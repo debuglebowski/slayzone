@@ -4,6 +4,8 @@ import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
 import type { DirectPtyService } from './handlers/pty'
 import type { DirectChatService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
+import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
+import { loadRtcPolyfill } from './direct/rtc-runtime'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
@@ -38,6 +40,7 @@ import {
   JSON_RPC_INTERNAL_ERROR,
   RpcError,
   computerShutdownParamsSchema,
+  directRtcOfferParamsSchema,
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
@@ -240,6 +243,11 @@ export interface HubRequestHandlerDeps {
    * unimplemented (tests).
    */
   directGrants?: DirectGrantStore
+  /**
+   * The WebRTC answerer (docs/direct-link.md), late-bound: it exists once the
+   * direct listener bound and node-datachannel loaded. Null/absent = no WebRTC.
+   */
+  getRtcAnswerer?: () => RtcAnswerer | null
 }
 
 export interface HubRequestDispatch {
@@ -350,11 +358,32 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       )
     : {}
   Object.assign(table, directGrantHandlers)
+  const directHubKey = deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
+  // Answered only for a live grant THIS hub link registered (rtc-answerer.ts).
+  const directRtcHandlers = deps.getRtcAnswerer
+    ? {
+        [HubToComputerMethods.directRtcOffer]: async (raw: unknown) => {
+          const answerer = deps.getRtcAnswerer?.()
+          if (!answerer) {
+            throw new RpcError(
+              ComputerTransportErrorCodes.refusedByComputer,
+              'this computer offers no WebRTC direct link'
+            )
+          }
+          return answerer.answer(directHubKey, directRtcOfferParamsSchema.parse(raw))
+        }
+      }
+    : {}
+  Object.assign(table, directRtcHandlers)
 
   const hub = deps.hubHost ?? 'unknown'
   // Neither terminals nor grant bookkeeping look tools up on PATH, so neither waits
   // for the login-shell probe; a client waits on a grant before it can attach.
-  const ptyMethods = new Set([...Object.keys(pty.handlers), ...Object.keys(directGrantHandlers)])
+  const ptyMethods = new Set([
+    ...Object.keys(pty.handlers),
+    ...Object.keys(directGrantHandlers),
+    ...Object.keys(directRtcHandlers)
+  ])
 
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
@@ -571,6 +600,7 @@ export function startComputer(
   // so hubs learn the address from enroll/hello: dialing waits for the bind (a
   // loopback bind takes milliseconds), and a failed bind only costs the direct path.
   let directListener: DirectListener | null = null
+  let rtcAnswerer: RtcAnswerer | null = null
   // Bound (or failed to): a hub added from now on dials at once.
   let directSettled = false
   // Which hub's handlers serve a grant: the hub key a grant is registered under.
@@ -601,6 +631,9 @@ export function startComputer(
   })
     .then((listener) => {
       directListener = listener
+      // WebRTC rides on the listener (its channels are served like its sockets).
+      const rtc = loadRtcPolyfill(log)
+      if (rtc) rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener, log })
     })
     .catch((err: unknown) => {
       log('direct link unavailable — clients use the hub relay', { error: String(err) })
@@ -609,6 +642,7 @@ export function startComputer(
       directSettled = true
     })
   identity.directAddress = () => directListener?.advertisedAddress ?? null
+  identity.directRtc = () => rtcAnswerer !== null
 
   /**
    * Everything that belongs to ONE hub.
@@ -712,6 +746,7 @@ export function startComputer(
       admission,
       requestLog,
       directGrants,
+      getRtcAnswerer: () => rtcAnswerer,
       hubHost: hubHostFromUrl(hubUrl),
       // Per connection: the process-wide grant is for the primary (loopback) hub of
       // the desktop's own computer. A hub joined at runtime never edits the jail.
@@ -944,6 +979,7 @@ export function startComputer(
       await Promise.all([...connections.values()].map((c) => c.dispose()))
       await directReady
       await directListener?.close()
+      rtcAnswerer?.close()
       directGrants.close()
     }
   }

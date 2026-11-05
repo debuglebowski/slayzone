@@ -136,7 +136,12 @@ export const directStunAddressesSchema = z
 export const directRtcOfferParamsSchema = z.object({
   grantId: idField,
   sdp: z.string().min(1).max(DIRECT_RTC_MAX_SDP),
-  stunAddresses: directStunAddressesSchema
+  stunAddresses: directStunAddressesSchema,
+  /**
+   * The client's address as the hub saw it: the computer counts the peer against its
+   * per-address caps, as it counts a WebSocket by its TCP peer.
+   */
+  clientAddress: z.string().min(1).max(100).nullable()
 })
 export type DirectRtcOfferParams = z.infer<typeof directRtcOfferParamsSchema>
 

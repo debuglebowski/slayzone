@@ -78,7 +78,12 @@ describe('direct.rtcOffer', () => {
   })
 
   it('carries a grant id, an SDP offer and STUN authorities (never URLs)', () => {
-    const ok = { grantId: 'g', sdp, stunAddresses: ['stun.cloudflare.com:3478'] }
+    const ok = {
+      grantId: 'g',
+      sdp,
+      stunAddresses: ['stun.cloudflare.com:3478'],
+      clientAddress: '198.51.100.7'
+    }
     expect(directRtcOfferParamsSchema.safeParse(ok).success).toBe(true)
     expect(
       directRtcOfferParamsSchema.safeParse({ ...ok, stunAddresses: ['stun:x:1'] }).success

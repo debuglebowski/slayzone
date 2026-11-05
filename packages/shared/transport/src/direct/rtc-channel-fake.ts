@@ -21,7 +21,7 @@ export class FakeChannel implements RtcChannelLike {
   onopen: ((ev: Event) => void) | null = null
   onmessage: ((ev: MessageEvent) => void) | null = null
   onclose: ((ev: Event) => void) | null = null
-  onerror: ((ev: Event) => void) | null = null
+  onerror: ((ev: RTCErrorEvent) => void) | null = null
   open(): void {
     this.readyState = 'open'
     this.onopen?.(new Event('open'))

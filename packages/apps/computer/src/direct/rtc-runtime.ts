@@ -14,11 +14,16 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 export type RtcRuntime = typeof import('node-datachannel')
+/** The standards-shaped API (RTCPeerConnection, RTCDataChannel) over the same addon. */
+export type RtcPolyfill = typeof import('node-datachannel/polyfill')
 
 let loaded: RtcRuntime | undefined
+let polyfill: RtcPolyfill | undefined
 
 /** node-datachannel, or null when it cannot load on this machine. */
-export function loadRtcRuntime(log?: (message: string, detail: object) => void): RtcRuntime | null {
+export function loadRtcRuntime(
+  log?: (message: string, detail?: Record<string, unknown>) => void
+): RtcRuntime | null {
   if (loaded) return loaded
   try {
     loaded =
@@ -30,6 +35,28 @@ export function loadRtcRuntime(log?: (message: string, detail: object) => void):
             'node-datachannel'
           ) as RtcRuntime)
     return loaded
+  } catch (err) {
+    log?.('WebRTC unavailable on this computer — clients use the hub relay', {
+      error: String(err)
+    })
+    return null
+  }
+}
+
+/** node-datachannel's standards-shaped API, or null (see {@link loadRtcRuntime}). */
+export function loadRtcPolyfill(
+  log?: (message: string, detail?: Record<string, unknown>) => void
+): RtcPolyfill | null {
+  if (polyfill) return polyfill
+  if (!loadRtcRuntime(log)) return null
+  try {
+    polyfill =
+      typeof require === 'function'
+        ? (require('node-datachannel/polyfill') as RtcPolyfill)
+        : (createRequire(process.argv[1] ?? join(process.cwd(), 'index.js'))(
+            'node-datachannel/polyfill'
+          ) as RtcPolyfill)
+    return polyfill
   } catch (err) {
     log?.('WebRTC unavailable on this computer — clients use the hub relay', {
       error: String(err)

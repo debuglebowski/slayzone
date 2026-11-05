@@ -39,7 +39,7 @@ export interface RtcChannelLike {
   onopen: ((ev: Event) => void) | null
   onmessage: ((ev: MessageEvent) => void) | null
   onclose: ((ev: Event) => void) | null
-  onerror: ((ev: Event) => void) | null
+  onerror: ((ev: RTCErrorEvent) => void) | null
 }
 
 /** One message as the pieces to send, in order. */
