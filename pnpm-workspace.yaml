@@ -197,3 +197,4 @@ patchedDependencies:
   'electron-chrome-extensions@4.9.0': patches/electron-chrome-extensions@4.9.0.patch
   'node-pty@1.1.0': patches/node-pty@1.1.0.patch
   '@radix-ui/react-menu@2.2.1': patches/@radix-ui__react-menu@2.2.1.patch
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301': patches/@xterm__addon-unicode-graphemes@0.5.0-beta.301.patch
