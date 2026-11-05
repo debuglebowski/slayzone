@@ -171,7 +171,7 @@ import {
 } from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
 import { setTurnGitRouting } from '@slayzone/agent-turns/server'
-import { setUsageCollectRouting, type ParseResult } from '@slayzone/usage-analytics/server'
+import { setUsageCollectRouting, type UsageCollectReply } from '@slayzone/usage-analytics/server'
 import { setTestScanRouting } from '@slayzone/test-panel/server'
 import {
   AutomationEngine,
@@ -1921,15 +1921,21 @@ export function composeServer(opts: {
       computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
       // The hub's machine's own computer reads the logs the old hub-disk cursors index.
       localComputerId: () => deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME),
-      collect: async (computerId, cursors) =>
-        usageCollectResultSchema.parse(
+      collect: async (computerId, cursors, page) => {
+        const reply = usageCollectResultSchema.parse(
           await computerGateway.request(
             computerId,
             HubToComputerMethods.usageCollect,
-            { cursors },
+            // Pages after the first carry only where to continue.
+            page ? { cursors: {}, page } : { cursors },
             USAGE_COLLECT_TIMEOUT_MS
           )
-        ).results as unknown as ParseResult[]
+        )
+        return {
+          results: reply.results as unknown as UsageCollectReply['results'],
+          ...(reply.next ? { next: reply.next } : {})
+        }
+      }
     })
     // AI-config files (instructions, skills, MCP): a project's on the project's
     // computer (by its checkout path), the computer-level ones on an explicit computer

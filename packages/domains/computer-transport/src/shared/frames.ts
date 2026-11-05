@@ -1359,11 +1359,23 @@ export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
  * file: the offset and mtime the last parse ended at — the hub keeps them per
  * computer). Answers each changed file's new records and its new cursor.
  */
+/**
+ * A collect is paged: the first reply carries `next` when more follows, and the hub
+ * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
+ * a whole backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
+ * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ */
+const usageCollectPageSchema = z.object({
+  token: z.string().min(1).max(64),
+  index: z.number().int().nonnegative()
+})
 export const usageCollectParamsSchema = z.object({
   cursors: z.record(
     z.string(),
     z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
-  )
+  ),
+  page: usageCollectPageSchema.optional()
 })
 export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
 export const usageCollectResultSchema = z.object({
@@ -1372,10 +1384,13 @@ export const usageCollectResultSchema = z.object({
       sourceFile: z.string(),
       fileMtimeMs: z.number(),
       endOffset: z.number().int().nonnegative(),
+      /** false: more of this file's records follow on a later page; keep its cursor. */
+      complete: z.boolean().optional(),
       // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
       records: z.array(z.record(z.string(), z.unknown()))
     })
-  )
+  ),
+  next: usageCollectPageSchema.optional()
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 

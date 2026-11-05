@@ -15,10 +15,27 @@ const HUB_DISK = ''
  * Where usage logs are parsed: on each connected computer (`usage.collect`), wired
  * by the hub's composition. Unwired: the hub parses its own disk, as before.
  */
+/** Where a paged collect continues (`usage.collect` `next`). */
+export interface UsageCollectPage {
+  token: string
+  index: number
+}
+
+/** One page of a collect: `complete: false` = more of that file follows. */
+export interface UsageCollectReply {
+  results: Array<ParseResult & { complete?: boolean }>
+  next?: UsageCollectPage
+}
+
 export interface UsageCollectRouting {
   /** The computers to ask this refresh (connected ones). */
   computers(): readonly string[]
-  collect(computerId: string, cursors: UsageCursors): Promise<ParseResult[]>
+  /** One page: the first (from `cursors`), or the one `page` names. */
+  collect(
+    computerId: string,
+    cursors: UsageCursors,
+    page?: UsageCollectPage
+  ): Promise<UsageCollectReply>
   /**
    * The computer on this hub's own machine (the desktop's local computer): it reads
    * the files the hub's old cursors (computer_id '') point into, so it takes them
@@ -143,13 +160,13 @@ async function refresh(db: SlayzoneDb): Promise<void> {
   // desktop the local computer reads the very same logs).
   const sources: Array<{
     computerId: string
-    collect: (c: UsageCursors) => Promise<ParseResult[]>
+    collect: (c: UsageCursors, page?: UsageCollectPage) => Promise<UsageCollectReply>
   }> = routing
     ? routing.computers().map((id) => ({
         computerId: id,
-        collect: (c) => (routing as UsageCollectRouting).collect(id, c)
+        collect: (c, page) => (routing as UsageCollectRouting).collect(id, c, page)
       }))
-    : [{ computerId: HUB_DISK, collect: collectUsage }]
+    : [{ computerId: HUB_DISK, collect: async (c) => ({ results: await collectUsage(c) }) }]
 
   const local = routing?.localComputerId?.() ?? null
   if (local && sources.some((source) => source.computerId === local)) {
@@ -158,23 +175,31 @@ async function refresh(db: SlayzoneDb): Promise<void> {
 
   let totalInserted = 0
   for (const source of sources) {
-    let results: ParseResult[]
-    try {
-      results = await source.collect(await loadCursors(db, source.computerId))
-    } catch {
-      continue // unreachable this refresh: its cursors stand, next refresh resumes
-    }
-    for (const result of results) {
-      const inserted = await upsertRecords(db, result.records, result.sourceFile)
-      await saveParseState(
-        db,
-        source.computerId,
-        result.sourceFile,
-        result.fileMtimeMs,
-        result.endOffset
-      )
-      totalInserted += inserted
-    }
+    const cursors = await loadCursors(db, source.computerId)
+    let page: UsageCollectPage | undefined
+    // Page by page: each page is stored (records, and the cursors of files it
+    // completes) before the next is asked for, so a lost page loses nothing earlier.
+    do {
+      let reply: UsageCollectReply
+      try {
+        reply = await source.collect(cursors, page)
+      } catch {
+        break // unreachable now: its saved cursors stand, the next refresh resumes
+      }
+      for (const result of reply.results) {
+        totalInserted += await upsertRecords(db, result.records, result.sourceFile)
+        // A file split across pages: its cursor moves only with its last chunk.
+        if (result.complete === false) continue
+        await saveParseState(
+          db,
+          source.computerId,
+          result.sourceFile,
+          result.fileMtimeMs,
+          result.endOffset
+        )
+      }
+      page = reply.next
+    } while (page)
   }
 
   // Only correlate if new records were inserted

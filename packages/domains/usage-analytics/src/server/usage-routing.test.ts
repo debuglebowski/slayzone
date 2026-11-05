@@ -37,14 +37,16 @@ describe('usage from computers', () => {
       collect: async (computerId, cursors) => {
         asked.push({ computerId, cursors })
         if (computerId === 'gone') throw new Error('offline')
-        return [
-          {
-            sourceFile: file,
-            fileMtimeMs: computerId === 'c1' ? 10 : 20,
-            endOffset: computerId === 'c1' ? 100 : 200,
-            records: [rec(`${computerId}-r1`)]
-          }
-        ]
+        return {
+          results: [
+            {
+              sourceFile: file,
+              fileMtimeMs: computerId === 'c1' ? 10 : 20,
+              endOffset: computerId === 'c1' ? 100 : 200,
+              records: [rec(`${computerId}-r1`)]
+            }
+          ]
+        }
       }
     })
     await refreshUsageData(db)
@@ -87,7 +89,7 @@ describe("the hub's old cursors after v194", () => {
       localComputerId: () => 'local',
       collect: async (computerId, cursors) => {
         seen[computerId] = cursors
-        return []
+        return { results: [] }
       }
     })
     await refreshUsageData(db)
@@ -99,5 +101,53 @@ describe("the hub's old cursors after v194", () => {
     expect(rows, 'moved, not copied: the hub-disk rows are gone').toEqual([
       { computer_id: 'local' }
     ])
+  })
+})
+
+// A large collect arrives in pages: each page's records and complete cursors are
+// saved before the next is asked for, so a page that fails loses nothing already
+// delivered; a file split across pages keeps its cursor until its last chunk.
+describe('paged collect', () => {
+  test('saves page by page and follows `next` until done', async () => {
+    h.db.prepare('DELETE FROM usage_parse_state').run()
+    h.db.prepare('DELETE FROM usage_records').run()
+    const a = '/home/u/.claude/projects/p/a.jsonl'
+    const b = '/home/u/.claude/projects/p/b.jsonl'
+    const calls: unknown[] = []
+    setUsageCollectRouting({
+      computers: () => ['c1'],
+      collect: async (_computerId, _cursors, page) => {
+        calls.push(page ?? null)
+        if (!page)
+          return {
+            results: [
+              { sourceFile: a, fileMtimeMs: 1, endOffset: 10, records: [rec('pa-1')] },
+              {
+                sourceFile: b,
+                fileMtimeMs: 2,
+                endOffset: 0,
+                complete: false,
+                records: [rec('pb-1')]
+              }
+            ],
+            next: { token: 't', index: 1 }
+          }
+        throw new Error('page 2 lost')
+      }
+    })
+    await refreshUsageData(db)
+    expect(calls).toEqual([null, { token: 't', index: 1 }])
+    const states = h.db
+      .prepare('SELECT file_path, last_offset FROM usage_parse_state ORDER BY file_path')
+      .all()
+    expect(states, "a's cursor moved; b (split, unfinished) kept none").toEqual([
+      { file_path: a, last_offset: 10 }
+    ])
+    const ids = (
+      h.db.prepare('SELECT id FROM usage_records ORDER BY id').all() as Array<{
+        id: string
+      }>
+    ).map((r) => r.id)
+    expect(ids, "page 1's records are stored").toEqual(['pa-1', 'pb-1'])
   })
 })
