@@ -336,15 +336,33 @@ interface ComputerConnection {
  * pending — so it says that, and keeps the JSON-RPC code for callers that check it.
  */
 export class ComputerUpdatePendingError extends RpcError {
-  constructor(readonly method: string) {
+  constructor(
+    readonly method: string,
+    code: number,
+    readonly computerVersion?: string
+  ) {
     super(
-      JSON_RPC_METHOD_NOT_FOUND,
-      `This computer's SlayZone is older than this hub and cannot do this yet (${method}). ` +
-        'It updates once the work running on it finishes — stop its agents and processes, ' +
-        'or restart the computer.'
+      code,
+      `This computer's SlayZone${computerVersion ? ` (${computerVersion})` : ''} is older than ` +
+        `this hub and cannot do this yet (${method}). It updates once the work running on it ` +
+        'finishes — stop its agents and processes, or restart the computer.'
     )
     this.name = 'ComputerUpdatePendingError'
   }
+}
+
+/**
+ * A computer's answer to a method it does not have: its dispatcher's
+ * `-32001 unimplemented: <method>` (every release), or JSON-RPC's own -32601. Other
+ * -32001 answers (a handler declining an op) are not this.
+ */
+function isUnknownMethodAnswer(err: unknown, method: string): err is RpcError {
+  if (!(err instanceof RpcError)) return false
+  if (err.code === JSON_RPC_METHOD_NOT_FOUND) return true
+  return (
+    err.code === ComputerTransportErrorCodes.unimplemented &&
+    err.message === `unimplemented: ${method}`
+  )
 }
 
 export function createHubComputerGateway(options: HubComputerGatewayOptions): HubComputerGateway {
@@ -1114,8 +1132,8 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
               .then(send)
           : conn.rpc.request<T>(method, params, timeoutMs, actor)
       ).catch((err: unknown) => {
-        if (err instanceof RpcError && err.code === JSON_RPC_METHOD_NOT_FOUND)
-          throw new ComputerUpdatePendingError(method)
+        if (isUnknownMethodAnswer(err, method))
+          throw new ComputerUpdatePendingError(method, err.code, conn.descriptor?.version)
         throw err
       })
       if (!audited) {

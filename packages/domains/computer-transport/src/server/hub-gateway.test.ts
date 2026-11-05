@@ -298,6 +298,52 @@ describe('hub → computer requests', () => {
     expect((err as Error).message).not.toMatch(/^Method not found/)
   })
 
+  // Round-3 F4: what a real computer (this release and v0.37.2) answers for a method
+  // it does not have is NOT -32601 — its dispatcher throws `-32001 unimplemented:
+  // <method>` (pinned by the computer's own main.test). That is the case to map; the
+  // code is kept, since the "older computer" fallbacks match on it.
+  it('the real computer answer (-32001 "unimplemented: <method>"): update pending, naming its version', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: (method) => {
+        throw new RpcError(ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'usage.collect', { cursors: {} }).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as RpcError).code, 'the fallbacks still match it').toBe(
+      ComputerTransportErrorCodes.unimplemented
+    )
+    expect((err as Error).message).toMatch(/usage\.collect/)
+    expect((err as Error).message, "names the computer's version").toMatch(/0\.0\.0/)
+    expect((err as Error).message).not.toMatch(/^unimplemented/)
+  })
+
+  it('another -32001 (not an unknown method) is left as is', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: () => {
+        throw new RpcError(
+          ComputerTransportErrorCodes.unimplemented,
+          'pty.doctor: not supported here'
+        )
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'pty.doctor', {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).not.toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as Error).message).toBe('pty.doctor: not supported here')
+  })
+
   it('requests time out when the computer never answers', async () => {
     const hub = await startHub()
     const dialer = makeDialer(hub.url, {
