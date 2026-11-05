@@ -120,6 +120,11 @@ machine. A remote computer is direct only when its operator sets a public addres
   - mobile installs a plain fetch;
   - the web shell and the Chromium fork install none and stay on the relay.
 
+**Dead sockets.** The direct socket pings every 10 s and closes after 5 s without a
+pong (a half-open socket brings no FIN), which ends its leases. A direct keystroke or
+backfill has a 3 s deadline; one that did not land (grant ended, socket closed, no
+answer in time) goes to the hub, and a transport failure drops the lease at once.
+
 **Gap-free switching:**
 - **Terminals.** Delivery is seq-ordered and gap-aware (`pty-delivery.ts`): a chunk
   past `lastSeq + 1` is held while the gap is read back, and the terminal's own

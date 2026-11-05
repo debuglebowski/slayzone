@@ -30,6 +30,13 @@ import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import type { DirectIssueTarget, DirectRouter } from '../direct/router'
 
+export {
+  DIRECT_CALL_DEADLINE_MS,
+  DirectDeadlineError,
+  directCallFailure,
+  withDirectDeadline
+} from './direct-call'
+
 export const DIRECT_LINK_PATH = '/direct/v1'
 export const DIRECT_LINK_HEALTH_PATH = '/direct/v1/health'
 
@@ -141,10 +148,20 @@ export async function defaultDirectProbe(address: string, deadlineMs = 3_000): P
 }
 
 /** Never reconnects on its own; every open is probed first. */
+/**
+ * Client pings on the direct socket. A half-open socket (a NAT dropped the flow, the
+ * network changed) brings no FIN; without pings the client would wait on it forever
+ * while its sessions are kept off the relay. A missed pong closes the socket, which
+ * ends its leases (back to the relay at once).
+ */
+export const DIRECT_KEEPALIVE = { intervalMs: 10_000, pongTimeoutMs: 5_000 }
+
 export function openDirectConnection(opts: {
   url: string
   token: string
   probe: () => Promise<boolean>
+  /** Default {@link DIRECT_KEEPALIVE}. */
+  keepAlive?: { intervalMs: number; pongTimeoutMs: number }
 }): DirectConnection {
   const closeListeners: Array<() => void> = []
   let closed = false
@@ -162,6 +179,7 @@ export function openDirectConnection(opts: {
     connectionParams: { token: opts.token },
     // The manager decides when to try again (after a probe and a fresh grant).
     retryDelayMs: () => 2_147_483_647,
+    keepAlive: { enabled: true, ...(opts.keepAlive ?? DIRECT_KEEPALIVE) },
     onClose: () => queueMicrotask(close)
   })
   return {

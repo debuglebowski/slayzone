@@ -14,7 +14,10 @@
  * @module terminal/client/direct-pty
  */
 import {
+  DIRECT_CALL_DEADLINE_MS,
+  directCallFailure,
   keepDirectLease,
+  withDirectDeadline,
   noteDirectUse,
   type DirectLease,
   type DirectLinkManager
@@ -24,7 +27,10 @@ import { taskIdFromSessionId } from './session-id'
 type DirectPtyClient = DirectLease['client']
 
 /** Sessions with a live direct lease, for the read/write helpers below. */
-const directSessions = new Map<string, DirectPtyClient>()
+const directSessions = new Map<string, { client: DirectPtyClient; lost: () => void }>()
+
+/** How long a direct write or backfill may take (`@slayzone/transport`). */
+export const DIRECT_WRITE_DEADLINE_MS = DIRECT_CALL_DEADLINE_MS
 
 const changeListeners = new Set<() => void>()
 function changed(): void {
@@ -39,7 +45,7 @@ export function onDirectPtySessionsChanged(cb: () => void): () => void {
 
 /** The direct client for a session, or null (use the hub). */
 export function directPtyFor(sessionId: string): DirectPtyClient | null {
-  return directSessions.get(sessionId) ?? null
+  return directSessions.get(sessionId)?.client ?? null
 }
 
 /** What went direct since load (diagnostics, e2e): chunks received, writes sent. */
@@ -82,7 +88,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   function unlink(): void {
     sub?.unsubscribe()
     sub = null
-    if (current && directSessions.get(sessionId) === current.client) {
+    if (current && directSessions.get(sessionId)?.client === current.client) {
       directSessions.delete(sessionId)
       noteDirectUse('pty', sessionId, false)
       changed()
@@ -92,7 +98,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
 
   function link(got: DirectLease): void {
     current = got
-    directSessions.set(sessionId, got.client)
+    directSessions.set(sessionId, { client: got.client, lost: () => keeper.lost() })
     noteDirectUse('pty', sessionId, true)
     changed()
     // Live chunks wait until the gap since the last delivered seq is filled, so
@@ -159,28 +165,26 @@ interface HubPtyBuffer {
   }
 }
 
-function refusedDirectly(err: unknown): boolean {
-  const code = (err as { data?: { code?: string } } | null)?.data?.code
-  return code === 'FORBIDDEN' || code === 'UNAUTHORIZED'
-}
-
 /**
- * Keystrokes: direct when the session has a lease, else the hub. A direct write
- * the computer refused (its grant ended) was not written, so it goes to the hub.
+ * Keystrokes: direct when the session has a lease, else the hub. A direct write that
+ * did not land (refused, socket gone, no answer in time) goes to the hub, so a
+ * keystroke is never silently lost; a transport failure also drops the lease.
  */
 export async function ptyWrite(
   hub: HubPtyWrite,
   sessionId: string,
   data: string
 ): Promise<boolean> {
-  const direct = directPtyFor(sessionId)
+  const direct = directSessions.get(sessionId)
   if (direct) {
     try {
-      const written = await direct.pty.write.mutate({ sessionId, data })
+      const written = await withDirectDeadline(direct.client.pty.write.mutate({ sessionId, data }))
       stats.writes++
       return written
     } catch (err) {
-      if (!refusedDirectly(err)) throw err
+      const why = directCallFailure(err)
+      if (why === 'answered') throw err
+      if (why === 'transport') direct.lost()
     }
   }
   return hub.pty.write.mutate({ sessionId, data })
@@ -192,12 +196,25 @@ export async function ptyBufferSince(
   sessionId: string,
   afterSeq: number
 ): ReturnType<HubPtyBuffer['pty']['getBufferSince']['query']> {
-  const direct = directPtyFor(sessionId)
+  const direct = directSessions.get(sessionId)
   if (direct) {
-    const res = await direct.pty.getBufferSince.query({ sessionId, afterSeq }).catch(() => null)
+    const res = await withDirectDeadline(
+      direct.client.pty.getBufferSince.query({ sessionId, afterSeq })
+    ).catch((err: unknown) => {
+      if (directCallFailure(err) === 'transport') direct.lost()
+      return null
+    })
     if (res) return res
   }
   return hub.pty.getBufferSince.query({ sessionId, afterSeq })
+}
+
+/**
+ * For `void`-style call sites (keystrokes from xterm handlers): a write neither path
+ * could deliver is reported, never an unhandled rejection.
+ */
+export function reportPtyWriteFailure(err: unknown): void {
+  console.warn('[terminal] keystroke not delivered', err)
 }
 
 /** Test seam. */

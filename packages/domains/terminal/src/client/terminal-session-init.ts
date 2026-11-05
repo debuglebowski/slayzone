@@ -1,4 +1,4 @@
-import { ptyWrite } from './direct-pty'
+import { ptyWrite, reportPtyWriteFailure } from './direct-pty'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import type { ITheme, Terminal as XTerm } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
@@ -705,7 +705,7 @@ export async function initTerminalSession(
     // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
     // Stopping the reply from being generated leaves keystrokes untouched.
     const inputGate = createInputGate((data) => {
-      void ptyWrite(trpcClient, sessionId, data)
+      void ptyWrite(trpcClient, sessionId, data).catch(reportPtyWriteFailure)
     })
     // An init abandoned mid-way (unmount) may leave this xterm cached and later
     // reattached: never leave it holding input.

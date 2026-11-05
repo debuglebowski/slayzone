@@ -2,6 +2,7 @@
  * The phone's terminal reads and types over the direct link when it has one
  * (docs/direct-link.md), and over the hub otherwise.
  */
+import { DIRECT_CALL_DEADLINE_MS } from '@slayzone/transport/client'
 import { TerminalController } from './terminal-controller'
 
 function hubClient() {
@@ -95,5 +96,51 @@ describe('TerminalController: direct link', () => {
     await c.write('x')
     expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'x' }]])
     c.dispose()
+  })
+
+  // A half-open socket never settles a write; a closed one rejects with no code. The
+  // keystroke goes to the hub, and the link is reported lost (back to the relay).
+  it('a write with no answer in time, or a transport failure, goes to the hub and drops the link', async () => {
+    jest.useFakeTimers()
+    try {
+      const hub = hubClient()
+      const c = new TerminalController(
+        's',
+        hub.client as never,
+        () => undefined,
+        (run) => run()
+      )
+      let lost = 0
+      const hanging = {
+        pty: { write: { mutate: () => new Promise(() => undefined) } }
+      }
+      c.setDirect(hanging as never, () => {
+        lost++
+      })
+      const written = c.write('k')
+      await jest.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
+      await written
+      expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'k' }]])
+      expect(lost).toBe(1)
+
+      const closed = {
+        pty: {
+          write: {
+            mutate: async () => {
+              throw new Error('WebSocket closed')
+            }
+          }
+        }
+      }
+      c.setDirect(closed as never, () => {
+        lost++
+      })
+      await c.write('j')
+      expect(hub.calls.at(-1)).toEqual(['hub.write', { sessionId: 's', data: 'j' }])
+      expect(lost).toBe(2)
+      c.dispose()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

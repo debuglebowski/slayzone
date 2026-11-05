@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   __resetDirectPtyForTest,
+  DIRECT_WRITE_DEADLINE_MS,
   directPtyFor,
   ptyBufferSince,
   ptyWrite,
@@ -199,6 +200,70 @@ describe('startDirectPtyLink', () => {
     }
     await ptyWrite(hub, 's1', 'x')
     expect(hubWrites).toEqual(['x'])
+  })
+
+  // M2: a half-open socket never settles a write, and a socket that closed between
+  // send and unlink rejects with no error code. Neither keystroke may be lost.
+  const hubCapture = () => {
+    const hubWrites: string[] = []
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ data }: { data: string }) => {
+            hubWrites.push(data)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    return { hub, hubWrites }
+  }
+
+  it('a direct write past its deadline goes to the hub, and the lease is dropped', async () => {
+    const l = fakeLease()
+    l.lease.client.pty.write.mutate = () => new Promise<boolean>(() => undefined)
+    const { acquired } = setup([l])
+    await flush()
+    vi.useFakeTimers()
+    const { hub, hubWrites } = hubCapture()
+    const written = ptyWrite(hub, 's1', 'k')
+    await vi.advanceTimersByTimeAsync(DIRECT_WRITE_DEADLINE_MS + 1)
+    expect(await written).toBe(true)
+    expect(hubWrites).toEqual(['k'])
+    // Off the half-open socket at once: later keystrokes go to the hub without waiting.
+    expect(directPtyFor('s1')).toBeNull()
+    expect(acquired.length).toBe(1)
+  })
+
+  it('a direct write that failed in transport (no error code) goes to the hub', async () => {
+    const l = fakeLease()
+    l.lease.client.pty.write.mutate = async () => {
+      throw new Error('WebSocket closed')
+    }
+    setup([l])
+    await flush()
+    const { hub, hubWrites } = hubCapture()
+    expect(await ptyWrite(hub, 's1', 'x')).toBe(true)
+    expect(hubWrites).toEqual(['x'])
+    expect(directPtyFor('s1')).toBeNull()
+  })
+
+  it('a backfill past its deadline is read from the hub', async () => {
+    const l = fakeLease()
+    l.lease.client.pty.getBufferSince.query = () => new Promise(() => undefined)
+    setup([l])
+    await flush()
+    vi.useFakeTimers()
+    const hub = {
+      pty: {
+        write: { mutate: async () => true },
+        getBufferSince: { query: async () => ({ chunks: [], currentSeq: 9, prelude: 'hub' }) }
+      }
+    }
+    const read = ptyBufferSince(hub, 's1', 0)
+    await vi.advanceTimersByTimeAsync(DIRECT_WRITE_DEADLINE_MS + 1)
+    expect((await read)?.currentSeq).toBe(9)
   })
 
   it('re-acquires after the lease is lost; at once when the computer reconnects', async () => {

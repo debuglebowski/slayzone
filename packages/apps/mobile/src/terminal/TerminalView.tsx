@@ -84,7 +84,7 @@ export function TerminalView({
     live
   )
   useEffect(() => {
-    controller.setDirect(direct?.client ?? null)
+    controller.setDirect(direct?.client ?? null, directLost)
     if (!direct) return
     const sub = direct.client.pty.onData.subscribe(
       { sessionId },

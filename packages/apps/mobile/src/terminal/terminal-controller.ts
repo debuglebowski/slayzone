@@ -9,10 +9,11 @@
  *   session replayed.
  * - Report the user's presence (`pty.touch`) at most every 4s, desktop's throttle.
  * - Read (attach, catch-up) and type over the direct link to the session's computer
- *   while there is one (docs/direct-link.md), the hub otherwise. A keystroke the
- *   computer refused (its grant ended) was not written, so it goes to the hub.
+ *   while there is one (docs/direct-link.md), the hub otherwise. A keystroke that
+ *   did not land directly (grant ended, socket closed, no answer in time) goes to the
+ *   hub, and a transport failure drops the link.
  */
-import type { DirectLease } from '@slayzone/transport/client'
+import { directCallFailure, withDirectDeadline, type DirectLease } from '@slayzone/transport/client'
 import type { HubClient } from '../hub-board'
 import { createDomSink, type DomTerminal } from './dom-sink'
 import { type FeedClient, type FeedStatus, TerminalFeed } from './terminal-feed'
@@ -29,6 +30,7 @@ export class TerminalController {
   private domReady = false
   private lastTouch = 0
   private direct: DirectLease['client'] | null = null
+  private directLost: () => void = () => undefined
 
   constructor(
     private readonly sessionId: string,
@@ -37,36 +39,63 @@ export class TerminalController {
     schedule: (run: () => void) => void = (run) => requestAnimationFrame(run)
   ) {
     const feedClient: FeedClient = {
-      attach: async (sid, afterSeq) =>
-        this.direct
-          ? { ...(await this.direct.pty.attach.query({ sessionId: sid, afterSeq })), state: null }
-          : client.pty.attach.query({ sessionId: sid, afterSeq }),
+      attach: (sid, afterSeq) =>
+        this.viaDirect(
+          async (d) => ({
+            ...(await d.pty.attach.query({ sessionId: sid, afterSeq })),
+            state: null
+          }),
+          () => client.pty.attach.query({ sessionId: sid, afterSeq })
+        ),
       bufferSince: (sid, afterSeq) =>
-        this.direct
-          ? this.direct.pty.getBufferSince.query({ sessionId: sid, afterSeq })
-          : client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
+        this.viaDirect(
+          (d) => d.pty.getBufferSince.query({ sessionId: sid, afterSeq }),
+          () => client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
+        )
     }
     this.sink = createDomSink(() => this.terminal?.current ?? null, schedule)
     this.feed = new TerminalFeed(sessionId, feedClient, this.sink, onStatus)
   }
 
-  /** Read and type over this direct link from now on (null: the hub). */
-  setDirect(direct: DirectLease['client'] | null): void {
+  /**
+   * Read and type over this direct link from now on (null: the hub). `lost` is told
+   * when the link failed under a call (the holder goes back to the relay).
+   */
+  setDirect(direct: DirectLease['client'] | null, lost: () => void = () => undefined): void {
     this.direct = direct
+    this.directLost = lost
   }
 
-  /** Keystrokes: direct while there is a link, else the hub. */
-  async write(data: string): Promise<unknown> {
-    const direct = this.direct
-    if (direct) {
+  /**
+   * A read over the direct link while there is one, the hub otherwise — and the hub
+   * too when the direct call did not land (a transport failure also drops the link).
+   */
+  private async viaDirect<T>(
+    direct: (d: DirectLease['client']) => Promise<T>,
+    hub: () => Promise<T>
+  ): Promise<T> {
+    const d = this.direct
+    if (d) {
       try {
-        return await direct.pty.write.mutate({ sessionId: this.sessionId, data })
+        return await withDirectDeadline(direct(d))
       } catch (err) {
-        const code = (err as { data?: { code?: string } } | null)?.data?.code
-        if (code !== 'FORBIDDEN' && code !== 'UNAUTHORIZED') throw err
+        const why = directCallFailure(err)
+        if (why === 'answered') throw err
+        if (why === 'transport' && this.direct === d) {
+          this.direct = null
+          this.directLost()
+        }
       }
     }
-    return this.client.pty.write.mutate({ sessionId: this.sessionId, data })
+    return hub()
+  }
+
+  /** Keystrokes: direct while there is a link, else the hub (see `viaDirect`). */
+  write(data: string): Promise<unknown> {
+    return this.viaDirect(
+      (d) => d.pty.write.mutate({ sessionId: this.sessionId, data }),
+      () => this.client.pty.write.mutate({ sessionId: this.sessionId, data })
+    )
   }
 
   /** The `ref` the web view's terminal fills with its handle (set after mount). */

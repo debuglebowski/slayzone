@@ -22,6 +22,9 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  DIRECT_CALL_DEADLINE_MS,
+  directCallFailure,
+  withDirectDeadline,
   createDirectLinkManager,
   directLinkManagerFor,
   defaultDirectProbe,
