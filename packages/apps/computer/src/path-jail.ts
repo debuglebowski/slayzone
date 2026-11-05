@@ -242,13 +242,16 @@ function outside(candidate: string, allowedRoots: readonly string[]): JailViolat
  * path: its existing part real and canonical, the missing rest appended.
  */
 function walk(
-  root: LiveRoot,
+  start: LiveRoot,
   parts: readonly string[],
   access: JailAccess,
   candidate: string,
   allowedRoots: readonly string[],
   hops: { n: number }
 ): string {
+  // The root the walk is in: a link may lead into ANOTHER allowed root (a computer
+  // with several), and the rest of the path is judged there.
+  let root = start
   let current = root.real
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!
@@ -288,7 +291,11 @@ function walk(
         hops
       )
     }
-    if (!isInside(target, root.real)) throw outside(candidate, allowedRoots)
+    if (!isInside(target, root.real)) {
+      const other = liveRoots(allowedRoots).find((r) => isInside(target, r.real))
+      if (!other) throw outside(candidate, allowedRoots)
+      root = other
+    }
     current = target
   }
   // The canonical spelling of what exists (letter case on a case-insensitive disk);

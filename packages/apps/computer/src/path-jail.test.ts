@@ -172,6 +172,17 @@ describe('the table: every escape, judged', () => {
     })
   }
 
+  // Round-5 K9: a computer with several allowed roots — a link from one into another
+  // lands inside the jail, and was refused since round 4 (only its own root counted).
+  it('a link from one allowed root into another is followed', () => {
+    const r2 = join(base, 'r2')
+    mkdirSync(join(r2, 'dir'), { recursive: true })
+    symlinkSync(join(r2, 'dir'), join(r, 'x'))
+    expect(judgePath(`${r}/x/f`, [r, r2], { access: 'write' })).toBe(join(r2, 'dir', 'f'))
+    // Not when the other root is not allowed.
+    expect(() => judgePath(`${r}/x/f`, [r], { access: 'write' })).toThrow(/allowedRoots/)
+  })
+
   it('a root spelled through a link above it (/tmp → /private/tmp)', () => {
     symlinkSync(r, join(base, 'alias'))
     expect(judgePath(join(base, 'alias', 'f'), [r], { access: 'write' })).toBe(join(r, 'f'))
