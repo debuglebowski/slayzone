@@ -24,7 +24,11 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { checkCliInstalled } from '@slayzone/platform'
+import {
+  checkCliInstalled,
+  checkCliInstalledAtTarget,
+  hubProcessesEnabled
+} from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   assertHubIntegrationsEnabled,
@@ -675,8 +679,13 @@ export function composeServer(opts: {
   // up was a fire-and-forget race that could leave the first spec staring at the
   // onboarding screen.
   if (process.env.PLAYWRIGHT === '1') {
+    // Same baseline as `resetForTest`: onboarding done, CLI prompt off. Whether the
+    // install prompt opens depends on the HOST's `slay`, so it must never be ambient
+    // in e2e — specs that test it set `cli_install_dismissed` back themselves.
     bootBestEffort('e2e-onboarding-seed', () =>
-      db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')")
+      db.run(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true')"
+      )
     )
   }
   // T-23: session content older than SLAYZONE_HUB_SESSION_RETENTION_DAYS goes, shortly
@@ -1150,7 +1159,11 @@ export function composeServer(opts: {
       // Real fs probe (pure Node, no Electron) — the stub hardcoded
       // `installed: false`, so the "Install the slay CLI" dialog auto-opened for
       // every fork user even when the CLI was already installed.
-      appCheckCliInstalled: () => checkCliInstalled(),
+      // PATH + `slay --version` exec on this machine; a hub with processes off must
+      // not exec (T-06), so it reports only what is at the install target. No
+      // expected version: this build has none to compare (`appGetVersion` above).
+      appCheckCliInstalled: async () =>
+        hubProcessesEnabled() ? checkCliInstalled() : checkCliInstalledAtTarget(),
       appInstallCli: stub('appInstallCli'),
       appAdjustZoom: stub('appAdjustZoom'),
       appRestartForUpdate: stub('appRestartForUpdate'),
@@ -2081,6 +2094,9 @@ export function composeServer(opts: {
       // exercise another mode set it themselves.
       const baseline: Array<[string, string]> = [
         ['onboarding_completed', 'true'],
+        // CLI install/update prompt off: it depends on the host's `slay`, so specs
+        // that test it opt in by clearing this.
+        ['cli_install_dismissed', 'true'],
         [AGENT_STARTUP_SETTING, 'manual']
       ]
       // Boot-time write the wipe erased: the CLI/agents discover this process via

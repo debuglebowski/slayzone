@@ -122,9 +122,13 @@ export {
   installCli,
   installCliSync,
   checkCliInstalled,
+  checkCliInstalledAtTarget,
+  parseCliVersion,
   getCliBinTarget,
   getManualInstallHint,
-  type CliInstallResult
+  type CliInstallResult,
+  type CliStatus,
+  type CheckCliOptions
 } from './cli-install'
 export { refreshInstalledCliSync, type CliRefreshResult } from './cli-refresh'
 export { adoptRenamedDatabase, type AdoptRenamedDbResult } from './adopt-renamed-db'

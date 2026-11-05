@@ -2503,7 +2503,7 @@ app
               appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
               appGetProtocolClientStatus: () => protocolClientStatus,
               appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
-              appCheckCliInstalled: () => checkCliInstalled(),
+              appCheckCliInstalled: () => checkCliInstalled({ expectedVersion: app.getVersion() }),
               appInstallCli: () => installCli(getCliSrc()),
               appAdjustZoom: (command) => applyAppZoom(command),
               appRestartForUpdate: () => restartForUpdate(),
@@ -3858,7 +3858,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
       ipcMain.handle('app:restart-for-update', () => restartForUpdate())
       ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-      ipcMain.handle('app:cli-status', () => checkCliInstalled())
+      ipcMain.handle('app:cli-status', () =>
+        checkCliInstalled({ expectedVersion: app.getVersion() })
+      )
       ipcMain.handle('app:install-cli', () => installCli(getCliSrc()))
 
       ipcMain.handle('window:close', (event) => {
