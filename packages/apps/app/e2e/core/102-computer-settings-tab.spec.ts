@@ -61,12 +61,12 @@ test.describe('Computer settings tab', () => {
     await mainWindow.keyboard.press('Escape')
   })
 
-  test('the local computer cannot be revoked', async ({ mainWindow }) => {
+  test('the local computer cannot be deleted or disabled', async ({ mainWindow }) => {
     const group = await openComputersTab(mainWindow)
 
-    // Either the computer is enrolled (a row, no revoke on it) or it is missing (the
-    // Start row). Neither state offers a revoke, because the only computer the local
-    // hub can have is the one this app supervises.
+    // Either the computer is enrolled (a row, no delete or disable on it) or it is
+    // missing (the Start row). Neither state offers either, because the only computer
+    // the local hub can have is the one this app supervises.
     await expect
       .poll(
         async () =>
@@ -75,7 +75,8 @@ test.describe('Computer settings tab', () => {
         { timeout: 30_000 }
       )
       .toBeGreaterThan(0)
-    await expect(group.getByTestId('computer-revoke')).toHaveCount(0)
+    await expect(group.getByTestId('computer-delete')).toHaveCount(0)
+    await expect(group.getByTestId('computer-disable')).toHaveCount(0)
 
     await mainWindow.keyboard.press('Escape')
   })

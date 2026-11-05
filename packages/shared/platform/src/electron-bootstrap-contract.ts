@@ -17,7 +17,7 @@
  * from renderer bundles.
  */
 import type { HubEntry } from './hub-registry'
-import type { LocalComputerStatus } from './local-computer-status'
+import type { LocalComputerHubs, LocalComputerStatus } from './local-computer-status'
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
@@ -57,6 +57,9 @@ export interface ElectronBootstrapApp {
   /** Stop waiting (the dialog was closed). */
   hubDeviceLoginCancel: (payload: { flowId: string }) => Promise<{ ok: true }>
   getWindowId: () => Promise<number | null>
+  /** App icon badge (dock / taskbar overlay / launcher count). text '' = clear.
+   *  overlayPng: PNG data URL drawn by the renderer for the Windows overlay. */
+  setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) => Promise<void>
   relaunch: () => Promise<void>
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
@@ -89,6 +92,8 @@ export interface ElectronBootstrapApp {
   restartLocalComputer: () => Promise<{ ok: boolean; error?: string }>
   /** Null when this host supervises no local computer (remote mode). */
   getLocalComputerStatus: () => Promise<LocalComputerStatus | null>
+  /** Where this app's own computer stands on each remote hub (it joins all of them). */
+  getLocalComputerHubs: () => Promise<LocalComputerHubs>
   isPlaywright: boolean
   dataReady: () => void
   bootMark: (label: string) => void

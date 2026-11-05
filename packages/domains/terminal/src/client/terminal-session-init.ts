@@ -37,7 +37,11 @@ import {
   registerActiveTerminal,
   getLiveTerminals
 } from './terminal-cache'
-import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
+import {
+  suppressDeviceStatusReplies,
+  suppressStateReportReplies,
+  suppressXtVersionReply
+} from './suppress-device-status'
 import { isParked, parkBeforeOpen, parkRenderer, unparkToDom, wakeRenderer } from './renderer-park'
 import { isLiveWebglAddon, scheduleWebglBudget, trackWebglAddon } from './webgl-budget'
 import { acquireInitSlot } from './terminal-init-scheduler'
@@ -628,6 +632,9 @@ export async function initTerminalSession(
     // asker left. Answering it injects an unsolicited DCS into the live
     // program's stdin, which wedges Claude Code's key handling.
     suppressXtVersionReply(terminal)
+    // DECRQM / DECRQSS: the server answers them from its own copy of the screen
+    // (TerminalReplyMirror), so the renderer must not answer a replayed one.
+    suppressStateReportReplies(terminal)
 
     // Open with the parked renderer whenever WebGL is going to be (or may later
     // be) this terminal's renderer: no DOM renderer — and no ~790-rule theme

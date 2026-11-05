@@ -13,6 +13,8 @@ export interface ComputerStatusRow {
   usable?: boolean
   lastSeenAt: number | null
   revokedAt?: number | null
+  /** Enrolled and connected, but given no new work (`computers.setDisabled`). */
+  disabledAt?: number | null
 }
 
 /**
@@ -24,12 +26,14 @@ export interface ComputerStatusRow {
  * reaped it yet, and that gap is exactly when a binary Connected/Offline lies.
  * REVOKED outranks everything: it is a deliberate act, and reporting connectivity
  * for a computer whose credential was pulled would describe the wrong thing entirely.
+ * DISABLED comes next, for the same reason: it takes no work whatever its socket says.
  */
 export function computerStatus(row: ComputerStatusRow): {
   label: string
   tone: ComputerStatusTone
 } {
   if (row.revokedAt != null) return { label: 'Revoked', tone: 'bad' }
+  if (row.disabledAt != null) return { label: 'Disabled', tone: 'idle' }
   if (row.usable) return { label: 'Connected', tone: 'ok' }
   // Socket open but silent — it will be reaped, and until then it cannot take work.
   if (row.connected) return { label: 'Not responding', tone: 'bad' }
@@ -138,7 +142,9 @@ export const STANDARD_COMPUTER_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as co
 export function capabilityNote(capabilities: readonly string[]): string | null {
   if (capabilities.length === 0) return 'no capabilities'
   const have = new Set(capabilities)
-  const standard = new Set<string>(STANDARD_COMPUTER_CAPABILITIES)
+  // `desktop` marks a desktop app's own computer joined to another hub — not a thing
+  // it can or cannot do; the row says "this computer" where it matters.
+  const standard = new Set<string>([...STANDARD_COMPUTER_CAPABILITIES, 'desktop'])
   const missing = STANDARD_COMPUTER_CAPABILITIES.filter((c) => !have.has(c))
   const extra = capabilities.filter((c) => !standard.has(c))
   const parts: string[] = []
@@ -175,6 +181,10 @@ export function runsOnLabel(name: string): string {
  * to a sleeping laptop is the normal case.
  */
 export const OFFLINE_MARK = 'offline'
+
+/** Beside a DISABLED computer (Settings → Connections): it takes no new work, so it
+ *  cannot be chosen for any. */
+export const DISABLED_MARK = 'disabled'
 
 /** A hub with no computer enrolled runs everything itself. */
 export const NO_COMPUTERS_NOTE = 'No computers — runs locally'

@@ -50,6 +50,8 @@ export interface TaskBranchCtx {
   treeShowWorktree: boolean
   /** Task id → tags to render as chips. Empty when "Show tags" is off. */
   tagsByTaskId: Map<string, Tag[]>
+  /** Task ids to mark with a "Blocked" icon. Empty when the toggle is off. */
+  blockedBadgeTaskIds: ReadonlySet<string>
   treeCrossOutDone: boolean
   treeGroupBy: 'none' | 'status' | 'priority'
   treeGroupPinned: boolean

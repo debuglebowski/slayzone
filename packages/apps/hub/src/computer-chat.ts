@@ -332,7 +332,7 @@ export function createComputerChatServices(opts: {
   /** Computer a legacy owner's provider session ran on. One definition for the
    * migration, its session election, and the terminal-resume ambiguity fence:
    * if they disagreed, a session could be elected in one and fenced in another. */
-  // Where a legacy (hub-era) tab's agent ran: v195's record, not the legacy table.
+  // Where a legacy (hub-era) tab's agent ran: v196's record, not the legacy table.
   const sessionComputer = async (owner: HubChatOwnership) => {
     const recorded = await opts.db.get<{ computer_id: string }>(
       'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',

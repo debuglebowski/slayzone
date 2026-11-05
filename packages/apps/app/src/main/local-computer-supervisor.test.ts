@@ -93,6 +93,28 @@ if (process.env.FAKE_CONNECT_MS && process.send) {
     process.send({ type: 'connected', hubUrl: 'ws://127.0.0.1:1/computers' })
   }, Number(process.env.FAKE_CONNECT_MS))
 }
+// FAKE_HUBS: speak the secondary-hub protocol (computer bin.ts). Say 'hubs-ready',
+// echo each 'set-hubs' it is sent (a line per message), report every listed hub
+// connected (as a secondary) — except one whose url says 'needs-token' and came with
+// no token: that one asks the app for a join token and echoes the answer.
+if (process.env.FAKE_HUBS === '1' && process.send) {
+  process.on('message', function (msg) {
+    if (msg && msg.type === 'set-hubs') {
+      process.stdout.write('fake-computer set-hubs=' + JSON.stringify(msg.hubs) + '\\n')
+      for (const hub of msg.hubs) {
+        if (hub.url.indexOf('needs-token') >= 0 && !hub.joinToken) {
+          process.send({ type: 'join-token-request', requestId: 'req-1', hubUrl: hub.url })
+        } else {
+          process.send({ type: 'connected', hubUrl: hub.url, computerId: 'id-' + hub.name, primary: false })
+        }
+      }
+    }
+    if (msg && msg.type === 'join-token') {
+      process.stdout.write('fake-computer join-token=' + msg.requestId + ':' + msg.token + '\\n')
+    }
+  })
+  process.send({ type: 'hubs-ready' })
+}
 for (let i = 1; i <= lines; i++) process.stderr.write('computer-line-' + i + '\\n')
 process.stdout.write('fake-computer bye\\n')
 // Dies the way the real computer does when a native will not load: an uncaught
@@ -127,6 +149,10 @@ function cleanup(): void {
 }
 
 type HarnessCtx = {
+  /** Secondary-hub reports the supervisor forwarded, in order. */
+  hubEvents: Array<Record<string, unknown>>
+  /** Hub urls a secondary join token was asked for, in order. */
+  secondaryMints: string[]
   exits: LocalComputerExitInfo[]
   permanentFailure: { attempts: number; lastError: unknown } | null
   needsReEnrollment: number
@@ -143,6 +169,8 @@ function makeHarness(
   withMint = false
 ): { handle: LocalComputerHandle; ctx: HarnessCtx } {
   const ctx: HarnessCtx = {
+    hubEvents: [],
+    secondaryMints: [],
     exits: [],
     permanentFailure: null,
     needsReEnrollment: 0,
@@ -160,6 +188,11 @@ function makeHarness(
     },
     onNeedsReEnrollment: () => {
       ctx.needsReEnrollment += 1
+    },
+    onSecondaryHubEvent: (event) => ctx.hubEvents.push({ ...event }),
+    mintSecondaryJoinToken: async (hubUrl) => {
+      ctx.secondaryMints.push(hubUrl)
+      return `secondary-token-${ctx.secondaryMints.length}`
     },
     ...(withMint
       ? {
@@ -380,6 +413,74 @@ test('awaitHubConnected: true once the computer reports connected over IPC', asy
   try {
     expect(await handle.awaitHubConnected(10_000), 'connect reported').toBe(true)
     expect(await handle.awaitHubConnected(1), 'already connected resolves at once').toBe(true)
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('secondary hubs: the set reaches the computer once it is ready, and again after a respawn', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_HUBS: '1' },
+    { backoffMs: [10, 10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    // Set before the child said it was listening: held, then delivered.
+    handle.setSecondaryHubs([{ url: 'ws://hub-b/computers', name: 'my-mac' }])
+    await waitFor(
+      () => ctx.lines.some((l) => l.includes('set-hubs=[{"url":"ws://hub-b/computers"')),
+      15_000,
+      'set-hubs delivered'
+    )
+    // Its connection is a SECONDARY's: forwarded, and not the primary connection.
+    await waitFor(() => ctx.hubEvents.length > 0, 15_000, 'secondary connected forwarded')
+    expect(ctx.hubEvents[0]).toMatchObject({
+      type: 'connected',
+      hubUrl: 'ws://hub-b/computers',
+      computerId: 'id-my-mac'
+    })
+    expect(await handle.awaitHubConnected(100), 'a secondary is not the primary hub').toBe(false)
+
+    // A change is sent at once.
+    handle.setSecondaryHubs([])
+    await waitFor(
+      () => ctx.lines.some((l) => l.includes('set-hubs=[]')),
+      15_000,
+      'empty set delivered'
+    )
+
+    // A respawned computer gets the current set again.
+    handle.setSecondaryHubs([{ url: 'ws://hub-c/computers', name: 'my-mac' }])
+    const before = ctx.lines.filter((l) => l.includes('hub-c')).length
+    const pid = handle.getPid()
+    process.kill(pid!, 'SIGKILL')
+    await waitFor(
+      () => handle.getPid() !== null && handle.getPid() !== pid,
+      15_000,
+      'computer respawned'
+    )
+    await waitFor(
+      () => ctx.lines.filter((l) => l.includes('set-hubs=[{"url":"ws://hub-c')).length > before,
+      15_000,
+      'set re-sent to the new child'
+    )
+  } finally {
+    await handle.stop()
+  }
+})
+
+test('secondary hubs: a join-token request is answered with a freshly minted token', async () => {
+  const { handle, ctx } = makeHarness(
+    { FAKE_STAY_ALIVE: '1', FAKE_HUBS: '1' },
+    { backoffMs: [10_000], healthyResetMs: 60_000, stopSigtermGraceMs: 500 }
+  )
+  try {
+    handle.setSecondaryHubs([{ url: 'ws://needs-token/computers', name: 'my-mac' }])
+    await waitFor(
+      () => ctx.lines.some((l) => l.includes('join-token=req-1:secondary-token-1')),
+      15_000,
+      'token delivered to the computer'
+    )
+    expect(ctx.secondaryMints).toEqual(['ws://needs-token/computers'])
   } finally {
     await handle.stop()
   }

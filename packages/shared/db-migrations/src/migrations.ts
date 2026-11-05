@@ -4702,6 +4702,16 @@ export const migrations: Migration[] = [
   },
   {
     version: 194,
+    // Disabling a computer (`computers.setDisabled`): it stays enrolled and connected,
+    // and gets no new work. Distinct from `revoked_at`, which ends its credential.
+    // NULL = enabled. Kept across re-enrollment: a computer an operator turned off
+    // stays off until they turn it on.
+    up: (db) => {
+      db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
+    }
+  },
+  {
+    version: 195,
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
       // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
@@ -4726,7 +4736,7 @@ export const migrations: Migration[] = [
     }
   },
   {
-    version: 195,
+    version: 196,
     up(db) {
       // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
       // session lives, so the migration copies it from there. It was read from the

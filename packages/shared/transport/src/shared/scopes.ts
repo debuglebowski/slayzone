@@ -108,6 +108,16 @@ export type ProcedureScope = Scope | 'never'
  * existing session (`setMode`, `setModel`, `setEffort`, `setFastMode`,
  * `setCollaboration`) stay granted — no cwd/binary choice involved.
  *
+ * ── fileEditor: one task's own folders (`files`) ──────────────────────────────
+ * Granted (`files`): read/list/search/watch/gitStatus and write/create/rename/
+ * delete/copy — ONLY together with `task-file-confinement.ts` (`@slayzone/api`),
+ * which, for every non-`full` caller, requires a `taskId` (no `computerId` /
+ * `projectId`) and a `rootPath` under that task's worktree, base dir, project path
+ * or a placement of its project. The owner gate alone would admit a path inside
+ * nobody's project (`HUB_WIDE`, e.g. `~/.ssh`); the confinement is what refuses it.
+ * Denied (`never`): `showInFinder` (opens the HOST's file manager) and `copyIn`
+ * (reads an arbitrary absolute `absoluteSrc` on the host, outside any root).
+ *
  * ── computers: visibility-filtered reads only ───────────────────────────────
  * `list` / `resolveTaskComputer` / `onStatusChange` are granted as `read` — a
  * web client cannot render a task without showing which computer it runs on,
@@ -170,7 +180,7 @@ export type ProcedureScope = Scope | 'never'
  * (provider API keys), `integrations` (credential-store backed), `worktrees`
  * (git mutations + `mergeWithAI`/`analyzeConflict`), `processes`, `automations`,
  * `menu`, `workspace` (includes `setAllowedRoots` — mutates the fs sandbox
- * itself), `fileEditor` (raw filesystem writes), `testPanel`, `diagnostics`,
+ * itself), `testPanel`, `diagnostics`,
  * `feedback`, `notify` (minus the one exception above), `telemetry`, `template`,
  * `hub` (minus `describe`, which is reachable regardless — see below).
  *
@@ -554,9 +564,11 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'computers.list': 'read',
   'computers.mintJoinToken': 'never',
   'computers.onStatusChange': 'read',
+  'computers.rename': 'never',
   'computers.renameMachine': 'never',
   'computers.resolveTaskComputer': 'read',
   'computers.revokeComputer': 'never',
+  'computers.setDisabled': 'never',
   'computers.setProjectDefaultComputer': 'never',
   'computers.setTaskComputer': 'never',
   'computers.setVisibility': 'never',
@@ -572,20 +584,20 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'feedback.getMessages': 'never',
   'feedback.listThreads': 'never',
   'feedback.updateThreadDiscordId': 'never',
-  'fileEditor.copy': 'never',
+  'fileEditor.copy': 'files',
   'fileEditor.copyIn': 'never',
-  'fileEditor.createDir': 'never',
-  'fileEditor.createFile': 'never',
-  'fileEditor.delete': 'never',
-  'fileEditor.gitStatus': 'never',
-  'fileEditor.listAllFiles': 'never',
-  'fileEditor.readDir': 'never',
-  'fileEditor.readFile': 'never',
-  'fileEditor.rename': 'never',
-  'fileEditor.searchFiles': 'never',
+  'fileEditor.createDir': 'files',
+  'fileEditor.createFile': 'files',
+  'fileEditor.delete': 'files',
+  'fileEditor.gitStatus': 'files',
+  'fileEditor.listAllFiles': 'files',
+  'fileEditor.readDir': 'files',
+  'fileEditor.readFile': 'files',
+  'fileEditor.rename': 'files',
+  'fileEditor.searchFiles': 'files',
   'fileEditor.showInFinder': 'never',
-  'fileEditor.watch': 'never',
-  'fileEditor.writeFile': 'never',
+  'fileEditor.watch': 'files',
+  'fileEditor.writeFile': 'files',
   'history.getAutomationActionRuns': 'read',
   'history.listForTask': 'read',
   'hub.describe': 'read',

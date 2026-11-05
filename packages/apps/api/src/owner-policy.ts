@@ -822,11 +822,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     },
     sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
   }),
+  'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
   'computers.delete': none(COMPUTER),
   'computers.onStatusChange': none(COMPUTER),
   'computers.revokeComputer': none(COMPUTER),
+  'computers.setDisabled': none(COMPUTER),
 
   // ── diagnostics, feedback ──
   'diagnostics.recordClientError': none(SELF),

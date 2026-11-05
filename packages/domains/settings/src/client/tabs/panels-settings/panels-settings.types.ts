@@ -1,12 +1,8 @@
 import { Globe } from 'lucide-react'
-import type { AgentId, AgentDefinition } from '@slayzone/terminal-contracts'
 
 export interface PanelsSettingsTabProps {
   activeTab: string
   navigateTo: (tab: string) => void
-  modes: AgentDefinition[]
-  defaultAgentId: AgentId
-  onDefaultAgentIdChange: (mode: AgentId) => void
 }
 
 export interface PanelRowDescriptor {

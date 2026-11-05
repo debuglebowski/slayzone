@@ -45,6 +45,13 @@ export interface HandlerContext {
    * with no authority form) → whatever the hub sent is passed through.
    */
   hubAddress?: string
+  /**
+   * May THIS hub connection change `allowedRoots` (`computer.setAllowedRoots`)?
+   * Per connection, not per process: the desktop's supervised computer lets its own
+   * loopback hub widen the jail (`config.hubMayEditRoots`), but a hub it joins at
+   * runtime is someone else's hub and never may. Absent = no (fail closed).
+   */
+  hubMayEditRoots?: boolean
 }
 
 /** A single hub→computer method handler. Params are validated inside. */

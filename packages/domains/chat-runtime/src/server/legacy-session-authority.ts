@@ -109,7 +109,7 @@ async function elect(
       [owner.tabId, taskId]
     )
     if (!tab) continue
-    // Where a hub-era tab's agent ran: v195's record, not the legacy table.
+    // Where a hub-era tab's agent ran: v196's record, not the legacy table.
     const recorded = await db.get<{ computer_id: string }>(
       'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
       [owner.tabId]

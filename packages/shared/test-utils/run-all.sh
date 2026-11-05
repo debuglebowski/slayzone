@@ -45,6 +45,8 @@ run_harness packages/shared/settings-core/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/domains/projects/src/server/projects-router.test.ts
+# App icon badge — settings parse + which statuses count and how they show.
+run_harness packages/domains/settings/src/shared/app-badge.test.ts
 # With computers, a project's folder is recorded on a computer (create / update /
 # refusal leaves no half-made project), never in the hub's projects.path column.
 run_harness packages/domains/projects/src/server/project-folders.test.ts
@@ -110,6 +112,8 @@ run_harness packages/apps/hub/src/direct-link.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
 run_harness packages/apps/hub/src/chat-relay-watch.test.ts
 run_harness packages/apps/hub/src/user-access.test.ts
+# Disabling a computer: which requests start new work, and what blocks disabling one.
+run_harness packages/apps/hub/src/computer-new-work.test.ts
 # Project folders: the ordered sequence each computer goes through on connect
 # (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder
 # changes, serialized per computer so a refresh can never undo a folder just set.
@@ -187,6 +191,7 @@ run_harness packages/apps/hub/src/session-retention-boot.test.ts
 # Owner checks (T-17): the one access function over a real DB, then two users on a real
 # hub with login (ids, lists, live streams, admin) and the desktop's hub with login off.
 run_harness packages/apps/api/src/access.test.ts
+run_harness packages/apps/api/src/task-file-confinement.test.ts
 run_harness packages/apps/hub/src/owner-checks.test.ts
 run_harness packages/apps/hub/src/owner-checks-login-off.test.ts
 # Owner checks over REST, MCP and agent hooks (T-18): two users on a real hub with
@@ -467,6 +472,8 @@ run_harness packages/apps/app/src/main/project-icons-migration.test.ts
 # the copy migrations can plant an older one at the new name.
 run_harness packages/shared/platform/src/adopt-renamed-db.test.ts
 run_harness packages/apps/app/src/main/data-paths.test.ts
+# App icon badge: payload validation + per-platform apply (dock / overlay / count).
+run_harness packages/apps/app/src/main/app-badge.test.ts
 run_harness packages/domains/projects/src/server/project-icons-relocate.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
@@ -838,6 +845,8 @@ run_harness packages/apps/app/src/main/sidecar-server-supervisor-real-stop.test.
 # stop() as quit awaits it, and parent death against the REAL computer bundle
 # (rebuilt on demand): a supervised computer never outlives its app.
 run_harness packages/apps/app/src/main/local-computer-supervisor.test.ts
+# The local computer on every remote hub the client lists: joins, mints, recovery.
+run_harness packages/apps/app/src/main/local-computer-hubs.test.ts
 
 # e2e stale-process reaper: must never match the dev app's live computer (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).
@@ -1168,6 +1177,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/ai-config/src/client/state-sync-components.test.tsx \
   packages/domains/ai-config/src/client/context-manager-slots.test.tsx \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
+  packages/domains/settings/src/client/settings-hub.test.tsx \
+  packages/domains/settings/src/client/tabs/use-default-agent.test.tsx \
   packages/domains/settings/src/client/UserSettingsDialog.test.tsx \
   packages/domains/settings/src/client/AppearanceContext.test.tsx \
   packages/domains/agent-turns/src/client/useAgentTurns.test.tsx \

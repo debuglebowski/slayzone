@@ -123,6 +123,63 @@ export function summarizeExitReason(
   return signal ? `killed by ${signal}` : `exited with code ${String(code)}`
 }
 
+/** A hub the computer serves besides its primary (see `setSecondaryHubs`). */
+export type SecondaryHub = {
+  /** The hub's computer dial url, `ws(s)://host[:port]/computers`. */
+  url: string
+  /** The name this computer enrolls under there. */
+  name: string
+  /** A single-use join token, when the computer has no credential there yet. */
+  joinToken?: string
+}
+
+/** What the computer reports about one of its secondary hubs (computer bin.ts). */
+export type SecondaryHubEvent =
+  | { type: 'connected'; hubUrl: string; computerId: string }
+  | { type: 'disconnected'; hubUrl: string }
+  | { type: 'hub-error'; hubUrl: string; message: string; reason?: 'needs-re-enrollment' }
+
+/** The parent-bound messages of the secondary-hub protocol, validated by hand. */
+function parseChildMessage(
+  message: unknown
+):
+  | { type: 'connected' | 'disconnected'; hubUrl: string; primary: boolean; computerId?: string }
+  | { type: 'hub-error'; hubUrl: string; message: string; reason?: 'needs-re-enrollment' }
+  | { type: 'join-token-request'; requestId: string; hubUrl: string }
+  | { type: 'hubs-ready' }
+  | null {
+  if (!message || typeof message !== 'object') return null
+  const m = message as Record<string, unknown>
+  const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0
+  switch (m.type) {
+    case 'connected':
+    case 'disconnected':
+      // A computer from before the secondary-hub protocol sends neither field: its
+      // one hub is the primary.
+      return {
+        type: m.type,
+        hubUrl: str(m.hubUrl) ? m.hubUrl : '',
+        primary: m.primary !== false,
+        ...(str(m.computerId) ? { computerId: m.computerId } : {})
+      }
+    case 'hub-error':
+      if (!str(m.hubUrl)) return null
+      return {
+        type: 'hub-error',
+        hubUrl: m.hubUrl,
+        message: str(m.message) ? m.message : 'hub connection failed',
+        ...(m.reason === 'needs-re-enrollment' ? { reason: 'needs-re-enrollment' as const } : {})
+      }
+    case 'join-token-request':
+      if (!str(m.requestId) || !str(m.hubUrl)) return null
+      return { type: 'join-token-request', requestId: m.requestId, hubUrl: m.hubUrl }
+    case 'hubs-ready':
+      return { type: 'hubs-ready' }
+    default:
+      return null
+  }
+}
+
 export type LocalComputerOpts = {
   /** process.execPath — the Electron binary. */
   execPath: string
@@ -169,6 +226,15 @@ export type LocalComputerOpts = {
   /** Called when the computer reports the hub no longer recognizes it. Restarts are
    *  suppressed from that point; the caller should surface it to the user. */
   onNeedsReEnrollment?: () => void
+  /** Reports about the computer's SECONDARY hubs (connected, dropped, failed). Its
+   *  primary hub's connection is `awaitHubConnected`'s, never this. */
+  onSecondaryHubEvent?: (event: SecondaryHubEvent) => void
+  /**
+   * Mint a fresh join token on the secondary hub the computer dials at `hubUrl`, when
+   * it asks for one (its credential there stopped working). Null when none can be had;
+   * the computer then reports that hub failed.
+   */
+  mintSecondaryJoinToken?: (hubUrl: string) => Promise<string | null>
   /** Optional timing overrides (tests only — production omits this). */
   timing?: LocalComputerTiming
 }
@@ -198,6 +264,13 @@ export type LocalComputerHandle = {
    * anything yet.
    */
   awaitHubConnected: (windowMs: number) => Promise<boolean>
+  /**
+   * The hubs the computer serves BESIDES its primary — the desired set, joined and
+   * left at runtime with no restart (a restart kills every agent on the machine).
+   * Delivered once the computer says it listens (`hubs-ready`), at once while it does,
+   * and again to every respawned computer, so the latest set always wins.
+   */
+  setSecondaryHubs: (hubs: readonly SecondaryHub[]) => void
   /**
    * Cycle the computer in place (Settings → Computers restart button).
    *
@@ -256,6 +329,18 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
   let needsReEnrollment = false
   /** Latest re-minted join token, or null to use whatever `opts.env` carries. */
   let currentJoinToken: string | null = null
+  /** The secondary hubs the computer should serve (see `setSecondaryHubs`). */
+  let secondaryHubs: readonly SecondaryHub[] = []
+  /** Whether the CURRENT child listens for `set-hubs` (it said `hubs-ready`). */
+  let childListens = false
+  const sendSecondaryHubs = (): void => {
+    if (!child || !childListens || !child.connected) return
+    try {
+      child.send({ type: 'set-hubs', hubs: secondaryHubs }, () => undefined)
+    } catch (err) {
+      opts.logger(`[local-computer] could not send hubs: ${String(err)}`)
+    }
+  }
   let attempt = 0
   let stopped = false
   /** Set by `suspendRestarts()` (app quit): no respawn of any kind. */
@@ -349,13 +434,15 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
         // A re-minted token overrides the (possibly spent) one in `opts.env`.
         ...(currentJoinToken ? { SLAYZONE_HUB_JOIN_TOKEN: currentJoinToken } : {})
       },
-      // fd 3 = IPC: the computer reports its hub connection over it (see
-      // `awaitHubConnected`). It sends only; it unrefs its end so the channel never
-      // holds a stopping computer's loop open.
+      // fd 3 = IPC: the computer reports its hub connections over it (see
+      // `awaitHubConnected`) and is sent the hubs it serves besides its primary
+      // (`setSecondaryHubs`). It unrefs its end so the channel never holds a stopping
+      // computer's loop open.
       stdio: ['pipe', 'pipe', 'pipe', 'ipc']
     })
     child = proc
     hubConnected = false
+    childListens = false
     const seq = ++spawnSeq
     reaper.track(proc)
     const spawnedAt = Date.now()
@@ -385,13 +472,46 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     proc.stderr?.on('data', pipe)
     proc.on('message', (message: unknown) => {
       if (child !== proc) return
-      const type = (message as { type?: unknown } | null)?.type
-      if (type === 'connected') {
-        if (!hubConnected) opts.logger('[local-computer] reported connected to hub')
-        hubConnected = true
-        settleConnectWaiters(true)
-      } else if (type === 'disconnected') {
-        hubConnected = false
+      const msg = parseChildMessage(message)
+      if (!msg) return
+      switch (msg.type) {
+        case 'connected':
+        case 'disconnected':
+          if (!msg.primary) {
+            opts.onSecondaryHubEvent?.(
+              msg.type === 'connected'
+                ? { type: 'connected', hubUrl: msg.hubUrl, computerId: msg.computerId ?? '' }
+                : { type: 'disconnected', hubUrl: msg.hubUrl }
+            )
+          } else if (msg.type === 'connected') {
+            if (!hubConnected) opts.logger('[local-computer] reported connected to hub')
+            hubConnected = true
+            settleConnectWaiters(true)
+          } else {
+            hubConnected = false
+          }
+          return
+        case 'hub-error':
+          opts.logger(`[local-computer] hub ${msg.hubUrl} failed: ${msg.message}`)
+          opts.onSecondaryHubEvent?.(msg)
+          return
+        case 'hubs-ready':
+          childListens = true
+          sendSecondaryHubs()
+          return
+        case 'join-token-request': {
+          const mint = opts.mintSecondaryJoinToken
+          void (mint ? mint(msg.hubUrl) : Promise.resolve(null))
+            .catch((err: unknown) => {
+              opts.logger(`[local-computer] join token for ${msg.hubUrl} failed: ${String(err)}`)
+              return null
+            })
+            .then((token) => {
+              if (child !== proc || !proc.connected) return
+              proc.send({ type: 'join-token', requestId: msg.requestId, token }, () => undefined)
+            })
+          return
+        }
       }
     })
 
@@ -531,6 +651,10 @@ export function startLocalComputer(opts: LocalComputerOpts): LocalComputerHandle
     }),
     awaitStartup,
     awaitHubConnected,
+    setSecondaryHubs: (hubs) => {
+      secondaryHubs = hubs.map((h) => ({ ...h }))
+      sendSecondaryHubs()
+    },
     restart: () => {
       if (restartInFlight) return restartInFlight
       restartInFlight = doRestart().finally(() => {

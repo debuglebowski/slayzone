@@ -22,7 +22,7 @@ import {
   notifyComputerBindingChanged,
   type ComputerManagerAccess
 } from './computers-router-deps'
-import { decideJoinTokenMint } from './join-token-policy'
+import { decideJoinTokenMint, isJoinTokenForbidden } from './join-token-policy'
 import {
   getComputerUpgradeStatuses,
   listComputers as storeListComputers,
@@ -32,8 +32,18 @@ import {
   setProjectDefaultComputer as storeSetProjectDefaultComputer,
   setTaskComputer as storeSetTaskComputer,
   resolveTaskComputerId as storeResolveTaskComputerId,
-  getComputer as storeGetComputer
+  getComputer as storeGetComputer,
+  setComputerDisabled as storeSetComputerDisabled,
+  renameComputer as storeRenameComputer
 } from './store'
+import {
+  computerDisabledError,
+  computerHasRunningWorkError,
+  computerIsLocalError,
+  computerNameReservedError,
+  type ComputerStateError
+} from './computer-state-errors'
+import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared/types'
 import { mintJoinToken as storeMintJoinToken } from './join-tokens'
 import {
   machinesByHostId as storeMachinesByHostId,
@@ -92,6 +102,29 @@ const managerAccessOf = (
 ): ComputerManagerAccess => getComputersRouterDeps().managerAccessFor(ctx)
 
 const noSuchComputer = (): Error => new Error('no such computer, or you do not have access to it')
+
+/** A computer-state refusal as tRPC carries it (`data.appCode` = its code). */
+const stateRefusal = (
+  code: 'BAD_REQUEST' | 'PRECONDITION_FAILED',
+  cause: ComputerStateError
+): TRPCError => new TRPCError({ code, message: cause.message, cause })
+
+/** Refuse binding work to a computer that is missing or disabled. */
+async function requireBindable(
+  ctx: Pick<TrpcContext, 'db'>,
+  computerId: string | null
+): Promise<void> {
+  if (computerId === null) return
+  const row = await storeGetComputer(ctx.db, computerId)
+  if (!row) throw noSuchComputer()
+  if (row.disabled_at != null) {
+    throw stateRefusal('PRECONDITION_FAILED', computerDisabledError(row.name))
+  }
+}
+
+/** The desktop app's own computer on its own hub, which is never disabled or deleted. */
+const isProtectedLocal = (computerId: string): boolean =>
+  (getComputersDepsOrNull()?.localComputerId ?? null) === computerId
 
 /**
  * Lifecycle of someone else's computer, or an unowned one, is the admin's (T-15,
@@ -167,6 +200,8 @@ export const computersRouter = router({
             usable: usableIds.has(row.id),
             connectedAt: conn?.connectedAt ?? null,
             revokedAt: row.revoked_at,
+            // Enrolled and connected, but given no new work (`setDisabled`).
+            disabledAt: row.disabled_at ?? null,
             // `hostId`, never a machine id: a merge destroys the losing row, so a
             // client holding one could act on an id that no longer exists. The host
             // id survives on the winner.
@@ -192,10 +227,11 @@ export const computersRouter = router({
    * a secret: it is embedded in the token the caller already receives in full.
    * The REST twin has always returned it; this closes that shape gap.
    *
-   * WHO IT IS FOR (T-20, `join-token-policy.ts`): on a hub with login only an admin
-   * mints (the role gate, `admin-policy.ts`) and `forUser` — an account id or email
-   * — must name an enabled account, which owns the computer that redeems the token.
-   * Without login, as before: no user, an unowned computer. `ttlMs` at most 1 hour.
+   * WHO IT IS FOR (T-20 + self-enroll, `join-token-policy.ts`): on a hub with login
+   * every user mints for themselves (no `forUser`, or their own); only an admin may
+   * name someone else — an account id or email of an enabled account, which owns the
+   * computer that redeems the token. Without login, as before: no user, an unowned
+   * computer. `ttlMs` at most 1 hour.
    */
   mintJoinToken: publicProcedure
     .input(
@@ -211,11 +247,14 @@ export const computersRouter = router({
         loginRequired: getAuthGate(),
         forUser: input.forUser,
         ttlMs: input.ttlMs,
+        caller: ctx.principal?.userId
+          ? { userId: ctx.principal.userId, isAdmin: ctx.principal.role === 'admin' }
+          : null,
         findAccount: deps.findAccount
       })
       if (!decision.ok) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
+          code: isJoinTokenForbidden(decision.error.code) ? 'FORBIDDEN' : 'BAD_REQUEST',
           message: decision.error.message,
           cause: decision.error
         })
@@ -254,9 +293,7 @@ export const computersRouter = router({
   setTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      if (input.computerId !== null && !(await storeGetComputer(ctx.db, input.computerId))) {
-        throw noSuchComputer()
-      }
+      await requireBindable(ctx, input.computerId)
       await storeSetTaskComputer(ctx.db, input.taskId, input.computerId)
       notifyComputerBindingChanged()
       return { ok: true as const }
@@ -267,9 +304,7 @@ export const computersRouter = router({
   setProjectDefaultComputer: publicProcedure
     .input(z.object({ projectId: z.string(), computerId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
-      if (input.computerId !== null && !(await storeGetComputer(ctx.db, input.computerId))) {
-        throw noSuchComputer()
-      }
+      await requireBindable(ctx, input.computerId)
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
       notifyComputerBindingChanged()
       return { ok: true as const }
@@ -415,10 +450,72 @@ export const computersRouter = router({
     .input(z.object({ computerId: z.string() }))
     .mutation(async ({ ctx, input, path }) => {
       await requireManager(ctx, path, input.computerId)
+      if (isProtectedLocal(input.computerId)) {
+        throw stateRefusal('BAD_REQUEST', computerIsLocalError('deleted'))
+      }
       await storeDeleteComputer(ctx.db, input.computerId)
+      // Its open socket would otherwise keep it in the usable set until it re-dialed.
+      getComputersDepsOrNull()?.getGateway()?.disconnect?.(input.computerId, 'computer deleted')
       auditComputer('computer.delete', input.computerId)
       // It never reconnects: whatever waited for it (a process run it kept) lets go.
       getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Rename a computer (what Settings and every computer picker show). The manager's,
+   * as for disable. Not the desktop app's own computer on its own hub, and never TO
+   * the name that hub reserves for it: the hub picks its default computer by that
+   * name, so a second one would take its place.
+   */
+  rename: publicProcedure
+    .input(z.object({ computerId: z.string(), name: z.string().trim().min(1).max(64) }))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireManager(ctx, path, input.computerId)
+      if (isProtectedLocal(input.computerId)) {
+        throw stateRefusal('BAD_REQUEST', computerIsLocalError('renamed'))
+      }
+      if (input.name === DEFAULT_LOCAL_COMPUTER_NAME) {
+        throw stateRefusal('BAD_REQUEST', computerNameReservedError(input.name))
+      }
+      await storeRenameComputer(ctx.db, input.computerId, input.name)
+      auditComputer('computer.rename', input.computerId)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Disable (`disabled: true`) or enable a computer. A disabled computer stays
+   * enrolled, listed and connected, but gets no new work: placement leaves it out of
+   * every default pick, nothing new may be bound to it, and the hub refuses to start
+   * a terminal, agent or process on it (the spawn guard in `apps/hub` composition).
+   *
+   * Refused while terminals or agents run on it — the operator stops them first, so a
+   * disable never strands work — and for the desktop app's own computer on its own
+   * hub, without which nothing on the machine could run. Enabling has no such check.
+   * Who may: the computer's manager (its owner, or an admin), as for revoke.
+   */
+  setDisabled: publicProcedure
+    .input(z.object({ computerId: z.string(), disabled: z.boolean() }))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireManager(ctx, path, input.computerId)
+      if (input.disabled) {
+        if (isProtectedLocal(input.computerId)) {
+          throw stateRefusal('BAD_REQUEST', computerIsLocalError('disabled'))
+        }
+        const row = await storeGetComputer(ctx.db, input.computerId)
+        const runningWorkOn = getComputersDepsOrNull()?.runningWorkOn
+        const running = runningWorkOn ? await runningWorkOn(input.computerId) : null
+        if (running === null) {
+          throw new Error('cannot tell what runs on this computer yet; try again in a moment')
+        }
+        if (running > 0) {
+          throw stateRefusal('PRECONDITION_FAILED', computerHasRunningWorkError(running, row?.name))
+        }
+      }
+      await storeSetComputerDisabled(ctx.db, input.computerId, input.disabled)
+      auditComputer(input.disabled ? 'computer.disable' : 'computer.enable', input.computerId)
+      // Placement's default pick changes with it, exactly as a binding change does.
+      notifyComputerBindingChanged()
       return { ok: true as const }
     }),
 
@@ -470,6 +567,8 @@ export const computersRouter = router({
     .mutation(async ({ ctx, input, path }) => {
       await requireManager(ctx, path, input.computerId)
       await storeRevokeComputer(ctx.db, input.computerId)
+      // As the REST twin does: a revoked computer stops working now, not at its next dial.
+      getComputersDepsOrNull()?.getGateway()?.disconnect?.(input.computerId, 'computer revoked')
       auditComputer('computer.revoke', input.computerId)
       getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
       await getComputersDepsOrNull()?.onComputerRevoked?.(input.computerId)
