@@ -1135,6 +1135,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/transport/src/client/direct-lease-keeper.test.ts \
   packages/shared/transport/src/direct/rtc-channel.test.ts \
   packages/shared/transport/src/client/direct-rtc.test.ts \
+  packages/shared/transport/src/client/direct-connection.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
