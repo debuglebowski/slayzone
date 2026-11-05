@@ -272,9 +272,8 @@ import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
-import { countRunningWork, startsNewWork } from './computer-new-work.js'
+import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
-  computerDisabledError,
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
@@ -1784,20 +1783,15 @@ export function composeServer(opts: {
     const chatCommandBarrier = createComputerChatCommandBarrier({
       lifecycle: computerChat.lifecycle.syncNative
     })
+    const newWorkGuard = createNewWorkGuard(db)
     const computerGateway = createHubComputerGateway({
       // THE owner check (G2): every hub→computer request, whatever routed it, is
       // refused on a computer its caller does not own. The hub's own work passes.
       authorizeRequest: createComputerRequestAuthorizer(placement.gate),
       beforeRequest: async (computerId, method, params) => {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
-        // A disabled computer takes no new work (`computers.setDisabled`). Every
-        // request passes here, so a binding, a resumed conversation's owner or a spec
-        // that named the computer directly is refused alike; reads, kills and
-        // maintenance are not new work and pass. One row read, spawns only.
-        if (startsNewWork(method, params)) {
-          const row = await getComputer(db, computerId)
-          if (row?.disabled_at != null) throw computerDisabledError(row.name)
-        }
+        // A disabled computer takes no new work (`computers.setDisabled`).
+        await newWorkGuard(computerId, method, params)
       },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       // The dedup is the DESKTOP hub's alone: only there is a computer of that name its

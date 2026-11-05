@@ -110,6 +110,10 @@ run_harness packages/apps/hub/src/path-owner-agreement.test.ts
 # Round-6 review regressions (L3 case folding, L4 disabled computer, L6 path aliases):
 # part of `pnpm test:review-regressions` (review-regressions.mjs).
 run_harness packages/apps/hub/src/review-regressions-owner.test.ts
+# Round-6 L3 on any OS: a case-insensitive hub disk (mocked) must not fold a computer's path.
+run_harness packages/apps/hub/src/review-regressions-l3-folding-hub.test.ts
+# Round-6 L4 through the real gateway: a disabled computer refuses new work before sending.
+run_harness packages/apps/hub/src/computer-disabled-gateway.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -436,6 +440,8 @@ run_harness packages/shared/db-migrations/src/ai-config-raw-skill-migration.test
 run_harness packages/shared/db-migrations/src/ai-config-slug-migration.test.ts
 run_harness packages/shared/db-migrations/src/codex-flags-migration.test.ts
 run_harness packages/shared/db-migrations/src/schema-too-new.test.ts
+# K4 (review regressions): migration versions unique + increasing; main's v194 → latest.
+run_harness packages/shared/db-migrations/src/review-regressions-migrations.test.ts
 # v51 on a v50 DB, with and without the column already present (drift).
 run_harness packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts
 run_harness packages/domains/projects/src/server/status-normalization.test.ts

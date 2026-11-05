@@ -26,6 +26,8 @@
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
 import type { HubComputerGateway } from '@slayzone/computer-transport/server'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
+import { computerDisabledError, getComputer } from '@slayzone/computers/server'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 /** Methods that start something on the computer, whatever their params. */
 const NEW_WORK_METHODS: ReadonlySet<string> = new Set([
@@ -138,4 +140,21 @@ export async function countRunningWork(
   const terminals = ptys.sessions.filter((s) => !warm.has(s.sessionId)).length
   const agents = chats.filter((s) => !IDLE_CHAT_STATES.has(s.state)).length
   return terminals + agents + procs.sessions.length
+}
+
+/**
+ * The gateway's `beforeRequest` step for disabled computers: a request that starts
+ * new work ({@link startsNewWork}) on a computer an operator disabled is refused
+ * before it is sent. Every request passes here, so a binding, a resumed
+ * conversation's owner or a spec that named the computer directly is refused alike;
+ * reads, kills and maintenance are not new work and pass. One row read, new work only.
+ */
+export function createNewWorkGuard(
+  db: SlayzoneDb
+): (computerId: string, method: string, params: unknown) => Promise<void> {
+  return async (computerId, method, params) => {
+    if (!startsNewWork(method, params)) return
+    const row = await getComputer(db, computerId)
+    if (row?.disabled_at != null) throw computerDisabledError(row.name)
+  }
 }

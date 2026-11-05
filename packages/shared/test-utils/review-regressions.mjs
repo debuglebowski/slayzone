@@ -54,7 +54,10 @@ export const REGRESSIONS = [
     round: 1,
     id: 'H2',
     what: 'git ops and exec.run carry timeouts above the gateway default',
-    files: [`${P}domains/worktrees/src/server/git-op-timeouts.test.ts`]
+    files: [
+      `${P}domains/worktrees/src/server/git-op-timeouts.test.ts`,
+      `${hub}computer-exec-run.test.ts`
+    ]
   },
   { round: 1, id: 'H3', what: 'usage parse cursors re-keyed per computer', files: [usageRouting] },
   {
@@ -169,6 +172,19 @@ export const REGRESSIONS = [
     files: [ownerBoundary, authorizer]
   },
   { round: 2, id: 'R8', what: 'catch-up never duplicates or reorders', files: [catchUpMerge] },
+  {
+    round: 2,
+    id: 'R9',
+    what: 'lazy node-pty, bounded signal strings, the boot-window watch retry, conflict-AI argv',
+    files: [
+      `${computer}node-pty-lazy.test.ts`,
+      `${computer}native-probe.test.ts`,
+      `${P}domains/computer-transport/src/shared/frames-bounds.test.ts`,
+      `${P}domains/worktrees/src/client/git-diff-store.test.ts`,
+      `${P}domains/worktrees/src/server/merge-ai-routing.test.ts`,
+      `${hub}computer-probes.test.ts`
+    ]
+  },
   // ── round 3 ──
   {
     round: 3,
@@ -203,8 +219,8 @@ export const REGRESSIONS = [
   {
     round: 3,
     id: 'F6',
-    what: 'Windows npm shims for the conflict-AI argv',
-    files: [`${computer}handlers/resolve-command.test.ts`]
+    what: 'Windows npm shims and stdin for the conflict-AI argv',
+    files: [`${computer}handlers/resolve-command.test.ts`, `${computer}handlers/exec-run.test.ts`]
   },
   // ── round 4 ──
   {
@@ -257,8 +273,8 @@ export const REGRESSIONS = [
   {
     round: 5,
     id: 'K4',
-    what: "main's reply mirror runs on the computer",
-    files: [`${computer}pty-signals.test.ts`]
+    what: "migration versions unique and increasing; a DB at main's v194 reaches latest",
+    files: [`${P}shared/db-migrations/src/review-regressions-migrations.test.ts`]
   },
   {
     round: 5,
@@ -282,6 +298,12 @@ export const REGRESSIONS = [
     what: 'readDir and searchFiles through links stay in the jail',
     files: jail
   },
+  {
+    round: 5,
+    id: 'K4 merge',
+    what: "main's reply mirror, merged in K4, runs on the computer",
+    files: [`${computer}pty-signals.test.ts`]
+  },
   // ── round 6 ──
   {
     round: 6,
@@ -299,13 +321,13 @@ export const REGRESSIONS = [
     round: 6,
     id: 'L3',
     what: "case folding is the computer's, never the hub disk's",
-    files: [rrOwner]
+    files: [`${hub}review-regressions-l3-folding-hub.test.ts`, rrOwner]
   },
   {
     round: 6,
     id: 'L4',
     what: 'a disabled computer refuses exec.run and new worktrees',
-    files: [rrOwner]
+    files: [`${hub}computer-disabled-gateway.test.ts`, rrOwner]
   },
   {
     round: 6,
@@ -320,6 +342,12 @@ export const REGRESSIONS = [
     files: [rrOwner]
   },
   // ── round 7 ──
+  {
+    round: 7,
+    id: 'N2',
+    what: "K2's worst vector: an agentConfig.fs rename onto COMPUTER.CONFIG.JSON",
+    files: [`${computer}handlers/jail-escapes.test.ts`]
+  },
   {
     round: 7,
     id: 'N1',

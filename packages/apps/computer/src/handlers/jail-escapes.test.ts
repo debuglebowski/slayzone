@@ -266,6 +266,22 @@ describe.skipIf(process.platform === 'linux')(
       expect(kept()).toBe(true)
     })
 
+    // Round-7 N2: K2's worst vector — the agent config rename, onto the computer's own
+    // config in another case: `rename(2)` replaces it (the hub then owns the computer).
+    it('agentConfig.fs rename onto `.state/COMPUTER.CONFIG.JSON` is refused', async () => {
+      writeFileSync(join(r, 'evil.json'), '{"hubUrl":"ws://evil"}')
+      expect(
+        await attempt(() =>
+          agent[M.agentConfigFs]({
+            op: 'rename',
+            path: join(r, 'evil.json'),
+            to: join(r, '.state', 'COMPUTER.CONFIG.JSON')
+          })
+        )
+      ).toBe('refused')
+      expect(kept()).toBe(true)
+    })
+
     it('a not-yet-existing protected file is refused in any case', async () => {
       setProtectedPaths([join(r, '.state', 'credentials.json')])
       expect(
