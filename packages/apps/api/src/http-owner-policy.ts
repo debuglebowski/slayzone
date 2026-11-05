@@ -103,6 +103,8 @@ const session = ref('session', 'exact')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
+/** A path the hub opens on its OWN disk for the caller: one of their roots (N1). */
+const owned = ref('ownedPath', 'exact')
 const computer = ref('computer', 'exact')
 const automation = ref('automation', 'exact')
 const automationPrefix = ref('automation', 'prefix')
@@ -235,11 +237,12 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'PUT /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
-  // `outputPath` is a hub-host path the render is WRITTEN to: someone else's worktree
-  // or artifact directory, or the hub's own state directory, is refused (access.ts `path`).
-  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), path('body.outputPath')),
+  // `outputPath` is a hub-host path the render is WRITTEN to: only inside one of the
+  // caller's roots (access.ts `ownedPath`, N1) — never the hub's own state, someone
+  // else's worktree, or a file in nobody's project (`~/.bashrc`).
+  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), owned('body.outputPath')),
+  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), owned('body.outputPath')),
+  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), owned('body.outputPath')),
   'GET /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),

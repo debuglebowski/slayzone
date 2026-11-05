@@ -141,6 +141,10 @@ run_harness packages/apps/hub/src/local-exec-refusals.test.ts
 # A bad processes.* input is a clean error, never a hub exit (T-102): the built hub with
 # processes on (desktop, login) and off (Normain).
 run_harness packages/apps/hub/src/processes-bad-input.test.ts
+# N1: a hub-local path read needs a root the caller may access — the built hub with
+# login refuses user B's /dev/fd/<hub db> and a file in no root; the desktop's hub
+# still copies the latter.
+run_harness packages/apps/hub/src/hub-local-path-reads.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_harness packages/apps/hub/src/backup.test.ts
@@ -195,6 +199,9 @@ run_harness packages/apps/hub/src/owner-checks-admin-login-off.test.ts
 # Upload procedures never copy the hub's own files (DB, auth store, SSO key) or another
 # user's to a caller, and read nothing off the hub's disk with processes off (T-107).
 run_harness packages/apps/api/src/routers/upload-sources.test.ts
+# N1: the other hub-local path procedures (file probe/opener, export/import test ops,
+# AI config, file editor, git, tests panel) refuse a path in no root and /dev/fd.
+run_harness packages/apps/api/src/routers/hub-local-paths.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
