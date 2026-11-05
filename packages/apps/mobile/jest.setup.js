@@ -21,6 +21,8 @@ jest.mock('react-native-webrtc', () => ({
     constructor(config) {
       this.config = config
     }
-    close() {}
+    close() {
+      this.closed = true
+    }
   }
 }))
