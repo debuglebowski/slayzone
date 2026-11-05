@@ -25,8 +25,13 @@ export interface FakeChat {
   /** The saved history `getBufferSince` returns. */
   buffer: Array<{ seq: number; event: AgentEvent; at?: number }>
   queue: Array<{ id: string; send: string; position: number; createdAt: string }>
-  /** Emit a chat event for a tab (saved: `at` set). */
+  /**
+   * A chat event saved on the computer, as the hub sees it: its summary always, the
+   * full event only while a hub client watches the tab (`watchEvents`).
+   */
   emit(tabId: string, event: AgentEvent, seq?: number): void
+  /** Hub watchers per tab ('*' = unfiltered). */
+  watchers: Map<string, number>
   /** Fire a state change on the shared bus. */
   state(sessionId: string, state: TerminalState): void
   reset(): void
@@ -56,9 +61,12 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     // As the hub does for a saved event: its summary always (`saved`), the full event
     // to clients that watch it (docs/direct-link.md).
     emit: (tabId, event, seq = 1_000) => {
+      fake.buffer.push({ seq, event, at: Date.now() })
       events.emit('saved', tabId, chatSavedSummary(event, seq))
-      events.emit('event', tabId, event, seq, undefined, Date.now())
+      if (fake.watchers.has(tabId) || fake.watchers.has('*'))
+        events.emit('event', tabId, event, seq, undefined, Date.now())
     },
+    watchers: new Map(),
     state: (sessionId, state) => {
       for (const cb of stateListeners) cb(sessionId, state)
     },
@@ -67,6 +75,7 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
       fake.status = { state: 'idle', turnOpen: false, pendingRequestIds: [], outboxInFlight: 0 }
       fake.buffer = []
       fake.queue = []
+      fake.watchers.clear()
     }
   }
   fake.reset()
@@ -115,9 +124,23 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     clear: record('clear', 0)
   }
 
+  const watchEvents = (tabIds: readonly string[] | 'all') => {
+    const ids = tabIds === 'all' ? ['*'] : [...tabIds]
+    for (const id of ids) fake.watchers.set(id, (fake.watchers.get(id) ?? 0) + 1)
+    return () => {
+      for (const id of ids) {
+        const n = (fake.watchers.get(id) ?? 1) - 1
+        if (n <= 0) fake.watchers.delete(id)
+        else fake.watchers.set(id, n)
+      }
+    }
+  }
+
   fake.chat = {
     deps: () =>
-      ({ ops, queueOps, events, queueEvents }) as unknown as ReturnType<ChatAccess['deps']>,
+      ({ ops, queueOps, events, queueEvents, watchEvents }) as unknown as ReturnType<
+        ChatAccess['deps']
+      >,
     onStateChange: (cb) => {
       stateListeners.add(cb)
       return () => stateListeners.delete(cb)
