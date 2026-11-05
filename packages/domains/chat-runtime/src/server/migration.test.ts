@@ -14,7 +14,6 @@ afterEach(() => {
 async function fixture() {
   const h = await createTestHarness()
   harnesses.push(h)
-  const db = h.db
   const ownership = createChatOwnershipStore(h.slayDb)
   const route = await ownership.register({
     id: 'c',
