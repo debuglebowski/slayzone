@@ -244,6 +244,12 @@ export function createPtyHandlers(
     string,
     { spawnId?: string; taskId?: string; promise: Promise<unknown>; cancelled: boolean }
   >()
+  /**
+   * `pty.relay` for an attempt that has no session yet (queued for a slot, or
+   * waiting out a replacement): applied when it starts, so a change made while it
+   * waited is not lost — the hub never sends it again.
+   */
+  const relayBeforeStart = new Map<string, { spawnId?: string; on: boolean }>()
 
   function serializeStart<T>(
     id: string,
@@ -406,7 +412,7 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
-      relay: opts.relay !== false,
+      relay: relayAtStart(id, opts.spawnId, opts.relay),
       cwd,
       startedAt: Date.now(),
       ...(opts.taskId ? { taskId: opts.taskId } : {}),
@@ -1021,6 +1027,7 @@ export function createPtyHandlers(
     const live = sessions.get(params.sessionId)
     const pending = queued.get(params.sessionId)
     if (pending && (params.spawnId === undefined || pending.spawnId === params.spawnId)) {
+      relayBeforeStart.delete(params.sessionId)
       // Killed while waiting for its slot: it never runs, and ends exactly as a
       // killed process would — with an exit the hub's session settles on. The
       // exit goes out BEFORE the spawn's (error) reply, so the hub has already
@@ -1159,11 +1166,29 @@ export function createPtyHandlers(
     }
   }
 
+  /** The relay a new session starts with: a change made while it waited wins. */
+  function relayAtStart(id: string, spawnId: string | undefined, requested?: boolean): boolean {
+    const early = relayBeforeStart.get(id)
+    relayBeforeStart.delete(id)
+    if (early && (early.spawnId === undefined || early.spawnId === spawnId)) return early.on
+    return requested !== false
+  }
+
   function relay(rawParams: unknown): PtyRelayResult {
     const params = ptyRelayParamsSchema.parse(rawParams)
-    const session = sessions.get(params.sessionId)
-    if (!session || (params.spawnId !== undefined && session.spawnId !== params.spawnId))
-      return { seq: -1 }
+    const id = params.sessionId
+    const matches = (spawnId: string | undefined) =>
+      params.spawnId === undefined || spawnId === params.spawnId
+    // Not started yet (queued for a slot, or replacing a session): remembered.
+    const waiting = queued.get(id) ?? starts.get(id)
+    if (waiting && matches(waiting.spawnId)) {
+      relayBeforeStart.set(id, {
+        ...(waiting.spawnId !== undefined ? { spawnId: waiting.spawnId } : {}),
+        on: params.on
+      })
+    }
+    const session = sessions.get(id)
+    if (!session || !matches(session.spawnId)) return { seq: -1 }
     session.relay = params.on
     return { seq: session.buffer.getCurrentSeq() }
   }
