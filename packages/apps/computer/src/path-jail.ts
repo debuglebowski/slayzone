@@ -48,7 +48,12 @@ import {
   writeFileSync,
   writeSync
 } from 'node:fs'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
+import {
+  canonicalComputerPath,
+  computerPathWithin,
+  pathFoldsCase
+} from '@slayzone/platform/computer-path'
 
 /**
  * A path or spawn cwd the computer refuses by its own policy (T-27). The dispatcher
@@ -97,13 +102,85 @@ export function setProtectedPaths(paths: readonly string[]): void {
 
 /** Is `absolute` (already judged) one of the protected state paths, or under one? */
 export function isProtectedPath(absolute: string): boolean {
-  return protectedPaths.some((guarded) => isInside(absolute, guarded))
+  return protectedHit(absolute, false)
+}
+
+/** `dev:ino` of `p` itself (a link is not followed), or null when it does not exist. */
+function identity(p: string): string | null {
+  try {
+    const st = lstatSync(p)
+    return `${st.dev}:${st.ino}`
+  } catch {
+    return null
+  }
+}
+
+/** Identities of `p` and every ancestor of it that exists. */
+function identityChain(p: string): Set<string> {
+  const out = new Set<string>()
+  let current = p
+  for (;;) {
+    const id = identity(current)
+    if (id) out.add(id)
+    const parent = dirname(current)
+    if (parent === current) return out
+    current = parent
+  }
+}
+
+/**
+ * Does `judged` touch the computer's own state? Matched by IDENTITY (the file or
+ * folder itself, whatever the spelling: on APFS / NTFS `COMPUTER.CONFIG.JSON` and an
+ * NFD name ARE the protected file, K2) and by canonical name — case-folded on such a
+ * volume, NFC — for a protected path that does not exist yet. `subtree`: an ancestor
+ * of a protected path counts too.
+ */
+function protectedHit(judged: string, subtree: boolean): boolean {
+  if (protectedPaths.length === 0) return false
+  const chain = identityChain(judged)
+  const self = identity(judged)
+  for (const guarded of protectedPaths) {
+    if (isInside(judged, guarded) || (subtree && isInside(guarded, judged))) return true
+    const id = identity(guarded)
+    if (id && chain.has(id)) return true
+    if (subtree && self && identityChain(guarded).has(self)) return true
+  }
+  return false
 }
 
 // --- judging ----------------------------------------------------------------
 
+/**
+ * `path` is `dir` or inside it, compared as the one canonical key every SlayZone
+ * path comparison uses (`@slayzone/platform/computer-path`): NFC, and case-folded on
+ * a case-insensitive volume — where `ROOT/x` IS `root/x`.
+ */
 function isInside(path: string, dir: string): boolean {
-  return path === dir || path.startsWith(dir.endsWith(sep) ? dir : dir + sep)
+  return computerPathWithin(path, dir, pathFoldsCase(dir))
+}
+
+/**
+ * The real spelling of an entry WITHOUT following it: a link's own name as its
+ * folder lists it (same canonical key), anything else by `realpath`. Missing: as is.
+ */
+function canonicalEntry(p: string): string {
+  const parent = canonical(dirname(p))
+  const name = basename(p)
+  let isLink: boolean
+  try {
+    isLink = lstatSync(join(parent, name)).isSymbolicLink()
+  } catch {
+    return join(parent, name)
+  }
+  if (!isLink) return canonical(join(parent, name))
+  const folds = pathFoldsCase(parent)
+  const key = canonicalComputerPath(name, folds)
+  try {
+    const listed = readdirSync(parent).find((n) => canonicalComputerPath(n, folds) === key)
+    return join(parent, listed ?? name)
+  } catch {
+    return join(parent, name)
+  }
 }
 
 /** The realpath of `p`'s deepest existing ancestor, plus the rest (links trusted). */
@@ -141,9 +218,14 @@ function liveRoots(allowedRoots: readonly string[]): LiveRoot[] {
   return out
 }
 
+/**
+ * The components of `path` below `base` — which it is inside by the canonical key
+ * (possibly in another case or Unicode form, so not a string prefix): both are
+ * resolved absolute paths, so `base`'s components are `path`'s first ones.
+ */
 function components(path: string, base: string): string[] {
-  const rel = relative(base, path)
-  return rel === '' ? [] : rel.split(sep)
+  const of = (p: string) => p.split(sep).filter(Boolean)
+  return of(path).slice(of(base).length)
 }
 
 function outside(candidate: string, allowedRoots: readonly string[]): JailViolationError {
@@ -209,9 +291,7 @@ function walk(
   // The canonical spelling of what exists (letter case on a case-insensitive disk);
   // for `entry`, of its folder only — the entry itself is never followed.
   const real =
-    access === 'entry' && current !== root.real
-      ? join(canonical(dirname(current)), basename(current))
-      : canonical(current)
+    access === 'entry' && current !== root.real ? canonicalEntry(current) : canonical(current)
   if (!isInside(real, root.real)) throw outside(candidate, allowedRoots)
   return real
 }
@@ -269,12 +349,10 @@ export function judgePath(
     if (!root) throw outside(candidate, allowedRoots)
     judged = walk(root, components(canon, root.real), access, candidate, allowedRoots, hops)
   }
-  for (const guarded of protectedPaths) {
-    if (isInside(judged, guarded) || (opts.subtree && isInside(guarded, judged))) {
-      throw new JailViolationError(
-        `path '${candidate}' holds this computer's own state (config, credentials or request log); refused`
-      )
-    }
+  if (protectedHit(judged, opts.subtree === true)) {
+    throw new JailViolationError(
+      `path '${candidate}' holds this computer's own state (config, credentials or request log); refused`
+    )
   }
   return judged
 }

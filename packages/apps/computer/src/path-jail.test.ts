@@ -252,10 +252,14 @@ describe('jailedFs: re-checked right before the write', () => {
  * write through it must never create or change anything outside `r`.
  */
 describe('fuzz: a write never lands outside the root', () => {
+  // mulberry32: a real 32-bit generator. The earlier LCG multiplied past 2^53, lost
+  // precision and explored almost nothing (a mutant jail went uncaught).
   let seed = 0x5eed
   const rand = (n: number) => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff
-    return seed % n
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) % n
   }
   const pick = <T>(xs: readonly T[]): T => xs[rand(xs.length)]!
 
@@ -274,15 +278,29 @@ describe('fuzz: a write never lands outside the root', () => {
     return out.sort().join('\n')
   }
 
-  it('2,000 trials', () => {
-    const names = ['a', 'b', 'l1', 'l2', 'l3', 'miss', 'f']
+  // Round 5: path forms also come with a leading `//`, in another letter case or in
+  // NFD — and the computer's own state (protected) lives INSIDE the root, so a write
+  // or a delete must never touch it either, in any spelling (K1, K2).
+  it('2,000 trials: never outside the root, never the protected state', () => {
+    const names = ['a', 'b', 'l1', 'l2', 'l3', 'miss', 'f', '.state', 'caf\u00e9']
+    const variants = (part: string): string[] => [
+      part,
+      part.toUpperCase(),
+      part.charAt(0).toUpperCase() + part.slice(1),
+      part.normalize('NFD')
+    ]
+    const foldsCase = process.platform !== 'linux'
     for (let trial = 0; trial < 2000; trial++) {
       rmSync(r, { recursive: true, force: true })
       rmSync(o, { recursive: true, force: true })
       mkdirSync(join(r, 'a', 'b'), { recursive: true })
+      mkdirSync(join(r, '.state'), { recursive: true })
+      mkdirSync(join(r, 'caf\u00e9'), { recursive: true })
       mkdirSync(join(o, 'dir'), { recursive: true })
       writeFileSync(join(r, 'a', 'f'), 'in')
+      writeFileSync(join(r, '.state', 'computer.config.json'), 'state')
       writeFileSync(join(o, 'dir', 'f'), 'out')
+      setProtectedPaths([join(r, '.state'), join(r, 'caf\u00e9')])
       const targets = [
         () => join(o, 'dir'),
         () => join(o, 'dir', 'f'),
@@ -295,7 +313,10 @@ describe('fuzz: a write never lands outside the root', () => {
         () => 'a/../../o',
         () => 'l2',
         () => 'l3/..',
-        () => join(r, 'a')
+        () => join(r, 'a'),
+        () => '.state',
+        () => '.STATE/computer.config.json',
+        () => join(r, '.state')
       ]
       for (const name of ['l1', 'l2', 'l3']) {
         const where = pick([r, join(r, 'a'), join(o, 'dir')])
@@ -306,21 +327,41 @@ describe('fuzz: a write never lands outside the root', () => {
         }
       }
       const parts: string[] = []
-      for (let i = 0, n = 1 + rand(5); i < n; i++) parts.push(pick([...names, '..', '.', '']))
-      const form = pick(['abs', 'rel', 'alias'])
+      // Short paths often: one name is where most spellings of the state are.
+      for (let i = 0, n = 1 + rand(rand(2) ? 2 : 5); i < n; i++) {
+        const part = pick([...names, '..', '.', '', 'computer.config.json'])
+        parts.push(foldsCase ? pick(variants(part)) : part)
+      }
+      const form = pick(['abs', 'rel', 'alias', 'slashes', 'case-root'])
       const rel = parts.join('/')
       const before = snapshot(o)
+      const state = snapshot(join(r, '.state'))
+      const op = pick(['write', 'remove'] as const)
       try {
+        let judged: string
+        const access = op === 'remove' ? 'entry' : 'write'
         if (form === 'rel') {
-          jailedFs.writeFile(judgePathIn(r, rel, [r], { access: 'write' }).path, 'w')
+          judged = judgePathIn(r, rel, [r], { access, subtree: op === 'remove' }).path
         } else {
-          const prefix = form === 'alias' ? `${r}/a/..` : r
-          jailedFs.writeFile(judgePath(`${prefix}/${rel}`, [r], { access: 'write' }), 'w')
+          const prefix =
+            form === 'alias'
+              ? `${r}/a/..`
+              : form === 'slashes'
+                ? `/${r}`
+                : form === 'case-root' && foldsCase
+                  ? r.toUpperCase()
+                  : r
+          judged = judgePath(`${prefix}/${rel}`, [r], { access, subtree: op === 'remove' })
         }
+        if (op === 'remove') jailedFs.remove(judged, { force: true })
+        else jailedFs.writeFile(judged, 'w')
       } catch {
         /* refused is fine */
       }
-      expect(snapshot(o), `trial ${trial}: ${form} ${rel}`).toBe(before)
+      expect(snapshot(o), `trial ${trial}: ${form} ${op} ${rel}`).toBe(before)
+      expect(existsSync(join(r, '.state', 'computer.config.json')), `trial ${trial}`).toBe(true)
+      expect(snapshot(join(r, '.state')), `trial ${trial}: ${form} ${op} ${rel}`).toBe(state)
+      expect(existsSync(join(r, 'caf\u00e9')), `trial ${trial}: ${form} ${op} ${rel}`).toBe(true)
     }
-  }, 120_000)
+  }, 180_000)
 })

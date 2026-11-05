@@ -36,7 +36,8 @@ import { HUB_SSO_ENV, type SlayzoneDb } from '@slayzone/platform'
 import {
   computerPathWithin,
   isWindowsComputerPath,
-  normalizeComputerPath
+  normalizeComputerPath,
+  pathFoldsCase
 } from '@slayzone/platform/computer-path'
 import { mayAccessProject, type ProjectOwnership } from '@slayzone/projects/server'
 import { agentSessionsEvents } from '@slayzone/task/server'
@@ -313,7 +314,8 @@ function normalizePath(p: string, cached = false): string {
     if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.form
   }
   const abs = realpathOf(isAbsolute(p) ? p : `${process.cwd()}${sep}${p}`)
-  const form = abs.length > 1 ? abs.replace(/\/+$/, '') : abs
+  // NFC, as every other SlayZone comparison of a path (`computer-path.ts`).
+  const form = (abs.length > 1 ? abs.replace(/\/+$/, '') : abs).normalize('NFC')
   if (cached) {
     if (rootForms.size > 20_000) rootForms.clear()
     rootForms.set(p, { form, at: Date.now() })
@@ -322,7 +324,8 @@ function normalizePath(p: string, cached = false): string {
 }
 
 /** `child` is `root` or inside it. */
-const within = computerPathWithin
+const within = (child: string, root: string): boolean =>
+  computerPathWithin(child, root, pathFoldsCase(root))
 
 /**
  * `rawPath` is `rawRoot` or inside it, after both are resolved the way every path
