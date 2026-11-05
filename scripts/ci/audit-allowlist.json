@@ -10,7 +10,7 @@
     },
     {
       "packages": ["body-parser"],
-      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process. express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 30-day minimumReleaseAge holds it back until 2026-11-21.",
+      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process (still in 2.3.0, locked 2026-11-04). express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 30-day minimumReleaseAge holds it back until 2026-11-21.",
       "reviewed": "2026-10-24",
       "expires": "2026-11-22",
       "advisories": ["GHSA-27r3-jxmh-p828"]
@@ -32,117 +32,33 @@
       ]
     },
     {
-      "packages": ["fflate"],
-      "reason": "Inside posthog-js (0.4.8, pinned by posthog): the advisory is in unzipSync (ZIP64 parsing), which posthog-js does not ship; it only compresses outgoing event batches.",
-      "reviewed": "2026-10-25",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-px8p-9vwx-vf98"]
-    },
-    {
-      "packages": ["dompurify"],
-      "reason": "NEEDS REVIEW: dompurify 3.4.15 via mermaid and 3.4.16 via @slayzone/editor. These ids were previously covered by the posthog-js entry, whose rationale (posthog's pinned 3.3.1 copy) does not apply to these paths; moved here unchanged when posthog-js 1.434 dropped dompurify.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-c6gr-qvv4-5v3f", "GHSA-cg2g-xh64-v4q7", "GHSA-mrv2-3pqr-j5jr"]
-    },
-    {
-      "packages": ["hono", "@hono/node-server", "express-rate-limit", "ip-address", "fast-uri"],
-      "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic, JSX, CORS, cookie or JWT code); the rate-limit/IP code is in the SDK auth router, which we do not mount; no URI-based security decisions.",
-      "reviewed": "2026-10-22",
+      "packages": ["@hono/node-server", "ip-address", "fast-uri"],
+      "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic; the serveStatic fix is only in @hono/node-server 2.x, which the SDK does not accept); the IP code is in the SDK auth router, which we do not mount; no URI-based security decisions. Locked to the newest versions at least 30 days old on 2026-11-04 (fast-uri 3.1.8, ip-address 10.7.3); the remaining fixes (fast-uri 3.1.9, ip-address 10.7.4) clear the age gate later in November.",
+      "reviewed": "2026-11-04",
       "expires": "2027-01-22",
       "advisories": [
-        "GHSA-26pp-8wgv-hjvm",
-        "GHSA-2gcr-mfcq-wcc3",
         "GHSA-333x-w4r6-6crp",
-        "GHSA-3hrh-pfw6-9m5x",
-        "GHSA-458j-xx4x-4375",
-        "GHSA-46wh-pxpv-q5gq",
-        "GHSA-4c8g-83qw-93j6",
-        "GHSA-5pq2-9x2x-5p6w",
-        "GHSA-69xw-7hcm-h432",
-        "GHSA-79qm-7rj5-m7r9",
-        "GHSA-7p8r-x3mc-p8w7",
-        "GHSA-88fw-hqm2-52qc",
-        "GHSA-8j4g-w8fx-2239",
-        "GHSA-92pp-h63x-v22m",
-        "GHSA-9vqf-7f2p-gf9v",
-        "GHSA-crvj-82cr-hjcx",
-        "GHSA-f23p-vx2j-j53r",
-        "GHSA-f577-qrjj-4474",
-        "GHSA-f65p-4m7j-42xc",
-        "GHSA-frvp-7c67-39w9",
-        "GHSA-g6gw-c38x-mqfc",
-        "GHSA-gq3j-xvxp-8hrf",
-        "GHSA-gqvv-2mrq-wpjv",
-        "GHSA-h3mg-xc3c-68pw",
-        "GHSA-hm8q-7f3q-5f36",
-        "GHSA-hrr3-gc8f-f4qj",
-        "GHSA-hvrm-45r6-mjfj",
-        "GHSA-hxh3-vqpv-xpqv",
-        "GHSA-j6c9-x7qj-28xf",
-        "GHSA-j6r3-76f7-8jcv",
-        "GHSA-jqff-g426-hqxp",
-        "GHSA-mwp4-54f8-5fhr",
-        "GHSA-p6xx-57qc-3wxr",
-        "GHSA-p77w-8qqv-26rm",
-        "GHSA-q3j6-qgpj-74h6",
-        "GHSA-q5qw-h33p-qvwr",
-        "GHSA-qp7p-654g-cw7p",
-        "GHSA-qw65-cvwx-89v3",
-        "GHSA-r5rp-j6wh-rvv4",
-        "GHSA-rpw4-54j3-4h4q",
-        "GHSA-rv63-4mwf-qqc2",
+        "GHSA-rmxm-3fg6-px4f",
         "GHSA-rxp7-6hxx-x8q5",
-        "GHSA-v2hh-gcrm-f6hx",
-        "GHSA-v2v4-37r5-5v8g",
-        "GHSA-v39h-62p7-jpjc",
-        "GHSA-v8w9-8mx6-g223",
-        "GHSA-w62v-xxxg-mg59",
         "GHSA-w74x-v6f9-j3xg",
-        "GHSA-wc8c-qw6v-h7f6",
-        "GHSA-wgpf-jwqj-8h8p",
-        "GHSA-wmmm-f939-6g9c",
-        "GHSA-wwfh-h76j-fc44",
-        "GHSA-xf4j-xp2r-rqqx",
-        "GHSA-xgm2-5f3f-mvvc",
-        "GHSA-xhq7-xmqj-769h",
-        "GHSA-xpcf-pg52-r92g",
-        "GHSA-xrhx-7g5j-rcj5"
+        "GHSA-wjr9-j795-jxcr",
+        "GHSA-xhq7-xmqj-769h"
       ]
     },
     {
-      "packages": ["proxy-addr", "path-to-regexp", "qs", "body-parser"],
-      "reason": "Express internals: `trust proxy` is never set (re-check if it ever is); no route uses sequential optional groups or multiple wildcards; Express 5's default query parser is not qs; no urlencoded parser; body limits are valid. qs: express and body-parser only call qs.parse; the advisory is in qs.stringify with arrayFormat \"comma\".",
-      "reviewed": "2026-11-02",
+      "packages": ["qs"],
+      "reason": "Express internals: express and body-parser only call qs.parse, and Express 5's default query parser is not qs; no urlencoded parser. Locked at 6.16.0 on 2026-11-04; the fix (6.16.1) is held back by the 30-day minimumReleaseAge.",
+      "reviewed": "2026-11-04",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-27v5-c462-wpq7",
-        "GHSA-4mjr-xmp4-gh2g",
-        "GHSA-6pq8-jhm2-2vcw",
-        "GHSA-j3q9-mxjg-w52f",
-        "GHSA-jqcg-44mw-7w3h",
-        "GHSA-q8mj-m7cp-5q26",
-        "GHSA-v422-hmwv-36x6",
-        "GHSA-x5fp-wj9c-mxmx"
-      ]
+      "advisories": ["GHSA-6pq8-jhm2-2vcw"]
     },
     {
-      "packages": [
-        "vite",
-        "vitest",
-        "@vitest/mocker",
-        "rollup",
-        "postcss",
-        "esbuild",
-        "source-map-js",
-        "nanoid"
-      ],
-      "reason": "Counted as production only because better-auth lists vitest as an optional peer; dev tooling in practice. Our Vite dev servers bind localhost, and the dev-server advisories need --host.",
-      "reviewed": "2026-10-22",
+      "packages": ["vite"],
+      "reason": "Counted as production only because better-auth lists vitest as an optional peer; dev tooling in practice. Our Vite dev servers bind localhost, and the dev-server advisories need --host. The fix (8.3.3, published 2026-10-06) clears the 30-day minimumReleaseAge on 2026-11-05.",
+      "reviewed": "2026-11-04",
       "expires": "2027-01-22",
       "advisories": [
         "GHSA-587h-7wmj-h5pm",
-        "GHSA-68fv-2mgg-jv7q",
         "GHSA-698v-4r3x-3vcv",
         "GHSA-9jrq-w75r-8gcw",
         "GHSA-r825-w8mm-5pxw",
@@ -151,24 +67,16 @@
       ]
     },
     {
-      "packages": ["lodash-es", "js-cookie", "decode-uri-component", "colord", "katex"],
-      "reason": "Via @lobehub/icons / @lobehub/ui: we deep-import 6 icon components, which do not load these.",
-      "reviewed": "2026-11-02",
+      "packages": ["decode-uri-component", "katex"],
+      "reason": "decode-uri-component: via @lobehub/icons / @lobehub/ui; we deep-import 6 icon components, which do not load it (fix 0.5.1 held back by the 30-day minimumReleaseAge). katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
+      "reviewed": "2026-11-04",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-238p-pmpm-9mq7",
-        "GHSA-2wm5-q62r-hmrv",
-        "GHSA-f23m-r3pf-42rh",
-        "GHSA-qjx8-664m-686j",
-        "GHSA-qr28-fpjm-wq7f",
-        "GHSA-r5fr-rjxr-66jc",
-        "GHSA-vcc3-ghjq-m6fr"
-      ]
+      "advisories": ["GHSA-238p-pmpm-9mq7", "GHSA-qr28-fpjm-wq7f"]
     },
     {
-      "packages": ["minimatch", "brace-expansion", "lodash"],
-      "reason": "Via archiver in the CLI zip export: no glob patterns are passed. minimatch also comes in via eslint (lint-time, our own config globs) and Expo build tooling (mobile, our own project files).",
-      "reviewed": "2026-11-02",
+      "packages": ["minimatch"],
+      "reason": "The fix is only in minimatch 11. 10.2.5 comes in via eslint (lint-time, our own config globs) and Expo build tooling (mobile, our own project files); no untrusted glob patterns.",
+      "reviewed": "2026-11-04",
       "expires": "2027-01-22",
       "advisories": ["GHSA-g3hv-75wg-m249"]
     },
@@ -178,20 +86,6 @@
       "reviewed": "2026-10-22",
       "expires": "2027-01-22",
       "advisories": ["GHSA-27mx-gchc-6xjp"]
-    },
-    {
-      "packages": ["defu"],
-      "reason": "better-auth merges its own config objects; the pollution needs attacker-controlled input as the first argument.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-737v-mqg7-c878"]
-    },
-    {
-      "packages": ["protocol-buffers-schema"],
-      "reason": "Via pbf's .proto compiler; electron-chrome-web-store only uses pbf's runtime decoder on the CRX header.",
-      "reviewed": "2026-10-22",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-j452-xhg8-qg39"]
     },
     {
       "packages": ["node-forge", "glob", "deepmerge"],

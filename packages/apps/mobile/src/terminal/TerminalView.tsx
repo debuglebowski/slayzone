@@ -7,10 +7,14 @@
  * - Output: `TerminalFeed` (subscribe → attach → dedupe → catch up), started once the
  *   data subscription runs AND the web view's terminal exists; a reloaded web view
  *   gets the session replayed. Rendered at the session's size, never resized.
- * - Input: key bar → `pty.write` (Esc and Ctrl+C also `pty.interrupt`, as desktop);
+ * - Input: key bar → `pty.write` (Esc and Ctrl+C also `pty.interrupt`, as desktop),
+ *   and so does a touch scroll the program takes (wheel / arrow bytes from the view);
  *   text → `pty.submit` (the agent's own submit, which knows its Enter), an empty
  *   send presses Enter. OSC strings are stripped from typed text, as desktop strips
  *   them from its terminal's input.
+ * - Keyboard: Return sends and keeps the keyboard up, and the terminal is a web view
+ *   (a touch there does not blur the field), so closing it is explicit: the Hide
+ *   button beside Send while typing, or touching the terminal.
  * - Presence: `pty.touch` when opened and, at most every 4s (desktop's throttle), on
  *   interaction — the idle-close timer must not put an agent the user is watching
  *   to sleep.
@@ -18,7 +22,7 @@
 import { ENTER, stripOscReplies } from '@slayzone/terminal-contracts'
 import { useSubscription } from '@slayzone/transport/client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { type ChromeColors, useTerminalColors, useTheme } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { type BarKey, KEY_BAR, type KeyModes, keyBytes } from './key-bar'
@@ -44,6 +48,7 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
   })
   const [text, setText] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
+  const [typing, setTyping] = useState(false)
 
   const terminal = useRef<TerminalDomHandle>(null)
   // The web view mounts one render later (`useNativeMounted`: expo's mount-time call
@@ -111,6 +116,13 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
     })
   }
 
+  /** Bytes from the terminal itself (a touch scroll), as a keyboard would send them. */
+  const write = (data: string): void => {
+    if (!live) return
+    touch()
+    send(() => client.pty.write.mutate({ sessionId, data }))
+  }
+
   const submit = (): void => {
     if (!live) return
     touch()
@@ -129,7 +141,11 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
             colors={colors}
             onReady={() => controller.terminalReady()}
             onModes={async (applicationCursorKeys) => setModes({ applicationCursorKeys })}
-            onInteract={async () => touch()}
+            onInteract={async () => {
+              Keyboard.dismiss()
+              touch()
+            }}
+            onInput={async (data) => write(data)}
             dom={{ style: styles.web, scrollEnabled: false, bounces: false }}
           />
         ) : null}
@@ -180,7 +196,19 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
           autoCorrect={false}
           returnKeyType="send"
           blurOnSubmit={false}
+          onFocus={() => setTyping(true)}
+          onBlur={() => setTyping(false)}
         />
+        {typing ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Hide keyboard"
+            onPress={() => Keyboard.dismiss()}
+            hitSlop={8}
+          >
+            <Text style={styles.hide}>Hide</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Send"
@@ -239,5 +267,6 @@ const makeStyles = (t: ChromeColors) =>
       paddingHorizontal: 10,
       paddingVertical: 8
     },
+    hide: { fontSize: 15, color: t.mutedForeground },
     send: { fontSize: 15, fontWeight: '600', color: t.foreground }
   })

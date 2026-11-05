@@ -3,8 +3,10 @@ import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
+import { STANDARD_COMPUTER_CAPABILITIES } from '@slayzone/computers/labels'
 import {
   assertPathAllowed,
+  DEFAULT_CAPABILITIES,
   effectiveHubUrls,
   ENV_VARS,
   ignoredCertPinNotices,
@@ -629,4 +631,12 @@ it('does not revive an unsaved launch override after current config adoption and
   } finally {
     vi.unstubAllEnvs()
   }
+})
+
+describe('DEFAULT_CAPABILITIES', () => {
+  // The hub UI hides the capability list when it is the standard set, so a default
+  // computer must report exactly that set or every row would show a spurious diff.
+  it('is the standard set the hub UI treats as unremarkable', () => {
+    expect([...DEFAULT_CAPABILITIES]).toEqual([...STANDARD_COMPUTER_CAPABILITIES])
+  })
 })

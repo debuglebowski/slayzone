@@ -395,6 +395,8 @@ export interface ChatSessionStateEntry {
   /** Last event flow timestamp (ms). Same semantics as PtyInfo.lastOutputTime. */
   lastOutputTime: number
   state: TerminalState
+  /** Background commands still running (the jobs orbit); absent = none. */
+  backgroundJobs?: number
 }
 
 // Buffer chunk with sequence number for ordering

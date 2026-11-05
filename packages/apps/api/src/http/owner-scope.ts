@@ -172,6 +172,19 @@ export function idValuesAt(
   return { values, invalid }
 }
 
+/**
+ * A project ref's id-prefix fallback (`resolve.ts` `resolveProjectRef`: tried only
+ * when neither a full id nor a name substring matches), as SQL: `?` =
+ * {@link projectIdPrefixParam}. LIKE wildcards in the ref are literal — a prefix is
+ * characters, not a pattern. One definition, so the gate admits what the resolver
+ * resolves.
+ */
+export const PROJECT_ID_PREFIX_SQL = `id LIKE ? || '%' ESCAPE '\\'`
+
+export function projectIdPrefixParam(ref: string): string {
+  return ref.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
 /** Whether the caller may use `value` the way the route reads it. */
 export async function refAllowed(
   db: SlayzoneDb,
@@ -185,7 +198,10 @@ export async function refAllowed(
   const clause = await projectClause(scope, source.project)
   const match =
     ref.match === 'projectRef'
-      ? { sql: '(id = ? OR LOWER(name) LIKE ?)', params: [value, `%${value.toLowerCase()}%`] }
+      ? {
+          sql: `(id = ? OR LOWER(name) LIKE ? OR ${PROJECT_ID_PREFIX_SQL})`,
+          params: [value, `%${value.toLowerCase()}%`, projectIdPrefixParam(value)]
+        }
       : { sql: `id LIKE ? || '%'`, params: [value] }
   const row = await db.get(
     `SELECT 1 FROM ${source.table} WHERE ${match.sql}${clause.sql} LIMIT 1`,

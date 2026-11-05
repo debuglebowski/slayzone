@@ -644,6 +644,8 @@ async function emit(raw) {
     if (typeof event.uuid !== 'string' || recordUuids.has(event.uuid)) event.uuid = randomUUID()
     recordUuids.add(event.uuid)
   }
+  // A stopped sub-agent's scripted end: the CLI sends none.
+  if (!taskSim.noteEmitted(event)) return
   trackTools(event)
   recordEmitted(event)
   // A status frame reporting a mode (scripted, replayed or from a prompt

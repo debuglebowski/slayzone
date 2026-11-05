@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/theme-tokens",
-  "version": "0.36.4",
+  "version": "0.37.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -13,6 +13,6 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json && tsgo --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   }
 }

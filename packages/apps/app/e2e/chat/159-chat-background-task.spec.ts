@@ -58,6 +58,9 @@ test.describe('Chat background commands', () => {
     })
     await t.send('loop in the background')
     await expect(t.panel.getByText('STARTED')).toBeVisible({ timeout: 5_000 })
+    // The task's state dot carries the running job (its orbit), as a terminal agent's does.
+    const orbit = t.page.getByTestId('background-jobs-orbit').first()
+    await expect(orbit).toBeVisible({ timeout: 5_000 })
 
     const card = await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'background', { timeout: 5_000 })
@@ -76,6 +79,7 @@ test.describe('Chat background commands', () => {
     await expect(card.getByTestId('bash-output')).toContainText('tick 3')
     await expect(card.getByTestId('bash-output')).toContainText('[exited with code 0]')
     await expect(banner).toBeHidden()
+    await expect(t.page.getByTestId('background-jobs-orbit')).toHaveCount(0)
     // The turn the CLI started by itself shows up.
     await expect(t.panel.getByText('The loop finished.')).toBeVisible({ timeout: 5_000 })
 
@@ -131,5 +135,130 @@ test.describe('Chat background commands', () => {
     await expect(card.getByTestId('bash-output')).toContainText('[killed]', { timeout: 5_000 })
     const banner = t.page.getByTestId('background-jobs-banner')
     await expect(banner).toBeHidden()
+  })
+
+  test('a background sub-agent outliving its turn reads as background work', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Chat background sub-agent',
+      scenario: {
+        processes: [
+          {
+            turns: [
+              [
+                step.emit(
+                  ev.init(),
+                  ev.toolUse({
+                    id: 'toolu_159a',
+                    name: 'Agent',
+                    input: { description: 'Research', prompt: 'x', run_in_background: true }
+                  }),
+                  {
+                    type: 'system',
+                    subtype: 'task_started',
+                    task_id: 'a159',
+                    tool_use_id: 'toolu_159a',
+                    description: 'Research',
+                    task_type: 'local_agent'
+                  },
+                  ev.toolResult({
+                    toolUseId: 'toolu_159a',
+                    content: 'Async agent launched',
+                    structured: { isAsync: true, status: 'async_launched', agentId: 'a159' }
+                  }),
+                  ev.text('LAUNCHED'),
+                  ev.result({ text: 'LAUNCHED' })
+                ),
+                step.sleep(3_000),
+                step.emit({
+                  type: 'system',
+                  subtype: 'task_notification',
+                  task_id: 'a159',
+                  tool_use_id: 'toolu_159a',
+                  status: 'completed',
+                  summary: 'done'
+                })
+              ]
+            ]
+          }
+        ]
+      }
+    })
+    await t.send('research in the background')
+    await expect(t.panel.getByText('LAUNCHED')).toBeVisible({ timeout: 5_000 })
+    // The turn is over, its sub-agent still runs: background work, not idle.
+    const working = t.page.getByLabel('Subagents working').first()
+    await expect(working).toBeVisible({ timeout: 5_000 })
+    // The composer lists it (the turn's Sub-agents pill); its name opens its row in the turn.
+    const subAgents = t.page.getByTestId('composer-sub-agents')
+    await expect(subAgents.getByTestId('composer-sub-agents-toggle')).toContainText('1 running')
+    await subAgents.getByTestId('composer-sub-agents-toggle').click()
+    await subAgents.getByRole('button', { name: 'Show sub-agent Research' }).click()
+    await expect(t.panel.getByTestId('chat-turn-sub-agents')).toBeVisible()
+    // Its notification ends it.
+    await expect(t.page.getByLabel('Subagents working')).toHaveCount(0, { timeout: 8_000 })
+    await expect(subAgents).toBeHidden()
+    await expect(t.page.getByTestId('background-jobs-banner')).toBeHidden()
+  })
+
+  test('the composer stops a background sub-agent (stop_task)', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Chat stop background sub-agent',
+      scenario: {
+        processes: [
+          {
+            turns: [
+              [
+                step.emit(
+                  ev.init(),
+                  ev.toolUse({
+                    id: 'toolu_159b',
+                    name: 'Agent',
+                    input: { description: 'Research', prompt: 'x', run_in_background: true }
+                  }),
+                  {
+                    type: 'system',
+                    subtype: 'task_started',
+                    task_id: 'a159b',
+                    tool_use_id: 'toolu_159b',
+                    description: 'Research',
+                    is_backgrounded: true,
+                    task_type: 'local_agent'
+                  },
+                  ev.toolResult({
+                    toolUseId: 'toolu_159b',
+                    content: 'Async agent launched',
+                    structured: { isAsync: true, status: 'async_launched', agentId: 'a159b' }
+                  }),
+                  ev.text('LAUNCHED'),
+                  ev.result({ text: 'LAUNCHED' })
+                ),
+                // Never plays: the stop ends it first.
+                step.sleep(60_000),
+                step.emit({
+                  type: 'system',
+                  subtype: 'task_notification',
+                  task_id: 'a159b',
+                  tool_use_id: 'toolu_159b',
+                  status: 'completed',
+                  summary: 'done'
+                })
+              ]
+            ]
+          }
+        ]
+      }
+    })
+    await t.send('research in the background')
+    await expect(t.panel.getByText('LAUNCHED')).toBeVisible({ timeout: 5_000 })
+    const subAgents = t.page.getByTestId('composer-sub-agents')
+    await subAgents.getByTestId('composer-sub-agents-toggle').click()
+    await subAgents.getByRole('button', { name: 'Stop sub-agent Research' }).click()
+
+    const run = await t.run(0)
+    await expect
+      .poll(() => run.controlRequests().filter((r) => r.subtype === 'stop_task'))
+      .toEqual([{ subtype: 'stop_task', task_id: 'a159b' }])
+    await expect(subAgents).toBeHidden({ timeout: 5_000 })
+    await expect(t.page.getByLabel('Subagents working')).toHaveCount(0, { timeout: 5_000 })
   })
 })

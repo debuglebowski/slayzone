@@ -32,7 +32,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
-import { chatStorageMode, terminalStorageAgentId } from './storage-mode'
+import { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
 
 export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
   `session:${JSON.stringify([mode, conversationId])}`
@@ -303,10 +303,7 @@ export function createLocalChatData(
           store.removeRecord(previous.identity.id, previous.identity.epoch, 'draft', inherited.id)
         }
       }
-      if (
-        value.identity.tabId.startsWith('artifact-store:') ||
-        value.identity.tabId === `task-content:${value.identity.taskId}`
-      )
+      if (isStorageOnlyChatOwner(value.identity))
         set(value.identity.tabId, 'settings', 'inbox', true)
       store.transaction(() => {
         const previous =
@@ -1288,7 +1285,7 @@ export function createLocalChatData(
             })
         }
         if (
-          i.tabId !== `task-content:${i.taskId}` &&
+          !isStorageOnlyChatOwner(i) &&
           r.kind === 'settings' &&
           (r.id === 'provider' || r.id.startsWith('provider:'))
         ) {

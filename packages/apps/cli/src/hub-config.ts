@@ -41,7 +41,8 @@
  *
  * Precedence, task commands:
  *   1. `--hub`
- *   2. computer-issued loopback CLI relay + session capability, in a task terminal
+ *   2. computer-issued loopback CLI relay + session capability (any process the
+ *      computer spawned with one — a task terminal or not)
  *   3. `SLAYZONE_HUB_ADDRESS`
  *   4. the stored target — OUTSIDE a task terminal only
  *   5. null — the local app, found by probing its fixed port (api.ts); in a task
@@ -245,8 +246,13 @@ function flagTarget(): ResolvedHubTarget | null {
   return hubOverride ? { ...hubOverride, source: 'flag' } : null
 }
 
+/**
+ * The computer-issued relay. Keyed on its OWN credentials, not on
+ * {@link isTaskTerminal}: a computer issues them per spawned process and strips any
+ * it inherited, so their presence already proves the computer launched us — a task
+ * terminal or not (the banner's `slay init` setup is not one).
+ */
 function relayTarget(): ResolvedHubTarget | null {
-  if (!isTaskTerminal()) return null
   const address = process.env.SLAYZONE_CLI_RELAY_ADDRESS
   const token = process.env.SLAYZONE_CLI_RELAY_TOKEN
   if (!address && !token) return null // terminals opened by an older computer

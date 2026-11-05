@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/hub",
-  "version": "0.36.4",
+  "version": "0.37.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -57,9 +57,9 @@
     "@slayzone/computer": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^24.19.0",
-    "@types/ws": "^8.5.13",
+    "@types/node": "^24.19.1",
+    "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   }
 }

@@ -68,9 +68,18 @@ function start(
   args = CHAT_ARGV,
   env: Record<string, string> = {}
 ): Proc {
+  // The env the fake reads + records (fake-claude.mjs LOGGED_ENV) comes from the test
+  // only: a Claude Code terminal running the suite exports
+  // CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true, which flipped rewind_files and the
+  // recorded env.
+  const {
+    CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: _checkpointing,
+    CLAUDE_CONFIG_DIR: _configDir,
+    ...inherited
+  } = process.env
   const child = spawn(path.join(fake.binDir, 'claude'), [...args, ...extraArgs], {
     cwd: root,
-    env: { ...process.env, ...env },
+    env: { ...inherited, ...env },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   procs.push(child)

@@ -103,17 +103,33 @@ export const escapeHtml = (s: string): string =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c
   )
 
+/** Responses written by {@link sendHubPage}: their CSP is the page's own. */
+const hubPageResponses = new WeakSet<ServerResponse>()
+
+/**
+ * Whether `res` is one of the hub's Entra pages ({@link sendHubPage}). The hub's
+ * security headers (apps/hub `security-headers.ts`) then keep the page's own CSP —
+ * at least as strict as theirs, with the one directive only the page can name: its
+ * forms' `form-action`. Under `/api` the hub's policy is `form-action 'none'`, which
+ * blocks the app sign-in confirm page's own Continue/Cancel forms.
+ */
+export function isHubPageResponse(res: ServerResponse): boolean {
+  return hubPageResponses.has(res)
+}
+
 /**
  * Send one of the hub's Entra pages: no script, nothing loaded, one inline `<style>`
  * (passes the web shell's `style-src 'unsafe-inline'`). `formAction` is the page's
  * CSP `form-action` source list — where its forms post AND where their responses may
- * redirect (Chrome applies it to the redirect after a POST).
+ * redirect (Chrome applies it to the redirect after a POST). This CSP is what the
+ * browser gets ({@link isHubPageResponse}).
  */
 export function sendHubPage(
   res: ServerResponse,
   page: { status: number; title: string; body: string; formAction: string }
 ): void {
   if (res.headersSent) return
+  hubPageResponses.add(res)
   res.writeHead(page.status, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',

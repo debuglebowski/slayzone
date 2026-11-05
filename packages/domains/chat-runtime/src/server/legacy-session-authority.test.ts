@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
-import { legacySessionAuthority } from './legacy-session-authority'
+import { legacySessionAmbiguous, legacySessionAuthority } from './legacy-session-authority'
 
 test.each([false, true])(
   'legacy same-provider sessions require unambiguous computer provenance, recordedSession=%s',
@@ -60,3 +60,34 @@ test.each([false, true])(
     }
   }
 )
+
+// #172: no competing chat owner = unclaimed, not ambiguous.
+test('a session no chat owner competes for stays unclaimed and clears a stale NULL', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
+    h.db.prepare("INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task')").run()
+    // Storage-only owner: no terminal tab, never a provider-session candidate.
+    await createChatOwnershipStore(h.slayDb).register({
+      id: 'content',
+      taskId: 'task',
+      tabId: 'task-content:task',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const rows = () =>
+      h.db.prepare('SELECT conversation_id FROM chat_legacy_session_authority').all()
+    expect(await legacySessionAuthority(h.slayDb, 'task', 'claude-code', 'session')).toBeNull()
+    expect(rows()).toEqual([])
+    h.db
+      .prepare(
+        "INSERT INTO chat_legacy_session_authority VALUES('task','claude-code','session',NULL)"
+      )
+      .run()
+    expect(await legacySessionAmbiguous(h.slayDb, 'task', 'claude-code', 'session')).toBe(false)
+    expect(rows()).toEqual([])
+  } finally {
+    h.cleanup()
+  }
+})

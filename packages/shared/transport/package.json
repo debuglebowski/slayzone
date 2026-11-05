@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/transport",
-  "version": "0.36.4",
+  "version": "0.37.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -9,6 +9,7 @@
     "./client": "./src/client/index.ts",
     "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
+    "./host-paths": "./src/shared/host-paths.ts",
     "./testing": "./src/testing/index.tsx"
   },
   "scripts": {
@@ -17,7 +18,7 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
-    "@tanstack/react-query": "^5.104.0",
+    "@tanstack/react-query": "^5.104.1",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
@@ -29,7 +30,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.2",
     "ws": "^8.22.0"
   }
 }

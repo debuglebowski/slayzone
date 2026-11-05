@@ -2,6 +2,8 @@ import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { listPromptsForTask } from '@slayzone/agent-turns/server'
+import { legacySessionPromptSummaries } from '@slayzone/task/server'
 import {
   defaultChatModeSettingKey,
   defaultChatModelSettingKey,
@@ -26,8 +28,10 @@ import {
   createLegacyChatSource,
   legacyChatTabContentSql,
   legacyChatTaskContentSql,
+  legacySessionAmbiguous,
   createHubChatRelay,
   createHubProviderConfigStore,
+  isStorageOnlyChatOwner,
   terminalStorageAgentId,
   type ChatComputerRequest,
   type HubChatOwnership,
@@ -41,6 +45,42 @@ import type {
   ChatTerminalState
 } from '@slayzone/terminal/runtime'
 import { defaultConversationRegistry } from '@slayzone/terminal/hub'
+
+/** `quiesce` refused: the task's agents run, so its history migration waits. */
+class ChatMigrationDeferredError extends Error {}
+
+/**
+ * An agent start named a provider session another task's chat owns. Two tasks must
+ * never drive one transcript, so the start is refused — naming the owner, so the
+ * user can continue there or start fresh here. Rare since one task per provider
+ * session (agent-sessions.ts `NOT_CLAIMED_ELSEWHERE_SQL`) keeps another task's
+ * session out of this task's resume target: an explicit id (a stale resume hint)
+ * is what still reaches it.
+ */
+export class ProviderSessionOwnedElsewhereError extends Error {
+  readonly code = 'provider-session-owned-elsewhere'
+  constructor(
+    readonly ownerTaskId: string,
+    ownerTitle: string | null
+  ) {
+    super(
+      `This session belongs to task "${ownerTitle?.trim() || ownerTaskId}". Continue it there, or start a fresh session here.`
+    )
+    this.name = 'ProviderSessionOwnedElsewhereError'
+  }
+}
+
+/**
+ * Owner states whose hub source rows are still the conversation's history: not
+ * migrated ('legacy') or copied but not yet activated ('copying', 'verified').
+ * An 'active' owner's history is on its computer; hub rows left by a pending
+ * cleanup are already superseded.
+ */
+const HUB_HISTORY_STATES: ReadonlySet<HubChatOwnership['state']> = new Set([
+  'legacy',
+  'copying',
+  'verified'
+])
 
 export function createComputerChatServices(opts: {
   db: SlayzoneDb
@@ -68,6 +108,7 @@ export function createComputerChatServices(opts: {
     previous: ChatTerminalState,
     hasUserInput: boolean
   ): void | Promise<void>
+  onBackgroundJobs?(sessionId: string, count: number): void | Promise<void>
 }) {
   const ownership = createChatOwnershipStore(opts.db)
   const providerConfigs = createHubProviderConfigStore(opts.db)
@@ -205,7 +246,7 @@ export function createComputerChatServices(opts: {
       [owner.taskId]
     )
     if (!task) throw new Error('Chat task no longer exists')
-    if (owner.tabId.startsWith('artifact-store:') || owner.tabId === `task-content:${owner.taskId}`)
+    if (isStorageOnlyChatOwner(owner))
       return {
         identity: {
           id: owner.id,
@@ -288,6 +329,17 @@ export function createComputerChatServices(opts: {
         : 0
     }
   }
+  /** Computer a legacy owner's provider session ran on. One definition for the
+   * migration, its session election, and the terminal-resume ambiguity fence:
+   * if they disagreed, a session could be elected in one and fenced in another. */
+  // Where a legacy (hub-era) tab's agent ran: v195's record, not the legacy table.
+  const sessionComputer = async (owner: HubChatOwnership) => {
+    const recorded = await opts.db.get<{ computer_id: string }>(
+      'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
+      [owner.tabId]
+    )
+    return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
+  }
   const source = createLegacyChatSource({
     diagnostics: opts.diagnostics,
     freezeMetadata: (owner, migrationId, candidate) =>
@@ -308,16 +360,10 @@ export function createComputerChatServices(opts: {
     readAttachment: (_owner, ref) => opts.attachments.read(ref),
     readPinnedAttachment: opts.attachments.readForMigration,
     collectReleasedAttachments: opts.attachments.readForMigration?.collectGarbage,
-    resolveSessionComputer: async (owner) => {
-      const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
-        [owner.tabId]
-      )
-      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
-    },
+    resolveSessionComputer: sessionComputer,
     quiesce: async (owner) => {
       if (await opts.hasLiveTask(owner.taskId))
-        throw new Error(
+        throw new ChatMigrationDeferredError(
           'Chat migration waits for this task’s agents to stop. Stop agents, then reopen chat.'
         )
     }
@@ -377,6 +423,108 @@ export function createComputerChatServices(opts: {
     }
   }
   const migration = createChatMigration({ ownership, source, request })
+  /**
+   * Is the hub still the source of this task's prompt history? Prompts and
+   * task-wide content migrate with the task's `chat_legacy_task_authority`
+   * owner; until that owner activates, its `agent_prompts` rows are the only
+   * copy. Without an authority owner the task has no legacy prompt content.
+   */
+  async function hubHoldsTaskHistory(taskId: string) {
+    const authority = await opts.db.get<{ conversation_id: string }>(
+      'SELECT conversation_id FROM chat_legacy_task_authority WHERE task_id=?',
+      [taskId]
+    )
+    if (!authority) return true
+    const owner = await ownership.get(authority.conversation_id)
+    return !!owner && HUB_HISTORY_STATES.has(owner.state)
+  }
+  /**
+   * History reads of a task whose migration is deferred (its agents run, often
+   * for days after an upgrade restarts them) serve the hub's legacy rows
+   * read-only instead of failing. Migration itself is unchanged: every read
+   * still tries it first, and once the task's history is activated on its
+   * computer, reads go there. Never both sources at once: when the task's
+   * prompts already moved but another conversation still waits, the deferral
+   * error stands.
+   */
+  async function readHistory<T>(
+    taskId: string,
+    computer: () => Promise<T>,
+    hub: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await computer()
+    } catch (error) {
+      if (!(error instanceof ChatMigrationDeferredError) || !(await hubHoldsTaskHistory(taskId)))
+        throw error
+      return hub()
+    }
+  }
+  async function computerPromptSummaries(taskId: string, conversationIds: string[]) {
+    const owners = await relay.ensurePromptTask(taskId)
+    type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
+    const result = new Map<string, Summary>()
+    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
+      await opts.gate?.(computerId, taskId)
+      for (let offset = 0; offset < conversationIds.length; offset += 500) {
+        const summaries = (await request(computerId, {
+          kind: 'prompt.summaries',
+          taskId,
+          conversationIds: conversationIds.slice(offset, offset + 500)
+        })) as Summary[]
+        for (const summary of summaries) {
+          const prior = result.get(summary.conversationId)
+          if (!prior) result.set(summary.conversationId, summary)
+          else
+            result.set(summary.conversationId, {
+              ...(prior.firstAt <= summary.firstAt ? prior : summary),
+              count: prior.count + summary.count
+            })
+        }
+      }
+    }
+    return [...result.values()]
+  }
+  async function computerPrompts(taskId: string, agentId?: string) {
+    const owners = await relay.ensurePromptTask(taskId)
+    const excluded = (
+      await opts.db.all<{ mode: string; conversation_id: string }>(
+        'SELECT mode,conversation_id FROM session_deletions WHERE task_id=?',
+        [taskId]
+      )
+    ).map((r) => ({ mode: r.mode, conversationId: r.conversation_id }))
+    const result = new Map<
+      string,
+      {
+        id: string
+        task_id: string
+        agent_id: string
+        cli_session_id: string | null
+        text: string
+        created_at: number
+      }
+    >()
+    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
+      await opts.gate?.(computerId, taskId)
+      const prompts = (await request(computerId, {
+        kind: 'prompts',
+        taskId,
+        agentId,
+        excluded
+      })) as Array<{
+        id: string
+        task_id: string
+        agent_id: string
+        cli_session_id: string | null
+        text: string
+        created_at: number
+      }>
+      for (const prompt of prompts) result.set(prompt.id, prompt)
+    }
+    return [...result.values()].sort(
+      (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)
+    )
+  }
   const relay = createHubChatRelay({
     ...opts,
     recordConversation: (input) => opts.legacyData.recordConversation(input),
@@ -387,13 +535,7 @@ export function createComputerChatServices(opts: {
       opts.diagnostics?.hasTask
         ? opts.diagnostics.hasTask(taskId)
         : ((await opts.diagnostics?.tasks()) ?? []).includes(taskId),
-    resolveMigrationComputer: async (owner) => {
-      const recorded = await opts.db.get<{ computer_id: string }>(
-        'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
-        [owner.tabId]
-      )
-      return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
-    },
+    resolveMigrationComputer: sessionComputer,
     recoverComputer,
     bootstrap,
     migrate: migration.ensure,
@@ -727,13 +869,15 @@ export function createComputerChatServices(opts: {
       taskId: string,
       context?: { mode?: string; conversationId?: string | null }
     ) {
+      // Storage-only owners never fence agent starts (see the migration fence
+      // below): an agent neither resumes from nor writes into their history, so
+      // their missing history surfaces where it is read, not here.
       const assertTaskHistory = async () => {
-        const missing = await opts.db.get<{ reason: string }>(
-          `SELECT u.reason FROM chat_unavailable_owners u JOIN chat_ownership o ON o.id=u.conversation_id
-          WHERE o.task_id=? AND o.state='active' AND o.computer_id=u.computer_id AND o.epoch=u.epoch LIMIT 1`,
-          [taskId]
-        )
-        if (missing) throw new Error(missing.reason)
+        for (const o of await ownership.forTask(taskId)) {
+          if (o.state !== 'active' || isStorageOnlyChatOwner(o)) continue
+          const missing = await ownership.unavailable(o.id)
+          if (missing) throw new Error(missing.reason)
+        }
       }
       const lifecycleState = await opts.db.get<{ state: string }>(
         'SELECT state FROM chat_task_lifecycle WHERE task_id=?',
@@ -741,15 +885,46 @@ export function createComputerChatServices(opts: {
       )
       if (lifecycleState && lifecycleState.state !== 'active')
         throw new Error('This task is paused or deleted. Restore it before starting an agent.')
-      if (
-        await opts.db.get(
-          "SELECT 1 FROM chat_ownership WHERE task_id=? AND (state IN ('copying','verified') OR cleanup_pending=1) LIMIT 1",
-          [taskId]
-        )
+      // A storage-only owner has no tab to reopen and no provider session for an
+      // agent to resume: its pending migration fences nothing an agent touches
+      // (terminal prompts land in the computer's own store, v187 triggers refuse
+      // legacy writes once a migration starts, cleanup removes only copied rows)
+      // and retries when the task is idle. Chat-tab owners fence.
+      const chatOwners = (await ownership.forTask(taskId)).filter((o) => !isStorageOnlyChatOwner(o))
+      const chatLabel = async (o: HubChatOwnership) =>
+        (
+          await opts.db.get<{ label: string | null }>(
+            'SELECT label FROM terminal_tabs WHERE id=? AND task_id=?',
+            [o.tabId, taskId]
+          )
+        )?.label?.trim() || null
+      // Copy/verify, or an active owner whose legacy cleanup is still owed:
+      // opening that chat runs the migration to completion.
+      const migrating = chatOwners.find(
+        (o) =>
+          o.state === 'copying' ||
+          o.state === 'verified' ||
+          (o.state !== 'deleted' && o.cleanupPending)
       )
+      if (migrating) {
+        const label = await chatLabel(migrating)
         throw new Error(
-          'Chat history migration is pending. Reopen chat before starting this agent.'
+          label
+            ? `Chat history migration is pending for "${label}". Open that chat to finish it, then start this agent.`
+            : 'Chat history migration is pending for a chat in this task. Open that chat to finish it, then start this agent.'
         )
+      }
+      // A deleted chat stays pending until every computer that held it
+      // acknowledges the deletion, which happens when that computer connects.
+      const deleting = chatOwners.find((o) => o.state === 'deleted' && o.cleanupPending)
+      if (deleting) {
+        const label = await chatLabel(deleting)
+        throw new Error(
+          label
+            ? `Deleted chat "${label}" is still being removed from its computer. Reconnect that computer, then start this agent.`
+            : 'A deleted chat is still being removed from its computer. Reconnect that computer, then start this agent.'
+        )
+      }
       const native =
         context?.conversationId ??
         (context?.mode
@@ -761,10 +936,7 @@ export function createComputerChatServices(opts: {
         !owner &&
         native &&
         context?.mode &&
-        (await opts.db.get(
-          'SELECT 1 FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=? AND conversation_id IS NULL',
-          [taskId, terminalStorageAgentId(context.mode), native]
-        ))
+        (await legacySessionAmbiguous(opts.db, taskId, context.mode, native, sessionComputer))
       )
         throw new Error(
           'Original computer for this historical provider session is ambiguous. Open its original chat before continuing.'
@@ -773,7 +945,14 @@ export function createComputerChatServices(opts: {
         await recoverComputer(owner.computerId!)
         await assertTaskHistory()
         await lifecycle.sync(owner.computerId!)
-        if (owner.taskId !== taskId || owner.state !== 'active' || !owner.computerId)
+        if (owner.taskId !== taskId) {
+          const ownerTask = await opts.db.get<{ title: string | null }>(
+            'SELECT title FROM tasks WHERE id=?',
+            [owner.taskId]
+          )
+          throw new ProviderSessionOwnedElsewhereError(owner.taskId, ownerTask?.title ?? null)
+        }
+        if (owner.state !== 'active' || !owner.computerId)
           throw new Error('Provider session ownership is unavailable')
         await opts.gate?.(owner.computerId, taskId)
         return owner.computerId
@@ -803,70 +982,23 @@ export function createComputerChatServices(opts: {
       }
       return computerId
     },
-    async promptSummaries(taskId: string, conversationIds: string[]) {
+    async promptSummaries(
+      taskId: string,
+      conversationIds: string[]
+    ): Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>> {
       if (!conversationIds.length) return []
-      const owners = await relay.ensurePromptTask(taskId)
-      type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
-      const result = new Map<string, Summary>()
-      for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-        await opts.gate?.(computerId, taskId)
-        for (let offset = 0; offset < conversationIds.length; offset += 500) {
-          const summaries = (await request(computerId, {
-            kind: 'prompt.summaries',
-            taskId,
-            conversationIds: conversationIds.slice(offset, offset + 500)
-          })) as Summary[]
-          for (const summary of summaries) {
-            const prior = result.get(summary.conversationId)
-            if (!prior) result.set(summary.conversationId, summary)
-            else
-              result.set(summary.conversationId, {
-                ...(prior.firstAt <= summary.firstAt ? prior : summary),
-                count: prior.count + summary.count
-              })
-          }
-        }
-      }
-      return [...result.values()]
+      return readHistory(
+        taskId,
+        () => computerPromptSummaries(taskId, conversationIds),
+        () =>
+          legacySessionPromptSummaries(opts.db, taskId, conversationIds, { codexChatEvents: true })
+      )
     },
     async prompts(taskId: string, agentId?: string) {
-      const owners = await relay.ensurePromptTask(taskId)
-      const excluded = (
-        await opts.db.all<{ mode: string; conversation_id: string }>(
-          'SELECT mode,conversation_id FROM session_deletions WHERE task_id=?',
-          [taskId]
-        )
-      ).map((r) => ({ mode: r.mode, conversationId: r.conversation_id }))
-      const result = new Map<
-        string,
-        {
-          id: string
-          task_id: string
-          agent_id: string
-          cli_session_id: string | null
-          text: string
-          created_at: number
-        }
-      >()
-      for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-        await opts.gate?.(computerId, taskId)
-        const prompts = (await request(computerId, {
-          kind: 'prompts',
-          taskId,
-          agentId,
-          excluded
-        })) as Array<{
-          id: string
-          task_id: string
-          agent_id: string
-          cli_session_id: string | null
-          text: string
-          created_at: number
-        }>
-        for (const prompt of prompts) result.set(prompt.id, prompt)
-      }
-      return [...result.values()].sort(
-        (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)
+      return readHistory(
+        taskId,
+        () => computerPrompts(taskId, agentId),
+        () => listPromptsForTask(opts.db, taskId, agentId)
       )
     }
   }

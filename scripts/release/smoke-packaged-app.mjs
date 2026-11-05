@@ -136,6 +136,24 @@ if (have('computer/bin.cjs')) {
     s.status === 0 && s.out.includes('pty-ok')
       ? pass('computer: node-pty spawns a process')
       : fail(`computer: node-pty cannot spawn — ${s.out.split('\n')[0]}`)
+  } else {
+    // Windows spawns through ConPTY (conpty.node + its bundled OpenConsole.exe), which the
+    // release loads from node-pty's prebuild instead of a local compile — load alone would
+    // not catch a prebuild that cannot start a console. ConPTY may report exit before the
+    // last output is read, so pass on the output itself. The marker is a sum only running
+    // cmd produces: ConPTY can echo the command line itself (OSC window title) before cmd
+    // runs, so an `echo` marker would pass even if nothing executed. Escape sequences are
+    // stripped before matching, and the outer check wants the snippet's own verdict line.
+    const s = run(
+      `const pty=require('module').createRequire(${JSON.stringify(computer)})('node-pty');` +
+        `const p=pty.spawn(process.env.ComSpec||'cmd.exe',['/d','/c','set /a 12000+34567'],{env:process.env});let o='';` +
+        `const strip=(t)=>t.replace(/\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)/g,'').replace(/\\x1b\\[[0-?]*[ -\\/]*[@-~]/g,'').replace(/\\x1b./g,'');` +
+        `p.onData((d)=>{o+=d;if(/(^|\\D)46567(\\D|$)/.test(strip(o))){console.log('PTY_RESULT=46567');process.exit(0)}});` +
+        `p.onExit(()=>setTimeout(()=>{console.log(JSON.stringify(strip(o).trim()));process.exit(0)},2000))`
+    )
+    s.status === 0 && s.out.includes('PTY_RESULT=46567')
+      ? pass('computer: node-pty spawns a process')
+      : fail(`computer: node-pty cannot spawn — ${s.out.split('\n')[0]}`)
   }
 }
 

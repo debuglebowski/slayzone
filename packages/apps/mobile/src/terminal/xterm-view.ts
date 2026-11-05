@@ -14,6 +14,11 @@
  *   (`terminal-scale.ts`); a pinch zooms, a double tap toggles fit ↔ readable.
  * - Reports the cursor-key mode (DECCKM) when it changes, so the key bar's arrows send
  *   what xterm would.
+ * - Touch scroll the PROGRAM takes (mouse wheel reports, or the alternate screen):
+ *   xterm would send it as input, which read-only drops — so the view encodes it
+ *   (`touch-scroll.ts`) and hands it to `onInput`. Scrollback scrolling stays xterm's.
+ *   The mouse encoding is not public in xterm: the view follows the same DECSET /
+ *   DECRST / RIS sequences xterm does, without consuming them.
  */
 import {
   suppressDeviceStatusReplies,
@@ -22,14 +27,25 @@ import {
 import type { TerminalThemeColors } from '@slayzone/theme-tokens'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import { clampZoom, fitFontSize, readableZoom } from './terminal-scale'
+import {
+  type MouseEncoding,
+  type MouseTracking,
+  ScrollAccumulator,
+  type ScrollModes,
+  scrollGoesToProgram,
+  touchScrollBytes
+} from './touch-scroll'
+
+type CsiParams = (number | number[])[]
 
 /** The xterm.js surface this view uses. */
 export interface TerminalLike {
   cols: number
   rows: number
   options: { fontSize?: number; theme?: unknown }
-  modes: { applicationCursorKeysMode: boolean }
-  parser: Pick<XTerm['parser'], 'registerCsiHandler'>
+  modes: { applicationCursorKeysMode: boolean; mouseTrackingMode: MouseTracking }
+  buffer: { active: { type: 'normal' | 'alternate' } }
+  parser: Pick<XTerm['parser'], 'registerCsiHandler' | 'registerEscHandler'>
   open(element: HTMLElement): void
   write(data: string, callback?: () => void): void
   reset(): void
@@ -37,13 +53,21 @@ export interface TerminalLike {
   dispose(): void
 }
 
-/** Where the terminal is shown, and the two widths the fit needs. */
+/** A rectangle in the web view's viewport (`getBoundingClientRect`). */
+export interface ScreenRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** Where the terminal is shown, and what the fit and touch scroll measure. */
 export interface XtermHost {
   element: HTMLElement
   /** The width available to the terminal (the web view's). */
   viewportWidth(): number
-  /** The rendered width of the terminal's columns at the current font size. */
-  screenWidth(): number
+  /** The terminal's rendered cells (all columns × rows) at the current font size. */
+  screenRect(): ScreenRect
 }
 
 export interface XtermOptions {
@@ -59,6 +83,8 @@ export interface XtermOptions {
 
 export interface XtermEvents {
   onModes?: (modes: { applicationCursorKeys: boolean }) => void
+  /** Bytes for the program from a gesture (touch scroll), as xterm would send them. */
+  onInput?: (data: string) => void
 }
 
 const BASE_FONT = 14
@@ -72,6 +98,8 @@ export class XtermView {
   private zoom = 1
   private pinchZoom = 1
   private applicationCursorKeys = false
+  private mouseEncoding: MouseEncoding = 'default'
+  private readonly scroll = new ScrollAccumulator()
 
   constructor(
     create: (options: XtermOptions) => TerminalLike,
@@ -92,6 +120,7 @@ export class XtermView {
     const parserOwner = this.term as unknown as Pick<XTerm, 'parser'>
     suppressDeviceStatusReplies(parserOwner)
     suppressXtVersionReply(parserOwner)
+    this.followMouseEncoding()
     this.term.open(host.element)
     this.refit()
   }
@@ -102,6 +131,7 @@ export class XtermView {
 
   reset(): void {
     this.term.reset()
+    this.mouseEncoding = 'default'
     this.checkModes()
   }
 
@@ -114,7 +144,7 @@ export class XtermView {
   /** The screen changed (rotation, split view): fit again, keeping the zoom. */
   refit(): void {
     const current = this.term.options.fontSize ?? BASE_FONT
-    this.fitFont = fitFontSize(current, this.host.screenWidth(), this.host.viewportWidth())
+    this.fitFont = fitFontSize(current, this.host.screenRect().width, this.host.viewportWidth())
     this.zoom = clampZoom(this.zoom, this.fitFont)
     this.applyFont()
   }
@@ -139,8 +169,66 @@ export class XtermView {
     this.applyFont()
   }
 
+  /**
+   * A one-finger drag starts: true if the program takes it (the caller then keeps it
+   * from xterm and feeds `touchScrollMove`), false if it scrolls xterm's scrollback.
+   */
+  touchScrollStart(): boolean {
+    this.scroll.reset()
+    return scrollGoesToProgram(this.scrollModes())
+  }
+
+  /** The finger moved `dy` px down, now at (`clientX`, `clientY`) in the viewport. */
+  touchScrollMove(dy: number, clientX: number, clientY: number): void {
+    const rect = this.host.screenRect()
+    const { cols, rows } = this.term
+    const lines = this.scroll.lines(dy, rect.height / rows)
+    if (lines === 0) return
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    const cell = (offset: number, size: number, count: number): number =>
+      Math.min(count, Math.max(1, Math.floor(offset / size) + 1))
+    const data = touchScrollBytes(lines, this.scrollModes(), {
+      col: cell(x, rect.width / cols, cols),
+      row: cell(y, rect.height / rows, rows),
+      x: Math.max(0, Math.floor(x)),
+      y: Math.max(0, Math.floor(y))
+    })
+    if (data) this.events.onInput?.(data)
+  }
+
   dispose(): void {
     this.term.dispose()
+  }
+
+  private scrollModes(): ScrollModes {
+    return {
+      mouseTracking: this.term.modes.mouseTrackingMode,
+      mouseEncoding: this.mouseEncoding,
+      alternateScreen: this.term.buffer.active.type === 'alternate',
+      applicationCursorKeys: this.term.modes.applicationCursorKeysMode
+    }
+  }
+
+  /** xterm's own encoding switches (InputHandler setModePrivate/resetModePrivate, RIS). */
+  private followMouseEncoding(): void {
+    const modes = (params: CsiParams): number[] =>
+      params.map((p) => (Array.isArray(p) ? p[0] : p)).filter((p) => p !== undefined)
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      for (const mode of modes(params)) {
+        if (mode === 1006) this.mouseEncoding = 'sgr'
+        else if (mode === 1016) this.mouseEncoding = 'sgr-pixels'
+      }
+      return false
+    })
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+      if (modes(params).some((m) => m === 1006 || m === 1016)) this.mouseEncoding = 'default'
+      return false
+    })
+    this.term.parser.registerEscHandler({ final: 'c' }, () => {
+      this.mouseEncoding = 'default'
+      return false
+    })
   }
 
   private applyFont(): void {

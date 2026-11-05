@@ -7,7 +7,12 @@ import { useTRPC, useTRPCClient } from '../trpc'
 // and then fails to resolve. Same constant, browser-safe module.
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/computer-identity'
 // The status words every client shows (the mobile app too): one implementation.
-import { computerStatus, outdatedComputerNote } from '@slayzone/computers/labels'
+import {
+  capabilityNote,
+  computerRowStatus,
+  computerUpgradeTitle,
+  outdatedComputerNote
+} from '@slayzone/computers/labels'
 import { Button, IconButton, Input, Skeleton, cn, toast } from '@slayzone/ui'
 import { FolderCog, Loader2, Plus, RefreshCw, RotateCw, Trash2, X } from 'lucide-react'
 import { useComputerActions } from './ComputerActions'
@@ -128,30 +133,48 @@ export type HubStatusTone = 'ok' | 'idle' | 'bad'
 export function HubStatus({
   tone,
   label,
+  detail,
   title
 }: {
   tone: HubStatusTone
   label: string
+  /** Second, fainter line under the label (e.g. an upgrade's step and target). */
+  detail?: string
   title?: string
 }) {
-  return (
-    <span className="flex items-center gap-1.5 text-xs" title={title} data-testid="hub-status">
-      <span
-        className={cn(
-          'size-1.5 shrink-0 rounded-full',
-          tone === 'ok'
-            ? 'bg-green-500'
-            : tone === 'bad'
-              ? 'bg-destructive'
-              : 'bg-muted-foreground/50'
-        )}
-        aria-hidden="true"
-      />
-      <span
-        className={cn('truncate', tone === 'bad' ? 'text-destructive' : 'text-muted-foreground')}
-      >
-        {label}
+  const dot = (
+    <span
+      className={cn(
+        'size-1.5 shrink-0 rounded-full',
+        tone === 'ok'
+          ? 'bg-green-500'
+          : tone === 'bad'
+            ? 'bg-destructive'
+            : 'bg-muted-foreground/50'
+      )}
+      aria-hidden="true"
+    />
+  )
+  const word = (
+    <span className={cn('truncate', tone === 'bad' ? 'text-destructive' : 'text-muted-foreground')}>
+      {label}
+    </span>
+  )
+  if (!detail)
+    return (
+      <span className="flex items-center gap-1.5 text-xs" title={title} data-testid="hub-status">
+        {dot}
+        {word}
       </span>
+    )
+  return (
+    <span className="flex min-w-0 flex-col text-xs" title={title} data-testid="hub-status">
+      <span className="flex items-center gap-1.5">
+        {dot}
+        {word}
+      </span>
+      {/* Indented to the label, past the dot (size-1.5 + gap-1.5 = 0.75rem). */}
+      <span className="text-muted-foreground/70 truncate pl-3">{detail}</span>
     </span>
   )
 }
@@ -484,31 +507,19 @@ export function HubCard({
                       <span className="text-muted-foreground truncate font-mono text-xs">
                         {computer.platform}
                       </span>
-                      <span className="text-muted-foreground truncate text-xs">
-                        {computer.capabilities.length > 0 ? computer.capabilities.join(', ') : '—'}
-                      </span>
                       {/* Which physical box. Repeats across rows that share one,
                           which is what makes the grouping visible without adding a
                           header to the common one-computer-per-machine case. */}
                       <MachineLabel machine={computer.machine ?? null} />
-                      {computer.upgradeStatus && (
+                      {/* Only a DIFFERENCE from the standard set: every default
+                          computer reports the same four, so listing them said nothing. */}
+                      {capabilityNote(computer.capabilities) && (
                         <span
-                          className="text-muted-foreground text-xs"
-                          title={
-                            computer.upgradeStatus.error ??
-                            `Connector ${computer.upgradeStatus.version ?? computer.upgradeStatus.currentVersion}; host ${computer.upgradeStatus.hostVersion}`
-                          }
+                          className="text-muted-foreground truncate text-xs"
+                          title={computer.capabilities.join(', ') || 'No capabilities'}
+                          data-testid="computer-capabilities"
                         >
-                          Upgrade: {computer.upgradeStatus.phase}
-                          {computer.upgradeStatus.target
-                            ? ` → ${computer.upgradeStatus.target}`
-                            : ''}
-                          {computer.upgradeStatus.maintenanceReason
-                            ? ' · host maintenance pending'
-                            : ''}
-                          {computer.upgradeStatus.retryAt
-                            ? ` · retry ${new Date(computer.upgradeStatus.retryAt).toLocaleTimeString()}`
-                            : ''}
+                          {capabilityNote(computer.capabilities)}
                         </span>
                       )}
                     </div>
@@ -518,10 +529,17 @@ export function HubCard({
                       truncation and the tone are identical rather than merely
                       similar. */}
                   <td className="w-32 py-2 pr-3">
+                    {/* Connection and upgrade as ONE field: an upgrade is a state
+                        of the computer, and steady state (up to date) says nothing. */}
                     <HubStatus
-                      tone={computerStatus(computer).tone}
-                      label={computerStatus(computer).label}
-                      title={computerStatus(computer).label}
+                      tone={computerRowStatus(computer).tone}
+                      label={computerRowStatus(computer).label}
+                      detail={computerRowStatus(computer).detail}
+                      title={
+                        computer.upgradeStatus
+                          ? `${computerRowStatus(computer).label} · ${computerUpgradeTitle(computer.upgradeStatus)}`
+                          : computerRowStatus(computer).label
+                      }
                     />
                   </td>
                   <td className="w-24 py-2 text-right">

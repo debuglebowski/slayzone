@@ -2,7 +2,7 @@ import type { SessionInfo, TerminalState } from '@slayzone/terminal-contracts'
 
 interface MergeInputs {
   ptys: ReadonlyArray<{ sessionId: string; state: TerminalState; backgroundJobs?: number }>
-  chats: ReadonlyArray<{ sessionId: string; state: TerminalState }>
+  chats: ReadonlyArray<{ sessionId: string; state: TerminalState; backgroundJobs?: number }>
 }
 
 /**
@@ -37,7 +37,12 @@ export function mergeSessions({ ptys, chats }: MergeInputs): SessionInfo[] {
       )
       continue
     }
-    out.push({ sessionId: c.sessionId, state: c.state, kind: 'chat' })
+    out.push({
+      sessionId: c.sessionId,
+      state: c.state,
+      kind: 'chat',
+      ...(c.backgroundJobs ? { backgroundJobs: c.backgroundJobs } : {})
+    })
   }
 
   return out

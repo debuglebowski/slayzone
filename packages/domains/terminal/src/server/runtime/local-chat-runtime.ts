@@ -10,7 +10,14 @@
  */
 import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
 
-export type LocalChatState = 'not-spawned' | 'starting' | 'running' | 'idle' | 'error' | 'dead'
+export type LocalChatState =
+  | 'not-spawned'
+  | 'starting'
+  | 'running'
+  | 'background'
+  | 'idle'
+  | 'error'
+  | 'dead'
 
 export interface LocalChatRuntime {
   killByTaskId(taskId: string): void

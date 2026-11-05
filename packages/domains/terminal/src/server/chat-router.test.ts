@@ -219,6 +219,18 @@ describe('chat router', () => {
 })
 
 describe('chat router — command tasks (plan 3.9)', () => {
+  test('stopSubAgent delegates to ops', async () => {
+    const seen: unknown[] = []
+    Object.assign(ops, {
+      stopSubAgent: (tabId: string, toolUseId: string) => {
+        seen.push([tabId, toolUseId])
+        return Promise.resolve()
+      }
+    })
+    await chatRouter.createCaller(ctx).stopSubAgent({ tabId: 't1', toolUseId: 'toolu_a' })
+    expect(seen).toEqual([['t1', 'toolu_a']])
+  })
+
   test('commandTaskOutput / stopCommandTask / backgroundCommandTask delegate to ops', async () => {
     const seen: unknown[] = []
     Object.assign(ops, {

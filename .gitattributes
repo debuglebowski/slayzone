@@ -1,0 +1,6 @@
+# Shell scripts stay LF in every checkout, whatever core.autocrlf says (Windows runners and
+# Git for Windows default it to true). A CRLF copy fails under sh/bash: `set -e\r` is an
+# invalid option, and `#!/bin/sh\r` is a bad interpreter. The Windows build inlines
+# notify.sh (agent hooks) from its checkout and ships cli/bin/slay as resources/bin/slay.
+*.sh text eol=lf
+packages/apps/cli/bin/slay text eol=lf

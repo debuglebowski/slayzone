@@ -515,6 +515,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.sideQuestion.cancel': 'agent',
   'chat.start': 'never',
   'chat.stopCommandTask': 'agent',
+  'chat.stopSubAgent': 'agent',
   'chat.backups.list': 'never',
   'chat.backups.create': 'never',
   'chat.backups.delete': 'never',

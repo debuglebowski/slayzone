@@ -321,6 +321,8 @@ export function createChatRuntimeHandlers(opts: {
             oldState,
             hasUserInput: instance?.transport.hasSessionUserInput(sessionId) ?? false
           }),
+        onBackgroundJobsChange: (sessionId, count) =>
+          publish('background-jobs', { sessionId, count }),
         workspaceCapture: {
           begin: async (ctx) =>
             workspaceCaptureBeginSchema.parse(
@@ -674,7 +676,7 @@ export function createChatRuntimeHandlers(opts: {
       Boolean(
         instance?.transport
           .listChatSessions()
-          .some((s) => s.state === 'running' || s.state === 'starting')
+          .some((s) => s.state === 'running' || s.state === 'starting' || s.state === 'background')
       )
   }
 }

@@ -1,0 +1,49 @@
+diff --git a/out/node-module-collector/moduleManager.js b/out/node-module-collector/moduleManager.js
+index 7a64eab..2278f26 100644
+--- a/out/node-module-collector/moduleManager.js
++++ b/out/node-module-collector/moduleManager.js
+@@ -35,11 +35,16 @@ class ModuleManager {
+         this.existsMap = new Map();
+         this.lstatMap = new Map();
+         this.packageDataMap = new Map();
++        // SlayZone patch: memoized readdir for the downward BFS. Every missed lookup (e.g. each
++        // uninstalled optional platform package) re-walked the same up-to-2000 node_modules dirs
++        // of a hoisted tree uncached; the tree does not change while modules are collected.
++        this.readdirMap = new Map();
+         this.logSummaryMap = new Map();
+         this.logSummary = this.createLogSummarySyncProxy();
+         this.exists = this.createAsyncProxy(this.existsMap, (p) => (0, builder_util_1.exists)(p));
+         this.json = this.createAsyncProxy(this.jsonMap, (p) => fs.readJson(p).catch(() => null));
+         this.lstat = this.createAsyncProxy(this.lstatMap, (p) => fs.lstat(p).catch(() => null));
++        this.readdir = this.createAsyncProxy(this.readdirMap, (p) => fs.readdir(p).catch(() => null));
+         this.packageData = this.createAsyncProxy(this.packageDataMap, (p) => this.locatePackageVersionFromCacheKey(p).catch(() => null));
+         this.realPath = this.createAsyncProxy(this.realPathMap, async (p) => {
+             const filePath = path.resolve(p);
+@@ -230,11 +235,8 @@ class ModuleManager {
+             if (depth > maxDepth) {
+                 continue;
+             }
+-            let entries;
+-            try {
+-                entries = await fs.readdir(dir);
+-            }
+-            catch {
++            const entries = await this.readdir[dir];
++            if (entries == null) {
+                 continue;
+             }
+             for (const entry of entries) {
+@@ -288,11 +290,8 @@ class ModuleManager {
+         if (!(await this.exists[scopePath]) || !((_a = (await this.lstat[scopePath])) === null || _a === void 0 ? void 0 : _a.isDirectory())) {
+             return null;
+         }
+-        let scopeEntries;
+-        try {
+-            scopeEntries = await fs.readdir(scopePath);
+-        }
+-        catch {
++        const scopeEntries = await this.readdir[scopePath];
++        if (scopeEntries == null) {
+             return null;
+         }
+         for (const sc of scopeEntries) {

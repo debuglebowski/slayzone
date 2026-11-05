@@ -747,6 +747,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.commandTaskOutput': checked(tab('tabId')),
   'chat.stopCommandTask': checked(tab('tabId')),
   'chat.backgroundCommandTask': checked(tab('tabId')),
+  'chat.stopSubAgent': checked(tab('tabId')),
   'chat.getInfo': checked(tab('tabId')),
   'chat.inspectPermissions': checked(task('taskId')),
   'chat.getMode': checked(task('taskId')),
