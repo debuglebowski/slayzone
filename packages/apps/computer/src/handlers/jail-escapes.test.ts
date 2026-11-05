@@ -277,3 +277,46 @@ describe.skipIf(process.platform === 'linux')(
     })
   }
 )
+
+// Round-5 K8: the file editor's search read THROUGH links — to files outside the
+// root, or to the computer's own credentials inside it (the protected filter checked
+// the link's own path) — and readDir never judged its folder, so listing through a
+// folder link showed what lies outside. Through the real handlers.
+describe('K8: search and readDir never reach through a link out of the jail', () => {
+  it('fs.searchFiles skips a link out and a link onto protected state', async () => {
+    writeFileSync(join(o, 'secret.txt'), 'TOPSECRET line\n')
+    mkdirSync(join(r, '.state'))
+    writeFileSync(join(r, '.state', 'credentials.json'), 'TOKEN=abc\n')
+    setProtectedPaths([join(r, '.state')])
+    try {
+      symlinkSync(join(o, 'secret.txt'), join(r, 'l'))
+      symlinkSync(join(r, '.state', 'credentials.json'), join(r, 'c'))
+      writeFileSync(join(r, 'ok.txt'), 'TOPSECRET in the root is fine\nTOKEN=here\n')
+      const found = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'TOPSECRET' })) as {
+        results: Array<{ path: string }>
+      }
+      expect(found.results.map((x) => x.path)).toEqual(['ok.txt'])
+      const tokens = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'TOKEN=' })) as {
+        results: Array<{ path: string }>
+      }
+      expect(tokens.results.map((x) => x.path)).toEqual(['ok.txt'])
+    } finally {
+      setProtectedPaths([])
+    }
+  })
+
+  it('a link to a file inside the root is still searched', async () => {
+    writeFileSync(join(r, 'real.txt'), 'NEEDLE\n')
+    symlinkSync(join(r, 'real.txt'), join(r, 'alias.txt'))
+    const found = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'NEEDLE' })) as {
+      results: Array<{ path: string }>
+    }
+    expect(found.results.map((x) => x.path).sort()).toEqual(['alias.txt', 'real.txt'])
+  })
+
+  it('fs.readDir through a folder link out is refused', async () => {
+    writeFileSync(join(o, 'dir', 'outside-file'), 'x')
+    symlinkSync(join(o, 'dir'), join(r, 'x'))
+    expect(await attempt(() => fs[M.fsReadDir]({ rootPath: r, dirPath: 'x' }))).toBe('refused')
+  })
+})
