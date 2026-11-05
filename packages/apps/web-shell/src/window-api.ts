@@ -72,6 +72,8 @@ const webApiTarget: ElectronAPI = {
     hubDeviceLoginWait: async () => ({ ok: false, error: NOT_SUPPORTED }),
     hubDeviceLoginCancel: async () => ({ ok: true }),
     getWindowId: async () => resolveWindowId(),
+    // A browser tab has no app icon to badge.
+    setAppBadge: async () => undefined,
     relaunch: async () => {
       window.location.reload()
     },

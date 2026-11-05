@@ -17,6 +17,7 @@ import {
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
+import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
@@ -562,6 +563,7 @@ function App(): React.JSX.Element {
       }),
     [rawIdleTasks, dismissedIdle]
   )
+  useAppBadge({ tasks, idleTasks: allIdleTasks, hubIdByProject, defaultHubId })
   const idleTasks = useMemo(
     () =>
       agentStatusState.filterCurrentProject

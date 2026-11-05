@@ -108,6 +108,8 @@ export const appShim = {
   }),
   getLocalComputerStatus: async (): Promise<LocalComputerStatus | null> => null,
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
+  // No app icon of its own in the Chromium shell.
+  setAppBadge: async (): Promise<void> => undefined,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),
   cliStatus: async (): Promise<{ installed: boolean; path: string | null }> => ({

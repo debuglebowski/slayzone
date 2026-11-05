@@ -22,6 +22,8 @@ import {
 import { useTheme } from '../ThemeContext'
 import { useTabStore } from '@slayzone/tabs-state'
 import { SettingsTabIntro } from './SettingsTabIntro'
+import { AppBadgeSettingsCard } from './AppBadgeSettingsCard'
+import type { Project } from '@slayzone/projects-contracts'
 
 function SettingLabel({ children, tip }: { children: React.ReactNode; tip: string }) {
   return (
@@ -59,7 +61,12 @@ function ThemeSelect({ value, onChange }: { value: string; onChange: (id: string
   )
 }
 
-export function AppearanceSettingsTab() {
+export function AppearanceSettingsTab({
+  appBadgeProjects
+}: {
+  /** Projects for the app icon badge card; absent = this host has no app icon. */
+  appBadgeProjects?: Project[]
+} = {}) {
   const trpc = useTRPC()
   const allSettingsQuery = useQuery(trpc.settings.getAll.queryOptions())
   const setSettingMutation = useMutation(trpc.settings.set.mutationOptions())
@@ -439,6 +446,8 @@ export function AppearanceSettingsTab() {
           </div>
         </CardContent>
       </Card>
+
+      {appBadgeProjects && <AppBadgeSettingsCard projects={appBadgeProjects} />}
     </>
   )
 }

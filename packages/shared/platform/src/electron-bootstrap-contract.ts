@@ -57,6 +57,9 @@ export interface ElectronBootstrapApp {
   /** Stop waiting (the dialog was closed). */
   hubDeviceLoginCancel: (payload: { flowId: string }) => Promise<{ ok: true }>
   getWindowId: () => Promise<number | null>
+  /** App icon badge (dock / taskbar overlay / launcher count). text '' = clear.
+   *  overlayPng: PNG data URL drawn by the renderer for the Windows overlay. */
+  setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) => Promise<void>
   relaunch: () => Promise<void>
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'

@@ -18,6 +18,7 @@ import { LabsSettingsTab } from './tabs/LabsSettingsTab'
 import { ConnectionsSettingsTab } from './tabs/ConnectionsSettingsTab'
 import { SettingsTabIntro } from './tabs/SettingsTabIntro'
 import { SettingsHubProvider, SettingsHubPicker } from './settings-hub'
+import type { Project } from '@slayzone/projects-contracts'
 
 function TelemetrySettingsTab() {
   const { tier, setTier, lockedByHub, homeHubLabel, withheldHubs } = useTelemetry()
@@ -43,13 +44,16 @@ interface UserSettingsDialogProps {
   onOpenChange: (open: boolean) => void
   initialTab?: string
   onTabChange?: (tab: string) => void
+  /** All projects (every hub) for the app icon badge card; absent = no app icon here. */
+  appBadgeProjects?: Project[]
 }
 
 export function UserSettingsDialog({
   open,
   onOpenChange,
   initialTab = 'appearance',
-  onTabChange
+  onTabChange,
+  appBadgeProjects
 }: UserSettingsDialogProps) {
   const [activeTab, setActiveTab] = useState(initialTab)
   // Legacy Server/Hubs/Computer tab keys now resolve to the merged Connections tab;
@@ -125,7 +129,9 @@ export function UserSettingsDialog({
             <div className="mx-auto w-full max-w-4xl space-y-8">
               {activeTab === 'worktrees' && <WorktreesSettingsTab />}
 
-              {activeTab === 'appearance' && <AppearanceSettingsTab />}
+              {activeTab === 'appearance' && (
+                <AppearanceSettingsTab appBadgeProjects={appBadgeProjects} />
+              )}
 
               {activeTab === 'appearance/layout' && <LayoutSettingsTab />}
 

@@ -61,6 +61,9 @@ export const electronBootstrap = {
   hubDeviceLoginCancel: (payload: { flowId: string }) =>
     api().app.hubDeviceLoginCancel?.(payload) ?? Promise.resolve({ ok: true as const }),
   getWindowId: () => api().app.getWindowId?.() ?? Promise.resolve(null),
+  // No app icon outside Electron — a no-op elsewhere.
+  setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) =>
+    api().app.setAppBadge?.(badge) ?? Promise.resolve(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string

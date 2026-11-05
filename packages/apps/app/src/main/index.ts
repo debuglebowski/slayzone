@@ -20,7 +20,8 @@ import {
   protocol,
   screen,
   powerMonitor,
-  crashReporter
+  crashReporter,
+  nativeImage
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { pathToFileURL } from 'url'
@@ -80,6 +81,7 @@ import {
 } from './browser-view-manager'
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
 import { attachHubSocketOriginStrip } from './hub-socket-origin'
+import { applyAppBadge, parseAppBadgePayload } from './app-badge'
 import {
   probeRemoteHealth,
   hubLogin,
@@ -3499,6 +3501,27 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
     }
     ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+    // App icon badge. Only the main window's renderer drives it (it holds the
+    // full task list); secondary task windows never send, but guard anyway.
+    ipcMain.handle('app:set-badge', (event, raw: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+      const badge = parseAppBadgePayload(raw)
+      if (!badge) return
+      applyAppBadge(
+        {
+          platform: process.platform,
+          setDockBadge: (text) => app.dock?.setBadge(text),
+          setBadgeCount: (count) => {
+            app.setBadgeCount(count)
+          },
+          setOverlayIcon: (png, description) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return
+            mainWindow.setOverlayIcon(png ? nativeImage.createFromDataURL(png) : null, description)
+          }
+        },
+        badge
+      )
+    })
     // Bootstrap IPCs for the server-mode toggle (slice 7) — the last new IPC
     // before slice 8 drops the legacy bridge. These three CANNOT be tRPC: they
     // decide which server the tRPC client connects to in the first place.

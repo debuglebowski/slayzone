@@ -63,6 +63,7 @@ const api: ElectronAPI = {
     hubDeviceLoginCancel: (payload) =>
       ipcRenderer.invoke('app:hub-device-login-cancel', payload) as Promise<{ ok: true }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
+    setAppBadge: (badge) => ipcRenderer.invoke('app:set-badge', badge) as Promise<void>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>
       ipcRenderer.invoke('app:set-boot-settings', payload) as Promise<{ ok: true }>,

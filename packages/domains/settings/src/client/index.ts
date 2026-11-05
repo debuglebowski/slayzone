@@ -10,3 +10,16 @@ export { requestSettingsReopen } from './settings-reopen'
 export { useSettingsReopenTab } from './useSettingsReopenTab'
 export { useAppearance, type AppearanceSettings } from '@slayzone/ui'
 export type { CreateTaskDraft } from '@slayzone/task-contracts'
+export {
+  APP_BADGE_KEYS,
+  APP_BADGE_SOURCES,
+  appBadgeProjectKey,
+  computeAppBadge,
+  parseAppBadgeSettings,
+  type AppBadge,
+  type AppBadgeScope,
+  type AppBadgeSettings,
+  type AppBadgeSource,
+  type AppBadgeStyle,
+  type AppBadgeTask
+} from '../shared/app-badge'

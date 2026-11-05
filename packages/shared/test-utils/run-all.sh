@@ -45,6 +45,8 @@ run_harness packages/shared/settings-core/src/server/router.test.ts
 run_harness packages/apps/api/src/routers/hub.test.ts
 run_harness packages/domains/tags/src/server/router.test.ts
 run_harness packages/domains/projects/src/server/projects-router.test.ts
+# App icon badge — settings parse + which statuses count and how they show.
+run_harness packages/domains/settings/src/shared/app-badge.test.ts
 # With computers, a project's folder is recorded on a computer (create / update /
 # refusal leaves no half-made project), never in the hub's projects.path column.
 run_harness packages/domains/projects/src/server/project-folders.test.ts
@@ -449,6 +451,8 @@ run_harness packages/apps/app/src/main/project-icons-migration.test.ts
 # the copy migrations can plant an older one at the new name.
 run_harness packages/shared/platform/src/adopt-renamed-db.test.ts
 run_harness packages/apps/app/src/main/data-paths.test.ts
+# App icon badge: payload validation + per-platform apply (dock / overlay / count).
+run_harness packages/apps/app/src/main/app-badge.test.ts
 run_harness packages/domains/projects/src/server/project-icons-relocate.test.ts
 # Hidden-window invariant under Playwright. Six call sites open-coded
 # restore/show/focus with no PLAYWRIGHT gate, so an e2e spec hitting one stole
