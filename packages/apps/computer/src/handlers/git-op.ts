@@ -49,7 +49,13 @@ function insideRepo(repo: string, rel: string): boolean {
   )
 }
 
-export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
+export function createGitOpHandlers(
+  ctx: HandlerContext,
+  hooks: {
+    /** Register what to do when the hub connection goes away. */
+    onHubDisconnected?: (cb: () => void) => void
+  } = {}
+): HubMethodTable {
   // This process adopted the login-shell PATH at boot, and running git is its job:
   // no hub refusal here, and its diagnostics go to its own log.
   configureGitExec({
@@ -102,10 +108,20 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
     const { watchId, worktreePath } = gitWatchStartParamsSchema.parse(raw)
     allow(worktreePath)
     if (watchPaths.has(watchId)) return { ok: true }
-    watchPaths.set(watchId, worktreePath)
+    // Subscribe first: a watch that failed to start is never recorded as live.
     watcher.subscribe(worktreePath)
+    watchPaths.set(watchId, worktreePath)
     return { ok: true }
   }
+
+  // The hub that started these is gone; the next one starts its own under new ids.
+  // Left open, each reconnect added one more recursive fs.watch.
+  hooks.onHubDisconnected?.(() => {
+    for (const [watchId, worktreePath] of watchPaths) {
+      watchPaths.delete(watchId)
+      watcher.unsubscribe(worktreePath)
+    }
+  })
 
   async function watchStop(raw: unknown): Promise<{ ok: true }> {
     const { watchId } = gitWatchStopParamsSchema.parse(raw)

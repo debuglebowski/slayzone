@@ -224,13 +224,15 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     return { ok: true }
   }
 
+  /** Handlers' cleanup for a lost hub connection (their state belongs to that hub). */
+  const onHubDisconnected: Array<() => void> = []
   const table: HubMethodTable = {
     [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
-    ...createGitOpHandlers(ctx),
+    ...createGitOpHandlers(ctx, { onHubDisconnected: (cb) => onHubDisconnected.push(cb) }),
     ...createExecRunHandlers(ctx, deps.getProjectPaths),
     ...createAgentConfigHandlers(ctx),
     ...createUsageCollectHandlers(ctx),
@@ -325,6 +327,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
 
   const hubDisconnected = (reason: string): void => {
     pty.dropQueued(`hub disconnected (${reason})`)
+    for (const cb of onHubDisconnected) cb()
   }
 
   let inFlight = 0
