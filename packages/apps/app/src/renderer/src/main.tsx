@@ -13,6 +13,7 @@ import {
   electronBootstrap,
   setHubConnectProbe,
   setDirectLinkProbe,
+  setDirectRtcPeerFactory,
   useHubRegistryStore
 } from '@slayzone/transport/client'
 import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
@@ -88,6 +89,10 @@ setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url
 // and probes the computer over HTTP, so a socket that would fail is never opened —
 // a failed WebSocket here would also slow the hub's (see above).
 setDirectLinkProbe(async (address) => (await electronBootstrap.prepareDirectLink(address)).ok)
+// A computer with no listener this window can dial (a remote one, behind NAT) is
+// reached over WebRTC, brokered by the hub. A failed WebRTC connect is not a failed
+// WebSocket, so it cannot slow the hub's socket either.
+setDirectRtcPeerFactory((config) => new RTCPeerConnection(config))
 
 window.addEventListener('error', (event) => {
   recordClientError({

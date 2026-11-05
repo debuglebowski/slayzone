@@ -688,6 +688,12 @@ export function directLinkStatus(): Array<{
   return [...managers].map(([hubId, { manager }]) => ({ hubId, computers: manager.status() }))
 }
 
+if (typeof window !== 'undefined') {
+  // Diagnostics and e2e: which computers are direct, over which transport.
+  ;(window as unknown as { __slayzone_directLinks?: () => unknown }).__slayzone_directLinks =
+    directLinkStatus
+}
+
 /** Test seam / hub removal. */
 export function disposeDirectLinkManagers(): void {
   for (const { manager, stop } of managers.values()) {

@@ -35,6 +35,7 @@ export {
   type DirectLinkComputerStatus,
   isDirectLinkEnabled,
   setDirectLinkProbe,
+  setDirectRtcPeerFactory,
   type DirectLinkHubClient,
   type DirectIssueResult,
   type DirectLease,
