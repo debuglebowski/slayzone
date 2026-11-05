@@ -1,21 +1,16 @@
-import Database from 'better-sqlite3'
 import { afterEach, expect, test } from 'vitest'
-import { migrations } from '../../../../shared/db-migrations/src/migrations'
-import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness'
+import { createTestHarness, type TestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
-const dbs: Database.Database[] = []
+const harnesses: TestHarness[] = []
 afterEach(() => {
-  for (const db of dbs.splice(0)) db.close()
+  for (const h of harnesses.splice(0)) h.cleanup()
 })
-function fixture() {
-  const db = new Database(':memory:')
-  dbs.push(db)
-  db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
-  // From the chat-ownership migrations (187) on, minus v192: it renames
-  // `terminal_modes` / `tasks.terminal_mode`, which this skeleton DB does not have.
-  for (const migration of migrations.filter((m) => m.version >= 187 && m.version !== 192))
-    migration.up(db)
-  return { db, store: createChatOwnershipStore(createSlayzoneDbAdapter(db)) }
+// The real, fully migrated hub schema: a hand-picked slice of migrations on a
+// skeleton DB broke on every later migration that touches a table it lacks.
+async function fixture() {
+  const h = await createTestHarness()
+  harnesses.push(h)
+  return { db: h.db, store: createChatOwnershipStore(h.slayDb) }
 }
 const route = {
   id: 'storage',
@@ -26,7 +21,7 @@ const route = {
   epoch: 1
 }
 test('ownership changes only after verification and rejects stale writers', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await store.beginMigration('storage', {
     expectedComputerId: 'pc-a',
@@ -54,14 +49,14 @@ test('ownership changes only after verification and rejects stale writers', asyn
   ).rejects.toThrow(/ownership/i)
 })
 test('registering another owner cannot overwrite an existing conversation or tab binding', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await expect(store.register({ ...route, computerId: 'pc-b' })).rejects.toThrow(/ownership/i)
   await expect(store.register({ ...route, id: 'another' })).rejects.toThrow(/binding/i)
   expect(await store.forTab('tab')).toMatchObject({ id: 'storage', computerId: 'pc-a' })
 })
 test('deletion metadata survives independently of task/tab rows', async () => {
-  const { store, db } = fixture()
+  const { store, db } = await fixture()
   await store.register(route)
   await store.deleteForTask('task')
   expect(await store.forTab('tab')).toMatchObject({ state: 'deleted', epoch: 2 })
@@ -70,7 +65,7 @@ test('deletion metadata survives independently of task/tab rows', async () => {
 })
 
 test('terminal and chat modes resolve to the same provider-session owner', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await store.bindProvider('storage', 'provider-session', 'claude-chat')
   expect(await store.forProviderSession('provider-session', 'claude-code')).toMatchObject({
@@ -80,7 +75,7 @@ test('terminal and chat modes resolve to the same provider-session owner', async
 })
 
 test('a rejected registration cannot leave an alias to another task conversation', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await expect(
     store.register({ ...route, taskId: 'foreign-task', tabId: 'foreign-tab' })
@@ -88,7 +83,7 @@ test('a rejected registration cannot leave an alias to another task conversation
   expect(await store.forTab('foreign-tab')).toBeNull()
 })
 test('stale deletion acknowledgements cannot clear the reconnect barrier', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await store.deleteForTask('task')
   await store.deleteForTask('task')
@@ -101,7 +96,7 @@ test('stale deletion acknowledgements cannot clear the reconnect barrier', async
 })
 
 test('same-computer tabs can select a provider session; another computer cannot claim it', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register(route)
   await store.bindProvider(route.id, 'native', 'claude-chat')
   await store.register({ ...route, id: 'second', tabId: 'tab2' })
@@ -114,7 +109,7 @@ test('same-computer tabs can select a provider session; another computer cannot 
 })
 
 test('a live tab reclaims a provider session whose previous owner in the same task was deleted', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register({ ...route, id: 'closed', tabId: 'prompt-history:task' })
   await store.bindProvider('closed', 'native', 'claude-chat')
   await store.deleteConversation('closed')
@@ -129,7 +124,7 @@ test('a live tab reclaims a provider session whose previous owner in the same ta
 })
 
 test('a deleted owner in another task never yields its provider session', async () => {
-  const { store } = fixture()
+  const { store } = await fixture()
   await store.register({ ...route, id: 'closed', taskId: 'other', tabId: 'tab-other' })
   await store.bindProvider('closed', 'native', 'claude-chat')
   await store.deleteConversation('closed')

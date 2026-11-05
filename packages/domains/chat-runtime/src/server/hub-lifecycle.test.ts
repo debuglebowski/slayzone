@@ -1,19 +1,15 @@
-import Database from 'better-sqlite3'
 import { expect, test } from 'vitest'
-import { migrations } from '../../../../shared/db-migrations/src/migrations'
-import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createChatLifecycle } from './hub-lifecycle'
 
 test('reconnect barrier delivers lifecycle before commands and never acknowledges a failed deletion', async () => {
-  const db = new Database(':memory:')
-  db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
-  // From the chat-ownership migrations (187) on, minus v192: it renames
-  // `terminal_modes` / `tasks.terminal_mode`, which this skeleton DB does not have.
-  for (const migration of migrations.filter((m) => m.version >= 187 && m.version !== 192))
-    migration.up(db)
+  // The real, fully migrated hub schema: a hand-picked slice of migrations on a
+  // skeleton DB broke on every later migration that touches a table it lacks.
+  const h = await createTestHarness()
+  const db = h.db
   try {
-    const adapter = createSlayzoneDbAdapter(db),
+    const adapter = h.slayDb,
       ownership = createChatOwnershipStore(adapter)
     await ownership.register({
       id: 'c',
@@ -45,12 +41,11 @@ test('reconnect barrier delivers lifecycle before commands and never acknowledge
     expect(await ownership.pendingDeletions('pc')).toEqual([])
     expect(await ownership.forTab('tab')).toMatchObject({ state: 'deleted', cleanupPending: false })
   } finally {
-    db.close()
+    h.cleanup()
   }
 })
 
 test('tab deletion keeps durable targets while other task conversations stay active', async () => {
-  const { createTestHarness } = await import('../../../../shared/test-utils/ipc-harness')
   const h = await createTestHarness()
   try {
     h.db.exec(
