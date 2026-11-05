@@ -67,6 +67,10 @@ scroll stay on their hub calls (see *Follow-ups*).
   own frames: they run as the hub (`runAsSecurityActor(null, …)`), so the G2 owner
   check never refuses an admin's revocation on a computer the admin does not own. A
   revocation a computer could not receive is audited as `failure` and logged.
+- **One grant per target per socket.** A grant authorized on a socket supersedes
+  whatever the socket held on the same session or tab (a renewal, or a chat grant from
+  an older epoch, which would otherwise shadow it). When a client's last lease on a
+  target ends it calls `direct.release`, so grants never pile up to the socket's cap.
 - **Hub link loss.** Grants already issued live out their TTL but cannot renew. On
   every (re)connect the hub sends `direct.reset { keep }` with the grants it still
   holds. After a hub restart that list is empty, so every grant drops.

@@ -149,6 +149,22 @@ function covers(resource: GrantRecord['resource'], target: DirectTarget): boolea
     : target.kind === 'chat' && resource.tabId === target.tabId
 }
 
+/** Same session, or same tab (any epoch). */
+function sameResource(a: GrantRecord['resource'], b: GrantRecord['resource']): boolean {
+  return a.kind === 'pty'
+    ? b.kind === 'pty' && a.sessionId === b.sessionId
+    : b.kind === 'chat' && a.tabId === b.tabId
+}
+
+/** End the streams whose target this socket no longer holds any grant on. */
+function endUncovered(state: SocketState): void {
+  for (const watcher of [...state.targetWatchers]) {
+    if ([...state.grants.values()].some((g) => covers(g.resource, watcher.target))) continue
+    state.targetWatchers.delete(watcher)
+    watcher.ended()
+  }
+}
+
 function view(record: GrantRecord, now: number): DirectGrantView {
   return {
     grantId: record.grantId,
@@ -194,12 +210,27 @@ export async function createDirectListener(
           limiter.hit(`auth|${state.bucket}`, minute(limits.failedAuthsPerMinute))
           return null
         }
+        // Newest wins: drop what this socket held on the same session or tab (a renewal,
+        // or a chat grant from an older epoch that would shadow this one).
+        for (const [id, held] of state.grants) {
+          if (id !== record.grantId && sameResource(held.resource, record.resource)) {
+            state.grants.delete(id)
+          }
+        }
         if (!state.grants.has(record.grantId) && state.grants.size >= limits.grantsPerSocket) {
           return null
         }
         state.grants.set(record.grantId, record)
         state.authenticated = true
         return view(record, performance.now())
+      },
+      release(target) {
+        let hit = false
+        for (const [id, held] of state.grants) {
+          if (covers(held.resource, target)) hit = state.grants.delete(id) || hit
+        }
+        if (hit) endUncovered(state)
+        return hit
       },
       grantFor(target) {
         for (const record of state.grants.values()) {
@@ -291,11 +322,7 @@ export async function createDirectListener(
       let hit = false
       for (const id of ids) hit = state.grants.delete(id) || hit
       if (!hit) continue
-      for (const watcher of [...state.targetWatchers]) {
-        if ([...state.grants.values()].some((g) => covers(g.resource, watcher.target))) continue
-        state.targetWatchers.delete(watcher)
-        watcher.ended()
-      }
+      endUncovered(state)
       if (state.grants.size === 0) closeUnauthorized(ws, 'capability ended')
     }
   })

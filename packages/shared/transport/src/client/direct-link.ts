@@ -28,7 +28,7 @@
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
-import type { DirectIssueTarget, DirectRouter } from '../direct/router'
+import type { DirectIssueTarget, DirectRouter, DirectTarget } from '../direct/router'
 
 export {
   DIRECT_CALL_DEADLINE_MS,
@@ -242,11 +242,33 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     return null
   }
 
-  function lose(lease: LeaseState, reason: DirectLeaseLostReason): void {
+  /**
+   * The lease leaves its socket. When it was the socket's last lease on its target,
+   * the computer is told to drop that target's grants (they would otherwise stay on
+   * the socket until their TTL, and renewals would pile them up to its cap).
+   */
+  function detach(lease: LeaseState, socketOpen: boolean): void {
+    const { socket } = lease
+    socket.leases.delete(lease)
+    if (!socketOpen) return
+    const key = targetKey(lease.target)
+    if ([...socket.leases].some((l) => targetKey(l.target) === key)) return
+    const target: DirectTarget =
+      lease.target.kind === 'pty'
+        ? { kind: 'pty', sessionId: lease.target.sessionId }
+        : { kind: 'chat', tabId: lease.target.tabId }
+    // Best-effort: a grant the computer keeps meanwhile is superseded by the next one
+    // on the same target, and ends with its TTL.
+    void Promise.resolve()
+      .then(() => socket.connection.client.release.mutate(target))
+      .catch(() => undefined)
+  }
+
+  function lose(lease: LeaseState, reason: DirectLeaseLostReason, socketOpen = true): void {
     if (lease.done) return
     lease.done = true
     if (lease.renew) clearTimeout(lease.renew)
-    lease.socket.leases.delete(lease)
+    detach(lease, socketOpen)
     for (const cb of [...lease.lostListeners]) cb(reason)
     lease.lostListeners.clear()
   }
@@ -254,7 +276,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   function dropSocket(socket: Socket, reason: DirectLeaseLostReason): void {
     if (sockets.get(socket.key) === socket) sockets.delete(socket.key)
     if (socket.linger) clearTimeout(socket.linger)
-    for (const lease of [...socket.leases]) lose(lease, reason)
+    for (const lease of [...socket.leases]) lose(lease, reason, false)
     socket.connection.close()
   }
 
@@ -418,7 +440,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
           if (lease.done) return
           lease.done = true
           if (lease.renew) clearTimeout(lease.renew)
-          socket.leases.delete(lease)
+          detach(lease, true)
           lease.lostListeners.clear()
           if (socket.leases.size === 0 && !socket.linger) {
             socket.linger = setTimeout(() => {

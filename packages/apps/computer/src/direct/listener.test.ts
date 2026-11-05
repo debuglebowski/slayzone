@@ -467,6 +467,52 @@ describe('direct listener: chat', () => {
   })
 })
 
+// M4: a tab's epoch moves while its computer stays the same. The client authorizes a
+// new-epoch grant on the same socket; it must win over the old one at once, and a
+// renewal must replace (not pile up on) what the socket holds.
+describe('direct listener: grant replacement and release', () => {
+  it('the newest grant for a target wins; the one it supersedes leaves the socket', async () => {
+    const { store, listener, chat } = await setup()
+    const old = grant(store, { chat: { tabId: 't1', epoch: 1 } })
+    const { trpc } = client(listener, old.token)
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    const fresh = grant(store, { chat: { tabId: 't1', epoch: 2 } })
+    const view = await trpc.authorize.mutate({ token: fresh.token })
+    expect(view.grantId).toBe(fresh.grantId)
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    expect(chat.reads.map((r) => (r as { epoch: number }).epoch)).toEqual([1, 2])
+    // The superseded grant is gone from the socket: revoking it ends nothing.
+    store.revoke('hub', { by: 'grant', grantIds: [old.grantId] })
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    expect(chat.reads.length).toBe(3)
+  })
+
+  it('renewals never fill the per-socket cap', async () => {
+    const { store, listener } = await setup({ grantsPerSocket: 3 })
+    const first = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, first.token)
+    for (let i = 0; i < 10; i++) {
+      const next = grant(store, { sessionId: 's1' })
+      expect((await trpc.authorize.mutate({ token: next.token })).grantId).toBe(next.grantId)
+    }
+    const other = grant(store, { sessionId: 's2' })
+    expect((await trpc.authorize.mutate({ token: other.token })).grantId).toBe(other.grantId)
+  })
+
+  it('a released grant leaves the socket (the lease is gone)', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, a.token)
+    const b = grant(store, { sessionId: 's2' })
+    await trpc.authorize.mutate({ token: b.token })
+    expect(await trpc.release.mutate({ kind: 'pty', sessionId: 's2' })).toEqual({ released: true })
+    await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+  })
+})
+
 describe('direct listener: chat commands', () => {
   it('runs the simple commands under the granted epoch, with an operation id', async () => {
     const { store, listener, chat } = await setup()

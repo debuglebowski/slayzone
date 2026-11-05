@@ -33,10 +33,12 @@ const available = (over: Partial<Extract<DirectIssueResult, { available: true }>
 
 function fakeConnection(opts: { ready?: boolean } = {}) {
   const authorized: string[] = []
+  const released: unknown[] = []
   const closeListeners: Array<() => void> = []
   let closed = false
   const conn: DirectConnection & {
     authorized: string[]
+    released: unknown[]
     drop: () => void
     closed: () => boolean
   } = {
@@ -50,6 +52,12 @@ function fakeConnection(opts: { ready?: boolean } = {}) {
           authorized.push(token)
           return { grantId: 'x', resource: { kind: 'pty', sessionId: 's' }, expiresInMs: 1 }
         }
+      },
+      release: {
+        mutate: async (target: unknown) => {
+          released.push(target)
+          return { released: true }
+        }
       }
     } as never,
     onClose: (cb) => closeListeners.push(cb),
@@ -57,6 +65,7 @@ function fakeConnection(opts: { ready?: boolean } = {}) {
       closed = true
     },
     authorized,
+    released,
     drop: () => {
       for (const cb of closeListeners) cb()
     },
@@ -159,6 +168,25 @@ describe('acquire', () => {
     expect(leases.every((l) => l === null)).toBe(true)
     expect(probes.length).toBe(1)
     expect(opened.length).toBe(0)
+  })
+
+  // M4: grants the client no longer uses must leave the computer's socket, or they
+  // pile up to its per-socket cap. Only the LAST lease on a target releases it.
+  it('releases a target on the computer when its last lease on the socket ends', async () => {
+    const { manager, connections } = setup()
+    const a = await manager.acquire(pty('s1'))
+    const b = await manager.acquire(pty('s1'))
+    const c = await manager.acquire(pty('s2'))
+    a?.release()
+    await Promise.resolve()
+    expect(connections[0]?.released).toEqual([])
+    b?.release()
+    c?.release()
+    await Promise.resolve()
+    expect(connections[0]?.released).toEqual([
+      { kind: 'pty', sessionId: 's1' },
+      { kind: 'pty', sessionId: 's2' }
+    ])
   })
 
   it('returns null (use the relay) when the hub offers nothing', async () => {

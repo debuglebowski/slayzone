@@ -59,8 +59,17 @@ export interface DirectHeldGrant {
 
 /** One authenticated client connection, as the computer's listener holds it. */
 export interface DirectSocket {
-  /** Add (or renew with) a capability. Null: unknown or expired token. */
+  /**
+   * Add (or renew with) a capability. It supersedes whatever this socket held on the
+   * same session or tab (a renewal, or a new chat epoch): the newest grant wins and
+   * the socket never piles them up. Null: unknown or expired token.
+   */
   authorize(token: string): DirectGrantView | null
+  /**
+   * The client holds no lease on `target` any more: drop every grant this socket
+   * holds on it (streams on it end).
+   */
+  release(target: DirectTarget): boolean
   /** A live grant this socket holds on `target`, or null. */
   grantFor(target: DirectTarget): DirectHeldGrant | null
   /** Called once when this socket no longer holds any grant on `target`. */
@@ -194,6 +203,16 @@ export function createDirectRouter(services: DirectRouterServices) {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'unknown or expired capability' })
         return grant
       }),
+
+    /** The client's last lease on this session or tab ended. */
+    release: t.procedure
+      .input(
+        z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('pty'), sessionId }),
+          z.object({ kind: z.literal('chat'), tabId: z.string().min(1).max(200) })
+        ])
+      )
+      .mutation(({ ctx, input }) => ({ released: ctx.socket.release(input) })),
 
     pty: t.router({
       /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
