@@ -17,7 +17,7 @@
  * from renderer bundles.
  */
 import type { HubEntry } from './hub-registry'
-import type { LocalComputerStatus } from './local-computer-status'
+import type { LocalComputerHubs, LocalComputerStatus } from './local-computer-status'
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
@@ -84,6 +84,8 @@ export interface ElectronBootstrapApp {
   restartLocalComputer: () => Promise<{ ok: boolean; error?: string }>
   /** Null when this host supervises no local computer (remote mode). */
   getLocalComputerStatus: () => Promise<LocalComputerStatus | null>
+  /** Where this app's own computer stands on each remote hub (it joins all of them). */
+  getLocalComputerHubs: () => Promise<LocalComputerHubs>
   isPlaywright: boolean
   dataReady: () => void
   bootMark: (label: string) => void

@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 
 /**
- * One hub's computer block — the list, enrollment, revoke, and the local-computer
+ * One hub's computer block — the list, enrollment, disable/delete, and the local-computer
  * process controls.
  *
  * The block is mounted per hub inside that hub's `<HubScope>`, so everything it
  * does is hub-scoped by construction. These tests stand in for that scope by
  * stamping a hub id onto the mocked tRPC builders (`__hub`) and routing the
  * mutation spies by it — which is what lets the "two blocks, two hubs" cases below
- * prove that a mint or revoke cannot leak to the wrong hub.
+ * prove that a mint or delete cannot leak to the wrong hub.
  */
 
 type MockComputer = {
@@ -26,6 +26,7 @@ type MockComputer = {
   version?: string | null
   usable?: boolean
   upgradeStatus?: Record<string, unknown>
+  disabledAt?: number | null
 }
 
 /** What the card sends to `computers.mintJoinToken`. */
@@ -36,6 +37,15 @@ type Kids = { children?: React.ReactNode }
 let computersByHub: Record<string, MockComputer[]> = {}
 /** Query lifecycle, so the loading / error / empty summaries can be exercised. */
 let queryState: 'success' | 'loading' | 'error' = 'success'
+/** Where this app's own computer stands on each remote hub (main-process state). */
+let localComputerHubs: Record<
+  string,
+  {
+    state: 'joining' | 'joined' | 'offline' | 'failed'
+    computerId: string | null
+    error: string | null
+  }
+> = {}
 
 const mintSpy = vi.fn(() =>
   Promise.resolve({
@@ -44,7 +54,10 @@ const mintSpy = vi.fn(() =>
     hubUrl: 'ws://127.0.0.1:51100/computers'
   })
 )
-const revokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+const deleteSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+const setDisabledSpy = vi.fn((_input: { computerId: string; disabled: boolean }, _hub?: string) =>
+  Promise.resolve({ ok: true as const })
+)
 const remoteMintSpy = vi.fn((_input: MintInput, hub?: string) =>
   Promise.resolve({
     token: 'szjt1.REMOTETOKEN',
@@ -55,7 +68,7 @@ const remoteMintSpy = vi.fn((_input: MintInput, hub?: string) =>
       hub === 'hub-lo' ? 'ws://127.0.0.1:51100/computers' : 'wss://hub-b.example.com:8443/computers'
   })
 )
-const remoteRevokeSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
+const remoteDeleteSpy = vi.fn(() => Promise.resolve({ ok: true as const }))
 
 /**
  * The local computer is cycled over the DESKTOP BRIDGE, not tRPC — it is a child of
@@ -93,7 +106,9 @@ vi.mock('@slayzone/transport/client', () => ({
         renameMachine: {
           mutationOptions: () => ({ __key: 'computers.renameMachine' })
         },
-        revokeComputer: { mutationOptions: () => ({ __key: 'revoke', __hub: hub }) }
+        delete: { mutationOptions: () => ({ __key: 'delete', __hub: hub }) },
+        setDisabled: { mutationOptions: () => ({ __key: 'setDisabled', __hub: hub }) },
+        rename: { mutationOptions: () => ({ __key: 'rename', __hub: hub }) }
       }
     }
   },
@@ -121,7 +136,8 @@ vi.mock('@slayzone/transport/client', () => ({
   },
   electronBootstrap: {
     restartLocalComputer: () => restartLocalComputerSpy(),
-    getLocalComputerStatus: () => Promise.resolve(localComputerStatus)
+    getLocalComputerStatus: () => Promise.resolve(localComputerStatus),
+    getLocalComputerHubs: () => Promise.resolve(localComputerHubs)
   }
 }))
 
@@ -171,12 +187,19 @@ vi.mock('@tanstack/react-query', () => ({
   },
   useMutation: (opts: { __key?: string; __hub?: string }) => {
     const remote = opts?.__hub !== undefined && opts.__hub !== 'local'
-    const revoke = opts?.__key === 'revoke'
+    if (opts?.__key === 'setDisabled') {
+      return {
+        mutateAsync: (input: { computerId: string; disabled: boolean }) =>
+          setDisabledSpy(input, opts.__hub),
+        isPending: false
+      }
+    }
+    const remove = opts?.__key === 'delete'
     return {
-      mutateAsync: revoke
+      mutateAsync: remove
         ? remote
-          ? remoteRevokeSpy
-          : revokeSpy
+          ? remoteDeleteSpy
+          : deleteSpy
         : remote
           ? (input: MintInput) => remoteMintSpy(input, opts?.__hub)
           : mintSpy,
@@ -259,12 +282,18 @@ const statusFor = (label: string) => <span data-testid="hub-status-slot">{label}
 const primaryFor = (label: string) => <button data-testid="hub-primary">{label} primary</button>
 const moreFor = (label: string) => <button data-testid="hub-more">{label} more</button>
 
-const card = (hubId: string, hubLabel: string, isLocalHub: boolean) => (
+const card = (
+  hubId: string,
+  hubLabel: string,
+  isLocalHub: boolean,
+  ownComputerId: string | null = null
+) => (
   <Scope hubId={hubId}>
     <HubCard
       hubId={hubId}
       hubLabel={hubLabel}
       isLocalHub={isLocalHub}
+      ownComputerId={ownComputerId}
       headerTestId={isLocalHub ? 'hub-row-local' : 'hub-row-remote'}
       identity={identityFor(hubLabel)}
       status={statusFor(hubLabel)}
@@ -319,11 +348,13 @@ beforeEach(() => {
   // an unrelated row sprout a marker.
   renderingHubId = 'local'
   mintSpy.mockClear()
-  revokeSpy.mockClear()
+  deleteSpy.mockClear()
+  setDisabledSpy.mockClear()
   remoteMintSpy.mockClear()
-  remoteRevokeSpy.mockClear()
+  remoteDeleteSpy.mockClear()
   restartLocalComputerSpy.mockClear()
   localComputerStatus = null
+  localComputerHubs = {}
   refetchSpy.mockClear()
 })
 
@@ -419,16 +450,76 @@ describe('HubCard', () => {
     expect(screen.getByText('darwin-arm64')).toBeDefined()
   })
 
-  it('fires the revoke mutation after confirming', async () => {
+  it('fires the delete mutation after confirming', async () => {
     computersByHub = { local: [makeComputer()] }
     await renderLocal()
     await act(async () => {
-      fireEvent.click(screen.getByTestId('computer-revoke'))
+      fireEvent.click(screen.getByTestId('computer-delete'))
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     })
-    expect(revokeSpy).toHaveBeenCalledWith({ computerId: 'r-1' })
+    expect(deleteSpy).toHaveBeenCalledWith({ computerId: 'r-1' })
+  })
+
+  it('disables a computer, and enables a disabled one', async () => {
+    computersByHub = {
+      local: [
+        makeComputer({ id: 'r-on', name: 'on-box' }),
+        makeComputer({ id: 'r-off', name: 'off-box', disabledAt: 5 })
+      ]
+    }
+    await renderLocal()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-disable'))
+    })
+    expect(setDisabledSpy).toHaveBeenCalledWith({ computerId: 'r-on', disabled: true }, 'local')
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-enable'))
+    })
+    expect(setDisabledSpy).toHaveBeenCalledWith({ computerId: 'r-off', disabled: false }, 'local')
+  })
+
+  it("marks this app's own computer on a remote hub, from where main says it joined", async () => {
+    localComputerHubs = { 'hub-b': { state: 'joined', computerId: 'r-mine', error: null } }
+    computersByHub = {
+      'hub-b': [
+        makeComputer({ id: 'r-mine', name: 'my-laptop' }),
+        makeComputer({ id: 'r-other', name: 'vps-1' })
+      ]
+    }
+    await renderRemote()
+    await waitFor(() => expect(screen.getAllByTestId('computer-own').length).toBe(1))
+    expect(screen.getAllByTestId('computer-delete').length).toBe(1)
+  })
+
+  it('says why this computer could not join a remote hub', async () => {
+    localComputerHubs = {
+      'hub-b': { state: 'failed', computerId: null, error: 'sign in to this hub to let it join' }
+    }
+    computersByHub = { 'hub-b': [makeComputer({ id: 'r-other', name: 'vps-1' })] }
+    await renderRemote()
+    await waitFor(() =>
+      expect(screen.getByTestId('computer-own-join-failed').textContent).toContain(
+        'sign in to this hub'
+      )
+    )
+  })
+
+  it("on a remote hub, this app's own computer can be disabled but not deleted", async () => {
+    computersByHub = {
+      'hub-b': [
+        makeComputer({ id: 'r-mine', name: 'my-laptop' }),
+        makeComputer({ id: 'r-other', name: 'vps-1' })
+      ]
+    }
+    await act(async () => {
+      render(
+        <ComputerActionsProvider>{card('hub-b', 'Hub B', false, 'r-mine')}</ComputerActionsProvider>
+      )
+    })
+    expect(screen.getAllByTestId('computer-disable').length).toBe(2)
+    expect(screen.getAllByTestId('computer-delete').length).toBe(1)
   })
 
   // --- the heading: names the rows, and names each NOT-a-list state -----------
@@ -534,20 +625,20 @@ describe('HubCard', () => {
     })
   })
 
-  it('revokes a remote row against the REMOTE hub, with that row’s id', async () => {
+  it('deletes a remote row against the REMOTE hub, with that row’s id', async () => {
     computersByHub = {
       local: [makeComputer({ id: 'r-1', name: 'mac-studio' })],
       'hub-b': [makeComputer({ id: 'r-remote', name: 'vps-1' })]
     }
     await renderTwoHubs()
     await act(async () => {
-      fireEvent.click(screen.getAllByTestId('computer-revoke')[1]!)
+      fireEvent.click(screen.getAllByTestId('computer-delete')[1]!)
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     })
-    expect(remoteRevokeSpy).toHaveBeenCalledWith({ computerId: 'r-remote' })
-    expect(revokeSpy).not.toHaveBeenCalled()
+    expect(remoteDeleteSpy).toHaveBeenCalledWith({ computerId: 'r-remote' })
+    expect(deleteSpy).not.toHaveBeenCalled()
   })
 
   // The app's filesystem work runs on the computer that owns the workspace, so a
@@ -890,18 +981,18 @@ describe('HubCard', () => {
     expect(screen.getByTestId('hub-computers-summary').textContent).toBe('could not reach this hub')
   })
 
-  it('does not let the local computer be revoked', async () => {
-    // Revoking it deletes the credential the app re-dials with; nothing on this
-    // machine could execute until a relaunch re-enrolled one.
+  it('does not let the local computer be deleted or disabled on the local hub', async () => {
+    // Nothing on this machine could execute without it.
     computersByHub = { local: [makeComputer({ id: 'r-local', name: 'local-computer' })] }
     await renderLocal()
     expect(screen.getAllByTestId('computer-row').length).toBe(1)
-    expect(screen.queryByTestId('computer-revoke')).toBeNull()
+    expect(screen.queryByTestId('computer-delete')).toBeNull()
+    expect(screen.queryByTestId('computer-disable')).toBeNull()
     // The action it DOES keep is the process one.
     expect(screen.getByTestId('computer-local-restart')).toBeDefined()
   })
 
-  it('still revokes a non-local computer enrolled on the local hub', async () => {
+  it('still deletes a non-local computer enrolled on the local hub', async () => {
     // Installs that enrolled one before the local hub stopped offering enrollment
     // must keep a way to remove it.
     computersByHub = {
@@ -911,15 +1002,15 @@ describe('HubCard', () => {
       ]
     }
     await renderLocal()
-    const revokes = screen.getAllByTestId('computer-revoke')
-    expect(revokes.length).toBe(1)
+    const deletes = screen.getAllByTestId('computer-delete')
+    expect(deletes.length).toBe(1)
     await act(async () => {
-      fireEvent.click(revokes[0]!)
+      fireEvent.click(deletes[0]!)
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     })
-    expect(revokeSpy).toHaveBeenCalledWith({ computerId: 'r-legacy' })
+    expect(deleteSpy).toHaveBeenCalledWith({ computerId: 'r-legacy' })
   })
 
   // --- loading + refresh ------------------------------------------------------

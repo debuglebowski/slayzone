@@ -59,7 +59,7 @@ function ctxWith(roots: string[]) {
     // The desktop's own computer (T-27): the only kind that accepts a hub-pushed jail.
     hubMayEditRoots: true
   }
-  return { dialer, config, log: () => {} }
+  return { dialer, config, log: () => {}, hubMayEditRoots: true }
 }
 
 describe('computer.setAllowedRoots', () => {

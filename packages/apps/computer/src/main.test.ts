@@ -1,16 +1,21 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ComputerCredentialStore } from '@slayzone/computer-transport/client'
 import {
+  HubDialer,
+  type ComputerCredentialStore,
+  type HubDialerOptions
+} from '@slayzone/computer-transport/client'
+import {
+  COMPUTER_EXIT_NEEDS_RE_ENROLLMENT,
   ComputerTransportErrorCodes,
   HubToComputerMethods,
   RpcError
 } from '@slayzone/computer-transport/shared'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from './config'
 import type { ComputerDialer } from './handlers/types'
-import { createHubRequestHandler, startComputer } from './main'
+import { createHubRequestHandler, startComputer, watchPrimaryHubExitCode } from './main'
 
 const fakeDialer: ComputerDialer = { notify: () => true }
 
@@ -267,6 +272,224 @@ describe('startComputer multi-hub', () => {
     )
     try {
       expect(handle.dialers.length).toBe(1)
+    } finally {
+      await handle.stop()
+    }
+  })
+})
+
+/**
+ * The desktop app's supervised computer joins further hubs while it runs: a restart
+ * would kill every agent pty, so `setSecondaryHubs` reconciles the live set instead.
+ * Dialers are real but never started (no socket), so lifecycle is driven by emitting
+ * their events.
+ */
+describe('startComputer runtime secondary hubs', () => {
+  const PRIMARY = 'ws://127.0.0.1:0/computers'
+  const B = 'ws://127.0.0.2:0/computers'
+  const C = 'ws://127.0.0.3:0/computers'
+
+  let root: string
+  beforeEach(() => {
+    // Secondary hubs use the file credential store / project map / computer config
+    // under the computer ROOT — keep every one of them in a temp dir.
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'computer-secondary-')))
+    vi.stubEnv('SLAYZONE_ROOT', root)
+    vi.stubEnv('HOME', root)
+    vi.stubEnv('USERPROFILE', root)
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function harness(config: Partial<ComputerConfig> = {}) {
+    const created: { options: HubDialerOptions; dialer: HubDialer }[] = []
+    const handle = startComputer(
+      { ...testConfig, hubUrl: PRIMARY, joinToken: 'primary-token', ...config },
+      {
+        credentialStore: memoryStore(),
+        stateDir: tempState(),
+        refreshJoinTokenFor: async (hubUrl) => `fresh-for-${hubUrl}`,
+        createDialer: (options) => {
+          const dialer = new HubDialer(options)
+          vi.spyOn(dialer, 'start').mockImplementation(() => {})
+          vi.spyOn(dialer, 'stop')
+          created.push({ options, dialer })
+          return dialer
+        }
+      }
+    )
+    const of = (url: string) => created.filter((c) => c.options.url === url)
+    const fatal = (dialer: HubDialer, reason?: 'needs-re-enrollment') =>
+      dialer.events.emit('error', {
+        error: new Error('refused'),
+        fatal: true,
+        ...(reason ? { reason } : {})
+      })
+    return { handle, created, of, fatal }
+  }
+
+  it('connects a hub added at runtime with its own name and join token', async () => {
+    const { handle, of } = harness()
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'Kalle on B', joinToken: 'tok-b' }])
+      expect(handle.dialers.length).toBe(2)
+      const [b] = of(B)
+      expect(b.dialer.start).toHaveBeenCalledTimes(1)
+      expect(b.options.joinToken).toBe('tok-b')
+      // Its own enrollment name; the primary keeps the configured one.
+      expect(b.options.identity.name).toBe('Kalle on B')
+      expect(of(PRIMARY)[0].options.identity.name).toBe(testConfig.name)
+      expect(b.options.identity.platform).toBe(of(PRIMARY)[0].options.identity.platform)
+      // Marked as a desktop's own computer joined there, so that hub never prefers it
+      // over a computer its user already had; the primary reports exactly its own.
+      expect(b.options.identity.capabilities).toEqual([...testConfig.capabilities, 'desktop'])
+      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual(testConfig.capabilities)
+      // A spent token is recovered by asking the parent for a fresh one, per hub.
+      expect(await b.options.refreshJoinToken!()).toBe(`fresh-for-${B}`)
+      // The primary is wired exactly as before: no refresh hook, its own token.
+      expect(of(PRIMARY)[0].options.refreshJoinToken).toBeUndefined()
+      expect(of(PRIMARY)[0].options.joinToken).toBe('primary-token')
+      // A second set with a different name changes nothing on a live connection.
+      await handle.setSecondaryHubs!([{ url: B, name: 'renamed' }])
+      expect(of(B).length).toBe(1)
+      expect(b.dialer.stop).not.toHaveBeenCalled()
+    } finally {
+      await handle.stop()
+    }
+    // stop covers the runtime-added hub too.
+    expect(of(B)[0].dialer.stop).toHaveBeenCalled()
+  })
+
+  // Grouping onto a machine must hold for every hub, whichever resolved first.
+  it('gives a secondary identity the host id, before and after it resolves', async () => {
+    const { handle, of } = harness()
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      const primary = of(PRIMARY)[0].options.identity
+      await vi.waitFor(() => expect(primary.hostId).toBeDefined(), { timeout: 5_000 })
+      expect(of(B)[0].options.identity.hostId).toBe(primary.hostId)
+      await handle.setSecondaryHubs!([
+        { url: B, name: 'b' },
+        { url: C, name: 'c' }
+      ])
+      expect(of(C)[0].options.identity.hostId).toBe(primary.hostId)
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it('removing a hub disposes only that connection', async () => {
+    const { handle, of } = harness()
+    try {
+      await handle.setSecondaryHubs!([
+        { url: B, name: 'b' },
+        { url: C, name: 'c' }
+      ])
+      await handle.setSecondaryHubs!([{ url: C, name: 'c' }])
+      expect(of(B)[0].dialer.stop).toHaveBeenCalled()
+      expect(of(C)[0].dialer.stop).not.toHaveBeenCalled()
+      expect(of(PRIMARY)[0].dialer.stop).not.toHaveBeenCalled()
+      expect(handle.dialers).toEqual([of(PRIMARY)[0].dialer, of(C)[0].dialer])
+      // Re-adding after removal is a fresh connection.
+      await handle.setSecondaryHubs!([
+        { url: B, name: 'b' },
+        { url: C, name: 'c' }
+      ])
+      expect(of(B).length).toBe(2)
+      expect(handle.dialers.length).toBe(3)
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it('reconnects a fatally stopped secondary only when handed a join token', async () => {
+    const { handle, of, fatal } = harness()
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      // A live hub with a token is left alone: the token is only for recovery.
+      await handle.setSecondaryHubs!([{ url: B, name: 'b', joinToken: 'unused' }])
+      expect(of(B).length).toBe(1)
+
+      fatal(of(B)[0].dialer, 'needs-re-enrollment')
+      // No token, nothing to recover with: it stays as it is.
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      expect(of(B).length).toBe(1)
+
+      await handle.setSecondaryHubs!([{ url: B, name: 'b2', joinToken: 'tok-2' }])
+      expect(of(B)[0].dialer.stop).toHaveBeenCalled()
+      expect(of(B).length).toBe(2)
+      expect(of(B)[1].options.joinToken).toBe('tok-2')
+      expect(of(B)[1].options.identity.name).toBe('b2')
+      expect(of(B)[1].dialer.start).toHaveBeenCalled()
+      expect(handle.dialers).toEqual([of(PRIMARY)[0].dialer, of(B)[1].dialer])
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it('never touches the primary hub', async () => {
+    const { handle, of, created, fatal } = harness()
+    const primary = of(PRIMARY)[0].dialer
+    try {
+      fatal(primary)
+      await handle.setSecondaryHubs!([{ url: PRIMARY, name: 'x', joinToken: 'y' }])
+      // Same credential key (host:port) under another url: would race the primary's creds.
+      await handle.setSecondaryHubs!([{ url: 'wss://127.0.0.1:0/other', name: 'x' }])
+      await handle.setSecondaryHubs!([])
+      expect(created.length).toBe(1)
+      expect(primary.stop).not.toHaveBeenCalled()
+      expect(handle.dialer).toBe(primary)
+      expect(handle.dialers).toEqual([primary])
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it('a secondary hub fatal never sets the exit code; the primary one still does', async () => {
+    const { handle, of, fatal } = harness()
+    const exit = vi.fn()
+    watchPrimaryHubExitCode(handle.dialer, exit)
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      fatal(of(B)[0].dialer, 'needs-re-enrollment')
+      fatal(of(B)[0].dialer)
+      expect(exit).not.toHaveBeenCalled()
+      fatal(of(PRIMARY)[0].dialer, 'needs-re-enrollment')
+      expect(exit).toHaveBeenCalledWith(COMPUTER_EXIT_NEEDS_RE_ENROLLMENT)
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  // T-27: only the desktop's own loopback hub may widen the jail. A hub joined at
+  // runtime is someone else's hub, whatever the primary is allowed.
+  it('a secondary hub cannot edit allowed roots; the primary still can', async () => {
+    const allowed = join(root, 'allowed')
+    const wider = join(root, 'wider')
+    mkdirSync(allowed)
+    mkdirSync(wider)
+    const { handle, of } = harness({ allowedRoots: [allowed], hubMayEditRoots: true })
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      const viaB = of(B)[0].options.onHubRequest!
+      const viaPrimary = of(PRIMARY)[0].options.onHubRequest!
+      const err = await Promise.resolve(
+        viaB(HubToComputerMethods.computerSetAllowedRoots, { roots: [allowed, wider] }, ACTOR)
+      ).then(
+        () => null,
+        (e: unknown) => e
+      )
+      expect(err).toBeInstanceOf(RpcError)
+      expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+
+      const ok = (await viaPrimary(
+        HubToComputerMethods.computerSetAllowedRoots,
+        { roots: [allowed, wider] },
+        ACTOR
+      )) as { roots: string[] }
+      expect(ok.roots).toEqual([allowed, wider])
     } finally {
       await handle.stop()
     }

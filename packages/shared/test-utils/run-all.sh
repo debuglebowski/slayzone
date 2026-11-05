@@ -102,6 +102,8 @@ run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
+# Disabling a computer: which requests start new work, and what blocks disabling one.
+run_harness packages/apps/hub/src/computer-new-work.test.ts
 # Project folders: the ordered sequence each computer goes through on connect
 # (refresh, legacy paths → pending, widen, deliver, default backfill) and user folder
 # changes, serialized per computer so a refresh can never undo a folder just set.
@@ -800,6 +802,8 @@ run_harness packages/apps/app/src/main/sidecar-server-supervisor-real-stop.test.
 # stop() as quit awaits it, and parent death against the REAL computer bundle
 # (rebuilt on demand): a supervised computer never outlives its app.
 run_harness packages/apps/app/src/main/local-computer-supervisor.test.ts
+# The local computer on every remote hub the client lists: joins, mints, recovery.
+run_harness packages/apps/app/src/main/local-computer-hubs.test.ts
 
 # e2e stale-process reaper: must never match the dev app's live computer (doing so
 # SIGTERM'd every agent on the machine once per `pnpm test:e2e`).

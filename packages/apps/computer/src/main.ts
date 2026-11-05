@@ -26,6 +26,7 @@ import {
   type ComputerIdentity
 } from '@slayzone/computer-transport/client'
 import {
+  COMPUTER_EXIT_NEEDS_RE_ENROLLMENT,
   ComputerTransportErrorCodes,
   HubToComputerMethods,
   JSON_RPC_INTERNAL_ERROR,
@@ -34,6 +35,7 @@ import {
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
+import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import {
   effectiveHubUrls,
@@ -81,13 +83,61 @@ export interface ComputerRuntimeDeps {
   stateDir?: string
   /** See {@link HubRequestHandlerDeps.pathReady}. Shared by every hub's dispatch. */
   pathReady?: Promise<unknown>
+  /**
+   * Obtain a fresh join token for a hub added with {@link ComputerHandle.setSecondaryHubs}
+   * (the dialer's `refreshJoinToken`: a single-use token already spent). The desktop's
+   * supervised computer asks its parent app, which can mint one. Absent: a refused
+   * token stays fatal for that hub, as for any dialer without the hook.
+   */
+  refreshJoinTokenFor?: (hubUrl: string) => Promise<string | null>
+  /**
+   * Called for EVERY hub connection this computer creates — the initial ones and any
+   * added later by `setSecondaryHubs` — synchronously, before its dialer starts, so a
+   * listener attached here misses none of its events.
+   */
+  onConnection?: (connection: HubConnectionInfo) => void
+}
+
+/** A hub the computer serves IN ADDITION to its primary, added while it runs. */
+export interface SecondaryHubSpec {
+  /** `ws://` / `wss://` hub computer endpoint. */
+  url: string
+  /** The name this computer enrolls under on THAT hub. */
+  name: string
+  /** First contact, or recovery of a fatally stopped connection (see setSecondaryHubs). */
+  joinToken?: string
+}
+
+export interface HubConnectionInfo {
+  hubUrl: string
+  /** The hub the computer was started for (`hubUrls[0]` / `hubUrl`). */
+  primary: boolean
+  dialer: HubDialer
 }
 
 export interface ComputerHandle {
-  /** The primary hub's dialer — `hubUrls[0]`, or the single `hubUrl`. */
+  /** The primary hub's dialer — `hubUrls[0]`, or the single `hubUrl`. Never changes. */
   dialer: HubDialer
-  /** One per hub this computer serves. Length 1 unless `hubUrls` is configured. */
-  dialers: HubDialer[]
+  /**
+   * One per hub this computer serves RIGHT NOW, the primary first. Length 1 unless
+   * `hubUrls` is configured or secondary hubs were added. Re-read it: the set changes
+   * with {@link setSecondaryHubs}.
+   */
+  readonly dialers: HubDialer[]
+  /**
+   * Reconcile the hubs served in addition to the primary — without restarting the
+   * process, which would kill every agent pty. `hubs` is the complete desired set:
+   *   - a url not served yet is connected, enrolling under its entry's `name`;
+   *   - a served url missing from `hubs` is disconnected (its work on this computer
+   *     is torn down, as on stop);
+   *   - a served url whose dialer gave up (fatal) is reconnected when its entry
+   *     carries a `joinToken` — how a parent recovers it with a freshly minted one;
+   *   - anything else is left alone (a new `name` does not re-enroll a live hub).
+   * The primary hub, and hubs from `hubUrls`, are never touched: an entry naming one
+   * (or sharing its credential key) is ignored. Calls apply in order; the promise
+   * settles when this one has. Only the full computer has it (not the connector).
+   */
+  setSecondaryHubs?(hubs: ReadonlyArray<SecondaryHubSpec>): Promise<void>
   activate(): void | Promise<void>
   isIdle(): boolean
   setHookDirectory(hub: string, directory: string): void
@@ -98,9 +148,37 @@ export interface ComputerHandle {
 /** One hub's worth of runtime: its dialer, and how to tear it down. */
 interface HubConnection {
   dialer: HubDialer
+  /** Added by `setSecondaryHubs` — the only connections it may replace or remove. */
+  secondary: boolean
+  /** The dialer gave up (a `fatal` error); it will not reconnect on its own. */
+  isFatallyStopped: () => boolean
   dispose: () => Promise<void>
   isIdle: () => boolean
   setHookDirectory: (directory: string) => void
+}
+
+/**
+ * Exit-code policy for the computer process: ONLY the primary hub's dialer decides
+ * it. The dialer gives up on fatal auth errors (bad join token, missing creds), so
+ * exit non-zero and supervisors notice instead of idling forever. A secondary hub
+ * failing is that hub's problem, reported per hub — never a reason to look dead.
+ *
+ * Exit code 78 (EX_CONFIG, sysexits.h) is reserved for "the hub no longer
+ * recognizes this computer". A supervisor cannot fix that by restarting — only an
+ * operator re-enrolling can — so it needs to distinguish that from a crash, and an
+ * exit code is a far sturdier channel for that than matching a log line.
+ */
+export function watchPrimaryHubExitCode(
+  primary: HubDialer,
+  setExitCode: (code: number) => void
+): void {
+  primary.events.on('error', ({ fatal, reason }) => {
+    if (reason === 'needs-re-enrollment') {
+      setExitCode(COMPUTER_EXIT_NEEDS_RE_ENROLLMENT)
+      return
+    }
+    if (fatal) setExitCode(1)
+  })
 }
 
 export interface HubRequestHandlerDeps {
@@ -121,6 +199,12 @@ export interface HubRequestHandlerDeps {
   /** The authority this hub connection dials — overlaid as `SLAYZONE_HUB_ADDRESS`
    *  into everything spawned for it (see HandlerContext.hubAddress). */
   hubAddress?: string
+  /**
+   * May this hub edit `allowedRoots`? See HandlerContext.hubMayEditRoots. Absent:
+   * the process-wide `config.hubMayEditRoots` — right for a dispatch serving the
+   * computer's only (or primary) hub; `startComputer` always passes it explicitly.
+   */
+  hubMayEditRoots?: boolean
   /**
    * Where this computer keeps each project on disk. Read lazily: the map comes
    * from a file and the dispatch table is built synchronously, so the handlers
@@ -180,6 +264,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     hookDirectory: deps.hookDirectory,
     config: deps.config,
     log,
+    hubMayEditRoots: deps.hubMayEditRoots ?? deps.config.hubMayEditRoots === true,
     ...(deps.agentHookUrl ? { agentHookUrl: deps.agentHookUrl } : {}),
     ...(deps.hubAddress ? { hubAddress: deps.hubAddress } : {})
   }
@@ -363,10 +448,15 @@ export function startComputer(
     version: COMPUTER_VERSION,
     capabilities: config.capabilities
   } as ComputerIdentity
+  // A secondary hub enrolls this computer under its OWN name, so it gets its own
+  // identity object — the same machine otherwise, host id included. One made before
+  // the id resolves is filled in with the primary's; one made after copies it.
+  const secondaryIdentities = new Set<ComputerIdentity>()
   let hostIdStop: (() => void) | undefined
   const hostIdReady = startHostIdReconciler({ log })
     .then((r) => {
       identity.hostId = r.hostId
+      for (const secondary of secondaryIdentities) secondary.hostId = r.hostId
       hostIdStop = r.stop
     })
     .catch((err: unknown) => {
@@ -446,8 +536,16 @@ export function startComputer(
    * shared relay would forward another hub's agent lifecycle to the wrong place.
    * The two persistence layers were already keyed by hub host, so nothing new is
    * stored — this is the runtime catching up with a shape the files always had.
+   *
+   * `secondary` marks a hub added at runtime by `setSecondaryHubs`: it enrolls under
+   * its own name, recovers a spent join token through `refreshJoinTokenFor`, may not
+   * edit allowedRoots, and a `computer.shutdown` from it ends only its connection.
    */
-  const connectHub = (hubUrl: string, isPrimary: boolean): HubConnection => {
+  const connectHub = (
+    hubUrl: string,
+    isPrimary: boolean,
+    secondary?: Omit<SecondaryHubSpec, 'url'>
+  ): HubConnection => {
     // Creds always derive from the ROOT anchor, keyed by hub host. The injected
     // store (tests) applies to the PRIMARY hub only — one store cannot stand in
     // for several hubs' credentials without silently sharing one entry.
@@ -455,14 +553,32 @@ export function startComputer(
       (isPrimary ? deps.credentialStore : undefined) ??
       createFileCredentialStore(hubHostFromUrl(hubUrl))
 
+    let hubIdentity = identity
+    if (secondary) {
+      // Marked as a desktop's own computer joined to a hub besides its own: that hub
+      // then never prefers it over a computer its user already had there.
+      hubIdentity = {
+        ...identity,
+        name: secondary.name,
+        capabilities: [...identity.capabilities, DESKTOP_COMPUTER_CAPABILITY]
+      }
+      secondaryIdentities.add(hubIdentity)
+    }
+    const joinToken = secondary ? secondary.joinToken : isPrimary ? config.joinToken : undefined
+    const refreshJoinTokenFor = deps.refreshJoinTokenFor
+
     // How this box reaches the hub — what `slay` in its terminals must dial too.
     const hubAddress = hubAddrFromUrl(hubUrl)
     let dispatch: HubRequestDispatch
+    let connection: HubConnection
     const dialer = (deps.createDialer ?? ((options) => new HubDialer(options)))({
       url: hubUrl,
-      identity,
+      identity: hubIdentity,
       credentialStore,
-      ...(config.joinToken && isPrimary ? { joinToken: config.joinToken } : {}),
+      ...(joinToken ? { joinToken } : {}),
+      ...(secondary && refreshJoinTokenFor
+        ? { refreshJoinToken: () => refreshJoinTokenFor(hubUrl) }
+        : {}),
       onHubRequest: async (method, params, actor) => {
         if (activation) await activation
         if (draining)
@@ -496,6 +612,14 @@ export function startComputer(
       cliRelayReady,
       hookDirectory: deps.hookDirectory?.(hubUrl),
       shutdown: (reason) => {
+        if (secondary) {
+          // This process belongs to whoever started it with its primary hub (the
+          // desktop app); a hub it merely joined must not end it — that would kill
+          // every other hub's agents. It can stop being served, though.
+          log('hub asked to stop serving it — disconnecting that hub only', { hubUrl, reason })
+          void removeConnection(hubUrl, connection)
+          return
+        }
         log('computer shutdown requested by hub', { hubUrl, reason })
         void handle.stop().then(() => deps.onShutdown?.(reason))
       },
@@ -506,6 +630,9 @@ export function startComputer(
       admission,
       requestLog,
       hubHost: hubHostFromUrl(hubUrl),
+      // Per connection: the process-wide grant is for the primary (loopback) hub of
+      // the desktop's own computer. A hub joined at runtime never edits the jail.
+      hubMayEditRoots: !secondary && config.hubMayEditRoots === true,
       // Per hub, like the hook relay: a pty THIS hub asked for belongs to it.
       ...(hubAddress ? { hubAddress } : {}),
       ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
@@ -529,7 +656,11 @@ export function startComputer(
     dialer.events.on('reconnect-scheduled', ({ attempt, delayMs }) =>
       log('reconnect scheduled', { hubUrl, attempt, delayMs })
     )
+    // A fatal error is final for THIS dialer (it never reconnects on its own), which
+    // is what lets `setSecondaryHubs` replace it when handed a fresh token.
+    let fatallyStopped = false
     dialer.events.on('error', ({ error, fatal, reason }) => {
+      if (fatal) fatallyStopped = true
       // `needs-re-enrollment` is the one failure an operator can act on: that hub no
       // longer recognizes this computer (its storage was deleted, one of its two DBs
       // was restored without the other, or the computer was revoked). Log it as its
@@ -561,10 +692,10 @@ export function startComputer(
         return null
       })
 
-    dialer.start()
-
-    return {
+    connection = {
       dialer,
+      secondary: secondary !== undefined,
+      isFatallyStopped: () => fatallyStopped,
       isIdle: () => dispatch.isIdle(),
       setHookDirectory: (directory) => dispatch.setHookDirectory(directory),
       dispose: async () => {
@@ -580,38 +711,144 @@ export function startComputer(
         const agentHookServer = await agentHookReady
         if (agentHookServer) await agentHookServer.close()
         await dialer.stop()
+        secondaryIdentities.delete(hubIdentity)
+      }
+    }
+    // Before start: a listener attached here cannot miss the first event.
+    deps.onConnection?.({ hubUrl, primary: isPrimary, dialer })
+    dialer.start()
+    return connection
+  }
+
+  /**
+   * Every hub served right now, keyed by url, in connect order — the primary first,
+   * and it is never removed (so `handle.dialer` stays `dialers[0]`).
+   */
+  const connections = new Map<string, HubConnection>()
+  const hubUrls = effectiveHubUrls(config)
+  const primaryUrl = hubUrls[0]
+  for (const [i, url] of hubUrls.entries()) connections.set(url, connectHub(url, i === 0))
+  const primaryDialer = connections.get(primaryUrl)!.dialer
+
+  // Hub-set changes run one at a time, each after the previous has fully applied:
+  // a hub removed and re-added must not have its old connection (same credential
+  // entry, same project map) still tearing down while the new one enrolls.
+  let stopped = false
+  let hubChanges: Promise<void> = Promise.resolve()
+  const enqueueHubChange = (change: () => Promise<void>): Promise<void> => {
+    const run = hubChanges.then(change)
+    hubChanges = run.catch((err: unknown) =>
+      log('changing the served hubs failed', { error: String(err) })
+    )
+    return hubChanges
+  }
+
+  /** Drop one secondary connection, if it is still the one in the set. */
+  function removeConnection(hubUrl: string, which: HubConnection): Promise<void> {
+    return enqueueHubChange(async () => {
+      // After stop began, stop disposes every connection itself.
+      if (stopped || connections.get(hubUrl) !== which) return
+      connections.delete(hubUrl)
+      await which.dispose()
+    })
+  }
+
+  const applySecondaryHubs = async (hubs: ReadonlyArray<SecondaryHubSpec>): Promise<void> => {
+    if (stopped) return
+    // Credential entries (and project maps) are keyed by hub HOST, not url: two urls
+    // for one host:port would race over one entry. So a hub is identified by its
+    // host key here — and the configured hubs' keys are never available to a
+    // secondary, whatever url names them.
+    const configuredKeys = new Set(
+      [...connections.entries()].filter(([, c]) => !c.secondary).map(([url]) => hubHostFromUrl(url))
+    )
+    const wanted = new Map<string, SecondaryHubSpec>()
+    const wantedKeys = new Set<string>()
+    for (const hub of hubs) {
+      let key: string
+      try {
+        key = hubHostFromUrl(hub.url)
+      } catch {
+        log('ignoring an additional hub with an invalid url', { hubUrl: hub.url })
+        continue
+      }
+      if (configuredKeys.has(key)) {
+        log('ignoring an additional hub that is a hub this computer was started for', {
+          hubUrl: hub.url
+        })
+        continue
+      }
+      if (wantedKeys.has(key)) {
+        log('ignoring a duplicate additional hub (same host as another)', { hubUrl: hub.url })
+        continue
+      }
+      wantedKeys.add(key)
+      wanted.set(hub.url, hub)
+    }
+
+    const drop: [string, HubConnection][] = []
+    for (const [url, connection] of connections) {
+      if (!connection.secondary) continue
+      const spec = wanted.get(url)
+      if (!spec) drop.push([url, connection])
+      else if (connection.isFatallyStopped() && spec.joinToken) {
+        log('reconnecting a stopped hub with a fresh join token', { hubUrl: url })
+        drop.push([url, connection])
+      }
+    }
+    for (const [url] of drop) connections.delete(url)
+    await Promise.all(drop.map(([, connection]) => connection.dispose()))
+    if (stopped) return
+
+    // No host-key conflict is left here: a secondary served under another url of a
+    // wanted host is not itself wanted (keys are unique above), so it was dropped.
+    for (const [url, spec] of wanted) {
+      if (connections.has(url)) continue
+      try {
+        connections.set(url, connectHub(url, false, { name: spec.name, joinToken: spec.joinToken }))
+        log('serving an additional hub', { hubUrl: url, name: spec.name })
+      } catch (err) {
+        // A url the dialer refuses (not ws/wss) fails here, before any I/O.
+        log('could not connect an additional hub', { hubUrl: url, error: String(err) })
       }
     }
   }
-
-  const hubUrls = effectiveHubUrls(config)
-  const connections = hubUrls.map((url, i) => connectHub(url, i === 0))
 
   handle = {
     // The primary hub's dialer. Kept as a named field because a computer serving
     // exactly one hub is the overwhelming case and every existing caller reads it;
     // `dialers` is what multi-hub callers iterate.
-    dialer: connections[0].dialer,
-    dialers: connections.map((c) => c.dialer),
+    dialer: primaryDialer,
+    get dialers() {
+      return [...connections.values()].map((c) => c.dialer)
+    },
+    setSecondaryHubs: (hubs) => {
+      // Snapshot now: the caller may reuse its array before the change applies.
+      const desired = hubs.map((hub) => ({ ...hub }))
+      return enqueueHubChange(() => applySecondaryHubs(desired))
+    },
     activate: () => {
       activate()
       draining = false
     },
     setHookDirectory: (hub, directory) => {
-      const i = hubUrls.indexOf(hub)
-      if (i >= 0) connections[i].setHookDirectory(directory)
+      connections.get(hub)?.setHookDirectory(directory)
     },
-    isIdle: () => connections.every((c) => c.isIdle()),
+    isIdle: () => [...connections.values()].every((c) => c.isIdle()),
     drainForUpgrade: () => {
-      if (!connections.every((c) => c.isIdle())) return false
+      if (![...connections.values()].every((c) => c.isIdle())) return false
       draining = true
       return true
     },
     stop: async () => {
+      // No hub change may start after this, and one in flight finishes first, so
+      // no connection is created behind stop's back or left half torn down.
+      stopped = true
+      await hubChanges
       await hostIdReady
       hostIdStop?.()
       if (watchLocalRoots) unwatchFile(configFile)
-      await Promise.all(connections.map((c) => c.dispose()))
+      await Promise.all([...connections.values()].map((c) => c.dispose()))
     }
   }
   return handle

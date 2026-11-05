@@ -25,7 +25,7 @@ import {
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { pathToFileURL } from 'url'
-import { homedir } from 'os'
+import { homedir, hostname } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync, writeFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
@@ -770,6 +770,13 @@ let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHand
 // in remote mode (no local hub to dial) or before the async spawn runs. Cycled by
 // `app:restart-local-computer`; reaped by the quit (see reapSupervisedChildrenForQuit).
 let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
+/** The local computer on every remote hub the client lists (`local-computer-hubs.ts`);
+ *  null until the local computer is started. */
+let localComputerHubs: import('./local-computer-hubs').LocalComputerHubs | null = null
+/** Re-check which remote hubs the local computer serves (hub list or a sign-in changed). */
+function syncLocalComputerHubs(): void {
+  void localComputerHubs?.sync()
+}
 // Why the local computer was never spawned (join-token mint failed). Shown in
 // Settings → Computers next to "Not running"; cleared once a supervisor exists.
 let localComputerUnspawnedReason: string | null = null
@@ -1024,6 +1031,10 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
       const fresh = await mintLocalComputerJoinToken(port)
       return fresh?.token ?? null
     },
+    // Its OTHER hubs — every remote hub the client lists (`local-computer-hubs.ts`).
+    // Late-bound: the manager is created right after this handle, which it drives.
+    onSecondaryHubEvent: (event) => localComputerHubs?.onEvent(event),
+    mintSecondaryJoinToken: async (hubUrl) => (await localComputerHubs?.mintFor(hubUrl)) ?? null,
     onNeedsReEnrollment: () => {
       // The hub no longer recognizes this computer, so restarting cannot help. Say so
       // where the user will see it: nothing can execute until it is enrolled again.
@@ -1067,6 +1078,32 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
   localComputerHandle = handleComputer
   localComputerUnspawnedReason = null
   logBoot('local-computer supervisor started (auto-enrolled)')
+
+  // The same computer on every REMOTE hub the client lists: joined at runtime, with
+  // a join token minted there under the user's session, never by restarting it.
+  const { createLocalComputerHubs } = await import('./local-computer-hubs')
+  const { mintRemoteJoinToken } = await import('./remote-join-token')
+  localComputerHubs = createLocalComputerHubs({
+    stateFile: join(getSupervisedRoot('computer'), 'hub-memberships.json'),
+    listRemoteHubs: () =>
+      resolveHubRegistry(readBootConfig(getClientStateRoot(), getLegacyClientStateRoot()))
+        .filter((h) => h.kind === 'remote' && typeof h.url === 'string')
+        .map((h) => ({ id: h.id, label: h.label, url: h.url as string })),
+    mint: async (hub, label) =>
+      mintRemoteJoinToken(
+        hub.url,
+        (await createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot()).get(hub.id)) ??
+          null,
+        label
+      ),
+    // Named after the machine: on a shared hub "local-computer" says nothing, and
+    // the hub would take that name for its OWN co-spawned computer.
+    computerName: () => hostname().replace(/\.local$/i, '') || 'computer',
+    primaryHubUrl: () => minted.hubUrl,
+    apply: (hubs) => handleComputer.setSecondaryHubs(hubs),
+    log: (line) => logBoot(line)
+  })
+  syncLocalComputerHubs()
 }
 
 /**
@@ -3648,6 +3685,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // is injected here from the live sidecar handle (the config can't know the
     // sticky port). With multi_hub off this returns exactly today's single
     // effective hub, so the renderer's HubScope('local') stays byte-identical.
+    // Where the local computer stands on each remote hub (joined, failed and why, its
+    // computer id there) — Settings marks that row as this machine's own.
+    ipcMain.handle('app:get-local-computer-hubs', () => localComputerHubs?.status() ?? {})
     ipcMain.handle('app:get-hub-registry', async () => {
       const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
       const hubs = resolveHubRegistry(cfg)
@@ -3679,6 +3719,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       async (_event, payload: { hubId: string; token: string }) => {
         // An empty token clears the hub's entry (`createHubTokenStore`).
         await hubTokens().set(payload.hubId, payload.token)
+        // A new sign-in may be what lets the local computer join that hub.
+        syncLocalComputerHubs()
         return { ok: true as const }
       }
     )
@@ -3694,6 +3736,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           } catch (err) {
             return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
           }
+          syncLocalComputerHubs()
           return { ok: true as const }
         }
         return { ok: false as const, error: result.error }
@@ -3745,6 +3788,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         })
         if (!result.ok) return result
         await hubTokens().set(flow.hubId, result.token)
+        syncLocalComputerHubs()
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -3782,6 +3826,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           },
           getLegacyClientStateRoot()
         )
+        // A hub added or removed: the local computer joins or leaves it.
+        syncLocalComputerHubs()
         return { ok: true as const }
       }
     )

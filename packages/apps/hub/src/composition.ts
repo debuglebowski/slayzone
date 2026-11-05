@@ -232,7 +232,9 @@ import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
+import { countRunningWork, startsNewWork } from './computer-new-work.js'
 import {
+  computerDisabledError,
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
@@ -1635,6 +1637,14 @@ export function composeServer(opts: {
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
     // only on a hub with login. The REST twin reads the same function.
     findAccount: joinTokenAccounts,
+    // The desktop app's own co-spawned computer (its enroll name always maps to this
+    // id, see the local-computer dedup below) is never disabled or deleted on its own
+    // hub. A standalone hub spawns no computer of its own, so it protects none.
+    localComputerId: supervised ? deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME) : null,
+    // What blocks disabling a computer: its terminals and agents, asked of the
+    // computer itself. Not connected yet (gateway still starting) = nothing runs.
+    runningWorkOn: async (computerId) =>
+      computerGatewayRef ? countRunningWork(computerGatewayRef, computerId) : 0,
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -1715,11 +1725,27 @@ export function composeServer(opts: {
       lifecycle: computerChat.lifecycle.syncNative
     })
     const computerGateway = createHubComputerGateway({
-      beforeRequest: async (computerId, method) => {
+      beforeRequest: async (computerId, method, params) => {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
+        // A disabled computer takes no new work (`computers.setDisabled`). Every
+        // request passes here, so a binding, a resumed conversation's owner or a spec
+        // that named the computer directly is refused alike; reads, kills and
+        // maintenance are not new work and pass. One row read, spawns only.
+        if (startsNewWork(method, params)) {
+          const row = await getComputer(db, computerId)
+          if (row?.disabled_at != null) throw computerDisabledError(row.name)
+        }
       },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
-      ...createComputerAuthAdapters({ db, auth: hubAuth, localComputerName }),
+      // The dedup is the DESKTOP hub's alone: only there is a computer of that name its
+      // own co-spawned child. A standalone hub is shared by many machines, so a
+      // computer enrolling under the name there is just a computer — giving every one
+      // the same deterministic id would collapse different machines onto one row.
+      ...createComputerAuthAdapters({
+        db,
+        auth: hubAuth,
+        ...(supervised ? { localComputerName } : {})
+      }),
       // Off: no caps on unauthenticated sockets (a hub nobody else can reach).
       ...(opts.floodLimits ? {} : { floodLimits: false as const })
     })

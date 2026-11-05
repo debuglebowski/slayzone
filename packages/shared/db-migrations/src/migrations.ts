@@ -4699,6 +4699,16 @@ export const migrations: Migration[] = [
       )
         db.exec('CREATE INDEX agent_sessions_conversation ON agent_sessions(conversation_id)')
     }
+  },
+  {
+    version: 194,
+    // Disabling a computer (`computers.setDisabled`): it stays enrolled and connected,
+    // and gets no new work. Distinct from `revoked_at`, which ends its credential.
+    // NULL = enabled. Kept across re-enrollment: a computer an operator turned off
+    // stays off until they turn it on.
+    up: (db) => {
+      db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
+    }
   }
 ]
 

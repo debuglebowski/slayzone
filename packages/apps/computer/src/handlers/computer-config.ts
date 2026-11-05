@@ -2,9 +2,11 @@
  * Computer self-configuration handlers — currently just the path-jail.
  *
  * T-27: FOLDER LIMITS STAY LOCAL. `computer.setAllowedRoots` is refused
- * (`refusedByComputer`) unless `config.hubMayEditRoots` — true only for the
- * desktop app's own supervised computer dialing its loopback hub, where the hub
- * is the local app. Everywhere else the device's user sets the roots on the
+ * (`refusedByComputer`) unless the requesting connection's `ctx.hubMayEditRoots` —
+ * true only on the desktop app's own supervised computer, for its PRIMARY
+ * connection to its loopback hub, where the hub is the local app. A hub that
+ * computer joins at runtime never gets it, and neither does any other computer's
+ * hub. Everywhere else the device's user sets the roots on the
  * device: `slay computer roots <name> --add <dir>` (or `computer.config.json`),
  * which a running computer picks up live via {@link reloadLocalRootsFromFile}.
  *
@@ -148,7 +150,9 @@ export function createComputerConfigHandlers(ctx: HandlerContext): HubMethodTabl
    */
   function setAllowedRoots(rawParams: unknown): ComputerSetAllowedRootsResult {
     const { roots } = computerSetAllowedRootsParamsSchema.parse(rawParams)
-    if (!ctx.config.hubMayEditRoots) {
+    // The connection's grant, never `ctx.config.hubMayEditRoots`: that one is
+    // process-wide, and a secondary hub sharing this process must not inherit it.
+    if (ctx.hubMayEditRoots !== true) {
       throw new RpcError(
         ComputerTransportErrorCodes.refusedByComputer,
         `this computer's folder limits are set on the computer itself, not by a hub — ` +

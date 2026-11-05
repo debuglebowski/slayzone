@@ -37,6 +37,9 @@ export type ComputerGateway = {
     connectedAt: number
     lastSeenAt: number
   }>
+  /** Drop a computer's connection now (false when it is not connected): a deleted or
+   *  revoked computer would otherwise keep its open socket until it next dialed. */
+  disconnect?: (computerId: string, reason: string) => boolean
 }
 
 export type ComputersDeps = {
@@ -61,6 +64,18 @@ export type ComputersDeps = {
    * with login, where a mint without it fails rather than guessing an owner.
    */
   findAccount?: FindJoinTokenAccount
+  /**
+   * The desktop app's own co-spawned computer on its own hub — never disabled, never
+   * deleted (nothing on the machine could run without it). Null/absent on a hub that
+   * spawns no computer of its own (standalone).
+   */
+  localComputerId?: string | null
+  /**
+   * How many terminals and agents run on a computer right now (0 when it is not
+   * connected: nothing can run there). Disabling waits for 0. Absent = unknown, which
+   * refuses to disable rather than guess.
+   */
+  runningWorkOn?: (computerId: string) => Promise<number>
 }
 
 let computersDeps: ComputersDeps | null = null

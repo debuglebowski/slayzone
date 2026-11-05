@@ -1939,7 +1939,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(remoteGroup).toBeVisible({ timeout: 10_000 })
       await remoteGroup.locator('[data-testid="computer-add-open"]').click()
       await expect(page.locator('[data-testid="computer-add-hub"]')).toHaveCount(0)
-      // Hub B requires sign-in, so it mints only for a named user (T-20).
+      // Hub B requires sign-in: a named user owns the computer (blank = the signed-in
+      // caller; naming someone else is an admin's, T-20).
       await remoteGroup.locator('[data-testid="computer-enroll-for"]').fill(hub.email)
       await remoteGroup.locator('[data-testid="computer-add"]').click()
 

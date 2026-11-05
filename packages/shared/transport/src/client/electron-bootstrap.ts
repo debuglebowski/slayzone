@@ -1,6 +1,9 @@
 import type { ElectronBootstrapAPI } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
+import type {
+  LocalComputerHubs,
+  LocalComputerStatus
+} from '@slayzone/platform/local-computer-status'
 
 // The app-wide `ElectronAPI` type extends `ElectronBootstrapAPI` with no
 // members of its own, so this and its own `Window.api` declaration are the
@@ -83,6 +86,8 @@ export const electronBootstrap = {
   // No supervised computer outside Electron — nothing to report.
   getLocalComputerStatus: () =>
     api().app.getLocalComputerStatus?.() ?? Promise.resolve<LocalComputerStatus | null>(null),
+  getLocalComputerHubs: () =>
+    api().app.getLocalComputerHubs?.() ?? Promise.resolve<LocalComputerHubs>({}),
   // Boot instrumentation is pure timing telemetry — optional outside Electron
   // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
   // chain so a missing host method is a no-op, not a TypeError that aborts the

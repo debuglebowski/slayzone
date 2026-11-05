@@ -14,7 +14,9 @@ import {
   setTaskComputer,
   touchComputerLastSeen,
   unrevokeComputer,
-  deleteComputer
+  deleteComputer,
+  setComputerDisabled,
+  listDisabledComputerIds
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { listPlacements, setPlacement } from './project-paths'
@@ -480,5 +482,40 @@ describe('unrevokeComputer', () => {
     expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(false)
     await unrevokeComputer(t.db, c.id)
     expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(true)
+  })
+})
+
+describe('setComputerDisabled', () => {
+  it('sets and clears disabled_at; a disabled computer stays listed', async () => {
+    const c = await mkComputer()
+    expect((await getComputer(t.db, c.id))?.disabled_at ?? null).toBeNull()
+    await setComputerDisabled(t.db, c.id, true, 5000)
+    expect((await getComputer(t.db, c.id))?.disabled_at).toBe(5000)
+    expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(true)
+    expect([...(await listDisabledComputerIds(t.db))]).toEqual([c.id])
+    await setComputerDisabled(t.db, c.id, false)
+    expect((await getComputer(t.db, c.id))?.disabled_at ?? null).toBeNull()
+    expect((await listDisabledComputerIds(t.db)).size).toBe(0)
+  })
+
+  it('keeps the first disable time when disabled again', async () => {
+    const c = await mkComputer()
+    await setComputerDisabled(t.db, c.id, true, 5000)
+    await setComputerDisabled(t.db, c.id, true, 9000)
+    expect((await getComputer(t.db, c.id))?.disabled_at).toBe(5000)
+  })
+
+  it('survives a re-enroll of the local computer (only revoked_at is cleared)', async () => {
+    const id = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+    const input = {
+      id,
+      name: DEFAULT_LOCAL_COMPUTER_NAME,
+      platform: 'darwin-arm64',
+      version: '0.37.0'
+    }
+    await registerOrReplaceComputer(t.db, input)
+    await setComputerDisabled(t.db, id, true, 5000)
+    await registerOrReplaceComputer(t.db, { ...input, version: '0.38.0' })
+    expect((await getComputer(t.db, id))?.disabled_at).toBe(5000)
   })
 })

@@ -21,6 +21,18 @@ describe('computerStatus', () => {
     })
   })
 
+  it('reports a disabled computer as disabled, connected or not', () => {
+    for (const connected of [true, false]) {
+      expect(
+        computerStatus({ connected, usable: connected, lastSeenAt: 1, disabledAt: 2 })
+      ).toEqual({ label: 'Disabled', tone: 'idle' })
+    }
+    // Revoked still outranks it: the credential is gone.
+    expect(
+      computerStatus({ connected: false, lastSeenAt: 1, disabledAt: 2, revokedAt: 3 }).label
+    ).toBe('Revoked')
+  })
+
   it('is Connected only while the computer can take work', () => {
     expect(computerStatus({ connected: true, usable: true, lastSeenAt: 1 })).toEqual({
       label: 'Connected',
@@ -187,6 +199,10 @@ describe('capabilityNote', () => {
   it('says nothing for the standard set, in any order', () => {
     expect(capabilityNote([...STANDARD_COMPUTER_CAPABILITIES])).toBeNull()
     expect(capabilityNote(['proc', 'fs', 'git', 'pty'])).toBeNull()
+  })
+
+  it("does not call a desktop's joined computer different", () => {
+    expect(capabilityNote([...STANDARD_COMPUTER_CAPABILITIES, 'desktop'])).toBeNull()
   })
 
   it('names what is missing and what is extra', () => {

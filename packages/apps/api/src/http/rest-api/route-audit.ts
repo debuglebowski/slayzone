@@ -8,8 +8,7 @@ import { ADMIN_ONLY } from '../../admin-policy'
  * gate exempts `/api/hub/users` and `/api/computers/join-token` and lets them decide
  * (see `apps/hub/src/rest-auth.ts`), so their 403/401 is the gate's denial and is
  * written the same way: `authz.denied`, never the presented credential.
- * `not-admin`: a valid session whose account is not admin (`/api/hub/users`,
- * `/api/computers/join-token`).
+ * `not-admin`: a valid session whose account is not admin (`/api/hub/users`).
  */
 export function auditRouteRefusal(
   req: {

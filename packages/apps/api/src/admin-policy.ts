@@ -61,8 +61,13 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
   // admin's (`computer-access.ts` mayManageComputer, T-19).
   'computers.delete': 'the caller does not own the computer',
   'computers.revokeComputer': 'the caller does not own the computer',
+  'computers.setDisabled': 'the caller does not own the computer',
+  'computers.rename': 'the caller does not own the computer',
   'computers.setVisibility': 'the caller does not own the computer',
   'computers.renameMachine': 'the caller does not own every computer on that machine',
+  // A computer is personal: every user enrolls their own; naming someone else is the
+  // admin's (`join-token-policy.ts`).
+  'computers.mintJoinToken': 'the token names a user other than the caller',
   // Per-user keys (view state, layout) stay writable by everyone; hub-wide ones do not.
   'settings.set': 'the key is hub-wide or server-internal (`hub-setting-keys.ts`)'
 }
@@ -72,8 +77,6 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
  *
  * ── admin ───────────────────────────────────────────────────────────────────
  * `hub.setLabel`                  the hub's name, shown to every user.
- * `computers.mintJoinToken`       enrollment secrets: only an admin mints (O-5), for a
- *                                 named user, at most 1 hour (`join-token-policy.ts`, T-20).
  * `computers.claim`               assigning an unowned computer an owner (and refused
  *                                 outright on a hub with login, T-19).
  * `computers.unrevoke`            re-trusting a revoked computer's credential: the
@@ -469,11 +472,13 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'computers.claim': 'admin',
   'computers.delete': 'user',
   'computers.list': 'user',
-  'computers.mintJoinToken': 'admin',
+  'computers.mintJoinToken': 'user',
   'computers.onStatusChange': 'user',
+  'computers.rename': 'user',
   'computers.renameMachine': 'user',
   'computers.resolveTaskComputer': 'user',
   'computers.revokeComputer': 'user',
+  'computers.setDisabled': 'user',
   'computers.setProjectDefaultComputer': 'user',
   'computers.setTaskComputer': 'user',
   'computers.setVisibility': 'user',
@@ -851,11 +856,14 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
  *
  * ── admin ───────────────────────────────────────────────────────────────────
  * `/api/automations*`             the REST twin of `automations.*`.
- * `/api/computers/join-token`     the REST twin of `computers.mintJoinToken`.
- * `/api/hub/users`                account management (`slay hub users`).
- * The last two are exempt from the hub's bearer gate and verify the caller
- * themselves (apps/hub `rest-auth.ts` `SELF_GUARDED`), so they also check the role
- * themselves; the shared gate never sees a principal for them.
+ * `/api/hub/users`                account management (`slay hub users`). Exempt from
+ *                                 the hub's bearer gate and verifies the caller itself
+ *                                 (apps/hub `rest-auth.ts` `SELF_GUARDED`), so it also
+ *                                 checks the role itself; the shared gate never sees a
+ *                                 principal for it. `/api/computers/join-token` is
+ *                                 self-guarded the same way, and `user` like its tRPC
+ *                                 twin: everyone enrolls their own computer; naming
+ *                                 someone else is the admin's (`join-token-policy.ts`).
  * `PATCH /api/hub/computers`      revoke / unrevoke any computer (`slay hub computers`).
  *
  * ── open ────────────────────────────────────────────────────────────────────
@@ -907,7 +915,7 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'GET /api/browser/url': 'user',
   'POST /api/close-task/:id': 'user',
   'GET /api/computers': 'user',
-  'POST /api/computers/join-token': 'admin',
+  'POST /api/computers/join-token': 'user',
   'DELETE /api/hub/users': 'admin',
   'GET /api/hub/users': 'admin',
   'PATCH /api/hub/users': 'admin',

@@ -11,7 +11,7 @@
 // the existing `__testEmit(channel, data)` hook (dispatches a CustomEvent).
 // Production menu accelerator dispatch is unchanged (still deferred).
 
-import type { LocalComputerStatus } from '@slayzone/types'
+import type { LocalComputerHubs, LocalComputerStatus } from '@slayzone/types'
 import { resolveServerUrl, CHROMIUM_WINDOW_ID } from '../server-url'
 
 const noopUnsub = (): void => undefined
@@ -107,6 +107,7 @@ export const appShim = {
     error: 'Not supported in the Chromium shell'
   }),
   getLocalComputerStatus: async (): Promise<LocalComputerStatus | null> => null,
+  getLocalComputerHubs: async (): Promise<LocalComputerHubs> => ({}),
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
   // No app icon of its own in the Chromium shell.
   setAppBadge: async (): Promise<void> => undefined,

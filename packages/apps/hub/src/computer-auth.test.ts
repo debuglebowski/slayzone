@@ -25,6 +25,7 @@ import {
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { runWithSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
 import {
+  deleteComputer,
   deterministicLocalComputerId,
   getComputer,
   listComputers,
@@ -160,6 +161,22 @@ test('re-enroll after socket drop returns the SAME computerId + apiKey', async (
   const descriptor = await adapters.verifyApiKey(second.apiKey)
   expect(descriptor, 're-enroll key verifies').not.toBeNull()
   expect(descriptor!.computerId, 're-enroll key maps to same computer').toBe(first.computerId)
+})
+
+test('the grace re-issue never resurrects a computer deleted or revoked since', async () => {
+  // Deleted (or revoked) right after enrolling — then the same machine re-dials with
+  // the same (joinToken, name). Handing back the cached pair would give it a
+  // credential for a computer that no longer exists: connected, but on no list and
+  // with no way back. It must instead be told the token is spent, so it fetches a
+  // fresh one and enrolls as a new computer.
+  for (const remove of ['delete', 'revoke'] as const) {
+    const token = await mintToken(db, `grace-${remove}`)
+    const params = { ...ENROLL_BASE, name: `gone-${remove}`, joinToken: token }
+    const first = await adapters.verifyEnrollment(params)
+    if (remove === 'delete') await deleteComputer(db, first.computerId)
+    else await revokeComputer(db, first.computerId)
+    await expect(adapters.verifyEnrollment(params), remove).rejects.toThrow(/join token rejected/)
+  }
 })
 
 test('a raw re-verify of a used token (miss ⇒ used) is rejected', async () => {
