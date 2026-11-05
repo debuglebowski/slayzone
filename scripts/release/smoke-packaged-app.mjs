@@ -123,6 +123,15 @@ if (have('computer/bin.cjs')) {
   r.status === 0 && r.out.includes('loaded')
     ? pass('computer: node-pty loads')
     : fail(`computer: node-pty cannot load — ${r.out.split('\n')[0]}`)
+  // The WebRTC direct link (docs/direct-link.md): node-datachannel's per-platform
+  // binary must be unpacked next to it, or the computer silently offers no WebRTC.
+  const rtc = run(
+    `const R=require('module').createRequire(${JSON.stringify(computer)})('node-datachannel');` +
+      `const p=new R.PeerConnection('smoke',{iceServers:[]});p.close();R.cleanup();console.log('rtc')`
+  )
+  rtc.status === 0 && rtc.out.includes('rtc')
+    ? pass('computer: node-datachannel loads (WebRTC direct link)')
+    : fail(`computer: node-datachannel cannot load — ${rtc.out.split('\n')[0]}`)
   // Loading is not spawning: on posix node-pty execs a separate `spawn-helper` binary
   // whose path it derives itself (rewriting `app.asar` → `app.asar.unpacked`), and a
   // wrong or non-executable helper fails only at `spawn` ("posix_spawnp failed.") —

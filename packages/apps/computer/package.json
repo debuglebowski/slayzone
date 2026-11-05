@@ -26,31 +26,29 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",
-    "@slayzone/computer-transport": "workspace:*",
     "@slayzone/processes": "workspace:*",
-    "node-pty": "^1.1.0",
-    "zod": "^4.3.5",
-    "@slayzone/ai-config": "workspace:*",
-    "@slayzone/computer-runtime": "workspace:*",
-    "@slayzone/chat-runtime": "workspace:*",
     "@slayzone/terminal": "workspace:*",
-    "@slayzone/worktrees": "workspace:*",
-    "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/test-panel": "workspace:*",
-    "better-sqlite3": "^13.0.3",
     "@slayzone/transport": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "@trpc/server": "^11.19.0",
-    "ws": "^8.22.0"
+    "better-sqlite3": "^13.0.3",
+    "node-datachannel": "^0.33.4",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.0",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
-    "@types/node": "^24.19.2",
-    "esbuild": "^0.28.2",
-    "vitest": "^5.0.5",
+    "@slayzone/trpc-server": "workspace:*",
     "@trpc/client": "^11.19.0",
+    "@types/node": "^24.19.2",
     "@types/ws": "^8.5.13",
-    "@slayzone/trpc-server": "workspace:*"
+    "esbuild": "^0.28.2",
+    "vitest": "^5.0.5"
   }
 }
