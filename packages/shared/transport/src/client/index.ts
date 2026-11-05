@@ -41,7 +41,8 @@ export {
   type DirectLease,
   type DirectLeaseLostReason,
   type DirectLinkManager,
-  type DirectLinkManagerOptions
+  type DirectLinkManagerOptions,
+  type DirectRtcPeerFactory
 } from './direct-link'
 export {
   keepDirectLease,
