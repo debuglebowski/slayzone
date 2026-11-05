@@ -142,8 +142,9 @@ export function gitWatchComputerGone(computerId: string): void {
   }
 }
 
+/** Without trailing separators (`/`, or `\` on a Windows computer's path). */
 function trimSlashes(p: string): string {
-  return p.length > 1 ? p.replace(/\/+$/, '') : p
+  return p.length > 1 ? p.replace(/[\\/]+$/, '') : p
 }
 
 /**
@@ -157,8 +158,10 @@ export async function gitTargetForPath(
   path: string
 ): Promise<WorktreesComputerTarget | null> {
   const p = trimSlashes(path)
-  // `inside(col)`: p is col, or lies under col/ (substr compare: no LIKE escaping).
-  const inside = (col: string) => `(${col} = ? OR substr(?, 1, length(${col}) + 1) = ${col} || '/')`
+  // `inside(col)`: p is col, or lies under col/ — or col\ (a Windows computer's
+  // folder): substr compare, no LIKE escaping. char(92) is the backslash.
+  const inside = (col: string) =>
+    `(${col} = ? OR substr(?, 1, length(${col}) + 1) IN (${col} || '/', ${col} || char(92)))`
   const task = await db.get<{ id: string; worktree_path: string }>(
     `SELECT id, worktree_path FROM tasks
       WHERE worktree_path IS NOT NULL AND worktree_path != '' AND ${inside('worktree_path')}

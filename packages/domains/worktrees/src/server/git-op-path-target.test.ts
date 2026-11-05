@@ -56,6 +56,17 @@ describe('gitTargetForPath', () => {
     })
   })
 
+  // A Windows computer records `C:\Users\a\proj`: inside it is `\`-separated.
+  test('a Windows folder: a path under it with `\\` separators is that computer’s', async () => {
+    h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p3', 'W', '#000')
+    place('c-b', 'p3', 'C:\\Users\\b\\proj')
+    expect(await gitTargetForPath(db, 'C:\\Users\\b\\proj\\packages\\x')).toEqual({
+      computerId: 'c-b',
+      projectId: 'p3'
+    })
+    expect(await gitTargetForPath(db, 'C:\\Users\\b\\project-two')).toBeNull()
+  })
+
   test('a prefix that is not a path boundary does not match', async () => {
     expect(await gitTargetForPath(db, '/home/a/project-two')).toBeNull()
   })
