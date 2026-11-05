@@ -265,11 +265,32 @@ export const ptyDataParamsSchema = z.object({
 })
 export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 
+/**
+ * A string a computer reports about its sessions (titles, prompt text, ids, URLs,
+ * error text, exit signals) — kept in the hub's state and DB, so bounded. Cut, not
+ * rejected: an oversized title must not drop the state signal carrying it.
+ */
+const bounded = (max: number) => z.string().transform((v) => (v.length > max ? v.slice(0, max) : v))
+const boundedNonEmpty = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .transform((v) => (v.length > max ? v.slice(0, max) : v))
+const SIGNAL_TEXT_MAX = 16 * 1024
+const SIGNAL_TITLE_MAX = 1024
+const SIGNAL_ID_MAX = 256
+const SIGNAL_URL_MAX = 2048
+const SIGNAL_URLS_MAX = 32
+const EXIT_SIGNAL_MAX = 64
+const devServerUrlsSchema = z
+  .array(boundedNonEmpty(SIGNAL_URL_MAX))
+  .transform((urls) => urls.slice(0, SIGNAL_URLS_MAX))
+
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   /**
    * A lifecycle cause the code cannot carry — today `startup-timeout`: the
    * computer killed a session that produced no output within the spawn's
@@ -349,14 +370,14 @@ export const ptyDetectionParamsSchema = z.object({
 export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
 
 const ptySignalErrorSchema = z.object({
-  code: z.string().min(1),
-  message: z.string(),
+  code: boundedNonEmpty(SIGNAL_ID_MAX),
+  message: bounded(SIGNAL_TEXT_MAX),
   recoverable: z.boolean()
 })
 
 const ptySignalPromptSchema = z.object({
   type: z.enum(['permission', 'question', 'input']),
-  text: z.string(),
+  text: bounded(SIGNAL_TEXT_MAX),
   position: z.number()
 })
 
@@ -368,10 +389,10 @@ const ptySignalPromptSchema = z.object({
  */
 export const ptyDetectedSnapshotSchema = z.object({
   activity: z.enum(['working', 'idle', 'unknown']).nullable(),
-  title: z.string().nullable(),
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
   prompt: ptySignalPromptSchema.nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable(),
   error: ptySignalErrorSchema.nullable()
 })
 export type PtyDetectedSnapshot = z.infer<typeof ptyDetectedSnapshotSchema>
@@ -402,9 +423,9 @@ export const ptySignalPayloadSchema = z.object({
   firstOutput: z.literal(true).optional(),
   suppressOutput: z.boolean(),
   prompt: ptySignalPromptSchema.nullable(),
-  title: z.string().nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable()
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable()
 })
 export type PtySignalPayload = z.infer<typeof ptySignalPayloadSchema>
 
@@ -435,7 +456,7 @@ export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   reason: z.string().min(1).optional(),
   /** The spawn attempt that exited. */
   spawnId: z.string().min(1).optional(),
