@@ -148,9 +148,11 @@ export function channelWebSocket(
       channel.onclose = () => this.finish()
       channel.onerror = () => this.emit({ type: 'error' })
       if (channel.readyState === 'open') {
-        queueMicrotask(() => {
+        // A macrotask, not a microtask: tRPC constructs the socket and attaches its
+        // listeners in separate promise steps, and a microtask would fire between them.
+        setTimeout(() => {
           if (!this.closed) this.emit({ type: 'open' })
-        })
+        }, 0)
       }
     }
 

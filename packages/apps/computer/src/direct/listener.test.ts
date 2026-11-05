@@ -9,7 +9,10 @@ import type { DirectRouter } from '@slayzone/transport/direct'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
+import { channelWebSocket } from '../../../../shared/transport/src/direct/rtc-channel'
+import { fakeChannelPair } from '../../../../shared/transport/src/direct/rtc-channel-fake'
 import { createDirectGrantStore, type DirectGrantStore } from './grants'
+import { RtcServerSocket } from './rtc-socket'
 import { advertisedDirectAddress, createDirectListener, type DirectListener } from './listener'
 
 const cleanups: Array<() => unknown> = []
@@ -572,5 +575,73 @@ describe('direct listener: chat commands', () => {
       trpc.chat.sendToolResult.mutate({ tabId: 't2', args: { toolUseId: 'u', content: 'c' } })
     ).rejects.toThrow(/no capability/)
     expect(chat.commands).toEqual([])
+  })
+})
+
+// M5: a WebRTC data channel is served exactly like a WebSocket — same capability
+// auth, grants, flood limits and per-address caps (docs/direct-link.md).
+describe('direct listener: data channels', () => {
+  function rtcClient(listener: DirectListener, token: string | null, ip = '198.51.100.7') {
+    const [mine, theirs] = fakeChannelPair()
+    const socket = new RtcServerSocket(theirs, { maxMessageChars: 1 << 20 })
+    const served = listener.serveChannel(socket, { ip })
+    mine.open()
+    theirs.open()
+    const closes: number[] = []
+    const ws = createWSClient({
+      url: 'rtc://direct',
+      WebSocket: channelWebSocket(mine, { maxMessageChars: 1 << 20 }) as never,
+      connectionParams: token === null ? null : { token },
+      retryDelayMs: () => 60_000,
+      onClose: (cause) => closes.push(cause?.code ?? 0)
+    })
+    cleanups.push(() => ws.close())
+    const trpc: TRPCClient<DirectRouter> = createTRPCClient<DirectRouter>({
+      links: [wsLink({ client: ws, transformer: wireSuperjson })]
+    })
+    return { trpc, served, socket, closes }
+  }
+
+  it('serves a channel whose first frame carries a live capability: same router, same grants', async () => {
+    const { store, listener } = await setup()
+    const { token } = grant(store, { sessionId: 's1' })
+    const { trpc, served } = rtcClient(listener, token)
+    expect(served).toBe(true)
+    expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+    await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+  })
+
+  it('closes a channel with no capability, or an unknown one', async () => {
+    const { listener } = await setup()
+    for (const token of [null, 'nope'.repeat(12)]) {
+      const { trpc, socket } = rtcClient(listener, token)
+      await expect(trpc.ping.query()).rejects.toThrow()
+      await waitFor(() => socket.readyState === 3)
+    }
+  })
+
+  it('counts channels against the per-address caps, and refuses past them', async () => {
+    const { store, listener, audit } = await setup({ socketsPerAddress: 2 })
+    const { token } = grant(store)
+    expect(rtcClient(listener, token).served).toBe(true)
+    expect(rtcClient(listener, token).served).toBe(true)
+    const third = rtcClient(listener, token)
+    expect(third.served).toBe(false)
+    expect(third.socket.readyState).toBe(3)
+    expect(audit.some((a) => a.limit === 'computer.direct.sockets_per_address')).toBe(true)
+    // Another address is not affected.
+    expect(rtcClient(listener, token, '203.0.113.5').served).toBe(true)
+  })
+
+  it('ends the channel when its last capability is revoked', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store)
+    const { trpc, socket } = rtcClient(listener, a.token)
+    expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+    store.revoke('hub', { by: 'grant', grantIds: [a.grantId] })
+    await waitFor(() => socket.readyState === 3)
   })
 })

@@ -56,6 +56,10 @@ import {
   type DirectTarget
 } from '@slayzone/transport/direct'
 import { WebSocketServer, type WebSocket } from 'ws'
+import type { RtcServerSocket } from './rtc-socket'
+
+/** A WebSocket, or a WebRTC data channel made to look like one (rtc-socket.ts). */
+type ServedSocket = WebSocket | RtcServerSocket
 import type { DirectGrantStore, GrantRecord } from './grants'
 
 export const DIRECT_PATH = '/direct/v1'
@@ -108,6 +112,13 @@ export interface DirectListener {
   readonly boundAddress: string
   /** What hubs are told to offer clients; null = nothing dialable. */
   readonly advertisedAddress: string | null
+  /**
+   * Serve a WebRTC data channel exactly like an upgraded WebSocket: the same
+   * capability auth, grants, flood limits and per-address caps. `ip` is the
+   * client's address as the hub saw it while brokering. False (and the channel is
+   * closed) when a per-address cap refuses it.
+   */
+  serveChannel(socket: RtcServerSocket, meta: { ip: string | null }): boolean
   close(): Promise<void>
 }
 
@@ -180,7 +191,7 @@ export async function createDirectListener(
   const minute = (max: number): RateRule => ({ max, windowMs: 60_000 })
   const limiter = createFixedWindowLimiter()
   const auditLimiter = createFixedWindowLimiter()
-  const sockets = new Map<WebSocket, SocketState>()
+  const sockets = new Map<ServedSocket, SocketState>()
   const openPerBucket = new Map<string, number>()
 
   const refuse = (refusal: RateLimitRefusal): void => {
@@ -196,13 +207,13 @@ export async function createDirectListener(
   const router = createDirectRouter(options.services)
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes })
 
-  function closeUnauthorized(ws: WebSocket, reason: string): void {
-    if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+  function closeUnauthorized(ws: ServedSocket, reason: string): void {
+    if (ws.readyState === 1 || ws.readyState === 0) {
       ws.close(DIRECT_CLOSE_UNAUTHORIZED, reason)
     }
   }
 
-  function socketFor(ws: WebSocket, state: SocketState): DirectSocket {
+  function socketFor(ws: ServedSocket, state: SocketState): DirectSocket {
     return {
       authorize(token) {
         const record = options.grants.authenticate(token)
@@ -257,7 +268,7 @@ export async function createDirectListener(
     router,
     keepAlive: { enabled: true, pingMs: 30_000, pongWaitMs: 10_000 },
     createContext: ({ res, info }): DirectContext => {
-      const ws = res
+      const ws = res as unknown as ServedSocket
       const state = sockets.get(ws)
       if (!state) throw new TRPCError({ code: 'UNAUTHORIZED' })
       const socket = socketFor(ws, state)
@@ -270,8 +281,46 @@ export async function createDirectListener(
     }
   })
 
-  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-    const ip = req.socket.remoteAddress ?? null
+  /**
+   * The per-address admission checks, before a socket is served (WebSocket upgrade
+   * or data channel). False = refused, audited.
+   */
+  function admit(ip: string | null, route: string): { ok: true } | { ok: false; status: number } {
+    const bucket = addressBucket(ip)
+    if (!limiter.check(`auth|${bucket}`, minute(limits.failedAuthsPerMinute)).allowed) {
+      refuse({
+        limit: 'computer.direct.failed_auth_per_address',
+        address: ip,
+        route,
+        max: limits.failedAuthsPerMinute,
+        windowSec: 60
+      })
+      return { ok: false, status: 429 }
+    }
+    if ((openPerBucket.get(bucket) ?? 0) >= limits.socketsPerAddress) {
+      refuse({
+        limit: 'computer.direct.sockets_per_address',
+        address: ip,
+        route,
+        max: limits.socketsPerAddress
+      })
+      return { ok: false, status: 429 }
+    }
+    if (!limiter.consume(`upgrade|${bucket}`, minute(limits.upgradesPerMinute)).allowed) {
+      refuse({
+        limit: 'computer.direct.upgrades_per_address',
+        address: ip,
+        route,
+        max: limits.upgradesPerMinute,
+        windowSec: 60
+      })
+      return { ok: false, status: 429 }
+    }
+    return { ok: true }
+  }
+
+  /** Serve one admitted socket, whichever transport brought it. */
+  function serve(ws: ServedSocket, req: IncomingMessage, ip: string | null, route: string): void {
     const bucket = addressBucket(ip)
     const state: SocketState = {
       bucket,
@@ -299,7 +348,7 @@ export async function createDirectListener(
         refuse({
           limit: 'computer.direct.messages_per_socket',
           address: ip,
-          route: `WS ${DIRECT_PATH}`,
+          route,
           max: limits.messagesPerSocketPer10s,
           windowSec: 10
         })
@@ -313,7 +362,11 @@ export async function createDirectListener(
       if (open <= 0) openPerBucket.delete(bucket)
       else openPerBucket.set(bucket, open)
     })
-    handle(ws, req)
+    handle(ws as WebSocket, req)
+  }
+
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    serve(ws, req, req.socket.remoteAddress ?? null, `WS ${DIRECT_PATH}`)
   })
 
   const stopDrops = options.grants.onDropped((dropped) => {
@@ -357,38 +410,8 @@ export async function createDirectListener(
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = (req.url ?? '/').split('?')[0]
     if (path !== DIRECT_PATH) return refuseUpgrade(socket, 404, 'Not Found')
-    const ip = req.socket.remoteAddress ?? null
-    const bucket = addressBucket(ip)
-    const route = `WS ${DIRECT_PATH}`
-    if (!limiter.check(`auth|${bucket}`, minute(limits.failedAuthsPerMinute)).allowed) {
-      refuse({
-        limit: 'computer.direct.failed_auth_per_address',
-        address: ip,
-        route,
-        max: limits.failedAuthsPerMinute,
-        windowSec: 60
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
-    if ((openPerBucket.get(bucket) ?? 0) >= limits.socketsPerAddress) {
-      refuse({
-        limit: 'computer.direct.sockets_per_address',
-        address: ip,
-        route,
-        max: limits.socketsPerAddress
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
-    if (!limiter.consume(`upgrade|${bucket}`, minute(limits.upgradesPerMinute)).allowed) {
-      refuse({
-        limit: 'computer.direct.upgrades_per_address',
-        address: ip,
-        route,
-        max: limits.upgradesPerMinute,
-        windowSec: 60
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
+    const admitted = admit(req.socket.remoteAddress ?? null, `WS ${DIRECT_PATH}`)
+    if (!admitted.ok) return refuseUpgrade(socket, admitted.status, 'Too Many Requests')
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
   })
 
@@ -407,6 +430,22 @@ export async function createDirectListener(
   return {
     boundAddress,
     advertisedAddress,
+    serveChannel(socket, meta) {
+      const route = `RTC ${DIRECT_PATH}`
+      if (!admit(meta.ip, route).ok) {
+        socket.close(1008, 'refused')
+        return false
+      }
+      // tRPC's handler reads the request only for `connectionParams=1` (the first
+      // frame carries the capability) — the same as a WebSocket client sends.
+      const req = {
+        url: `${DIRECT_PATH}?connectionParams=1`,
+        headers: { host: 'direct.rtc' },
+        socket: { remoteAddress: meta.ip ?? undefined }
+      } as unknown as IncomingMessage
+      serve(socket, req, meta.ip, route)
+      return true
+    },
     async close() {
       stopDrops()
       for (const ws of sockets.keys()) ws.terminate()
