@@ -83,6 +83,26 @@ export type ArtifactStore = ReturnType<typeof createArtifactStore>
 export function createArtifactStore(dataDir: string) {
   const artifactsDir = artifactsDirOf(dataDir)
 
+  /** The one create; `stagedPath` only from {@link createArtifactFromStagedFile}. */
+  async function createRow(
+    db: SlayzoneDb,
+    data: CreateArtifactInput,
+    stagedPath: string | undefined
+  ): Promise<TaskArtifact | null> {
+    return parseArtifact(
+      await db.namedTxn('task-artifacts:create', {
+        dataDir,
+        taskId: data.taskId,
+        folderId: data.folderId ?? null,
+        title: data.title,
+        renderMode: data.renderMode ?? null,
+        language: data.language ?? null,
+        content: data.content ?? '',
+        sourcePath: stagedPath
+      })
+    )
+  }
+
   function getArtifactFilePath(taskId: string, artifactId: string, title: string): string {
     return artifactFilePathIn(artifactsDir, taskId, artifactId, title)
   }
@@ -118,27 +138,24 @@ export function createArtifactStore(dataDir: string) {
       return parseArtifact(await getRow(db, id))
     },
 
+    /** A new artifact from `content`. Takes no path: a client-named one is how the
+     *  hub was made to read any file on its disk (round-8 P1). */
+    async createArtifact(db: SlayzoneDb, data: CreateArtifactInput): Promise<TaskArtifact | null> {
+      return createRow(db, data, undefined)
+    },
+
     /**
-     * `sourcePath` is the binary-safe alternative to `content`: the initial bytes
-     * are copied from that file rather than utf-8-encoded from a string, so a
-     * PNG/PDF created through this path is not corrupted. Used by the REST create
-     * route, which stages a streamed request body to a temp file.
+     * {@link createArtifact} with the initial bytes copied from `stagedPath` — the
+     * binary-safe alternative to `content` (a PNG/PDF is not utf-8-encoded). Only for
+     * a file the HUB staged itself: the REST create route streams the request body to
+     * a temp file. Never a client-named path.
      */
-    async createArtifact(
+    async createArtifactFromStagedFile(
       db: SlayzoneDb,
-      data: CreateArtifactInput & { sourcePath?: string }
+      data: CreateArtifactInput,
+      stagedPath: string
     ): Promise<TaskArtifact | null> {
-      const row = await db.namedTxn('task-artifacts:create', {
-        dataDir,
-        taskId: data.taskId,
-        folderId: data.folderId ?? null,
-        title: data.title,
-        renderMode: data.renderMode ?? null,
-        language: data.language ?? null,
-        content: data.content ?? '',
-        sourcePath: data.sourcePath
-      })
-      return parseArtifact(row)
+      return createRow(db, data, stagedPath)
     },
 
     async updateArtifact(

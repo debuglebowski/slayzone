@@ -410,6 +410,12 @@ export const REGRESSIONS = [
     id: 'P2',
     what: "naming a computer never wins a path tie on the hub's disk",
     files: [`${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P1',
+    what: 'no procedure, REST route or MCP tool reads a hub-disk path the caller may not access',
+    files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
   }
 ]
 
