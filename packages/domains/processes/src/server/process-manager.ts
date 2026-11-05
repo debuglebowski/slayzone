@@ -382,6 +382,16 @@ export async function processesComputerConnected(computerId: string): Promise<vo
   }
 }
 
+/**
+ * Whether `sessionId` on `computerId` is a run this manager adopted (a previous
+ * hub's run the computer kept: orphaned, no handle, reached by session). The
+ * routing backend does not track it, so its reconnect sweep must not end it.
+ */
+export function isAdoptedOnComputer(computerId: string, sessionId: string): boolean {
+  const proc = processes.get(sessionId)
+  return !!proc && !proc.handle && proc.computerId === computerId && proc.computerPid != null
+}
+
 /** How long a routed spawn waits for its computer's "it runs" before answering anyway. */
 const ROUTED_SPAWN_CONFIRM_MS = 10_000
 

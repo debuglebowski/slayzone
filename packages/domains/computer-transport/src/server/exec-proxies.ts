@@ -544,6 +544,11 @@ interface DetachControllerOptions<E extends DetachableEntry> {
   settleExited: (entry: E, exit: ListedExit) => void
   /** The computer went away with this session live: its outcome is now unknown. */
   onDetach?: (entry: E) => void
+  /**
+   * A session this backend does not track but its owner still holds (a run the
+   * process manager adopted after a hub restart): never swept as a stray.
+   */
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
 }
 
 /**
@@ -586,6 +591,7 @@ interface DetachParticipant {
   resume: (entry: DetachableEntry, listed: ListedSession) => void
   settleExited: (entry: DetachableEntry, exit: ListedExit) => void
   onDetach?: (entry: DetachableEntry) => void
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
   /** Has this participant ever held a session? Gates pruning — see `prune`. */
   everUsed?: boolean
 }
@@ -609,13 +615,15 @@ const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachControll
 function joinDetachController<E extends DetachableEntry>(
   options: DetachControllerOptions<E>
 ): DetachEntry {
-  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach } = options
+  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach, keepUntracked } =
+    options
   const participant = {
     sessions,
     finalize,
     resume,
     settleExited,
-    onDetach
+    onDetach,
+    keepUntracked
   } as unknown as DetachParticipant
 
   let byKind = detachControllers.get(gateway)
@@ -844,6 +852,8 @@ function createDetachController<E extends DetachableEntry>(
           (o.entry.pendingSpawn !== undefined || sameAttempt(o.entry, running))
       )
       if (owned) continue
+      // Held by its owner outside this backend (an adopted run): not a stray.
+      if (participants.some((p) => p.keepUntracked?.(computerId, sessionId))) continue
       void gateway.request(computerId, killMethod, { sessionId }).catch(noop)
     }
     if (resumed.length > 0) {
@@ -1781,6 +1791,12 @@ export interface RoutingProcessBackendOptions {
    * behavior and its argv was silently dropped.
    */
   buildSpawnParams?: (spec: ProcSpawnSpec) => Record<string, unknown>
+  /**
+   * Runs this backend does not track that their owner holds — the process manager's
+   * runs adopted after a hub restart (orphaned, reached by session). A reconnect's
+   * stray sweep leaves them alone.
+   */
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
 }
 
 interface ProcEntry extends DetachableEntry, SeqGapState {
@@ -2011,6 +2027,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     kind: 'process',
     listMethod: HubToComputerMethods.procList,
     killMethod: HubToComputerMethods.procKill,
+    ...(options.keepUntracked ? { keepUntracked: options.keepUntracked } : {}),
     parseList: (raw) => {
       const parsed = procListResultSchema.safeParse(raw)
       return parsed.success ? toSessionList(parsed.data) : null

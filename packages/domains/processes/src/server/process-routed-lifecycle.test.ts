@@ -7,7 +7,9 @@ import { execFileSync } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import {
   initProcessManagerWith,
+  isAdoptedOnComputer,
   listAllProcesses,
+  processesComputerConnected,
   restartProcessDetailed,
   setProcessComputerResolver,
   spawnProcess,
@@ -178,5 +180,27 @@ describe('stop / restart wait for the computer to end the tree', () => {
     pending.shift()!(false)
     await stop
     expect(status(id)?.status).toBe('orphaned')
+  })
+})
+
+// A run the computer kept from before a hub restart is adopted (orphaned, no
+// handle). The routing backend's reconnect sweep asks this before ending a
+// session it does not track — it must say yes for exactly that run.
+describe('adopted runs are reported to the reconnect sweep', () => {
+  test('a kept run is adopted; another session or computer is not', async () => {
+    setProcessBackend({
+      spawn: () => {
+        throw new Error('not spawned here')
+      },
+      listSessions: async () => [{ sessionId: keptId, pid: 4242 }]
+    } as unknown as ProcessBackend)
+    setProcessComputerResolver(async () => null)
+    const keptId = await spawnProcess('p', null, 'kept', 'pnpm dev', '/tmp', false)
+    expect(isAdoptedOnComputer('c9', keptId)).toBe(false)
+    await processesComputerConnected('c9')
+    expect(status(keptId)?.status).toBe('orphaned')
+    expect(isAdoptedOnComputer('c9', keptId)).toBe(true)
+    expect(isAdoptedOnComputer('c1', keptId)).toBe(false)
+    expect(isAdoptedOnComputer('c9', 'other')).toBe(false)
   })
 })

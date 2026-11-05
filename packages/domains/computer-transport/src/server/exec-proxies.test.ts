@@ -1739,6 +1739,35 @@ describe('createRoutingProcessBackend', () => {
     return { exit: () => exit }
   }
 
+  // After a hub restart the process manager adopts the runs a computer kept (they
+  // show orphaned, Stop reaches them by session) — with no handle, so this backend
+  // does not track them. A network blip and same-epoch reconnect then swept them as
+  // strays: the dev server was killed silently. Adopted runs are kept; a stray is not.
+  it('a reconnect keeps runs the process manager adopted, and still ends a stray', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    gateway.onMethod('proc.kill', () => ({ ok: true, clean: true }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 1, seq: 0 },
+        { sessionId: 'adopted-dev-server', pid: 7, seq: 3 },
+        { sessionId: 'stray', pid: 8, seq: 0 }
+      ]
+    }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null,
+      keepUntracked: (computerId, sessionId) =>
+        computerId === 'computer-1' && sessionId === 'adopted-dev-server'
+    })
+    connectProc(gateway, 'epoch-a')
+    backend.spawn(procSpec())
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connectProc(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(gateway.requestsOf('proc.kill')).toHaveLength(1))
+    expect(gateway.requestsOf('proc.kill').map((c) => c.params)).toEqual([{ sessionId: 'stray' }])
+  })
+
   it('computer-lost detaches the process rather than declaring it dead', () => {
     const gateway = new FakeGateway()
     expect(spawnDetachedProc(gateway).exit()).toBeNull()

@@ -18,7 +18,8 @@ export {
   killAllProcesses,
   shutdownAllProcesses,
   setProcessComputerResolver,
-  processesComputerConnected
+  processesComputerConnected,
+  isAdoptedOnComputer
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {

@@ -202,6 +202,7 @@ import {
   subscribeToProcessLogs,
   setProcessComputerResolver,
   processesComputerConnected,
+  isAdoptedOnComputer,
   setProcessBackend,
   killAllProcesses,
   setProcessesDeps
@@ -1819,7 +1820,9 @@ export function composeServer(opts: {
     setProcessBackend(
       createRoutingProcessBackend({
         gateway: computerGateway,
-        resolveComputerId: (spec) => spec.computerId
+        resolveComputerId: (spec) => spec.computerId,
+        // Runs adopted after a hub restart are the manager's: a reconnect keeps them.
+        keepUntracked: isAdoptedOnComputer
       })
     )
     setProcessComputerResolver(async ({ taskId, projectId }) => {
