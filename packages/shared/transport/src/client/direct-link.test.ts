@@ -132,6 +132,35 @@ describe('acquire', () => {
     expect(connections[0]?.authorized.length).toBe(1)
   })
 
+  // M3: at boot every open tab's terminal and chat acquires at once. One computer must
+  // still get ONE probe and ONE socket (the listener allows 64 per address; a refused
+  // upgrade is a failed WebSocket connect, which slows the renderer's hub socket too).
+  it('70 concurrent acquires for one computer share one probe and one socket', async () => {
+    const { manager, opened, connections, probes } = setup()
+    const leases = await Promise.all(
+      Array.from({ length: 70 }, (_, i) => manager.acquire(pty(`s${i}`)))
+    )
+    expect(probes.length).toBe(1)
+    expect(opened.length).toBe(1)
+    expect(leases.every((l) => l !== null && l.client === leases[0]?.client)).toBe(true)
+    // The opener's token rode the connection params; every other lease authorized on it.
+    expect(connections[0]?.authorized.length).toBe(69)
+    expect(manager.status()).toEqual([
+      { computerId: 'c1', path: 'direct', address: '127.0.0.1:5001', leases: 70 }
+    ])
+  })
+
+  it('concurrent acquires that fail to open all fall back, with one probe', async () => {
+    const { manager, opened, probes, setProbe } = setup()
+    setProbe(false)
+    const leases = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => manager.acquire(pty(`s${i}`)))
+    )
+    expect(leases.every((l) => l === null)).toBe(true)
+    expect(probes.length).toBe(1)
+    expect(opened.length).toBe(0)
+  })
+
   it('returns null (use the relay) when the hub offers nothing', async () => {
     const { manager, setIssue, opened } = setup()
     setIssue(() => ({ available: false, reason: 'no-address' }))

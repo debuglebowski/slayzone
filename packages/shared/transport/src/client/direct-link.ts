@@ -305,12 +305,40 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     })
   }
 
+  /**
+   * Sockets being opened, per computer and address. Every acquire that arrives while
+   * one opens waits for it (one probe, one socket): at boot every open tab acquires
+   * at once, and a socket each would exceed the listener's per-address limit — a
+   * refused upgrade is a failed WebSocket connect, which slows the hub's socket too.
+   */
+  const opening = new Map<string, Promise<Socket | null>>()
+
   async function socketFor(
     issued: Extract<DirectIssueResult, { available: true }>
   ): Promise<{ socket: Socket; fresh: boolean } | null> {
     const key = `${issued.computerId}|${issued.address}`
     const existing = sockets.get(key)
     if (existing) return { socket: existing, fresh: false }
+    const pending = opening.get(key)
+    if (pending) {
+      // Opened with the opener's token: this caller authorizes its own on it.
+      const socket = await pending
+      return socket ? { socket, fresh: false } : null
+    }
+    const opened = openSocket(key, issued)
+    opening.set(key, opened)
+    try {
+      const socket = await opened
+      return socket ? { socket, fresh: true } : null
+    } finally {
+      opening.delete(key)
+    }
+  }
+
+  async function openSocket(
+    key: string,
+    issued: Extract<DirectIssueResult, { available: true }>
+  ): Promise<Socket | null> {
     if (!(await probe(issued.address))) return fail(issued.computerId, 'probe')
     const connection = open({
       url: hubUrlFromAddr(issued.address, 'ws', DIRECT_LINK_PATH),
@@ -333,7 +361,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     connection.onClose(() => dropSocket(socket, 'closed'))
     sockets.set(key, socket)
     backoff.delete(issued.computerId)
-    return { socket, fresh: true }
+    return socket
   }
 
   return {
