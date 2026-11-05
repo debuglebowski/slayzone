@@ -1,5 +1,5 @@
 diff --git a/dist/ws-BMSSVFiW.cjs b/dist/ws-BMSSVFiW.cjs
-index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..2a60390032d0d1051d415d52f99e888d72f82c8e 100644
+index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..9563d93abcd5fae79cc2529cf1d67292c988a02f 100644
 --- a/dist/ws-BMSSVFiW.cjs
 +++ b/dist/ws-BMSSVFiW.cjs
 @@ -32,6 +32,9 @@ function getWSConnectionHandler(opts) {
@@ -21,24 +21,47 @@ index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..2a60390032d0d1051d415d52f99e888d
  				return;
  			}
  			const { path, lastEventId } = msg.params;
-@@ -149,6 +154,7 @@ function getWSConnectionHandler(opts) {
+@@ -145,10 +150,28 @@ function getWSConnectionHandler(opts) {
+ 					(_input = input) !== null && _input !== void 0 || (input = { lastEventId });
+ 				}
+ 			}
++			// slayzone patch (N3/P3): registered synchronously, before the first await, so
++			// a stop that arrives in the same tick (or during the middlewares) aborts it.
++			const abortController = new AbortController();
++			if (type === "subscription" && !clientSubscriptions.has(id) && !pendingSubscriptions.has(id)) pendingSubscriptions.set(id, abortController);
++			const forgetPending = () => {
++				if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
++			};
+ 			require_codes.run(async () => {
  				const res = await ctxPromise;
- 				if (!res.ok) throw res.error;
- 				const abortController = new AbortController();
-+				if (type === "subscription") pendingSubscriptions.set(id, abortController);
+-				if (!res.ok) throw res.error;
+-				const abortController = new AbortController();
++				if (!res.ok) {
++					forgetPending();
++					throw res.error;
++				}
++				if (abortController.signal.aborted) {
++					forgetPending();
++					respond({
++						id,
++						jsonrpc,
++						result: { type: "stopped" }
++					});
++					return;
++				}
  				const result = await require_tracked.callProcedure({
  					router,
  					path,
-@@ -157,6 +163,8 @@ function getWSConnectionHandler(opts) {
+@@ -157,7 +180,7 @@ function getWSConnectionHandler(opts) {
  					type,
  					signal: abortController.signal,
  					batchIndex
-+				}).finally(() => {
-+					if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
- 				});
+-				});
++				}).finally(forgetPending);
  				const isIterableResult = require_codes.isAsyncIterable(result) || require_observable.isObservable(result);
  				if (type !== "subscription") {
-@@ -185,6 +193,14 @@ function getWSConnectionHandler(opts) {
+ 					if (isIterableResult) throw new require_tracked.TRPCError({
+@@ -185,6 +208,14 @@ function getWSConnectionHandler(opts) {
  					message: `Duplicate id ${id}`,
  					code: "BAD_REQUEST"
  				});
@@ -53,7 +76,7 @@ index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..2a60390032d0d1051d415d52f99e888d
  				const iterable = require_observable.isObservable(result) ? require_observable.observableToAsyncIterable(result, abortController.signal) : result;
  				require_codes.run(async () => {
  					try {
-@@ -399,6 +415,8 @@ function getWSConnectionHandler(opts) {
+@@ -399,6 +430,8 @@ function getWSConnectionHandler(opts) {
  		client.once("close", () => {
  			for (const sub of clientSubscriptions.values()) sub.abort();
  			clientSubscriptions.clear();
@@ -63,7 +86,7 @@ index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..2a60390032d0d1051d415d52f99e888d
  		});
  	};
 diff --git a/dist/ws-C7ZOJJeA.mjs b/dist/ws-C7ZOJJeA.mjs
-index d8c6039d96256d87a194f2cbda7dfc05211ae604..f19dd270a5a9e1b09d33b8184a746da0243f74b1 100644
+index d8c6039d96256d87a194f2cbda7dfc05211ae604..5b297db7963de3e2fa8e8faa192f8c728039524d 100644
 --- a/dist/ws-C7ZOJJeA.mjs
 +++ b/dist/ws-C7ZOJJeA.mjs
 @@ -32,6 +32,9 @@ function getWSConnectionHandler(opts) {
@@ -85,24 +108,47 @@ index d8c6039d96256d87a194f2cbda7dfc05211ae604..f19dd270a5a9e1b09d33b8184a746da0
  				return;
  			}
  			const { path, lastEventId } = msg.params;
-@@ -149,6 +154,7 @@ function getWSConnectionHandler(opts) {
+@@ -145,10 +150,28 @@ function getWSConnectionHandler(opts) {
+ 					(_input = input) !== null && _input !== void 0 || (input = { lastEventId });
+ 				}
+ 			}
++			// slayzone patch (N3/P3): registered synchronously, before the first await, so
++			// a stop that arrives in the same tick (or during the middlewares) aborts it.
++			const abortController = new AbortController();
++			if (type === "subscription" && !clientSubscriptions.has(id) && !pendingSubscriptions.has(id)) pendingSubscriptions.set(id, abortController);
++			const forgetPending = () => {
++				if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
++			};
+ 			run(async () => {
  				const res = await ctxPromise;
- 				if (!res.ok) throw res.error;
- 				const abortController = new AbortController();
-+				if (type === "subscription") pendingSubscriptions.set(id, abortController);
+-				if (!res.ok) throw res.error;
+-				const abortController = new AbortController();
++				if (!res.ok) {
++					forgetPending();
++					throw res.error;
++				}
++				if (abortController.signal.aborted) {
++					forgetPending();
++					respond({
++						id,
++						jsonrpc,
++						result: { type: "stopped" }
++					});
++					return;
++				}
  				const result = await callProcedure({
  					router,
  					path,
-@@ -157,6 +163,8 @@ function getWSConnectionHandler(opts) {
+@@ -157,7 +180,7 @@ function getWSConnectionHandler(opts) {
  					type,
  					signal: abortController.signal,
  					batchIndex
-+				}).finally(() => {
-+					if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
- 				});
+-				});
++				}).finally(forgetPending);
  				const isIterableResult = isAsyncIterable(result) || isObservable(result);
  				if (type !== "subscription") {
-@@ -185,6 +193,14 @@ function getWSConnectionHandler(opts) {
+ 					if (isIterableResult) throw new TRPCError({
+@@ -185,6 +208,14 @@ function getWSConnectionHandler(opts) {
  					message: `Duplicate id ${id}`,
  					code: "BAD_REQUEST"
  				});
@@ -117,7 +163,7 @@ index d8c6039d96256d87a194f2cbda7dfc05211ae604..f19dd270a5a9e1b09d33b8184a746da0
  				const iterable = isObservable(result) ? observableToAsyncIterable(result, abortController.signal) : result;
  				run(async () => {
  					try {
-@@ -399,6 +415,8 @@ function getWSConnectionHandler(opts) {
+@@ -399,6 +430,8 @@ function getWSConnectionHandler(opts) {
  		client.once("close", () => {
  			for (const sub of clientSubscriptions.values()) sub.abort();
  			clientSubscriptions.clear();

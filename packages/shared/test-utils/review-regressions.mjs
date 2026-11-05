@@ -398,6 +398,12 @@ export const REGRESSIONS = [
     id: 'P4',
     what: 'the K2 rename repro protects the file as production does (red before K2)',
     files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P3',
+    what: 'a ws stop in the same tick as its subscribe (and out of order) never leaks',
+    files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
   }
 ]
 

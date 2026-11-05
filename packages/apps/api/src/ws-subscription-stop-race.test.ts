@@ -69,6 +69,48 @@ test('a subscription stopped during its middlewares never subscribes', async () 
   }
 })
 
+// Round-8 P3: a stop in the SAME tick as its subscribe (the client unsubscribing at
+// once — ws delivers both messages in one read) landed before the handler had even
+// started on the subscribe, and was dropped just the same.
+test('a stop sent right after its subscribe (same tick) never subscribes', async () => {
+  const { port } = wss.address() as AddressInfo
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  await new Promise((r) => ws.once('open', r))
+  try {
+    for (let id = 1; id <= 20; id++) {
+      ws.send(JSON.stringify({ id, method: 'subscription', params: { path: 'watch' } }))
+      ws.send(JSON.stringify({ id, method: 'subscription.stop' }))
+      await settle()
+      released?.()
+      await settle()
+    }
+    expect(live, 'listeners still attached after back-to-back subscribe + stop').toBe(0)
+  } finally {
+    ws.close()
+  }
+})
+
+// Both orders in one batch: a stop BEFORE its subscribe (out of order, or a client
+// bug) stops nothing that runs later — the subscription still starts and ends.
+test('a subscribe after an unknown stop still subscribes and can be stopped', async () => {
+  const { port } = wss.address() as AddressInfo
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  await new Promise((r) => ws.once('open', r))
+  try {
+    ws.send(JSON.stringify({ id: 7, method: 'subscription.stop' }))
+    ws.send(JSON.stringify({ id: 7, method: 'subscription', params: { path: 'watch' } }))
+    await settle()
+    released?.()
+    await settle()
+    expect(live).toBe(1)
+    ws.send(JSON.stringify({ id: 7, method: 'subscription.stop' }))
+    await settle()
+    expect(live).toBe(0)
+  } finally {
+    ws.close()
+  }
+})
+
 test('one stopped after it started still ends (unchanged)', async () => {
   const { port } = wss.address() as AddressInfo
   const ws = new WebSocket(`ws://127.0.0.1:${port}`)
