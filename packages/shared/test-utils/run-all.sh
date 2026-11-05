@@ -102,6 +102,9 @@ run_harness packages/apps/hub/src/git-op-gate.test.ts
 run_harness packages/apps/hub/src/git-op-owner-boundary.test.ts
 run_harness packages/apps/hub/src/computer-request-authorizer.test.ts
 run_harness packages/apps/hub/src/path-owner-agreement.test.ts
+# Round-6 review regressions (L3 case folding, L4 disabled computer, L6 path aliases):
+# part of `pnpm test:review-regressions` (review-regressions.mjs).
+run_harness packages/apps/hub/src/review-regressions-owner.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -816,6 +819,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # The hub mirrors owner-detected pty output (signals) instead of parsing it.
 run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
+# Round-6 review regression L2: relay requests run as the hub; a failed one is asked again.
+run_harness packages/domains/terminal/src/server/runtime/review-regressions-relay.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.

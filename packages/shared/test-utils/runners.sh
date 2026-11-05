@@ -236,8 +236,9 @@ write_list() {
   return 0
 }
 
+# Usage: package_test <workspace-name> [<file relative to the package>...]
 package_test() {
-  (set -o pipefail; pnpm --filter "$1" test 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
+  (set -o pipefail; pnpm --filter "$1" test "${@:2}" 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
 }
 
 integration_test() {
@@ -269,7 +270,9 @@ lane_app_and_packages() {
       ./node_modules/.bin/vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**'
   fi
   for i in "${!PACKAGE_NAMES[@]}"; do
-    command_suite "${PACKAGE_DIRS[$i]} (own vitest config)" package_test "${PACKAGE_NAMES[$i]}"
+    # With SLZ_UNIT_ONLY: only its listed files (space-separated, package-relative).
+    # shellcheck disable=SC2086
+    command_suite "${PACKAGE_DIRS[$i]} (own vitest config)" package_test "${PACKAGE_NAMES[$i]}" ${PACKAGE_ONLY[$i]:-}
   done
   for i in "${!JEST_PACKAGE_NAMES[@]}"; do
     command_suite "${JEST_PACKAGE_DIRS[$i]} (jest)" package_test "${JEST_PACKAGE_NAMES[$i]}"
@@ -307,6 +310,71 @@ selected_lanes() {
   done
 }
 
+# SLZ_UNIT_ONLY=<file>: run only the test files listed in <file> (repo-relative, one per
+# line), each in the lane and runner it is registered with above — the review
+# regression suite (`pnpm test:review-regressions`, review-regressions.mjs) is one such
+# list. A listed file nobody registered fails the run; registration is still checked
+# for every file (require_registered). Usage: apply_only (from run_suites)
+PACKAGE_ONLY=()
+apply_only() {
+  [ -n "${SLZ_UNIT_ONLY:-}" ] || return 0
+  local file i dir kept_names=() kept_dirs=() kept_only=() rel files keep=() keep_labels=()
+  local listed=()
+  while IFS= read -r file; do [ -n "$file" ] && listed+=("$file"); done <"$SLZ_UNIT_ONLY"
+  is_listed() { printf '%s\n' "${listed[@]}" | grep -qxF -- "$1"; }
+  keep=()
+  for file in ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  HARNESS_FILES=(${keep[@]+"${keep[@]}"})
+  keep=()
+  for file in ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  HARNESS_NODE_FILES=(${keep[@]+"${keep[@]}"})
+  keep=()
+  for i in "${!APP_VITEST_FILES[@]}"; do
+    if is_listed "${APP_VITEST_FILES[$i]}"; then
+      keep+=("${APP_VITEST_FILES[$i]}")
+      keep_labels+=("${APP_VITEST_LABELS[$i]}")
+    fi
+  done
+  APP_VITEST_FILES=(${keep[@]+"${keep[@]}"})
+  APP_VITEST_LABELS=(${keep_labels[@]+"${keep_labels[@]}"})
+  for i in "${!PACKAGE_NAMES[@]}"; do
+    dir="${PACKAGE_DIRS[$i]}"
+    files=""
+    for file in "${listed[@]}"; do
+      case "$file" in "$dir"/*) files="$files ${file#"$dir"/}" ;; esac
+    done
+    if [ -n "$files" ]; then
+      kept_names+=("${PACKAGE_NAMES[$i]}")
+      kept_dirs+=("$dir")
+      kept_only+=("${files# }")
+    fi
+  done
+  PACKAGE_NAMES=(${kept_names[@]+"${kept_names[@]}"})
+  PACKAGE_DIRS=(${kept_dirs[@]+"${kept_dirs[@]}"})
+  PACKAGE_ONLY=(${kept_only[@]+"${kept_only[@]}"})
+  JEST_PACKAGE_NAMES=()
+  JEST_PACKAGE_DIRS=()
+  keep=()
+  for file in ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  INTEGRATION_FILES=(${keep[@]+"${keep[@]}"})
+  # Every listed file runs somewhere: registered file by file, or in a package run.
+  for file in "${listed[@]}"; do
+    if printf '%s\n' ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"} ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"} \
+      ${APP_VITEST_FILES[@]+"${APP_VITEST_FILES[@]}"} ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"} | grep -qxF -- "$file"; then
+      continue
+    fi
+    rel=0
+    for dir in ${PACKAGE_DIRS[@]+"${PACKAGE_DIRS[@]}"}; do
+      case "$file" in "$dir"/*) rel=1 ;; esac
+    done
+    if [ "$rel" = 0 ] || [ ! -f "$file" ]; then
+      echo "SLZ_UNIT_ONLY: $file is not a registered test file" >&2
+      FAIL=$((FAIL + 1))
+      FAILED+=("not registered: $file")
+    fi
+  done
+}
+
 # Runs everything registered above, then folds each lane's verdicts into PASS / FAIL /
 # FAILED. SLZ_UNIT_JSON=<path> keeps the Electron harness run's JSON report (per-file
 # test counts and durations). Usage: run_suites
@@ -332,6 +400,8 @@ run_suites() {
     list_pids+=($!)
   done
 
+  # After the package listings above started: they register every package's files.
+  dry_run || apply_only
   if ! dry_run; then
     write_list "$WORK/harness.list" ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"}
     write_list "$WORK/harness-node.list" ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}
