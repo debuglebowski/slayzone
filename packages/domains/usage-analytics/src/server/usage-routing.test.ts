@@ -68,3 +68,36 @@ describe('usage from computers', () => {
     })
   })
 })
+
+// v194 kept the hub's own parse cursors under computer_id '' (this hub's disk). On
+// the desktop the local computer reads those very files: its first collect must
+// start from them, or it re-parses every log in one huge reply (81 MiB measured)
+// that times out on every refresh. Another computer's disk is not this hub's.
+describe("the hub's old cursors after v194", () => {
+  test('the local computer takes them over; another computer does not', async () => {
+    h.db.prepare('DELETE FROM usage_parse_state').run()
+    h.db
+      .prepare(
+        "INSERT INTO usage_parse_state (computer_id, file_path, last_offset, last_modified_ms) VALUES ('', ?, 500, 50)"
+      )
+      .run(file)
+    const seen: Record<string, Record<string, unknown>> = {}
+    setUsageCollectRouting({
+      computers: () => ['remote', 'local'],
+      localComputerId: () => 'local',
+      collect: async (computerId, cursors) => {
+        seen[computerId] = cursors
+        return []
+      }
+    })
+    await refreshUsageData(db)
+    expect(seen.local).toEqual({ [file]: { offset: 500, modifiedMs: 50 } })
+    expect(seen.remote).toEqual({})
+    const rows = h.db
+      .prepare('SELECT computer_id FROM usage_parse_state ORDER BY computer_id')
+      .all()
+    expect(rows, 'moved, not copied: the hub-disk rows are gone').toEqual([
+      { computer_id: 'local' }
+    ])
+  })
+})

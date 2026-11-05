@@ -8,6 +8,8 @@ import { EXEC_RUN_REPLY_GRACE_MS, execRunOnComputer } from './computer-exec-run'
 
 // Explicit limits for computer requests that are not `exec.run` / git ops (those
 // carry their own): never the gateway's 30 s default.
+/** A usage collect parses every new log line on the computer (a first one: all of them). */
+const USAGE_COLLECT_TIMEOUT_MS = 5 * 60_000
 /** A test-file scan of a large checkout. */
 const COMPUTER_SCAN_TIMEOUT_MS = 2 * 60_000
 /** One AI-config fs call (read / write / stat / readdir of one file or dir). */
@@ -1914,11 +1916,16 @@ export function composeServer(opts: {
     // what is new since its own cursors.
     setUsageCollectRouting({
       computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
+      // The hub's machine's own computer reads the logs the old hub-disk cursors index.
+      localComputerId: () => deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME),
       collect: async (computerId, cursors) =>
         usageCollectResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.usageCollect, {
-            cursors
-          })
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.usageCollect,
+            { cursors },
+            USAGE_COLLECT_TIMEOUT_MS
+          )
         ).results as unknown as ParseResult[]
     })
     // AI-config files (instructions, skills, MCP): a project's on the project's

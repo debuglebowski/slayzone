@@ -19,6 +19,12 @@ export interface UsageCollectRouting {
   /** The computers to ask this refresh (connected ones). */
   computers(): readonly string[]
   collect(computerId: string, cursors: UsageCursors): Promise<ParseResult[]>
+  /**
+   * The computer on this hub's own machine (the desktop's local computer): it reads
+   * the files the hub's old cursors (computer_id '') point into, so it takes them
+   * over instead of re-parsing every log.
+   */
+  localComputerId?(): string | null
 }
 
 let routing: UsageCollectRouting | null = null
@@ -41,6 +47,27 @@ async function loadCursors(db: SlayzoneDb, computerId: string): Promise<UsageCur
   const out: UsageCursors = {}
   for (const r of rows) out[r.file_path] = { offset: r.last_offset, modifiedMs: r.last_modified_ms }
   return out
+}
+
+/**
+ * Hand the hub's own cursors (computer_id '', what v194 kept from the hub-disk
+ * parse) to the computer on the hub's machine, once: moved, not copied, so they are
+ * never adopted twice. A cursor the computer already has wins.
+ */
+async function adoptHubDiskCursors(db: SlayzoneDb, computerId: string): Promise<void> {
+  await db.batchTxn([
+    {
+      type: 'run' as const,
+      sql: `INSERT OR IGNORE INTO usage_parse_state (computer_id, file_path, last_offset, last_modified_ms)
+        SELECT ?, file_path, last_offset, last_modified_ms FROM usage_parse_state WHERE computer_id = ?`,
+      params: [computerId, HUB_DISK]
+    },
+    {
+      type: 'run' as const,
+      sql: 'DELETE FROM usage_parse_state WHERE computer_id = ?',
+      params: [HUB_DISK]
+    }
+  ])
 }
 
 async function saveParseState(
@@ -123,6 +150,11 @@ async function refresh(db: SlayzoneDb): Promise<void> {
         collect: (c) => (routing as UsageCollectRouting).collect(id, c)
       }))
     : [{ computerId: HUB_DISK, collect: collectUsage }]
+
+  const local = routing?.localComputerId?.() ?? null
+  if (local && sources.some((source) => source.computerId === local)) {
+    await adoptHubDiskCursors(db, local)
+  }
 
   let totalInserted = 0
   for (const source of sources) {
