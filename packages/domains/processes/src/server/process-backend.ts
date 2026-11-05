@@ -34,8 +34,13 @@ export interface ProcHandle {
   onExit(cb: (e: { code: number | null; signal: string | null; detail?: string }) => void): {
     dispose(): void
   }
-  /** Kill the whole process tree (POSIX detached-group / Windows `taskkill /T`). */
-  kill(sig?: string): void
+  /**
+   * Kill the whole process tree (POSIX detached-group / Windows `taskkill /T`). A
+   * routed handle resolves once its computer reports the tree gone (TERM, then KILL
+   * for survivors): `false` = part of it outlived SIGKILL, or the computer could
+   * not be asked. `void` = fire-and-forget (nothing to wait for).
+   */
+  kill(sig?: string): void | Promise<boolean>
   /**
    * A process that starts ELSEWHERE (a computer): fires once it really runs there,
    * with its pid on that machine. Absent on the local backend (pid is known at once).

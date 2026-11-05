@@ -517,7 +517,7 @@ function detachAndTerminate(proc: ManagedProcess): {
   const handle = proc.handle
   const keptOnComputer =
     handle == null && proc.computerId != null && proc.computerPid != null ? proc.computerId : null
-  const keptPid = proc.computerPid
+  const keptPid = proc.computerPid ?? handle?.pid ?? null
   proc.awaitingComputer = false
   proc.handle = null
   proc.pid = null
@@ -526,8 +526,12 @@ function detachAndTerminate(proc: ManagedProcess): {
   const previous = proc.termination
   const done = (async (): Promise<boolean> => {
     if (handle) {
-      handle.kill()
-      return true
+      // Awaited: the computer replies once the whole tree is gone, so a following
+      // start never collides with the old run's port.
+      const ended = (await Promise.resolve(handle.kill()).catch(() => false)) !== false
+      // Not confirmed gone: keep it addressable (by session) for the next stop.
+      if (!ended && proc.generation === generation && keptPid != null) proc.computerPid = keptPid
+      return ended
     }
     if (keptOnComputer) {
       const backend = getProcessBackend()
@@ -644,8 +648,12 @@ export async function restartProcessDetailed(id: string): Promise<StartProcessRe
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
   if (!proc) return { ok: false, reason: 'not-found' }
-  // A live run is ended on its computer first (awaited by respawn).
-  const generation = proc.handle ? detachAndTerminate(proc).generation : ++proc.generation
+  // A live run is ended on its computer first (awaited by respawn), as is a run
+  // still kept there (orphaned).
+  const generation =
+    proc.handle || proc.computerPid != null
+      ? detachAndTerminate(proc).generation
+      : ++proc.generation
   pushLog(proc, '[restarting...]')
   setStatus(proc, 'running')
   return respawn(proc, generation)

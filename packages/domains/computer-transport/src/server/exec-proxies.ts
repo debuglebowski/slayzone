@@ -133,6 +133,13 @@ import type { HubComputerGateway } from './hub-gateway'
  */
 export type RoutingGateway = Pick<HubComputerGateway, 'request' | 'events' | 'listComputers'>
 
+/**
+ * A process kill waits on the computer until the tree is gone: up to its SIGTERM
+ * grace (2s) plus SIGKILL settling and the `ps` / `pgrep` probes. Generous, so a
+ * slow box still gets the verdict rather than a timeout.
+ */
+const PROC_KILL_TIMEOUT_MS = 20_000
+
 // ===========================================================================
 // Internal helpers
 // ===========================================================================
@@ -2138,7 +2145,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
             }
           )
       },
-      kill: (signal?: string): void => {
+      kill: (signal?: string): Promise<boolean> => {
         if (entry.detached) {
           // Same rule as the pty handle: undeliverable now, and must not be
           // resumed or re-spawned later — stop tracking, the reconnect sweep
@@ -2146,16 +2153,26 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           entry.disposed = true
           entry.pendingSpawn = undefined
           if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
-          return
+          return Promise.resolve(false)
         }
-        void gateway
-          .request(computerId, HubToComputerMethods.procKill, {
-            sessionId: spec.id,
-            // Only THIS attempt: a late kill must never reach a replacement.
-            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
-            ...(signal ? { signal } : {})
-          })
-          .catch(noop)
+        // Resolves once the computer reports the tree gone (it waits out SIGTERM,
+        // then SIGKILLs survivors); an older computer replies at once with no verdict.
+        return gateway
+          .request(
+            computerId,
+            HubToComputerMethods.procKill,
+            {
+              sessionId: spec.id,
+              // Only THIS attempt: a late kill must never reach a replacement.
+              ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+              ...(signal ? { signal } : {})
+            },
+            PROC_KILL_TIMEOUT_MS
+          )
+          .then(
+            (reply) => (reply as { clean?: unknown } | null)?.clean !== false,
+            () => false
+          )
       }
     }
 
@@ -2286,7 +2303,15 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       },
       /** End such a run on its computer (the computer tree-kills it). */
       async killSession(computerId: string, sessionId: string) {
-        await gateway.request(computerId, HubToComputerMethods.procKill, { sessionId })
+        const reply = await gateway.request(
+          computerId,
+          HubToComputerMethods.procKill,
+          { sessionId },
+          PROC_KILL_TIMEOUT_MS
+        )
+        if ((reply as { clean?: unknown } | null)?.clean === false) {
+          throw new Error('part of the run outlived SIGKILL on its computer')
+        }
       }
     }
   }

@@ -126,3 +126,57 @@ describe('on a computer: start / stop / restart', () => {
     expect(await startProcess('nope')).toEqual({ ok: false, reason: 'not-found' })
   })
 })
+
+// The computer replies to a kill once the whole tree is gone (TERM, then KILL).
+// Stop and Restart wait for that reply: marking stopped, or spawning again, before
+// it let the restarted server collide with the old one's port.
+describe('stop / restart wait for the computer to end the tree', () => {
+  const pending: Array<(clean: boolean) => void> = []
+  let spawns = 0
+  const slowKill: ProcessBackend = {
+    spawn(): ProcHandle {
+      spawns++
+      return {
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: () => new Promise<boolean>((resolve) => pending.push(resolve))
+      }
+    }
+  }
+  let id = ''
+  beforeAll(async () => {
+    setProcessBackend(slowKill)
+    setProcessComputerResolver(async () => 'c1')
+    id = await spawnProcess('p', null, 'srv', 'node server.js', '/tmp', false)
+  })
+  const tick = () => new Promise((r) => setTimeout(r, 20))
+
+  test('restart spawns the new run only after the old tree is gone', async () => {
+    const restart = restartProcessDetailed(id)
+    await tick()
+    expect(pending, 'the kill is in flight').toHaveLength(1)
+    expect(spawns, 'no new run while the old one may hold its port').toBe(1)
+    pending.shift()!(true)
+    expect(await restart).toMatchObject({ ok: true })
+    expect(spawns).toBe(2)
+  })
+
+  test('stop reads stopped only once the tree is gone', async () => {
+    const stop = stopProcess(id)
+    await tick()
+    expect(status(id)?.status, 'not stopped while the kill is in flight').toBe('running')
+    pending.shift()!(true)
+    await stop
+    expect(status(id)?.status).toBe('stopped')
+  })
+
+  test('a tree that survived SIGKILL leaves the row orphaned, still stoppable', async () => {
+    await startProcess(id)
+    const stop = stopProcess(id)
+    await tick()
+    pending.shift()!(false)
+    await stop
+    expect(status(id)?.status).toBe('orphaned')
+  })
+})
