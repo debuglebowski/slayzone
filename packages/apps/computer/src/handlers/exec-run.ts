@@ -16,7 +16,7 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { spawnCwd } from '../config'
+import { spawnCwd } from '../path-jail'
 import { resolveCommand } from './resolve-command'
 import type { HandlerContext, HubMethodTable } from './types'
 

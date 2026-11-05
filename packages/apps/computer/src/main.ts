@@ -35,12 +35,8 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
-import {
-  effectiveHubUrls,
-  JailViolationError,
-  setProtectedPaths,
-  type ComputerConfig
-} from './config'
+import { effectiveHubUrls, type ComputerConfig } from './config'
+import { JailViolationError, setProtectedPaths } from './path-jail'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { createAgentHookServer } from './handlers/agent-hook'

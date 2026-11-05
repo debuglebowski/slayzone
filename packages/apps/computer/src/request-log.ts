@@ -9,7 +9,7 @@
  * HOW THE HUB IS KEPT OUT.
  *   - No hub → computer method reads, lists, rotates or clears it. This module
  *     exposes `record` and nothing else; there is no read or truncate API.
- *   - Its directory is a protected path (`setProtectedPaths` in config.ts), so no
+ *   - Its directory is a protected path (`setProtectedPaths` in path-jail.ts), so no
  *     fs/git/proc frame can name it even when an allowed root contains it.
  *   - Append-only by construction: every write opens with `O_APPEND`, and the file
  *     and its directory are created `0600` / `0700` in the computer's own state dir.

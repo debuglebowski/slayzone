@@ -70,7 +70,7 @@ import {
 } from '@slayzone/platform/node-pty-install'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
-import { spawnCwd } from '../config'
+import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
 import {

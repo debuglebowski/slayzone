@@ -212,6 +212,29 @@ export function gitOpRepoRelativePaths<K extends GitOpName>(op: K, input: GitOpI
   return fieldValues(input as Record<string, unknown>, gitOpsContract[op].repoRelative)
 }
 
+/**
+ * `input` with every path field replaced: absolute ones by `absolute(p)`, repo-
+ * relative ones by `repoRelative(p)`. The computer runs an op on the paths its jail
+ * judged, never on the raw ones the hub sent.
+ */
+export function mapGitOpPaths<K extends GitOpName>(
+  op: K,
+  input: GitOpInput<K>,
+  map: { absolute: (p: string) => string; repoRelative: (p: string) => string }
+): GitOpInput<K> {
+  const out: Record<string, unknown> = { ...(input as Record<string, unknown>) }
+  const apply = (fields: readonly string[], fn: (p: string) => string) => {
+    for (const f of fields) {
+      const v = out[f]
+      if (typeof v === 'string') out[f] = fn(v)
+      else if (Array.isArray(v)) out[f] = v.map((x) => (typeof x === 'string' ? fn(x) : x))
+    }
+  }
+  apply(gitOpsContract[op].paths, map.absolute)
+  apply(gitOpsContract[op].repoRelative, map.repoRelative)
+  return out as GitOpInput<K>
+}
+
 export function isGitOpName(name: string): name is GitOpName {
   return Object.hasOwn(gitOpsContract, name)
 }

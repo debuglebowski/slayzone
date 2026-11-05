@@ -62,7 +62,7 @@ import {
   RpcError,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { spawnCwd } from '../config'
+import { spawnCwd } from '../path-jail'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import { collectProcessStats, collectProcessTitles } from '@slayzone/processes/pid-stats'
