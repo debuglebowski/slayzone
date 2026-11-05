@@ -87,7 +87,9 @@ export function createGitOpHandlers(
           }
           throw err
         }
-        return relative(repo, path) || '.'
+        // The repo itself (`''`, `.`) stays as sent: a file op never widens to `.`.
+        const inRepo = relative(repo, path)
+        return inRepo === '' ? rel : inRepo
       }
     })
     if (name === 'writeResolvedFile') {
