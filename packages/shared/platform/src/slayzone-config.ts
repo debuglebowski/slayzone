@@ -86,6 +86,11 @@ export interface HubConfig {
   enableIntegrations?: boolean
   /** Third-party telemetry (PostHog, Convex) in the web UI and connected apps. Default on. */
   enableTelemetry?: boolean
+  /**
+   * STUN servers for WebRTC direct links, `host:port` each (env
+   * `SLAYZONE_HUB_STUN_ADDRESSES` wins). Absent = Cloudflare's; `[]` = none.
+   */
+  stunAddresses?: string[]
 }
 
 /** The boolean switch keys of {@link HubConfig}, in file order. */
@@ -221,6 +226,8 @@ function coerceHubConfig(raw: Record<string, unknown>): HubConfig {
     cfg.ssoTenantId = raw.ssoTenantId.trim()
   if (typeof raw.ssoClientId === 'string' && raw.ssoClientId.trim().length > 0)
     cfg.ssoClientId = raw.ssoClientId.trim()
+  if (Array.isArray(raw.stunAddresses) && raw.stunAddresses.every((a) => typeof a === 'string'))
+    cfg.stunAddresses = raw.stunAddresses as string[]
   // `mode` (the retired SLAYZONE_MODE key) is deliberately NOT read: it is ignored.
   return cfg
 }
@@ -249,6 +256,16 @@ export function diagnoseHubConfig(raw: Record<string, unknown>): HubConfigProble
         message: `'${key}' must be true or false, got ${JSON.stringify(raw[key])}`
       })
     }
+  }
+  // Its values are checked with the env form (boot rule B18); only the shape is here.
+  if (
+    raw.stunAddresses !== undefined &&
+    !(Array.isArray(raw.stunAddresses) && raw.stunAddresses.every((a) => typeof a === 'string'))
+  ) {
+    problems.push({
+      key: 'stunAddresses',
+      message: `'stunAddresses' must be a list of "host:port" strings, got ${JSON.stringify(raw.stunAddresses)}`
+    })
   }
   return problems
 }

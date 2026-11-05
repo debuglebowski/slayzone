@@ -6,7 +6,11 @@ import {
   type SecurityEventName,
   type SecurityOutcome
 } from '@slayzone/platform/security-log'
-import type { DirectLinkIssueResult } from '../shared/direct-link'
+import {
+  DIRECT_RTC_MAX_SDP,
+  type DirectLinkIssueResult,
+  type DirectRtcConnectResult
+} from '../shared/direct-link'
 import { TRPCError } from '@trpc/server'
 import {
   router,
@@ -335,13 +339,40 @@ export const computersRouter = router({
             taskId: z.string().min(1).max(200),
             computerId: z.string().min(1).max(200).optional()
           })
-        ])
+        ]),
+        // What the client can use. Absent (an older client): WebSocket only.
+        transports: z
+          .array(z.enum(['ws', 'webrtc']))
+          .max(2)
+          .optional()
       })
     )
     .mutation(async ({ ctx, input }): Promise<DirectLinkIssueResult> => {
       const issue = getComputersDepsOrNull()?.issueDirectLink
       if (!issue) return { available: false, reason: 'unsupported' }
-      return issue(input.target, {
+      return issue(
+        input.target,
+        { userId: ctx.principal?.userId ?? null, ip: currentSecurityContext()?.ip ?? null },
+        input.transports ? { transports: input.transports } : {}
+      )
+    }),
+
+  /**
+   * Broker a WebRTC offer for a direct-link grant the caller holds (docs/direct-link.md):
+   * the hub sends it to the grant's computer over that computer's authenticated link
+   * and returns the computer's answer. `ok: false` means "use the hub relay".
+   */
+  directRtcConnect: publicProcedure
+    .input(
+      z.object({
+        grantId: z.string().min(1).max(200),
+        sdp: z.string().min(1).max(DIRECT_RTC_MAX_SDP)
+      })
+    )
+    .mutation(async ({ ctx, input }): Promise<DirectRtcConnectResult> => {
+      const connect = getComputersDepsOrNull()?.directRtcConnect
+      if (!connect) return { ok: false, reason: 'refused' }
+      return connect(input.grantId, input.sdp, {
         userId: ctx.principal?.userId ?? null,
         ip: currentSecurityContext()?.ip ?? null
       })

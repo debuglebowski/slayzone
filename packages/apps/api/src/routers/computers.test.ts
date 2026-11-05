@@ -559,6 +559,51 @@ test('computers.issueDirectLink: relays to the hub issuer with the caller; unsup
   }
 })
 
+test('computers.issueDirectLink passes the client transports; directRtcConnect relays the offer with the caller', async () => {
+  const seen: unknown[] = []
+  expect(await caller.directRtcConnect({ grantId: 'g1', sdp: 'offer' })).toEqual({
+    ok: false,
+    reason: 'refused'
+  })
+  setComputersDeps({
+    ...fakeDeps,
+    issueDirectLink: async (target, who, options) => {
+      seen.push({ target, who, options })
+      return { available: false, reason: 'no-address' }
+    },
+    directRtcConnect: async (grantId, sdp, who) => {
+      seen.push({ grantId, sdp, who })
+      return { ok: true, sdp: 'answer' }
+    }
+  })
+  try {
+    await caller.issueDirectLink({
+      target: { kind: 'pty', sessionId: 's1', taskId },
+      transports: ['ws', 'webrtc']
+    })
+    await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1', taskId } })
+    expect(await caller.directRtcConnect({ grantId: 'g1', sdp: 'offer' })).toEqual({
+      ok: true,
+      sdp: 'answer'
+    })
+    expect(seen).toEqual([
+      {
+        target: { kind: 'pty', sessionId: 's1', taskId },
+        who: { userId: null, ip: null },
+        options: { transports: ['ws', 'webrtc'] }
+      },
+      {
+        target: { kind: 'pty', sessionId: 's1', taskId },
+        who: { userId: null, ip: null },
+        options: {}
+      },
+      { grantId: 'g1', sdp: 'offer', who: { userId: null, ip: null } }
+    ])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})
+
 test('computers.revokeComputer: tells the hub, which drops its direct-link grants and live connection', async () => {
   const r = await registerComputer(h.slayDb, {
     name: 'revoked-live',

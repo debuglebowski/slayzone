@@ -39,7 +39,7 @@ const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
 const GH_DEFAULT_TIMEOUT_MS = 30_000
 import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
-import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
+import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
 import {
   createComputerChatMaintenance,
@@ -1741,10 +1741,14 @@ export function composeServer(opts: {
       // Revoking used to leave a live connection working until it next reconnected.
       computerGatewayRef?.disconnect(computerId, 'computer revoked')
     },
-    issueDirectLink: (target, caller) =>
+    issueDirectLink: (target, caller, options) =>
       directLinkIssuer
-        ? directLinkIssuer.issue(target, caller)
+        ? directLinkIssuer.issue(target, caller, options)
         : Promise.resolve({ available: false, reason: 'no-computer' }),
+    directRtcConnect: (grantId, sdp, caller) =>
+      directLinkIssuer
+        ? directLinkIssuer.rtcConnect(grantId, sdp, caller)
+        : Promise.resolve({ ok: false, reason: 'refused' }),
     // The desktop app's own co-spawned computer (its enroll name always maps to this
     // id, see the local-computer dedup below) is never disabled or deleted on its own
     // hub. A standalone hub spawns no computer of its own, so it protects none.
@@ -1872,7 +1876,12 @@ export function composeServer(opts: {
         if (await computerChat.ownership.unavailable(owner.id)) return null
         return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
       },
-      ...(placement.gate ? { gate: placement.gate } : {})
+      ...(placement.gate ? { gate: placement.gate } : {}),
+      // Validated at boot (rule B18), so this is the parsed value.
+      stunAddresses: () => {
+        const stun = readHubStunAddresses()
+        return stun.ok ? stun.addresses : []
+      }
     })
     // Every (re)connect: the computer keeps exactly the grants this hub still holds
     // (none after a hub restart), so nothing it granted outlives what the hub knows.

@@ -1,4 +1,9 @@
-import type { DirectLinkIssueResult, DirectLinkTarget } from '../shared/direct-link'
+import type {
+  DirectLinkIssueResult,
+  DirectLinkTarget,
+  DirectLinkTransport,
+  DirectRtcConnectResult
+} from '../shared/direct-link'
 import type { FindJoinTokenAccount } from './join-token-policy'
 
 // Computers / computer deps — the hub/computer-split surface the `computersRouter`
@@ -82,8 +87,18 @@ export type ComputersDeps = {
    */
   issueDirectLink?: (
     target: DirectLinkTarget,
-    caller: { userId: string | null; ip: string | null }
+    caller: { userId: string | null; ip: string | null },
+    options: { transports?: readonly DirectLinkTransport[] }
   ) => Promise<DirectLinkIssueResult>
+  /**
+   * Broker a client's WebRTC offer for a direct-link grant it holds (hub
+   * `direct-link.ts` rtcConnect). Absent: this host brokers none.
+   */
+  directRtcConnect?: (
+    grantId: string,
+    sdp: string,
+    caller: { userId: string | null; ip: string | null }
+  ) => Promise<DirectRtcConnectResult>
   /**
    * The desktop app's own co-spawned computer on its own hub — never disabled, never
    * deleted (nothing on the machine could run without it). Null/absent on a hub that

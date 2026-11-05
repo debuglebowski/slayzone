@@ -98,6 +98,7 @@ export const SECURITY_EVENTS = [
   'computer.direct_grant',
   /** Direct-link capabilities revoked on one computer (`detail.reason`, `detail.grants`). */
   'computer.direct_revoke',
+  'computer.direct_rtc_signal',
   /** A computer's direct-link listener refused a client by a flood limit (`denied`);
    *  at most one line per limit and address per minute. `detail.limit`, `detail.max`. */
   'computer.rate_limit',

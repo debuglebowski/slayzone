@@ -33,14 +33,19 @@ import {
   type DirectGrantParams,
   type DirectResource,
   type DirectRevokeParams,
+  type DirectRtcOfferParams,
+  directRtcAnswerSchema,
   HubToComputerMethods
 } from '@slayzone/computer-transport/shared'
 import type {
   DirectLinkIssueResult,
   DirectLinkResource,
-  DirectLinkTarget
+  DirectLinkTarget,
+  DirectLinkTransport,
+  DirectRtcConnectResult
 } from '@slayzone/computers/shared'
 import { isLoopbackAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
+import { createFixedWindowLimiter } from '@slayzone/platform/rate-limit'
 import { runAsSecurityActor, securityEvent } from '@slayzone/platform/security-log'
 
 /** The slice of the computer gateway the issuer needs. */
@@ -49,6 +54,8 @@ export interface DirectLinkGateway {
     computerId: string
     directAddress: string | null
     peerLoopback: boolean
+    /** Whether it answers WebRTC offers (absent: no). */
+    directRtc?: boolean
   }>
   request(computerId: string, method: string, params: unknown): Promise<unknown>
 }
@@ -68,6 +75,16 @@ export interface DirectLinkIssuerDeps {
   gate?: (computerId: string, work: ComputerWork) => Promise<void>
   /** Wall clock ms, for forgetting expired grants. */
   now?: () => number
+  /** STUN servers handed to both WebRTC peers (`SLAYZONE_HUB_STUN_ADDRESSES`). */
+  stunAddresses?: () => readonly string[]
+  /** WebRTC offers per user, and per client address, per minute. Default 30. */
+  signalLimitPerMinute?: number
+}
+
+/** What the client says it can use (`computers.issueDirectLink` input). */
+export interface DirectLinkIssueOptions {
+  /** Absent (an older client): WebSocket only. */
+  transports?: readonly DirectLinkTransport[]
 }
 
 export interface DirectLinkCaller {
@@ -107,7 +124,21 @@ function asHub<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export interface DirectLinkIssuer {
-  issue(target: DirectLinkTarget, caller: DirectLinkCaller): Promise<DirectLinkIssueResult>
+  issue(
+    target: DirectLinkTarget,
+    caller: DirectLinkCaller,
+    options?: DirectLinkIssueOptions
+  ): Promise<DirectLinkIssueResult>
+  /**
+   * Broker a client's WebRTC offer to the computer that holds its grant, as the
+   * caller (the gateway's owner check applies), and return the computer's answer.
+   * Only for a live grant this hub issued to this caller.
+   */
+  rtcConnect(
+    grantId: string,
+    sdp: string,
+    caller: DirectLinkCaller
+  ): Promise<DirectRtcConnectResult>
   /** Live grant ids this hub issued on a computer (for `direct.reset`). */
   heldGrantIds(computerId: string): string[]
   /**
@@ -125,6 +156,8 @@ export interface DirectLinkIssuer {
 export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIssuer {
   const now = deps.now ?? Date.now
   const grants = new Map<string, IssuedGrant>()
+  const signalLimiter = createFixedWindowLimiter()
+  const signalRule = { max: deps.signalLimitPerMinute ?? 30, windowMs: 60_000 }
 
   function prune(): void {
     const t = now()
@@ -174,7 +207,7 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
   }
 
   return {
-    async issue(target, caller) {
+    async issue(target, caller, options = {}) {
       const located = await locate(target)
       if ('unavailable' in located) return { available: false, reason: located.unavailable }
       // The target's task (and computer, when named) is what the owner gate checked:
@@ -189,12 +222,22 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         .listUsableComputers()
         .find((c) => c.computerId === located.computerId)
       if (!computer) return { available: false, reason: 'no-computer' }
-      if (!computer.directAddress) return { available: false, reason: 'no-address' }
-      if (
-        isLoopbackAuthority(computer.directAddress) &&
-        !(computer.peerLoopback && isLoopbackPeer(caller.ip))
-      ) {
-        return { available: false, reason: 'unreachable' }
+      // The WebSocket listener when this client can dial it; else WebRTC, brokered
+      // here, when both ends speak it; else the relay (the same answers as before).
+      const wsAddress =
+        computer.directAddress &&
+        !(
+          isLoopbackAuthority(computer.directAddress) &&
+          !(computer.peerLoopback && isLoopbackPeer(caller.ip))
+        )
+          ? computer.directAddress
+          : null
+      const rtc =
+        wsAddress === null &&
+        computer.directRtc === true &&
+        !!options.transports?.includes('webrtc')
+      if (wsAddress === null && !rtc) {
+        return { available: false, reason: computer.directAddress ? 'unreachable' : 'no-address' }
       }
       // Throws on refusal: a caller the gate refuses gets the same error the relayed
       // request would, not a silent fallback.
@@ -231,15 +274,72 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
           ttlMs: params.ttlMs
         }
       })
+      if (rtc) {
+        return {
+          available: true,
+          transport: 'webrtc',
+          computerId: computer.computerId,
+          token,
+          grantId: params.grantId,
+          expiresInMs: params.ttlMs,
+          protocol: DIRECT_LINK_PROTOCOL,
+          stunAddresses: [...(deps.stunAddresses?.() ?? [])]
+        }
+      }
       return {
         available: true,
+        transport: 'ws',
         computerId: computer.computerId,
-        address: computer.directAddress,
+        address: wsAddress as string,
         token,
         grantId: params.grantId,
         expiresInMs: params.ttlMs,
         protocol: DIRECT_LINK_PROTOCOL
       }
+    },
+
+    async rtcConnect(grantId, sdp, caller) {
+      prune()
+      const grant = grants.get(grantId)
+      if (!grant || grant.userId !== caller.userId) return { ok: false, reason: 'no-grant' }
+      const userKey = `user|${caller.userId ?? ''}`
+      const ipKey = `ip|${caller.ip ?? ''}`
+      if (
+        !signalLimiter.consume(userKey, signalRule).allowed ||
+        !signalLimiter.consume(ipKey, signalRule).allowed
+      ) {
+        securityEvent({
+          event: 'computer.direct_rtc_signal',
+          outcome: 'denied',
+          targetKind: 'computer',
+          targetId: grant.computerId,
+          detail: { grantId, reason: 'rate_limited', max: signalRule.max, windowSec: 60 }
+        })
+        return { ok: false, reason: 'rate-limited' }
+      }
+      const params: DirectRtcOfferParams = {
+        grantId,
+        sdp,
+        stunAddresses: [...(deps.stunAddresses?.() ?? [])],
+        clientAddress: caller.ip
+      }
+      // As the caller: the gateway's owner check applies, as for the grant itself.
+      const answer = await deps.gateway
+        .request(grant.computerId, HubToComputerMethods.directRtcOffer, params)
+        .then(
+          (raw) => directRtcAnswerSchema.safeParse(raw),
+          () => null
+        )
+      const ok = answer?.success === true
+      // The SDP is never audited: it carries the client's network addresses.
+      securityEvent({
+        event: 'computer.direct_rtc_signal',
+        outcome: ok ? 'success' : 'failure',
+        targetKind: 'computer',
+        targetId: grant.computerId,
+        detail: { grantId }
+      })
+      return ok ? { ok: true, sdp: answer.data.sdp } : { ok: false, reason: 'refused' }
     },
 
     heldGrantIds(computerId) {

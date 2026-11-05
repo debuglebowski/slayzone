@@ -396,6 +396,8 @@ const CONNECTION =
 const COMPUTER =
   "computer management (metadata, lifecycle): decided in the handler — the computer's owner, or an admin (computer-access.ts, T-19)"
 const SELF = "the caller's own settings or client diagnostics (T-16 scopes settings per user)"
+const DIRECT_GRANT =
+  'a direct-link grant id: brokered only for a live grant the hub issued to this caller, matched in the handler (hub direct-link.ts rtcConnect)'
 const FEEDBACK = 'feedback threads to the SlayZone team: no owner column (hub-wide)'
 const TEST = 'test-only (PLAYWRIGHT=1); refused in production'
 const META = 'app or hub metadata'
@@ -828,6 +830,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     // The task the resource lies in (the issuer refuses one outside it).
     needsOne: ['target.taskId']
   },
+  'computers.directRtcConnect': none(DIRECT_GRANT),
   'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),

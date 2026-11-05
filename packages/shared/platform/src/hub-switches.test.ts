@@ -10,6 +10,9 @@ import { ENV_MANIFEST } from './env-manifest'
 import {
   HUB_ALLOWED_WEB_ORIGINS_ENV,
   HUB_PROCESS_ENV,
+  HUB_STUN_ADDRESSES_ENV,
+  DEFAULT_HUB_STUN_ADDRESSES,
+  readHubStunAddresses,
   HUB_SWITCH_DEFAULTS,
   HUB_SWITCH_ENV,
   HubSwitchValueError,
@@ -279,3 +282,30 @@ test('isHubLoginRequired: garbage → false (does not throw)', () => {
     expect(Object.keys(NOT_HUB_PROCESS_CONFIG).every((k) => k in ENV_MANIFEST)).toBe(true)
   })
 }
+
+// M5: STUN servers the hub hands both WebRTC peers (docs/direct-link.md).
+// Authorities, never URLs (env rule 5); empty = none; default Cloudflare's.
+test('SLAYZONE_HUB_STUN_ADDRESSES: default, none, a list; never a URL', () => {
+  expect(HUB_STUN_ADDRESSES_ENV).toBe('SLAYZONE_HUB_STUN_ADDRESSES')
+  expect(DEFAULT_HUB_STUN_ADDRESSES).toEqual(['stun.cloudflare.com:3478'])
+  expect(readHubStunAddresses({})).toEqual({ ok: true, addresses: ['stun.cloudflare.com:3478'] })
+  expect(readHubStunAddresses({ SLAYZONE_HUB_STUN_ADDRESSES: '' })).toEqual({
+    ok: true,
+    addresses: []
+  })
+  expect(
+    readHubStunAddresses({ SLAYZONE_HUB_STUN_ADDRESSES: 'stun.example:3478, [2001:db8::1]:19302' })
+  ).toEqual({ ok: true, addresses: ['stun.example:3478', '[2001:db8::1]:19302'] })
+  for (const bad of [
+    'stun:stun.example:3478',
+    'https://x',
+    'a:1/b',
+    Array(9).fill('a:1').join(',')
+  ]) {
+    const r = readHubStunAddresses({ SLAYZONE_HUB_STUN_ADDRESSES: bad })
+    expect(r.ok, bad).toBe(false)
+    if (!r.ok) expect(r.message).toContain('SLAYZONE_HUB_STUN_ADDRESSES')
+  }
+  expect(HUB_PROCESS_ENV).toContain('SLAYZONE_HUB_STUN_ADDRESSES')
+  expect(ENV_MANIFEST.SLAYZONE_HUB_STUN_ADDRESSES).toBe('infra')
+})

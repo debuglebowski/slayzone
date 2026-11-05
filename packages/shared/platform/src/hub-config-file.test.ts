@@ -446,3 +446,29 @@ describe('hub-config-file: legacy shared config.json fallback', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// M5: STUN servers for WebRTC direct links (docs/direct-link.md). The file holds a
+// list; anything else refuses boot instead of falling back to the default.
+describe('hub-config-file: stunAddresses', () => {
+  test('a list of strings is read; [] means none', () => {
+    const dir = tmp()
+    const p = join(dir, 'hub.config.json')
+    writeFileSync(p, JSON.stringify({ stunAddresses: ['stun.example:3478'] }))
+    expect(loadHubConfigFile(p).stunAddresses).toEqual(['stun.example:3478'])
+    expect(loadHubConfigProblems(p)).toEqual([])
+    writeFileSync(p, JSON.stringify({ stunAddresses: [] }))
+    expect(loadHubConfigFile(p).stunAddresses).toEqual([])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('any other shape is a problem that refuses boot', () => {
+    const dir = tmp()
+    const p = join(dir, 'hub.config.json')
+    for (const bad of ['stun.example:3478', [1], { a: 1 }]) {
+      writeFileSync(p, JSON.stringify({ stunAddresses: bad }))
+      expect(loadHubConfigFile(p).stunAddresses).toBeUndefined()
+      expect(loadHubConfigProblems(p).map((x) => x.key)).toEqual(['stunAddresses'])
+    }
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

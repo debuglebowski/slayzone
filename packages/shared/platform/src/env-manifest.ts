@@ -133,6 +133,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // The Convex deployment (host[:port]) the hub starts GitHub sign-in against — never
   // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
   SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
+  SLAYZONE_HUB_STUN_ADDRESSES: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_COMPUTER_AUTO_UPGRADE: 'infra',
   SLAYZONE_COMPUTER_UPGRADE_WORKER: 'infra',

@@ -850,3 +850,16 @@ test('B17: compares the raw value — a trailing newline is a different secret',
   }
   expect(rule, `B17, got ${rule}`).toBe('B17')
 })
+
+console.log('\nB18: STUN servers for WebRTC direct links')
+console.log('─'.repeat(40))
+
+test('B18: unset, empty and host:port lists boot; anything else refuses, naming the value', () => {
+  for (const v of [undefined, '', 'stun.cloudflare.com:3478', 'a.example:1,b.example:2']) {
+    assertBoots({ env: v === undefined ? {} : { SLAYZONE_HUB_STUN_ADDRESSES: v } })
+  }
+  for (const v of ['stun:a.example:1', 'https://a.example', 'a.example:1/x']) {
+    assertRefuses({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }, 'SLAYZONE_HUB_STUN_ADDRESSES', v)
+    expect(refusedRule({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }), `'${v}' is B18`).toBe('B18')
+  }
+})

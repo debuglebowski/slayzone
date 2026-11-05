@@ -38,9 +38,24 @@ export type DirectLinkUnavailableReason =
   | 'unsupported'
   | 'wrong-target'
 
+/**
+ * How the client reaches the computer: its WebSocket listener, or a WebRTC data
+ * channel the hub brokers (`computers.directRtcConnect`) when no listener is reachable.
+ */
+export type DirectLinkTransport = 'ws' | 'webrtc'
+
+/**
+ * Largest SDP a client may send. Equal to `@slayzone/computer-transport`'s
+ * `DIRECT_RTC_MAX_SDP`, which this barrel cannot import (it reaches the renderer);
+ * the hub's direct-link test pins the two together.
+ */
+export const DIRECT_RTC_MAX_SDP = 64 * 1024
+
 export type DirectLinkIssueResult =
   | {
       available: true
+      /** Absent from an older hub: `ws`. */
+      transport?: 'ws'
       computerId: string
       /** The computer's direct-listener authority; scheme from the host (`hubUrlFromAddr`). */
       address: string
@@ -52,4 +67,28 @@ export type DirectLinkIssueResult =
       /** Direct-link wire version (`DIRECT_LINK_PROTOCOL`). */
       protocol: number
     }
+  | {
+      available: true
+      transport: 'webrtc'
+      computerId: string
+      /** Bearer capability. Present it in the data channel's first frame only. */
+      token: string
+      grantId: string
+      expiresInMs: number
+      protocol: number
+      /** STUN servers for both peers, `host:port` (no `stun:` scheme). */
+      stunAddresses: string[]
+    }
   | { available: false; reason: DirectLinkUnavailableReason }
+
+/** `computers.directRtcConnect`: the computer's SDP answer, or why there is none. */
+export type DirectRtcConnectResult =
+  | { ok: true; sdp: string }
+  | {
+      ok: false
+      /**
+       * `no-grant`: the caller holds no live grant by that id. `rate-limited`: too many
+       * offers. `refused`: the computer did not answer it. All mean "use the relay".
+       */
+      reason: 'no-grant' | 'rate-limited' | 'refused'
+    }

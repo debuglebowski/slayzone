@@ -27,6 +27,7 @@ interface Computer {
   computerId: string
   directAddress: string | null
   peerLoopback: boolean
+  directRtc?: boolean
 }
 
 function setup(over: Partial<DirectLinkIssuerDeps> = {}, computers?: Computer[]) {
@@ -410,4 +411,144 @@ describe('direct-link revocation', () => {
       { computerId: 'c-remote', method: HubToComputerMethods.directReset, params: { keep: [] } }
     ])
   })
+})
+
+// M5: a remote computer without a reachable listener gets a WebRTC direct link,
+// brokered by the hub (docs/direct-link.md). Only for a client that says it speaks
+// WebRTC, and only to a computer that advertises it.
+describe('direct-link issuer: WebRTC', () => {
+  const rtcComputers: Computer[] = [
+    { computerId: 'c-local', directAddress: '127.0.0.1:5001', peerLoopback: true, directRtc: true },
+    { computerId: 'c-remote', directAddress: null, peerLoopback: false, directRtc: true },
+    { computerId: 'c-none', directAddress: null, peerLoopback: false, directRtc: false }
+  ]
+  const STUN = ['stun.cloudflare.com:3478']
+  function rtcSetup(over: Partial<DirectLinkIssuerDeps> = {}) {
+    return setup(
+      {
+        stunAddresses: () => STUN,
+        resolvePty: async (sessionId) => ({
+          computerId: sessionId.startsWith('r')
+            ? 'c-remote'
+            : sessionId.startsWith('n')
+              ? 'c-none'
+              : 'c-local',
+          direct: true,
+          taskId: 'task-1'
+        }),
+        ...over
+      },
+      rtcComputers
+    )
+  }
+  const pty = (sessionId: string) => ({ kind: 'pty' as const, sessionId, taskId: 'task-1' })
+
+  it('offers WebRTC to a client that speaks it when the computer has no reachable listener', async () => {
+    const { issuer, requests } = rtcSetup()
+    const out = await issuer.issue(pty('r1'), remoteClient, { transports: ['ws', 'webrtc'] })
+    expect(out).toMatchObject({
+      available: true,
+      transport: 'webrtc',
+      computerId: 'c-remote',
+      stunAddresses: STUN
+    })
+    expect(requests.map((r) => r.method)).toEqual([HubToComputerMethods.directGrant])
+    // A loopback listener a remote client cannot dial: WebRTC too.
+    expect(
+      await issuer.issue(pty('t:t'), remoteClient, { transports: ['ws', 'webrtc'] })
+    ).toMatchObject({ available: true, transport: 'webrtc', computerId: 'c-local' })
+  })
+
+  it('prefers the WebSocket listener when it is reachable', async () => {
+    const { issuer } = rtcSetup()
+    expect(await issuer.issue(pty('t:t'), local, { transports: ['ws', 'webrtc'] })).toMatchObject({
+      available: true,
+      transport: 'ws',
+      address: '127.0.0.1:5001'
+    })
+  })
+
+  it('keeps today’s answers for an older client, or a computer without WebRTC', async () => {
+    const { issuer } = rtcSetup()
+    expect(await issuer.issue(pty('r1'), remoteClient)).toEqual({
+      available: false,
+      reason: 'no-address'
+    })
+    expect(await issuer.issue(pty('n1'), remoteClient, { transports: ['webrtc'] })).toEqual({
+      available: false,
+      reason: 'no-address'
+    })
+  })
+
+  it('brokers the offer to the granted computer, with STUN and the client address', async () => {
+    const { issuer, requests } = rtcSetup({
+      gateway: {
+        listUsableComputers: () => rtcComputers,
+        request: async (computerId, method, params) => {
+          requests.push({ computerId, method, params: params as Record<string, unknown> })
+          return method === HubToComputerMethods.directRtcOffer
+            ? { sdp: 'answer-sdp' }
+            : { ok: true }
+        }
+      }
+    })
+    const out = await issuer.issue(pty('r1'), remoteClient, { transports: ['webrtc'] })
+    if (!out.available) throw new Error('unreachable')
+    lines = []
+    expect(await issuer.rtcConnect(out.grantId, 'offer-sdp', remoteClient)).toEqual({
+      ok: true,
+      sdp: 'answer-sdp'
+    })
+    expect(requests.at(-1)).toEqual({
+      computerId: 'c-remote',
+      method: HubToComputerMethods.directRtcOffer,
+      params: {
+        grantId: out.grantId,
+        sdp: 'offer-sdp',
+        stunAddresses: STUN,
+        clientAddress: remoteClient.ip
+      }
+    })
+    expect(lines.filter((l) => l.event === 'computer.direct_rtc_signal')).toEqual([
+      expect.objectContaining({ outcome: 'success', targetId: 'c-remote' })
+    ])
+    expect(JSON.stringify(lines)).not.toContain('offer-sdp')
+  })
+
+  it('refuses an offer for a grant the caller does not hold', async () => {
+    const { issuer, requests } = rtcSetup()
+    const out = await issuer.issue(pty('r1'), remoteClient, { transports: ['webrtc'] })
+    if (!out.available) throw new Error('unreachable')
+    const before = requests.length
+    expect(await issuer.rtcConnect('nope', 'sdp', remoteClient)).toEqual({
+      ok: false,
+      reason: 'no-grant'
+    })
+    expect(
+      await issuer.rtcConnect(out.grantId, 'sdp', { userId: 'someone-else', ip: '203.0.113.1' })
+    ).toEqual({ ok: false, reason: 'no-grant' })
+    expect(requests.length).toBe(before)
+  })
+
+  it('rate-limits signaling per user and per address', async () => {
+    const { issuer } = rtcSetup({ signalLimitPerMinute: 2 })
+    const out = await issuer.issue(pty('r1'), remoteClient, { transports: ['webrtc'] })
+    if (!out.available) throw new Error('unreachable')
+    // The fake computer does not answer (refused), but the first two are let through.
+    expect(await issuer.rtcConnect(out.grantId, 'sdp', remoteClient)).toEqual({
+      ok: false,
+      reason: 'refused'
+    })
+    expect((await issuer.rtcConnect(out.grantId, 'sdp', remoteClient)).ok).toBe(false)
+    expect(await issuer.rtcConnect(out.grantId, 'sdp', remoteClient)).toEqual({
+      ok: false,
+      reason: 'rate-limited'
+    })
+  })
+})
+
+it('the SDP limit clients see equals the one the computer enforces', async () => {
+  const { DIRECT_RTC_MAX_SDP: clientMax } = await import('@slayzone/computers/shared')
+  const { DIRECT_RTC_MAX_SDP: wireMax } = await import('@slayzone/computer-transport/shared')
+  expect(clientMax).toBe(wireMax)
 })
