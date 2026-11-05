@@ -22,7 +22,8 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
 import { HubToComputerMethods as M } from '@slayzone/computer-transport/shared'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import { canAccess, invalidateAccessCache, resource } from '@slayzone/api'
+import { canAccess, invalidateAccessCache, requestComputerOf, resource } from '@slayzone/api'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { gitTargetForPath } from '@slayzone/worktrees/hub'
 import { countRunningWork, startsNewWork } from './computer-new-work'
 
@@ -128,6 +129,79 @@ test("L3: one folder recorded for two users is neither's by path (a tie never gr
   expect(await can(A, '/srv/same/x')).toBe(false)
   expect(await can(B, '/srv/same/x')).toBe(false)
   sql(`DELETE FROM projects WHERE id IN ('pTieA', 'pTieB')`)
+})
+
+// Round-7 N4: since L3 a tie denies both — so user A could lock user B out of B's own
+// folder by registering a project at B's root on A's computer. A request that names
+// its computer breaks the tie: the root recorded on THAT computer decides (the
+// gateway then refuses a computer the caller does not own). With no computer named,
+// or none of the tied roots on it, the tie still denies — and says so in the audit log.
+describe('N4: a tie is broken by the computer the request names', () => {
+  const computerOf = (id: string, owner: string) =>
+    sql(
+      `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+       VALUES (?, ?, 'linux-x64', '1', '[]', 1, ?)`,
+      id,
+      id,
+      owner
+    )
+  computerOf('cTieA', A)
+  computerOf('cTieB', B)
+  const placed = (computerId: string, projectId: string, root: string) =>
+    sql(
+      `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+       VALUES (?, ?, ?, 'ready', 1)`,
+      computerId,
+      projectId,
+      root
+    )
+  project('pN4A', A, '/srv/n4')
+  project('pN4B', B, '/srv/n4')
+  sql(`UPDATE projects SET path = NULL WHERE id IN ('pN4A', 'pN4B')`)
+  placed('cTieB', 'pN4B', '/srv/n4')
+  placed('cTieA', 'pN4A', '/srv/n4')
+  const canOn = async (user: string, path: string, computerId?: string) => {
+    invalidateAccessCache()
+    return canAccess(
+      h.slayDb,
+      {
+        authRequired: true,
+        principal: { userId: user },
+        hubRoots: [hubRoot],
+        ...(computerId ? { computerId } : {})
+      },
+      resource('path', path)
+    )
+  }
+
+  test("B's request on B's computer: B's folder", async () => {
+    expect(await canOn(B, '/srv/n4/x', 'cTieB')).toBe(true)
+    expect(await canOn(A, '/srv/n4/x', 'cTieB')).toBe(false)
+  })
+  test("A's request on A's computer: A's folder", async () => {
+    expect(await canOn(A, '/srv/n4/x', 'cTieA')).toBe(true)
+    expect(await canOn(B, '/srv/n4/x', 'cTieA')).toBe(false)
+  })
+  test('no computer named: the tie denies both, and is audited', async () => {
+    const lines: Array<Record<string, unknown>> = []
+    setSecurityLogSink((line) => lines.push(JSON.parse(line) as Record<string, unknown>))
+    try {
+      expect(await canOn(B, '/srv/n4/x')).toBe(false)
+      expect(await canOn(A, '/srv/n4/x')).toBe(false)
+    } finally {
+      setSecurityLogSink()
+    }
+    const ties = lines.filter((l) => l.event === 'authz.path_tie')
+    expect(ties).toHaveLength(2)
+    // A path can carry a user's directory names: never logged.
+    expect(JSON.stringify(ties)).not.toContain('/srv/n4')
+  })
+  test('the gate reads the computer a request names', () => {
+    expect(requestComputerOf({ target: { computerId: 'c1' }, path: '/x' })).toBe('c1')
+    expect(requestComputerOf({ computerId: 'c2' })).toBe('c2')
+    expect(requestComputerOf({ path: '/x' })).toBeNull()
+    expect(requestComputerOf(undefined)).toBeNull()
+  })
 })
 
 describe('L4: a disabled computer refuses exec.run and new worktrees', () => {

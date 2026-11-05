@@ -357,6 +357,12 @@ export const REGRESSIONS = [
       `${P}domains/terminal/src/server/runtime/review-regressions-relay.test.ts`,
       `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
     ]
+  },
+  {
+    round: 7,
+    id: 'N4',
+    what: "a path tie between owners is broken by the request's computer, else denied and audited",
+    files: [rrOwner]
   }
 ]
 

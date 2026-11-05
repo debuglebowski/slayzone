@@ -122,7 +122,8 @@ export {
   type AccessScope,
   type OwnedResource,
   type Ownership,
-  type ResourceKind
+  type ResourceKind,
+  requestComputerOf
 } from './access'
 export {
   TRPC_OWNER_POLICY,
