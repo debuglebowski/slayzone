@@ -85,15 +85,56 @@ export interface DirectBuffer {
   chunks: Array<{ seq: number; data: string }>
   currentSeq: number
   prelude: string
+  /**
+   * The read stopped at `maxChars`: more chunks follow. Read on from the last chunk's
+   * seq (`readDirectPtyBuffer` does). Absent/false: this is everything.
+   */
+  more?: boolean
+}
+
+/**
+ * Bounds of one backfill page, in estimated serialised characters (see
+ * {@link directChunkCost}). Every direct-protocol message must fit a WebRTC data
+ * channel's message cap, and a full scrollback serialises past it (JSON writes each
+ * ESC as `\u001b`).
+ */
+export const DIRECT_BUFFER_PAGE_MIN_CHARS = 4_096
+export const DIRECT_BUFFER_PAGE_MAX_CHARS = 8 * 1024 * 1024
+
+/** A chunk's estimated cost in a serialised page: its JSON string and the envelope. */
+export function directChunkCost(data: string): number {
+  return JSON.stringify(data).length + 32
+}
+
+/**
+ * The first page of `chunks` within `maxChars` (always at least one chunk, so a page
+ * makes progress), and whether more follow. Absent `maxChars`: everything.
+ */
+export function pageChunks<C extends { data: string }>(
+  chunks: C[],
+  maxChars: number | undefined
+): { chunks: C[]; more: boolean } {
+  if (maxChars === undefined) return { chunks, more: false }
+  let size = 0
+  let n = 0
+  for (const c of chunks) {
+    const cost = directChunkCost(c.data)
+    if (n > 0 && size + cost > maxChars) break
+    size += cost
+    n++
+  }
+  return { chunks: n === chunks.length ? chunks : chunks.slice(0, n), more: n < chunks.length }
 }
 
 /** One hub's terminals on this computer (the computer's `DirectPtyService`). */
 export interface DirectPtyService {
+  /** `maxChars`: page the buffer (see {@link DirectBuffer.more}). */
   attach(
     sessionId: string,
-    afterSeq: number
+    afterSeq: number,
+    maxChars?: number
   ): { exists: boolean; size: { cols: number; rows: number } | null; buffer: DirectBuffer }
-  getBufferSince(sessionId: string, afterSeq: number): DirectBuffer
+  getBufferSince(sessionId: string, afterSeq: number, maxChars?: number): DirectBuffer
   /**
    * False when the session has no live process. `writeId`: the client's id, applied
    * once on any path (a repeat answers true and writes nothing).
@@ -154,6 +195,13 @@ export interface DirectPtyData {
 const t = initTRPC.context<DirectContext>().create({ transformer: wireSuperjson })
 
 const sessionId = z.string().min(1).max(200)
+/** A backfill page bound (see `DirectBuffer.more`). Absent: the whole buffer. */
+const maxChars = z
+  .number()
+  .int()
+  .min(DIRECT_BUFFER_PAGE_MIN_CHARS)
+  .max(DIRECT_BUFFER_PAGE_MAX_CHARS)
+  .optional()
 
 function noCapability(): TRPCError {
   return new TRPCError({ code: 'FORBIDDEN', message: 'no capability for this session' })
@@ -220,14 +268,18 @@ export function createDirectRouter(services: DirectRouterServices) {
     pty: t.router({
       /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
       attach: t.procedure
-        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1), maxChars }))
         .query(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq)
+          ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq, input.maxChars)
         ),
       getBufferSince: t.procedure
-        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1), maxChars }))
         .query(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).getBufferSince(input.sessionId, input.afterSeq)
+          ptyFor(ctx, input.sessionId).getBufferSince(
+            input.sessionId,
+            input.afterSeq,
+            input.maxChars
+          )
         ),
       /**
        * Keystrokes and pastes. The computer writes them and reports submits and Esc

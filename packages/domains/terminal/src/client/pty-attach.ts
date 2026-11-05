@@ -1,3 +1,4 @@
+import { attachDirectPty } from '@slayzone/transport/direct-client'
 import { directPtyFor } from './direct-pty'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 
@@ -97,7 +98,8 @@ export async function attachPty(
   const direct = directPtyFor(sessionId)
   if (direct) {
     const [attached, state] = await Promise.all([
-      direct.pty.attach.query({ sessionId, afterSeq }).catch(() => null),
+      // Paged: a full scrollback is larger than one WebRTC message.
+      attachDirectPty(direct, sessionId, afterSeq).catch(() => null),
       client.pty.getState.query({ sessionId }).catch(() => null)
     ])
     if (attached)

@@ -14,7 +14,9 @@
  *   hub, and a transport failure drops the link.
  */
 import {
+  attachDirectPty,
   directCallFailure,
+  readDirectPtyBuffer,
   newDirectWriteId,
   withDirectDeadline,
   type DirectLease
@@ -47,14 +49,14 @@ export class TerminalController {
       attach: (sid, afterSeq) =>
         this.viaDirect(
           async (d) => ({
-            ...(await d.pty.attach.query({ sessionId: sid, afterSeq })),
+            ...(await attachDirectPty(d, sid, afterSeq)),
             state: null
           }),
           () => client.pty.attach.query({ sessionId: sid, afterSeq })
         ),
       bufferSince: (sid, afterSeq) =>
         this.viaDirect(
-          (d) => d.pty.getBufferSince.query({ sessionId: sid, afterSeq }),
+          (d) => readDirectPtyBuffer(d, sid, afterSeq),
           () => client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
         )
     }

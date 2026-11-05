@@ -37,6 +37,11 @@ import {
 } from './direct-rtc'
 
 export {
+  attachDirectPty,
+  DIRECT_BUFFER_PAGE_CHARS,
+  readDirectPtyBuffer
+} from './direct-pty-read'
+export {
   DIRECT_RTC_CONNECT_MS,
   openDirectRtcConnection,
   type DirectRtcConnectAnswer,

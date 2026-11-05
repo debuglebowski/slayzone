@@ -18,6 +18,7 @@ import {
   directCallFailure,
   keepDirectLease,
   newDirectWriteId,
+  readDirectPtyBuffer,
   withDirectDeadline,
   noteDirectUse,
   type DirectLease,
@@ -109,9 +110,8 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
     const catchUp = async (): Promise<void> => {
       const after = opts.lastSeq()
       if (after >= 0) {
-        const missed = await got.client.pty.getBufferSince
-          .query({ sessionId, afterSeq: after })
-          .catch(() => null)
+        // Paged: a full scrollback is larger than one WebRTC message.
+        const missed = await readDirectPtyBuffer(got.client, sessionId, after).catch(() => null)
         if (current !== got) return
         for (const c of missed?.chunks ?? []) opts.deliver(c.data, c.seq)
       }
@@ -209,7 +209,7 @@ export async function ptyBufferSince(
   const direct = directSessions.get(sessionId)
   if (direct) {
     const res = await withDirectDeadline(
-      direct.client.pty.getBufferSince.query({ sessionId, afterSeq })
+      readDirectPtyBuffer(direct.client, sessionId, afterSeq)
     ).catch((err: unknown) => {
       if (directCallFailure(err) === 'transport') direct.lost()
       return null

@@ -83,7 +83,7 @@ describe('direct pty service', () => {
     expect(pty.direct.attach('nope', -1)).toEqual({
       exists: false,
       size: null,
-      buffer: { chunks: [], prelude: '', currentSeq: -1 }
+      buffer: { chunks: [], prelude: '', currentSeq: -1, more: false }
     })
     expect(
       pty.direct.watch(
@@ -232,6 +232,35 @@ describe('client write ids', () => {
     await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
     await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
     await waitFor(() => got.join('').split('x').length - 1 >= 4)
+    pty.disposeAll()
+  })
+})
+
+// R2: a direct read can be paged by its serialised size; the pages joined are the
+// whole read, the prelude only on the first.
+describe('paged direct backfill', () => {
+  it('pages by size and the pages join to the whole buffer', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'p-1'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    for (let i = 0; i < 40; i++)
+      await pty.handlers['pty.write']({ sessionId, data: `line-${i}-${'x'.repeat(200)}\n` })
+    await waitFor(() => pty.direct.getBufferSince(sessionId, -1).chunks.length >= 10)
+    await new Promise((r) => setTimeout(r, 200))
+    const whole = pty.direct.getBufferSince(sessionId, -1)
+    expect(whole.more).toBe(false)
+    const joined: Array<{ seq: number; data: string }> = []
+    let page = pty.direct.getBufferSince(sessionId, -1, 4096)
+    let pages = 1
+    joined.push(...page.chunks)
+    while (page.more) {
+      page = pty.direct.getBufferSince(sessionId, joined.at(-1)!.seq, 4096)
+      joined.push(...page.chunks)
+      pages++
+    }
+    expect(pages).toBeGreaterThan(1)
+    expect(joined).toEqual(whole.chunks)
     pty.disposeAll()
   })
 })

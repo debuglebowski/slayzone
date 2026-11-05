@@ -22,6 +22,8 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  attachDirectPty,
+  readDirectPtyBuffer,
   DIRECT_CALL_DEADLINE_MS,
   directCallFailure,
   newDirectWriteId,

@@ -82,6 +82,7 @@ import {
   SESSION_ERROR_WINDOW_MS
 } from '@slayzone/terminal/pty-detection'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
+import { pageChunks } from '@slayzone/transport/direct'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -115,17 +116,25 @@ interface DirectWatcher {
  * scrollback and its live output, independent of whether the hub relays it.
  */
 export interface DirectPtyService {
-  /** Cold attach (`afterSeq` -1) or reattach; `size` null when no live process. */
+  /**
+   * Cold attach (`afterSeq` -1) or reattach; `size` null when no live process.
+   * `maxChars` pages the buffer (`more`); the first page keeps the prelude.
+   */
   attach(
     sessionId: string,
-    afterSeq: number
+    afterSeq: number,
+    maxChars?: number
   ): {
     exists: boolean
     size: { cols: number; rows: number } | null
-    buffer: BufferSinceResult
+    buffer: BufferSinceResult & { more: boolean }
   }
-  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude). */
-  getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult
+  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude), paged by `maxChars`. */
+  getBufferSince(
+    sessionId: string,
+    afterSeq: number,
+    maxChars?: number
+  ): BufferSinceResult & { more: boolean }
   /**
    * A client's keystrokes, written to the process. Submits and Esc presses are
    * reported to the hub as a journaled `pty-input` event, so the hub's input
@@ -1410,22 +1419,30 @@ export function createPtyHandlers(
 
   const belongsToTask = (id: string, taskId: string, recordedTask?: string) =>
     recordedTask ? recordedTask === taskId : id === taskId || id.startsWith(taskId + ':')
+  /** One page of a direct backfill (`maxChars`); the first page keeps the prelude. */
+  function directPage(buffer: RingBuffer | undefined, afterSeq: number, maxChars?: number) {
+    const all = replayOf(buffer, afterSeq)
+    const page = pageChunks(all.chunks, maxChars)
+    return { ...all, chunks: page.chunks, more: page.more }
+  }
+
   const direct: DirectPtyService = {
-    attach(sessionId, afterSeq) {
+    attach(sessionId, afterSeq, maxChars) {
       const live = sessions.get(sessionId)
       const isLive = live !== undefined && !live.warm
       const buffer = isLive ? live.buffer : tombstones.get(sessionId)?.buffer
       return {
         exists: isLive,
         size: isLive ? { cols: live.proc.cols, rows: live.proc.rows } : null,
-        buffer: replayOf(buffer, afterSeq)
+        buffer: directPage(buffer, afterSeq, maxChars)
       }
     },
-    getBufferSince(sessionId, afterSeq) {
+    getBufferSince(sessionId, afterSeq, maxChars) {
       const live = sessions.get(sessionId)
-      return replayOf(
+      return directPage(
         live && !live.warm ? live.buffer : tombstones.get(sessionId)?.buffer,
-        afterSeq
+        afterSeq,
+        maxChars
       )
     },
     write(sessionId, data, writeId) {
