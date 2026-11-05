@@ -538,6 +538,19 @@ describe('assertPathAllowed', () => {
     }
   })
 
+  // On POSIX a backslash is a plain filename character, not a separator: splitting on
+  // it judged `root/../x\..\root/f` as root/f, while the kernel writes to the sibling
+  // folder named `x\..\root` — outside the root.
+  it.skipIf(process.platform === 'win32')(
+    'POSIX: a backslash is part of a name, never a separator',
+    () => {
+      const root = join(realpathSync(dir), 'allowed')
+      mkdirSync(root)
+      expect(() => assertPathAllowed(`${root}/../x\\..\\allowed/f`, [root])).toThrow(/allowedRoots/)
+      expect(assertPathAllowed(`${root}/a\\b`, [root])).toBe(`${root}/a\\b`)
+    }
+  )
+
   // The race: the check passes for a folder that does not exist yet, then it is made a
   // link out before the write. The write re-checks where it lands and never follows a
   // link at the file itself.

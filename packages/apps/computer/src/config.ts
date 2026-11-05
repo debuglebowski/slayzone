@@ -150,7 +150,8 @@ const MAX_LINK_HOPS = 40
 function resolveAsKernel(target: string, hops = { n: 0 }): string {
   const abs = isAbsolute(target) ? target : `${process.cwd()}${sep}${target}`
   const { root } = parse(abs)
-  const segments = abs.slice(root.length).split(/[\\/]+/)
+  // A backslash separates only on Windows; on POSIX it is part of a name.
+  const segments = abs.slice(root.length).split(sep === '\\' ? /[\\/]+/ : /\/+/)
   let current = root
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i]!
