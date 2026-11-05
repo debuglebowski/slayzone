@@ -434,6 +434,22 @@ function ancestryOf(p: string): Ancestry {
   }
 }
 
+const rootAncestries = new Map<string, { ancestry: Ancestry; at: number }>()
+
+/**
+ * A registered root's {@link ancestryOf}, remembered for {@link ROOT_TTL_MS} like its
+ * form and identity: a tree check asks it of EVERY root, and uncached that was every
+ * folder above every task's worktree, statted on each check (N5).
+ */
+function rootAncestry(root: string): Ancestry {
+  const hit = rootAncestries.get(root)
+  if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.ancestry
+  const ancestry = ancestryOf(root)
+  if (rootAncestries.size > 20_000) rootAncestries.clear()
+  rootAncestries.set(root, { ancestry, at: Date.now() })
+  return ancestry
+}
+
 /**
  * Where in `target` the root `root` ends (its length there), or -1 when `target` is
  * not `root` or inside it — by name (`inside`), else by identity.
@@ -568,7 +584,7 @@ async function resolvePathTree(
   const dirId = rootIdentity(dir)
   // A root inside `dir`: by name, or by identity (`dir` is one of its folders).
   const holds = (root: string, inside: (child: string, root: string) => boolean) =>
-    inside(root, dir) || (dirId !== null && ancestryOf(root).has(dirId))
+    inside(root, dir) || (dirId !== null && rootAncestry(root).has(dirId))
   for (const raw of hubRoots) if (holds(hubRootForm(raw), withinHubRoot)) return NONE
   // A walk from `/` (or any folder holding one) would reach a system directory.
   if (!isWindowsPath(dir) && SYSTEM_DIRS.some((d) => holds(d, within))) return NONE

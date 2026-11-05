@@ -336,6 +336,12 @@ export const REGRESSIONS = [
     id: 'N3',
     what: 'a ws subscription stopped during its middlewares never subscribes',
     files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
+  },
+  {
+    round: 7,
+    id: 'N5',
+    what: "tree access checks reuse each root's ancestry (no stat storm per check)",
+    files: [`${P}apps/api/src/access-tree-cost.test.ts`]
   }
 ]
 
