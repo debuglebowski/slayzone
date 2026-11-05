@@ -1,6 +1,57 @@
 # Changelog
 
 
+## v0.38.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.37.2...v0.38.0)
+
+### 🚀 Enhancements
+
+- **file-editor:** Let signed-in web sessions edit their task's files ([885207da5](https://github.com/debuglebowski/slayzone/commit/885207da5))
+- **settings:** Hub picker for hub-wide settings ([1a073494d](https://github.com/debuglebowski/slayzone/commit/1a073494d))
+- **sidebar:** Blocked icon on tree-view tasks ([f6af24b7c](https://github.com/debuglebowski/slayzone/commit/f6af24b7c))
+- **app:** App icon badge for unread/idle tasks ([7d2679112](https://github.com/debuglebowski/slayzone/commit/7d2679112))
+- **computers:** Disable, delete, local computer joins every hub ([a3ddee963](https://github.com/debuglebowski/slayzone/commit/a3ddee963))
+- **chat:** Pin messages to jump back to them ([47667a0bd](https://github.com/debuglebowski/slayzone/commit/47667a0bd))
+- **app:** Badge setting to count only tasks open in tabs ([52db92f4a](https://github.com/debuglebowski/slayzone/commit/52db92f4a))
+- **chat:** Reopen answer-threads panel after reload ([10ab7aaa6](https://github.com/debuglebowski/slayzone/commit/10ab7aaa6))
+
+### 🩹 Fixes
+
+- **web-shell:** Open tasks from tree sidebar clicks ([88b9c8a82](https://github.com/debuglebowski/slayzone/commit/88b9c8a82))
+- **terminal:** Answer sync queries in the order they were asked ([f443e26e9](https://github.com/debuglebowski/slayzone/commit/f443e26e9))
+- **tabs:** Clear unread flag on the task's owning hub ([5cda52f74](https://github.com/debuglebowski/slayzone/commit/5cda52f74))
+- **mobile:** Terminal keyboard dismiss + scroll full-screen agents ([d81fb2b13](https://github.com/debuglebowski/slayzone/commit/d81fb2b13))
+- **api:** Resolve project refs by unique id prefix ([5e1fcf6d8](https://github.com/debuglebowski/slayzone/commit/5e1fcf6d8))
+- **transport:** Route desktop-host calls from remote hubs to local hub ([ec0c215c9](https://github.com/debuglebowski/slayzone/commit/ec0c215c9))
+- **terminal:** Answer state queries from a server-side screen mirror ([09eb20ef3](https://github.com/debuglebowski/slayzone/commit/09eb20ef3))
+- **cli:** Resolve slay via login-shell PATH, flag outdated copies ([f90bd9771](https://github.com/debuglebowski/slayzone/commit/f90bd9771))
+- **test-utils:** Fail loudly when a package's test file listing fails ([403a09d38](https://github.com/debuglebowski/slayzone/commit/403a09d38))
+- **terminal:** XTVERSION reports xterm 6.1.0-beta.315 ([7e5bfe456](https://github.com/debuglebowski/slayzone/commit/7e5bfe456))
+- **terminal:** Graphemes addon decodes from its own byte range ([87e1e78c6](https://github.com/debuglebowski/slayzone/commit/87e1e78c6))
+- **app:** Badge skips archived and done/canceled unread tasks ([b1eac53fd](https://github.com/debuglebowski/slayzone/commit/b1eac53fd))
+- **settings:** Group app badge switches before dropdowns ([03b77fa96](https://github.com/debuglebowski/slayzone/commit/03b77fa96))
+- **settings:** Show expired hub sessions instead of "Signed in" ([749bf9b3a](https://github.com/debuglebowski/slayzone/commit/749bf9b3a))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.37.2 ([c92e7fad3](https://github.com/debuglebowski/slayzone/commit/c92e7fad3))
+- Biome format ActiveTabSync.read-clear test ([4a201798f](https://github.com/debuglebowski/slayzone/commit/4a201798f))
+
+### ✅ Tests
+
+- Register ActiveTabSync read-clear and terminal reply mirror suites ([fea368128](https://github.com/debuglebowski/slayzone/commit/fea368128))
+- **chat-runtime:** Build ownership fixtures on the full migrated schema ([464642cc1](https://github.com/debuglebowski/slayzone/commit/464642cc1))
+- **api:** Admin REST route count follows join-token becoming user ([87bc879b1](https://github.com/debuglebowski/slayzone/commit/87bc879b1))
+- **terminal:** Line-splitter linearity check takes best of 5 runs ([827542bf7](https://github.com/debuglebowski/slayzone/commit/827542bf7))
+- **chat-runtime:** Drop unused db binding in migration fixture ([7ef0446db](https://github.com/debuglebowski/slayzone/commit/7ef0446db))
+- **e2e:** Fix 108 on Linux; seed tour toast off ([6159e66e1](https://github.com/debuglebowski/slayzone/commit/6159e66e1))
+
+### ❤️ Contributors
+
+- Debuglebowski
+- Ubuntu
+
 ## v0.37.2
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.37.1...v0.37.2)

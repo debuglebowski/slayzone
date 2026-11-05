@@ -1,5 +1,42 @@
 [
   {
+    "version": "0.38.0",
+    "date": "2026-11-05",
+    "tagline": "Pins and badges",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Pin chat messages",
+        "description": "Pin any message in a chat to jump straight back to it later."
+      },
+      {
+        "category": "feature",
+        "title": "App icon badge",
+        "description": "The dock icon shows how many tasks are unread or waiting on you, skipping archived and done tasks, with an option to count only tasks open in tabs."
+      },
+      {
+        "category": "feature",
+        "title": "Blocked tasks in tree view",
+        "description": "Blocked tasks now show a blocked icon in the sidebar tree view."
+      },
+      {
+        "category": "improvement",
+        "title": "Answer threads survive reload",
+        "description": "An open answer-threads panel in chat reopens after the app reloads."
+      },
+      {
+        "category": "improvement",
+        "title": "Smarter CLI detection",
+        "description": "SlayZone finds slay anywhere on your PATH instead of prompting to install it, and warns when your copy is outdated."
+      },
+      {
+        "category": "fix",
+        "title": "Terminal apps get correct replies",
+        "description": "Cursor-position and mode queries are answered accurately and in order, fixing tools like gh auth login that rejected the terminal."
+      }
+    ]
+  },
+  {
     "version": "0.37.2",
     "date": "2026-11-04",
     "tagline": "Sessions stay put",

@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/mobile",
-  "version": "0.37.2",
+  "version": "0.38.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
