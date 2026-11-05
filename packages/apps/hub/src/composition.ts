@@ -679,12 +679,12 @@ export function composeServer(opts: {
   // up was a fire-and-forget race that could leave the first spec staring at the
   // onboarding screen.
   if (process.env.PLAYWRIGHT === '1') {
-    // Same baseline as `resetForTest`: onboarding done, CLI prompt off. Whether the
+    // Same baseline as `resetForTest`: onboarding done, CLI prompt + tour toast off. Whether the
     // install prompt opens depends on the HOST's `slay`, so it must never be ambient
     // in e2e — specs that test it set `cli_install_dismissed` back themselves.
     bootBestEffort('e2e-onboarding-seed', () =>
       db.run(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true')"
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true'), ('tutorial_prompted', 'true')"
       )
     )
   }
@@ -2097,6 +2097,9 @@ export function composeServer(opts: {
         // CLI install/update prompt off: it depends on the host's `slay`, so specs
         // that test it opt in by clearing this.
         ['cli_install_dismissed', 'true'],
+        // "Want a quick tour?" toast off: it would land in every spec's first
+        // seconds and shift any toast a spec is driving.
+        ['tutorial_prompted', 'true'],
         [AGENT_STARTUP_SETTING, 'manual']
       ]
       // Boot-time write the wipe erased: the CLI/agents discover this process via

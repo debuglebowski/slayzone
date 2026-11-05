@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { test, expect, seed, openTaskById, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
+import { pressShortcut } from '../fixtures/shortcuts'
 
 // Undo of "Complete & Close Tab" (⌘⇧D) must put back everything the action did:
 // the status AND the closed tab. For a temporary task the close also DELETES the
@@ -33,8 +34,14 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       return index < 0 ? 'closed' : index === s.activeTabIndex ? 'active' : 'background'
     }, taskId)
 
+  /**
+   * Completes the active task. Undo goes by keyboard (`undo` below), not the
+   * toast's Undo button: the toast auto-dismisses after sonner's 4s, which a
+   * loaded box can spend before the dialog has even finished closing. The button
+   * calls the same `undo.undo()` — covered by useCompleteAndCloseTask.test.tsx.
+   */
   const completeActiveTask = async (page: Page) => {
-    await page.keyboard.press('Meta+Shift+d')
+    await pressShortcut(page, 'complete-close-tab')
     const dialog = page.locator('[data-slot="alert-dialog-content"]')
     await expect(dialog.getByText('Mark as complete and close tab?')).toBeVisible({
       timeout: 5_000
@@ -43,21 +50,14 @@ test.describe('Complete & Close Tab: undo/redo', () => {
     await expect(dialog).not.toBeVisible({ timeout: 5_000 })
   }
 
-  const clickToastUndo = (page: Page, title: string) =>
-    page
-      .locator('[data-sonner-toast]')
-      .filter({ hasText: `Completed "${title}"` })
-      .getByRole('button', { name: 'Undo' })
-      .click()
-
   /**
-   * ⌘⇧Z is ignored while focus sits in an input/editor/terminal, and a live
+   * ⌘Z/⌘⇧Z are ignored while focus sits in an input/editor/terminal, and a live
    * terminal takes focus back whenever it blurs to <body> (Terminal's focus
    * self-heal) — so with a restored scratch terminal on screen there's nowhere
-   * neutral to park focus. Redo from Home, as a user would: the task's terminal
+   * neutral to park focus. Press from Home, as a user would: the task's terminal
    * is hidden there and can't reclaim it.
    */
-  const redo = async (page: Page) => {
+  const pressFromHome = async (page: Page, shortcut: 'undo' | 'redo') => {
     await page.evaluate(() => {
       const s = (window as TabStoreWindow).__slayzone_tabStore!.getState()
       s.setActiveTabIndex(s.tabs.findIndex((t) => t.type === 'home'))
@@ -72,8 +72,10 @@ test.describe('Complete & Close Tab: undo/redo', () => {
         poll
       )
       .toBe(false)
-    await page.keyboard.press('Meta+Shift+z')
+    await pressShortcut(page, shortcut)
   }
+  const undo = (page: Page) => pressFromHome(page, 'undo')
+  const redo = (page: Page) => pressFromHome(page, 'redo')
 
   const poll = { timeout: 10_000, intervals: [250, 500, 1_000] }
 
@@ -104,7 +106,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
     await expect.poll(async () => (await getTask(mainWindow, task.id))?.status, poll).toBe('done')
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
 
-    await clickToastUndo(mainWindow, 'CU regular task')
+    await undo(mainWindow)
     await expect
       .poll(async () => (await getTask(mainWindow, task.id))?.status, poll)
       .toBe('in_progress')
@@ -136,7 +138,7 @@ test.describe('Complete & Close Tab: undo/redo', () => {
       .toBe(false)
     await expect.poll(() => tabState(mainWindow, task.id), poll).toBe('closed')
 
-    await clickToastUndo(mainWindow, 'CU temporary task')
+    await undo(mainWindow)
     await expect
       .poll(async () => (await getTask(mainWindow, task.id))?.deleted_at ?? null, poll)
       .toBeNull()
