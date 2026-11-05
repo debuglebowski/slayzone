@@ -1966,10 +1966,10 @@ export function composeServer(opts: {
     )
     // The conflict analysis's agent CLI runs on the caller's own computer (agents run
     // on computers); with none (null) it runs here, refused where processes are off.
-    setAiCommandRunner(async (command, timeoutMs) => {
+    setAiCommandRunner(async (argv, timeoutMs) => {
       const computerId = await placement.forCaller()
       if (computerId == null) return null
-      return execRunOnComputer(computerGateway, computerId, { command, timeoutMs })
+      return execRunOnComputer(computerGateway, computerId, { argv, timeoutMs })
     })
     // Terminal settings probes (a mode's binary, a docker / ssh context) run on the
     // caller's computer as one exec.run; with none, "connect a computer".

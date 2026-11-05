@@ -1317,12 +1317,30 @@ export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
  * its output. `cwd` (absolute, jailed) wins; else `projectId`'s folder on that
  * computer; else its first allowed root. `timeoutMs` ends the whole process tree.
  */
-export const execRunParamsSchema = z.object({
-  command: z.string().min(1),
-  cwd: z.string().min(1).optional(),
-  projectId: z.string().min(1).optional(),
-  timeoutMs: z.number().int().positive()
-})
+export const execRunParamsSchema = z
+  .object({
+    /** A shell command line (`/bin/sh -c`, `cmd /c` on Windows). */
+    command: z.string().min(1).optional(),
+    /**
+     * Or a program and its args, run with NO shell: the computer resolves `file` on
+     * its PATH, else under its home (`homeFallbacks`, home-relative) — so the hub
+     * builds no shell line (its quoting and `$HOME` are POSIX; the computer's may
+     * not be).
+     */
+    argv: z
+      .object({
+        file: z.string().min(1),
+        args: z.array(z.string()),
+        homeFallbacks: z.array(z.string().min(1)).max(8).optional()
+      })
+      .optional(),
+    cwd: z.string().min(1).optional(),
+    projectId: z.string().min(1).optional(),
+    timeoutMs: z.number().int().positive()
+  })
+  .refine((p) => (p.command === undefined) !== (p.argv === undefined), {
+    message: 'exec.run takes exactly one of command or argv'
+  })
 export type ExecRunParams = z.infer<typeof execRunParamsSchema>
 export const execRunResultSchema = z.object({
   stdout: z.string(),

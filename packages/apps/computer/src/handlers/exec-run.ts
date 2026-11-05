@@ -14,7 +14,10 @@ import {
   execRunParamsSchema,
   type ExecRunResult
 } from '@slayzone/computer-transport/shared'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { spawnCwd } from '../config'
+import { resolveCommand } from './resolve-command'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Per-stream capture cap: the head is dropped first (the tail says what failed). */
@@ -32,6 +35,34 @@ function capped(): { push(chunk: string): void; text(): string } {
   }
 }
 
+/**
+ * A program the hub named by argv, resolved on this computer: its PATH (as the OS
+ * would, PATHEXT on Windows), else under its own home. No shell — args reach the
+ * program unsplit — except a Windows `.cmd`/`.bat`, which only cmd.exe can run.
+ */
+function programInvocation(
+  argv: { file: string; args: string[]; homeFallbacks?: string[] },
+  cwd: string,
+  win: boolean
+): { file: string; args: string[] } | null {
+  const env = process.env as Record<string, string>
+  const resolved =
+    resolveCommand(argv.file, env, cwd) ??
+    (argv.homeFallbacks ?? [])
+      .map((rel) => resolveCommand(join(homedir(), rel), env, cwd))
+      .find((p): p is string => p !== null) ??
+    null
+  if (!resolved) return null
+  if (win && /\.(cmd|bat)$/i.test(resolved)) {
+    const quote = (a: string) => `"${a.replace(/"/g, '""')}"`
+    return {
+      file: 'cmd.exe',
+      args: ['/d', '/s', '/c', `"${[resolved, ...argv.args].map(quote).join(' ')}"`]
+    }
+  }
+  return { file: resolved, args: argv.args }
+}
+
 export function createExecRunHandlers(
   ctx: HandlerContext,
   getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
@@ -44,16 +75,26 @@ export function createExecRunHandlers(
         : undefined
     const cwd = spawnCwd(params.cwd ?? projectDir, ctx.config.allowedRoots)
     const win = process.platform === 'win32'
-    const child = spawn(
-      win ? 'cmd.exe' : '/bin/sh',
-      win ? ['/c', params.command] : ['-c', params.command],
-      {
-        cwd,
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: !win
+    const invocation = params.argv
+      ? programInvocation(params.argv, cwd, win)
+      : {
+          file: win ? 'cmd.exe' : '/bin/sh',
+          args: win ? ['/c', params.command ?? ''] : ['-c', params.command ?? '']
+        }
+    if (!invocation) {
+      return {
+        stdout: '',
+        stderr: `${params.argv?.file} not found on this computer (PATH or home)`,
+        status: 127,
+        timedOut: false
       }
-    )
+    }
+    const child = spawn(invocation.file, invocation.args, {
+      cwd,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: !win
+    })
     const stdout = capped()
     const stderr = capped()
     child.stdout.on('data', (d: Buffer) => stdout.push(d.toString()))

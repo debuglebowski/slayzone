@@ -1,4 +1,3 @@
-import { quoteForShell } from '@slayzone/platform'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 
 /** The result of one shell command on a computer (`exec.run`). */
@@ -9,8 +8,16 @@ export interface AiCommandResult {
   timedOut: boolean
 }
 /** Null = no computer: refused ("connect a computer"). */
+/** A program and its args, resolved and run on the computer with no shell. */
+export interface AiProgram {
+  file: string
+  args: string[]
+  /** Home-relative places to look when `file` is not on the computer's PATH. */
+  homeFallbacks?: string[]
+}
+
 export type AiCommandRunner = (
-  command: string,
+  program: AiProgram,
   timeoutMs: number
 ) => Promise<AiCommandResult | null>
 
@@ -27,12 +34,17 @@ export function setAiCommandRunner(next: AiCommandRunner | null): void {
 const AI_COMMAND_TIMEOUT_MS = 60_000
 
 export async function runAiCommand(mode: 'claude-code' | 'codex', prompt: string): Promise<string> {
-  const args =
-    mode === 'claude-code' ? ['--print', '--allow-dangerously-skip-permissions', prompt] : [prompt]
-  // The binary is the COMPUTER's: `$HOME` expands in its shell, not here.
-  const binary = mode === 'claude-code' ? '"$HOME/.local/bin/claude"' : quoteForShell('codex')
-  const command = [binary, ...args.map(quoteForShell)].join(' ')
-  const result = runner ? await runner(command, AI_COMMAND_TIMEOUT_MS) : null
+  // The computer resolves the binary (its PATH, else its own ~/.local/bin/claude)
+  // and runs it with no shell: no quoting or `$HOME` built here for another OS.
+  const program: AiProgram =
+    mode === 'claude-code'
+      ? {
+          file: 'claude',
+          args: ['--print', '--allow-dangerously-skip-permissions', prompt],
+          homeFallbacks: ['.local/bin/claude']
+        }
+      : { file: 'codex', args: [prompt] }
+  const result = runner ? await runner(program, AI_COMMAND_TIMEOUT_MS) : null
   if (!result) refuseNoComputer({ op: 'worktrees.analyzeConflict' })
   if (result.timedOut) throw new Error('Timeout')
   if (result.status !== 0) throw new Error(result.stderr || `Exit code ${result.status}`)

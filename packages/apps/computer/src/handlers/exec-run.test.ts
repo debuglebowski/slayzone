@@ -3,7 +3,7 @@
  * run HERE in a jailed cwd — a project's own folder on this computer when the hub
  * names the project — answering its output; a timeout kills the whole tree.
  */
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -31,6 +31,56 @@ beforeEach(() => {
 })
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+// A program the hub names by argv (the conflict analysis's agent CLI) is resolved
+// and run HERE with no shell: no hub-side POSIX quoting or `$HOME`, which broke on a
+// Windows computer. A bare name is looked up on this computer's PATH, then under its
+// home (`homeFallbacks`).
+describe('exec.run with argv', () => {
+  it.skipIf(process.platform === 'win32')(
+    'runs the program unsplit, no shell — args with spaces and quotes stay one each',
+    async () => {
+      const res = (await run({
+        argv: { file: 'printf', args: ['%s|', "it's a $(prompt)", 'two words'] },
+        cwd: dir,
+        timeoutMs: 5000
+      })) as { stdout: string; status: number }
+      expect(res.status).toBe(0)
+      expect(res.stdout).toBe("it's a $(prompt)|two words|")
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')('a home fallback when not on PATH', async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'computer-home-')))
+    const savedHome = process.env.HOME
+    try {
+      mkdirSync(join(home, 'bin-x'), { recursive: true })
+      const tool = join(home, 'bin-x', 'my-agent-cli')
+      writeFileSync(tool, '#!/bin/sh\necho from-home "$1"\n')
+      chmodSync(tool, 0o755)
+      process.env.HOME = home
+      const res = (await run({
+        argv: { file: 'my-agent-cli', args: ['ok'], homeFallbacks: ['bin-x/my-agent-cli'] },
+        cwd: dir,
+        timeoutMs: 5000
+      })) as { stdout: string; status: number }
+      expect(res.stdout.trim()).toBe('from-home ok')
+    } finally {
+      process.env.HOME = savedHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('a program found nowhere: status 127, naming it', async () => {
+    const res = (await run({
+      argv: { file: 'no-such-agent-cli-x', args: [] },
+      cwd: dir,
+      timeoutMs: 5000
+    })) as { stderr: string; status: number }
+    expect(res.status).toBe(127)
+    expect(res.stderr).toMatch(/no-such-agent-cli-x/)
+  })
+})
 
 describe('exec.run', () => {
   it('runs the command through the shell in the given folder', async () => {

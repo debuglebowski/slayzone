@@ -1,7 +1,7 @@
 /**
  * The conflict analysis runs an agent CLI (`claude --print` / `codex`): agents run
- * on computers, so with a runner wired the command leaves as one shell command for
- * the caller's computer — argv shell-quoted, the 60s budget kept.
+ * on computers, so with a runner wired it leaves as one program + args for the
+ * caller's computer (resolved and run there, no shell) — the 60s budget kept.
  */
 import { afterEach, describe, expect, test } from 'vitest'
 // Not './merge-ai': the harness aliases that specifier to its mock.
@@ -17,28 +17,32 @@ describe('runAiCommand on a computer', () => {
     await expect(runAiCommand('codex', 'x')).rejects.toThrow(/Connect a computer/)
   })
 
-  test('one shell command, the prompt quoted, its stdout the answer', async () => {
-    const seen: Array<{ command: string; timeoutMs: number }> = []
-    setAiCommandRunner(async (command, timeoutMs) => {
-      seen.push({ command, timeoutMs })
+  // No shell line built here: the hub's POSIX quoting and `$HOME` broke on a
+  // Windows computer. The computer resolves the program and runs it unsplit.
+  test('a program and its args, unquoted — the prompt one argument', async () => {
+    const seen: Array<{ run: unknown; timeoutMs: number }> = []
+    setAiCommandRunner(async (run, timeoutMs) => {
+      seen.push({ run, timeoutMs })
       return { stdout: ' SUMMARY: ok \n', stderr: '', status: 0, timedOut: false }
     })
     const out = await runAiCommand('codex', "it's a $(prompt)")
     expect(out).toBe('SUMMARY: ok')
     expect(seen[0]?.timeoutMs).toBe(60_000)
-    expect(seen[0]?.command).toBe(`'codex' 'it'"'"'s a $(prompt)'`)
+    expect(seen[0]?.run).toEqual({ file: 'codex', args: ["it's a $(prompt)"] })
   })
 
-  test("claude: the computer's own ~/.local/bin/claude, expanded there", async () => {
-    const seen: string[] = []
-    setAiCommandRunner(async (command) => {
-      seen.push(command)
+  test("claude: on the computer's PATH, else its own ~/.local/bin/claude", async () => {
+    const seen: unknown[] = []
+    setAiCommandRunner(async (run) => {
+      seen.push(run)
       return { stdout: 'x', stderr: '', status: 0, timedOut: false }
     })
     await runAiCommand('claude-code', 'p')
-    expect(seen[0]).toBe(
-      `"$HOME/.local/bin/claude" '--print' '--allow-dangerously-skip-permissions' 'p'`
-    )
+    expect(seen[0]).toEqual({
+      file: 'claude',
+      args: ['--print', '--allow-dangerously-skip-permissions', 'p'],
+      homeFallbacks: ['.local/bin/claude']
+    })
   })
 
   test('a failure or timeout rejects with what the computer said', async () => {
