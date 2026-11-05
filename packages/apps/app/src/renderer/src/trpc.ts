@@ -17,6 +17,7 @@ export const useTRPC: View['useTRPC'] = view.useTRPC
 export const useTRPCClient: View['useTRPCClient'] = view.useTRPCClient
 export const getTrpcClient: View['getTrpcClient'] = view.getTrpcClient
 export const getClientForHub: View['getClientForHub'] = view.getClientForHub
+export const getHubClient: View['getHubClient'] = view.getHubClient
 
 export const initTrpcClient: TrpcBoot<AppRouter>['initTrpcClient'] =
   trpcBootFor<AppRouter>().initTrpcClient

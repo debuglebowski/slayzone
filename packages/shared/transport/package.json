@@ -9,6 +9,7 @@
     "./client": "./src/client/index.ts",
     "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
+    "./host-paths": "./src/shared/host-paths.ts",
     "./testing": "./src/testing/index.tsx"
   },
   "scripts": {
