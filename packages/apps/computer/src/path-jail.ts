@@ -498,7 +498,10 @@ function pipeFile(src: string, fd: number): void {
 function copyEntry(src: string, dest: string): void {
   const st = lstatSync(src)
   if (st.isSymbolicLink()) {
-    // Copied as the link it is: a copy of a link is not a write through it.
+    // Copied as the link it is: a copy of a link is not a write through it. Its folder
+    // is made first (judged, never through a link), as a file's is: a folder holding
+    // only links — npm's `node_modules/.bin` — has no file to create it (L5).
+    mkdirs(dirname(dest))
     const existing = lstatOrNull(dest)
     if (existing) {
       if (existing.isDirectory() && !existing.isSymbolicLink()) {
