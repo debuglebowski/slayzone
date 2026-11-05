@@ -399,6 +399,8 @@ export async function startSessionHost(
         if (method === 'identity')
           return {
             ...transport.options.identity,
+            // Functions do not survive JSON-RPC: the connector gets the values.
+            ...((await handle.directIdentity?.()) ?? {}),
             epoch,
             contract: HOST_CONTRACT_VERSION,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,

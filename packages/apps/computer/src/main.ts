@@ -151,6 +151,12 @@ export interface ComputerHandle {
   activate(): void | Promise<void>
   isIdle(): boolean
   setHookDirectory(hub: string, directory: string): void
+  /**
+   * The direct link's identity once its listener has settled (bound, or failed):
+   * the address clients dial and whether WebRTC offers are answered. Values, not
+   * functions: a session host hands them to its connector over JSON-RPC.
+   */
+  directIdentity?(): Promise<{ directAddress: string | null; directRtc: boolean }>
   drainForUpgrade(): boolean
   stop(): Promise<void>
 }
@@ -947,6 +953,13 @@ export function startComputer(
     // exactly one hub is the overwhelming case and every existing caller reads it;
     // `dialers` is what multi-hub callers iterate.
     dialer: primaryDialer,
+    directIdentity: async () => {
+      await directReady
+      return {
+        directAddress: identity.directAddress?.() ?? null,
+        directRtc: identity.directRtc?.() ?? false
+      }
+    },
     get dialers() {
       return [...connections.values()].map((c) => c.dialer)
     },
