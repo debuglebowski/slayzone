@@ -9,7 +9,7 @@
  *
  * @module computer/handlers/git-op
  */
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   ComputerNotificationMethods,
   GIT_WATCH_EVENT,
@@ -38,7 +38,7 @@ import {
   turnGitContract,
   type TurnGitOpInput
 } from '@slayzone/agent-turns/turn-git'
-import { assertPathAllowed, JailViolationError } from '../config'
+import { assertPathAllowed, JailViolationError, writeFileWithinRoots } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
 function insideRepo(repo: string, rel: string): boolean {
@@ -79,7 +79,14 @@ export function createGitOpHandlers(
     for (const rel of gitOpRepoRelativePaths(name, parsed)) {
       if (!repo || !insideRepo(repo, rel))
         throw new JailViolationError(`path '${rel}' must stay inside the repository`)
-      allow(resolve(repo, rel))
+      // Unnormalized: the jail resolves `..` after any link before it, as the kernel.
+      allow(`${repo}${sep}${rel}`)
+    }
+    if (name === 'writeResolvedFile') {
+      // Written where it was judged, re-checked at the open, never through a link.
+      const { repoPath, filePath, content } = parsed as GitOpInput<'writeResolvedFile'>
+      writeFileWithinRoots(allow(`${repoPath}${sep}${filePath}`), content, ctx.config.allowedRoots)
+      return { result: null }
     }
     const result = await runGitOpLocally(name, parsed)
     return { result: result ?? null }

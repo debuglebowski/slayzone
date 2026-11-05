@@ -12,9 +12,18 @@
  */
 
 import { createHash } from 'node:crypto'
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
+import {
+  closeSync,
+  constants as fsConstants,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readlinkSync,
+  realpathSync,
+  writeSync
+} from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
@@ -124,48 +133,76 @@ export const ENV_VARS = {
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
 
-/** The target of `path` when it is a symlink (dangling or not); null otherwise. */
-function readLinkOrNull(path: string): string | null {
-  try {
-    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : null
-  } catch {
-    return null
+/** Symlinks followed while resolving one path, before it is refused as a loop. */
+const MAX_LINK_HOPS = 40
+
+/**
+ * Where `target` really is, as the kernel would resolve it — and so where a write
+ * to it lands: segment by segment from the root, each symlink (dangling or not)
+ * followed from its REAL parent, `..` taken as the parent of what precedes it (after
+ * any link), a not-yet-existing tail kept as is. Then the existing part's canonical
+ * spelling (`realpath`, e.g. letter case).
+ *
+ * Never a lexical `..` collapse first: `root/s/../y` with `s → outside/dir` is
+ * `outside/y`, not `root/y`; and a link reached through a link (`root/x → outside/dir`,
+ * `outside/dir/f → ../secret`) resolves from `outside/dir` (F3).
+ */
+function resolveAsKernel(target: string, hops = { n: 0 }): string {
+  const abs = isAbsolute(target) ? target : `${process.cwd()}${sep}${target}`
+  const { root } = parse(abs)
+  const segments = abs.slice(root.length).split(/[\\/]+/)
+  let current = root
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]!
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      current = dirname(current)
+      continue
+    }
+    const next = join(current, segment)
+    let isLink: boolean
+    try {
+      isLink = lstatSync(next).isSymbolicLink()
+    } catch {
+      // Missing from here on: nothing below can be a link yet.
+      return lexicalTail(next, segments.slice(i + 1))
+    }
+    if (isLink) {
+      if (++hops.n > MAX_LINK_HOPS) throw new JailViolationError(`too many symlinks in '${target}'`)
+      const link = readlinkSync(next)
+      current = resolveAsKernel(isAbsolute(link) ? link : `${current}${sep}${link}`, hops)
+      continue
+    }
+    current = next
   }
+  return current
+}
+
+/** `base` plus segments that do not exist yet (so `..` among them is plain). */
+function lexicalTail(base: string, segments: readonly string[]): string {
+  let current = base
+  for (const segment of segments) {
+    if (segment === '' || segment === '.') continue
+    current = segment === '..' ? dirname(current) : join(current, segment)
+  }
+  return current
 }
 
 /**
- * Resolve `target` to an absolute canonical path, tolerating a
- * not-yet-existing tail (e.g. a worktree directory about to be created).
- *
- * Lexically normalizes `..` first, then `realpath`s the nearest EXISTING
- * ancestor to collapse symlinks (so an attacker cannot symlink out of an
- * allowed root), re-appending the non-existent remainder. This closes both the
- * lexical-`../` traversal hole and the symlinked-ancestor hole.
+ * Resolve `target` to an absolute canonical path, tolerating a not-yet-existing tail
+ * (a worktree about to be created): {@link resolveAsKernel}, then the deepest
+ * existing ancestor's `realpath` (canonical spelling) plus the missing remainder.
  */
 function realpathBoundary(target: string): string {
-  let current = resolve(target)
+  let current = resolveAsKernel(target)
   const tail: string[] = []
-  let hops = 0
-  // Walk up until we hit an existing directory we can canonicalize.
   for (;;) {
     try {
       const real = realpathSync.native(current)
       return tail.length > 0 ? join(real, ...tail.reverse()) : real
     } catch {
-      // A dangling symlink (its target does not exist yet) is not a missing file: a
-      // write through it lands at its target. Follow it, so the jail judges where
-      // the write goes — not the link's own (allowed) place.
-      const link = readLinkOrNull(current)
-      if (link !== null && hops++ < 40) {
-        current = resolve(dirname(current), link)
-        continue
-      }
       const parent = dirname(current)
-      if (parent === current) {
-        // Reached the filesystem root and nothing exists — fall back to the
-        // lexically-resolved path (already free of `..` segments).
-        return resolve(target)
-      }
+      if (parent === current) return resolveAsKernel(target)
       tail.push(basename(current))
       current = parent
     }
@@ -272,6 +309,35 @@ export function assertPathAllowed(
  * or delete files anywhere that user can. The real boundary is the OS account the
  * computer runs as — run it under a dedicated account for isolation.
  */
+/**
+ * Write `content` to `target` — a path {@link assertPathAllowed} returned — without
+ * trusting that the check still holds: its folder is created and judged again
+ * right before the open (a folder swapped for a link out after the check is
+ * refused), and the file is opened with `O_NOFOLLOW`, so a link put at the file
+ * itself is never written through.
+ */
+export function writeFileWithinRoots(
+  target: string,
+  content: string,
+  allowedRoots: readonly string[]
+): void {
+  const dir = dirname(target)
+  mkdirSync(assertPathAllowed(dir, allowedRoots), { recursive: true })
+  if (assertPathAllowed(target, allowedRoots) !== target) {
+    throw new JailViolationError(`path '${target}' changed after it was checked; refused`)
+  }
+  const fd = openSync(
+    target,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    0o644
+  )
+  try {
+    writeSync(fd, content)
+  } finally {
+    closeSync(fd)
+  }
+}
+
 export function spawnCwd(cwd: string | undefined, allowedRoots: readonly string[]): string {
   if (cwd !== undefined) return assertPathAllowed(cwd, allowedRoots)
   for (const root of allowedRoots) {

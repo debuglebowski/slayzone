@@ -1,4 +1,14 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  unlinkSync
+} from 'node:fs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +16,7 @@ import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
 import { STANDARD_COMPUTER_CAPABILITIES } from '@slayzone/computers/labels'
 import {
   assertPathAllowed,
+  writeFileWithinRoots,
   DEFAULT_CAPABILITIES,
   effectiveHubUrls,
   ENV_VARS,
@@ -493,6 +504,63 @@ describe('assertPathAllowed', () => {
     const link = join(root, 'inner-dangling')
     symlinkSync(join(root, 'later'), link)
     expect(assertPathAllowed(link, [root])).toBe(join(root, 'later'))
+  })
+
+  // Round-3 F3, the reviewer's repro: root/x → outside/dir, and outside/dir/f → ../secret
+  // (dangling). Following f's link from its LEXICAL parent judged root/secret (allowed);
+  // the write landed in outside/secret.
+  it('F3: a link reached through a link is followed from its real parent', () => {
+    const root = realpathSync(dir)
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'computer-outside-')))
+    try {
+      mkdirSync(join(outside, 'dir'))
+      symlinkSync(join(outside, 'dir'), join(root, 'x'))
+      symlinkSync('../secret', join(outside, 'dir', 'f'))
+      expect(() => assertPathAllowed(join(root, 'x', 'f'), [root])).toThrow(/allowedRoots/)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  // The second reviewer's variant: x → "s/../y" with s → outside/dir. `..` after a link
+  // is the link target's parent, not the link's own: a lexical collapse said root/y.
+  it('F3: `..` inside a link target is taken after following what precedes it', () => {
+    const root = realpathSync(dir)
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'computer-outside-')))
+    try {
+      mkdirSync(join(outside, 'dir'))
+      symlinkSync(join(outside, 'dir'), join(root, 's'))
+      symlinkSync('s/../y', join(root, 'x2'))
+      expect(() => assertPathAllowed(join(root, 'x2'), [root])).toThrow(/allowedRoots/)
+      expect(() => assertPathAllowed(`${root}/s/../z`, [root])).toThrow(/allowedRoots/)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  // The race: the check passes for a folder that does not exist yet, then it is made a
+  // link out before the write. The write re-checks where it lands and never follows a
+  // link at the file itself.
+  it('race: a path swapped for a link after the check is not written through', () => {
+    const root = realpathSync(dir)
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'computer-outside-')))
+    try {
+      const target = assertPathAllowed(join(root, 'later', 'f.txt'), [root])
+      symlinkSync(outside, join(root, 'later')) // swapped in after the check
+      expect(() => writeFileWithinRoots(target, 'x', [root])).toThrow(/allowedRoots|refused/)
+      expect(existsSync(join(outside, 'f.txt')), 'nothing written outside').toBe(false)
+
+      const file = assertPathAllowed(join(root, 'g.txt'), [root])
+      symlinkSync(join(outside, 'g.txt'), join(root, 'g.txt')) // the file itself, now a link
+      expect(() => writeFileWithinRoots(file, 'x', [root])).toThrow()
+      expect(existsSync(join(outside, 'g.txt'))).toBe(false)
+
+      // A plain write inside the root still works.
+      writeFileWithinRoots(assertPathAllowed(join(root, 'ok', 'h.txt'), [root]), 'hi', [root])
+      expect(readFileSync(join(root, 'ok', 'h.txt'), 'utf-8')).toBe('hi')
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 
   it('throws when no roots are configured', () => {

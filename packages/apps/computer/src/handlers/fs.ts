@@ -45,7 +45,7 @@ import {
   renamePath as feRenamePath,
   searchFiles as feSearchFiles,
   subscribeFileWatcher,
-  writeFile as feWriteFile
+  assertWithinRoot
 } from '@slayzone/file-editor/server'
 import type { DirEntry, FileSearchResult, ReadFileResult } from '@slayzone/file-editor/shared'
 import {
@@ -83,7 +83,7 @@ import {
   type FsReadFileResult,
   type FsSearchFilesResult
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed, isProtectedPath } from '../config'
+import { assertPathAllowed, isProtectedPath, writeFileWithinRoots } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /**
@@ -130,7 +130,8 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
    */
   const allowIn = (rootPath: string, rel: string, subtree = false): string => {
     const root = allow(rootPath)
-    allow(join(root, rel), subtree)
+    // Unnormalized: the jail resolves `..` after any link before it, as the kernel.
+    allow(`${root}${sep}${rel}`, subtree)
     return root
   }
 
@@ -259,7 +260,11 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   function writeFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath, content } = fsWriteFileParamsSchema.parse(rawParams)
-    feWriteFile(allowIn(rootPath, filePath), filePath, content)
+    const root = allowIn(rootPath, filePath)
+    // Contained as the file editor does, then written where it was judged — re-checked
+    // at the open, never through a link.
+    assertWithinRoot(root, filePath)
+    writeFileWithinRoots(allow(`${root}${sep}${filePath}`), content, ctx.config.allowedRoots)
     return { ok: true }
   }
 

@@ -18,7 +18,7 @@ import {
   HubToComputerMethods,
   agentConfigFsParamsSchema
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { assertPathAllowed, writeFileWithinRoots } from '../config'
 import type { HandlerContext, HubMethodTable } from './types'
 
 export function createAgentConfigHandlers(
@@ -26,12 +26,11 @@ export function createAgentConfigHandlers(
   homedir: () => string = osHomedir
 ): HubMethodTable {
   /** Allowed roots (live — `computer.setAllowedRoots` edits them) + provider dirs. */
-  const allow = (candidate: string): void => {
-    const providerDirs = Object.values(COMPUTER_PROVIDER_PATHS).map((p) =>
-      join(homedir(), p.baseDir)
-    )
-    assertPathAllowed(candidate, [...ctx.config.allowedRoots, ...providerDirs])
-  }
+  const roots = (): string[] => [
+    ...ctx.config.allowedRoots,
+    ...Object.values(COMPUTER_PROVIDER_PATHS).map((p) => join(homedir(), p.baseDir))
+  ]
+  const allow = (candidate: string): string => assertPathAllowed(candidate, roots())
 
   async function agentConfigFs(raw: unknown): Promise<{ result: unknown }> {
     const p = agentConfigFsParamsSchema.parse(raw)
@@ -46,8 +45,8 @@ export function createAgentConfigHandlers(
         allow(p.path)
         return { result: await fs.readFile(p.path) }
       case 'writeFile':
-        allow(p.path)
-        await fs.writeFile(p.path, p.content)
+        // Written where it was judged, re-checked at the open, never through a link.
+        writeFileWithinRoots(allow(p.path), p.content, roots())
         return { result: null }
       case 'mkdir':
         allow(p.path)
