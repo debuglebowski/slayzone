@@ -140,6 +140,8 @@ interface TabState {
   // Tree-view: show worktree pill on tasks that have a worktree_path.
   treeShowWorktree: boolean
   treeShowTags: boolean
+  // Tree-view: "Blocked" icon on tasks that are flagged blocked or have open blockers.
+  treeShowBlockedBadge: boolean
   // Tree-view: group root tasks by status within each project.
   // Tree-view layout — decoupled from kanban filter.
   treeGroupBy: TreeGroupBy
@@ -203,6 +205,7 @@ interface TabState {
   setTreeShowAllOpen: (show: boolean) => void
   setTreeShowWorktree: (show: boolean) => void
   setTreeShowTags: (show: boolean) => void
+  setTreeShowBlockedBadge: (show: boolean) => void
   setTreeGroupBy: (groupBy: TreeGroupBy) => void
   setTreeOrderBy: (orderBy: TreeOrderBy) => void
   setTreeOrderDir: (dir: TreeOrderDir) => void
@@ -259,6 +262,7 @@ interface TabState {
     treeHideClosed?: boolean
     treeShowWorktree?: boolean
     treeShowTags?: boolean
+    treeShowBlockedBadge?: boolean
     treeGroupBy?: TreeGroupBy
     treeOrderBy?: TreeOrderBy
     treeOrderDir?: TreeOrderDir
@@ -338,6 +342,7 @@ export const useTabStore = create<TabState>()(
     treeShowAllOpen: true,
     treeShowWorktree: true,
     treeShowTags: false,
+    treeShowBlockedBadge: true,
     treeGroupBy: 'status',
     treeOrderBy: 'manual',
     treeOrderDir: 'asc',
@@ -410,6 +415,7 @@ export const useTabStore = create<TabState>()(
 
     setTreeShowWorktree: (show) => set({ treeShowWorktree: show }),
     setTreeShowTags: (show) => set({ treeShowTags: show }),
+    setTreeShowBlockedBadge: (show) => set({ treeShowBlockedBadge: show }),
 
     setTreeGroupBy: (groupBy) => set({ treeGroupBy: groupBy }),
     setTreeOrderBy: (orderBy) => set({ treeOrderBy: orderBy }),
@@ -626,6 +632,8 @@ export const useTabStore = create<TabState>()(
         treeShowWorktree:
           typeof state.treeShowWorktree === 'boolean' ? state.treeShowWorktree : true,
         treeShowTags: typeof state.treeShowTags === 'boolean' ? state.treeShowTags : false,
+        treeShowBlockedBadge:
+          typeof state.treeShowBlockedBadge === 'boolean' ? state.treeShowBlockedBadge : true,
         treeGroupBy:
           state.treeGroupBy === 'priority' || state.treeGroupBy === 'none'
             ? state.treeGroupBy
@@ -815,6 +823,7 @@ useTabStore.subscribe(
     treeShowAllOpen: state.treeShowAllOpen,
     treeShowWorktree: state.treeShowWorktree,
     treeShowTags: state.treeShowTags,
+    treeShowBlockedBadge: state.treeShowBlockedBadge,
     treeGroupBy: state.treeGroupBy,
     treeOrderBy: state.treeOrderBy,
     treeOrderDir: state.treeOrderDir,

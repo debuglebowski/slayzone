@@ -748,6 +748,7 @@ export function HomeView({
         onPinnedReorder={data.reorderPinnedTasks}
         tags={data.tags}
         taskTags={data.taskTags}
+        blockedTaskIds={data.blockedTaskIds}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {sidebarView !== 'tree' && (

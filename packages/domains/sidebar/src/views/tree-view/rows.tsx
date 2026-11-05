@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, GitBranch, Pin, Power, X } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, GitBranch, Pin, Power, X } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { DraggableSyntheticListeners } from '@dnd-kit/core'
@@ -276,6 +276,9 @@ function TaskRowView({
           </span>
         )}
         <TagChips tags={ctx.tagsByTaskId.get(task.id)} />
+        {ctx.blockedBadgeTaskIds.has(task.id) && (
+          <Ban aria-label="Blocked" className="size-3.5 shrink-0 text-warning-foreground" />
+        )}
         {task.needs_attention && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
             Unread

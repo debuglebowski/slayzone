@@ -90,6 +90,7 @@ interface AppSidebarProps {
   columnsByProjectId?: Map<string, ColumnConfig[] | null>
   tags?: Tag[]
   taskTags?: Map<string, string[]>
+  blockedTaskIds?: Set<string>
   compactFooter?: ReactNode
   updateState?: UpdateState | null
   /**
@@ -207,6 +208,7 @@ export function AppSidebar({
   columnsByProjectId,
   tags,
   taskTags,
+  blockedTaskIds,
   compactFooter,
   updateState,
   statusSlot
@@ -313,7 +315,8 @@ export function AppSidebar({
               doneTaskIds,
               columnsByProjectId,
               tags,
-              taskTags
+              taskTags,
+              blockedTaskIds
             })}
           </SidebarGroupContent>
         </SidebarGroup>

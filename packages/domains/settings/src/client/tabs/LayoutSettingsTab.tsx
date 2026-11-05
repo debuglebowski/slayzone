@@ -171,6 +171,7 @@ export function LayoutSettingsTab() {
   const treeShowTemporary = useTabStore((s) => s.treeShowTemporary)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeShowTags = useTabStore((s) => s.treeShowTags)
+  const treeShowBlockedBadge = useTabStore((s) => s.treeShowBlockedBadge)
   const treeStatusFilter = useTabStore((s) => s.treeStatusFilter)
   const treeGroupBy = useTabStore((s) => s.treeGroupBy)
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
@@ -194,6 +195,7 @@ export function LayoutSettingsTab() {
   const setTreeShowTemporary = useTabStore((s) => s.setTreeShowTemporary)
   const setTreeShowWorktree = useTabStore((s) => s.setTreeShowWorktree)
   const setTreeShowTags = useTabStore((s) => s.setTreeShowTags)
+  const setTreeShowBlockedBadge = useTabStore((s) => s.setTreeShowBlockedBadge)
   const setTreeStatusFilter = useTabStore((s) => s.setTreeStatusFilter)
 
   const statusOptions = useMemo(() => buildStatusOptions(null), [])
@@ -410,6 +412,12 @@ export function LayoutSettingsTab() {
                 tip="Tag chips after the title"
                 checked={treeShowTags}
                 onChange={setTreeShowTags}
+              />
+              <ToggleRow
+                label="Show blocked badge"
+                tip="Blocked icon after the title"
+                checked={treeShowBlockedBadge}
+                onChange={setTreeShowBlockedBadge}
               />
               <ToggleRow
                 label="Cross out completed"

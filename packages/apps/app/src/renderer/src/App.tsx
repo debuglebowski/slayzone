@@ -1485,6 +1485,7 @@ function App(): React.JSX.Element {
             columnsByProjectId={columnsByProjectId}
             tags={tags}
             taskTags={taskTags}
+            blockedTaskIds={blockedTaskIds}
             compactFooter={headerHidden ? compactFooterContent : undefined}
             statusSlot={<StartupProgressStatus />}
             updateState={
