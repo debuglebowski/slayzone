@@ -2493,6 +2493,16 @@ export interface RemoteWorktreeAdaptersOptions {
  * be a network call (documented cosmetic degradation for remote worktrees).
  * When `resolveComputerId()` is null every method degrades to `local`.
  */
+/**
+ * Request limits for a task's worktree steps — never the gateway's 30 s default, as
+ * the git panel's ops (`gitOpTimeoutMs`). Create / remove / ignored-file copy can
+ * be slow on a big repo, and the setup script runs up to 5 min on the computer:
+ * the request outlives it, so its result arrives rather than a timeout while it runs.
+ */
+const WORKTREE_LONG_STEP_TIMEOUT_MS = 15 * 60_000
+/** Probes (repo? branch? path?). */
+const WORKTREE_PROBE_TIMEOUT_MS = 2 * 60_000
+
 export function createRemoteWorktreeAdapters(
   options: RemoteWorktreeAdaptersOptions
 ): WorktreeExecAdapters {
@@ -2509,22 +2519,24 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree create for task ${taskId}`)
-      await gateway.request(computerId, HubToComputerMethods.gitCreateWorktree, {
-        repoPath,
-        worktreePath,
-        branch,
-        sourceBranch
-      })
+      await gateway.request(
+        computerId,
+        HubToComputerMethods.gitCreateWorktree,
+        { repoPath, worktreePath, branch, sourceBranch },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
     },
 
     async removeWorktree(taskId, projectPath, worktreePath) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitRemoveWorktree, {
-        projectPath,
-        worktreePath
-      })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitRemoveWorktree,
+        { projectPath, worktreePath },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
       return gitRemoveWorktreeResultSchema.parse(res)
     },
 
@@ -2539,7 +2551,8 @@ export function createRemoteWorktreeAdapters(
           worktreePath,
           repoPath,
           sourceBranch
-        }
+        },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
       )
       return gitRunWorktreeSetupScriptResultSchema.parse(res)
     },
@@ -2548,21 +2561,24 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`ignored-file copy for task ${taskId}`)
-      await gateway.request(computerId, HubToComputerMethods.gitCopyIgnoredFiles, {
-        repoPath,
-        worktreePath,
-        behavior,
-        customPaths
-      })
+      await gateway.request(
+        computerId,
+        HubToComputerMethods.gitCopyIgnoredFiles,
+        { repoPath, worktreePath, behavior, customPaths },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
     },
 
     async getCurrentBranch(taskId, repoPath) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`git branch read for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitGetCurrentBranch, {
-        repoPath
-      })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitGetCurrentBranch,
+        { repoPath },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 
@@ -2570,7 +2586,12 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`git repo probe for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitIsGitRepo, { path })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitIsGitRepo,
+        { path },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
 
@@ -2587,7 +2608,12 @@ export function createRemoteWorktreeAdapters(
     async pathExists(taskId, path) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null) throw new NoComputerAvailableError(`path probe for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.fsPathExists, { path })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.fsPathExists,
+        { path },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return fsPathExistsResultSchema.parse(res).exists
     },
 

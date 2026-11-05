@@ -1985,6 +1985,41 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
 const TASK = 'task-1'
 
 describe('createRemoteWorktreeAdapters', () => {
+  // A task's auto-worktree runs its setup script on the computer (5 min there);
+  // at the gateway's 30 s default the hub reported auto_worktree_setup_failed while
+  // the script kept running (a retry then hit a duplicate worktree).
+  it('every step carries an explicit timeout; create / setup / copy / remove get minutes', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
+    gateway.onMethod('git.getCurrentBranch', () => ({ branch: 'main' }))
+    gateway.onMethod('git.removeWorktree', () => ({ branchDeleted: true }))
+    gateway.onMethod('git.runWorktreeSetupScript', () => ({ ran: true, success: true, output: '' }))
+    gateway.onMethod('fs.pathExists', () => ({ exists: true }))
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'computer-1'
+    })
+    await adapters.isGitRepo(TASK, '/repo')
+    await adapters.getCurrentBranch(TASK, '/repo')
+    await adapters.pathExists(TASK, '/wt')
+    await adapters.createWorktree(TASK, '/repo', '/wt', 'feature', 'main')
+    await adapters.runWorktreeSetupScript(TASK, '/wt', '/repo', 'main')
+    await adapters.copyIgnoredFiles(TASK, '/repo', '/wt', 'none' as never, [])
+    await adapters.removeWorktree(TASK, '/proj', '/wt')
+    for (const call of gateway.calls) {
+      expect(call.timeoutMs, `${call.method}: explicit`).toBeGreaterThan(30_000)
+    }
+    for (const method of [
+      'git.createWorktree',
+      'git.runWorktreeSetupScript',
+      'git.copyIgnoredFiles',
+      'git.removeWorktree'
+    ]) {
+      expect(requireCall(gateway, method).timeoutMs, method).toBeGreaterThan(5 * 60_000)
+    }
+  })
+
   it('forwards git/fs ops to the right frames and parses the computer replies', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
