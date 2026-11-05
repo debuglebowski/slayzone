@@ -348,6 +348,15 @@ export const REGRESSIONS = [
     id: 'N6',
     what: 'git routing: exact case first, else one case-insensitive candidate',
     files: [rrOwner]
+  },
+  {
+    round: 7,
+    id: 'N7',
+    what: 'pty.relay sent once on reconnect; an old computer without it is asked once',
+    files: [
+      `${P}domains/terminal/src/server/runtime/review-regressions-relay.test.ts`,
+      `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
+    ]
   }
 ]
 

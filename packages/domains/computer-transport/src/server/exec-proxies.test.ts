@@ -26,6 +26,7 @@ import {
   type RoutingGateway
 } from './exec-proxies'
 import type { ComputerDescriptor, ComputerGatewayEvents } from './hub-gateway'
+import { ComputerUpdatePendingError } from './hub-gateway'
 
 // ---------------------------------------------------------------------------
 // Fake gateway
@@ -783,6 +784,69 @@ describe('createRoutingPtyBackend', () => {
     gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 8, data: 'x' })
     expect(got).toEqual([['x', 8]])
     expect(gateway.calls.filter((c) => c.method === 'pty.getBufferSince')).toEqual([])
+  })
+
+  // Round-7 N7: on reconnect the relay request went out twice — from here and from
+  // the terminal runtime's availability listener (which owns that decision since L2).
+  it('resume does not resend the relay itself (the runtime asks once, on availability)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.relay', () => ({ seq: 0 }))
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: -1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false },
+      relay: false
+    })) as PtyHandle
+    await handle.whenSpawned
+    await handle.setRelay?.(true)
+    const seen: boolean[] = []
+    handle.onAvailability?.((available) => seen.push(available))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(seen).toEqual([false, true]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+  })
+
+  // N7: a computer that predates pty.relay (v0.37.2) streams every session anyway; each
+  // watch change asked it again, and failed. It is asked once.
+  it('a computer without pty.relay is asked once, and the relay reads as applied', async () => {
+    for (const refusal of [
+      new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented: pty.relay'),
+      new ComputerUpdatePendingError(
+        'pty.relay',
+        ComputerTransportErrorCodes.unimplemented,
+        '0.37.2'
+      )
+    ]) {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      gateway.onMethod('pty.relay', () => {
+        throw refusal
+      })
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const handle = (await backend.spawn({
+        ...ptySpec(),
+        detection: { mode: 'codex', resuming: false },
+        relay: false
+      })) as PtyHandle
+      await handle.whenSpawned
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(false)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+    }
   })
 
   it('a routed handle reports its output unavailable while the computer is away, and back on resume', async () => {

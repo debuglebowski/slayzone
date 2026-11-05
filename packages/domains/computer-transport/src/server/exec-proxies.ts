@@ -114,7 +114,7 @@ import {
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
-import type { HubComputerGateway } from './hub-gateway'
+import { ComputerUpdatePendingError, type HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
 // Gateway surface
@@ -987,6 +987,11 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   /** Listeners for the computer going away (false) and coming back (true). */
   availability: Set<(available: boolean) => void>
   setRelay?: (on: boolean) => Promise<void> | void
+  /**
+   * The computer has no `pty.relay` (it predates it, v0.37.2): it streams every
+   * session anyway, so the relay is never asked again (N7).
+   */
+  relayUnsupported?: boolean
 }
 
 /**
@@ -1188,10 +1193,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       entry.sealed = false
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
-      // The computer may have dropped relay state with the connection: ask again.
-      if (entry.relay !== undefined) {
-        void Promise.resolve(entry.setRelay?.(entry.relay)).catch(noop)
-      }
+      // The relay is asked again by the terminal runtime, which hears `available`
+      // above and owns that decision (L2); asking here too sent it twice (N7).
       // The computer kept detecting while the hub was away; its signals then went
       // nowhere. Its settled view brings the mirror up to date in one step.
       if (entry.detectsOutput && listed.detected) {
@@ -1323,6 +1326,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       },
       setRelay: (on: boolean): Promise<void> => {
         entry.relay = on
+        if (entry.relayUnsupported) return Promise.resolve()
         // Hub-shared state (every watcher's), so the hub's request — never the caller
         // whose watch changed it (L2).
         return runAsSecurityActor(null, () =>
@@ -1343,7 +1347,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             }
             drain(entry)
           })
-        )
+        ).catch((err: unknown) => {
+          if (!isUnknownRelayAnswer(err)) throw err
+          // An older computer: it relays everything regardless — what was asked holds.
+          entry.relayUnsupported = true
+        })
       },
       getReplay: async (afterSeq: number) =>
         ptyGetReplayResultSchema.parse(
@@ -2968,4 +2976,15 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       return stop
     }
   }
+}
+
+/** A computer's answer that it has no `pty.relay` (see {@link ComputerUpdatePendingError}). */
+function isUnknownRelayAnswer(err: unknown): boolean {
+  if (err instanceof ComputerUpdatePendingError) return err.method === HubToComputerMethods.ptyRelay
+  if (!(err instanceof RpcError)) return false
+  return (
+    err.code === -32601 ||
+    (err.code === ComputerTransportErrorCodes.unimplemented &&
+      err.message === `unimplemented: ${HubToComputerMethods.ptyRelay}`)
+  )
 }

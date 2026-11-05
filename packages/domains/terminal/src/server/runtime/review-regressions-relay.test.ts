@@ -50,6 +50,8 @@ type Computer = {
   /** Refuse the next N requests whatever the caller (the computer briefly away). */
   failNext: number
   emit?: (data: string) => void
+  /** Report the computer away (false) or back (true). */
+  available?: (on: boolean) => void
 }
 const computers = new Map<string, Computer>()
 
@@ -69,6 +71,10 @@ setPtyBackend({
         return { dispose: () => undefined }
       },
       onSignal: () => ({ dispose: () => undefined }),
+      onAvailability: (cb: (on: boolean) => void) => {
+        c.available = cb
+        return { dispose: () => undefined }
+      },
       onExit: () => ({ dispose: () => undefined }),
       write: () => undefined,
       kill: () => undefined,
@@ -150,5 +156,19 @@ describe("L2: one user's subscription never stops another user's live output", (
     second()
     await settle()
     expect(c.relay).toBe(false)
+  })
+
+  // N7: the routed handle no longer re-asks on reconnect; the runtime does, once.
+  test('the computer back after an absence: the relay is asked again, once', async () => {
+    const c = await open('rr:back', 'computer-a')
+    const stop = as('user-a', () => watchPtyOutput(['rr:back']))
+    await settle()
+    c.available?.(false)
+    c.relay = false // the computer lost its relay state with the connection
+    c.available?.(true)
+    await settle()
+    expect(c.requests.map((r) => r.on)).toEqual([true, true])
+    expect(c.relay).toBe(true)
+    stop()
   })
 })
