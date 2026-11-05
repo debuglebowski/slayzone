@@ -239,6 +239,19 @@ describe('jailedFs: re-checked right before the write', () => {
     expect(() => jailedFs.copy(join(r, 'src'), join(r, 'src', 'sub', 'x'))).toThrow(/into itself/)
   })
 
+  it('copyAsync keeps the jail rules: links as links, never written through', async () => {
+    mkdirSync(join(r, 'src', 'sub'), { recursive: true })
+    writeFileSync(join(r, 'src', 'sub', 'f'), 'hi')
+    symlinkSync('sub/f', join(r, 'src', 'ln'))
+    mkdirSync(join(r, 'dst', 'sub'), { recursive: true })
+    symlinkSync(join(o, 'f'), join(r, 'dst', 'sub', 'f')) // a link out, where a file lands
+    await expect(jailedFs.copyAsync(join(r, 'src'), join(r, 'dst'))).rejects.toThrow()
+    expect(existsSync(join(o, 'f'))).toBe(false)
+    await jailedFs.copyAsync(join(r, 'src'), join(r, 'dst2'))
+    expect(readFileSync(join(r, 'dst2', 'sub', 'f'), 'utf-8')).toBe('hi')
+    expect(lstatSync(join(r, 'dst2', 'ln')).isSymbolicLink()).toBe(true)
+  })
+
   it('plain writes still work: new file, deep mkdir -p, overwrite', () => {
     jailedFs.writeFile(judge(`${r}/deep/er/f`), 'one')
     jailedFs.writeFile(judge(`${r}/deep/er/f`), 'two')

@@ -48,6 +48,9 @@ import {
   writeFileSync,
   writeSync
 } from 'node:fs'
+import { lstat as lstatAsync, open as openAsync, readdir as readdirAsync } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { write as writeCb } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   canonicalComputerPath,
@@ -512,6 +515,58 @@ function copyEntry(src: string, dest: string): void {
   }
 }
 
+/** `fs.write` on the numeric fd `openForWrite` returns, as a promise. */
+const writeAsync = promisify(writeCb)
+
+/** How many entries a long copy handles before it lets the event loop run. */
+const COPY_YIELD_EVERY = 32
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+/**
+ * {@link copyEntry}, asynchronously and in chunks: a tree of tens of thousands of
+ * files (a worktree's `node_modules`) must not hold the computer's event loop — that
+ * froze every terminal and agent on the machine, and past the heartbeat window the
+ * hub declared the computer lost (K3). Same rules as the synchronous copy: each
+ * write re-checked and opened `O_NOFOLLOW`, links copied as links. One buffer.
+ */
+async function copyEntryAsync(
+  src: string,
+  dest: string,
+  state: { n: number; buf: Buffer }
+): Promise<void> {
+  if (++state.n % COPY_YIELD_EVERY === 0) await yieldToLoop()
+  const st = await lstatAsync(src)
+  if (st.isSymbolicLink() || (!st.isDirectory() && !st.isFile())) {
+    copyEntry(src, dest)
+    return
+  }
+  if (st.isDirectory()) {
+    mkdirs(dest)
+    for (const name of await readdirAsync(src)) {
+      await copyEntryAsync(join(src, name), join(dest, name), state)
+    }
+    return
+  }
+  const fd = openForWrite(dest, false)
+  try {
+    const source = await openAsync(src, 'r')
+    try {
+      for (;;) {
+        const { bytesRead } = await source.read(state.buf, 0, state.buf.length, null)
+        if (bytesRead === 0) break
+        let off = 0
+        while (off < bytesRead) {
+          off += (await writeAsync(fd, state.buf, off, bytesRead - off)).bytesWritten
+        }
+      }
+    } finally {
+      await source.close()
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
 /**
  * The only writes a hub frame can cause. Every path is one {@link judgePath}
  * returned (with the access the op needs); each op re-checks right before it acts.
@@ -595,5 +650,13 @@ export const jailedFs = {
       throw new Error(`cannot copy '${judgedSrc}' into itself`)
     }
     copyEntry(judgedSrc, judgedDest)
+  },
+
+  /** {@link jailedFs.copy} for big trees: asynchronous, yielding to the event loop. */
+  async copyAsync(judgedSrc: string, judgedDest: string): Promise<void> {
+    if (isInside(judgedDest, judgedSrc)) {
+      throw new Error(`cannot copy '${judgedSrc}' into itself`)
+    }
+    await copyEntryAsync(judgedSrc, judgedDest, { n: 0, buf: Buffer.allocUnsafe(256 * 1024) })
   }
 }
