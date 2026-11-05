@@ -22,7 +22,10 @@
  *
  * `hub-wide` resolutions are the exception, and the only one: things that belong to
  * no user BY DESIGN (a global AI-config library item, an empty project folder, a
- * filesystem path inside nobody's project) are allowed. Listed per kind below.
+ * filesystem path inside nobody's project) are allowed. Listed per kind below. A path
+ * the hub itself opens for the caller (`ownedPath`, `pathTree`) is never hub-wide
+ * (N1), and a path under `/dev`, `/proc`, `/sys` or `/.vol` is nobody's, whatever it
+ * is spelled as.
  *
  * SHARING (T-100) extends `mayAccessProject` — "owner or member" — plus the facts it
  * needs in {@link ProjectOwnership}. Nothing here or at any call site changes, and
@@ -63,16 +66,24 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *                  computer placement). Inside the hub's own state directory it is
  *                  refused (the database, auth store and owner token live there) unless
  *                  a project root there is more specific — and an artifact file is its
- *                  task's. Anywhere else it is hub-wide.
+ *                  task's. Under a system directory ({@link SYSTEM_DIRS}) it is refused.
+ *                  Anywhere else it is hub-wide: a folder about to BECOME a root (a new
+ *                  project, a new worktree) is in none yet.
+ *   ownedPath      `path`, minus hub-wide: a path the hub opens on its OWN disk for the
+ *                  caller (copies, reads, git, the OS opener) must lie in a root the
+ *                  caller may access. In no root it is nobody's (N1: anything the hub
+ *                  process can read — its own database through `/dev/fd/<n>`, its
+ *                  environment and auth secret through `/proc/self/environ` — was
+ *                  anybody's).
  *   computer       a computer (T-19): its OWNER only — `computers.owner_user_id`, not a
  *                  project. A computer is one OS account's environment, so using it is
  *                  code execution in that account: no admin, no sharing, and an unowned
  *                  one is nobody's (O-6). Managing one (list, rename, revoke) is wider —
  *                  the owner or an admin — and is decided in `computer-access.ts`.
  *   pathTree       a directory and everything under it (a directory upload walks it,
- *                  T-107): `path` for the directory, and refused when a root under it
- *                  is one the request may not touch — the hub's own state, or a
- *                  project root of a project it may not access.
+ *                  T-107): `ownedPath` for the directory, and refused when a root under
+ *                  it is one the request may not touch — the hub's own state, a system
+ *                  directory, or a project root of a project it may not access.
  */
 export type ResourceKind =
   | 'project'
@@ -96,6 +107,7 @@ export type ResourceKind =
   | 'automation'
   | 'computer'
   | 'pathTree'
+  | 'ownedPath'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -118,8 +130,14 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'path',
   'automation',
   'computer',
-  'pathTree'
+  'pathTree',
+  'ownedPath'
 ]
+
+/** The kinds whose id is a filesystem path. A path can carry a user's directory
+ *  names, so a refusal logs the kind only, never the id. */
+export const isPathKind = (kind: ResourceKind): boolean =>
+  kind === 'path' || kind === 'ownedPath' || kind === 'pathTree'
 
 export interface OwnedResource {
   readonly kind: ResourceKind
@@ -347,13 +365,47 @@ const ROOTS_SQL = `
     UNION ALL SELECT project_id, root_path FROM project_placements WHERE root_path <> ''
   ) r JOIN projects p ON p.id = r.project_id`
 
+/**
+ * Directories whose entries are not files anyone keeps there: device nodes and the
+ * kernel's views of processes. `/dev/fd/<n>` and `/dev/stdin` read whatever the hub
+ * has open (its database), `/proc/self/environ` its environment (the auth secret),
+ * `/.vol/<dev>/<inode>` (macOS) any file by number past every path check. Their
+ * realpath names nothing real (`/dev/fd/node`), so no root could ever hold them.
+ */
+const SYSTEM_DIRS = ['/dev', '/proc', '/sys', '/.vol'] as const
+
+/** `p` (absolute, POSIX) is a system directory or under one. Case-folded: macOS's
+ *  default volume is case-insensitive, so `/DEV/fd/3` opens `/dev/fd/3` (on Linux it
+ *  refuses a `/DEV` nobody keeps project files in). */
+const inSystemDir = (p: string): boolean => {
+  const lower = p.toLowerCase()
+  return SYSTEM_DIRS.some((d) => lower === d || lower.startsWith(`${d}/`))
+}
+
+/**
+ * A POSIX `rawPath` that is a system directory or under one — spelled so (`..`
+ * collapsed), or once symlinks are followed. Checked on both forms: realpath of a
+ * descriptor is a name that does not exist (`/dev/fd/node`), and a link elsewhere can
+ * point into one.
+ */
+function touchesSystemDir(rawPath: string, real: string): boolean {
+  if (isWindowsPath(rawPath)) return false
+  const lexical = posix.resolve(process.cwd(), rawPath)
+  return inSystemDir(lexical) || inSystemDir(real)
+}
+
+/** What a path resolution may answer for a path in no root. */
+type InNoRoot = 'hub-wide' | 'nobody'
+
 async function resolvePathResource(
   db: SlayzoneDb,
   rawPath: string,
-  hubRoots: readonly string[]
+  hubRoots: readonly string[],
+  inNoRoot: InNoRoot = 'hub-wide'
 ): Promise<Ownership> {
   if (!rawPath) return NONE
   const target = normalizePath(rawPath)
+  if (touchesSystemDir(rawPath, target)) return NONE
   // The hub's own state directory, as one more root in the competition below.
   let hubDepth = -1
   for (const raw of hubRoots) {
@@ -383,16 +435,18 @@ async function resolvePathResource(
     if (root.length === depth) owners.push(row)
   }
   if (hubDepth >= 0 && hubDepth >= depth) return NONE
-  return depth < 0 ? HUB_WIDE : projectsOf(owners)
+  if (depth < 0) return inNoRoot === 'hub-wide' ? HUB_WIDE : NONE
+  return projectsOf(owners)
 }
 
 /**
- * A directory and everything under it. What decides the directory decides here too,
- * but a walk also reaches every root nested inside it — so the hub's own state there
- * (a directory up the tree from `<ROOT>`, or holding the SSO key) or a project root
- * the request may not access (another user's project nested in yours, their worktree)
- * refuses the whole tree. Symlinks inside are not followed by the walk; one AT the
- * directory is resolved like any `path`.
+ * A directory and everything under it. What decides the directory as an `ownedPath`
+ * decides here too, but a walk also reaches every root nested inside it — so the
+ * hub's own state there (a directory up the tree from `<ROOT>`, or holding the SSO
+ * key), a system directory, or a project root the request may not access (another
+ * user's project nested in yours, their worktree) refuses the whole tree. Symlinks
+ * inside are not followed by the walk; one AT the directory is resolved like any
+ * `ownedPath`.
  */
 async function resolvePathTree(
   db: SlayzoneDb,
@@ -400,10 +454,11 @@ async function resolvePathTree(
   req: AccessRequest
 ): Promise<Ownership> {
   const hubRoots = req.hubRoots ?? []
-  const own = await resolvePathResource(db, rawPath, hubRoots)
+  const own = await resolvePathResource(db, rawPath, hubRoots, 'nobody')
   if (own.status === 'none') return NONE
   const dir = normalizePath(rawPath)
   for (const raw of hubRoots) if (within(normalizePath(raw, true), dir)) return NONE
+  if (!isWindowsPath(dir) && SYSTEM_DIRS.some((d) => within(d, dir))) return NONE
   for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
     if (within(normalizePath(row.root, true), dir) && !mayAccessProject(req, row)) return NONE
   }
@@ -443,7 +498,9 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   // Its owner row stands in for a project's: it carries no members, so sharing (T-100)
   // never extends to a computer.
   computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?'),
-  pathTree: resolvePathTree
+  pathTree: resolvePathTree,
+  // A path the hub opens on its own disk for the caller: a root of theirs, or nothing (N1).
+  ownedPath: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? [], 'nobody')
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

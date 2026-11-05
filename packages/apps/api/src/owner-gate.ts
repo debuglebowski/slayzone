@@ -29,6 +29,7 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import {
   createAccessScope,
   hubStateRoots,
+  isPathKind,
   type AccessRequest,
   type AccessScope,
   type OwnedResource
@@ -96,7 +97,7 @@ function refuse(
       reason,
       ...(resource ? { resource: resource.kind } : {}),
       // A path can carry a user's directory names; the kind is enough there.
-      ...(resource && resource.kind !== 'path' ? { resourceId: resource.id } : {})
+      ...(resource && !isPathKind(resource.kind) ? { resourceId: resource.id } : {})
     }
   })
   if (reason === 'owner_unclassified') {
