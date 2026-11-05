@@ -14,7 +14,7 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "better-sqlite3": "^13.0.3",
-    "js-yaml": "^5.4.2"
+    "js-yaml": "^5.5.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0"

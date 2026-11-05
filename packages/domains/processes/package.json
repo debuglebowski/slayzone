@@ -14,7 +14,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^24.19.1"
+    "@types/node": "^24.19.2"
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*",

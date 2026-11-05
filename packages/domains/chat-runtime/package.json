@@ -13,15 +13,15 @@
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "better-sqlite3": "^13.0.3",
-    "zod": "^4.3.5",
-    "@slayzone/terminal": "workspace:*",
-    "@slayzone/task-artifacts": "workspace:*"
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^24.19.1",
-    "vitest": "^5.0.3"
+    "@types/node": "^24.19.2",
+    "vitest": "^5.0.5"
   }
 }

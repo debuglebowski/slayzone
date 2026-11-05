@@ -9,43 +9,6 @@
       "advisories": ["GHSA-27r3-jxmh-p828"]
     },
     {
-      "packages": ["undici"],
-      "reason": "Via @electron/get, the electron package's install-time downloader; never in the app or hub.",
-      "reviewed": "2026-11-02",
-      "expires": "2027-01-24",
-      "advisories": [
-        "GHSA-2m5v-pch6-74hx",
-        "GHSA-4qv8-2p9j-2685",
-        "GHSA-4w7w-5xrc-9h26",
-        "GHSA-55wc-3pg8-jfw6",
-        "GHSA-9fm3-97px-rjf6",
-        "GHSA-f72v-6w45-q472",
-        "GHSA-qrxm-fqhp-jwvm",
-        "GHSA-xjj6-f33q-929c"
-      ]
-    },
-    {
-      "packages": ["@hono/node-server"],
-      "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic); the serveStatic fix is only in @hono/node-server 2.x, which the SDK does not accept.",
-      "reviewed": "2026-11-05",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-rmxm-3fg6-px4f"]
-    },
-    {
-      "packages": ["vite"],
-      "reason": "Counted as production only because better-auth lists vitest as an optional peer; dev tooling in practice. Our Vite dev servers bind localhost, and the dev-server advisories need --host. The fix (8.3.3, published 2026-10-06) is in Renovate PR #174.",
-      "reviewed": "2026-11-04",
-      "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-587h-7wmj-h5pm",
-        "GHSA-698v-4r3x-3vcv",
-        "GHSA-9jrq-w75r-8gcw",
-        "GHSA-r825-w8mm-5pxw",
-        "GHSA-rq7h-c2jc-7f22",
-        "GHSA-vfpm-58rq-9qcg"
-      ]
-    },
-    {
       "packages": ["decode-uri-component", "katex"],
       "reason": "decode-uri-component: via @lobehub/icons / @lobehub/ui; we deep-import 6 icon components, which do not load it (fix 0.5.1, published 2026-10-23, clears the 14-day minimumReleaseAge on 2026-11-06). katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
       "reviewed": "2026-11-04",

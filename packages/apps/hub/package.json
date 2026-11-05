@@ -21,6 +21,9 @@
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/api": "workspace:*",
     "@slayzone/automations": "workspace:*",
+    "@slayzone/chat-runtime": "workspace:*",
+    "@slayzone/computer-transport": "workspace:*",
+    "@slayzone/computers": "workspace:*",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
@@ -29,8 +32,6 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/projects": "workspace:*",
-    "@slayzone/computer-transport": "workspace:*",
-    "@slayzone/computers": "workspace:*",
     "@slayzone/settings-core": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
@@ -46,18 +47,17 @@
     "better-sqlite3": "^13.0.3",
     "bufferutil": "^4.1.0",
     "node-pty": "^1.1.0",
-    "superjson": "^2.2.1",
-    "ws": "^8.22.0",
-    "@slayzone/chat-runtime": "workspace:*"
+    "superjson": "^2.2.6",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/computer": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^24.19.1",
+    "@types/node": "^24.19.2",
     "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }

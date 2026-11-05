@@ -192,8 +192,8 @@ patchedDependencies:
   # Release CI: memoizes readdir in electron-builder's node-module BFS (Windows spent
   # ~165 s/arch re-walking node_modules for uninstalled optional platform packages).
   # Re-create on an electron-builder bump; drop once upstream caches it.
-  'app-builder-lib@26.17.0': patches/app-builder-lib@26.17.0.patch
+  'app-builder-lib@26.18.0': patches/app-builder-lib@26.18.0.patch
   'posix@4.2.0': patches/posix@4.2.0.patch
-  '@radix-ui/react-menu@2.1.24': patches/@radix-ui__react-menu@2.1.24.patch
   'electron-chrome-extensions@4.9.0': patches/electron-chrome-extensions@4.9.0.patch
   'node-pty@1.1.0': patches/node-pty@1.1.0.patch
+  '@radix-ui/react-menu@2.2.1': patches/@radix-ui__react-menu@2.2.1.patch

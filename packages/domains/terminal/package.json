@@ -47,7 +47,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-query": "^5.104.5",
     "@trpc/server": "^11.19.0",
     "@xterm/addon-fit": "0.12.0-beta.301",
     "@xterm/addon-search": "0.17.0-beta.301",
@@ -56,10 +56,10 @@
     "@xterm/addon-webgl": "0.20.0-beta.300",
     "@xterm/headless": "6.1.0-beta.303",
     "@xterm/xterm": "6.1.0-beta.304",
-    "lucide-react": "^1.52.0",
+    "lucide-react": "^1.61.0",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.16"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

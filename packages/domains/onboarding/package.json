@@ -17,15 +17,15 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "@radix-ui/react-collapsible": "^1.1.20",
+    "@radix-ui/react-collapsible": "^1.2.1",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/host-capabilities": "workspace:*",
     "@slayzone/settings-core": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.1",
-    "lucide-react": "^1.52.0",
+    "@tanstack/react-query": "^5.104.5",
+    "lucide-react": "^1.61.0",
     "motion": "^12.43.0"
   },
   "peerDependencies": {

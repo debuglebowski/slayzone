@@ -18,12 +18,12 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
-    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-query": "^5.104.5",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
-    "superjson": "^2.2.1",
-    "zustand": "^5.0.15"
+    "superjson": "^2.2.6",
+    "zustand": "^5.0.16"
   },
   "peerDependencies": {
     "react": "^19.3.1"
