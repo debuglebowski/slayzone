@@ -68,7 +68,7 @@ const remoteClient = { userId: 'u1', ip: '198.51.100.7' }
 describe('direct-link issuer', () => {
   it('registers the hash on the computer first, then hands the client the raw token', async () => {
     const { issuer, requests, gated } = setup()
-    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     expect(out).toMatchObject({
       available: true,
       computerId: 'c-local',
@@ -97,7 +97,7 @@ describe('direct-link issuer', () => {
 
   it('pins a chat grant to the epoch the hub holds, gated as the tab’s task', async () => {
     const { issuer, requests, gated } = setup()
-    const out = await issuer.issue({ kind: 'chat', tabId: 'tab-1' }, local)
+    const out = await issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-1' }, local)
     expect(out.available).toBe(true)
     expect(requests[0]?.params.resource).toEqual({ kind: 'chat', tabId: 'tab-1', epoch: 4 })
     expect(gated[0]).toEqual({ computerId: 'c-local', work: { kind: 'task', id: 'task-1' } })
@@ -105,7 +105,7 @@ describe('direct-link issuer', () => {
 
   it('audits each issue with grant id, computer and resource — never the token', async () => {
     const { issuer } = setup()
-    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     if (!out.available) throw new Error('unreachable')
     const line = lines.find((l) => l.event === 'computer.direct_grant')
     expect(line).toMatchObject({
@@ -119,14 +119,16 @@ describe('direct-link issuer', () => {
 
   it('offers a loopback listener only when the client and the computer are both on the hub’s machine', async () => {
     const { issuer, requests } = setup()
-    expect(await issuer.issue({ kind: 'pty', sessionId: 't:t' }, remoteClient)).toEqual({
+    expect(
+      await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, remoteClient)
+    ).toEqual({
       available: false,
       reason: 'unreachable'
     })
     const { issuer: other } = setup({}, [
       { computerId: 'c-local', directAddress: '127.0.0.1:5001', peerLoopback: false }
     ])
-    expect(await other.issue({ kind: 'pty', sessionId: 't:t' }, local)).toEqual({
+    expect(await other.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)).toEqual({
       available: false,
       reason: 'unreachable'
     })
@@ -135,7 +137,9 @@ describe('direct-link issuer', () => {
 
   it('offers a public address to any client', async () => {
     const { issuer } = setup()
-    expect(await issuer.issue({ kind: 'pty', sessionId: 'r1' }, remoteClient)).toMatchObject({
+    expect(
+      await issuer.issue({ kind: 'pty', sessionId: 'r1', taskId: 'task-1' }, remoteClient)
+    ).toMatchObject({
       available: true,
       address: 'box.example:7443'
     })
@@ -143,30 +147,63 @@ describe('direct-link issuer', () => {
 
   it('answers unavailable, never an error, when there is nothing direct to offer', async () => {
     const { issuer } = setup()
-    expect(await issuer.issue({ kind: 'pty', sessionId: 'gone' }, local)).toEqual({
+    expect(await issuer.issue({ kind: 'pty', sessionId: 'gone', taskId: 'task-1' }, local)).toEqual(
+      {
+        available: false,
+        reason: 'no-computer'
+      }
+    )
+    expect(await issuer.issue({ kind: 'chat', tabId: 'gone', taskId: 'task-1' }, local)).toEqual({
       available: false,
       reason: 'no-computer'
     })
-    expect(await issuer.issue({ kind: 'chat', tabId: 'gone' }, local)).toEqual({
-      available: false,
-      reason: 'no-computer'
-    })
-    expect(await issuer.issue({ kind: 'pty', sessionId: 'hub-owned' }, local)).toEqual({
+    expect(
+      await issuer.issue({ kind: 'pty', sessionId: 'hub-owned', taskId: 'task-1' }, local)
+    ).toEqual({
       available: false,
       reason: 'not-direct'
     })
     const { issuer: none } = setup({}, [
       { computerId: 'c-local', directAddress: null, peerLoopback: true }
     ])
-    expect(await none.issue({ kind: 'pty', sessionId: 't:t' }, local)).toEqual({
+    expect(await none.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)).toEqual({
       available: false,
       reason: 'no-address'
     })
     const { issuer: offline } = setup({}, [])
-    expect(await offline.issue({ kind: 'pty', sessionId: 't:t' }, local)).toEqual({
+    expect(await offline.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)).toEqual(
+      {
+        available: false,
+        reason: 'no-computer'
+      }
+    )
+  })
+
+  // The target is a computer target (owner-checked by its task, G2): a session or
+  // tab outside the task it names, or on another computer than it names, is refused.
+  it('refuses a session or tab outside the task or computer the target names', async () => {
+    const { issuer, requests } = setup()
+    expect(await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-2' }, local)).toEqual({
       available: false,
-      reason: 'no-computer'
+      reason: 'wrong-target'
     })
+    expect(await issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-2' }, local)).toEqual({
+      available: false,
+      reason: 'wrong-target'
+    })
+    expect(
+      await issuer.issue(
+        { kind: 'pty', sessionId: 't:t', taskId: 'task-1', computerId: 'c-remote' },
+        local
+      )
+    ).toEqual({ available: false, reason: 'wrong-target' })
+    expect(requests).toEqual([])
+    expect(
+      await issuer.issue(
+        { kind: 'pty', sessionId: 't:t', taskId: 'task-1', computerId: 'c-local' },
+        local
+      )
+    ).toMatchObject({ available: true })
   })
 
   it('refuses when the placement gate refuses, and registers nothing', async () => {
@@ -175,16 +212,16 @@ describe('direct-link issuer', () => {
         throw new Error('not your computer')
       }
     })
-    await expect(issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)).rejects.toThrow(
-      /not your computer/
-    )
+    await expect(
+      issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    ).rejects.toThrow(/not your computer/)
     expect(requests).toEqual([])
   })
 
   it('remembers what it issued per computer (for reset and revocation)', async () => {
     const { issuer } = setup()
-    const a = await issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
-    const b = await issuer.issue({ kind: 'pty', sessionId: 'r1' }, remoteClient)
+    const a = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    const b = await issuer.issue({ kind: 'pty', sessionId: 'r1', taskId: 'task-1' }, remoteClient)
     if (!a.available || !b.available) throw new Error('unreachable')
     expect(issuer.heldGrantIds('c-local')).toEqual([a.grantId])
     expect(issuer.heldGrantIds('c-remote')).toEqual([b.grantId])
@@ -193,7 +230,7 @@ describe('direct-link issuer', () => {
   it('forgets a grant once its TTL has passed', async () => {
     let now = 0
     const { issuer } = setup({ now: () => now })
-    await issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     now += DIRECT_GRANT_TTL_MS
     expect(issuer.heldGrantIds('c-local')).toEqual([])
   })
@@ -202,13 +239,16 @@ describe('direct-link issuer', () => {
 describe('direct-link revocation', () => {
   async function issued() {
     const ctx = setup()
-    const a = await ctx.issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    const a = await ctx.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     const b = await ctx.issuer.issue(
-      { kind: 'pty', sessionId: 'other:t' },
+      { kind: 'pty', sessionId: 'other:t', taskId: 'task-2' },
       { ...local, userId: 'u2' }
     )
-    const c = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1' }, local)
-    const d = await ctx.issuer.issue({ kind: 'pty', sessionId: 'r1' }, remoteClient)
+    const c = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-1' }, local)
+    const d = await ctx.issuer.issue(
+      { kind: 'pty', sessionId: 'r1', taskId: 'task-1' },
+      remoteClient
+    )
     if (!a.available || !b.available || !c.available || !d.available) throw new Error('unreachable')
     ctx.requests.length = 0
     return { ...ctx, ids: { a: a.grantId, b: b.grantId, c: c.grantId, d: d.grantId } }
@@ -284,7 +324,7 @@ describe('direct-link revocation', () => {
         }
       }
     })
-    await failing.issuer.issue({ kind: 'pty', sessionId: 't:t' }, local)
+    await failing.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     // Forgotten anyway: the reconnect reset drops it on the computer.
     await failing.issuer.revoke({ by: 'user', userId: 'u1' }, 'user_disabled')
     expect(failing.issuer.heldGrantIds('c-local')).toEqual([])

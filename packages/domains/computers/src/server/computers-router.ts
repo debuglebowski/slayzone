@@ -320,9 +320,21 @@ export const computersRouter = router({
   issueDirectLink: publicProcedure
     .input(
       z.object({
+        // A computer target (task, optionally its computer) plus the session or tab
+        // in it: owner-checked like every computer target (G2).
         target: z.discriminatedUnion('kind', [
-          z.object({ kind: z.literal('pty'), sessionId: z.string().min(1).max(200) }),
-          z.object({ kind: z.literal('chat'), tabId: z.string().min(1).max(200) })
+          z.object({
+            kind: z.literal('pty'),
+            sessionId: z.string().min(1).max(200),
+            taskId: z.string().min(1).max(200),
+            computerId: z.string().min(1).max(200).optional()
+          }),
+          z.object({
+            kind: z.literal('chat'),
+            tabId: z.string().min(1).max(200),
+            taskId: z.string().min(1).max(200),
+            computerId: z.string().min(1).max(200).optional()
+          })
         ])
       })
     )

@@ -103,7 +103,7 @@ function setup(over: Partial<DirectLinkManagerOptions> = {}) {
   }
 }
 
-const pty = (sessionId = 's1') => ({ kind: 'pty' as const, sessionId })
+const pty = (sessionId = 's1') => ({ kind: 'pty' as const, sessionId, taskId: 't1' })
 
 describe('acquire', () => {
   it('issues, probes the health path over HTTP, opens one socket and leases it', async () => {

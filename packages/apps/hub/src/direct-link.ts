@@ -35,7 +35,11 @@ import {
   type DirectRevokeParams,
   HubToComputerMethods
 } from '@slayzone/computer-transport/shared'
-import type { DirectLinkIssueResult, DirectLinkTarget } from '@slayzone/computers/shared'
+import type {
+  DirectLinkIssueResult,
+  DirectLinkResource,
+  DirectLinkTarget
+} from '@slayzone/computers/shared'
 import { isLoopbackAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { securityEvent } from '@slayzone/platform/security-log'
 
@@ -88,7 +92,7 @@ export type DirectRevocation =
   /** Task closed (archived, deleted, its agents stopped). */
   | { by: 'task'; taskId: string }
   /** One session or tab (chat ownership moved, tab removed). */
-  | { by: 'target'; target: DirectLinkTarget }
+  | { by: 'target'; target: DirectLinkResource }
   /** Computer revoked: everything this hub granted on it. */
   | { by: 'computer'; computerId: string }
 
@@ -131,7 +135,7 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
   }
 
   async function locate(
-    target: DirectLinkTarget
+    target: DirectLinkResource
   ): Promise<
     | { computerId: string; resource: DirectResource; work: ComputerWork; taskId: string }
     | { unavailable: 'no-computer' | 'not-direct' }
@@ -161,6 +165,14 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
     async issue(target, caller) {
       const located = await locate(target)
       if ('unavailable' in located) return { available: false, reason: located.unavailable }
+      // The target's task (and computer, when named) is what the owner gate checked:
+      // the resource must lie inside it, or the check covered something else.
+      if (
+        located.taskId !== target.taskId ||
+        (target.computerId !== undefined && target.computerId !== located.computerId)
+      ) {
+        return { available: false, reason: 'wrong-target' }
+      }
       const computer = deps.gateway
         .listUsableComputers()
         .find((c) => c.computerId === located.computerId)

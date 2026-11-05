@@ -38,7 +38,16 @@ import { useNativeMounted } from './use-native-mounted'
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
-export function TerminalView({ sessionId, live }: { sessionId: string; live: boolean }) {
+export function TerminalView({
+  sessionId,
+  taskId,
+  live
+}: {
+  sessionId: string
+  /** The task the session belongs to: the direct link's computer target. */
+  taskId: string
+  live: boolean
+}) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const theme = useTheme()
@@ -71,7 +80,7 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
   // hub can only issue for a running session).
   const { lease: direct, lost: directLost } = useDirectLease(
     client,
-    { kind: 'pty', sessionId },
+    { kind: 'pty', sessionId, taskId },
     live
   )
   useEffect(() => {

@@ -36,6 +36,13 @@ export type DirectGrantResource =
 /** A resource as a procedure names it (a chat tab without its epoch). */
 export type DirectTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
 
+/**
+ * What a client asks the hub to issue for: a computer target (its task, and its
+ * computer when known), owner-checked like every computer target, plus the session
+ * or tab in it (`@slayzone/computers` `DirectLinkTarget`, structurally).
+ */
+export type DirectIssueTarget = DirectTarget & { taskId: string; computerId?: string }
+
 export interface DirectGrantView {
   grantId: string
   resource: DirectGrantResource

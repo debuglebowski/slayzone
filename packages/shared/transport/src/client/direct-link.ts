@@ -28,7 +28,7 @@
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
-import type { DirectRouter, DirectTarget } from '../direct/router'
+import type { DirectIssueTarget, DirectRouter } from '../direct/router'
 
 export const DIRECT_LINK_PATH = '/direct/v1'
 export const DIRECT_LINK_HEALTH_PATH = '/direct/v1/health'
@@ -69,7 +69,7 @@ export type DirectLeaseLostReason =
   | 'disposed'
 
 export interface DirectLinkManagerOptions {
-  issue(target: DirectTarget): Promise<DirectIssueResult>
+  issue(target: DirectIssueTarget): Promise<DirectIssueResult>
   /**
    * Is the computer's listener at `address` worth a socket now? Default: a plain
    * HTTP `fetch` of its health path with a deadline (mobile, node). The desktop asks
@@ -102,7 +102,7 @@ export type DirectLinkComputerStatus =
     }
 
 export interface DirectLinkManager {
-  acquire(target: DirectTarget): Promise<DirectLease | null>
+  acquire(target: DirectIssueTarget): Promise<DirectLease | null>
   /** Computers on the direct link, and those backing off to the relay. */
   status(): DirectLinkComputerStatus[]
   /** The computer (re)connected to the hub: its address may have moved. */
@@ -186,7 +186,7 @@ interface Socket {
 }
 
 interface LeaseState {
-  target: DirectTarget
+  target: DirectIssueTarget
   socket: Socket
   renew: ReturnType<typeof setTimeout> | null
   lostListeners: Set<(reason: DirectLeaseLostReason) => void>
@@ -205,7 +205,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   >()
   /** The computer each target was last found on: a blocked one is not asked again. */
   const lastComputer = new Map<string, string>()
-  const targetKey = (t: DirectTarget): string =>
+  const targetKey = (t: DirectIssueTarget): string =>
     t.kind === 'pty' ? `pty:${t.sessionId}` : `chat:${t.tabId}`
   let hubUnsupported = false
   let disposed = false
@@ -430,7 +430,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
 export interface DirectLinkHubClient {
   computers: {
     issueDirectLink: {
-      mutate(input: { target: DirectTarget }): Promise<DirectIssueResult>
+      mutate(input: { target: DirectIssueTarget }): Promise<DirectIssueResult>
     }
     onStatusChange: {
       subscribe(

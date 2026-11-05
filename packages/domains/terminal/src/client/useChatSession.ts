@@ -371,7 +371,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // reads, the event stream and simple commands go there; the hub otherwise.
   const { lease: directChat, lost: directChatLost } = useDirectLease(
     trpcClient,
-    opts.tabId ? { kind: 'chat', tabId: opts.tabId } : null
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null
   )
   const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
   // Fixed identities for the hydrate effect: they read the CURRENT path when called,

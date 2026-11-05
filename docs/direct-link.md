@@ -9,7 +9,10 @@ permanent fallback.
 ## Flow
 
 1. **Issue.** The client asks the hub: `computers.issueDirectLink({ target })`, where
-   `target` is `{ kind: 'pty', sessionId }` or `{ kind: 'chat', tabId }`.
+   `target` is a computer target like every other computer-routed call (`taskId`,
+   optionally `computerId`) plus the resource in it: `{ kind: 'pty', sessionId }` or
+   `{ kind: 'chat', tabId }`. Owner-policy checks the task (and computer) as for any
+   target (G2), and the hub answers `wrong-target` for a resource outside them.
 2. **Gate and register.** The hub runs the gates the relayed call would run:
    - the owner gate on the session or tab (owner-policy);
    - scope `agent`;

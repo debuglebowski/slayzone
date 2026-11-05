@@ -5,8 +5,17 @@
  * Import-free on purpose: this barrel reaches the renderer and mobile.
  */
 
-/** What a client wants to reach directly on the computer that holds it. */
-export type DirectLinkTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
+/** One session or one chat tab on the computer that holds it. */
+export type DirectLinkResource =
+  | { kind: 'pty'; sessionId: string }
+  | { kind: 'chat'; tabId: string }
+
+/**
+ * What a client wants to reach directly: a computer target like every other
+ * computer-routed call (owner-checked by its task, and its computer when named; G2),
+ * plus the session or tab inside it. The hub refuses a resource outside it.
+ */
+export type DirectLinkTarget = DirectLinkResource & { taskId: string; computerId?: string }
 
 /**
  * Why the hub offers no direct link; the client uses the hub relay. None of these is
@@ -18,6 +27,8 @@ export type DirectLinkTarget = { kind: 'pty'; sessionId: string } | { kind: 'cha
  *    machine (or the computer is).
  *  - `not-direct`: the hub, not the computer, holds this session's output.
  *  - `unsupported`: this hub cannot issue direct links.
+ *  - `wrong-target`: the session/tab is not in the task (or on the computer) the
+ *    target names.
  */
 export type DirectLinkUnavailableReason =
   | 'no-computer'
@@ -25,6 +36,7 @@ export type DirectLinkUnavailableReason =
   | 'unreachable'
   | 'not-direct'
   | 'unsupported'
+  | 'wrong-target'
 
 export type DirectLinkIssueResult =
   | {

@@ -401,7 +401,7 @@ describe('client manager against the real listener (computer restart)', () => {
         backoffInitialMs: 50
       })
       cleanups.push(() => manager.dispose())
-      const lease = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      const lease = await manager.acquire({ kind: 'pty', sessionId: 's1', taskId: 't' })
       expect(lease).not.toBeNull()
       const lost: string[] = []
       lease?.onLost((r) => lost.push(r))
@@ -414,7 +414,7 @@ describe('client manager against the real listener (computer restart)', () => {
       // No blind reconnect to the dead port.
       expect(constructed).toBe(1)
       current = await setup()
-      const again = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      const again = await manager.acquire({ kind: 'pty', sessionId: 's1', taskId: 't' })
       expect(again).not.toBeNull()
       expect(constructed).toBe(2)
       expect(await again?.client.ping.query()).toEqual({ protocol: 1 })

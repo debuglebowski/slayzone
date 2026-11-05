@@ -155,7 +155,11 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   const { tabId, taskId, mode, cwd, providerFlagsOverride } = target
   // The tab's direct link to the computer holding its history (docs/direct-link.md):
   // the event stream, the replay and permission answers go there; the hub otherwise.
-  const { lease: direct, lost: directLost } = useDirectLease(trpcClient, { kind: 'chat', tabId })
+  const { lease: direct, lost: directLost } = useDirectLease(trpcClient, {
+    kind: 'chat',
+    tabId,
+    taskId
+  })
   const chatIo = useMemo(
     () => chatViaDirect(trpcClient, direct?.client ?? null, directLost),
     [trpcClient, direct, directLost]

@@ -808,8 +808,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
   'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
-  // A direct-link capability names one session or one chat tab, by `target.kind`.
-  'computers.issueDirectLink': checked({
+  // A direct-link target is a computer target (its task, and computer when named) plus
+  // the one session or chat tab in it, by `target.kind`. The issuer refuses a resource
+  // outside the task.
+  'computers.issueDirectLink': checked(...TARGET, {
     pick: (raw) => {
       const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
       const r =
@@ -820,7 +822,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
             : null
       return r ? [r] : []
     },
-    sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
+    sample: {
+      kind: 'session',
+      input: (id) => ({ target: { kind: 'pty', sessionId: id, taskId: 'sample-task' } })
+    }
   }),
   'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),

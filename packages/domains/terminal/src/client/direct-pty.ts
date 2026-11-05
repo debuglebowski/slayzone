@@ -19,6 +19,7 @@ import {
   type DirectLease,
   type DirectLinkManager
 } from '@slayzone/transport/direct-client'
+import { taskIdFromSessionId } from './session-id'
 
 type DirectPtyClient = DirectLease['client']
 
@@ -128,7 +129,7 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   }
 
   const keeper = keepDirectLease({
-    target: { kind: 'pty', sessionId },
+    target: { kind: 'pty', sessionId, taskId: taskIdFromSessionId(sessionId) },
     manager: opts.manager,
     ...(opts.wake ? { wake: opts.wake } : {}),
     ...(opts.retryMs !== undefined ? { retryMs: opts.retryMs } : {}),

@@ -530,7 +530,9 @@ test('T-20: users mint for themselves; only an admin mints for a named, enabled 
 
 test('computers.issueDirectLink: relays to the hub issuer with the caller; unsupported without one', async () => {
   // No issuer wired: the client is told to use the relay, never an error.
-  expect(await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1' } })).toEqual({
+  expect(
+    await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1', taskId } })
+  ).toEqual({
     available: false,
     reason: 'unsupported'
   })
@@ -543,12 +545,14 @@ test('computers.issueDirectLink: relays to the hub issuer with the caller; unsup
     }
   })
   try {
-    expect(await caller.issueDirectLink({ target: { kind: 'chat', tabId: 'tab-1' } })).toEqual({
+    expect(
+      await caller.issueDirectLink({ target: { kind: 'chat', tabId: 'tab-1', taskId } })
+    ).toEqual({
       available: false,
       reason: 'no-address'
     })
     expect(seen).toEqual([
-      { target: { kind: 'chat', tabId: 'tab-1' }, who: { userId: null, ip: null } }
+      { target: { kind: 'chat', tabId: 'tab-1', taskId }, who: { userId: null, ip: null } }
     ])
   } finally {
     setComputersDeps(fakeDeps)
