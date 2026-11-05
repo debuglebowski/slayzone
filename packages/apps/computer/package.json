@@ -19,6 +19,10 @@
   },
   "dependencies": {
     "@slayzone/agent-turns": "workspace:*",
+    "@slayzone/ai-config": "workspace:*",
+    "@slayzone/chat-runtime": "workspace:*",
+    "@slayzone/computer-runtime": "workspace:*",
+    "@slayzone/computer-transport": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",
@@ -42,9 +46,9 @@
     "@slayzone/build-guards": "workspace:*",
     "@slayzone/computers": "workspace:*",
     "@slayzone/test-utils": "workspace:*",
-    "@types/node": "^24.19.1",
+    "@types/node": "^24.19.2",
     "esbuild": "^0.28.2",
-    "vitest": "^5.0.3",
+    "vitest": "^5.0.5",
     "@trpc/client": "^11.19.0",
     "@types/ws": "^8.5.13",
     "@slayzone/trpc-server": "workspace:*"

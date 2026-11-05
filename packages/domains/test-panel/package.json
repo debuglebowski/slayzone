@@ -21,7 +21,7 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-query": "^5.104.5",
     "picomatch": "^4.0.7",
     "zod": "^4.3.5"
   },
@@ -29,9 +29,9 @@
     "react": "^19.3.1"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.2",
+    "@types/picomatch": "^4.0.3",
     "@slayzone/test-utils": "workspace:*",
     "@types/react": "^19.3.0",
-    "lucide-react": "^1.52.0"
+    "lucide-react": "^1.61.0"
   }
 }

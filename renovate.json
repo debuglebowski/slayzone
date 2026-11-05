@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Weekly dependency updates, only to versions published at least 30 days ago (the same age pnpm-workspace.yaml installs from: minimumReleaseAge 43200 minutes), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
+  "description": "Weekly dependency updates, only to versions published at least 30 days ago (longer than pnpm-workspace.yaml's install gate, minimumReleaseAge 20160 minutes = 14 days, so every proposed version installs), security fixes included. The weekly audit job (.github/workflows/audit.yml) catches advisories Renovate cannot fix, e.g. in transitive dependencies.",
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "timezone": "Europe/Stockholm",
   "schedule": ["before 6am on monday"],

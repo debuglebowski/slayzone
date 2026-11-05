@@ -20,8 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
-    "@codemirror/view": "^6.43.13",
+    "@codemirror/view": "^6.43.15",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/host-capabilities": "workspace:*",
@@ -34,10 +33,11 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-query": "^5.104.5",
     "@trpc/server": "^11.19.0",
+    "better-sqlite3": "^13.0.3",
     "diff": "^9.0.0",
-    "lucide-react": "^1.52.0",
+    "lucide-react": "^1.61.0",
     "zod": "^4.3.5"
   },
   "peerDependencies": {
@@ -48,6 +48,6 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }

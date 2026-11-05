@@ -61,11 +61,13 @@ function buildOptions(commit, builtAt) {
     // app.asar.unpacked, or `npm i @slayzone/hub`). See build-guards.
     // utf-8-validate stays undeclared on purpose: ws requires it only when
     // buffer.isUtf8 is missing (Node < 18.14), and the hub needs Node >= 24.
+    // @opentelemetry/api stays undeclared too: better-auth (>= 1.7.12) dynamic-imports it
+    // inside a try/catch and falls back to a no-op tracer when it is absent.
     plugins: [
       runtimeImportsEsbuildPlugin({
         bundleName: 'hub',
         packageJson: pkg,
-        optionalExternals: ['utf-8-validate']
+        optionalExternals: ['utf-8-validate', '@opentelemetry/api']
       })
     ],
     // Shebang: this bundle is ALSO the `slayzone-hub` bin of the published

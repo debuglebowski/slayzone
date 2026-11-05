@@ -14,10 +14,10 @@
     "test:redirects": "node scripts/test-redirects.mjs"
   },
   "devDependencies": {
-    "astro": "^7.0.0"
+    "astro": "^7.4.2"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.4",
-    "js-yaml": "^5.4.2"
+    "js-yaml": "^5.5.0"
   }
 }
