@@ -557,11 +557,13 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(ownB.text).toBe('B_OWN_FILE_BYTES')
   })
 
-  test('REST: an export cannot be written into A’s artifact dir or the hub’s state', async () => {
+  test('REST: an export cannot be written into A’s artifact dir, the hub’s state or nobody’s root', async () => {
     for (const outputPath of [
       join(hub.root, 'artifacts', A.task, 'planted.html'),
       join(A.path, 'planted.html'),
-      join(hub.root, 'slayzone.data.sqlite')
+      join(hub.root, 'slayzone.data.sqlite'),
+      // N1: a file in nobody's project root (the hub OS user's dotfiles live there).
+      join(hub.root, '..', 'planted.html')
     ]) {
       const before = lines.length
       const r = await rest(hub, b.token, {

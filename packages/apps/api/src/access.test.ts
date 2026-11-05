@@ -8,7 +8,17 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/api/src/access.test.ts
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
@@ -143,7 +153,8 @@ const OF_A: Record<ResourceKind, string> = {
   path: join(aWorktree, 'src', 'index.ts'),
   automation: 'auA',
   computer: 'cA',
-  pathTree: aWorktree
+  pathTree: aWorktree,
+  ownedPath: join(aRoot, 'README.md')
 }
 
 describe('every kind: the owner, and nobody else', () => {
@@ -303,7 +314,8 @@ describe('how each kind finds its owner', () => {
     expect(await can(A, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // holds B's project
     expect(await can(B, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // A's directory
     expect(await can(B, 'pathTree', bNested)).toBe(true)
-    expect(await can(A, 'pathTree', join(base, 'elsewhere'))).toBe(true) // hub-wide, empty
+    // In nobody's root: a walk opens every file under it, so it needs a root (N1).
+    expect(await can(A, 'pathTree', join(base, 'elsewhere'))).toBe(false)
     expect(await can(A, 'pathTree', base)).toBe(false) // holds the hub root
     expect(await can(A, 'pathTree', '/')).toBe(false)
   })
@@ -363,6 +375,88 @@ describe('how each kind finds its owner', () => {
       expect(await can(B, 'path', join(aRoot.toUpperCase(), 'README.md'))).toBe(false)
     }
   )
+})
+
+describe('ownedPath: a hub-local open needs a root the caller may access (N1)', () => {
+  test("inside a root: that root's owner only", async () => {
+    expect(await can(A, 'ownedPath', join(aRoot, 'README.md'))).toBe(true)
+    expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(true)
+    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(true)
+    expect(await can(B, 'ownedPath', join(aRoot, 'README.md'))).toBe(false)
+    expect(await can(A, 'ownedPath', join(bNested, 'lib.ts'))).toBe(false)
+  })
+  test("in nobody's root: refused (never hub-wide)", async () => {
+    for (const p of [join(base, 'elsewhere'), '/usr/bin/git', '/etc/passwd', '/'])
+      for (const who of [A, B, ADMIN]) expect(await can(who, 'ownedPath', p)).toBe(false)
+  })
+  test("the hub's state stays refused; an artifact file is still its task's", async () => {
+    expect(await can(A, 'ownedPath', join(hubRoot, 'slayzone.data.sqlite'))).toBe(false)
+    expect(await can(A, 'ownedPath', join(hubRoot, 'artifacts', 'tA', 'arA.md'))).toBe(true)
+    expect(await can(B, 'ownedPath', join(hubRoot, 'artifacts', 'tA', 'arA.md'))).toBe(false)
+  })
+  test("a link inside your root to a file in nobody's root: refused", async () => {
+    const outside = join(base, 'nobodys-file.txt')
+    writeFileSync(outside, 'x')
+    const link = join(aRoot, 'outside-link.txt')
+    symlinkSync(outside, link)
+    expect(await can(A, 'ownedPath', link)).toBe(false)
+  })
+  test('no login (the desktop app): allowed', async () => {
+    expect(await can(null, 'ownedPath', '/etc/passwd', false)).toBe(true)
+  })
+})
+
+describe('/dev, /proc, /sys and /.vol: refused for every path kind on a hub with login (N1)', () => {
+  // A descriptor of this process: `/dev/fd/<n>` reads whatever it has open (the
+  // hub's database, on a hub), and realpath of it is no real file.
+  const dbFile = join(hubRoot, 'slayzone.data.sqlite')
+  const fd = openSync(dbFile, 'r')
+  afterAll(() => closeSync(fd))
+  const PATH_KINDS: ResourceKind[] = ['path', 'ownedPath', 'pathTree']
+  const system: [string, string][] = [
+    [`/dev/fd/${fd}`, "a descriptor of the hub's database"],
+    ['/dev/stdin', 'a /dev link to a descriptor'],
+    ['/dev', '/dev itself'],
+    ['/dev/../dev/null', '/dev spelled with ..'],
+    ['/proc/self/environ', "the hub's environment (Linux)"],
+    ['/proc/1/environ', 'another process (Linux)'],
+    ['/sys/kernel', '/sys'],
+    ['/.vol/1/2', '/.vol (macOS volfs)']
+  ]
+  if (process.platform === 'darwin') system.push([`/DEV/fd/${fd}`, '/dev in another case'])
+  for (const kind of PATH_KINDS) {
+    for (const [p, what] of system) {
+      test(`${kind} — ${what}`, async () => {
+        for (const who of [A, B, ADMIN]) expect(await can(who, kind, p)).toBe(false)
+      })
+    }
+  }
+  test('a link inside your own root to /dev/fd/<n>: refused after realpath', async () => {
+    const link = join(aRoot, 'fd-link')
+    symlinkSync(`/dev/fd/${fd}`, link)
+    for (const kind of PATH_KINDS) expect(await can(A, kind, link)).toBe(false)
+  })
+  test('a project rooted at / does not open them', async () => {
+    sql(
+      `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES ('pSlash', 'S', '#111', ?, '/')`,
+      A
+    )
+    try {
+      for (const kind of ['path', 'ownedPath'] as ResourceKind[]) {
+        expect(await can(A, kind, `/dev/fd/${fd}`)).toBe(false)
+        if (existsSync('/proc/self/environ'))
+          expect(await can(A, kind, '/proc/self/environ')).toBe(false)
+      }
+    } finally {
+      sql(`DELETE FROM projects WHERE id = 'pSlash'`)
+    }
+  })
+  test('a directory holding one cannot be walked', async () => {
+    expect(await can(A, 'pathTree', '/')).toBe(false)
+  })
+  test('no login (the desktop app): unchanged', async () => {
+    for (const kind of PATH_KINDS) expect(await can(null, kind, `/dev/fd/${fd}`, false)).toBe(true)
+  })
 })
 
 describe('scopes: many decisions for one request or one stream', () => {

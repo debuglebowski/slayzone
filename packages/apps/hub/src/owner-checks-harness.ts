@@ -210,6 +210,8 @@ export interface Owned {
   readonly computer: string
   /** The same worktree, as a directory walked whole (T-107). */
   readonly pathTree: string
+  /** A file in that worktree, opened on the hub's own disk (N1: `ownedPath`). */
+  readonly ownedPath: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -237,7 +239,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     path: join(root, 'work', `${mark}_worktree`),
     automation: id('automation'),
     computer: id('computer'),
-    pathTree: join(root, 'work', `${mark}_worktree`)
+    pathTree: join(root, 'work', `${mark}_worktree`),
+    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md')
   }
 }
 
