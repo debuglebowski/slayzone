@@ -142,9 +142,31 @@ export function gitWatchComputerGone(computerId: string): void {
   }
 }
 
-/** Without trailing separators (`/`, or `\` on a Windows computer's path). */
-function trimSlashes(p: string): string {
-  return p.length > 1 ? p.replace(/[\\/]+$/, '') : p
+/**
+ * A checkout path as the computer will resolve it, lexically: `.` and `..` segments
+ * collapsed, repeated and trailing separators dropped. A Windows computer's path
+ * (`C:\…`) uses `\` (or `/`); any other path only `/` — a `\` is a name character
+ * there. Matched against worktrees and placements only in this form, so a `..` out
+ * of a worktree never counts as that worktree (F2).
+ */
+function normalizeCheckoutPath(p: string): string {
+  const windows = /^[A-Za-z]:[\\/]/.test(p)
+  const sep = windows ? '\\' : '/'
+  const parts = p.split(windows ? /[\\/]+/ : /\/+/)
+  const head = windows ? (parts.shift() ?? '') : ''
+  const absolute = !windows && p.startsWith('/')
+  const out: string[] = []
+  for (const part of parts) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      if (out.length > 0 && out[out.length - 1] !== '..') out.pop()
+      else if (!absolute && !windows) out.push('..')
+      continue
+    }
+    out.push(part)
+  }
+  if (windows) return `${head}${sep}${out.join(sep)}`
+  return (absolute ? '/' : '') + out.join('/') || (absolute ? '/' : '.')
 }
 
 /**
@@ -157,7 +179,7 @@ export async function gitTargetForPath(
   db: SlayzoneDb,
   path: string
 ): Promise<WorktreesComputerTarget | null> {
-  const p = trimSlashes(path)
+  const p = normalizeCheckoutPath(path)
   // `inside(col)`: p is col, or lies under col/ — or col\ (a Windows computer's
   // folder): substr compare, no LIKE escaping. char(92) is the backslash.
   const inside = (col: string) =>

@@ -1,9 +1,14 @@
 /**
- * The computer gate on a git op, on hubs with login. A caller's op is gated as what
- * it works on: a task's checkout as that task's work, anything else as the caller's
- * own request (a computer works only for its owner). Hub-internal work — the
- * conversation healer's branch probe, the worktree colour detector — has no caller:
- * it is the hub's own read of a path it chose, so there is no caller to gate.
+ * The computer gate on a git op, on hubs with login.
+ *
+ * A caller's op needs the CALLER to be allowed on the computer it lands on (a
+ * computer works only for its owner) — whatever its path says; on a task's
+ * checkout, the computer must also serve that task. Gating it only as "the task's
+ * work" (does the computer serve the task?) let user B aim A's worktree — through a
+ * `..` path the owner policy read as hub-wide — and run on A's computer (F2).
+ *
+ * Hub-internal work — the conversation healer's branch probe, the worktree colour
+ * detector — has no caller: the hub's own read of a path it chose, not gated.
  * Callers' targets are owner-checked before this (`TRPC_OWNER_POLICY`).
  *
  * @module hub/git-op-gate
@@ -22,6 +27,9 @@ export function createGitOpGate(
 ): (computerId: string, target: GitOpTargetResolved) => Promise<void> {
   return async (computerId, target) => {
     if (!gate || !currentActor()) return
-    await gate(computerId, target.taskId ? { kind: 'task', id: target.taskId } : null)
+    // The caller's own request: a computer works only for its owner.
+    await gate(computerId, null)
+    // A task's checkout: that computer must also be the one serving the task.
+    if (target.taskId) await gate(computerId, { kind: 'task', id: target.taskId })
   }
 }

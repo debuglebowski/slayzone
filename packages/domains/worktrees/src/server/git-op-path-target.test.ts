@@ -67,6 +67,17 @@ describe('gitTargetForPath', () => {
     expect(await gitTargetForPath(db, 'C:\\Users\\b\\project-two')).toBeNull()
   })
 
+  // The path is normalized before it is matched (as the owner policy reads it): a
+  // `..` out of a worktree names where it points, never the worktree (F2).
+  test('`.` and `..` segments are resolved before matching', async () => {
+    expect(await gitTargetForPath(db, '/home/a/worktrees/feat-x/../../.ssh')).toBeNull()
+    expect(await gitTargetForPath(db, '/home/a/worktrees/feat-x/sub/..')).toEqual({ taskId: 't1' })
+    expect(await gitTargetForPath(db, '/srv/x/../../home/a/worktrees/feat-x/./y')).toEqual({
+      taskId: 't1'
+    })
+    expect(await gitTargetForPath(db, 'C:\\Users\\b\\proj\\..\\other')).toBeNull()
+  })
+
   test('a prefix that is not a path boundary does not match', async () => {
     expect(await gitTargetForPath(db, '/home/a/project-two')).toBeNull()
   })

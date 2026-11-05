@@ -9,10 +9,13 @@
 import { expect, test, vi } from 'vitest'
 import { createGitOpGate } from './git-op-gate'
 
-test("a caller's task op is gated as the task's work", async () => {
+test("a caller's task op needs the caller on the computer AND the computer on the task", async () => {
   const gate = vi.fn(async () => undefined)
   await createGitOpGate(gate, () => 'user-1')('c1', { taskId: 't1' })
-  expect(gate).toHaveBeenCalledWith('c1', { kind: 'task', id: 't1' })
+  expect(gate.mock.calls).toEqual([
+    ['c1', null],
+    ['c1', { kind: 'task', id: 't1' }]
+  ])
 })
 
 test("a caller's op on a project or computer is the caller's own request", async () => {
