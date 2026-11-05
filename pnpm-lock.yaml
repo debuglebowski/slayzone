@@ -176,6 +176,7 @@ packageExtensionsChecksum: sha256-yucxjBCEEEleMRdCSterOmma5oliL1xHpkU1vW5QBT0=
 patchedDependencies:
   '@convex-dev/auth@0.0.96': 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
   '@radix-ui/react-menu@2.2.1': 0d843dd4e468b20e6ce826e5090298cc344be58699a21084871c34d9fadf728a
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.310': fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221
   app-builder-lib@26.18.0: fb86da384173fd3c2d15f34e7e3adca11814c3a886b214eb5f1a0c29017970d5
   electron-chrome-extensions@4.9.0: 15c38651399e4d63a73a1292fcbfff833ecb404aeb7c2381cad84e4e83089591
   node-pty@1.1.0: ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3
@@ -3039,7 +3040,7 @@ importers:
         version: 0.15.0-beta.310(@xterm/xterm@6.1.0-beta.315)
       '@xterm/addon-unicode-graphemes':
         specifier: 0.5.0-beta.310
-        version: 0.5.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        version: 0.5.0-beta.310(patch_hash=fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221)(@xterm/xterm@6.1.0-beta.315)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.309
         version: 0.20.0-beta.309(@xterm/xterm@6.1.0-beta.315)
@@ -19299,7 +19300,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.315
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.310(@xterm/xterm@6.1.0-beta.315)':
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.310(patch_hash=fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221)(@xterm/xterm@6.1.0-beta.315)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.315
 

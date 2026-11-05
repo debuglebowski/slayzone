@@ -623,6 +623,9 @@ run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
 # Terminal — state-dependent query replies (CPR, DECRQM, ...) answered from a headless
 # server-side screen mirror, in stream order with the stateless replies. Uses @xterm/headless.
 run_harness packages/domains/terminal/src/server/terminal-reply-mirror.test.ts
+# Terminal — the graphemes addon loads on plain Node whatever the Buffer pool offset
+# (patched decoder; a standalone computer froze at boot without it).
+run_harness packages/domains/terminal/src/server/graphemes-addon-load.test.ts
 # Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
 # chars by the redactor, making every recorded scramble event unprovable.
 run_harness packages/domains/diagnostics/src/server/payload-blobs.test.ts
