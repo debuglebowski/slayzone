@@ -8,7 +8,7 @@
  * caught by refetching once it starts.
  */
 import { useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { noteComputerConnected, useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from '../trpc'
 
 /** The tRPC namespaces (or single procedures) whose answers come from a computer. */
@@ -61,10 +61,18 @@ function pathKeyOf(trpc: unknown, query: string): readonly unknown[] {
 export function useComputerConnectRefetch(): void {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const refetch = computerConnectRefetcher(queryClient, (q) => pathKeyOf(trpc, q))
   useSubscription(
-    trpc.computers.onStatusChange.subscriptionOptions(
-      undefined,
-      computerConnectRefetcher(queryClient, (q) => pathKeyOf(trpc, q))
-    )
+    trpc.computers.onStatusChange.subscriptionOptions(undefined, {
+      // Subscriptions refused before then (the file editor's watch) start again too.
+      onStarted: () => {
+        refetch.onStarted()
+        noteComputerConnected()
+      },
+      onData: (change) => {
+        refetch.onData(change)
+        if (change.connected) noteComputerConnected()
+      }
+    })
   )
 }
