@@ -27,6 +27,16 @@
  */
 export const DIRECT_RTC_PIECE_CHARS = 16_000
 
+/**
+ * Label of the data channel the direct protocol runs on. Equal to
+ * `@slayzone/computer-transport`'s `DIRECT_RTC_CHANNEL_LABEL` (the computer's tests
+ * pin the two): neither package depends on the other.
+ */
+export const DIRECT_RTC_LABEL = 'slayzone-direct-v1'
+
+/** Largest direct-protocol message either side accepts, as the WebSocket listener's. */
+export const DIRECT_RTC_MAX_MESSAGE_CHARS = 1024 * 1024
+
 const MORE = '+'
 const LAST = '.'
 

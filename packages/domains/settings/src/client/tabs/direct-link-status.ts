@@ -12,10 +12,11 @@ export interface DirectLinkRow {
   detail: string
 }
 
-const REASONS: Record<'probe' | 'deadline' | 'refused', string> = {
+const REASONS: Record<'probe' | 'deadline' | 'refused' | 'rtc', string> = {
   probe: 'not reachable from here',
   deadline: 'no connection in time',
-  refused: 'refused the connection'
+  refused: 'refused the connection',
+  rtc: 'WebRTC could not connect'
 }
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -34,7 +35,7 @@ export function describeDirectLink(
         path: c.path === 'direct' ? 'Direct' : 'Hub relay',
         detail:
           c.path === 'direct'
-            ? `${c.address} · ${c.leases} open`
+            ? `${c.transport === 'webrtc' ? 'WebRTC' : c.address} · ${c.leases} open`
             : `${REASONS[c.reason]} · retrying in ${Math.ceil(c.retryInMs / 1000)} s`
       })
     }

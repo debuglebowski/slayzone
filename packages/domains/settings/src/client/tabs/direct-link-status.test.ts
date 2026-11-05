@@ -9,7 +9,13 @@ describe('describeDirectLink (Settings → Diagnostics)', () => {
           {
             hubId: 'local',
             computers: [
-              { computerId: 'c1', path: 'direct', address: '127.0.0.1:5001', leases: 2 },
+              {
+                computerId: 'c1',
+                path: 'direct',
+                transport: 'ws',
+                address: '127.0.0.1:5001',
+                leases: 2
+              },
               { computerId: 'c2', path: 'relay', reason: 'probe', retryInMs: 45_200 }
             ]
           }
@@ -34,7 +40,9 @@ describe('describeDirectLink (Settings → Diagnostics)', () => {
       [
         {
           hubId: 'a',
-          computers: [{ computerId: 'c1', path: 'direct', address: 'x:1', leases: 1 }]
+          computers: [
+            { computerId: 'c1', path: 'direct', transport: 'ws', address: 'x:1', leases: 1 }
+          ]
         },
         {
           hubId: 'b',
