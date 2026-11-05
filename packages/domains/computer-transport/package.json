@@ -24,7 +24,7 @@
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "ws": "^8.22.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@slayzone/test-utils": "workspace:*",

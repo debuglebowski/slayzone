@@ -54,7 +54,7 @@
     "express": "^5.3.0",
     "superjson": "^2.2.6",
     "ws": "^8.22.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

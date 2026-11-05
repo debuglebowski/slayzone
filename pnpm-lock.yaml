@@ -163,7 +163,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  zod: ^4.5.4
+  zod: ^4.6.5
   d3-shape>d3-path: ^3.1.0
   node-abi: ^4.35.0
   posix>nan: ^2.29.0
@@ -364,7 +364,7 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/better-sqlite3':
@@ -410,7 +410,7 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@convex-dev/auth':
@@ -810,7 +810,7 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/build-guards':
@@ -1261,7 +1261,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/react-compiler-config':
@@ -1331,7 +1331,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
       zustand:
         specifier: ^5.0.16
@@ -1371,7 +1371,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/db-migrations':
@@ -1429,7 +1429,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
       zustand:
         specifier: ^5.0.16
@@ -1527,7 +1527,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@testing-library/react':
@@ -1561,7 +1561,7 @@ importers:
         specifier: ^13.0.3
         version: 13.0.3
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/better-sqlite3':
@@ -1614,7 +1614,7 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0(bufferutil@4.1.0)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -1642,7 +1642,7 @@ importers:
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/db-migrations':
@@ -1673,7 +1673,7 @@ importers:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -1725,7 +1725,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/react':
@@ -1837,7 +1837,7 @@ importers:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -1871,7 +1871,7 @@ importers:
         specifier: workspace:*
         version: link:../../shared/trpc-server
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/better-sqlite3':
@@ -2015,7 +2015,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/better-sqlite3':
@@ -2117,7 +2117,7 @@ importers:
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/node':
@@ -2175,7 +2175,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/db-migrations':
@@ -2333,7 +2333,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
       zustand:
         specifier: ^5.0.16
@@ -2486,7 +2486,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -2625,7 +2625,7 @@ importers:
         specifier: ^7.90.0
         version: 7.90.0(@types/react@19.3.0)(react@19.3.1)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/db-migrations':
@@ -2698,7 +2698,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/react-compiler-config':
@@ -2762,7 +2762,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/react':
@@ -2775,7 +2775,7 @@ importers:
         specifier: workspace:*
         version: link:../terminal-contracts
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
 
   packages/domains/task-terminals:
@@ -2859,7 +2859,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -3063,7 +3063,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
       zustand:
         specifier: ^5.0.16
@@ -3108,7 +3108,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/picomatch':
@@ -3160,7 +3160,7 @@ importers:
         specifier: ^3.10.1
         version: 3.10.1(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/react':
@@ -3257,7 +3257,7 @@ importers:
         specifier: ^19.3.1
         version: 19.3.1
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@types/react':
@@ -3440,7 +3440,7 @@ importers:
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
 
   packages/shared/icons:
@@ -3611,7 +3611,7 @@ importers:
         specifier: ^11.19.0
         version: 11.19.0(typescript@7.1.0-beta)
       zod:
-        specifier: ^4.5.4
+        specifier: ^4.6.5
         version: 4.6.7
     devDependencies:
       '@slayzone/test-utils':
@@ -5752,7 +5752,7 @@ packages:
       valibot: '>=0.31.0 || ^1.0.0-beta.4 || ^1.0.0-rc'
       vest: '>=6.0.0'
       yup: ^1.0.0
-      zod: ^4.5.4
+      zod: ^4.6.5
     peerDependenciesMeta:
       '@sinclair/typebox':
         optional: true
@@ -6295,7 +6295,7 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
-      zod: ^4.5.4
+      zod: ^4.6.5
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
@@ -8991,7 +8991,7 @@ packages:
   better-call@1.4.4:
     resolution: {integrity: sha512-Gq4XdGFy4dmUxFEAX2nj0ycFcFbD9ZWh8YROouZoyXeF1M11TpYbplk0pDByTFF8Wz+MYa6W9052c9m7dD+mfw==}
     peerDependencies:
-      zod: ^4.5.4
+      zod: ^4.6.5
     peerDependenciesMeta:
       zod:
         optional: true
@@ -14463,13 +14463,13 @@ packages:
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
-      zod: ^4.5.4
+      zod: ^4.6.5
 
   zod-validation-error@4.0.2:
     resolution: {integrity: sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      zod: ^4.5.4
+      zod: ^4.6.5
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
