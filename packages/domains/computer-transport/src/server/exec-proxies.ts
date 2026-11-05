@@ -986,7 +986,7 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   relay?: boolean
   /** Listeners for the computer going away (false) and coming back (true). */
   availability: Set<(available: boolean) => void>
-  setRelay?: (on: boolean) => void
+  setRelay?: (on: boolean) => Promise<void> | void
 }
 
 /**
@@ -1189,7 +1189,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
       // The computer may have dropped relay state with the connection: ask again.
-      if (entry.relay !== undefined) entry.setRelay?.(entry.relay)
+      if (entry.relay !== undefined) {
+        void Promise.resolve(entry.setRelay?.(entry.relay)).catch(noop)
+      }
       // The computer kept detecting while the hub was away; its signals then went
       // nowhere. Its settled view brings the mirror up to date in one step.
       if (entry.detectsOutput && listed.detected) {
@@ -1319,14 +1321,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         entry.availability.add(cb)
         return { dispose: () => entry.availability.delete(cb) }
       },
-      setRelay: (on: boolean): void => {
+      setRelay: (on: boolean): Promise<void> => {
         entry.relay = on
-        void send(HubToComputerMethods.ptyRelay, {
-          sessionId,
-          ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
-          on
-        })
-          .then((res) => {
+        // Hub-shared state (every watcher's), so the hub's request — never the caller
+        // whose watch changed it (L2).
+        return runAsSecurityActor(null, () =>
+          send(HubToComputerMethods.ptyRelay, {
+            sessionId,
+            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+            on
+          }).then((res) => {
             const parsed = ptyRelayResultSchema.safeParse(res)
             if (!on || !parsed.success || entry.disposed) return
             // Frames up to here were never streamed (nobody watched): not a gap to
@@ -1339,7 +1343,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             }
             drain(entry)
           })
-          .catch(noop)
+        )
       },
       getReplay: async (afterSeq: number) =>
         ptyGetReplayResultSchema.parse(
