@@ -4,6 +4,18 @@ import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerProbes } from './computer-probes'
+import { EXEC_RUN_REPLY_GRACE_MS, execRunOnComputer } from './computer-exec-run'
+
+// Explicit limits for computer requests that are not `exec.run` / git ops (those
+// carry their own): never the gateway's 30 s default.
+/** A test-file scan of a large checkout. */
+const COMPUTER_SCAN_TIMEOUT_MS = 2 * 60_000
+/** One AI-config fs call (read / write / stat / readdir of one file or dir). */
+const COMPUTER_FS_CALL_TIMEOUT_MS = 60_000
+/** A turn snapshot writes a tree of a whole worktree. */
+const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
+/** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
+const GH_DEFAULT_TIMEOUT_MS = 30_000
 import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
@@ -214,7 +226,6 @@ import {
   ghExecResultSchema,
   claudeSessionLocateResultSchema,
   gitOpResultSchema,
-  execRunResultSchema,
   agentConfigFsResultSchema,
   usageCollectResultSchema,
   testPanelScanResultSchema,
@@ -1864,9 +1875,9 @@ export function composeServer(opts: {
     // The git panel: each op runs on the computer that holds the checkout (the
     // router resolves it like the workspace fs, owner-gated with login).
     setGitOpTransport({
-      request: async (computerId, params) =>
+      request: async (computerId, params, timeoutMs) =>
         gitOpResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.gitOp, params)
+          await computerGateway.request(computerId, HubToComputerMethods.gitOp, params, timeoutMs)
         ).result,
       watchStart: async (computerId, params) => {
         if (placement.gate) await placement.gate(computerId, null)
@@ -1891,7 +1902,12 @@ export function composeServer(opts: {
         placement.forTarget((await gitTargetForPath(db, projectPath)) ?? { projectId }),
       scan: async (computerId, input) =>
         testPanelScanResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.testPanelScan, input)
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.testPanelScan,
+            input,
+            COMPUTER_SCAN_TIMEOUT_MS
+          )
         )
     })
     // Agent usage logs are on the computers: each refresh asks every usable one for
@@ -1916,7 +1932,12 @@ export function composeServer(opts: {
       computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),
       request: async (computerId, call) =>
         agentConfigFsResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.agentConfigFs, call)
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.agentConfigFs,
+            call,
+            COMPUTER_FS_CALL_TIMEOUT_MS
+          )
         ).result
     })
     computerGateway.events.on('computer-disconnected', ({ computerId }) =>
@@ -1927,21 +1948,13 @@ export function composeServer(opts: {
     setAiCommandRunner(async (command, timeoutMs) => {
       const computerId = await placement.forCaller()
       if (computerId == null) return null
-      return execRunResultSchema.parse(
-        await computerGateway.request(computerId, HubToComputerMethods.execRun, {
-          command,
-          timeoutMs
-        })
-      )
+      return execRunOnComputer(computerGateway, computerId, { command, timeoutMs })
     })
     // Terminal settings probes (a mode's binary, a docker / ssh context) run on the
     // caller's computer as one exec.run; with none, "connect a computer".
     const computerProbes = createComputerProbes({
       computerFor: () => placement.forCaller(),
-      run: async (computerId, params) =>
-        execRunResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.execRun, params)
-        )
+      run: (computerId, params) => execRunOnComputer(computerGateway, computerId, params)
     })
     setTerminalCommandProbe(computerProbes.command)
     setExecutionContextProbe(computerProbes.executionContext)
@@ -1953,10 +1966,7 @@ export function composeServer(opts: {
         if (projectId) return resolveComputerForProject(projectId)
         return null
       },
-      run: async (computerId, command) =>
-        execRunResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.execRun, command)
-        )
+      run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command)
     })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).
@@ -1966,7 +1976,12 @@ export function composeServer(opts: {
       computerForTask: (taskId) => placement.forTarget({ taskId }),
       request: async (computerId, op, input) =>
         gitOpResultSchema.parse(
-          await computerGateway.request(computerId, HubToComputerMethods.gitTurnOp, { op, input })
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.gitTurnOp,
+            { op, input },
+            TURN_GIT_OP_TIMEOUT_MS
+          )
         ).result
     })
     setGhExecutor(async (args, opts) => {
@@ -1979,12 +1994,18 @@ export function composeServer(opts: {
       // No computer: `gh` has nowhere to run ("connect a computer") — the hub never
       // runs it itself.
       if (computerId == null || !opts.cwd) refuseNoComputer({ op: 'gh' })
-      const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
-        args,
-        cwd: opts.cwd,
-        ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
-        ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
-      })
+      const res = await computerGateway.request(
+        computerId,
+        HubToComputerMethods.ghExec,
+        {
+          args,
+          cwd: opts.cwd,
+          ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
+          ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
+        },
+        // `gh` ends itself at its own limit; the reply gets room after it.
+        (opts.timeout ?? GH_DEFAULT_TIMEOUT_MS) + EXEC_RUN_REPLY_GRACE_MS
+      )
       return ghExecResultSchema.parse(res)
     })
 

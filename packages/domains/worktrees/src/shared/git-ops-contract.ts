@@ -215,3 +215,40 @@ export function gitOpRepoRelativePaths<K extends GitOpName>(op: K, input: GitOpI
 export function isGitOpName(name: string): name is GitOpName {
   return Object.hasOwn(gitOpsContract, name)
 }
+
+/**
+ * How long one op's request may take on its computer. Explicit for every op — the
+ * gateway's 30 s default cut off hooks and network ops while the work kept running
+ * there. Ops that run hooks (commit, merge, rebase, checkout), the network (fetch,
+ * push, pull, prune) or setup scripts (worktree, submodules — 5 min each on the
+ * computer) get minutes; reads get two.
+ */
+const LONG_GIT_OPS: ReadonlySet<string> = new Set([
+  'init',
+  'checkoutBranch',
+  'mergeIntoParent',
+  'commitFiles',
+  'continueRebase',
+  'skipRebaseCommit',
+  'fetch',
+  'push',
+  'pull',
+  'pruneRemote',
+  'rebaseOnto',
+  'mergeFrom',
+  'copyIgnoredFiles',
+  'applyStash',
+  'popStash',
+  'branchFromStash',
+  'removeWorktree',
+  'ensureBranchPushed',
+  'addWorktree',
+  'initSubmodules',
+  'runWorktreeSetupScript',
+  'startMergeNoCommit'
+])
+export const LONG_GIT_OP_TIMEOUT_MS = 15 * 60_000
+export const GIT_OP_TIMEOUT_MS = 2 * 60_000
+export function gitOpTimeoutMs(op: GitOpName): number {
+  return LONG_GIT_OPS.has(op) ? LONG_GIT_OP_TIMEOUT_MS : GIT_OP_TIMEOUT_MS
+}

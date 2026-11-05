@@ -11,7 +11,12 @@
  */
 import type { SlayzoneDb } from '@slayzone/platform'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
-import { gitOpAbsolutePaths, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
+import {
+  gitOpAbsolutePaths,
+  gitOpTimeoutMs,
+  type GitOpInput,
+  type GitOpName
+} from '../shared/git-ops-contract'
 import type { GitOpResult } from './git-ops'
 import { getGitWatcher } from './git-watcher'
 import { getWorktreesRouterDepsOrNull, type WorktreesComputerTarget } from './worktrees-router-deps'
@@ -20,7 +25,9 @@ export interface GitOpTransport {
   /** One `git.op` request to `computerId`; answers the op's result. */
   request(
     computerId: string,
-    params: { op: GitOpName; input: unknown; mutates: boolean }
+    params: { op: GitOpName; input: unknown; mutates: boolean },
+    /** The op's own limit ({@link gitOpTimeoutMs}) — pass it on as the request's. */
+    timeoutMs: number
   ): Promise<unknown>
   /** Start watching a checkout there (`git.watchStart`); reports arrive via
    *  {@link deliverGitWatchEvent}. */
@@ -177,5 +184,9 @@ export async function executeGitOp<K extends GitOpName>(
   const repoPath = gitOpAbsolutePaths(op, input as GitOpInput<K>)[0]
   const computerId = await computerFor(target, repoPath, db)
   if (computerId == null || !transport) refuseNoComputer({ op: `worktrees.${op}` })
-  return (await transport.request(computerId, { op, input, mutates })) as GitOpResult<K>
+  return (await transport.request(
+    computerId,
+    { op, input, mutates },
+    gitOpTimeoutMs(op)
+  )) as GitOpResult<K>
 }

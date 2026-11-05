@@ -95,6 +95,7 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/computer-probes.test.ts
+run_harness packages/apps/hub/src/computer-exec-run.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -546,6 +547,7 @@ run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
 run_harness packages/domains/worktrees/src/server/git-watch-routing.test.ts
 run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
