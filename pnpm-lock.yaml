@@ -176,6 +176,7 @@ packageExtensionsChecksum: sha256-yucxjBCEEEleMRdCSterOmma5oliL1xHpkU1vW5QBT0=
 patchedDependencies:
   '@convex-dev/auth@0.0.96': 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
   '@radix-ui/react-menu@2.2.1': 0d843dd4e468b20e6ce826e5090298cc344be58699a21084871c34d9fadf728a
+  '@trpc/server@11.19.0': e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404
   '@xterm/addon-unicode-graphemes@0.5.0-beta.310': fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221
   app-builder-lib@26.18.0: fb86da384173fd3c2d15f34e7e3adca11814c3a886b214eb5f1a0c29017970d5
   electron-chrome-extensions@4.9.0: 15c38651399e4d63a73a1292fcbfff833ecb404aeb7c2381cad84e4e83089591
@@ -347,7 +348,7 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -384,7 +385,7 @@ importers:
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -929,10 +930,10 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
+        version: 11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -1111,7 +1112,7 @@ importers:
         version: 14.1.0(jest@30.5.2(@types/node@24.19.2)(babel-plugin-macros@3.1.0)(supports-color@7.2.0))(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)(test-renderer@1.3.0(@types/react@19.3.0)(react@19.3.1))
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
@@ -1228,10 +1229,10 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
+        version: 11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -1268,10 +1269,10 @@ importers:
         version: link:../../shared/types
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
+        version: 11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -1341,7 +1342,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
@@ -1381,7 +1382,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -1534,7 +1535,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
@@ -1658,7 +1659,7 @@ importers:
         version: link:../../shared/trpc-server
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       zod:
         specifier: ^4.5.4
         version: 4.6.7
@@ -1838,7 +1839,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
@@ -2133,7 +2134,7 @@ importers:
         version: link:../../shared/trpc-server
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       zod:
         specifier: ^4.5.4
         version: 4.6.7
@@ -2337,7 +2338,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       electron:
         specifier: ^45.0.0
         version: 45.0.0(supports-color@7.2.0)
@@ -2617,7 +2618,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       '@types/archiver':
         specifier: ^8.0.0
         version: 8.0.0
@@ -2702,7 +2703,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -2772,7 +2773,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
@@ -2860,7 +2861,7 @@ importers:
         version: 3.19.6
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       diff:
         specifier: ^9.0.0
         version: 9.0.0
@@ -2991,7 +2992,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       posthog-js:
         specifier: ^1.438.14
         version: 1.438.14(@types/react@19.3.0)(preact-render-to-string@6.5.11)(react@19.3.1)
@@ -3046,7 +3047,7 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.311
         version: 0.12.0-beta.311(@xterm/xterm@6.1.0-beta.315)
@@ -3267,7 +3268,7 @@ importers:
         version: 3.14.21(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
@@ -3459,7 +3460,7 @@ importers:
         version: link:../trpc-server
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       zod:
         specifier: ^4.5.4
         version: 4.6.7
@@ -3585,7 +3586,7 @@ importers:
         version: link:../trpc-server
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
 
   packages/shared/platform:
     devDependencies:
@@ -3630,7 +3631,7 @@ importers:
         version: link:../trpc-server
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       zod:
         specifier: ^4.5.4
         version: 4.6.7
@@ -3711,13 +3712,13 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
+        version: 11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       '@trpc/tanstack-react-query':
         specifier: ^11.19.0
-        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)
+        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -3745,7 +3746,7 @@ importers:
         version: link:../platform
       '@trpc/server':
         specifier: ^11.19.0
-        version: 11.19.0(typescript@7.1.0-beta)
+        version: 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       superjson:
         specifier: ^2.2.6
         version: 2.2.6
@@ -18749,20 +18750,20 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)':
+  '@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)':
     dependencies:
-      '@trpc/server': 11.19.0(typescript@7.1.0-beta)
+      '@trpc/server': 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       typescript: 7.1.0-beta
 
-  '@trpc/server@11.19.0(typescript@7.1.0-beta)':
+  '@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)':
     dependencies:
       typescript: 7.1.0-beta
 
-  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)':
+  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta))(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(react@19.3.1)(typescript@7.1.0-beta)':
     dependencies:
       '@tanstack/react-query': 5.104.5(@types/react@19.3.0)(react@19.3.1)
-      '@trpc/client': 11.19.0(@trpc/server@11.19.0(typescript@7.1.0-beta))(typescript@7.1.0-beta)
-      '@trpc/server': 11.19.0(typescript@7.1.0-beta)
+      '@trpc/client': 11.19.0(@trpc/server@11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
+      '@trpc/server': 11.19.0(patch_hash=e235630d6c9c8db4666303272005612c0be4ed6ce3023c73fd66188bc6abf404)(typescript@7.1.0-beta)
       react: 19.3.1
       typescript: 7.1.0-beta
 

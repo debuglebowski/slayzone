@@ -330,6 +330,12 @@ export const REGRESSIONS = [
       `${P}apps/api/src/routers/upload-sources.test.ts`,
       `${P}apps/api/src/access.test.ts`
     ]
+  },
+  {
+    round: 7,
+    id: 'N3',
+    what: 'a ws subscription stopped during its middlewares never subscribes',
+    files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
   }
 ]
 

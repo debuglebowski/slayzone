@@ -1,0 +1,128 @@
+diff --git a/dist/ws-BMSSVFiW.cjs b/dist/ws-BMSSVFiW.cjs
+index 230385b1c939a4d880e44af3c5c0b9505d55f5c8..2a60390032d0d1051d415d52f99e888d72f82c8e 100644
+--- a/dist/ws-BMSSVFiW.cjs
++++ b/dist/ws-BMSSVFiW.cjs
+@@ -32,6 +32,9 @@ function getWSConnectionHandler(opts) {
+ 	return (client, req) => {
+ 		var _opts$keepAlive;
+ 		const clientSubscriptions = /* @__PURE__ */ new Map();
++		// slayzone patch (N3): subscriptions still in their middlewares. A stop that
++		// lands before `callProcedure` resolves must reach them too.
++		const pendingSubscriptions = /* @__PURE__ */ new Map();
+ 		const abortController = new AbortController();
+ 		if ((_opts$keepAlive = opts.keepAlive) === null || _opts$keepAlive === void 0 ? void 0 : _opts$keepAlive.enabled) {
+ 			const { pingMs, pongWaitMs } = opts.keepAlive;
+@@ -133,6 +136,8 @@ function getWSConnectionHandler(opts) {
+ 			if (msg.method === "subscription.stop") {
+ 				var _clientSubscriptions$;
+ 				(_clientSubscriptions$ = clientSubscriptions.get(id)) === null || _clientSubscriptions$ === void 0 || _clientSubscriptions$.abort();
++				const pending = pendingSubscriptions.get(id);
++				if (pending) pending.abort();
+ 				return;
+ 			}
+ 			const { path, lastEventId } = msg.params;
+@@ -149,6 +154,7 @@ function getWSConnectionHandler(opts) {
+ 				const res = await ctxPromise;
+ 				if (!res.ok) throw res.error;
+ 				const abortController = new AbortController();
++				if (type === "subscription") pendingSubscriptions.set(id, abortController);
+ 				const result = await require_tracked.callProcedure({
+ 					router,
+ 					path,
+@@ -157,6 +163,8 @@ function getWSConnectionHandler(opts) {
+ 					type,
+ 					signal: abortController.signal,
+ 					batchIndex
++				}).finally(() => {
++					if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
+ 				});
+ 				const isIterableResult = require_codes.isAsyncIterable(result) || require_observable.isObservable(result);
+ 				if (type !== "subscription") {
+@@ -185,6 +193,14 @@ function getWSConnectionHandler(opts) {
+ 					message: `Duplicate id ${id}`,
+ 					code: "BAD_REQUEST"
+ 				});
++				if (abortController.signal.aborted) {
++					respond({
++						id,
++						jsonrpc,
++						result: { type: "stopped" }
++					});
++					return;
++				}
+ 				const iterable = require_observable.isObservable(result) ? require_observable.observableToAsyncIterable(result, abortController.signal) : result;
+ 				require_codes.run(async () => {
+ 					try {
+@@ -399,6 +415,8 @@ function getWSConnectionHandler(opts) {
+ 		client.once("close", () => {
+ 			for (const sub of clientSubscriptions.values()) sub.abort();
+ 			clientSubscriptions.clear();
++			for (const sub of pendingSubscriptions.values()) sub.abort();
++			pendingSubscriptions.clear();
+ 			abortController.abort();
+ 		});
+ 	};
+diff --git a/dist/ws-C7ZOJJeA.mjs b/dist/ws-C7ZOJJeA.mjs
+index d8c6039d96256d87a194f2cbda7dfc05211ae604..f19dd270a5a9e1b09d33b8184a746da0243f74b1 100644
+--- a/dist/ws-C7ZOJJeA.mjs
++++ b/dist/ws-C7ZOJJeA.mjs
+@@ -32,6 +32,9 @@ function getWSConnectionHandler(opts) {
+ 	return (client, req) => {
+ 		var _opts$keepAlive;
+ 		const clientSubscriptions = /* @__PURE__ */ new Map();
++		// slayzone patch (N3): subscriptions still in their middlewares. A stop that
++		// lands before `callProcedure` resolves must reach them too.
++		const pendingSubscriptions = /* @__PURE__ */ new Map();
+ 		const abortController = new AbortController();
+ 		if ((_opts$keepAlive = opts.keepAlive) === null || _opts$keepAlive === void 0 ? void 0 : _opts$keepAlive.enabled) {
+ 			const { pingMs, pongWaitMs } = opts.keepAlive;
+@@ -133,6 +136,8 @@ function getWSConnectionHandler(opts) {
+ 			if (msg.method === "subscription.stop") {
+ 				var _clientSubscriptions$;
+ 				(_clientSubscriptions$ = clientSubscriptions.get(id)) === null || _clientSubscriptions$ === void 0 || _clientSubscriptions$.abort();
++				const pending = pendingSubscriptions.get(id);
++				if (pending) pending.abort();
+ 				return;
+ 			}
+ 			const { path, lastEventId } = msg.params;
+@@ -149,6 +154,7 @@ function getWSConnectionHandler(opts) {
+ 				const res = await ctxPromise;
+ 				if (!res.ok) throw res.error;
+ 				const abortController = new AbortController();
++				if (type === "subscription") pendingSubscriptions.set(id, abortController);
+ 				const result = await callProcedure({
+ 					router,
+ 					path,
+@@ -157,6 +163,8 @@ function getWSConnectionHandler(opts) {
+ 					type,
+ 					signal: abortController.signal,
+ 					batchIndex
++				}).finally(() => {
++					if (pendingSubscriptions.get(id) === abortController) pendingSubscriptions.delete(id);
+ 				});
+ 				const isIterableResult = isAsyncIterable(result) || isObservable(result);
+ 				if (type !== "subscription") {
+@@ -185,6 +193,14 @@ function getWSConnectionHandler(opts) {
+ 					message: `Duplicate id ${id}`,
+ 					code: "BAD_REQUEST"
+ 				});
++				if (abortController.signal.aborted) {
++					respond({
++						id,
++						jsonrpc,
++						result: { type: "stopped" }
++					});
++					return;
++				}
+ 				const iterable = isObservable(result) ? observableToAsyncIterable(result, abortController.signal) : result;
+ 				run(async () => {
+ 					try {
+@@ -399,6 +415,8 @@ function getWSConnectionHandler(opts) {
+ 		client.once("close", () => {
+ 			for (const sub of clientSubscriptions.values()) sub.abort();
+ 			clientSubscriptions.clear();
++			for (const sub of pendingSubscriptions.values()) sub.abort();
++			pendingSubscriptions.clear();
+ 			abortController.abort();
+ 		});
+ 	};
