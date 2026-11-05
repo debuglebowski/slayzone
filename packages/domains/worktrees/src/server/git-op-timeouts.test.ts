@@ -11,7 +11,7 @@ import { executeGitOp, setGitOpTransport } from './git-op-routing'
 import { setWorktreesRouterDeps } from './worktrees-router-deps'
 
 const GATEWAY_DEFAULT_MS = 30_000
-const sent: Array<{ op: string; timeoutMs: number | undefined }> = []
+const sent: Array<{ op: string; timeoutMs: number | undefined; target: unknown }> = []
 
 beforeAll(() => {
   setWorktreesRouterDeps({
@@ -19,8 +19,8 @@ beforeAll(() => {
     shellOpenPath: async () => ''
   })
   setGitOpTransport({
-    request: async (_computerId, params, timeoutMs) => {
-      sent.push({ op: params.op, timeoutMs })
+    request: async (_computerId, params, timeoutMs, target) => {
+      sent.push({ op: params.op, timeoutMs, target })
       return null
     },
     watchStart: async () => undefined,
@@ -58,5 +58,10 @@ test("the routed request carries the op's timeout", async () => {
   await executeGitOp('push', { repoPath: '/r', target: { computerId: 'c1' } } as never, true).catch(
     () => undefined
   )
-  expect(sent.at(-1)).toEqual({ op: 'push', timeoutMs: gitOpTimeoutMs('push') })
+  // …and what it works on, resolved: the hub gates the op on that.
+  expect(sent.at(-1)).toEqual({
+    op: 'push',
+    timeoutMs: gitOpTimeoutMs('push'),
+    target: { computerId: 'c1' }
+  })
 })

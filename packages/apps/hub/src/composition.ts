@@ -4,6 +4,7 @@ import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerProbes } from './computer-probes'
+import { createGitOpGate } from './git-op-gate'
 import { EXEC_RUN_REPLY_GRACE_MS, execRunOnComputer } from './computer-exec-run'
 
 // Explicit limits for computer requests that are not `exec.run` / git ops (those
@@ -25,7 +26,7 @@ import {
   createComputerChatMaintenance,
   createComputerChatCommandBarrier
 } from './computer-chat-maintenance'
-import { runWithSecurityContext } from '@slayzone/platform/security-log'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
@@ -1879,10 +1880,11 @@ export function composeServer(opts: {
     // their parsing stay here untouched.
     // The git panel: each op runs on the computer that holds the checkout (the
     // router resolves it like the workspace fs, owner-gated with login).
+    const gateGitOp = createGitOpGate(placement.gate, () => currentSecurityContext()?.actor ?? null)
     setGitOpTransport({
-      request: async (computerId, params, timeoutMs) => {
-        // The caller's own request (as a watch): a computer works only for its owner.
-        if (placement.gate) await placement.gate(computerId, null)
+      request: async (computerId, params, timeoutMs, target) => {
+        // A caller's op is gated as what it works on; the hub's own reads pass.
+        await gateGitOp(computerId, target)
         return gitOpResultSchema.parse(
           await computerGateway.request(computerId, HubToComputerMethods.gitOp, params, timeoutMs)
         ).result

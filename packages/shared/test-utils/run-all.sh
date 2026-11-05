@@ -96,6 +96,7 @@ run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/computer-probes.test.ts
 run_harness packages/apps/hub/src/computer-exec-run.test.ts
+run_harness packages/apps/hub/src/git-op-gate.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.

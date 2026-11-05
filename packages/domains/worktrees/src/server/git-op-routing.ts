@@ -27,7 +27,9 @@ export interface GitOpTransport {
     computerId: string,
     params: { op: GitOpName; input: unknown; mutates: boolean },
     /** The op's own limit ({@link gitOpTimeoutMs}) — pass it on as the request's. */
-    timeoutMs: number
+    timeoutMs: number,
+    /** What the op works on, as resolved (a task's checkout, a project …): its gate. */
+    target: WorktreesComputerTarget
   ): Promise<unknown>
   /** Start watching a checkout there (`git.watchStart`); reports arrive via
    *  {@link deliverGitWatchEvent}. */
@@ -43,7 +45,16 @@ export function setGitOpTransport(next: GitOpTransport | null): void {
   routedWatches.clear()
 }
 
-/** Resolve the computer an op or watch on `path` runs on (null = this hub's disk). */
+/** What an op on `path` works on: an explicit target, else whose checkout the path is. */
+async function targetFor(
+  target: WorktreesComputerTarget | undefined,
+  path: string | undefined,
+  db: SlayzoneDb | undefined
+): Promise<WorktreesComputerTarget> {
+  return target ?? (db && path ? await gitTargetForPath(db, path) : null) ?? {}
+}
+
+/** Resolve the computer an op or watch on `path` runs on (null = none). */
 async function computerFor(
   target: WorktreesComputerTarget | undefined,
   path: string | undefined,
@@ -51,9 +62,7 @@ async function computerFor(
 ): Promise<string | null> {
   const deps = getWorktreesRouterDepsOrNull()
   if (!deps) return null
-  // An explicit target wins; else the path names whose checkout this is.
-  const resolvedTarget = target ?? (db && path ? await gitTargetForPath(db, path) : null) ?? {}
-  return deps.getWorkspace().resolveComputer(resolvedTarget)
+  return deps.getWorkspace().resolveComputer(await targetFor(target, path, db))
 }
 
 /** The panel's watches, refcounted per checkout path: many panels on one checkout = one watch. */
@@ -182,11 +191,14 @@ export async function executeGitOp<K extends GitOpName>(
   db?: SlayzoneDb
 ): Promise<GitOpResult<K>> {
   const repoPath = gitOpAbsolutePaths(op, input as GitOpInput<K>)[0]
-  const computerId = await computerFor(target, repoPath, db)
+  const deps = getWorktreesRouterDepsOrNull()
+  const resolved = await targetFor(target, repoPath, db)
+  const computerId = deps ? await deps.getWorkspace().resolveComputer(resolved) : null
   if (computerId == null || !transport) refuseNoComputer({ op: `worktrees.${op}` })
   return (await transport.request(
     computerId,
     { op, input, mutates },
-    gitOpTimeoutMs(op)
+    gitOpTimeoutMs(op),
+    resolved
   )) as GitOpResult<K>
 }
