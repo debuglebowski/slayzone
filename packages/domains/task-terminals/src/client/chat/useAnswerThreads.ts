@@ -1,9 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { toast, useStableCallback } from '@slayzone/ui'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { ChatThread } from '@slayzone/terminal-contracts'
+import {
+  answerThreadsPanelKey,
+  readAnswerThreadsPanel,
+  writeAnswerThreadsPanel,
+  type AnswerThreadsPanel
+} from './answer-threads-panel'
 
 const NO_THREADS: ChatThread[] = []
 
@@ -20,49 +26,70 @@ export function useAnswerThreads(
 ) {
   const trpc = useTRPC()
   const client = useTRPCClient()
-  const query = useQuery(
+  const {
+    data,
+    isSuccess,
+    refetch: refetchThreads
+  } = useQuery(
     trpc.chat.threads.list.queryOptions(
       { ...target, conversationId },
       { enabled: enabled && !!conversationId }
     )
   )
-  const [selection, setSelection] = useState<{
-    conversationId: string
-    answerId: string
-    sourceMessageId: string
-    activeId: string | null
-  } | null>(null)
+  // The open panel survives reloads and restarts (`answer-threads-panel.ts`).
+  const storageKey = answerThreadsPanelKey(useHubId() ?? 'local', target.tabId)
+  const [stored, setStored] = useState<{
+    key: string
+    selection: AnswerThreadsPanel | null
+  }>(() => ({ key: storageKey, selection: enabled ? readAnswerThreadsPanel(storageKey) : null }))
+  if (stored.key !== storageKey)
+    setStored({ key: storageKey, selection: enabled ? readAnswerThreadsPanel(storageKey) : null })
+  const selection = stored.key === storageKey ? stored.selection : null
+  const setSelection = (
+    next: (prev: AnswerThreadsPanel | null) => AnswerThreadsPanel | null
+  ): void => {
+    setStored((prev) =>
+      prev.key === storageKey ? { key: storageKey, selection: next(prev.selection) } : prev
+    )
+  }
+  useEffect(() => {
+    if (enabled && stored.key === storageKey) writeAnswerThreadsPanel(storageKey, stored.selection)
+  }, [enabled, stored, storageKey])
   const [creating, setCreating] = useState(false)
-  const threads = query.data ?? NO_THREADS
+  const threads = data ?? NO_THREADS
   // A reset/session switch keeps the old discussions durable, but this panel
   // only shows threads belonging to the conversation currently on screen.
   const panel = selection?.conversationId === conversationId ? selection : null
+  // A remembered thread that no longer exists (its tab went away): close.
+  if (panel?.activeId && isSuccess && !threads.some((thread) => thread.id === panel.activeId))
+    setStored({ key: storageKey, selection: null })
   useSubscription(
     trpc.chat.threads.onChanged.subscriptionOptions(
       { tabId: target.tabId },
       {
         enabled: enabled && !!conversationId,
         onData: () => {
-          void query.refetch()
+          void refetchThreads()
         }
       }
     )
   )
   const start = useStableCallback((answerId: string, sourceMessageId: string) => {
-    if (conversationId) setSelection({ conversationId, answerId, sourceMessageId, activeId: null })
+    if (conversationId)
+      setSelection(() => ({ conversationId, answerId, sourceMessageId, activeId: null }))
   })
   const open = useStableCallback((thread: ChatThread) => {
-    setSelection({
+    setSelection(() => ({
       conversationId: thread.parentConversationId,
       answerId: thread.answerId,
       sourceMessageId: thread.sourceMessageId,
       activeId: thread.id
-    })
+    }))
   })
   const select = useStableCallback((activeId: string | null) => {
     setSelection((prev) => (prev ? { ...prev, activeId } : null))
   })
-  const close = useStableCallback(() => setSelection(null))
+  const close = useStableCallback(() => setSelection(() => null))
   const create = useStableCallback(async (text: string): Promise<boolean> => {
     if (!panel || creating || !text.trim()) return false
     setCreating(true)
@@ -77,7 +104,7 @@ export function useAnswerThreads(
       })
       .then(
         async (thread) => {
-          await query.refetch()
+          await refetchThreads()
           setSelection((prev) =>
             prev?.conversationId === panel.conversationId &&
             prev.sourceMessageId === panel.sourceMessageId &&

@@ -1208,6 +1208,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/UserMessageAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx \
+  packages/domains/task-terminals/src/client/chat/answer-threads-panel.test.ts \
   packages/domains/task-terminals/src/client/chat/composer-state/review-integration-upgrade.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/review-offline-journal-expiry.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.test.tsx \

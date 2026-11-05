@@ -78,5 +78,26 @@ test.describe('Answer threads', () => {
       t.page.getByRole('complementary', { name: 'Answer threads' }).getByRole('tab')
     ).toHaveCount(2)
     expect((await t.run(0)).sessionId).toBe(original)
+
+    // The open panel and its selected thread survive a reload; closing it is remembered too.
+    await t.page
+      .getByRole('complementary', { name: 'Answer threads' })
+      .getByRole('tab', { name: 'second side question', exact: true })
+      .click()
+    await t.reload()
+    const restored = t.page.getByRole('complementary', { name: 'Answer threads' })
+    await expect(
+      restored.getByRole('tab', { name: 'second side question', exact: true })
+    ).toHaveAttribute('aria-selected', 'true')
+    await expect(restored.getByText('echo: second side question', { exact: true })).toBeVisible()
+    await restored.getByRole('button', { name: 'Close threads', exact: true }).click()
+    await t.reload()
+    await expect(
+      t.page
+        .locator('[data-chat-panel]:visible')
+        .first()
+        .getByRole('button', { name: /Threads 2 items/ })
+    ).toHaveCount(1)
+    await expect(t.page.getByRole('complementary', { name: 'Answer threads' })).toHaveCount(0)
   })
 })
