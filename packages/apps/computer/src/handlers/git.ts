@@ -257,7 +257,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       }
       if (!lstatExists(src)) continue
       try {
-        jailedFs.copy(src, dest)
+        // Asynchronous and chunked: a big node_modules must not freeze the computer (K3).
+        await jailedFs.copyAsync(src, dest)
         copied += 1
       } catch (err) {
         ctx.log('copyIgnoredFiles copy failed', { rel, error: String(err) })

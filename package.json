@@ -41,6 +41,7 @@
     "check": "biome check --write .",
     "test:unit": "bash packages/shared/test-utils/run-all.sh",
     "test:unit:registered": "SLZ_UNIT_DRY=1 bash packages/shared/test-utils/run-all.sh",
+    "test:review-regressions": "node packages/shared/test-utils/review-regressions.mjs",
     "test:chat:perf": "npx tsx packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts",
     "test:e2e": "pnpm --filter @slayzone/app test:e2e",
     "test:e2e:perf": "pnpm --filter @slayzone/app test:e2e:perf",

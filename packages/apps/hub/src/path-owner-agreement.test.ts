@@ -56,6 +56,8 @@ describe('routing and the owner policy agree on whose a path is', () => {
     [wt, true],
     [`${wt}/x`, true],
     [`${wt}/sub/../x`, true],
+    [`/${wt}/x`, true], // K1: a leading `//` is the same path on POSIX, never UNC
+    [`//${wt}`, true],
     [`${wt}\\x`, false], // POSIX: a name beside the worktree, not inside it
     [`${wt}/../x`, false],
     ['\\\\srv\\share\\a-wt\\feat', true],

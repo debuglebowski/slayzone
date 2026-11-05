@@ -7,13 +7,15 @@ import type {
   QueueAdmission,
   ProviderConfigEntry,
   TimelineWrite,
-  ChatThreadStore
+  ChatThreadStore,
+  ChatPinnedMessageStore
 } from '@slayzone/terminal/runtime'
 import type {
   ChatDraft,
   ChatScrollAnchor,
   ChatTabState,
   ChatThread,
+  ChatPinnedMessage,
   QueuedChatMessage,
   UserContentBlock,
   ChatAttachment,
@@ -915,6 +917,21 @@ export function createLocalChatData(
       if (thread) set(thread.parentTabId, 'thread', id, { ...thread, conversationId })
     }
   }
+  // A pin's record: one per row of one provider conversation of the tab.
+  const pinRecordId = (conversationId: string, key: string): string =>
+    JSON.stringify([conversationId, key])
+  const pinnedMessages: ChatPinnedMessageStore = {
+    list: async (tabId, conversationId) =>
+      store
+        .records(owner(tabId).id, 'pinned-message')
+        .map((r) => r.value as ChatPinnedMessage)
+        .filter((pin) => pin.conversationId === conversationId)
+        .sort((a, b) => a.pinnedAt - b.pinnedAt || a.key.localeCompare(b.key)),
+    pin: async (tabId, pin) =>
+      set(tabId, 'pinned-message', pinRecordId(pin.conversationId, pin.key), pin),
+    unpin: async (tabId, conversationId, key) =>
+      remove(tabId, 'pinned-message', pinRecordId(conversationId, key))
+  }
   function allAttachments(taskId?: string) {
     return store.findRecords('attachment', taskId).map(
       (r) =>
@@ -931,6 +948,7 @@ export function createLocalChatData(
   }
   const data: ChatDataOps = {
     threads,
+    pinnedMessages,
     readProviderConfig: async (taskId, mode) => provider(taskId, mode),
     writeChatMode: (t, m, v) => patch(t, m, 'chatMode', v),
     writeChatModel: (t, m, v) => patch(t, m, 'chatModel', v),

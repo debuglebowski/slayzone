@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -24,6 +25,7 @@ import { createAgentConfigHandlers } from './agent-config'
 import { createFsHandlers } from './fs'
 import { createGitOpHandlers } from './git-op'
 import type { HubMethodTable } from './types'
+import { setProtectedPaths } from '../path-jail'
 
 let base: string
 let r: string
@@ -212,5 +214,109 @@ describe('deletes and renames act on the entry, never through a link', () => {
     expect(
       await nothingOutside(() => fs[M.fsRename]({ rootPath: r, oldPath: 'a', newPath: 'x/a' }))
     ).toBe('refused')
+  })
+})
+
+// Round-5 K2: the computer's own state, protected by NAME, was let through in a
+// different letter case or Unicode form — on APFS / NTFS the same file. `fs.delete
+// '.STATE'` took the whole state folder. Protected by identity (and a folded name
+// for what does not exist yet), through the real handlers.
+describe.skipIf(process.platform === 'linux')(
+  'K2: the computer’s own state in any spelling',
+  () => {
+    beforeEach(() => {
+      mkdirSync(join(r, '.state'))
+      writeFileSync(join(r, '.state', 'computer.config.json'), '{"keep":true}')
+      writeFileSync(join(r, '.state', 'café.json'), 'keep')
+      setProtectedPaths([join(r, '.state')])
+    })
+    afterEach(() => setProtectedPaths([]))
+
+    const kept = () =>
+      existsSync(join(r, '.state', 'computer.config.json')) &&
+      readFileSync(join(r, '.state', 'computer.config.json'), 'utf-8') === '{"keep":true}'
+
+    it('fs.delete of `.STATE` is refused; the state folder survives', async () => {
+      expect(await attempt(() => fs[M.fsDelete]({ rootPath: r, targetPath: '.STATE' }))).toBe(
+        'refused'
+      )
+      expect(kept()).toBe(true)
+    })
+
+    it('fs.writeFile to `.state/COMPUTER.CONFIG.JSON` is refused', async () => {
+      expect(
+        await attempt(() =>
+          fs[M.fsWriteFile]({ rootPath: r, filePath: '.State/COMPUTER.CONFIG.JSON', content: 'x' })
+        )
+      ).toBe('refused')
+      expect(kept()).toBe(true)
+    })
+
+    it('an NFD spelling of an NFC name is refused', async () => {
+      expect(
+        await attempt(() =>
+          fs[M.fsWriteFile]({ rootPath: r, filePath: '.state/café.json', content: 'x' })
+        )
+      ).toBe('refused')
+      expect(readFileSync(join(r, '.state', 'café.json'), 'utf-8')).toBe('keep')
+    })
+
+    it('a removeDir of the root in another case is refused (it holds the state)', async () => {
+      expect(await attempt(() => fs[M.fsRemoveDir]({ path: r.toUpperCase() }))).toBe('refused')
+      expect(kept()).toBe(true)
+    })
+
+    it('a not-yet-existing protected file is refused in any case', async () => {
+      setProtectedPaths([join(r, '.state', 'credentials.json')])
+      expect(
+        await attempt(() =>
+          fs[M.fsWriteFile]({ rootPath: r, filePath: '.state/CREDENTIALS.JSON', content: 'x' })
+        )
+      ).toBe('refused')
+      expect(existsSync(join(r, '.state', 'credentials.json'))).toBe(false)
+    })
+  }
+)
+
+// Round-5 K8: the file editor's search read THROUGH links — to files outside the
+// root, or to the computer's own credentials inside it (the protected filter checked
+// the link's own path) — and readDir never judged its folder, so listing through a
+// folder link showed what lies outside. Through the real handlers.
+describe('K8: search and readDir never reach through a link out of the jail', () => {
+  it('fs.searchFiles skips a link out and a link onto protected state', async () => {
+    writeFileSync(join(o, 'secret.txt'), 'TOPSECRET line\n')
+    mkdirSync(join(r, '.state'))
+    writeFileSync(join(r, '.state', 'credentials.json'), 'TOKEN=abc\n')
+    setProtectedPaths([join(r, '.state')])
+    try {
+      symlinkSync(join(o, 'secret.txt'), join(r, 'l'))
+      symlinkSync(join(r, '.state', 'credentials.json'), join(r, 'c'))
+      writeFileSync(join(r, 'ok.txt'), 'TOPSECRET in the root is fine\nTOKEN=here\n')
+      const found = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'TOPSECRET' })) as {
+        results: Array<{ path: string }>
+      }
+      expect(found.results.map((x) => x.path)).toEqual(['ok.txt'])
+      const tokens = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'TOKEN=' })) as {
+        results: Array<{ path: string }>
+      }
+      expect(tokens.results.map((x) => x.path)).toEqual(['ok.txt'])
+    } finally {
+      setProtectedPaths([])
+    }
+  })
+
+  it('a link to a file inside the root is still searched', async () => {
+    writeFileSync(join(r, 'real.txt'), 'NEEDLE\n')
+    symlinkSync(join(r, 'real.txt'), join(r, 'alias.txt'))
+    const found = (await fs[M.fsSearchFiles]({ rootPath: r, query: 'NEEDLE' })) as {
+      results: Array<{ path: string }>
+    }
+    expect(found.results.map((x) => x.path).sort()).toEqual(['alias.txt', 'real.txt'])
+  })
+
+  it('fs.readDir through a folder link out is refused', async () => {
+    writeFileSync(join(o, 'dir', 'outside-file'), 'x')
+    symlinkSync(join(o, 'dir'), join(r, 'x'))
+    expect(await attempt(() => fs[M.fsReadDir]({ rootPath: r, dirPath: 'x' }))).toBe('refused')
   })
 })

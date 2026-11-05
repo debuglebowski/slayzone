@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'motion/react'
 import { Terminal } from 'lucide-react'
-import { Button, Checkbox, Dialog, DialogContent } from '@slayzone/ui'
+import { Button, Checkbox, Dialog, DialogContent, toast } from '@slayzone/ui'
 import { useTRPCClient } from './trpc'
 
 export function CliInstallDialog() {
@@ -16,13 +16,33 @@ export function CliInstallDialog() {
   useEffect(() => {
     if (checked.current) return
     checked.current = true
-    Promise.all([
+    // Settings first: a user who opted out (or hasn't onboarded) costs no login-shell
+    // probe. `cli_install_dismissed` ("Don't ask again") silences every CLI nag, the
+    // update notice included; e2e seeds it so no spec depends on the host's `slay`.
+    void Promise.all([
       trpcClient.settings.get.query({ key: 'onboarding_completed' }),
       trpcClient.settings.get.query({ key: 'cli_install_dismissed' }),
-      trpcClient.app.meta.checkCliInstalled.query()
-    ]).then(([onboarded, dismissed, status]) => {
-      if (onboarded === 'true' && dismissed !== 'true' && !status.installed) {
+      trpcClient.settings.get.query({ key: 'cli_update_dismissed_version' })
+    ]).then(async ([onboarded, dismissed, updateDismissedFor]) => {
+      if (onboarded !== 'true' || dismissed === 'true') return
+      const status = await trpcClient.app.meta.checkCliInstalled.query()
+      if (!status.installed) {
         setOpen(true)
+        return
+      }
+      if (
+        status.outdated &&
+        status.expectedVersion &&
+        updateDismissedFor !== status.expectedVersion
+      ) {
+        showCliUpdateNotice(status, {
+          update: () => trpcClient.app.meta.installCli.mutate(),
+          dismiss: () =>
+            void trpcClient.settings.set.mutate({
+              key: 'cli_update_dismissed_version',
+              value: status.expectedVersion!
+            })
+        })
       }
     })
   }, [trpcClient])
@@ -180,4 +200,50 @@ export function CliInstallDialog() {
       </DialogContent>
     </Dialog>
   )
+}
+
+interface OutdatedCliStatus {
+  path?: string
+  version?: string | null
+  expectedVersion?: string | null
+  appManaged?: boolean
+}
+
+/**
+ * Non-blocking: a stale `slay` still works for most commands, so it gets a toast,
+ * not a modal. An app-managed install (the app's own symlink/shim) can be refreshed
+ * in place; anything else (npm global, a copy elsewhere on PATH) belongs to whatever
+ * put it there, so the notice says where it is instead of touching it.
+ */
+function showCliUpdateNotice(
+  status: OutdatedCliStatus,
+  actions: {
+    update: () => Promise<{ ok: boolean; error?: string; pathNotInPATH?: boolean }>
+    dismiss: () => void
+  }
+): void {
+  const description = status.appManaged
+    ? `This app ships v${status.expectedVersion}.`
+    : `This app ships v${status.expectedVersion}. ${status.path} is not managed by SlayZone — update or remove it with the tool that installed it.`
+  toast(`slay CLI v${status.version} is out of date`, {
+    id: 'cli-update-notice',
+    description,
+    duration: 15000,
+    action: status.appManaged
+      ? {
+          label: 'Update',
+          onClick: () => {
+            void actions.update().then(
+              (r) =>
+                r.ok
+                  ? toast.success('slay CLI updated.')
+                  : toast.error(r.error ?? 'Updating the slay CLI failed.'),
+              (err: unknown) =>
+                toast.error(err instanceof Error ? err.message : 'Updating the slay CLI failed.')
+            )
+          }
+        }
+      : undefined,
+    cancel: { label: "Don't show again", onClick: actions.dismiss }
+  })
 }

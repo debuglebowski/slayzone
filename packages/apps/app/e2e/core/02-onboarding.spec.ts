@@ -13,6 +13,16 @@ test.describe('Onboarding', () => {
     await expect(mainWindow.getByText('Welcome to SlayZone', { exact: true })).not.toBeVisible()
   })
 
+  test('CLI install prompt is off by default (host `slay` must not leak in)', async ({
+    mainWindow
+  }) => {
+    const dismissed = await mainWindow.evaluate(() =>
+      window.getTrpcVanillaClient().settings.get.query({ key: 'cli_install_dismissed' })
+    )
+    expect(dismissed).toBe('true')
+    await expect(mainWindow.getByText('Install the slay CLI', { exact: true })).not.toBeVisible()
+  })
+
   test('full onboarding flow', async ({ mainWindow }) => {
     const s = seed(mainWindow)
 

@@ -566,7 +566,14 @@ function App(): React.JSX.Element {
       }),
     [rawIdleTasks, dismissedIdle]
   )
-  useAppBadge({ tasks, idleTasks: allIdleTasks, hubIdByProject, defaultHubId })
+  useAppBadge({
+    tasks,
+    idleTasks: allIdleTasks,
+    hubIdByProject,
+    defaultHubId,
+    columnsByProjectId,
+    openTaskIds
+  })
   const idleTasks = useMemo(
     () =>
       agentStatusState.filterCurrentProject

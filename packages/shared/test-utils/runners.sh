@@ -58,6 +58,8 @@ SKIPPED=()
 # Files skipped as part of a whole package (skip_package_tests): registered, but not
 # listed one by one in the summary.
 SKIPPED_FILES=()
+# Package dirs whose test file listing failed (run_suites); require_registered skips them.
+LIST_FAILED_DIRS=()
 
 # SLZ_UNIT_DRY=1: register every suite but run none, so require_registered can check in
 # seconds that every test file is registered (`pnpm test:unit:registered`, a lint step).
@@ -151,23 +153,41 @@ skip_package_tests() {
 # The exact test files a package's own vitest run collects, repo-relative. Read from
 # vitest itself rather than assumed from the directory: a package config may exclude
 # files (shared/platform excludes its Electron-node suites), and those must still be
-# registered file-by-file. Usage: package_test_files <workspace-name>
+# registered file-by-file. A listing that fails is an error (non-zero exit, the lister's
+# output on stderr), never an empty list: swallowed, it read as "every file of this
+# package is UNREGISTERED", pointing at registration when the package's vitest could not
+# even load. Usage: package_test_files <workspace-name>
 package_test_files() {
-  pnpm --filter "$1" exec vitest list --filesOnly --json 2>/dev/null |
-    node -e 'let s = ""
-      process.stdin.on("data", (d) => (s += d)).on("end", () => {
-        for (const { file } of JSON.parse(s || "[]")) console.log(require("path").relative(process.argv[1], file))
-      })' "$ROOT_DIR"
+  list_test_files "$1" file vitest list --filesOnly --json
 }
 
 # The same for a jest package: the files `jest --listTests` collects (absolute paths),
 # repo-relative. Usage: jest_package_test_files <workspace-name>
 jest_package_test_files() {
-  pnpm --filter "$1" exec jest --listTests --json 2>/dev/null |
-    node -e 'let s = ""
+  list_test_files "$1" "" jest --listTests --json
+}
+
+# Runs a lister in a package; prints the files of its JSON array output, repo-relative,
+# one per line. <key>: the entry field holding the path ("" = the entry is the path).
+# Usage: list_test_files <workspace-name> <key> <command...>
+list_test_files() {
+  local name="$1" key="$2" out err status=0
+  shift 2
+  err=$(mktemp "${TMPDIR:-/tmp}/slz-list.XXXXXX")
+  out=$(pnpm --filter "$name" exec "$@" 2>"$err") || status=$?
+  if [ "$status" = 0 ]; then
+    printf '%s' "$out" | node -e 'let s = ""
       process.stdin.on("data", (d) => (s += d)).on("end", () => {
-        for (const file of JSON.parse(s || "[]")) console.log(require("path").relative(process.argv[1], file))
-      })' "$ROOT_DIR"
+        const [root, key] = process.argv.slice(1)
+        for (const e of JSON.parse(s)) console.log(require("path").relative(root, key ? e[key] : e))
+      })' "$ROOT_DIR" "$key" 2>>"$err" || status=$?
+  fi
+  if [ "$status" != 0 ]; then
+    echo "listing the test files of $name failed (exit $status: $*):" >&2
+    tail -n 40 "$err" >&2
+  fi
+  rm -f "$err"
+  return "$status"
 }
 
 # ---------------------------------------------------------------------------------------
@@ -236,8 +256,9 @@ write_list() {
   return 0
 }
 
+# Usage: package_test <workspace-name> [<file relative to the package>...]
 package_test() {
-  (set -o pipefail; pnpm --filter "$1" test 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
+  (set -o pipefail; pnpm --filter "$1" test "${@:2}" 2>&1 | grep -v 'npm warn\|ExperimentalWarning')
 }
 
 integration_test() {
@@ -269,7 +290,9 @@ lane_app_and_packages() {
       ./node_modules/.bin/vitest run --config packages/apps/app/vitest.config.ts --exclude '**/.claude/worktrees/**'
   fi
   for i in "${!PACKAGE_NAMES[@]}"; do
-    command_suite "${PACKAGE_DIRS[$i]} (own vitest config)" package_test "${PACKAGE_NAMES[$i]}"
+    # With SLZ_UNIT_ONLY: only its listed files (space-separated, package-relative).
+    # shellcheck disable=SC2086
+    command_suite "${PACKAGE_DIRS[$i]} (own vitest config)" package_test "${PACKAGE_NAMES[$i]}" ${PACKAGE_ONLY[$i]:-}
   done
   for i in "${!JEST_PACKAGE_NAMES[@]}"; do
     command_suite "${JEST_PACKAGE_DIRS[$i]} (jest)" package_test "${JEST_PACKAGE_NAMES[$i]}"
@@ -307,12 +330,77 @@ selected_lanes() {
   done
 }
 
+# SLZ_UNIT_ONLY=<file>: run only the test files listed in <file> (repo-relative, one per
+# line), each in the lane and runner it is registered with above — the review
+# regression suite (`pnpm test:review-regressions`, review-regressions.mjs) is one such
+# list. A listed file nobody registered fails the run; registration is still checked
+# for every file (require_registered). Usage: apply_only (from run_suites)
+PACKAGE_ONLY=()
+apply_only() {
+  [ -n "${SLZ_UNIT_ONLY:-}" ] || return 0
+  local file i dir kept_names=() kept_dirs=() kept_only=() rel files keep=() keep_labels=()
+  local listed=()
+  while IFS= read -r file; do [ -n "$file" ] && listed+=("$file"); done <"$SLZ_UNIT_ONLY"
+  is_listed() { printf '%s\n' "${listed[@]}" | grep -qxF -- "$1"; }
+  keep=()
+  for file in ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  HARNESS_FILES=(${keep[@]+"${keep[@]}"})
+  keep=()
+  for file in ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  HARNESS_NODE_FILES=(${keep[@]+"${keep[@]}"})
+  keep=()
+  for i in "${!APP_VITEST_FILES[@]}"; do
+    if is_listed "${APP_VITEST_FILES[$i]}"; then
+      keep+=("${APP_VITEST_FILES[$i]}")
+      keep_labels+=("${APP_VITEST_LABELS[$i]}")
+    fi
+  done
+  APP_VITEST_FILES=(${keep[@]+"${keep[@]}"})
+  APP_VITEST_LABELS=(${keep_labels[@]+"${keep_labels[@]}"})
+  for i in "${!PACKAGE_NAMES[@]}"; do
+    dir="${PACKAGE_DIRS[$i]}"
+    files=""
+    for file in "${listed[@]}"; do
+      case "$file" in "$dir"/*) files="$files ${file#"$dir"/}" ;; esac
+    done
+    if [ -n "$files" ]; then
+      kept_names+=("${PACKAGE_NAMES[$i]}")
+      kept_dirs+=("$dir")
+      kept_only+=("${files# }")
+    fi
+  done
+  PACKAGE_NAMES=(${kept_names[@]+"${kept_names[@]}"})
+  PACKAGE_DIRS=(${kept_dirs[@]+"${kept_dirs[@]}"})
+  PACKAGE_ONLY=(${kept_only[@]+"${kept_only[@]}"})
+  JEST_PACKAGE_NAMES=()
+  JEST_PACKAGE_DIRS=()
+  keep=()
+  for file in ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  INTEGRATION_FILES=(${keep[@]+"${keep[@]}"})
+  # Every listed file runs somewhere: registered file by file, or in a package run.
+  for file in "${listed[@]}"; do
+    if printf '%s\n' ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"} ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"} \
+      ${APP_VITEST_FILES[@]+"${APP_VITEST_FILES[@]}"} ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"} | grep -qxF -- "$file"; then
+      continue
+    fi
+    rel=0
+    for dir in ${PACKAGE_DIRS[@]+"${PACKAGE_DIRS[@]}"}; do
+      case "$file" in "$dir"/*) rel=1 ;; esac
+    done
+    if [ "$rel" = 0 ] || [ ! -f "$file" ]; then
+      echo "SLZ_UNIT_ONLY: $file is not a registered test file" >&2
+      FAIL=$((FAIL + 1))
+      FAILED+=("not registered: $file")
+    fi
+  done
+}
+
 # Runs everything registered above, then folds each lane's verdicts into PASS / FAIL /
 # FAILED. SLZ_UNIT_JSON=<path> keeps the Electron harness run's JSON report (per-file
 # test counts and durations). Usage: run_suites
 run_suites() {
   local i j lane status verdict label file selected started=$SECONDS
-  local list_pids=() list_files=() lane_pids=() lanes=()
+  local list_pids=() list_files=() list_dirs=() lane_pids=() lanes=()
   selected=$(selected_lanes) || exit 2
   while IFS= read -r lane; do lanes+=("$lane"); done <<<"$selected"
   WORK=$(mktemp -d "${TMPDIR:-/tmp}/slz-unit.XXXXXX")
@@ -323,15 +411,19 @@ run_suites() {
   # require_registered.
   for i in "${!PACKAGE_NAMES[@]}"; do
     list_files+=("$WORK/package.$i.files")
-    package_test_files "${PACKAGE_NAMES[$i]}" >"$WORK/package.$i.files" &
+    list_dirs+=("${PACKAGE_DIRS[$i]}")
+    package_test_files "${PACKAGE_NAMES[$i]}" >"$WORK/package.$i.files" 2>"$WORK/package.$i.files.err" &
     list_pids+=($!)
   done
   for i in "${!JEST_PACKAGE_NAMES[@]}"; do
     list_files+=("$WORK/package.jest.$i.files")
-    jest_package_test_files "${JEST_PACKAGE_NAMES[$i]}" >"$WORK/package.jest.$i.files" &
+    list_dirs+=("${JEST_PACKAGE_DIRS[$i]}")
+    jest_package_test_files "${JEST_PACKAGE_NAMES[$i]}" >"$WORK/package.jest.$i.files" 2>"$WORK/package.jest.$i.files.err" &
     list_pids+=($!)
   done
 
+  # After the package listings above started: they register every package's files.
+  dry_run || apply_only
   if ! dry_run; then
     write_list "$WORK/harness.list" ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"}
     write_list "$WORK/harness-node.list" ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}
@@ -377,11 +469,30 @@ run_suites() {
     echo "All lanes done in $((SECONDS - started))s"
   fi
 
+  # A package whose listing failed is ONE failure, named, with the lister's output; its
+  # files are then not reported UNREGISTERED one by one (LIST_FAILED_DIRS): nothing is
+  # known about them.
   for j in "${!list_pids[@]}"; do
-    wait "${list_pids[$j]}" || true
-    while IFS= read -r file; do RAN+=("$file"); done <"${list_files[$j]}"
+    if wait "${list_pids[$j]}"; then
+      while IFS= read -r file; do RAN+=("$file"); done <"${list_files[$j]}"
+    else
+      echo "" >&2
+      cat "${list_files[$j]}.err" >&2
+      FAIL=$((FAIL + 1))
+      FAILED+=("test file listing: ${list_dirs[$j]}")
+      LIST_FAILED_DIRS+=("${list_dirs[$j]}")
+    fi
   done
   rm -rf "$WORK"
+}
+
+# True when <file> lies in a package whose test file listing failed (run_suites).
+listing_failed() {
+  local dir
+  for dir in ${LIST_FAILED_DIRS[@]+"${LIST_FAILED_DIRS[@]}"}; do
+    case "$1" in "$dir"/*) return 0 ;; esac
+  done
+  return 1
 }
 
 # Fails (counts into FAIL) for every test file under the given dirs that was neither
@@ -390,6 +501,7 @@ require_registered() {
   local dir file
   for dir in "$@"; do
     while IFS= read -r file; do
+      if listing_failed "$file"; then continue; fi
       # Consume the full list: grep -q closed a large registration pipe early,
       # producing hundreds of misleading printf broken-pipe errors.
       if ! printf '%s\n' "${RAN[@]}" ${SKIPPED[@]+"${SKIPPED[@]}"} ${SKIPPED_FILES[@]+"${SKIPPED_FILES[@]}"} | grep -xF -- "$file" >/dev/null; then

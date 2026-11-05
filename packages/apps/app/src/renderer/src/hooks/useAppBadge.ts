@@ -8,6 +8,7 @@ import {
   type AppBadgeTask
 } from '@slayzone/settings'
 import type { Task } from '@slayzone/task-contracts'
+import { isTerminalStatus, type ColumnConfig } from '@slayzone/projects-contracts'
 import type { IdleTask } from '@slayzone/agent-panels'
 import { useTRPC } from '../trpc'
 
@@ -42,18 +43,25 @@ function drawOverlay(text: string): string | null {
 /**
  * Drives the app icon badge (dock / taskbar) from the "App icon badge" settings:
  * unread tasks (amber dot) and idle agents (the bell's list, after dismissals).
+ * Archived and done/canceled tasks never count as unread: the flag only clears on
+ * open, so finished tasks would otherwise pile up in the badge forever.
  * Main window only — App.tsx is its sole caller.
  */
 export function useAppBadge({
   tasks,
   idleTasks,
   hubIdByProject,
-  defaultHubId
+  defaultHubId,
+  columnsByProjectId,
+  openTaskIds
 }: {
   tasks: Task[]
   idleTasks: IdleTask[]
   hubIdByProject: Map<string, string>
   defaultHubId: string
+  columnsByProjectId: Map<string, ColumnConfig[] | null>
+  /** Task ids open as tabs — for the "Only tasks open in tabs" setting. */
+  openTaskIds: string[]
 }): void {
   const trpc = useTRPC()
   const all = useQuery(trpc.settings.getAll.queryOptions()).data
@@ -68,11 +76,19 @@ export function useAppBadge({
         task.project_id
       )
     })
-    return computeAppBadge(settings, {
-      unread: tasks.filter((t) => t.needs_attention).map(toBadgeTask),
-      idle: idleTasks.map((t) => toBadgeTask(t.task))
-    })
-  }, [all, tasks, idleTasks, hubIdByProject, defaultHubId])
+    const isUnread = (task: Task): boolean =>
+      task.needs_attention &&
+      !task.archived_at &&
+      !isTerminalStatus(task.status, columnsByProjectId.get(task.project_id))
+    return computeAppBadge(
+      settings,
+      {
+        unread: tasks.filter(isUnread).map(toBadgeTask),
+        idle: idleTasks.map((t) => toBadgeTask(t.task))
+      },
+      new Set(openTaskIds)
+    )
+  }, [all, tasks, idleTasks, hubIdByProject, defaultHubId, columnsByProjectId, openTaskIds])
 
   const { text, count } = badge
   useEffect(() => {

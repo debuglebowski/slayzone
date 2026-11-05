@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { SIDE_QUESTION_MAX_CHARS } from '@slayzone/terminal-contracts'
+import {
+  PINNED_MESSAGE_EXCERPT_MAX,
+  PINNED_MESSAGE_KEY_MAX,
+  SIDE_QUESTION_MAX_CHARS
+} from '@slayzone/terminal-contracts'
 
 const id = z.string().min(1).max(500),
   text = z.string().max(1_000_000)
@@ -80,6 +84,16 @@ const create = z.object({
   providerFlagsOverride: z.string().nullish()
 })
 const rewind = create.extend({ messageId: id, scope: z.enum(['before', 'after']) })
+const pinnedMessage = z
+  .object({
+    conversationId: id,
+    key: z.string().min(1).max(PINNED_MESSAGE_KEY_MAX),
+    target: z.enum(['user', 'answer']),
+    messageId: id,
+    row: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    excerpt: z.string().max(PINNED_MESSAGE_EXCERPT_MAX)
+  })
+  .strict()
 const permissions = z.object({
   requestId: id,
   optionId: id.optional(),
@@ -162,6 +176,11 @@ export const chatOperationSchemas = {
       title: z.string().trim().min(1).max(120),
       text: text.min(1)
     })
+  ]),
+  listPinnedMessages: createTuple,
+  pinMessage: z.tuple([create.extend({ pin: pinnedMessage })]),
+  unpinMessage: z.tuple([
+    create.extend({ conversationId: id, key: z.string().min(1).max(PINNED_MESSAGE_KEY_MAX) })
   ]),
   switchConversation: z.tuple([
     create.extend({ conversationId: z.string().uuid(), sourceMode: z.string() })
@@ -274,6 +293,7 @@ export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'getWorkspaceChanges',
   'getWorkspaceFileDiff',
   'listThreads',
+  'listPinnedMessages',
   'inspectPermissions',
   'getMode',
   'getModel',

@@ -48,7 +48,15 @@ import {
   writeFileSync,
   writeSync
 } from 'node:fs'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { lstat as lstatAsync, open as openAsync, readdir as readdirAsync } from 'node:fs/promises'
+import { promisify } from 'node:util'
+import { write as writeCb } from 'node:fs'
+import { basename, dirname, join, resolve, sep } from 'node:path'
+import {
+  canonicalComputerPath,
+  computerPathWithin,
+  pathFoldsCase
+} from '@slayzone/platform/computer-path'
 
 /**
  * A path or spawn cwd the computer refuses by its own policy (T-27). The dispatcher
@@ -97,13 +105,85 @@ export function setProtectedPaths(paths: readonly string[]): void {
 
 /** Is `absolute` (already judged) one of the protected state paths, or under one? */
 export function isProtectedPath(absolute: string): boolean {
-  return protectedPaths.some((guarded) => isInside(absolute, guarded))
+  return protectedHit(absolute, false)
+}
+
+/** `dev:ino` of `p` itself (a link is not followed), or null when it does not exist. */
+function identity(p: string): string | null {
+  try {
+    const st = lstatSync(p)
+    return `${st.dev}:${st.ino}`
+  } catch {
+    return null
+  }
+}
+
+/** Identities of `p` and every ancestor of it that exists. */
+function identityChain(p: string): Set<string> {
+  const out = new Set<string>()
+  let current = p
+  for (;;) {
+    const id = identity(current)
+    if (id) out.add(id)
+    const parent = dirname(current)
+    if (parent === current) return out
+    current = parent
+  }
+}
+
+/**
+ * Does `judged` touch the computer's own state? Matched by IDENTITY (the file or
+ * folder itself, whatever the spelling: on APFS / NTFS `COMPUTER.CONFIG.JSON` and an
+ * NFD name ARE the protected file, K2) and by canonical name — case-folded on such a
+ * volume, NFC — for a protected path that does not exist yet. `subtree`: an ancestor
+ * of a protected path counts too.
+ */
+function protectedHit(judged: string, subtree: boolean): boolean {
+  if (protectedPaths.length === 0) return false
+  const chain = identityChain(judged)
+  const self = identity(judged)
+  for (const guarded of protectedPaths) {
+    if (isInside(judged, guarded) || (subtree && isInside(guarded, judged))) return true
+    const id = identity(guarded)
+    if (id && chain.has(id)) return true
+    if (subtree && self && identityChain(guarded).has(self)) return true
+  }
+  return false
 }
 
 // --- judging ----------------------------------------------------------------
 
+/**
+ * `path` is `dir` or inside it, compared as the one canonical key every SlayZone
+ * path comparison uses (`@slayzone/platform/computer-path`): NFC, and case-folded on
+ * a case-insensitive volume — where `ROOT/x` IS `root/x`.
+ */
 function isInside(path: string, dir: string): boolean {
-  return path === dir || path.startsWith(dir.endsWith(sep) ? dir : dir + sep)
+  return computerPathWithin(path, dir, pathFoldsCase(dir))
+}
+
+/**
+ * The real spelling of an entry WITHOUT following it: a link's own name as its
+ * folder lists it (same canonical key), anything else by `realpath`. Missing: as is.
+ */
+function canonicalEntry(p: string): string {
+  const parent = canonical(dirname(p))
+  const name = basename(p)
+  let isLink: boolean
+  try {
+    isLink = lstatSync(join(parent, name)).isSymbolicLink()
+  } catch {
+    return join(parent, name)
+  }
+  if (!isLink) return canonical(join(parent, name))
+  const folds = pathFoldsCase(parent)
+  const key = canonicalComputerPath(name, folds)
+  try {
+    const listed = readdirSync(parent).find((n) => canonicalComputerPath(n, folds) === key)
+    return join(parent, listed ?? name)
+  } catch {
+    return join(parent, name)
+  }
 }
 
 /** The realpath of `p`'s deepest existing ancestor, plus the rest (links trusted). */
@@ -141,9 +221,14 @@ function liveRoots(allowedRoots: readonly string[]): LiveRoot[] {
   return out
 }
 
+/**
+ * The components of `path` below `base` — which it is inside by the canonical key
+ * (possibly in another case or Unicode form, so not a string prefix): both are
+ * resolved absolute paths, so `base`'s components are `path`'s first ones.
+ */
 function components(path: string, base: string): string[] {
-  const rel = relative(base, path)
-  return rel === '' ? [] : rel.split(sep)
+  const of = (p: string) => p.split(sep).filter(Boolean)
+  return of(path).slice(of(base).length)
 }
 
 function outside(candidate: string, allowedRoots: readonly string[]): JailViolationError {
@@ -157,13 +242,16 @@ function outside(candidate: string, allowedRoots: readonly string[]): JailViolat
  * path: its existing part real and canonical, the missing rest appended.
  */
 function walk(
-  root: LiveRoot,
+  start: LiveRoot,
   parts: readonly string[],
   access: JailAccess,
   candidate: string,
   allowedRoots: readonly string[],
   hops: { n: number }
 ): string {
+  // The root the walk is in: a link may lead into ANOTHER allowed root (a computer
+  // with several), and the rest of the path is judged there.
+  let root = start
   let current = root.real
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!
@@ -203,15 +291,17 @@ function walk(
         hops
       )
     }
-    if (!isInside(target, root.real)) throw outside(candidate, allowedRoots)
+    if (!isInside(target, root.real)) {
+      const other = liveRoots(allowedRoots).find((r) => isInside(target, r.real))
+      if (!other) throw outside(candidate, allowedRoots)
+      root = other
+    }
     current = target
   }
   // The canonical spelling of what exists (letter case on a case-insensitive disk);
   // for `entry`, of its folder only — the entry itself is never followed.
   const real =
-    access === 'entry' && current !== root.real
-      ? join(canonical(dirname(current)), basename(current))
-      : canonical(current)
+    access === 'entry' && current !== root.real ? canonicalEntry(current) : canonical(current)
   if (!isInside(real, root.real)) throw outside(candidate, allowedRoots)
   return real
 }
@@ -269,12 +359,10 @@ export function judgePath(
     if (!root) throw outside(candidate, allowedRoots)
     judged = walk(root, components(canon, root.real), access, candidate, allowedRoots, hops)
   }
-  for (const guarded of protectedPaths) {
-    if (isInside(judged, guarded) || (opts.subtree && isInside(guarded, judged))) {
-      throw new JailViolationError(
-        `path '${candidate}' holds this computer's own state (config, credentials or request log); refused`
-      )
-    }
+  if (protectedHit(judged, opts.subtree === true)) {
+    throw new JailViolationError(
+      `path '${candidate}' holds this computer's own state (config, credentials or request log); refused`
+    )
   }
   return judged
 }
@@ -410,7 +498,10 @@ function pipeFile(src: string, fd: number): void {
 function copyEntry(src: string, dest: string): void {
   const st = lstatSync(src)
   if (st.isSymbolicLink()) {
-    // Copied as the link it is: a copy of a link is not a write through it.
+    // Copied as the link it is: a copy of a link is not a write through it. Its folder
+    // is made first (judged, never through a link), as a file's is: a folder holding
+    // only links — npm's `node_modules/.bin` — has no file to create it (L5).
+    mkdirs(dirname(dest))
     const existing = lstatOrNull(dest)
     if (existing) {
       if (existing.isDirectory() && !existing.isSymbolicLink()) {
@@ -431,6 +522,58 @@ function copyEntry(src: string, dest: string): void {
     } finally {
       closeSync(fd)
     }
+  }
+}
+
+/** `fs.write` on the numeric fd `openForWrite` returns, as a promise. */
+const writeAsync = promisify(writeCb)
+
+/** How many entries a long copy handles before it lets the event loop run. */
+const COPY_YIELD_EVERY = 32
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+/**
+ * {@link copyEntry}, asynchronously and in chunks: a tree of tens of thousands of
+ * files (a worktree's `node_modules`) must not hold the computer's event loop — that
+ * froze every terminal and agent on the machine, and past the heartbeat window the
+ * hub declared the computer lost (K3). Same rules as the synchronous copy: each
+ * write re-checked and opened `O_NOFOLLOW`, links copied as links. One buffer.
+ */
+async function copyEntryAsync(
+  src: string,
+  dest: string,
+  state: { n: number; buf: Buffer }
+): Promise<void> {
+  if (++state.n % COPY_YIELD_EVERY === 0) await yieldToLoop()
+  const st = await lstatAsync(src)
+  if (st.isSymbolicLink() || (!st.isDirectory() && !st.isFile())) {
+    copyEntry(src, dest)
+    return
+  }
+  if (st.isDirectory()) {
+    mkdirs(dest)
+    for (const name of await readdirAsync(src)) {
+      await copyEntryAsync(join(src, name), join(dest, name), state)
+    }
+    return
+  }
+  const fd = openForWrite(dest, false)
+  try {
+    const source = await openAsync(src, 'r')
+    try {
+      for (;;) {
+        const { bytesRead } = await source.read(state.buf, 0, state.buf.length, null)
+        if (bytesRead === 0) break
+        let off = 0
+        while (off < bytesRead) {
+          off += (await writeAsync(fd, state.buf, off, bytesRead - off)).bytesWritten
+        }
+      }
+    } finally {
+      await source.close()
+    }
+  } finally {
+    closeSync(fd)
   }
 }
 
@@ -517,5 +660,13 @@ export const jailedFs = {
       throw new Error(`cannot copy '${judgedSrc}' into itself`)
     }
     copyEntry(judgedSrc, judgedDest)
+  },
+
+  /** {@link jailedFs.copy} for big trees: asynchronous, yielding to the event loop. */
+  async copyAsync(judgedSrc: string, judgedDest: string): Promise<void> {
+    if (isInside(judgedDest, judgedSrc)) {
+      throw new Error(`cannot copy '${judgedSrc}' into itself`)
+    }
+    await copyEntryAsync(judgedSrc, judgedDest, { n: 0, buf: Buffer.allocUnsafe(256 * 1024) })
   }
 }

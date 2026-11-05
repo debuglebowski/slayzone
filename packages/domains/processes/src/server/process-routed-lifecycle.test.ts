@@ -21,6 +21,7 @@ import {
 } from './process-manager'
 import { setProcessBackend, type ProcessBackend, type ProcHandle } from './process-backend'
 import type { ProcessPersistence } from './process-persistence'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
 
 const persistence = {
   loadAll: async () => [],
@@ -371,15 +372,37 @@ describe("G3: the old run's computer is unreachable", () => {
     expect(spawned).toEqual([])
   })
 
-  test('the UI restart says the computer is offline, and Start anyway starts', async () => {
+  test('the UI restart says the computer is offline; moved elsewhere, it starts there', async () => {
     target = 'c2'
     online.add('c2')
     const id = await keptOnK()
     target = 'cK' // ...the task is still bound to the offline computer
     await expect(restartProcessForUi(id)).rejects.toThrow(/offline/)
-    target = 'c2' // the user moved it, then chose "Start anyway"
-    expect(await restartProcessForUi(id, { startAnyway: true })).toBe(true)
+    target = 'c2' // the user moved it to a computer that is up
+    expect(await restartProcessForUi(id)).toBe(true)
     expect(spawned).toEqual(['c2'])
+  })
+
+  // Round-5 K5: "Start anyway" with the task still bound to the offline computer
+  // parked a spawn there; on reconnect the computer replaced the old run in place
+  // (SIGTERM, no wait) — the R5 port collision, and a run ignoring SIGTERM became
+  // unaddressable. There is no safe "anyway": the only safe start is on another
+  // computer that is up, and that one starts by itself. No override exists.
+  test('K5: no override starts on the offline computer the old run holds', async () => {
+    const id = await keptOnK()
+    target = 'cK'
+    // What a client asking for an override sends: nothing honours it.
+    type Forced = (id: string, opts: { startAnyway: true }) => Promise<unknown>
+    const forced = { startAnyway: true } as const
+    expect(await (restartProcessDetailed as Forced)(id, forced)).toEqual({
+      ok: false,
+      reason: 'old-run-unreachable'
+    })
+    expect(await (startProcess as Forced)(id, forced)).toEqual({
+      ok: false,
+      reason: 'old-run-unreachable'
+    })
+    expect(spawned, 'nothing parked for cK').toEqual([])
   })
 
   test('a removed computer: its kept run is forgotten, Start runs freely', async () => {
@@ -391,5 +414,85 @@ describe("G3: the old run's computer is unreachable", () => {
     expect(await startProcess(id)).toMatchObject({ ok: true })
     expect(spawned).toEqual(['c2'])
     expect(killed).toEqual([])
+  })
+})
+
+// Round-5 K6: the stats poll's interval was created inside the FIRST spawner's
+// request, so every tick ran as that user — and the gateway's owner check refused
+// every other user's computer, silently: their processes showed no CPU, memory or
+// title for the life of the hub. The poll is the hub's own work: it runs as nobody.
+describe('K6: the stats poll runs as the hub, not as whoever started it', () => {
+  test('a tick carries no caller', async () => {
+    const seen: Array<string | null> = []
+    setProcessBackend({
+      spawn(): ProcHandle {
+        return {
+          pid: undefined,
+          onData: () => ({ dispose() {} }),
+          onExit: () => ({ dispose() {} }),
+          kill: () => undefined
+        }
+      },
+      stats: async () => {
+        seen.push(currentSecurityContext()?.actor ?? null)
+        return {}
+      }
+    })
+    setProcessComputerResolver(async () => 'cA')
+    const id = await runWithSecurityContext({ actor: 'user-A', ip: null, route: null }, () =>
+      spawnProcess('p', null, `k6-${Math.random()}`, 'pnpm dev', '/tmp', false)
+    )
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0), { timeout: 8000 })
+    expect(
+      seen.every((actor) => actor === null),
+      `tick actors: ${seen.join(',')}`
+    ).toBe(true)
+    await stopProcess(id)
+  }, 15_000)
+})
+
+// Round-5 K9: a run already marked "ended on reconnect" (left on cK while its row
+// started on c2) was re-adopted as orphaned when cK returned — "still running from
+// before the hub restarted" — though the hub had just ended it there.
+describe('K9: a run ended on reconnect is not re-adopted', () => {
+  test('its row keeps its own state; the old run is ended, not adopted', async () => {
+    const online = new Set<string>(['cK'])
+    const killed: string[] = []
+    let held: string[] = []
+    setProcessComputerReachability((c) => online.has(c))
+    setProcessBackend({
+      spawn: (): ProcHandle => ({
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: async () => true
+      }),
+      killSession: async (computerId, id) => {
+        if (!online.has(computerId)) throw new Error('unknown computer')
+        killed.push(`${computerId}:${id}`)
+      },
+      listSessions: async (computerId) =>
+        computerId === 'cK' ? held.map((sessionId) => ({ sessionId, pid: 1 })) : []
+    })
+    setProcessComputerResolver(async () => null)
+    const id = await spawnProcess('p', null, `k9-${Math.random()}`, 'pnpm dev', '/tmp', false)
+    held = [id]
+    await processesComputerConnected('cK') // adopted, orphaned on cK
+    online.delete('cK')
+    online.add('c2')
+    setProcessComputerResolver(async () => 'c2')
+    expect(await startProcess(id)).toMatchObject({ ok: true }) // runs on c2; cK's stranded
+    await stopProcess(id) // and is stopped there
+    expect(status(id)?.status).toBe('stopped')
+    online.add('cK')
+    await processesComputerConnected('cK') // cK returns, still holding the old run
+    await vi.waitFor(() => expect(killed).toContain(`cK:${id}`))
+    expect(status(id)?.status, 'not re-adopted as orphaned').toBe('stopped')
+    // Only the first, real adoption says so — not the return of an ended run.
+    const adoptions = (status(id)?.logBuffer ?? []).filter((l) =>
+      l.includes('before the hub restarted')
+    )
+    expect(adoptions).toHaveLength(1)
+    setProcessComputerReachability(null)
   })
 })

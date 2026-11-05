@@ -1306,6 +1306,9 @@ export function createHubChatRelay(opts: {
         case 'threads-changed':
           events.emit('threads-changed', owner.tabId)
           break
+        case 'pinned-messages-changed':
+          events.emit('pinned-messages-changed', owner.tabId)
+          break
         case 'queue-changed':
           queueEvents.emit('queue-changed', owner.tabId)
           break

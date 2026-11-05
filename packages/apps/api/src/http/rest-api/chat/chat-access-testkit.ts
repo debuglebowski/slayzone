@@ -44,6 +44,7 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     saved: [string, ChatSavedSummary]
     exit: [string, string, number | null, string | null]
     'threads-changed': [string]
+    'pinned-messages-changed': [string]
     'replay-required': [string, string]
   }>()
   const queueEvents = new TypedEmitter<{

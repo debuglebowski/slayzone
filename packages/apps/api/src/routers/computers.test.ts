@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { computersRouter } from '@slayzone/computers/server'
+import { computersRouter, setComputerRemovedListener } from '@slayzone/computers/server'
 import { setAuthGate } from '@slayzone/trpc-server'
 import { setComputersDeps, type ComputersDeps } from '../app-deps.js'
 import { appRouter } from '../router.js'
@@ -147,11 +147,12 @@ test('computers.revokeComputer: drops the computer from the active list', async 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
 })
 
-// G3: a deleted or revoked computer never reconnects — what waited for it (a process
-// run it kept) is let go. The router tells the hub through `onComputerRemoved`.
+// G3 / K9: a deleted or revoked computer never reconnects — what waited for it (a
+// process run it kept) is let go. The store tells the hub, so the router's delete and
+// revoke are heard — as are REST's and a departing user's (store-level test).
 test('computers: delete and revoke tell the hub the computer is gone', async () => {
   const removed: string[] = []
-  setComputersDeps({ ...fakeDeps, onComputerRemoved: (id) => removed.push(id) })
+  setComputerRemovedListener((id) => removed.push(id))
   try {
     const a = await registerComputer(h.slayDb, { name: 'gone-1', platform: 'darwin', version: '1' })
     const b = await registerComputer(h.slayDb, { name: 'gone-2', platform: 'darwin', version: '1' })
@@ -159,7 +160,7 @@ test('computers: delete and revoke tell the hub the computer is gone', async () 
     await caller.delete({ computerId: b.id })
     expect(removed).toEqual([a.id, b.id])
   } finally {
-    setComputersDeps(fakeDeps)
+    setComputerRemovedListener(null)
   }
 })
 
@@ -604,18 +605,33 @@ test('computers.issueDirectLink passes the client transports; directRtcConnect r
   }
 })
 
-test('computers.revokeComputer: tells the hub, which drops its direct-link grants and live connection', async () => {
+// The hub drops a revoked computer's direct-link grants from the store's removal
+// listener (every path), and the router drops its live connection now.
+test('computers.revokeComputer: the store tells the hub, and the live connection drops', async () => {
   const r = await registerComputer(h.slayDb, {
     name: 'revoked-live',
     platform: 'linux-x64',
     version: '1'
   })
-  const told: string[] = []
-  setComputersDeps({ ...fakeDeps, onComputerRevoked: async (id) => void told.push(id) })
+  const removed: string[] = []
+  const dropped: string[] = []
+  setComputerRemovedListener((id) => removed.push(id))
+  setComputersDeps({
+    ...fakeDeps,
+    getGateway: () => ({
+      ...fakeDeps.getGateway()!,
+      disconnect: (id: string) => {
+        dropped.push(id)
+        return true
+      }
+    })
+  })
   try {
     await caller.revokeComputer({ computerId: r.id })
-    expect(told).toEqual([r.id])
+    expect(removed).toEqual([r.id])
+    expect(dropped).toEqual([r.id])
   } finally {
+    setComputerRemovedListener(null)
     setComputersDeps(fakeDeps)
   }
 })

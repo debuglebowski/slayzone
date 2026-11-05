@@ -33,8 +33,7 @@ export type {
   ProcessComputerResolver,
   PidStats,
   StartProcessRefusal,
-  StartProcessResult,
-  StartOptions
+  StartProcessResult
 } from './process-manager'
 export { createDbProcessPersistence } from './process-persistence'
 export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'

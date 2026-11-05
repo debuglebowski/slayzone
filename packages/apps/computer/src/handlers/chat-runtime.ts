@@ -443,6 +443,9 @@ export function createChatRuntimeHandlers(opts: {
       publish('exit', { tabId, sessionId, code, signal })
     )
     instance.events.on('threads-changed', (tabId) => publish('threads-changed', { tabId }))
+    instance.events.on('pinned-messages-changed', (tabId) =>
+      publish('pinned-messages-changed', { tabId })
+    )
     instance.queueEvents.on('queue-changed', (tabId) => publish('queue-changed', { tabId }))
     instance.queueEvents.on('queue-drained', (tabId, original) =>
       publish('queue-drained', { tabId, original })

@@ -740,6 +740,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.rewindPreview': chatOpts,
   'chat.rewind': chatOpts,
   'chat.fork': chatOpts,
+  'chat.pinnedMessages.list': chatOpts,
+  'chat.pinnedMessages.pin': chatOpts,
+  'chat.pinnedMessages.unpin': chatOpts,
   'chat.threads.list': chatOpts,
   'chat.threads.create': chatOpts,
   'chat.sideQuestion.ask': chatOpts,
@@ -801,6 +804,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   // A bare signal (no payload to filter): the tab named in the input is checked instead.
   'chat.threads.onChanged': checked(tab('tabId')),
+  'chat.pinnedMessages.onChanged': checked(tab('tabId')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
   // ── computers (T-19): binding work needs the task/project AND the computer to be

@@ -159,6 +159,8 @@ export async function gitTargetForPath(
   path: string
 ): Promise<WorktreesComputerTarget | null> {
   const p = normalizeComputerPath(path)
+  // Letter case compared exactly, as the owner policy compares a project root: the
+  // owning computer folds case for its own volume, the hub's disk cannot say (L3).
   const under = (root: string) => computerPathWithin(p, root)
   let task: { id: string; root: string } | null = null
   for (const row of await db.all<{ id: string; worktree_path: string }>(

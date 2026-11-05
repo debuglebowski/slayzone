@@ -4,7 +4,6 @@ import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { Plus, Cpu, Info, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent, toast, useDepsChanged } from '@slayzone/ui'
-import { OLD_RUN_UNREACHABLE_MESSAGE } from '@slayzone/processes/shared'
 import { ProcessDialog } from './ProcessDialog'
 import type { ProcessEntry, ProcessStatus } from './ProcessesPanel.types'
 import { extractUrlFromLine } from './ProcessesPanel.utils'
@@ -204,24 +203,11 @@ export function ProcessesPanel({
 
   const handleRestart = useCallback(
     (proc: ProcessEntry) =>
-      restartProcess({ processId: proc.id }).catch((err: unknown) => {
-        // The previous run's computer is offline (not a survivor): it starts when that
-        // computer reconnects — or now, without that run, if the user says so (G3).
-        if (err instanceof Error && err.message === OLD_RUN_UNREACHABLE_MESSAGE) {
-          toast.error(`Couldn't restart ${proc.label}: ${err.message}`, {
-            action: {
-              label: 'Start anyway',
-              onClick: () => {
-                void restartProcess({ processId: proc.id, startAnyway: true }).catch(
-                  (again: unknown) => reportActionError('start', proc, again)
-                )
-              }
-            }
-          })
-          return
-        }
+      restartProcess({ processId: proc.id }).catch((err: unknown) =>
+        // An offline computer's kept run (G3) reads as such: it starts when that
+        // computer reconnects. No "start anyway" — that is the port collision (K5).
         reportActionError('restart', proc, err)
-      }),
+      ),
     [restartProcess, reportActionError]
   )
 

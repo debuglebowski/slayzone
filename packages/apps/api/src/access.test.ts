@@ -345,6 +345,24 @@ describe('how each kind finds its owner', () => {
   test("path: a Windows computer's path is compared as one, never as a hub path", async () => {
     expect(await can(A, 'path', 'C:\\Users\\a\\proj')).toBe(true)
   })
+  // Round-5 K1: a leading `//` was read as a Windows UNC path — no realpath, matching
+  // no root, so "hub-wide": anyone could read the hub's database or another user's
+  // project. On POSIX `//x` IS `/x`.
+  test('K1: a leading // is the same path, not a UNC one', async () => {
+    expect(await can(A, 'path', `/${join(hubRoot, 'slayzone.data.sqlite')}`)).toBe(false)
+    expect(await can(B, 'path', `/${join(aRoot, 'README.md')}`)).toBe(false)
+    expect(await can(B, 'path', `//${join(aRoot, 'README.md')}`)).toBe(false)
+    expect(await can(A, 'path', `/${join(aRoot, 'README.md')}`)).toBe(true)
+  })
+  // K2 on the hub side: on a case-insensitive volume a different letter case (or
+  // Unicode form) of a path is the same file.
+  test.skipIf(process.platform === 'linux')(
+    'K2: case and Unicode variants of a path are the same path on a case-insensitive volume',
+    async () => {
+      expect(await can(A, 'path', join(hubRoot, 'SLAYZONE.DATA.SQLITE'))).toBe(false)
+      expect(await can(B, 'path', join(aRoot.toUpperCase(), 'README.md'))).toBe(false)
+    }
+  )
 })
 
 describe('scopes: many decisions for one request or one stream', () => {

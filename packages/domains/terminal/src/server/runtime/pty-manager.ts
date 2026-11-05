@@ -7,6 +7,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { ptyEvents } from './pty-events'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
   modeAgentId,
   SESSION_ID_UNAVAILABLE,
@@ -470,11 +471,34 @@ function syncRelays(): void {
   for (const session of sessions.values()) syncRelay(session)
 }
 
+/**
+ * Relaying is hub-shared state — one stream per session for every watcher, whoever
+ * they are — so its request runs as the hub, never as the caller whose watch changed
+ * it: a watch of every session by user A used to ask user B's computer AS A, which
+ * the owner check refused, and B's output stayed dead (L2). A request that fails is
+ * not applied: the session reads unrelayed again, so the next change (a watcher, the
+ * computer coming back) asks again.
+ */
 function syncRelay(session: PtySession): void {
   const want = isWatched(session.sessionId)
   if (session.relayed === want) return
   session.relayed = want
-  ;(session.pty as unknown as PtyHandle).setRelay?.(want)
+  const handle = session.pty as unknown as PtyHandle
+  let sent: Promise<void> | void
+  try {
+    sent = runAsSecurityActor(null, () => handle.setRelay?.(want))
+  } catch (err) {
+    sent = Promise.reject(err)
+  }
+  void Promise.resolve(sent).catch(() => {
+    if (
+      sessions.get(session.sessionId) === session &&
+      (session.pty as unknown as PtyHandle) === handle &&
+      session.relayed === want
+    ) {
+      session.relayed = !want
+    }
+  })
 }
 
 /**
@@ -2658,6 +2682,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           if (!session || session.pty !== target) return
           session.outputUnavailable = !available
           ptyEvents.emit('output-availability', sessionId, available)
+          // Back: the relay it holds may not be the one asked for (a request that
+          // failed while it was away) — ask again.
+          if (available) {
+            session.relayed = !isWatched(sessionId)
+            syncRelay(session)
+          }
         })
       )
       // A client wrote to the computer directly (docs/direct-link.md): the same

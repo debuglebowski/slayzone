@@ -102,6 +102,9 @@ run_harness packages/apps/hub/src/git-op-gate.test.ts
 run_harness packages/apps/hub/src/git-op-owner-boundary.test.ts
 run_harness packages/apps/hub/src/computer-request-authorizer.test.ts
 run_harness packages/apps/hub/src/path-owner-agreement.test.ts
+# Round-6 review regressions (L3 case folding, L4 disabled computer, L6 path aliases):
+# part of `pnpm test:review-regressions` (review-regressions.mjs).
+run_harness packages/apps/hub/src/review-regressions-owner.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -661,6 +664,12 @@ run_harness packages/domains/terminal/src/server/pty-output-detector.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
+# Terminal — state-dependent query replies (CPR, DECRQM, ...) answered from a headless
+# server-side screen mirror, in stream order with the stateless replies. Uses @xterm/headless.
+run_harness packages/domains/terminal/src/server/terminal-reply-mirror.test.ts
+# Terminal — the graphemes addon loads on plain Node whatever the Buffer pool offset
+# (patched decoder; a standalone computer froze at boot without it).
+run_harness packages/domains/terminal/src/server/graphemes-addon-load.test.ts
 # Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
 # chars by the redactor, making every recorded scramble event unprovable.
 run_harness packages/domains/diagnostics/src/server/payload-blobs.test.ts
@@ -724,6 +733,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
@@ -824,6 +834,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # The hub mirrors owner-detected pty output (signals) instead of parsing it.
 run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
+# Round-6 review regression L2: relay requests run as the hub; a failed one is asked again.
+run_harness packages/domains/terminal/src/server/runtime/review-regressions-relay.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
@@ -1014,6 +1026,8 @@ run_harness packages/domains/task-terminals/src/client/chat/compact-entry.test.t
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-messages.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -1087,6 +1101,7 @@ run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-pinned-message.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
@@ -1188,6 +1203,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
@@ -1333,6 +1349,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/api/src/trpc.test.ts \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/shared/trpc-server/src/wire-bytes.test.ts \
+  packages/shared/trpc-server/src/subscription-security-context.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

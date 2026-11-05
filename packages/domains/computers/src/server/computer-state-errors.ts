@@ -11,7 +11,7 @@ import { registerAppCode } from '@slayzone/trpc-server'
 
 /** Work was sent to, or bound to, a disabled computer. */
 export const COMPUTER_DISABLED = 'COMPUTER_DISABLED'
-/** A computer cannot be disabled while terminals or agents run on it. */
+/** A computer cannot be disabled while terminals, agents or processes run on it. */
 export const COMPUTER_HAS_RUNNING_WORK = 'COMPUTER_HAS_RUNNING_WORK'
 /** The desktop app's own computer, on its own hub: never disabled, deleted or renamed. */
 export const COMPUTER_IS_LOCAL = 'COMPUTER_IS_LOCAL'
@@ -61,7 +61,8 @@ export function computerHasRunningWorkError(
   name?: string | null
 ): ComputerStateError {
   const on = name ? ` on "${name}"` : ' on this computer'
-  const what = count === 1 ? '1 terminal or agent is' : `${count} terminals or agents are`
+  const what =
+    count === 1 ? '1 terminal, agent or process is' : `${count} terminals, agents or processes are`
   return new ComputerStateError(
     COMPUTER_HAS_RUNNING_WORK,
     `${what} still running${on}. Stop ${count === 1 ? 'it' : 'them'} first, then disable it.`

@@ -248,6 +248,7 @@ export interface TransportDeps {
  */
 export type ChatEventMap = {
   'threads-changed': [parentTabId: string]
+  'pinned-messages-changed': [tabId: string]
   'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   /**

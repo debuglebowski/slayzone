@@ -7,6 +7,8 @@ import {
   chatPermissionArgsSchema,
   chatScrollAnchorSchema,
   chatToolResultArgsSchema,
+  PINNED_MESSAGE_EXCERPT_MAX,
+  PINNED_MESSAGE_KEY_MAX,
   SIDE_QUESTION_MAX_CHARS
 } from '@slayzone/terminal-contracts'
 import { getChatDeps } from './chat-router-deps'
@@ -29,6 +31,17 @@ const chatCreateOpts = z.object({
   cwd: z.string(),
   providerFlagsOverride: z.string().nullish()
 })
+const pinnedMessageKey = z.string().min(1).max(PINNED_MESSAGE_KEY_MAX)
+const pinnedMessageInput = z
+  .object({
+    conversationId: z.string().min(1).max(500),
+    key: pinnedMessageKey,
+    target: z.enum(['user', 'answer']),
+    messageId: z.string().min(1).max(500),
+    row: z.number().int().nonnegative().optional(),
+    excerpt: z.string().max(PINNED_MESSAGE_EXCERPT_MAX)
+  })
+  .strict()
 const toolResultArgs = chatToolResultArgsSchema
 const permissionArgs = chatPermissionArgsSchema
 
@@ -309,6 +322,29 @@ export const chatRouter = router({
   fork: publicProcedure
     .input(chatCreateOpts.extend({ messageId: z.string().min(1).max(200) }))
     .mutation(({ input }) => ops().fork(input)),
+  // Rows the user pinned in the conversation on screen, to go back to.
+  pinnedMessages: router({
+    onChanged: publicProcedure.input(z.object({ tabId: z.string() })).subscription(({ input }) =>
+      observable<void>((emit) => {
+        const handler = (tabId: string) => {
+          if (tabId === input.tabId) emit.next()
+        }
+        getChatDeps().events.on('pinned-messages-changed', handler)
+        return () => getChatDeps().events.off('pinned-messages-changed', handler)
+      })
+    ),
+    list: publicProcedure
+      .input(chatCreateOpts.extend({ conversationId: z.string().nullish() }))
+      .query(({ input: { conversationId: _key, ...o } }) => ops().listPinnedMessages(o)),
+    pin: publicProcedure
+      .input(chatCreateOpts.extend({ pin: pinnedMessageInput }))
+      .mutation(({ input }) => ops().pinMessage(input)),
+    unpin: publicProcedure
+      .input(
+        chatCreateOpts.extend({ conversationId: z.string().min(1).max(500), key: pinnedMessageKey })
+      )
+      .mutation(({ input }) => ops().unpinMessage(input))
+  }),
   threads: router({
     onChanged: publicProcedure.input(z.object({ tabId: z.string() })).subscription(({ input }) =>
       observable<void>((emit) => {

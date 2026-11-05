@@ -63,7 +63,11 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { checkCliInstalled } from '@slayzone/platform'
+import {
+  checkCliInstalled,
+  checkCliInstalledAtTarget,
+  hubProcessesEnabled
+} from '@slayzone/platform'
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   assertHubIntegrationsEnabled,
@@ -295,7 +299,8 @@ import {
   deterministicLocalComputerId,
   getComputer,
   recordedProjectRoot,
-  setComputerBindingChangedListener
+  setComputerBindingChangedListener,
+  setComputerRemovedListener
 } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
 import { createComputerPlacement, BindComputerError } from './computer-placement.js'
@@ -751,8 +756,13 @@ export function composeServer(opts: {
   // up was a fire-and-forget race that could leave the first spec staring at the
   // onboarding screen.
   if (process.env.PLAYWRIGHT === '1') {
+    // Same baseline as `resetForTest`: onboarding done, CLI prompt + tour toast off. Whether the
+    // install prompt opens depends on the HOST's `slay`, so it must never be ambient
+    // in e2e — specs that test it set `cli_install_dismissed` back themselves.
     bootBestEffort('e2e-onboarding-seed', () =>
-      db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')")
+      db.run(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true'), ('cli_install_dismissed', 'true'), ('tutorial_prompted', 'true')"
+      )
     )
   }
   // T-23: session content older than SLAYZONE_HUB_SESSION_RETENTION_DAYS goes, shortly
@@ -1239,7 +1249,11 @@ export function composeServer(opts: {
       // Real fs probe (pure Node, no Electron) — the stub hardcoded
       // `installed: false`, so the "Install the slay CLI" dialog auto-opened for
       // every fork user even when the CLI was already installed.
-      appCheckCliInstalled: () => checkCliInstalled(),
+      // PATH + `slay --version` exec on this machine; a hub with processes off must
+      // not exec (T-06), so it reports only what is at the install target. No
+      // expected version: this build has none to compare (`appGetVersion` above).
+      appCheckCliInstalled: async () =>
+        hubProcessesEnabled() ? checkCliInstalled() : checkCliInstalledAtTarget(),
       appInstallCli: stub('appInstallCli'),
       appAdjustZoom: stub('appAdjustZoom'),
       appRestartForUpdate: stub('appRestartForUpdate'),
@@ -1727,20 +1741,11 @@ export function composeServer(opts: {
   // URL once the server host feeds it via setComputerListenerInfo.
   setComputersDeps({
     getGateway: () => computerGatewayRef,
-    // A deleted or revoked computer never returns: the runs it kept are forgotten.
-    onComputerRemoved: (computerId) => processesComputerRemoved(computerId),
     getHubUrl: () => computerHubUrl,
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
     // only on a hub with login. The REST twin reads the same function.
     findAccount: joinTokenAccounts,
     // Before the gateway is up there is no computer to reach: the client relays.
-    onComputerRevoked: async (computerId) => {
-      reportDirectRevokeFailures(
-        await directLinkIssuer?.revoke({ by: 'computer', computerId }, 'computer_revoked')
-      )
-      // Revoking used to leave a live connection working until it next reconnected.
-      computerGatewayRef?.disconnect(computerId, 'computer revoked')
-    },
     issueDirectLink: (target, caller, options) =>
       directLinkIssuer
         ? directLinkIssuer.issue(target, caller, options)
@@ -1753,7 +1758,7 @@ export function composeServer(opts: {
     // id, see the local-computer dedup below) is never disabled or deleted on its own
     // hub. A standalone hub spawns no computer of its own, so it protects none.
     localComputerId: supervised ? deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME) : null,
-    // What blocks disabling a computer: its terminals and agents, asked of the
+    // What blocks disabling a computer: its terminals, agents and processes, asked of the
     // computer itself. Not connected yet (gateway still starting) = nothing runs.
     runningWorkOn: async (computerId) =>
       computerGatewayRef ? countRunningWork(computerGatewayRef, computerId) : 0,
@@ -1973,6 +1978,15 @@ export function composeServer(opts: {
     // A kept run whose computer is offline is not a survivor (G3): it is ended, and a
     // Start or Stop asked meanwhile done, when that computer reconnects.
     setProcessComputerReachability((computerId) => computerGateway.isComputerUsable(computerId))
+    // A deleted or revoked computer never returns — whoever removed it (Settings,
+    // REST, a departing user's cleanup): the runs it kept are forgotten.
+    setComputerRemovedListener((computerId) => {
+      processesComputerRemoved(computerId)
+      // Its direct-link grants go with it, whoever removed it (docs/direct-link.md).
+      void directLinkIssuer
+        ?.revoke({ by: 'computer', computerId }, 'computer_removed')
+        .then(reportDirectRevokeFailures)
+    })
     // Auto-restart processes that found no computer start now; runs a previous hub
     // left on this computer show as orphaned (Stop/Start reach them there).
     computerGateway.events.on('computer-connected', ({ computer }) => {
@@ -2368,6 +2382,12 @@ export function composeServer(opts: {
       // exercise another mode set it themselves.
       const baseline: Array<[string, string]> = [
         ['onboarding_completed', 'true'],
+        // CLI install/update prompt off: it depends on the host's `slay`, so specs
+        // that test it opt in by clearing this.
+        ['cli_install_dismissed', 'true'],
+        // "Want a quick tour?" toast off: it would land in every spec's first
+        // seconds and shift any toast a spec is driving.
+        ['tutorial_prompted', 'true'],
         [AGENT_STARTUP_SETTING, 'manual']
       ]
       // Boot-time write the wipe erased: the CLI/agents discover this process via

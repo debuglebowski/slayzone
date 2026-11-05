@@ -6,6 +6,7 @@ import { getProcessBackend } from './process-backend'
 import type { ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal-contracts'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
   assertHubProcessesEnabled,
   hubProcessesEnabled,
@@ -417,7 +418,8 @@ export async function processesComputerConnected(computerId: string): Promise<vo
   for (const proc of processes.values()) {
     if (proc.handle || proc.termination) continue
     const pid = held.get(proc.id)
-    if (held.has(proc.id) && proc.status !== 'running') {
+    // A run just ended above (its row moved on) is not adopted back as orphaned.
+    if (held.has(proc.id) && proc.status !== 'running' && !stranded?.has(proc.id)) {
       proc.computerId = computerId
       proc.computerPid = pid ?? null
       pushLog(
@@ -711,11 +713,7 @@ export type StartProcessResult =
  * start and restart, after each has detached what it needs to. (A run a previous hub
  * left on the computer under the same id is replaced there by the new spawn.)
  */
-async function respawn(
-  proc: ManagedProcess,
-  generation: number,
-  opts: StartOptions = {}
-): Promise<StartProcessResult> {
+async function respawn(proc: ManagedProcess, generation: number): Promise<StartProcessResult> {
   if (proc.termination) {
     const result = await proc.termination
     if (result === 'survives' && proc.generation === generation) {
@@ -729,8 +727,10 @@ async function respawn(
     if (result === 'unreachable' && proc.generation === generation) {
       const keptOn = proc.computerId
       // Where would the new run go? Elsewhere (the task moved, another computer
-      // serves it): no port to collide with — start there, and end the old run when
-      // its computer returns. Only there (or "start anyway"): wait for it.
+      // serves it, and it is up): no port to collide with — start there, and end the
+      // old run when its computer returns. Only there: wait for it. There is no
+      // override (K5): a start parked for that computer is replaced IN PLACE when it
+      // reconnects (SIGTERM, no wait) — the very port collision R5 refuses.
       const target = processComputerResolver
         ? await processComputerResolver({ taskId: proc.taskId, projectId: proc.projectId }).catch(
             () => null
@@ -738,7 +738,7 @@ async function respawn(
         : null
       if (proc.generation !== generation) return { ok: false, reason: 'already-running' }
       const elsewhere = target != null && target !== keptOn && isReachable(target)
-      if (!elsewhere && !opts.startAnyway) {
+      if (!elsewhere) {
         proc.onReconnect = 'start'
         pushLog(
           proc,
@@ -774,16 +774,7 @@ async function respawn(
  * An 'orphaned' row (a run a previous hub left on its computer) is not "running" in
  * this sense: the new spawn replaces it there.
  */
-/** `startAnyway`: the previous run's computer is offline — start without it (that run
- *  is ended when its computer reconnects). */
-export interface StartOptions {
-  startAnyway?: boolean
-}
-
-export async function startProcess(
-  id: string,
-  opts: StartOptions = {}
-): Promise<StartProcessResult> {
+export async function startProcess(id: string): Promise<StartProcessResult> {
   assertCanRunProcesses('hub.process.spawn', { op: 'start', detail: { processId: id } })
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
@@ -799,7 +790,7 @@ export async function startProcess(
     proc.computerPid != null ? detachAndTerminate(proc).generation : ++proc.generation
   pushLog(proc, '[starting...]')
   setStatus(proc, 'running')
-  return respawn(proc, generation, opts)
+  return respawn(proc, generation)
 }
 
 /**
@@ -807,10 +798,7 @@ export async function startProcess(
  * old one's port) and start again under the same id. Resolves after the new run
  * is spawned, so the caller can read its pid.
  */
-export async function restartProcessDetailed(
-  id: string,
-  opts: StartOptions = {}
-): Promise<StartProcessResult> {
+export async function restartProcessDetailed(id: string): Promise<StartProcessResult> {
   assertCanRunProcesses('hub.process.spawn', { op: 'restart', detail: { processId: id } })
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
@@ -823,7 +811,7 @@ export async function restartProcessDetailed(
       : ++proc.generation
   pushLog(proc, '[restarting...]')
   setStatus(proc, 'running')
-  return respawn(proc, generation, opts)
+  return respawn(proc, generation)
 }
 
 export async function restartProcess(id: string): Promise<boolean> {
@@ -843,8 +831,8 @@ export class OldRunSurvivesError extends Error {
  * an error with its reason, so the panel says why nothing restarted (it only
  * reached the process log before).
  */
-export async function restartProcessForUi(id: string, opts: StartOptions = {}): Promise<boolean> {
-  const result = await restartProcessDetailed(id, opts)
+export async function restartProcessForUi(id: string): Promise<boolean> {
+  const result = await restartProcessDetailed(id)
   if (!result.ok && result.reason === 'old-run-survives') throw new OldRunSurvivesError()
   if (!result.ok && result.reason === 'old-run-unreachable') throw new OldRunUnreachableError()
   return result.ok
@@ -852,7 +840,7 @@ export async function restartProcessForUi(id: string, opts: StartOptions = {}): 
 
 /**
  * A restart refused because the previous run's computer is offline (G3) — not a
- * survivor. The UI says so and offers "Start anyway" (`startAnyway`).
+ * survivor. The UI says so: it starts when that computer reconnects.
  */
 export class OldRunUnreachableError extends Error {
   constructor() {
@@ -931,7 +919,12 @@ async function pollRoutedStats(): Promise<void> {
 
 function startStatsPolling(): void {
   if (routedStatsTimer) return
-  routedStatsTimer = setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  // Started inside whichever request spawned first, a timer's ticks would run as THAT
+  // caller — and the gateway's owner check then refused every other user's computer,
+  // silently (K6). The poll is the hub's own work: created, so run, as nobody.
+  routedStatsTimer = runAsSecurityActor(null, () =>
+    setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  )
   routedStatsTimer.unref?.()
 }
 

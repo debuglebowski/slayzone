@@ -235,8 +235,11 @@ export interface PtyHandle {
   getReplay?(afterSeq: number): Promise<BufferSinceResult>
   /** Clear the owner's buffer. With {@link ownsOutput}. */
   clearOutput?(): Promise<{ clearedSeq: number }>
-  /** Start/stop streaming output to this side (see `PtySpawnSpec.relay`). */
-  setRelay?(on: boolean): void
+  /**
+   * Start/stop streaming output to this side (see `PtySpawnSpec.relay`). Rejects when
+   * the owner did not apply it (unreachable, refused).
+   */
+  setRelay?(on: boolean): Promise<void> | void
   /**
    * The owner went unreachable (false; the process may well still run) or came
    * back (true). While away, an owner-held scrollback cannot be read.

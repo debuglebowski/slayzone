@@ -240,7 +240,10 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   function readDirHandler(rawParams: unknown): FsReadDirResult {
     const { rootPath, dirPath } = fsReadDirParamsSchema.parse(rawParams)
-    return { entries: feReadDir(allow(rootPath), dirPath) }
+    // The folder is judged too: listing through a folder link out of the jail would
+    // show what lies outside (K8).
+    const { root } = allowIn(rootPath, dirPath)
+    return { entries: feReadDir(root, dirPath) }
   }
 
   function readFileHandler(rawParams: unknown): FsReadFileResult {
@@ -331,10 +334,22 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
     const root = allow(rootPath)
     // Content search reads every file below the root; a root above the computer's
     // own state must not hand back lines of its credentials or request log (T-27).
-    const results = feSearchFiles(root, query, {
-      ...options,
-      maxResults
-    }).filter((r) => !isProtectedPath(join(root, r.path)))
+    const results = feSearchFiles(
+      root,
+      query,
+      { ...options, maxResults },
+      {
+        // A link is read only where the jail lets it lead: never out of the roots,
+        // never onto the computer's own state (K8).
+        readLink: (abs) => {
+          try {
+            return allow(abs)
+          } catch {
+            return null
+          }
+        }
+      }
+    ).filter((r) => !isProtectedPath(join(root, r.path)))
     const total = results.reduce((n, r) => n + r.matches.length, 0)
     return { results, truncated: total >= maxResults }
   }

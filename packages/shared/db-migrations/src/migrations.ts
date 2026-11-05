@@ -4692,8 +4692,9 @@ export const migrations: Migration[] = [
     // Unindexed, each lookup walked every session: a large history blocked the hub
     // past the desktop's 10s health deadline.
     up: (db) => {
-      // Guarded like v187/v189: chat-runtime fixtures replay the chat migrations on a
-      // skeleton DB without this table. Every real store has it.
+      // Guarded like v187/v189. The guard was added for chat-runtime fixtures that
+      // replayed a migration slice on a skeleton DB; they now use the full schema.
+      // Every real store has the table, so the guard is a no-op there; kept as shipped.
       if (
         db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions'").get()
       )
@@ -4707,10 +4708,7 @@ export const migrations: Migration[] = [
     // NULL = enabled. Kept across re-enrollment: a computer an operator turned off
     // stays off until they turn it on.
     up: (db) => {
-      // Guarded like v193: chat-runtime fixtures replay the later migrations on a
-      // skeleton DB without this table. Every real store has it.
-      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='computers'").get())
-        db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
+      db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
     }
   },
   {

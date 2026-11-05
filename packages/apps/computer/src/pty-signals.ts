@@ -30,6 +30,9 @@ import {
   type PtyOutputDetection,
   type TerminalTheme
 } from '@slayzone/terminal/pty-detection'
+// Its own entry: the headless xterm it loads stays out of the lean detection entry,
+// which half the codebase imports (through the computer-transport frames).
+import { TerminalReplyMirror } from '@slayzone/terminal/reply-mirror'
 import type {
   PtyDetectedSnapshot,
   PtyDetectionParams,
@@ -79,6 +82,8 @@ export interface PtySessionSignals {
   sessionIdCommand(): string | undefined
   /** The hub's terminal theme changed (OSC colour query answers). */
   setTheme(theme: TerminalTheme): void
+  /** The terminal was resized: the screen mirror answers at the new size. */
+  resize(cols: number, rows: number): void
   /**
    * The process exited. A resume that failed gets its cause reported (before the
    * exit frame): its transcript is gone from THIS disk, or `output` (the replay
@@ -116,6 +121,14 @@ export interface PtySessionSignalsOptions {
   emit: PtySignalSink
   /** Write a terminal-query answer to the process, synchronously when possible. */
   respond: (answer: string) => void
+  /**
+   * The terminal's size: queries whose answer depends on terminal STATE (CPR,
+   * DECRQM, DECRQSS) are answered from a headless screen mirror of this size, in
+   * stream order with the stateless ones — what the hub does for the sessions it
+   * runs the pipeline for (`TerminalReplyMirror`). The renderer no longer answers
+   * them. Default 80×24.
+   */
+  size?: { cols: number; rows: number }
   now?: () => number
   disk?: PtyDiskSessionContext
 }
@@ -130,6 +143,7 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
     resuming: params.resuming
   })
   let syncPending = ''
+  const mirror = new TerminalReplyMirror(opts.size?.cols ?? 80, opts.size?.rows ?? 24, respond)
   let lastClockSignalAt = -Infinity
   let trailing: { seq: number; at: number } | null = null
   let trailingTimer: ReturnType<typeof setTimeout> | undefined
@@ -242,12 +256,13 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
 
   return {
     process(data) {
-      const { response, forwarded, pendingPartial } = computeSyncQueryResponse(
+      const { parts, forwarded, pendingPartial } = computeSyncQueryResponse(
         syncPending + data,
         theme
       )
       syncPending = pendingPartial
-      if (response) respond(response)
+      // Every part, in order: stateless replies and the mirror's answers alike.
+      mirror.apply(parts)
       return { clean: filterBufferData(forwarded), detection: detector.detect(forwarded) }
     },
     report(d, seq) {
@@ -335,8 +350,12 @@ export function createPtySessionSignals(opts: PtySessionSignalsOptions): PtySess
       }, CONVERSATION_ID_WATCH_TIMEOUT_MS)
       watchTimer.unref?.()
     },
+    resize(cols, rows) {
+      mirror.resize(cols, rows)
+    },
     dispose() {
       disposed = true
+      mirror.dispose()
       if (trailingTimer) clearTimeout(trailingTimer)
       if (watchTimer) clearTimeout(watchTimer)
       if (errorWindow) clearTimeout(errorWindow)
