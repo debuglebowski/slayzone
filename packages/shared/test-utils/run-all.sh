@@ -177,6 +177,7 @@ run_harness packages/apps/hub/src/session-retention-boot.test.ts
 # Owner checks (T-17): the one access function over a real DB, then two users on a real
 # hub with login (ids, lists, live streams, admin) and the desktop's hub with login off.
 run_harness packages/apps/api/src/access.test.ts
+run_harness packages/apps/api/src/task-file-confinement.test.ts
 run_harness packages/apps/hub/src/owner-checks.test.ts
 run_harness packages/apps/hub/src/owner-checks-login-off.test.ts
 # Owner checks over REST, MCP and agent hooks (T-18): two users on a real hub with

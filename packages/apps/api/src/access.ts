@@ -329,6 +329,15 @@ function within(child: string, root: string): boolean {
   return child.startsWith(root + s)
 }
 
+/**
+ * `rawPath` is `rawRoot` or inside it, after both are resolved the way every path
+ * check here resolves them (`..` and symlinks included). Empty never matches.
+ */
+export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
+  if (!rawPath || !rawRoot) return false
+  return within(normalizePath(rawPath), normalizePath(rawRoot, true))
+}
+
 /** Every registered root a project's content lives under, with its owner. */
 const ROOTS_SQL = `
   SELECT r.root AS root, p.owner_user_id AS owner_user_id FROM (

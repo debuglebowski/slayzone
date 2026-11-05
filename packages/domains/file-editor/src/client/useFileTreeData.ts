@@ -19,7 +19,19 @@ interface UseFileTreeDataArgs {
   refreshKey?: number
   controlledExpanded?: Set<string>
   onExpandedFoldersChange?: (folders: Set<string>) => void
-  onReady?: () => void
+  /** Every root-directory load reports here: `ready` on success, `error` on failure. */
+  onRootStatus?: (status: FileTreeRootStatus) => void
+}
+
+/**
+ * Outcome of loading the tree's root directory. A failure is reported, never
+ * swallowed: the view is waiting on this to drop its loading overlay, and a lost
+ * rejection left it spinning forever with the cause invisible.
+ */
+export type FileTreeRootStatus = { kind: 'ready' } | { kind: 'error'; message: string }
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : String(err)
 }
 
 export function useFileTreeData({
@@ -27,7 +39,7 @@ export function useFileTreeData({
   refreshKey,
   controlledExpanded,
   onExpandedFoldersChange,
-  onReady
+  onRootStatus
 }: UseFileTreeDataArgs) {
   const trpc = useTRPC()
   // Which machine these filesystem calls are for. Ambient for the whole
@@ -43,13 +55,13 @@ export function useFileTreeData({
   const expandedFolders = controlledExpanded ?? internalExpanded
   const expandedFoldersRef = useRef(expandedFolders)
   const controlledRef = useRef(controlledExpanded)
-  const onReadyRef = useRef(onReady)
+  const onRootStatusRef = useRef(onRootStatus)
   // Latest-value refs for handlers/timers; synced at commit, not during render.
   useInsertionEffect(() => {
     dirContentsRef.current = dirContents
     expandedFoldersRef.current = expandedFolders
     controlledRef.current = controlledExpanded
-    onReadyRef.current = onReady
+    onRootStatusRef.current = onRootStatus
   })
   const setExpandedFolders = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
@@ -148,6 +160,12 @@ export function useFileTreeData({
   useInsertionEffect(() => {
     loadDirRef.current = loadDir
   })
+  const loadRoot = useStableCallback(() => {
+    loadDirRef.current('').then(
+      () => onRootStatusRef.current?.({ kind: 'ready' }),
+      (err: unknown) => onRootStatusRef.current?.({ kind: 'error', message: errorMessage(err) })
+    )
+  })
   const watchRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onWatchEvent = useStableCallback(
@@ -187,8 +205,10 @@ export function useFileTreeData({
   // fs.watch can miss early create/delete events on some platforms while the
   // WebSocket subscription is settling. Keep a cheap polling fallback for the
   // visible directories only; watcher events still provide fast refreshes.
+  // The root goes through `loadRoot`, so a tree whose first load failed recovers
+  // here on its own once the directory becomes readable.
   useVisibleInterval(() => {
-    void loadDirRef.current('')
+    loadRoot()
     for (const dir of expandedFoldersRef.current) void loadDirRef.current(dir)
   }, 1_500)
 
@@ -196,7 +216,7 @@ export function useFileTreeData({
   // identity changes). Stable-callback body: reads the current expandedFolders
   // without making it a trigger.
   const loadInitialDirs = useStableCallback(() => {
-    loadDir('').then(() => onReadyRef.current?.())
+    loadRoot()
     expandedFolders.forEach((dir) => loadDir(dir))
   })
   useEffect(() => {
@@ -242,6 +262,8 @@ export function useFileTreeData({
     loadDir,
     gitStatus,
     dirGitStatus,
-    visibleEntries
+    visibleEntries,
+    /** Reload the root and every expanded folder, as on mount. */
+    reload: loadInitialDirs
   }
 }
