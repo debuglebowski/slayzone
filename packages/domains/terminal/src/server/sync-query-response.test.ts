@@ -372,3 +372,32 @@ test('XTVERSION torn across chunks is held, not forwarded half-answered', () => 
   expect(b.response, 'answered once reassembled').toBe(XTVERSION_RESPONSE)
   expect(b.forwarded).toBe('')
 })
+
+// Replies must come back in the order the queries were asked, like a real
+// terminal. termenv (gh, glow, lipgloss apps) sends `OSC 11 ?` then `CSI 6n` as
+// a sentinel and treats a CPR-first answer as "no OSC support" — leaving the OSC
+// reply unread in stdin, where the next key reader chokes on it (gh auth login:
+// "unexpected escape sequence from terminal: ['\x1b' ']']").
+test('termenv probe — OSC 11 answered before the CPR sentinel that follows it', () => {
+  const r = computeSyncQueryResponse('\x1b]11;?\x1b\\\x1b[6n', theme)
+  expect(r.response).toBe('\x1b]11;rgb:1212/3434/5656\x07\x1b[1;1R')
+  expect(r.forwarded).toBe('')
+})
+
+test('replies follow query order across every query kind', () => {
+  const r = computeSyncQueryResponse(
+    'a\x1b]4;1;?\x07b\x1b]10;?\x07\x1b[6nc\x1b]52;c;?\x07\x1b[>q\x1b[5n\x1b[>c\x1b[c',
+    theme
+  )
+  expect(r.response).toBe(
+    '\x1b]4;1;rgb:cdcd/0000/0000\x07' +
+      '\x1b]10;rgb:abab/cdcd/efef\x07' +
+      '\x1b[1;1R' +
+      '\x1b]52;\x07' +
+      XTVERSION_RESPONSE +
+      '\x1b[0n' +
+      '\x1b[>0;10;1c' +
+      '\x1b[?62;4;22c'
+  )
+  expect(r.forwarded).toBe('abc')
+})
