@@ -197,6 +197,7 @@ export function createComputerChatRuntime(opts: {
     changed: (id) => {
       queueRuntime.notifyChatQueueChanged(id)
       transport.chatEvents.emit('threads-changed', id)
+      transport.chatEvents.emit('pinned-messages-changed', id)
     }
   })
   const retentionService = retention

@@ -550,6 +550,11 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.testReadEvents': 'never',
   'chat.testProjection': 'never',
   'chat.testSeedPrompts': 'never',
+  // Pins are the user's bookmarks: an agent may read them, never change them.
+  'chat.pinnedMessages.list': 'agent',
+  'chat.pinnedMessages.onChanged': 'agent',
+  'chat.pinnedMessages.pin': 'never',
+  'chat.pinnedMessages.unpin': 'never',
   // Side threads: `create` forks a new conversation, like `fork`.
   'chat.threads.create': 'never',
   'chat.threads.list': 'agent',

@@ -41,6 +41,8 @@ import type {
 } from '@slayzone/terminal-contracts'
 import type {
   AgentEvent,
+  ChatPinnedMessage,
+  ChatPinnedMessageInput,
   OutgoingUserMessage,
   PermissionDecision,
   SideAnswer,
@@ -1144,6 +1146,34 @@ export function createChatOps(opts: ChatHandlerOpts) {
     listThreads: async (o: ChatCreateOpts) => {
       const parent = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
       return data.threads ? data.threads.list(o.tabId, parent.sessionId) : []
+    },
+
+    /** The pins of the tab's conversation on screen (none before it has one). */
+    listPinnedMessages: async (o: ChatCreateOpts): Promise<ChatPinnedMessage[]> => {
+      if (!data.pinnedMessages) return []
+      const session = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      return session.sessionId ? data.pinnedMessages.list(o.tabId, session.sessionId) : []
+    },
+
+    /**
+     * Pin a row of the conversation on screen. A pin naming another conversation
+     * (the view is behind a Reset / session switch) is refused, never filed there.
+     */
+    pinMessage: async (o: ChatCreateOpts & { pin: ChatPinnedMessageInput }): Promise<void> => {
+      if (!data.pinnedMessages) throw new Error('Pinned messages are unavailable')
+      const session = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      if (!session.sessionId || session.sessionId !== o.pin.conversationId)
+        throw new Error('The conversation changed; pin the message again')
+      await data.pinnedMessages.pin(o.tabId, { ...o.pin, pinnedAt: Date.now() })
+      chatEvents.emit('pinned-messages-changed', o.tabId)
+    },
+
+    unpinMessage: async (
+      o: ChatCreateOpts & { conversationId: string; key: string }
+    ): Promise<void> => {
+      if (!data.pinnedMessages) throw new Error('Pinned messages are unavailable')
+      await data.pinnedMessages.unpin(o.tabId, o.conversationId, o.key)
+      chatEvents.emit('pinned-messages-changed', o.tabId)
     },
 
     createThread: async (

@@ -689,6 +689,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
@@ -977,6 +978,8 @@ run_harness packages/domains/task-terminals/src/client/chat/compact-entry.test.t
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-messages.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -1050,6 +1053,7 @@ run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-pinned-message.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts

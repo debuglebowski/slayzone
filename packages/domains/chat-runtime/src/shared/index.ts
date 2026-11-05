@@ -19,15 +19,19 @@ export interface StoredChatEvent {
   at: number
   event: AgentEvent
 }
-export type ChatRecordKind =
-  | 'draft'
-  | 'queue'
-  | 'prompt'
-  | 'thread'
-  | 'workspace'
-  | 'attachment'
-  | 'settings'
-  | 'timeline'
+/** Every record kind a conversation holds (a transfer refuses any other). */
+export const CHAT_RECORD_KINDS = [
+  'draft',
+  'queue',
+  'prompt',
+  'thread',
+  'workspace',
+  'attachment',
+  'settings',
+  'timeline',
+  'pinned-message'
+] as const
+export type ChatRecordKind = (typeof CHAT_RECORD_KINDS)[number]
 export interface ChatRecord {
   kind: ChatRecordKind
   id: string

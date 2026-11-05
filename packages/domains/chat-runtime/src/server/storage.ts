@@ -16,6 +16,7 @@ import type {
   StoredChatEvent,
   ChatTabTransition
 } from '../shared'
+import { CHAT_RECORD_KINDS } from '../shared'
 
 function digest(value: unknown): string {
   return createHash('sha256')
@@ -57,7 +58,8 @@ const LOCAL_ONLY_RECORD_KINDS = [
   'prompt',
   'workspace',
   'attachment',
-  'timeline'
+  'timeline',
+  'pinned-message'
 ] as const satisfies readonly ChatRecordKind[]
 /** Trigger body: bump `task_state_versions` for the task named by SQL expression `task`. */
 export function bumpTaskStateVersion(task: string): string {
@@ -140,8 +142,11 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       ${['INSERT', 'UPDATE', 'DELETE']
         .map((op) => {
           const r = op === 'DELETE' ? 'OLD' : 'NEW'
+          // Recreated on every open: the local-only kinds are this build's, so a
+          // kind added since the database was created stays local too.
           return `
-      CREATE TRIGGER IF NOT EXISTS records_state_version_${op.toLowerCase()} AFTER ${op} ON records
+      DROP TRIGGER IF EXISTS records_state_version_${op.toLowerCase()};
+      CREATE TRIGGER records_state_version_${op.toLowerCase()} AFTER ${op} ON records
       WHEN NOT (${r}.kind IN (${LOCAL_ONLY_RECORD_KINDS.map((k) => `'${k}'`).join(',')})
         OR (${r}.kind='settings' AND (${r}.id='metadata-counter' OR ${r}.id GLOB 'metadata:*')))
       BEGIN ${bumpTaskStateVersion(`(SELECT task_id FROM conversations WHERE id=${r}.conversation_id)`)} END;
@@ -781,7 +786,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       return !!db
         .prepare(`SELECT 1 FROM events WHERE conversation_id=? UNION ALL
         SELECT 1 FROM records WHERE conversation_id=? AND
-          (kind IN ('queue','thread','workspace','timeline') OR
+          (kind IN ('queue','thread','workspace','timeline','pinned-message') OR
            (kind='settings' AND id IN ('metadata-state:agent-state','metadata-state:activity')) OR (kind='draft' AND
             (COALESCE(json_extract(value,'$.draft.text'),'')<>'' OR
              COALESCE(json_array_length(value,'$.draft.attachments'),0)>0))) LIMIT 1`)
@@ -961,16 +966,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           } else if (entry.kind === 'record') {
             const r = entry.value as ChatRecord
             if (
-              ![
-                'draft',
-                'queue',
-                'prompt',
-                'thread',
-                'workspace',
-                'attachment',
-                'settings',
-                'timeline'
-              ].includes(r.kind) ||
+              !(CHAT_RECORD_KINDS as readonly string[]).includes(r.kind) ||
               typeof r.id !== 'string' ||
               !Number.isSafeInteger(r.at)
             )
