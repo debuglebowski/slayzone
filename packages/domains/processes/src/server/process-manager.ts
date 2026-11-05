@@ -6,6 +6,7 @@ import { getProcessBackend } from './process-backend'
 import type { ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal-contracts'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
   assertHubProcessesEnabled,
   hubProcessesEnabled,
@@ -917,7 +918,12 @@ async function pollRoutedStats(): Promise<void> {
 
 function startStatsPolling(): void {
   if (routedStatsTimer) return
-  routedStatsTimer = setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  // Started inside whichever request spawned first, a timer's ticks would run as THAT
+  // caller — and the gateway's owner check then refused every other user's computer,
+  // silently (K6). The poll is the hub's own work: created, so run, as nobody.
+  routedStatsTimer = runAsSecurityActor(null, () =>
+    setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  )
   routedStatsTimer.unref?.()
 }
 

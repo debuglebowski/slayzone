@@ -21,6 +21,7 @@ import {
 } from './process-manager'
 import { setProcessBackend, type ProcessBackend, type ProcHandle } from './process-backend'
 import type { ProcessPersistence } from './process-persistence'
+import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
 
 const persistence = {
   loadAll: async () => [],
@@ -414,4 +415,38 @@ describe("G3: the old run's computer is unreachable", () => {
     expect(spawned).toEqual(['c2'])
     expect(killed).toEqual([])
   })
+})
+
+// Round-5 K6: the stats poll's interval was created inside the FIRST spawner's
+// request, so every tick ran as that user — and the gateway's owner check refused
+// every other user's computer, silently: their processes showed no CPU, memory or
+// title for the life of the hub. The poll is the hub's own work: it runs as nobody.
+describe('K6: the stats poll runs as the hub, not as whoever started it', () => {
+  test('a tick carries no caller', async () => {
+    const seen: Array<string | null> = []
+    setProcessBackend({
+      spawn(): ProcHandle {
+        return {
+          pid: undefined,
+          onData: () => ({ dispose() {} }),
+          onExit: () => ({ dispose() {} }),
+          kill: () => undefined
+        }
+      },
+      stats: async () => {
+        seen.push(currentSecurityContext()?.actor ?? null)
+        return {}
+      }
+    })
+    setProcessComputerResolver(async () => 'cA')
+    const id = await runWithSecurityContext({ actor: 'user-A', ip: null, route: null }, () =>
+      spawnProcess('p', null, `k6-${Math.random()}`, 'pnpm dev', '/tmp', false)
+    )
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0), { timeout: 8000 })
+    expect(
+      seen.every((actor) => actor === null),
+      `tick actors: ${seen.join(',')}`
+    ).toBe(true)
+    await stopProcess(id)
+  }, 15_000)
 })
