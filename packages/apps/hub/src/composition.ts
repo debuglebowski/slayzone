@@ -1877,10 +1877,13 @@ export function composeServer(opts: {
     // The git panel: each op runs on the computer that holds the checkout (the
     // router resolves it like the workspace fs, owner-gated with login).
     setGitOpTransport({
-      request: async (computerId, params, timeoutMs) =>
-        gitOpResultSchema.parse(
+      request: async (computerId, params, timeoutMs) => {
+        // The caller's own request (as a watch): a computer works only for its owner.
+        if (placement.gate) await placement.gate(computerId, null)
+        return gitOpResultSchema.parse(
           await computerGateway.request(computerId, HubToComputerMethods.gitOp, params, timeoutMs)
-        ).result,
+        ).result
+      },
       watchStart: async (computerId, params) => {
         if (placement.gate) await placement.gate(computerId, null)
         await computerGateway.request(computerId, HubToComputerMethods.gitWatchStart, params)
