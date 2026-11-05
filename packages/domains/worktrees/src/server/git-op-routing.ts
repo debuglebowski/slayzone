@@ -159,31 +159,62 @@ export async function gitTargetForPath(
   path: string
 ): Promise<WorktreesComputerTarget | null> {
   const p = normalizeComputerPath(path)
-  // Letter case compared exactly, as the owner policy compares a project root: the
-  // owning computer folds case for its own volume, the hub's disk cannot say (L3).
-  const under = (root: string) => computerPathWithin(p, root)
-  let task: { id: string; root: string } | null = null
-  for (const row of await db.all<{ id: string; worktree_path: string }>(
-    `SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path != ''`
-  )) {
-    const root = normalizeComputerPath(row.worktree_path)
-    if (under(root) && (!task || root.length > task.root.length)) task = { id: row.id, root }
-  }
+  const tasks = (
+    await db.all<{ id: string; worktree_path: string }>(
+      `SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path != ''`
+    )
+  ).map((r) => ({ id: r.id, root: normalizeComputerPath(r.worktree_path) }))
   const placements = (
     await db.all<{ computer_id: string; project_id: string; root_path: string }>(
       `SELECT computer_id, project_id, root_path FROM project_placements
         WHERE status != 'forgotten' AND root_path != ''`
     )
+  ).map((r) => ({ ...r, root: normalizeComputerPath(r.root_path) }))
+  // Letter case compared exactly first, as the owner policy compares a project root:
+  // the owning computer folds case for its own volume, the hub's disk cannot say (L3).
+  const exact = targetAmong(tasks, placements, (root) => computerPathWithin(p, root))
+  if (exact) return exact
+  // No exact match: a checkout recorded in another letter case (a Mac's
+  // `/Users/k/Proj` asked for as `/Users/k/proj`) is taken when it is the ONLY
+  // candidate — routing only; the gateway's owner check still decides (N6). Two
+  // candidates that differ only in case are not guessed between.
+  const folded = (root: string) => computerPathWithin(p, root, true)
+  const hits = [...tasks, ...placements].filter((r) => folded(r.root)).map((r) => r.root)
+  // The deepest recorded folder decides, as with an exact match.
+  const deepest = Math.max(-1, ...hits.map((root) => root.length))
+  const candidates = new Set(hits.filter((root) => root.length === deepest))
+  if (candidates.size !== 1) return null
+  const only = [...candidates][0] as string
+  return targetAmong(
+    tasks.filter((t) => t.root === only),
+    placements.filter((r) => r.root === only),
+    folded
   )
-    .map((r) => ({ ...r, root: normalizeComputerPath(r.root_path) }))
+}
+
+/**
+ * The deepest recorded checkout `under` accepts: a task's worktree (the task's
+ * computer), else a project folder on a computer. The same folder on several
+ * computers names only the project; on several projects, nothing.
+ */
+function targetAmong(
+  tasks: ReadonlyArray<{ id: string; root: string }>,
+  placements: ReadonlyArray<{ computer_id: string; project_id: string; root: string }>,
+  under: (root: string) => boolean
+): WorktreesComputerTarget | null {
+  let task: { id: string; root: string } | null = null
+  for (const t of tasks) {
+    if (under(t.root) && (!task || t.root.length > task.root.length)) task = t
+  }
+  const matched = placements
     .filter((r) => under(r.root))
     .sort((a, b) => b.root.length - a.root.length)
-  const longest = placements[0]
+  const longest = matched[0]
   if (task && (!longest || task.root.length >= longest.root.length)) {
     return { taskId: task.id }
   }
   if (!longest) return null
-  const same = placements.filter((r) => r.root === longest.root)
+  const same = matched.filter((r) => r.root === longest.root)
   const computers = new Set(same.map((r) => r.computer_id))
   const projects = new Set(same.map((r) => r.project_id))
   if (computers.size === 1)

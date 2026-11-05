@@ -342,6 +342,12 @@ export const REGRESSIONS = [
     id: 'N5',
     what: "tree access checks reuse each root's ancestry (no stat storm per check)",
     files: [`${P}apps/api/src/access-tree-cost.test.ts`]
+  },
+  {
+    round: 7,
+    id: 'N6',
+    what: 'git routing: exact case first, else one case-insensitive candidate',
+    files: [rrOwner]
   }
 ]
 
