@@ -11,6 +11,7 @@ import {
   listAllProcesses,
   processesComputerConnected,
   restartProcessDetailed,
+  restartProcessForUi,
   setProcessComputerResolver,
   spawnProcess,
   startProcess,
@@ -197,6 +198,54 @@ describe('stop / restart wait for the computer to end the tree', () => {
     pending.shift()!(true)
     await stop
     expect(status(id)?.status).toBe('stopped')
+  })
+
+  // Round-3 F5, the reviewer's sequence: a restart is refused (old-run-survives) and
+  // the row is orphaned with the survivor kept; pressing Start then spawned anyway —
+  // the computer's replace-spawn SIGTERMs without waiting, so the new run collided
+  // with the old port and the survivor became unreachable. Start ends a kept run
+  // first, exactly as Restart does, and refuses the same way while it survives.
+  test('F5: Start after old-run-survives ends the survivor first, refusing while it lives', async () => {
+    await startProcess(id)
+    const restart = restartProcessDetailed(id)
+    await tick()
+    pending.shift()!(false)
+    expect(await restart).toEqual({ ok: false, reason: 'old-run-survives' })
+    const before = spawns
+
+    const start1 = startProcess(id)
+    await tick()
+    expect(pending, 'Start asks the computer to end the survivor').toHaveLength(1)
+    expect(spawns, 'no spawn while it may hold the port').toBe(before)
+    pending.shift()!(false) // still alive
+    expect(await start1).toEqual({ ok: false, reason: 'old-run-survives' })
+    expect(spawns).toBe(before)
+    expect(status(id)?.status).toBe('orphaned')
+
+    const start2 = startProcess(id)
+    await tick()
+    pending.shift()!(true) // gone now
+    expect(await start2).toMatchObject({ ok: true })
+    expect(spawns, 'then it starts').toBe(before + 1)
+    // Leave it stopped for the next test.
+    const stop = stopProcess(id)
+    await tick()
+    pending.shift()!(true)
+    await stop
+  })
+
+  // The panel's Restart got only `false` back and showed nothing: the reason reached
+  // only the log. The UI's restart now fails with it (shown as a toast).
+  test('the UI restart surfaces old-run-survives as an error with its reason', async () => {
+    await startProcess(id)
+    const restart = restartProcessForUi(id)
+    await tick()
+    pending.shift()!(false)
+    await expect(restart).rejects.toThrow(/still alive/)
+    const stop = stopProcess(id)
+    await tick()
+    pending.shift()!(true)
+    await stop
   })
 
   test('a tree that survived SIGKILL leaves the row orphaned, still stoppable', async () => {

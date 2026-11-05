@@ -19,7 +19,9 @@ export {
   shutdownAllProcesses,
   setProcessComputerResolver,
   processesComputerConnected,
-  isAdoptedOnComputer
+  isAdoptedOnComputer,
+  restartProcessForUi,
+  OldRunSurvivesError
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {

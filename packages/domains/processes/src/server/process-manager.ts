@@ -660,7 +660,12 @@ export async function startProcess(id: string): Promise<StartProcessResult> {
   if (proc.handle || (proc.status === 'running' && !proc.termination)) {
     return { ok: false, reason: 'already-running' }
   }
-  const generation = ++proc.generation
+  // A run its computer still holds (orphaned: adopted after a hub restart, or one
+  // that outlived a stop) is ended there first and awaited, as Restart does — the
+  // computer's own replace-spawn would not wait for it to free its port. Refused
+  // (old-run-survives) while it lives.
+  const generation =
+    proc.computerPid != null ? detachAndTerminate(proc).generation : ++proc.generation
   pushLog(proc, '[starting...]')
   setStatus(proc, 'running')
   return respawn(proc, generation)
@@ -689,6 +694,25 @@ export async function restartProcessDetailed(id: string): Promise<StartProcessRe
 
 export async function restartProcess(id: string): Promise<boolean> {
   return (await restartProcessDetailed(id)).ok
+}
+
+/** A restart refused because the previous run still lives on its computer. */
+export class OldRunSurvivesError extends Error {
+  constructor() {
+    super('The previous run is still alive on its computer (it outlived SIGKILL) — stop it first')
+    this.name = 'OldRunSurvivesError'
+  }
+}
+
+/**
+ * Restart for the UI: `false` for the plain refusals, as before — but a survivor is
+ * an error with its reason, so the panel says why nothing restarted (it only
+ * reached the process log before).
+ */
+export async function restartProcessForUi(id: string): Promise<boolean> {
+  const result = await restartProcessDetailed(id)
+  if (!result.ok && result.reason === 'old-run-survives') throw new OldRunSurvivesError()
+  return result.ok
 }
 
 /** Kill all processes belonging to a specific task. Project-scoped processes are unaffected. */
