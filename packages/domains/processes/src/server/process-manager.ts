@@ -539,8 +539,9 @@ function detachAndTerminate(proc: ManagedProcess): {
       // Awaited: the computer replies once the whole tree is gone, so a following
       // start never collides with the old run's port.
       const ended = (await Promise.resolve(handle.kill()).catch(() => false)) !== false
-      // Not confirmed gone: keep it addressable (by session) for the next stop.
-      if (!ended && proc.generation === generation && keptPid != null) proc.computerPid = keptPid
+      // Not confirmed gone: keep it addressable (by session) for the next stop —
+      // unless a new run has taken the row meanwhile.
+      if (!ended && !proc.handle && keptPid != null) proc.computerPid = keptPid
       return ended
     }
     if (keptOnComputer) {
@@ -603,7 +604,14 @@ export function removeProcess(id: string): boolean {
 }
 
 /** Why a start did not happen. */
-export type StartProcessRefusal = 'not-found' | 'already-running' | 'shutting-down' | 'no-computer'
+export type StartProcessRefusal =
+  | 'not-found'
+  | 'already-running'
+  | 'shutting-down'
+  | 'no-computer'
+  /** Part of the previous run outlived SIGKILL on its computer: a new one would
+   *  collide with its port, and the survivor could no longer be stopped. */
+  | 'old-run-survives'
 export type StartProcessResult =
   | { ok: true; pid: number | null; status: ProcessStatus }
   | { ok: false; reason: StartProcessRefusal }
@@ -614,7 +622,17 @@ export type StartProcessResult =
  * left on the computer under the same id is replaced there by the new spawn.)
  */
 async function respawn(proc: ManagedProcess, generation: number): Promise<StartProcessResult> {
-  if (proc.termination) await proc.termination
+  if (proc.termination) {
+    const clean = await proc.termination
+    if (!clean && proc.generation === generation) {
+      pushLog(
+        proc,
+        '[not started: the previous run is still alive on its computer — stop it first]'
+      )
+      setStatus(proc, 'orphaned')
+      return { ok: false, reason: 'old-run-survives' }
+    }
+  }
   if (proc.generation === generation) {
     try {
       await doSpawn(proc, generation)

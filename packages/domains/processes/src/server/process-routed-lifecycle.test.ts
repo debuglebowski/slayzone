@@ -139,12 +139,17 @@ describe('stop / restart wait for the computer to end the tree', () => {
     spawn(): ProcHandle {
       spawns++
       return {
-        pid: undefined,
+        pid: 4242, // its pid on the computer
         onData: () => ({ dispose() {} }),
         onExit: () => ({ dispose() {} }),
         kill: () => new Promise<boolean>((resolve) => pending.push(resolve))
       }
-    }
+    },
+    // A survivor kept by session: its stop asks the computer again.
+    killSession: () =>
+      new Promise<void>((resolve, reject) =>
+        pending.push((clean) => (clean ? resolve() : reject(new Error('survived'))))
+      )
   }
   let id = ''
   beforeAll(async () => {
@@ -168,6 +173,27 @@ describe('stop / restart wait for the computer to end the tree', () => {
     const stop = stopProcess(id)
     await tick()
     expect(status(id)?.status, 'not stopped while the kill is in flight').toBe('running')
+    pending.shift()!(true)
+    await stop
+    expect(status(id)?.status).toBe('stopped')
+  })
+
+  test('restart does not start a new run while the old tree survives', async () => {
+    await startProcess(id)
+    const before = spawns
+    const restart = restartProcessDetailed(id)
+    await tick()
+    pending.shift()!(false) // part of the old tree outlived SIGKILL
+    expect(await restart, 'refused, with the reason').toEqual({
+      ok: false,
+      reason: 'old-run-survives'
+    })
+    expect(spawns, 'no second run on the same port').toBe(before)
+    expect(status(id)?.status).toBe('orphaned')
+    // Still stoppable: the survivor is reached again.
+    const stop = stopProcess(id)
+    await tick()
+    expect(pending, 'a stop asks the computer again').toHaveLength(1)
     pending.shift()!(true)
     await stop
     expect(status(id)?.status).toBe('stopped')

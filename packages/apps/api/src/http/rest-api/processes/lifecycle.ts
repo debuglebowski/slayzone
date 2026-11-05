@@ -9,13 +9,16 @@ const REFUSAL_STATUS = {
   'not-found': 404,
   'already-running': 409,
   'shutting-down': 503,
-  'no-computer': 503
+  'no-computer': 503,
+  'old-run-survives': 409
 } as const
 const REFUSAL_MESSAGE = {
   'not-found': 'Process not found',
   'already-running': 'Process is already running — restart it instead',
   'shutting-down': 'The app is shutting down',
-  'no-computer': 'No computer is connected to run this process. Connect a computer.'
+  'no-computer': 'No computer is connected to run this process. Connect a computer.',
+  'old-run-survives':
+    'The previous run is still alive on its computer (it outlived SIGKILL) — stop it first'
 } as const
 
 function answerStart(res: Response, id: string, result: ProcessStartResult): void {
