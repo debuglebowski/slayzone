@@ -1172,6 +1172,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \
   packages/domains/agent-panels/src/global-agent-panel/FloatingGlobalAgentPanel.test.tsx \
