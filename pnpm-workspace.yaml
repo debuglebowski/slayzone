@@ -4,10 +4,11 @@ packages:
   - 'packages/domains/*'
   - 'packages/shared/*'
 
-# Install only package versions published at least 30 days ago (minutes), the same age
-# Renovate waits before proposing an update. A hand bump that needs a newer version goes
-# in minimumReleaseAgeExclude below, with the reason and the date it clears the gate.
-minimumReleaseAge: 43200
+# Install only package versions published at least 14 days ago (minutes). Deliberately
+# shorter than Renovate's 30 days (renovate.json), so every version Renovate proposes
+# already clears this gate. A hand bump that needs a newer version goes in
+# minimumReleaseAgeExclude below, with the reason and the date it clears the gate.
+minimumReleaseAge: 20160
 # Exempt: TypeScript and React are always used at their latest versions.
 minimumReleaseAgeExclude:
   - typescript
@@ -191,8 +192,9 @@ patchedDependencies:
   # Release CI: memoizes readdir in electron-builder's node-module BFS (Windows spent
   # ~165 s/arch re-walking node_modules for uninstalled optional platform packages).
   # Re-create on an electron-builder bump; drop once upstream caches it.
-  'app-builder-lib@26.17.0': patches/app-builder-lib@26.17.0.patch
+  'app-builder-lib@26.18.0': patches/app-builder-lib@26.18.0.patch
   'posix@4.2.0': patches/posix@4.2.0.patch
-  '@radix-ui/react-menu@2.1.24': patches/@radix-ui__react-menu@2.1.24.patch
   'electron-chrome-extensions@4.9.0': patches/electron-chrome-extensions@4.9.0.patch
   'node-pty@1.1.0': patches/node-pty@1.1.0.patch
+  '@radix-ui/react-menu@2.2.1': patches/@radix-ui__react-menu@2.2.1.patch
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.301': patches/@xterm__addon-unicode-graphemes@0.5.0-beta.301.patch

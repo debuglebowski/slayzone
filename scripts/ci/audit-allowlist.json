@@ -2,76 +2,18 @@
   "$comment": "Reviewed decisions for production-dependency advisories (not applicable, or accepted until a date). Read by scripts/ci/audit-check.mjs: an advisory missing here, or past its expiry, fails the audit job. Re-review on expiry; remove ids the job reports as stale.",
   "entries": [
     {
-      "packages": ["zod"],
-      "reason": "APPLIES, accepted for now: a large array sent to a schema without a length cap makes zod allocate one issue per failing element until the process runs out of memory. Our hub and computer validate network input with zod (tRPC inputs, REST bodies, computer frames), mostly from authenticated callers. The fix (4.6.6) was published 2026-10-11, so the 30-day minimumReleaseAge holds it back until 2026-11-10.",
-      "reviewed": "2026-10-24",
-      "expires": "2026-11-11",
-      "advisories": ["GHSA-mrhx-c7xc-m3w5"]
-    },
-    {
       "packages": ["body-parser"],
-      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process (still in 2.3.0, locked 2026-11-04). express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 30-day minimumReleaseAge holds it back until 2026-11-21.",
+      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process (still in 2.3.0, locked 2026-11-04). express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 14-day minimumReleaseAge holds it back until 2026-11-05 11:39 UTC.",
       "reviewed": "2026-10-24",
       "expires": "2026-11-22",
       "advisories": ["GHSA-27r3-jxmh-p828"]
     },
     {
-      "packages": ["undici"],
-      "reason": "Via @electron/get, the electron package's install-time downloader; never in the app or hub.",
-      "reviewed": "2026-11-02",
-      "expires": "2027-01-24",
-      "advisories": [
-        "GHSA-2m5v-pch6-74hx",
-        "GHSA-4qv8-2p9j-2685",
-        "GHSA-4w7w-5xrc-9h26",
-        "GHSA-55wc-3pg8-jfw6",
-        "GHSA-9fm3-97px-rjf6",
-        "GHSA-f72v-6w45-q472",
-        "GHSA-qrxm-fqhp-jwvm",
-        "GHSA-xjj6-f33q-929c"
-      ]
-    },
-    {
-      "packages": ["@hono/node-server", "ip-address", "fast-uri"],
-      "reason": "Via @modelcontextprotocol/sdk: our server transport uses only @hono/node-server getRequestListener (no serveStatic; the serveStatic fix is only in @hono/node-server 2.x, which the SDK does not accept); the IP code is in the SDK auth router, which we do not mount; no URI-based security decisions. Locked to the newest versions at least 30 days old on 2026-11-04 (fast-uri 3.1.8, ip-address 10.7.3); the remaining fixes (fast-uri 3.1.9, ip-address 10.7.4) clear the age gate later in November.",
-      "reviewed": "2026-11-04",
+      "packages": ["katex"],
+      "reason": "katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
+      "reviewed": "2026-11-05",
       "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-333x-w4r6-6crp",
-        "GHSA-rmxm-3fg6-px4f",
-        "GHSA-rxp7-6hxx-x8q5",
-        "GHSA-w74x-v6f9-j3xg",
-        "GHSA-wjr9-j795-jxcr",
-        "GHSA-xhq7-xmqj-769h"
-      ]
-    },
-    {
-      "packages": ["qs"],
-      "reason": "Express internals: express and body-parser only call qs.parse, and Express 5's default query parser is not qs; no urlencoded parser. Locked at 6.16.0 on 2026-11-04; the fix (6.16.1) is held back by the 30-day minimumReleaseAge.",
-      "reviewed": "2026-11-04",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-6pq8-jhm2-2vcw"]
-    },
-    {
-      "packages": ["vite"],
-      "reason": "Counted as production only because better-auth lists vitest as an optional peer; dev tooling in practice. Our Vite dev servers bind localhost, and the dev-server advisories need --host. The fix (8.3.3, published 2026-10-06) clears the 30-day minimumReleaseAge on 2026-11-05.",
-      "reviewed": "2026-11-04",
-      "expires": "2027-01-22",
-      "advisories": [
-        "GHSA-587h-7wmj-h5pm",
-        "GHSA-698v-4r3x-3vcv",
-        "GHSA-9jrq-w75r-8gcw",
-        "GHSA-r825-w8mm-5pxw",
-        "GHSA-rq7h-c2jc-7f22",
-        "GHSA-vfpm-58rq-9qcg"
-      ]
-    },
-    {
-      "packages": ["decode-uri-component", "katex"],
-      "reason": "decode-uri-component: via @lobehub/icons / @lobehub/ui; we deep-import 6 icon components, which do not load it (fix 0.5.1 held back by the 30-day minimumReleaseAge). katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
-      "reviewed": "2026-11-04",
-      "expires": "2027-01-22",
-      "advisories": ["GHSA-238p-pmpm-9mq7", "GHSA-qr28-fpjm-wq7f"]
+      "advisories": ["GHSA-238p-pmpm-9mq7"]
     },
     {
       "packages": ["minimatch"],
@@ -89,7 +31,7 @@
     },
     {
       "packages": ["node-forge", "glob", "deepmerge"],
-      "reason": "Via Expo build tooling in the mobile app (@expo/cli dev server and code signing, @expo/config): runs on the developer machine at build and dev-server time on our own project files, never shipped in the app bundle. node-forge 1.4.1 (published 2026-10-27) and glob 14.0.2 (2026-10-27, a major bump from 13) are held back by the 30-day minimumReleaseAge; deepmerge has no fix. Re-check on the next Expo SDK bump.",
+      "reason": "Via Expo build tooling in the mobile app (@expo/cli dev server and code signing, @expo/config): runs on the developer machine at build and dev-server time on our own project files, never shipped in the app bundle. node-forge 1.4.1 (published 2026-10-27) and glob 14.0.2 (2026-10-27, a major bump from 13) clear the 14-day minimumReleaseAge on 2026-11-10; deepmerge has no fix. Re-check on the next Expo SDK bump.",
       "reviewed": "2026-11-02",
       "expires": "2027-02-02",
       "advisories": [

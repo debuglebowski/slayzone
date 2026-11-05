@@ -1,5 +1,5 @@
 diff --git a/out/node-module-collector/moduleManager.js b/out/node-module-collector/moduleManager.js
-index 7a64eab..2278f26 100644
+index 7a64eabf4ad5a129d835e23d706d9d4624502fa7..2278f2647e6bffaf728f2fea9ce134c04805cebe 100644
 --- a/out/node-module-collector/moduleManager.js
 +++ b/out/node-module-collector/moduleManager.js
 @@ -35,11 +35,16 @@ class ModuleManager {

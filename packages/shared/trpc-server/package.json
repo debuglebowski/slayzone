@@ -15,6 +15,6 @@
   "dependencies": {
     "@slayzone/platform": "workspace:*",
     "@trpc/server": "^11.19.0",
-    "superjson": "^2.2.1"
+    "superjson": "^2.2.6"
   }
 }

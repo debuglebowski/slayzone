@@ -17,17 +17,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@better-auth/api-key": "1.7.7",
-    "@better-auth/core": "1.7.7",
+    "@better-auth/api-key": "1.7.12",
+    "@better-auth/core": "1.7.12",
     "@slayzone/platform": "workspace:*",
-    "better-auth": "1.7.7",
-    "express": "^5.2.1",
-    "jose": "^6.2.12"
+    "better-auth": "1.7.12",
+    "express": "^5.3.0",
+    "jose": "^6.2.13"
   },
   "devDependencies": {
-    "@peculiar/x509": "~2.1.0",
-    "@types/express": "^5.0.5",
+    "@peculiar/x509": "~2.2.0",
+    "@types/express": "^5.0.6",
     "reflect-metadata": "^0.2.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }
