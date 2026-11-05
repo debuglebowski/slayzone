@@ -4707,7 +4707,10 @@ export const migrations: Migration[] = [
     // NULL = enabled. Kept across re-enrollment: a computer an operator turned off
     // stays off until they turn it on.
     up: (db) => {
-      db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
+      // Guarded like v193: chat-runtime fixtures replay the later migrations on a
+      // skeleton DB without this table. Every real store has it.
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='computers'").get())
+        db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
     }
   },
   {
