@@ -52,13 +52,16 @@ export function useAppBadge({
   idleTasks,
   hubIdByProject,
   defaultHubId,
-  columnsByProjectId
+  columnsByProjectId,
+  openTaskIds
 }: {
   tasks: Task[]
   idleTasks: IdleTask[]
   hubIdByProject: Map<string, string>
   defaultHubId: string
   columnsByProjectId: Map<string, ColumnConfig[] | null>
+  /** Task ids open as tabs — for the "Only tasks open in tabs" setting. */
+  openTaskIds: string[]
 }): void {
   const trpc = useTRPC()
   const all = useQuery(trpc.settings.getAll.queryOptions()).data
@@ -80,8 +83,8 @@ export function useAppBadge({
     return computeAppBadge(settings, {
       unread: tasks.filter(isUnread).map(toBadgeTask),
       idle: idleTasks.map((t) => toBadgeTask(t.task))
-    })
-  }, [all, tasks, idleTasks, hubIdByProject, defaultHubId, columnsByProjectId])
+    }, new Set(openTaskIds))
+  }, [all, tasks, idleTasks, hubIdByProject, defaultHubId, columnsByProjectId, openTaskIds])
 
   const { text, count } = badge
   useEffect(() => {
