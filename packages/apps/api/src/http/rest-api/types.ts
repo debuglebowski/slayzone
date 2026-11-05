@@ -154,7 +154,13 @@ export type ProcessStartResult =
   | { ok: true; pid: number | null; status: string }
   | {
       ok: false
-      reason: 'not-found' | 'already-running' | 'shutting-down' | 'no-computer' | 'old-run-survives'
+      reason:
+        | 'not-found'
+        | 'already-running'
+        | 'shutting-down'
+        | 'no-computer'
+        | 'old-run-survives'
+        | 'old-run-unreachable'
     }
 
 /** The minimal WebContents surface the browser routes drive. Structural (NOT

@@ -207,7 +207,9 @@ import {
   listAllProcesses,
   subscribeToProcessLogs,
   setProcessComputerResolver,
+  setProcessComputerReachability,
   processesComputerConnected,
+  processesComputerRemoved,
   isAdoptedOnComputer,
   setProcessBackend,
   killAllProcesses,
@@ -1675,6 +1677,8 @@ export function composeServer(opts: {
   // URL once the server host feeds it via setComputerListenerInfo.
   setComputersDeps({
     getGateway: () => computerGatewayRef,
+    // A deleted or revoked computer never returns: the runs it kept are forgotten.
+    onComputerRemoved: (computerId) => processesComputerRemoved(computerId),
     getHubUrl: () => computerHubUrl,
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
     // only on a hub with login. The REST twin reads the same function.
@@ -1847,6 +1851,9 @@ export function composeServer(opts: {
       if (projectId) return resolveComputerForProject(projectId)
       return resolveExecComputer(null)
     })
+    // A kept run whose computer is offline is not a survivor (G3): it is ended, and a
+    // Start or Stop asked meanwhile done, when that computer reconnects.
+    setProcessComputerReachability((computerId) => computerGateway.isComputerUsable(computerId))
     // Auto-restart processes that found no computer start now; runs a previous hub
     // left on this computer show as orphaned (Stop/Start reach them there).
     computerGateway.events.on('computer-connected', ({ computer }) => {

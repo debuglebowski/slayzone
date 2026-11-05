@@ -3,7 +3,7 @@ import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { TRPCError } from '@trpc/server'
 import { getProcessesDeps } from './processes-deps'
-import { OldRunSurvivesError } from './process-manager'
+import { OldRunSurvivesError, OldRunUnreachableError } from './process-manager'
 
 /** Far past any real value (a label is a tab title, a command one shell line, a cwd a
  *  path, Windows long paths included): only a client sending junk reaches them. */
@@ -59,13 +59,18 @@ export const processesRouter = router({
     .input(z.object({ processId: z.string() }))
     .mutation(({ input }) => getProcessesDeps().remove(input.processId)),
   restart: publicProcedure
-    .input(z.object({ processId: z.string() }))
+    // `startAnyway`: the previous run's computer is offline — start without it.
+    .input(z.object({ processId: z.string(), startAnyway: z.boolean().optional() }))
     .mutation(async ({ input }) => {
       try {
-        return await getProcessesDeps().restart(input.processId)
+        return await getProcessesDeps().restart(
+          input.processId,
+          input.startAnyway ? { startAnyway: true } : {}
+        )
       } catch (err) {
-        // A survivor refuses the restart: a precondition the user can act on (Stop).
-        if (err instanceof OldRunSurvivesError) {
+        // A survivor (Stop it) or an offline computer (wait, or start anyway) refuses
+        // the restart: a precondition the user can act on.
+        if (err instanceof OldRunSurvivesError || err instanceof OldRunUnreachableError) {
           throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message })
         }
         throw err

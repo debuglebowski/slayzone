@@ -2,6 +2,7 @@ import type { Express, Response } from 'express'
 import type { ProcessStartResult, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 import { refusedHubProcesses } from '../switch-refusal'
+import { OLD_RUN_UNREACHABLE_MESSAGE } from '@slayzone/processes/shared'
 
 /** A refused start/restart, as HTTP: unknown id 404, a running row 409 (use
  *  restart), the app going down 503. */
@@ -10,7 +11,8 @@ const REFUSAL_STATUS = {
   'already-running': 409,
   'shutting-down': 503,
   'no-computer': 503,
-  'old-run-survives': 409
+  'old-run-survives': 409,
+  'old-run-unreachable': 409
 } as const
 const REFUSAL_MESSAGE = {
   'not-found': 'Process not found',
@@ -18,7 +20,9 @@ const REFUSAL_MESSAGE = {
   'shutting-down': 'The app is shutting down',
   'no-computer': 'No computer is connected to run this process. Connect a computer.',
   'old-run-survives':
-    'The previous run is still alive on its computer (it outlived SIGKILL) — stop it first'
+    'The previous run is still alive on its computer (it outlived SIGKILL) — stop it first',
+  // Not a survivor: its computer is offline (G3).
+  'old-run-unreachable': OLD_RUN_UNREACHABLE_MESSAGE
 } as const
 
 function answerStart(res: Response, id: string, result: ProcessStartResult): void {

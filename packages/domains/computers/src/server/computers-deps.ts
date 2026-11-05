@@ -61,6 +61,11 @@ export type ComputersDeps = {
    * with login, where a mint without it fails rather than guessing an owner.
    */
   findAccount?: FindJoinTokenAccount
+  /**
+   * A computer was deleted or revoked: it never reconnects, so whatever waited for it
+   * (a process run it kept) is let go. Absent: nothing to tell.
+   */
+  onComputerRemoved?: (computerId: string) => void
 }
 
 let computersDeps: ComputersDeps | null = null

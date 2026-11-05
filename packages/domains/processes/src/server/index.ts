@@ -21,7 +21,10 @@ export {
   processesComputerConnected,
   isAdoptedOnComputer,
   restartProcessForUi,
-  OldRunSurvivesError
+  OldRunSurvivesError,
+  OldRunUnreachableError,
+  processesComputerRemoved,
+  setProcessComputerReachability
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
@@ -30,7 +33,8 @@ export type {
   ProcessComputerResolver,
   PidStats,
   StartProcessRefusal,
-  StartProcessResult
+  StartProcessResult,
+  StartOptions
 } from './process-manager'
 export { createDbProcessPersistence } from './process-persistence'
 export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'

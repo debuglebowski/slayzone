@@ -31,7 +31,7 @@ export type ProcessesDeps = {
   stop: (processId: string) => boolean | Promise<boolean>
   /** Delete the row; its run's tree is terminated. */
   remove: (processId: string) => boolean | Promise<boolean>
-  restart: (processId: string) => boolean | Promise<boolean>
+  restart: (processId: string, opts?: { startAnyway?: boolean }) => boolean | Promise<boolean>
   listForTask: (taskId: string | null, projectId: string | null) => ProcessInfo[]
   listAll: () => ProcessInfo[]
   /** `remove` every task-scoped row of `taskId`. */

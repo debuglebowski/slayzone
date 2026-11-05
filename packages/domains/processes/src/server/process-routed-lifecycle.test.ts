@@ -4,14 +4,16 @@
  * answer "connect a computer" and never start a child of this process.
  */
 import { execFileSync } from 'node:child_process'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
 import {
   initProcessManagerWith,
   isAdoptedOnComputer,
   listAllProcesses,
   processesComputerConnected,
+  processesComputerRemoved,
   restartProcessDetailed,
   restartProcessForUi,
+  setProcessComputerReachability,
   setProcessComputerResolver,
   spawnProcess,
   startProcess,
@@ -277,5 +279,117 @@ describe('adopted runs are reported to the reconnect sweep', () => {
     expect(isAdoptedOnComputer('c9', keptId)).toBe(true)
     expect(isAdoptedOnComputer('c1', keptId)).toBe(false)
     expect(isAdoptedOnComputer('c9', 'other')).toBe(false)
+  })
+})
+
+// Round-4 G3: a run kept on a computer that is merely OFFLINE (or removed) is not a
+// SIGKILL survivor. Start / Stop / Restart must not blame one, and must not wedge the
+// row until that computer returns or the hub restarts.
+describe("G3: the old run's computer is unreachable", () => {
+  const online = new Set<string>()
+  const killed: Array<{ computerId: string; id: string }> = []
+  let spawned: string[] = []
+  let target = 'cK'
+  let held: string[] = []
+  const backend: ProcessBackend = {
+    spawn(spec): ProcHandle {
+      spawned.push(spec.computerId ?? '?')
+      return {
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: async () => true
+      }
+    },
+    killSession: async (computerId, id) => {
+      if (!online.has(computerId)) throw new Error(`unknown computer '${computerId}'`)
+      killed.push({ computerId, id })
+    },
+    listSessions: async (computerId) =>
+      computerId === 'cK' ? held.map((sessionId) => ({ sessionId, pid: 4242 })) : []
+  }
+  const log = (id: string) => status(id)?.logBuffer.join('\n') ?? ''
+  /** A row whose run cK kept from before the hub restarted (adopted, orphaned). */
+  async function keptOnK(): Promise<string> {
+    online.add('cK')
+    setProcessComputerResolver(async () => null)
+    const id = await spawnProcess('p', null, `kept-${Math.random()}`, 'pnpm dev', '/tmp', false)
+    held = [id]
+    await processesComputerConnected('cK')
+    expect(status(id)?.status).toBe('orphaned')
+    online.delete('cK') // ...and now cK is offline
+    setProcessComputerResolver(async () => target)
+    spawned = []
+    killed.length = 0
+    return id
+  }
+
+  beforeAll(() => {
+    setProcessBackend(backend)
+    setProcessComputerReachability((computerId) => online.has(computerId))
+  })
+  afterAll(() => setProcessComputerReachability(null))
+
+  test('Start, task still on that computer: refused as unreachable, waits, then runs', async () => {
+    target = 'cK'
+    const id = await keptOnK()
+    expect(await startProcess(id)).toEqual({ ok: false, reason: 'old-run-unreachable' })
+    expect(spawned).toEqual([])
+    expect(log(id)).toMatch(/offline/)
+    expect(log(id)).not.toMatch(/still alive|SIGKILL/)
+    expect(status(id)?.status).toBe('orphaned')
+    // cK returns still holding the old run: it is ended there, then the new one starts.
+    online.add('cK')
+    await processesComputerConnected('cK')
+    await vi.waitFor(() => expect(spawned).toEqual(['cK']))
+    expect(killed).toEqual([{ computerId: 'cK', id }])
+  })
+
+  test('Start, the task now runs elsewhere: starts there; the old run ends when cK returns', async () => {
+    target = 'c2'
+    online.add('c2')
+    const id = await keptOnK()
+    expect(await startProcess(id)).toMatchObject({ ok: true })
+    expect(spawned).toEqual(['c2'])
+    expect(status(id)?.status).toBe('running')
+    online.add('cK')
+    await processesComputerConnected('cK')
+    await vi.waitFor(() => expect(killed).toEqual([{ computerId: 'cK', id }]))
+    expect(status(id)?.status, 'its live run on c2 is untouched').toBe('running')
+  })
+
+  test('Stop: remembered; the run is ended when its computer returns', async () => {
+    const id = await keptOnK()
+    expect(await stopProcess(id)).toBe(true)
+    expect(status(id)?.status).toBe('orphaned')
+    expect(log(id)).toMatch(/offline/)
+    expect(log(id)).not.toMatch(/could not end/)
+    online.add('cK')
+    await processesComputerConnected('cK')
+    await vi.waitFor(() => expect(status(id)?.status).toBe('stopped'))
+    expect(killed).toEqual([{ computerId: 'cK', id }])
+    expect(spawned).toEqual([])
+  })
+
+  test('the UI restart says the computer is offline, and Start anyway starts', async () => {
+    target = 'c2'
+    online.add('c2')
+    const id = await keptOnK()
+    target = 'cK' // ...the task is still bound to the offline computer
+    await expect(restartProcessForUi(id)).rejects.toThrow(/offline/)
+    target = 'c2' // the user moved it, then chose "Start anyway"
+    expect(await restartProcessForUi(id, { startAnyway: true })).toBe(true)
+    expect(spawned).toEqual(['c2'])
+  })
+
+  test('a removed computer: its kept run is forgotten, Start runs freely', async () => {
+    target = 'c2'
+    online.add('c2')
+    const id = await keptOnK()
+    processesComputerRemoved('cK')
+    expect(status(id)?.status).toBe('stopped')
+    expect(await startProcess(id)).toMatchObject({ ok: true })
+    expect(spawned).toEqual(['c2'])
+    expect(killed).toEqual([])
   })
 })
