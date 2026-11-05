@@ -811,22 +811,23 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // A direct-link target is a computer target (its task, and computer when named) plus
   // the one session or chat tab in it, by `target.kind`. The issuer refuses a resource
   // outside the task.
-  'computers.issueDirectLink': checked(...TARGET, {
-    pick: (raw) => {
-      const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
-      const r =
-        t?.kind === 'pty'
-          ? res('session', t.sessionId)
-          : t?.kind === 'chat'
-            ? res('tab', t.tabId)
-            : null
-      return r ? [r] : []
-    },
-    sample: {
-      kind: 'session',
-      input: (id) => ({ target: { kind: 'pty', sessionId: id, taskId: 'sample-task' } })
-    }
-  }),
+  'computers.issueDirectLink': {
+    ...checked(...TARGET, {
+      pick: (raw) => {
+        const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
+        const r =
+          t?.kind === 'pty'
+            ? res('session', t.sessionId)
+            : t?.kind === 'chat'
+              ? res('tab', t.tabId)
+              : null
+        return r ? [r] : []
+      },
+      sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
+    }),
+    // The task the resource lies in (the issuer refuses one outside it).
+    needsOne: ['target.taskId']
+  },
   'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
