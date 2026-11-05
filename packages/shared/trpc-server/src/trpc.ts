@@ -1,5 +1,4 @@
 import { initTRPC, TRPCError } from '@trpc/server'
-import { isObservable, observable } from '@trpc/server/observable'
 import {
   peerAddress,
   runWithSecurityContext,
@@ -75,18 +74,20 @@ const securityContext = t.middleware(async ({ ctx, next, path, type }) => {
  * body starts from there inherits it (AsyncLocalStorage follows promises).
  */
 function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
-  if (isObservable(data)) {
-    const inner = data
-    return observable<unknown, unknown>((emit) => {
-      const sub = runWithSecurityContext(sc, () =>
-        inner.subscribe({
-          next: (v) => emit.next(v),
-          error: (e) => emit.error(e),
-          complete: () => emit.complete()
-        })
-      )
-      return () => sub.unsubscribe()
-    })
+  // An observable is what tRPC itself takes for one (`isObservable`): an object with
+  // `subscribe`. Recognised and rebuilt here without `@trpc/server/observable`, whose
+  // second module copy upset unrelated module graphs in tests (the xterm addon's
+  // data inflate failed after it loaded).
+  if (typeof data === 'object' && data !== null && 'subscribe' in data) {
+    const inner = data as {
+      subscribe: (observer: unknown) => { unsubscribe: () => void }
+    }
+    type Op = (prev: unknown) => unknown
+    const wrapped = {
+      subscribe: (observer: unknown) => runWithSecurityContext(sc, () => inner.subscribe(observer)),
+      pipe: (...ops: Op[]): unknown => ops.reduce((prev: unknown, op) => op(prev), wrapped)
+    }
+    return wrapped
   }
   if (data && typeof (data as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function') {
     const inner = data as AsyncIterable<unknown>
