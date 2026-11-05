@@ -317,6 +317,8 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90',
     // Inherited, the hub would start GitHub sign-in against someone else's host (T-99).
     SLAYZONE_HUB_CONVEX_ADDRESS: 'metadata.internal',
+    // Inherited, the desktop's hub would hand every WebRTC peer someone else's STUN server.
+    SLAYZONE_HUB_STUN_ADDRESSES: 'stun.elsewhere.example:3478',
     // Inherited, a shared hub's telemetry opt-out would silently switch off the desktop's.
     SLAYZONE_HUB_ENABLE_TELEMETRY: '0'
   }
