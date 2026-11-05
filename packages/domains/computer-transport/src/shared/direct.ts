@@ -16,6 +16,7 @@
  * @module computer/shared/direct
  */
 import { z } from 'zod'
+import { isBareAuthority } from '@slayzone/platform/hub-addr'
 
 /** Wire version of the client ↔ computer direct protocol (path segment + issue result). */
 export const DIRECT_LINK_PROTOCOL = 1
@@ -112,3 +113,35 @@ export type DirectResetResult = z.infer<typeof directResetResultSchema>
  * `null` = no direct listener.
  */
 export const directAddressSchema = z.string().min(1).max(300).nullable()
+
+// ── WebRTC (remote computers without a reachable listener) ─────────────────────
+//
+// The hub brokers ONE offer/answer per peer connection over the links it already
+// has (the client's tRPC socket, the computer's authed wss), bound to a grant it
+// registered. The data channel then carries the same direct protocol as the
+// WebSocket listener, and its first frame still presents the capability.
+
+/** Label of the data channel the direct protocol runs on. */
+export const DIRECT_RTC_CHANNEL_LABEL = 'slayzone-direct-v1'
+
+/** Largest SDP accepted either way (a complete, non-trickle description). */
+export const DIRECT_RTC_MAX_SDP = 64 * 1024
+
+/** STUN servers handed to both peers: authorities (`host:port`), never URLs. */
+export const directStunAddressesSchema = z
+  .array(z.string().min(1).max(300).refine(isBareAuthority, 'a bare host:port authority'))
+  .max(8)
+
+/** `direct.rtcOffer` params: answer the client's offer for a grant this hub registered. */
+export const directRtcOfferParamsSchema = z.object({
+  grantId: idField,
+  sdp: z.string().min(1).max(DIRECT_RTC_MAX_SDP),
+  stunAddresses: directStunAddressesSchema
+})
+export type DirectRtcOfferParams = z.infer<typeof directRtcOfferParamsSchema>
+
+/** The computer's complete answer (candidates gathered in). */
+export const directRtcAnswerSchema = z.object({
+  sdp: z.string().min(1).max(DIRECT_RTC_MAX_SDP)
+})
+export type DirectRtcAnswer = z.infer<typeof directRtcAnswerSchema>

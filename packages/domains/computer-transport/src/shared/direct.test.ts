@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DIRECT_RTC_CHANNEL_LABEL,
+  DIRECT_RTC_MAX_SDP,
+  directRtcAnswerSchema,
+  directRtcOfferParamsSchema,
   DIRECT_GRANT_MAX_TTL_MS,
   directGrantParamsSchema,
   directRevokeParamsSchema,
@@ -62,5 +66,34 @@ describe('direct-link grant frames', () => {
   it('resets to an explicit keep list', () => {
     expect(directResetParamsSchema.safeParse({ keep: [] }).success).toBe(true)
     expect(directResetParamsSchema.safeParse({}).success).toBe(false)
+  })
+})
+
+// M5: WebRTC for remote computers (docs/direct-link.md). The hub brokers one SDP
+// offer/answer per peer, bound to a grant it registered.
+describe('direct.rtcOffer', () => {
+  const sdp = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n'
+  it('is a hub → computer method', () => {
+    expect(HubToComputerMethods.directRtcOffer).toBe('direct.rtcOffer')
+  })
+
+  it('carries a grant id, an SDP offer and STUN authorities (never URLs)', () => {
+    const ok = { grantId: 'g', sdp, stunAddresses: ['stun.cloudflare.com:3478'] }
+    expect(directRtcOfferParamsSchema.safeParse(ok).success).toBe(true)
+    expect(
+      directRtcOfferParamsSchema.safeParse({ ...ok, stunAddresses: ['stun:x:1'] }).success
+    ).toBe(false)
+    expect(
+      directRtcOfferParamsSchema.safeParse({ ...ok, stunAddresses: Array(9).fill('a:1') }).success
+    ).toBe(false)
+    expect(
+      directRtcOfferParamsSchema.safeParse({ ...ok, sdp: 'x'.repeat(DIRECT_RTC_MAX_SDP + 1) })
+        .success
+    ).toBe(false)
+    expect(directRtcAnswerSchema.safeParse({ sdp }).success).toBe(true)
+  })
+
+  it('names the data channel the direct protocol runs on', () => {
+    expect(DIRECT_RTC_CHANNEL_LABEL).toBe('slayzone-direct-v1')
   })
 })

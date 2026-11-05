@@ -45,7 +45,7 @@ function setup(ip: string) {
   return { gateway, connect }
 }
 
-function enrollFrame(directAddress?: string | null) {
+function enrollFrame(directAddress?: string | null, directRtc?: boolean) {
   return {
     id: 1,
     method: 'enroll',
@@ -56,7 +56,8 @@ function enrollFrame(directAddress?: string | null) {
       version: '0.0.0',
       capabilities: [],
       protocolVersion: COMPUTER_PROTOCOL_VERSION,
-      ...(directAddress !== undefined ? { directAddress } : {})
+      ...(directAddress !== undefined ? { directAddress } : {}),
+      ...(directRtc !== undefined ? { directRtc } : {})
     }
   }
 }
@@ -112,6 +113,20 @@ describe('protocol v8: direct-link address', () => {
       await flush()
       expect(ws.response(1)?.result).toBeTruthy()
       expect(gateway.listComputers()[0]?.directAddress).toBeNull()
+      gateway.close()
+    }
+  })
+
+  it('keeps whether the computer answers WebRTC offers (absent = no)', async () => {
+    for (const [advertised, kept] of [
+      [true, true],
+      [false, false],
+      [undefined, false]
+    ] as const) {
+      const { gateway, connect } = setup('203.0.113.9')
+      connect().frame(enrollFrame(null, advertised))
+      await flush()
+      expect(gateway.listComputers()[0]?.directRtc).toBe(kept)
       gateway.close()
     }
   })

@@ -623,6 +623,7 @@ describe('createRoutingPtyBackend', () => {
         authMode: 'hello',
         directAddress: null,
         peerLoopback: false,
+        directRtc: false,
         connectedAt: 0,
         lastSeenAt: 0,
         ...(epoch === undefined ? {} : { epoch })
@@ -1747,6 +1748,7 @@ describe('createRoutingProcessBackend', () => {
         authMode: 'hello',
         directAddress: null,
         peerLoopback: false,
+        directRtc: false,
         connectedAt: 0,
         lastSeenAt: 0,
         ...(epoch === undefined ? {} : { epoch })
@@ -2616,6 +2618,7 @@ describe('createRemoteFsAdapters — watch', () => {
     authMode: 'hello',
     directAddress: null,
     peerLoopback: false,
+    directRtc: false,
     connectedAt: 0,
     lastSeenAt: 0
   })

@@ -92,6 +92,8 @@ export interface ComputerDescriptor {
   directAddress: string | null
   /** Whether this computer's link to the hub comes from a loopback peer (same machine). */
   peerLoopback: boolean
+  /** v8: whether it answers WebRTC offers (`direct.rtcOffer`), from this connection's frame. */
+  directRtc: boolean
   connectedAt: number
   lastSeenAt: number
 }
@@ -713,6 +715,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
+      directRtc: parsed.data.directRtc === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -875,6 +878,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
+      directRtc: parsed.data.directRtc === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

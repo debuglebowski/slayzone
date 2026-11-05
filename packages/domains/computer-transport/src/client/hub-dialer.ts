@@ -56,6 +56,8 @@ export interface ComputerIdentity {
    * dialer was built is still advertised. Absent/null = no direct listener.
    */
   directAddress?: () => string | null
+  /** v8: whether this computer answers WebRTC offers; read at send time. Absent = no. */
+  directRtc?: () => boolean
 }
 
 export type HubDialerEvents = {
@@ -323,7 +325,8 @@ export class HubDialer {
       connectorGeneration: this.opts.connectorGeneration,
       epoch: this.epoch,
       ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
-      directAddress: this.opts.identity.directAddress?.() ?? null
+      directAddress: this.opts.identity.directAddress?.() ?? null,
+      directRtc: this.opts.identity.directRtc?.() ?? false
     })
     return enrollResultSchema.parse(raw)
   }
@@ -365,7 +368,8 @@ export class HubDialer {
             // Reconnect is the ONLY moment the hub can learn that this computer
             // adopted a peer's host id while it was offline.
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
-            directAddress: this.opts.identity.directAddress?.() ?? null
+            directAddress: this.opts.identity.directAddress?.() ?? null,
+            directRtc: this.opts.identity.directRtc?.() ?? false
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

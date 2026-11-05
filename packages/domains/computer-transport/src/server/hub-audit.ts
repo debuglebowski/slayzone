@@ -217,7 +217,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   // duplicate them. Params carry a token HASH, never the token.
   'direct.grant': null,
   'direct.revoke': null,
-  'direct.reset': null
+  'direct.reset': null,
+  // The hub writes `computer.direct_rtc_signal` itself (it knows the caller).
+  'direct.rtcOffer': null
 }
 
 /** The audit event for a hub → computer call, or null when the method is not audited. */

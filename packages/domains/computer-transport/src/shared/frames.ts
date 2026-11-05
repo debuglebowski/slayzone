@@ -202,7 +202,9 @@ export const enrollParamsSchema = z.object({
   epoch: epochField,
   hostId: hostIdField,
   /** v8: the direct listener's advertised authority; absent/null = none. */
-  directAddress: directAddressSchema.optional()
+  directAddress: directAddressSchema.optional(),
+  /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
+  directRtc: z.boolean().optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -230,7 +232,9 @@ export const helloParamsSchema = z.object({
    */
   protocolVersion: z.number().int().positive().optional(),
   /** v8: the direct listener's advertised authority; absent/null = none. */
-  directAddress: directAddressSchema.optional()
+  directAddress: directAddressSchema.optional(),
+  /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
+  directRtc: z.boolean().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -664,7 +668,9 @@ export const HubToComputerMethods = {
   /** Drop capabilities now (user disabled, computer revoked, task gone, epoch moved). */
   directRevoke: 'direct.revoke',
   /** After every (re)connect: keep only the grants the hub still holds. */
-  directReset: 'direct.reset'
+  directReset: 'direct.reset',
+  /** Answer a client's WebRTC offer for a registered grant (remote computers). */
+  directRtcOffer: 'direct.rtcOffer'
 } as const
 
 /** Reserved method namespaces for future hub → computer exec commands. */
