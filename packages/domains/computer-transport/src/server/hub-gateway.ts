@@ -329,6 +329,24 @@ interface ComputerConnection {
   closed: boolean
 }
 
+/**
+ * The computer does not know a method the hub asked for: a standalone computer's old
+ * session host survived its update (it is replaced only once nothing runs on it),
+ * and dispatches to its older handler table. Not a malfunction — an update still
+ * pending — so it says that, and keeps the JSON-RPC code for callers that check it.
+ */
+export class ComputerUpdatePendingError extends RpcError {
+  constructor(readonly method: string) {
+    super(
+      JSON_RPC_METHOD_NOT_FOUND,
+      `This computer's SlayZone is older than this hub and cannot do this yet (${method}). ` +
+        'It updates once the work running on it finishes — stop its agents and processes, ' +
+        'or restart the computer.'
+    )
+    this.name = 'ComputerUpdatePendingError'
+  }
+}
+
 export function createHubComputerGateway(options: HubComputerGatewayOptions): HubComputerGateway {
   const claimedGenerations = new Map<string, number>()
   // Run after every awaited credential/storage check, immediately before attach.
@@ -1089,11 +1107,17 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           throw new Error('Computer connection changed before command delivery')
         return conn.rpc.request<T>(method, params, timeoutMs, actor)
       }
-      const sent = options.beforeRequest
-        ? Promise.resolve()
-            .then(() => options.beforeRequest!(computerId, method, params))
-            .then(send)
-        : conn.rpc.request<T>(method, params, timeoutMs, actor)
+      const sent = (
+        options.beforeRequest
+          ? Promise.resolve()
+              .then(() => options.beforeRequest!(computerId, method, params))
+              .then(send)
+          : conn.rpc.request<T>(method, params, timeoutMs, actor)
+      ).catch((err: unknown) => {
+        if (err instanceof RpcError && err.code === JSON_RPC_METHOD_NOT_FOUND)
+          throw new ComputerUpdatePendingError(method)
+        throw err
+      })
       if (!audited) {
         // An unaudited method (a read, a probe) still leaves a line when the computer
         // REFUSES it by its own policy (T-27) — a jail refusal is worth seeing.

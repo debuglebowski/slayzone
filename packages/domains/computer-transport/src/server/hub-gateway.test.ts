@@ -12,7 +12,13 @@ import {
 import { createMemoryCredentialStore } from '../client/credential-store'
 import { HubDialer, type HubDialerOptions } from '../client/hub-dialer'
 import { ComputerTransportErrorCodes } from '../shared/frames'
-import { JSON_RPC_INTERNAL_ERROR, RpcError, RpcTimeoutError } from '../shared/rpc'
+import {
+  JSON_RPC_INTERNAL_ERROR,
+  JSON_RPC_METHOD_NOT_FOUND,
+  RpcError,
+  RpcTimeoutError
+} from '../shared/rpc'
+import { ComputerUpdatePendingError } from './hub-gateway'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 
 const IDENTITY = {
@@ -264,6 +270,32 @@ describe('hub → computer requests', () => {
     )
     expect(err).toBeInstanceOf(RpcError)
     expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
+  })
+
+  // A standalone computer whose old session host survived its update (it is only
+  // replaced once idle) answers the newer methods — git.op, exec.run, usage.collect …
+  // — with JSON-RPC "method not found". Shown as is, the git panel and processes
+  // fail with a raw protocol error; it is an update still pending.
+  it("a method the computer's host predates: a clear update-pending error", async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: (method) => {
+        throw new RpcError(JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`)
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'git.op', { op: 'getStatusSummary' }).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as RpcError).code, 'still detectable as method-not-found').toBe(
+      JSON_RPC_METHOD_NOT_FOUND
+    )
+    expect((err as Error).message).toMatch(/update/i)
+    expect((err as Error).message).toMatch(/git\.op/)
+    expect((err as Error).message).not.toMatch(/^Method not found/)
   })
 
   it('requests time out when the computer never answers', async () => {
