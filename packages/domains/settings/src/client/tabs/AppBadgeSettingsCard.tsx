@@ -105,19 +105,6 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
           </div>
         ))}
         <div className={ROW}>
-          <span className="text-sm">Show as</span>
-          <Select value={state.style} onValueChange={(v) => setStyle(v as AppBadgeStyle)}>
-            <SelectTrigger className="w-48" disabled={off}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" side="bottom">
-              <SelectItem value="count">Total count</SelectItem>
-              <SelectItem value="separate">One number per status</SelectItem>
-              <SelectItem value="dot">Dot only</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className={ROW}>
           <span className="text-sm">Only tasks open in tabs</span>
           <Switch
             checked={state.openTabsOnly}
@@ -162,6 +149,19 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
             </div>
           </div>
         )}
+        <div className={ROW}>
+          <span className="text-sm">Show as</span>
+          <Select value={state.style} onValueChange={(v) => setStyle(v as AppBadgeStyle)}>
+            <SelectTrigger className="w-48" disabled={off}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" side="bottom">
+              <SelectItem value="count">Total count</SelectItem>
+              <SelectItem value="separate">One number per status</SelectItem>
+              <SelectItem value="dot">Dot only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </CardContent>
     </Card>
   )
