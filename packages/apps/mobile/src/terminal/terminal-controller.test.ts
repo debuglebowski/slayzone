@@ -94,7 +94,9 @@ describe('TerminalController: direct link', () => {
     )
     c.setDirect(directClient({ refuseWrites: true }).client as never)
     await c.write('x')
-    expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'x' }]])
+    expect(hub.calls).toEqual([
+      ['hub.write', { sessionId: 's', data: 'x', writeId: expect.any(String) }]
+    ])
     c.dispose()
   })
 
@@ -120,7 +122,9 @@ describe('TerminalController: direct link', () => {
       const written = c.write('k')
       await jest.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
       await written
-      expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'k' }]])
+      expect(hub.calls).toEqual([
+        ['hub.write', { sessionId: 's', data: 'k', writeId: expect.any(String) }]
+      ])
       expect(lost).toBe(1)
 
       const closed = {
@@ -136,8 +140,56 @@ describe('TerminalController: direct link', () => {
         lost++
       })
       await c.write('j')
-      expect(hub.calls.at(-1)).toEqual(['hub.write', { sessionId: 's', data: 'j' }])
+      expect(hub.calls.at(-1)).toEqual([
+        'hub.write',
+        { sessionId: 's', data: 'j', writeId: expect.any(String) }
+      ])
       expect(lost).toBe(2)
+      c.dispose()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // R1: a late direct write is also sent through the hub — with the same id, so the
+  // computer applies it once.
+  it('a late direct write and its hub retry carry one id', async () => {
+    jest.useFakeTimers()
+    try {
+      const ids: Array<[string, string | undefined]> = []
+      const hub = {
+        pty: {
+          write: {
+            mutate: async (input: { writeId?: string }) => {
+              ids.push(['hub', input.writeId])
+              return true
+            }
+          }
+        }
+      }
+      const c = new TerminalController(
+        's',
+        hub as never,
+        () => undefined,
+        (run) => run()
+      )
+      const late = {
+        pty: {
+          write: {
+            mutate: (input: { writeId?: string }) => {
+              ids.push(['direct', input.writeId])
+              return new Promise(() => undefined)
+            }
+          }
+        }
+      }
+      c.setDirect(late as never, () => undefined)
+      const written = c.write('\r')
+      await jest.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
+      await written
+      expect(ids.map(([path]) => path)).toEqual(['direct', 'hub'])
+      expect(typeof ids[0]?.[1]).toBe('string')
+      expect(ids[1]?.[1]).toBe(ids[0]?.[1])
       c.dispose()
     } finally {
       jest.useRealTimers()

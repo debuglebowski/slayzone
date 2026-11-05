@@ -138,6 +138,11 @@ export interface PtySignal {
 export interface PtyWriteOptions {
   /** This write submits the session-id command (`/status`): watch for an id. */
   watchConversationId?: true
+  /**
+   * A client's write id (docs/direct-link.md): the computer applies it once and
+   * reports its input facts itself. Only for a routed handle (`computerId`).
+   */
+  writeId?: string
 }
 
 /** See {@link PtySpawnSpec.admission}. */

@@ -1325,6 +1325,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           sessionId,
           ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
           data,
+          ...(opts?.writeId !== undefined ? { writeId: opts.writeId } : {}),
           ...(opts?.watchConversationId && entry.detectsOutput
             ? { watchConversationId: true as const }
             : {})

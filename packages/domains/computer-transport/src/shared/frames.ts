@@ -930,6 +930,13 @@ export const ptyWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: spawnIdField,
   data: z.string(),
+  /**
+   * A client's id for this write (docs/direct-link.md). The computer applies an id
+   * once, whichever path brought it (a direct write that was late is also sent
+   * through the hub), and reports its input facts itself (`pty-input`), as for a
+   * direct write. Absent (an older client, or the hub's own writes): written as is.
+   */
+  writeId: z.string().min(1).max(100).optional(),
   /** This write submits the mode's session-id command (`/status`): watch the output
    *  for a conversation id. Ignored for a session without detection. */
   watchConversationId: z.literal(true).optional()

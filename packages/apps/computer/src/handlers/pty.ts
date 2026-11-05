@@ -132,7 +132,7 @@ export interface DirectPtyService {
    * effects (attention, turn tracking, running) match a write it relayed. False
    * when there is no live session.
    */
-  write(sessionId: string, data: string): boolean
+  write(sessionId: string, data: string, writeId?: string): boolean
   /** Stream a live session's output; null when there is none. Returns unsubscribe. */
   watch(
     sessionId: string,
@@ -141,9 +141,14 @@ export interface DirectPtyService {
   ): (() => void) | null
 }
 
+/** How many recent client write ids a session remembers (a retry follows within seconds). */
+const CLIENT_WRITE_ID_WINDOW = 1024
+
 interface PtySession {
-  /** What direct writes typed since their last submit (see `analyzePtyInput`). */
+  /** What client writes typed since their last submit (see `analyzePtyInput`). */
   directInput: string
+  /** Recent client write ids, oldest first (see `applyClientWrite`). */
+  clientWriteIds: Set<string>
   /** Direct-link clients streaming this session; independent of {@link relay}. */
   directWatchers: Set<DirectWatcher>
   /**
@@ -208,7 +213,8 @@ interface QueuedSpawn {
   ticket: AdmissionTicket
   cols?: number
   rows?: number
-  writes: string[]
+  /** Input that arrived while this waited; a client's carries its id (see `applyClientWrite`). */
+  writes: Array<{ data: string; writeId?: string }>
   /** A queued write submitted `/status`: watch for a conversation id once started. */
   watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
@@ -470,6 +476,7 @@ export function createPtyHandlers(
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
       directInput: '',
+      clientWriteIds: new Set(),
       directWatchers: new Set(),
       revokeCli: capability?.revoke,
       proc,
@@ -877,7 +884,10 @@ export function createPtyHandlers(
       session.admissionSlot = slot
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) {
+        if (w.writeId !== undefined) applyClientWrite(session, w.data, w.writeId)
+        else session.proc.write(w.data)
+      }
       if (item.watchConversationId) session.signals?.watchConversationId()
       return reply
     })
@@ -918,7 +928,7 @@ export function createPtyHandlers(
     return enqueueSpawn(params.warmId, 'warm', params, (slot, item) => {
       const session = startWarm(params, item.cols, item.rows)
       session.admissionSlot = slot
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) session.proc.write(w.data)
       return { pid: session.proc.pid }
     })
   }
@@ -1170,13 +1180,58 @@ export function createPtyHandlers(
     return { ok: true }
   }
 
+  /**
+   * A client's keystrokes, from the direct link or relayed by the hub with its id
+   * (docs/direct-link.md). An id already applied is dropped: a direct write that was
+   * late is also sent through the hub, and must land once. The input facts (submit,
+   * Esc, `/status`) are reported to the hub from here, once, for either path.
+   */
+  function applyClientWrite(session: PtySession, data: string, writeId?: string): void {
+    if (writeId !== undefined) {
+      if (session.clientWriteIds.has(writeId)) return
+      session.clientWriteIds.add(writeId)
+      // A bounded window: a retry follows its original within seconds.
+      if (session.clientWriteIds.size > CLIENT_WRITE_ID_WINDOW) {
+        const oldest = session.clientWriteIds.values().next().value
+        if (oldest !== undefined) session.clientWriteIds.delete(oldest)
+      }
+    }
+    const { buffer, facts } = analyzePtyInput(
+      session.directInput,
+      data,
+      session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
+    )
+    session.directInput = buffer
+    session.proc.write(data)
+    // What a relayed write tells this computer with `watchConversationId`.
+    if (facts.statusCommand) session.signals?.watchConversationId()
+    if (facts.esc || facts.submitted !== null) {
+      const payload: PtyInputPayload = {
+        sessionId: session.id,
+        ...(session.spawnId ? { spawnId: session.spawnId } : {}),
+        submitted: facts.submitted,
+        esc: facts.esc,
+        statusCommand: facts.statusCommand
+      }
+      ctx.dialer.notify(ComputerNotificationMethods.event, {
+        name: PTY_INPUT_EVENT_NAME,
+        payload
+      })
+    }
+  }
+
   function write(rawParams: unknown): { ok: true } {
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
       // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
-      waiting.writes.push(params.data)
+      if (params.writeId !== undefined && waiting.writes.some((w) => w.writeId === params.writeId))
+        return { ok: true }
+      waiting.writes.push({
+        data: params.data,
+        ...(params.writeId !== undefined ? { writeId: params.writeId } : {})
+      })
       if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
@@ -1185,6 +1240,11 @@ export function createPtyHandlers(
       return { ok: true }
     if (!session) {
       ctx.log('pty write on unknown session', { sessionId: params.sessionId })
+      return { ok: true }
+    }
+    if (params.writeId !== undefined) {
+      // A client's write relayed by the hub: once, with its facts reported from here.
+      applyClientWrite(session, params.data, params.writeId)
       return { ok: true }
     }
     session.proc.write(params.data)
@@ -1368,31 +1428,10 @@ export function createPtyHandlers(
         afterSeq
       )
     },
-    write(sessionId, data) {
+    write(sessionId, data, writeId) {
       const session = sessions.get(sessionId)
       if (!session || session.warm) return false
-      const { buffer, facts } = analyzePtyInput(
-        session.directInput,
-        data,
-        session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
-      )
-      session.directInput = buffer
-      session.proc.write(data)
-      // What a relayed write tells this computer with `watchConversationId`.
-      if (facts.statusCommand) session.signals?.watchConversationId()
-      if (facts.esc || facts.submitted !== null) {
-        const payload: PtyInputPayload = {
-          sessionId: session.id,
-          ...(session.spawnId ? { spawnId: session.spawnId } : {}),
-          submitted: facts.submitted,
-          esc: facts.esc,
-          statusCommand: facts.statusCommand
-        }
-        ctx.dialer.notify(ComputerNotificationMethods.event, {
-          name: PTY_INPUT_EVENT_NAME,
-          payload
-        })
-      }
+      applyClientWrite(session, data, writeId)
       return true
     },
     watch(sessionId, onData, onEnd) {

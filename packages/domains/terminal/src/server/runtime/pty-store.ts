@@ -381,7 +381,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   }
 
   const ptyTestExecutionContext = (context: ExecutionContext) => testExecutionContext(context)
-  const ptyWrite = (sessionId: string, data: string) => writePty(sessionId, data)
+  const ptyWrite = (sessionId: string, data: string, writeId?: string) =>
+    writePty(sessionId, data, writeId)
   const ptySubmit = (sessionId: string, text: string) => submitPty(sessionId, text)
   const ptyResize = (sessionId: string, cols: number, rows: number) =>
     resizePty(sessionId, cols, rows)

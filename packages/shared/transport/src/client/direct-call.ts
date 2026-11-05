@@ -53,3 +53,22 @@ export function directCallFailure(err: unknown): 'refused' | 'transport' | 'answ
   if (code === 'FORBIDDEN' || code === 'UNAUTHORIZED') return 'refused'
   return code === undefined ? 'transport' : 'answered'
 }
+
+const writeIdPrefix = (() => {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (typeof c?.randomUUID === 'function') return c.randomUUID()
+  // React Native (Hermes) and insecure contexts: a per-process random prefix.
+  return `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+})()
+let writeIdCounter = 0
+
+/**
+ * A fresh id for one client terminal write (docs/direct-link.md). The computer
+ * applies an id once, whichever path brought it, so a write retried through the hub
+ * after a late direct answer is not typed twice. Unique per process: a random prefix
+ * and a counter.
+ */
+export function newDirectWriteId(): string {
+  writeIdCounter += 1
+  return `${writeIdPrefix}-${writeIdCounter}`
+}

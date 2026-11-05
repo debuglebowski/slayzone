@@ -46,6 +46,7 @@ export {
   DIRECT_CALL_DEADLINE_MS,
   DirectDeadlineError,
   directCallFailure,
+  newDirectWriteId,
   withDirectDeadline
 } from './direct-call'
 

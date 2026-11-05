@@ -13,7 +13,12 @@
  *   did not land directly (grant ended, socket closed, no answer in time) goes to the
  *   hub, and a transport failure drops the link.
  */
-import { directCallFailure, withDirectDeadline, type DirectLease } from '@slayzone/transport/client'
+import {
+  directCallFailure,
+  newDirectWriteId,
+  withDirectDeadline,
+  type DirectLease
+} from '@slayzone/transport/client'
 import type { HubClient } from '../hub-board'
 import { createDomSink, type DomTerminal } from './dom-sink'
 import { type FeedClient, type FeedStatus, TerminalFeed } from './terminal-feed'
@@ -92,9 +97,12 @@ export class TerminalController {
 
   /** Keystrokes: direct while there is a link, else the hub (see `viaDirect`). */
   write(data: string): Promise<unknown> {
+    // One id on both paths: a late direct write retried through the hub is applied
+    // once by the computer (docs/direct-link.md).
+    const writeId = newDirectWriteId()
     return this.viaDirect(
-      (d) => d.pty.write.mutate({ sessionId: this.sessionId, data }),
-      () => this.client.pty.write.mutate({ sessionId: this.sessionId, data })
+      (d) => d.pty.write.mutate({ sessionId: this.sessionId, data, writeId }),
+      () => this.client.pty.write.mutate({ sessionId: this.sessionId, data, writeId })
     )
   }
 

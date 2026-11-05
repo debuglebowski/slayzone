@@ -180,3 +180,58 @@ describe('direct pty input', () => {
     pty.disposeAll()
   })
 })
+
+// R1: a client write carries an id. When a direct write is merely late, the client
+// also sends it through the hub with the same id: the computer applies it once, and
+// reports its input facts (submit, Esc) once.
+describe('client write ids', () => {
+  it('a write that arrives direct and through the hub is applied once, either order', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'w-1'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    const got: string[] = []
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => undefined
+    )
+
+    expect(pty.direct.write(sessionId, 'one\r', 'w-a')).toBe(true)
+    await pty.handlers['pty.write']({ sessionId, data: 'one\r', writeId: 'w-a' })
+    await pty.handlers['pty.write']({ sessionId, data: 'two\r', writeId: 'w-b' })
+    expect(pty.direct.write(sessionId, 'two\r', 'w-b')).toBe(true)
+    // Both echoes of each line (the tty's and cat's), then a quiet spell in which a
+    // duplicate would have shown up.
+    const count = (word: string) => got.join('').split(word).length - 1
+    await waitFor(() => count('one') >= 2 && count('two') >= 2)
+    await new Promise((r) => setTimeout(r, 500))
+    const out = got.join('')
+    expect(out.split('one').length - 1).toBe(2) // typed echo + cat's echo, once each
+    expect(out.split('two').length - 1).toBe(2)
+    // Each submit is reported to the hub once, whichever path delivered it.
+    const inputs = notifies.filter((n) => n.params.name === 'pty-input')
+    expect(inputs.map((n) => (n.params.payload as { submitted: string }).submitted)).toEqual([
+      'one\r',
+      'two\r'
+    ])
+    pty.disposeAll()
+  })
+
+  it('a write without an id (an older client) is applied as before', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'w-2'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    const got: string[] = []
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => undefined
+    )
+    await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
+    await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
+    await waitFor(() => got.join('').split('x').length - 1 >= 4)
+    pty.disposeAll()
+  })
+})

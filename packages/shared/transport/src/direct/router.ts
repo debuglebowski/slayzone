@@ -94,8 +94,11 @@ export interface DirectPtyService {
     afterSeq: number
   ): { exists: boolean; size: { cols: number; rows: number } | null; buffer: DirectBuffer }
   getBufferSince(sessionId: string, afterSeq: number): DirectBuffer
-  /** False when the session has no live process. */
-  write(sessionId: string, data: string): boolean
+  /**
+   * False when the session has no live process. `writeId`: the client's id, applied
+   * once on any path (a repeat answers true and writes nothing).
+   */
+  write(sessionId: string, data: string, writeId?: string): boolean
   watch(
     sessionId: string,
     onData: (chunk: { seq: number; data: string }) => void,
@@ -232,9 +235,15 @@ export function createDirectRouter(services: DirectRouterServices) {
        * write. Resize, interrupt and touch stay hub calls (it owns those records).
        */
       write: t.procedure
-        .input(z.object({ sessionId, data: z.string().max(1_000_000) }))
+        .input(
+          z.object({
+            sessionId,
+            data: z.string().max(1_000_000),
+            writeId: z.string().min(1).max(100).optional()
+          })
+        )
         .mutation(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).write(input.sessionId, input.data)
+          ptyFor(ctx, input.sessionId).write(input.sessionId, input.data, input.writeId)
         ),
       /**
        * Live output. Completes when the process ends; errors FORBIDDEN when the

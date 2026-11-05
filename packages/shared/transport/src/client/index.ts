@@ -24,6 +24,7 @@ export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
   DIRECT_CALL_DEADLINE_MS,
   directCallFailure,
+  newDirectWriteId,
   withDirectDeadline,
   createDirectLinkManager,
   directLinkManagerFor,

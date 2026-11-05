@@ -62,6 +62,13 @@ beforeEach(() => {
 
 const SID = 't:t'
 
+/** A recorded input without its random write id. */
+function withoutWriteId(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || !('writeId' in input)) return input
+  const { writeId: _id, ...rest } = input as Record<string, unknown>
+  return rest
+}
+
 function hub(opts: { offline?: () => boolean } = {}) {
   const calls: Array<[string, unknown]> = []
   let emitData: (data: unknown) => void = () => undefined
@@ -117,7 +124,9 @@ function hub(opts: { offline?: () => boolean } = {}) {
     emitData: (d: unknown) => act(async () => emitData(d)),
     emitResize: (d: unknown) => act(async () => emitResize(d)),
     emitAvailability: (d: unknown) => act(async () => emitAvailability(d)),
-    of: (path: string) => calls.filter(([p]) => p === path).map(([, input]) => input)
+    // Without the per-write `writeId` (a random id; terminal-controller.test pins it).
+    of: (path: string) =>
+      calls.filter(([p]) => p === path).map(([, input]) => withoutWriteId(input))
   }
 }
 
@@ -284,7 +293,7 @@ describe('TerminalView: direct link', () => {
         getBufferSince: { query: async () => ({ chunks: [], currentSeq: 0, prelude: '' }) },
         write: {
           mutate: async (input: unknown) => {
-            writes.push(input)
+            writes.push(withoutWriteId(input))
             return true
           }
         }

@@ -17,6 +17,7 @@ import {
   DIRECT_CALL_DEADLINE_MS,
   directCallFailure,
   keepDirectLease,
+  newDirectWriteId,
   withDirectDeadline,
   noteDirectUse,
   type DirectLease,
@@ -151,8 +152,13 @@ export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
 
 /** The hub client slice the helpers fall back to. */
 interface HubPtyWrite {
-  pty: { write: { mutate(input: { sessionId: string; data: string }): Promise<boolean> } }
+  pty: {
+    write: {
+      mutate(input: { sessionId: string; data: string; writeId?: string }): Promise<boolean>
+    }
+  }
 }
+
 interface HubPtyBuffer {
   pty: {
     getBufferSince: {
@@ -167,18 +173,22 @@ interface HubPtyBuffer {
 
 /**
  * Keystrokes: direct when the session has a lease, else the hub. A direct write that
- * did not land (refused, socket gone, no answer in time) goes to the hub, so a
- * keystroke is never silently lost; a transport failure also drops the lease.
+ * may not have landed (refused, socket gone, no answer in time) goes to the hub with
+ * the same id — the computer applies it once, so it is neither lost nor typed twice;
+ * a transport failure also drops the lease.
  */
 export async function ptyWrite(
   hub: HubPtyWrite,
   sessionId: string,
   data: string
 ): Promise<boolean> {
+  const writeId = newDirectWriteId()
   const direct = directSessions.get(sessionId)
   if (direct) {
     try {
-      const written = await withDirectDeadline(direct.client.pty.write.mutate({ sessionId, data }))
+      const written = await withDirectDeadline(
+        direct.client.pty.write.mutate({ sessionId, data, writeId })
+      )
       stats.writes++
       return written
     } catch (err) {
@@ -187,7 +197,7 @@ export async function ptyWrite(
       if (why === 'transport') direct.lost()
     }
   }
-  return hub.pty.write.mutate({ sessionId, data })
+  return hub.pty.write.mutate({ sessionId, data, writeId })
 }
 
 /** Backfill after `afterSeq`: direct when the session has a lease, else the hub. */

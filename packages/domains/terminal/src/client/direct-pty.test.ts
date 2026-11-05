@@ -54,7 +54,7 @@ function fakeLease() {
           })
         },
         write: {
-          mutate: async ({ data }: { data: string }) => {
+          mutate: async ({ data }: { data: string; writeId?: string }) => {
             writes.push(data)
             return true
           }
@@ -234,6 +234,63 @@ describe('startDirectPtyLink', () => {
     // Off the half-open socket at once: later keystrokes go to the hub without waiting.
     expect(directPtyFor('s1')).toBeNull()
     expect(acquired.length).toBe(1)
+  })
+
+  // R1: the review's repro. The direct write lands but answers after the deadline;
+  // the hub copy reaches the same computer. With one id on both, it is applied once.
+  it('a late direct write and its hub retry carry one id: the computer applies it once', async () => {
+    const applied: string[] = []
+    const seen = new Set<string>()
+    const computer = (data: string, writeId?: string) => {
+      if (writeId !== undefined && seen.has(writeId)) return
+      if (writeId !== undefined) seen.add(writeId)
+      applied.push(data)
+    }
+    const l = fakeLease()
+    l.lease.client.pty.write.mutate = (input: { data: string; writeId?: string }) =>
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => {
+          computer(input.data, input.writeId)
+          resolve(true)
+        }, DIRECT_WRITE_DEADLINE_MS + 1_000)
+      )
+    setup([l])
+    await flush()
+    vi.useFakeTimers()
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ data, writeId }: { data: string; writeId?: string }) => {
+            computer(data, writeId)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    const written = ptyWrite(hub, 's1', '\r')
+    await vi.advanceTimersByTimeAsync(DIRECT_WRITE_DEADLINE_MS + 2_000)
+    expect(await written).toBe(true)
+    expect(applied).toEqual(['\r'])
+  })
+
+  it('every write gets its own id', async () => {
+    const ids: Array<string | undefined> = []
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ writeId }: { data: string; writeId?: string }) => {
+            ids.push(writeId)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    await ptyWrite(hub, 'nolink', 'a')
+    await ptyWrite(hub, 'nolink', 'b')
+    expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true)
+    expect(new Set(ids).size).toBe(2)
   })
 
   it('a direct write that failed in transport (no error code) goes to the hub', async () => {

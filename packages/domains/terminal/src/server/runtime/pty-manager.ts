@@ -3235,9 +3235,19 @@ export function submitPty(sessionId: string, text: string): boolean {
   return writePty(sessionId, session.adapter.encodeSubmit(text))
 }
 
-export function writePty(sessionId: string, data: string): boolean {
+export function writePty(sessionId: string, data: string, writeId?: string): boolean {
   const session = sessions.get(sessionId)
   if (!session) return false
+
+  // A client's write with its id, on a session a computer runs (docs/direct-link.md):
+  // the computer applies the id once — a late direct write may also come this way —
+  // and reports the input facts (`pty-input`), as for a direct write. Counting them
+  // here too would count a retried keystroke twice.
+  const handle = session.pty as unknown as PtyHandle
+  if (writeId !== undefined && handle.computerId !== undefined) {
+    handle.write(data, { writeId })
+    return true
+  }
 
   // NOTE: writePty does NOT touch the idle-close clock. PTY input is a noisy
   // mix of real typing and terminal protocol the renderer writes back (focus/
