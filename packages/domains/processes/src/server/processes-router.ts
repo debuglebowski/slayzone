@@ -59,17 +59,13 @@ export const processesRouter = router({
     .input(z.object({ processId: z.string() }))
     .mutation(({ input }) => getProcessesDeps().remove(input.processId)),
   restart: publicProcedure
-    // `startAnyway`: the previous run's computer is offline — start without it.
-    .input(z.object({ processId: z.string(), startAnyway: z.boolean().optional() }))
+    .input(z.object({ processId: z.string() }))
     .mutation(async ({ input }) => {
       try {
-        return await getProcessesDeps().restart(
-          input.processId,
-          input.startAnyway ? { startAnyway: true } : {}
-        )
+        return await getProcessesDeps().restart(input.processId)
       } catch (err) {
-        // A survivor (Stop it) or an offline computer (wait, or start anyway) refuses
-        // the restart: a precondition the user can act on.
+        // A survivor (Stop it) or an offline computer (it starts when that computer
+        // reconnects) refuses the restart: a precondition the user can see.
         if (err instanceof OldRunSurvivesError || err instanceof OldRunUnreachableError) {
           throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message })
         }

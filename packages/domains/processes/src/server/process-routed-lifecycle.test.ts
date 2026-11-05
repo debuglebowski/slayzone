@@ -371,15 +371,37 @@ describe("G3: the old run's computer is unreachable", () => {
     expect(spawned).toEqual([])
   })
 
-  test('the UI restart says the computer is offline, and Start anyway starts', async () => {
+  test('the UI restart says the computer is offline; moved elsewhere, it starts there', async () => {
     target = 'c2'
     online.add('c2')
     const id = await keptOnK()
     target = 'cK' // ...the task is still bound to the offline computer
     await expect(restartProcessForUi(id)).rejects.toThrow(/offline/)
-    target = 'c2' // the user moved it, then chose "Start anyway"
-    expect(await restartProcessForUi(id, { startAnyway: true })).toBe(true)
+    target = 'c2' // the user moved it to a computer that is up
+    expect(await restartProcessForUi(id)).toBe(true)
     expect(spawned).toEqual(['c2'])
+  })
+
+  // Round-5 K5: "Start anyway" with the task still bound to the offline computer
+  // parked a spawn there; on reconnect the computer replaced the old run in place
+  // (SIGTERM, no wait) — the R5 port collision, and a run ignoring SIGTERM became
+  // unaddressable. There is no safe "anyway": the only safe start is on another
+  // computer that is up, and that one starts by itself. No override exists.
+  test('K5: no override starts on the offline computer the old run holds', async () => {
+    const id = await keptOnK()
+    target = 'cK'
+    // What a client asking for an override sends: nothing honours it.
+    type Forced = (id: string, opts: { startAnyway: true }) => Promise<unknown>
+    const forced = { startAnyway: true } as const
+    expect(await (restartProcessDetailed as Forced)(id, forced)).toEqual({
+      ok: false,
+      reason: 'old-run-unreachable'
+    })
+    expect(await (startProcess as Forced)(id, forced)).toEqual({
+      ok: false,
+      reason: 'old-run-unreachable'
+    })
+    expect(spawned, 'nothing parked for cK').toEqual([])
   })
 
   test('a removed computer: its kept run is forgotten, Start runs freely', async () => {

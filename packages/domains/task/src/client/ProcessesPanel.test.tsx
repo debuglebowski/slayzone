@@ -600,26 +600,19 @@ describe('ProcessesPanel row actions', () => {
     expect(toastErrors).toEqual([])
   })
 
-  // G3: the previous run's computer is offline — not a survivor. The toast says so and
-  // offers "Start anyway", which restarts without that run.
-  it("a restart refused because the old run's computer is offline offers Start anyway", async () => {
-    const calls: unknown[] = []
-    mutations.restart = async (input) => {
-      calls.push(input)
-      if (!(input as { startAnyway?: boolean }).startAnyway) {
-        throw new Error(OLD_RUN_UNREACHABLE_MESSAGE)
-      }
-      return true
+  // G3: the previous run's computer is offline — not a survivor; the toast says so.
+  // K5: it offers no "Start anyway" — a start parked for that computer is the R5 port
+  // collision; it starts by itself once that computer reconnects.
+  it("a restart refused because the old run's computer is offline says so, no override", async () => {
+    mutations.restart = async () => {
+      throw new Error(OLD_RUN_UNREACHABLE_MESSAGE)
     }
     toastActions = []
     await loaded([proc('a', 't1', 'Dev server')])
     click('restart-a')
     await settle()
     expect(toastErrors).toEqual([`Couldn't restart Dev server: ${OLD_RUN_UNREACHABLE_MESSAGE}`])
-    expect(toastActions[0]?.label).toBe('Start anyway')
-    await act(async () => toastActions[0]!.onClick())
-    await settle()
-    expect(calls).toEqual([{ processId: 'a' }, { processId: 'a', startAnyway: true }])
+    expect(toastActions).toEqual([null])
     expect(unhandled).toEqual([])
   })
 
