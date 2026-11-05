@@ -692,11 +692,16 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     },
     []
   )
+  // The lease whose computer stream has started (onStarted). Make-before-break: the
+  // hub stream stays on until then, so an event saved while the direct subscription
+  // is being set up arrives on the hub stream (seq dedupe drops the overlap).
+  const [directStartedFor, setDirectStartedFor] = useState<typeof directChat>(null)
+  const directLive = directChat !== null && directStartedFor === directChat
   // The hub relays this tab — and asks its computer for the full events — only
-  // while the tab is not on the direct link (docs/direct-link.md).
+  // while the tab is not live on the direct link (docs/direct-link.md).
   useSubscription(
     trpc.chat.onEvent.subscriptionOptions(opts.tabId ? { tabIds: [opts.tabId] } : undefined, {
-      enabled: !!opts.tabId && !directChat,
+      enabled: !!opts.tabId && !directLive,
       onData: handleEvent
     })
   )
@@ -709,6 +714,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     const sub = directChat.client.chat.onEvent.subscribe(
       { tabId },
       {
+        onStarted: () => setDirectStartedFor(directChat),
         onData: (event) => {
           noteDirectChatEvent()
           handleEvent(event)
@@ -768,8 +774,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   }, [])
   // Back from the direct link to the hub: events saved between the end of the
   // direct stream and the hub's first relayed one are not on either stream, so load
-  // the tab again (rare: the link dropped). Going direct needs nothing: the direct
-  // stream starts before the hub's stops.
+  // the tab again (rare: the link dropped). Going direct needs nothing: the hub stream
+  // stops only once the direct one has started (`directLive`).
   const wasDirectRef = useRef(false)
   useEffect(() => {
     if (directChat) {
