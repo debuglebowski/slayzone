@@ -16,7 +16,8 @@ import {
   unrevokeComputer,
   deleteComputer,
   setComputerDisabled,
-  listDisabledComputerIds
+  listDisabledComputerIds,
+  setComputerRemovedListener
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { listPlacements, setPlacement } from './project-paths'
@@ -517,5 +518,26 @@ describe('setComputerDisabled', () => {
     await setComputerDisabled(t.db, id, true, 5000)
     await registerOrReplaceComputer(t.db, { ...input, version: '0.38.0' })
     expect((await getComputer(t.db, id))?.disabled_at).toBe(5000)
+  })
+})
+
+// Round-5 K9: a revoke from REST, or from a departing user's cleanup, never told the
+// hub the computer was gone (only the tRPC router did), so a process run it kept
+// stayed "waiting for its computer" forever. The store itself tells — every path.
+describe('onComputerRemoved: every delete and revoke is heard', () => {
+  it('fires for revokeComputer and deleteComputer, from any caller', async () => {
+    const heard: string[] = []
+    setComputerRemovedListener((id) => heard.push(id))
+    try {
+      const a = await mkComputer({ name: 'one' })
+      const b = await mkComputer({ name: 'two' })
+      await revokeComputer(t.db, a.id)
+      await deleteComputer(t.db, b.id)
+      expect(heard).toEqual([a.id, b.id])
+    } finally {
+      setComputerRemovedListener(null)
+    }
+    await revokeComputer(t.db, (await mkComputer({ name: 'three' })).id)
+    expect(heard, 'cleared').toHaveLength(2)
   })
 })

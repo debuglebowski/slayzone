@@ -13,6 +13,7 @@ export {
   revokeComputer,
   unrevokeComputer,
   deleteComputer,
+  setComputerRemovedListener,
   setComputerDisabled,
   renameComputer,
   listDisabledComputerIds,

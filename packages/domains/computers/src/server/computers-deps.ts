@@ -76,11 +76,6 @@ export type ComputersDeps = {
    * refuses to disable rather than guess.
    */
   runningWorkOn?: (computerId: string) => Promise<number>
-  /**
-   * A computer was deleted or revoked: it never reconnects, so whatever waited for it
-   * (a process run it kept) is let go. Absent: nothing to tell.
-   */
-  onComputerRemoved?: (computerId: string) => void
 }
 
 let computersDeps: ComputersDeps | null = null

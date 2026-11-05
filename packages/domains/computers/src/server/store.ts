@@ -234,6 +234,24 @@ export async function unrevokeComputer(db: SlayzoneDb, id: string): Promise<void
  * repointed (there is no survivor to repoint to), and placements and grants go
  * too — they describe a machine that no longer exists.
  */
+/**
+ * Told when a computer is deleted or revoked — by ANY caller (the tRPC router, REST,
+ * a departing user's cleanup): it never reconnects, so whatever waited for it (a
+ * process run it kept) can let go. One listener (the hub's), replaced on each set,
+ * as `setComputerBindingChangedListener`; null clears it.
+ */
+export function setComputerRemovedListener(listener: ((computerId: string) => void) | null): void {
+  removedListener = listener
+}
+let removedListener: ((computerId: string) => void) | null = null
+function computerRemoved(id: string): void {
+  try {
+    removedListener?.(id)
+  } catch {
+    // The listener's failure is its own; the delete or revoke already happened.
+  }
+}
+
 export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> {
   await db.batchTxn([
     { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
@@ -246,6 +264,7 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
     { type: 'run', sql: `DELETE FROM computer_grants WHERE computer_id = ?`, params: [id] },
     { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
   ])
+  computerRemoved(id)
 }
 
 export async function getComputer(db: SlayzoneDb, id: string): Promise<ComputerRecord | null> {
@@ -293,6 +312,7 @@ export async function revokeComputer(
   at: number = Date.now()
 ): Promise<void> {
   await db.run(`UPDATE computers SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, [at, id])
+  computerRemoved(id)
 }
 
 /**

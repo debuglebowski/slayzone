@@ -450,3 +450,49 @@ describe('K6: the stats poll runs as the hub, not as whoever started it', () => 
     await stopProcess(id)
   }, 15_000)
 })
+
+// Round-5 K9: a run already marked "ended on reconnect" (left on cK while its row
+// started on c2) was re-adopted as orphaned when cK returned — "still running from
+// before the hub restarted" — though the hub had just ended it there.
+describe('K9: a run ended on reconnect is not re-adopted', () => {
+  test('its row keeps its own state; the old run is ended, not adopted', async () => {
+    const online = new Set<string>(['cK'])
+    const killed: string[] = []
+    let held: string[] = []
+    setProcessComputerReachability((c) => online.has(c))
+    setProcessBackend({
+      spawn: (): ProcHandle => ({
+        pid: undefined,
+        onData: () => ({ dispose() {} }),
+        onExit: () => ({ dispose() {} }),
+        kill: async () => true
+      }),
+      killSession: async (computerId, id) => {
+        if (!online.has(computerId)) throw new Error('unknown computer')
+        killed.push(`${computerId}:${id}`)
+      },
+      listSessions: async (computerId) =>
+        computerId === 'cK' ? held.map((sessionId) => ({ sessionId, pid: 1 })) : []
+    })
+    setProcessComputerResolver(async () => null)
+    const id = await spawnProcess('p', null, `k9-${Math.random()}`, 'pnpm dev', '/tmp', false)
+    held = [id]
+    await processesComputerConnected('cK') // adopted, orphaned on cK
+    online.delete('cK')
+    online.add('c2')
+    setProcessComputerResolver(async () => 'c2')
+    expect(await startProcess(id)).toMatchObject({ ok: true }) // runs on c2; cK's stranded
+    await stopProcess(id) // and is stopped there
+    expect(status(id)?.status).toBe('stopped')
+    online.add('cK')
+    await processesComputerConnected('cK') // cK returns, still holding the old run
+    await vi.waitFor(() => expect(killed).toContain(`cK:${id}`))
+    expect(status(id)?.status, 'not re-adopted as orphaned').toBe('stopped')
+    // Only the first, real adoption says so — not the return of an ended run.
+    const adoptions = (status(id)?.logBuffer ?? []).filter((l) =>
+      l.includes('before the hub restarted')
+    )
+    expect(adoptions).toHaveLength(1)
+    setProcessComputerReachability(null)
+  })
+})

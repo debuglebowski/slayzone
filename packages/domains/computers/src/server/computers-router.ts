@@ -431,8 +431,6 @@ export const computersRouter = router({
       // Its open socket would otherwise keep it in the usable set until it re-dialed.
       getComputersDepsOrNull()?.getGateway()?.disconnect?.(input.computerId, 'computer deleted')
       auditComputer('computer.delete', input.computerId)
-      // It never reconnects: whatever waited for it (a process run it kept) lets go.
-      getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
       return { ok: true as const }
     }),
 
@@ -544,7 +542,6 @@ export const computersRouter = router({
       // As the REST twin does: a revoked computer stops working now, not at its next dial.
       getComputersDepsOrNull()?.getGateway()?.disconnect?.(input.computerId, 'computer revoked')
       auditComputer('computer.revoke', input.computerId)
-      getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
       return { ok: true as const }
     })
 })

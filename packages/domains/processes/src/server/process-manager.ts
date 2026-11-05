@@ -418,7 +418,8 @@ export async function processesComputerConnected(computerId: string): Promise<vo
   for (const proc of processes.values()) {
     if (proc.handle || proc.termination) continue
     const pid = held.get(proc.id)
-    if (held.has(proc.id) && proc.status !== 'running') {
+    // A run just ended above (its row moved on) is not adopted back as orphaned.
+    if (held.has(proc.id) && proc.status !== 'running' && !stranded?.has(proc.id)) {
       proc.computerId = computerId
       proc.computerPid = pid ?? null
       pushLog(
