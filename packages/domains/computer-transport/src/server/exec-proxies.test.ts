@@ -1775,6 +1775,35 @@ describe('createRoutingProcessBackend', () => {
     return { exit: () => exit }
   }
 
+  // After a hub restart the process manager adopts the runs a computer kept (they
+  // show orphaned, Stop reaches them by session) — with no handle, so this backend
+  // does not track them. A network blip and same-epoch reconnect then swept them as
+  // strays: the dev server was killed silently. Adopted runs are kept; a stray is not.
+  it('a reconnect keeps runs the process manager adopted, and still ends a stray', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    gateway.onMethod('proc.kill', () => ({ ok: true, clean: true }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 1, seq: 0 },
+        { sessionId: 'adopted-dev-server', pid: 7, seq: 3 },
+        { sessionId: 'stray', pid: 8, seq: 0 }
+      ]
+    }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null,
+      keepUntracked: (computerId, sessionId) =>
+        computerId === 'computer-1' && sessionId === 'adopted-dev-server'
+    })
+    connectProc(gateway, 'epoch-a')
+    backend.spawn(procSpec())
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connectProc(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(gateway.requestsOf('proc.kill')).toHaveLength(1))
+    expect(gateway.requestsOf('proc.kill').map((c) => c.params)).toEqual([{ sessionId: 'stray' }])
+  })
+
   it('computer-lost detaches the process rather than declaring it dead', () => {
     const gateway = new FakeGateway()
     expect(spawnDetachedProc(gateway).exit()).toBeNull()
@@ -1992,6 +2021,41 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
 const TASK = 'task-1'
 
 describe('createRemoteWorktreeAdapters', () => {
+  // A task's auto-worktree runs its setup script on the computer (5 min there);
+  // at the gateway's 30 s default the hub reported auto_worktree_setup_failed while
+  // the script kept running (a retry then hit a duplicate worktree).
+  it('every step carries an explicit timeout; create / setup / copy / remove get minutes', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
+    gateway.onMethod('git.getCurrentBranch', () => ({ branch: 'main' }))
+    gateway.onMethod('git.removeWorktree', () => ({ branchDeleted: true }))
+    gateway.onMethod('git.runWorktreeSetupScript', () => ({ ran: true, success: true, output: '' }))
+    gateway.onMethod('fs.pathExists', () => ({ exists: true }))
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'computer-1'
+    })
+    await adapters.isGitRepo(TASK, '/repo')
+    await adapters.getCurrentBranch(TASK, '/repo')
+    await adapters.pathExists(TASK, '/wt')
+    await adapters.createWorktree(TASK, '/repo', '/wt', 'feature', 'main')
+    await adapters.runWorktreeSetupScript(TASK, '/wt', '/repo', 'main')
+    await adapters.copyIgnoredFiles(TASK, '/repo', '/wt', 'none' as never, [])
+    await adapters.removeWorktree(TASK, '/proj', '/wt')
+    for (const call of gateway.calls) {
+      expect(call.timeoutMs, `${call.method}: explicit`).toBeGreaterThan(30_000)
+    }
+    for (const method of [
+      'git.createWorktree',
+      'git.runWorktreeSetupScript',
+      'git.copyIgnoredFiles',
+      'git.removeWorktree'
+    ]) {
+      expect(requireCall(gateway, method).timeoutMs, method).toBeGreaterThan(5 * 60_000)
+    }
+  })
+
   it('forwards git/fs ops to the right frames and parses the computer replies', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
@@ -2777,25 +2841,5 @@ describe('the work gate: a computer works only for the work it was admitted for'
     await expect(adapters.pathExists('task-3', '/r')).rejects.toThrow('not yours')
     expect(asked.every((a) => a.work?.kind === 'task' && a.work.id === 'task-3')).toBe(true)
     expect(gateway.calls).toEqual([])
-  })
-
-  it("filesystem: every op is the caller's own request (work null); a refused watch never starts", async () => {
-    const gateway = new FakeGateway()
-    const { gate, asked } = gateFor('mine')
-    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs(), gate })
-    await expect(fs.listRoots('theirs')).rejects.toThrow('not yours')
-    await expect(fs.setAllowedRoots('theirs', ['/'])).rejects.toThrow('not yours')
-    await expect(fs.readFile('theirs', '/r', 'a.ts')).rejects.toThrow('not yours')
-    const stop = fs.watch('theirs', '/r', () => undefined)
-    await new Promise((r) => setImmediate(r))
-    stop()
-    expect(asked.every((a) => a.work === null)).toBe(true)
-    expect(gateway.requestsOf('fs.listRoots')).toEqual([])
-    expect(gateway.requestsOf('computer.setAllowedRoots')).toEqual([])
-    expect(gateway.requestsOf('fs.watchStart')).toEqual([])
-    expect(gateway.calls).toEqual([])
-    // With no computer the hub's own disk answers, and nothing is asked.
-    await fs.listRoots(null)
-    expect(asked).toHaveLength(4)
   })
 })

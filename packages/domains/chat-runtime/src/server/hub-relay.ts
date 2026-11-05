@@ -106,6 +106,8 @@ export function createHubChatRelay(opts: {
     previous: ChatTerminalState,
     hasUserInput: boolean
   ): void | Promise<void>
+  /** A session's count of background commands still running changed. */
+  onBackgroundJobs?(sessionId: string, count: number): void | Promise<void>
 }) {
   const { db, ownership } = opts
   const providerTransitions = createHubProviderTransitions({
@@ -1321,7 +1323,8 @@ export function createHubChatRelay(opts: {
             )
           )
             throw new Error('Invalid chat state notification')
-          if (p.newState !== 'not-spawned' && p.newState !== 'dead')
+          if (p.newState !== 'not-spawned' && p.newState !== 'dead') {
+            const jobs = sessionMirror.get(String(p.sessionId))?.backgroundJobs
             sessionMirror.set(String(p.sessionId), {
               sessionId: String(p.sessionId),
               taskId: owner.taskId,
@@ -1329,9 +1332,10 @@ export function createHubChatRelay(opts: {
               state: p.newState as ChatSessionStateEntry['state'],
               lastOutputTime: Date.now(),
               computerId,
-              providerSessionId: p.providerSessionId as string | null
+              providerSessionId: p.providerSessionId as string | null,
+              ...(jobs ? { backgroundJobs: jobs } : {})
             })
-          else sessionMirror.delete(String(p.sessionId))
+          } else sessionMirror.delete(String(p.sessionId))
           await opts.onState?.(
             String(p.sessionId),
             p.newState as ChatTerminalState,
@@ -1339,6 +1343,26 @@ export function createHubChatRelay(opts: {
             p.hasUserInput === true
           )
           break
+        case 'background-jobs': {
+          const count = p.count
+          if (
+            p.sessionId !== `${owner.taskId}:${owner.tabId}` ||
+            typeof count !== 'number' ||
+            !Number.isInteger(count) ||
+            count < 0
+          )
+            throw new Error('Invalid chat background-jobs notification')
+          const row = sessionMirror.get(String(p.sessionId))
+          if (row) {
+            const { backgroundJobs: _previous, ...rest } = row
+            sessionMirror.set(
+              String(p.sessionId),
+              count > 0 ? { ...rest, backgroundJobs: count } : rest
+            )
+          }
+          await opts.onBackgroundJobs?.(String(p.sessionId), count)
+          break
+        }
       }
     }
   }

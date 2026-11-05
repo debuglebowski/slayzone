@@ -116,6 +116,7 @@ import {
 } from '../shared/frames'
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import type { HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
@@ -135,6 +136,13 @@ import type { HubComputerGateway } from './hub-gateway'
  * them on the first disconnect. Reading the roster at construction closes that.
  */
 export type RoutingGateway = Pick<HubComputerGateway, 'request' | 'events' | 'listComputers'>
+
+/**
+ * A process kill waits on the computer until the tree is gone: up to its SIGTERM
+ * grace (2s) plus SIGKILL settling and the `ps` / `pgrep` probes. Generous, so a
+ * slow box still gets the verdict rather than a timeout.
+ */
+const PROC_KILL_TIMEOUT_MS = 20_000
 
 // ===========================================================================
 // Internal helpers
@@ -540,6 +548,11 @@ interface DetachControllerOptions<E extends DetachableEntry> {
   settleExited: (entry: E, exit: ListedExit) => void
   /** The computer went away with this session live: its outcome is now unknown. */
   onDetach?: (entry: E) => void
+  /**
+   * A session this backend does not track but its owner still holds (a run the
+   * process manager adopted after a hub restart): never swept as a stray.
+   */
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
 }
 
 /**
@@ -582,6 +595,7 @@ interface DetachParticipant {
   resume: (entry: DetachableEntry, listed: ListedSession) => void
   settleExited: (entry: DetachableEntry, exit: ListedExit) => void
   onDetach?: (entry: DetachableEntry) => void
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
   /** Has this participant ever held a session? Gates pruning — see `prune`. */
   everUsed?: boolean
 }
@@ -605,13 +619,15 @@ const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachControll
 function joinDetachController<E extends DetachableEntry>(
   options: DetachControllerOptions<E>
 ): DetachEntry {
-  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach } = options
+  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach, keepUntracked } =
+    options
   const participant = {
     sessions,
     finalize,
     resume,
     settleExited,
-    onDetach
+    onDetach,
+    keepUntracked
   } as unknown as DetachParticipant
 
   let byKind = detachControllers.get(gateway)
@@ -840,6 +856,8 @@ function createDetachController<E extends DetachableEntry>(
           (o.entry.pendingSpawn !== undefined || sameAttempt(o.entry, running))
       )
       if (owned) continue
+      // Held by its owner outside this backend (an adopted run): not a stray.
+      if (participants.some((p) => p.keepUntracked?.(computerId, sessionId))) continue
       void gateway.request(computerId, killMethod, { sessionId }).catch(noop)
     }
     if (resumed.length > 0) {
@@ -1474,12 +1492,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     setTheme(theme) {
-      for (const computer of gateway.listComputers()) {
-        // Best-effort: an older computer has no pipeline (method not found).
-        void gateway
-          .request(computer.computerId, HubToComputerMethods.ptySetTheme, { theme })
-          .catch(noop)
-      }
+      // The hub's own broadcast to every computer, not the saving caller's work on
+      // each: run as the hub (the gateway's owner check is for callers' requests).
+      runAsSecurityActor(null, () => {
+        for (const computer of gateway.listComputers()) {
+          // Best-effort: an older computer has no pipeline (method not found).
+          void gateway
+            .request(computer.computerId, HubToComputerMethods.ptySetTheme, { theme })
+            .catch(noop)
+        }
+      })
     },
 
     async warmKill(computerId: string, warmId: string) {
@@ -1795,6 +1817,12 @@ export interface RoutingProcessBackendOptions {
    * behavior and its argv was silently dropped.
    */
   buildSpawnParams?: (spec: ProcSpawnSpec) => Record<string, unknown>
+  /**
+   * Runs this backend does not track that their owner holds — the process manager's
+   * runs adopted after a hub restart (orphaned, reached by session). A reconnect's
+   * stray sweep leaves them alone.
+   */
+  keepUntracked?: (computerId: string, sessionId: string) => boolean
 }
 
 interface ProcEntry extends DetachableEntry, SeqGapState {
@@ -2025,6 +2053,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     kind: 'process',
     listMethod: HubToComputerMethods.procList,
     killMethod: HubToComputerMethods.procKill,
+    ...(options.keepUntracked ? { keepUntracked: options.keepUntracked } : {}),
     parseList: (raw) => {
       const parsed = procListResultSchema.safeParse(raw)
       return parsed.success ? toSessionList(parsed.data) : null
@@ -2159,7 +2188,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
             }
           )
       },
-      kill: (signal?: string): void => {
+      kill: (signal?: string): Promise<boolean> => {
         if (entry.detached) {
           // Same rule as the pty handle: undeliverable now, and must not be
           // resumed or re-spawned later — stop tracking, the reconnect sweep
@@ -2167,16 +2196,26 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           entry.disposed = true
           entry.pendingSpawn = undefined
           if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
-          return
+          return Promise.resolve(false)
         }
-        void gateway
-          .request(computerId, HubToComputerMethods.procKill, {
-            sessionId: spec.id,
-            // Only THIS attempt: a late kill must never reach a replacement.
-            ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
-            ...(signal ? { signal } : {})
-          })
-          .catch(noop)
+        // Resolves once the computer reports the tree gone (it waits out SIGTERM,
+        // then SIGKILLs survivors); an older computer replies at once with no verdict.
+        return gateway
+          .request(
+            computerId,
+            HubToComputerMethods.procKill,
+            {
+              sessionId: spec.id,
+              // Only THIS attempt: a late kill must never reach a replacement.
+              ...(entry.spawnId ? { spawnId: entry.spawnId } : {}),
+              ...(signal ? { signal } : {})
+            },
+            PROC_KILL_TIMEOUT_MS
+          )
+          .then(
+            (reply) => (reply as { clean?: unknown } | null)?.clean !== false,
+            () => false
+          )
       }
     }
 
@@ -2307,7 +2346,15 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       },
       /** End such a run on its computer (the computer tree-kills it). */
       async killSession(computerId: string, sessionId: string) {
-        await gateway.request(computerId, HubToComputerMethods.procKill, { sessionId })
+        const reply = await gateway.request(
+          computerId,
+          HubToComputerMethods.procKill,
+          { sessionId },
+          PROC_KILL_TIMEOUT_MS
+        )
+        if ((reply as { clean?: unknown } | null)?.clean === false) {
+          throw new Error('part of the run outlived SIGKILL on its computer')
+        }
       }
     }
   }
@@ -2472,6 +2519,16 @@ export interface RemoteWorktreeAdaptersOptions {
  * be a network call (documented cosmetic degradation for remote worktrees).
  * When `resolveComputerId()` is null every method degrades to `local`.
  */
+/**
+ * Request limits for a task's worktree steps — never the gateway's 30 s default, as
+ * the git panel's ops (`gitOpTimeoutMs`). Create / remove / ignored-file copy can
+ * be slow on a big repo, and the setup script runs up to 5 min on the computer:
+ * the request outlives it, so its result arrives rather than a timeout while it runs.
+ */
+const WORKTREE_LONG_STEP_TIMEOUT_MS = 15 * 60_000
+/** Probes (repo? branch? path?). */
+const WORKTREE_PROBE_TIMEOUT_MS = 2 * 60_000
+
 export function createRemoteWorktreeAdapters(
   options: RemoteWorktreeAdaptersOptions
 ): WorktreeExecAdapters {
@@ -2488,22 +2545,24 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree create for task ${taskId}`)
-      await gateway.request(computerId, HubToComputerMethods.gitCreateWorktree, {
-        repoPath,
-        worktreePath,
-        branch,
-        sourceBranch
-      })
+      await gateway.request(
+        computerId,
+        HubToComputerMethods.gitCreateWorktree,
+        { repoPath, worktreePath, branch, sourceBranch },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
     },
 
     async removeWorktree(taskId, projectPath, worktreePath) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitRemoveWorktree, {
-        projectPath,
-        worktreePath
-      })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitRemoveWorktree,
+        { projectPath, worktreePath },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
       return gitRemoveWorktreeResultSchema.parse(res)
     },
 
@@ -2518,7 +2577,8 @@ export function createRemoteWorktreeAdapters(
           worktreePath,
           repoPath,
           sourceBranch
-        }
+        },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
       )
       return gitRunWorktreeSetupScriptResultSchema.parse(res)
     },
@@ -2527,21 +2587,24 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`ignored-file copy for task ${taskId}`)
-      await gateway.request(computerId, HubToComputerMethods.gitCopyIgnoredFiles, {
-        repoPath,
-        worktreePath,
-        behavior,
-        customPaths
-      })
+      await gateway.request(
+        computerId,
+        HubToComputerMethods.gitCopyIgnoredFiles,
+        { repoPath, worktreePath, behavior, customPaths },
+        WORKTREE_LONG_STEP_TIMEOUT_MS
+      )
     },
 
     async getCurrentBranch(taskId, repoPath) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`git branch read for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitGetCurrentBranch, {
-        repoPath
-      })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitGetCurrentBranch,
+        { repoPath },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return gitGetCurrentBranchResultSchema.parse(res).branch
     },
 
@@ -2549,7 +2612,12 @@ export function createRemoteWorktreeAdapters(
       const computerId = await resolveComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`git repo probe for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.gitIsGitRepo, { path })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.gitIsGitRepo,
+        { path },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
     },
 
@@ -2566,7 +2634,12 @@ export function createRemoteWorktreeAdapters(
     async pathExists(taskId, path) {
       const computerId = await resolveComputerId(taskId)
       if (computerId == null) throw new NoComputerAvailableError(`path probe for task ${taskId}`)
-      const res = await gateway.request(computerId, HubToComputerMethods.fsPathExists, { path })
+      const res = await gateway.request(
+        computerId,
+        HubToComputerMethods.fsPathExists,
+        { path },
+        WORKTREE_PROBE_TIMEOUT_MS
+      )
       return fsPathExistsResultSchema.parse(res).exists
     },
 
@@ -2602,13 +2675,8 @@ export interface RemoteFsAdaptersOptions {
   local: LocalWorkspaceFs
   /** Mint a correlation id for a watch. Injected so tests are deterministic. */
   newWatchId?: () => string
-  /**
-   * Asked before every op that reaches a computer, as the caller's own request
-   * (`work: null`): these take a computer, not a task. The hub's own maintenance on
-   * connect (widening the local computer's roots, seeding its paths) uses an
-   * instance without one.
-   */
-  gate?: ComputerWorkGate
+  // No gate of its own: whether the caller may use the computer is the gateway's one
+  // owner check (`authorizeRequest`, G2), asked for every request it sends.
 }
 
 let watchSeq = 0
@@ -2623,7 +2691,7 @@ let watchSeq = 0
  * with the same `resolveExecComputer` the pty backend uses, and pass the result.
  */
 export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): WorkspaceFsAdapters {
-  const { gateway, local, gate } = options
+  const { gateway, local } = options
   const newWatchId = options.newWatchId ?? (() => `w${++watchSeq}`)
 
   const req = async <T>(
@@ -2632,7 +2700,6 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
     params: unknown,
     schema: { parse: (v: unknown) => T }
   ): Promise<T> => {
-    if (gate) await gate(computerId, null)
     return gateway.request(computerId, method, params).then((res) => schema.parse(res))
   }
 
@@ -2873,15 +2940,13 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       gateway.events.on('computer-disconnected', onDisconnected)
       gateway.events.on('computer-lost', onDisconnected)
 
-      // A refused watch never starts (recorded like any other failure below), and its
-      // stop is never sent either: nothing reaches a computer the gate refused.
-      const admitted = gate ? gate(computerId, null) : null
-      const start = () =>
-        gateway.request(computerId, HubToComputerMethods.fsWatchStart, {
-          watchId,
-          rootPath
-        })
-      void (admitted ? admitted.then(start) : start())
+      // A watch the gateway refuses never starts (recorded like any other failure
+      // below); its stop is refused the same way.
+      const started = gateway.request(computerId, HubToComputerMethods.fsWatchStart, {
+        watchId,
+        rootPath
+      })
+      void started
         .then(() => {
           if (stopped) {
             void gateway
@@ -2909,13 +2974,13 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         gateway.events.off('fs.change', onChange)
         gateway.events.off('computer-disconnected', onDisconnected)
         gateway.events.off('computer-lost', onDisconnected)
-        const sendStop = () =>
-          gateway.request(computerId!, HubToComputerMethods.fsWatchStop, {
-            watchId
+        // Sent at once; a stop that overtakes a still-pending start is sent again
+        // once the start is answered (above).
+        void gateway
+          .request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
+          .catch(() => {
+            /* already gone, or refused like its start */
           })
-        void (admitted ? admitted.then(sendStop) : sendStop()).catch(() => {
-          /* already gone, or never admitted */
-        })
       }
       return stop
     }

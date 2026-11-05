@@ -1,4 +1,5 @@
-import { act, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { Keyboard } from 'react-native'
 import { trpcTest } from '../testing'
 import { TerminalView } from './TerminalView'
 
@@ -8,6 +9,7 @@ const mockDom = {
   props: null as null | {
     onModes: (applicationCursorKeys: boolean) => Promise<void>
     onInteract: () => Promise<void>
+    onInput: (data: string) => Promise<void>
   }
 }
 
@@ -19,6 +21,7 @@ jest.mock('./TerminalDom', () => {
     onReady: () => Promise<void>
     onModes: (applicationCursorKeys: boolean) => Promise<void>
     onInteract: () => Promise<void>
+    onInput: (data: string) => Promise<void>
   }) {
     mockDom.props = props
     useImperativeHandle(
@@ -164,6 +167,15 @@ describe('TerminalView', () => {
     )
   })
 
+  it('sends what a touch scroll gives the program (a full-screen agent scrolls)', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await act(async () => mockDom.props?.onInput('\x1b[<64;3;2M'))
+    await waitFor(() =>
+      expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\x1b[<64;3;2M' }])
+    )
+  })
+
   it('submits typed text (the agent’s own Enter); an empty send presses Enter', async () => {
     const h = hub()
     await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
@@ -177,6 +189,28 @@ describe('TerminalView', () => {
 
     await user.press(screen.getByLabelText('Send'))
     await waitFor(() => expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\r' }]))
+  })
+
+  it('closes the keyboard: its own button while typing, or touching the terminal', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss')
+    try {
+      const h = hub()
+      await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+      const input = screen.getByLabelText('Message to the agent')
+      // Return sends (and keeps the keyboard up), so the field needs its own close.
+      expect(screen.queryByLabelText('Hide keyboard')).toBeNull()
+      await act(async () => fireEvent(input, 'focus'))
+      await userEvent.setup().press(screen.getByLabelText('Hide keyboard'))
+      expect(dismiss).toHaveBeenCalledTimes(1)
+      await act(async () => fireEvent(input, 'blur'))
+      expect(screen.queryByLabelText('Hide keyboard')).toBeNull()
+
+      // The terminal is a web view: a touch there does not blur the field by itself.
+      await act(async () => mockDom.props?.onInteract())
+      expect(dismiss).toHaveBeenCalledTimes(2)
+    } finally {
+      dismiss.mockRestore()
+    }
   })
 
   it('reports the user’s presence at most every 4 seconds (it keeps the agent from idle-closing)', async () => {
@@ -214,6 +248,7 @@ describe('TerminalView', () => {
     const h = hub()
     await render(<TerminalView sessionId={SID} live={false} />, { wrapper: h.wrapper })
     await userEvent.setup().press(screen.getByLabelText('Escape'))
+    await act(async () => mockDom.props?.onInput('\x1b[A'))
     await act(async () => undefined)
     expect(h.of('pty.write')).toEqual([])
     expect(h.of('pty.interrupt')).toEqual([])

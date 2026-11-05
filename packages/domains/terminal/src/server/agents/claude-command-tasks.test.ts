@@ -372,6 +372,46 @@ describe('ClaudeCommandTasks — polling output', () => {
   })
 })
 
+describe('ClaudeCommandTasks — stop a sub-agent', () => {
+  const agent = (over: Partial<CliTaskEvent> = {}) =>
+    started({ taskId: 'a1', toolUseId: 'toolu_a', taskType: 'local_agent', ...over })
+
+  it('sends stop_task with the task id its tool call started', async () => {
+    const h = harness()
+    h.tasks.route(agent())
+    const p = h.tasks.stopSubAgent('toolu_a')
+    expect(h.requests.map((r) => r.request)).toEqual([{ subtype: 'stop_task', task_id: 'a1' }])
+    h.requests[0].resolve({ response: {} })
+    await p
+  })
+
+  it('refuses an unknown, ended or command task', async () => {
+    const h = harness()
+    await expect(h.tasks.stopSubAgent('toolu_a')).rejects.toThrow(/not running/)
+    h.tasks.route(agent())
+    h.tasks.route(notification({ taskId: 'a1', toolUseId: 'toolu_a', status: 'completed' }))
+    await expect(h.tasks.stopSubAgent('toolu_a')).rejects.toThrow(/not running/)
+    h.tasks.route(started())
+    await expect(h.tasks.stopSubAgent('toolu_1')).rejects.toThrow(/not running/)
+    expect(h.requests).toHaveLength(0)
+  })
+
+  it('a progress notification keeps it running', async () => {
+    const h = harness()
+    h.tasks.route(agent())
+    h.tasks.route(notification({ taskId: 'a1', toolUseId: 'toolu_a', status: 'running' }))
+    void h.tasks.stopSubAgent('toolu_a')
+    expect(h.requests).toHaveLength(1)
+  })
+
+  it('refuses after dispose', async () => {
+    const h = harness()
+    h.tasks.route(agent())
+    h.tasks.dispose()
+    await expect(h.tasks.stopSubAgent('toolu_a')).rejects.toThrow(/not running/)
+  })
+})
+
 describe('ClaudeCommandTasks — stop and move to background', () => {
   it('stop sends stop_task for a running command', async () => {
     const h = harness()

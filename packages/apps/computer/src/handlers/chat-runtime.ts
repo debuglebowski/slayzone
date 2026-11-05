@@ -39,7 +39,7 @@ import {
   workspaceCaptureResultSchema,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed, spawnCwd } from '../config'
+import { judgePath, spawnCwd } from '../path-jail'
 import { createProcHandlers } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
@@ -413,6 +413,8 @@ export function createChatRuntimeHandlers(opts: {
             oldState,
             hasUserInput: instance?.transport.hasSessionUserInput(sessionId) ?? false
           }),
+        onBackgroundJobsChange: (sessionId, count) =>
+          publish('background-jobs', { sessionId, count }),
         workspaceCapture: {
           begin: async (ctx) =>
             workspaceCaptureBeginSchema.parse(
@@ -607,7 +609,7 @@ export function createChatRuntimeHandlers(opts: {
             bootstrap = owner
               ? r.local.get<ChatBootstrap>(owner.identity.tabId, 'settings', 'bootstrap')
               : null
-          call.args[0] = assertPathAllowed(
+          call.args[0] = judgePath(
             String(call.args[0] || bootstrap?.cwd || ''),
             opts.ctx.config.allowedRoots
           )
@@ -718,7 +720,7 @@ export function createChatRuntimeHandlers(opts: {
         const first = call.args[0]
         if (first && typeof first === 'object' && 'cwd' in first) {
           const o = first as { cwd: string }
-          if (o.cwd) o.cwd = assertPathAllowed(o.cwd, opts.ctx.config.allowedRoots)
+          if (o.cwd) o.cwd = judgePath(o.cwd, opts.ctx.config.allowedRoots)
           else {
             const i = r.storage.conversation(call.route.id)?.identity
             const b = i ? r.local.get<ChatBootstrap>(i.tabId, 'settings', 'bootstrap') : null
@@ -726,7 +728,7 @@ export function createChatRuntimeHandlers(opts: {
           }
         }
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(call.method))
-          call.args[0] = assertPathAllowed(String(first), opts.ctx.config.allowedRoots)
+          call.args[0] = judgePath(String(first), opts.ctx.config.allowedRoots)
         return r.invoke(call)
       }
       case 'inspect':
@@ -820,7 +822,7 @@ export function createChatRuntimeHandlers(opts: {
       Boolean(
         instance?.transport
           .listChatSessions()
-          .some((s) => s.state === 'running' || s.state === 'starting')
+          .some((s) => s.state === 'running' || s.state === 'starting' || s.state === 'background')
       )
   }
 }

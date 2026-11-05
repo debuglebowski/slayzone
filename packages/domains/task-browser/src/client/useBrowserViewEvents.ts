@@ -107,14 +107,25 @@ export function useBrowserViewEvents(viewId: string | null): BrowserViewState {
         break
       }
 
+      // Main stamps its own url + hasLoadedRealPage on dom-ready so this event
+      // is self-sufficient: deriving them from `prev.url` alone stranded the
+      // view behind the loading cover (hidden, never sized → 1x1 page) whenever
+      // did-navigate was missed. Fallback to prev.url for hosts that send a
+      // bare dom-ready.
       case 'dom-ready':
-        setState((prev) => ({
-          ...prev,
-          domReady: true,
-          error: null,
-          hasLoadedRealPage:
-            prev.hasLoadedRealPage || (prev.url !== '' && prev.url !== 'about:blank')
-        }))
+        setState((prev) => {
+          const url = (event.url as string | undefined) || prev.url
+          return {
+            ...prev,
+            url,
+            domReady: true,
+            error: null,
+            hasLoadedRealPage:
+              prev.hasLoadedRealPage ||
+              event.hasLoadedRealPage === true ||
+              (url !== '' && url !== 'about:blank')
+          }
+        })
         break
 
       case 'did-fail-load':

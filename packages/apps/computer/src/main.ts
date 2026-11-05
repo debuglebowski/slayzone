@@ -41,13 +41,8 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
-import {
-  DEFAULT_DIRECT_LISTEN_ADDRESS,
-  effectiveHubUrls,
-  JailViolationError,
-  setProtectedPaths,
-  type ComputerConfig
-} from './config'
+import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
+import { JailViolationError, setProtectedPaths } from './path-jail'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { createAgentHookServer } from './handlers/agent-hook'
@@ -241,13 +236,15 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     return { ok: true }
   }
 
+  /** Handlers' cleanup for a lost hub connection (their state belongs to that hub). */
+  const onHubDisconnected: Array<() => void> = []
   const table: HubMethodTable = {
     [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
-    ...createGitOpHandlers(ctx),
+    ...createGitOpHandlers(ctx, { onHubDisconnected: (cb) => onHubDisconnected.push(cb) }),
     ...createExecRunHandlers(ctx, deps.getProjectPaths),
     ...createAgentConfigHandlers(ctx),
     ...createUsageCollectHandlers(ctx),
@@ -352,6 +349,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
 
   const hubDisconnected = (reason: string): void => {
     pty.dropQueued(`hub disconnected (${reason})`)
+    for (const cb of onHubDisconnected) cb()
   }
 
   let inFlight = 0

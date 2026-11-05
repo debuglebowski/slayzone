@@ -259,7 +259,7 @@ import {
   fileUrlToSlzFileUrl,
   injectForcedHtmlTheme
 } from '@slayzone/platform'
-import { initStorageDir, getStorageDir } from './data-paths'
+import { initStorageDir, getStorageDir, resolveLegacyStateDir } from './data-paths'
 import { StorageImportError } from './copy-utils'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
@@ -297,8 +297,13 @@ function fileDialog() {
 }
 
 // The legacy state location = userData BEFORE any dev/e2e profile swap below.
-// This is the migration source (our DB/artifacts historically lived here).
-const legacyStateDir = app.getPath('userData')
+// This is the migration source (our DB/artifacts historically lived here). A
+// Playwright worker reads its own sandbox instead — never the developer's real
+// userData (see resolveLegacyStateDir).
+const legacyStateDir = resolveLegacyStateDir(app.getPath('userData'), {
+  isPlaywright,
+  sandboxDir: process.env.SLAYZONE_USER_DATA_DIR
+})
 
 if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Playwright runs alongside the user's dev app, so isolate the entire
@@ -430,8 +435,13 @@ function packagedNativeModuleEnv(): { NODE_PATH?: string } {
     : {}
 }
 
-import icon from '../../resources/icon.png?asset'
+import packagedIcon from '../../resources/icon.png?asset'
+import devIcon from '../../resources/icon-dev.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
+
+/** Unpackaged runs (`pnpm dev`, e2e) get a DEV-badged icon so they're distinguishable from the installed app. */
+const icon = app.isPackaged ? packagedIcon : devIcon
+
 // The standalone mermaid browser bundle the offscreen artifact exporter injects. An
 // asset import copies just this file into out/main, so the packaged app need not ship
 // the mermaid package (the renderer bundles its own mermaid).
@@ -2171,7 +2181,7 @@ app
       Menu.setApplicationMenu(Menu.buildFromTemplate(template))
     }
 
-    // Set dock icon on macOS (needed for dev mode)
+    // Set dock icon on macOS (unpackaged runs otherwise show Electron's icon)
     if (process.platform === 'darwin') {
       app.dock?.setIcon(icon)
     }

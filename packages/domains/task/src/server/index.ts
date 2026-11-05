@@ -87,6 +87,7 @@ export {
   listConversationHistory,
   listTaskSessions,
   setTaskSessionPromptReader,
+  legacySessionPromptSummaries,
   isHonoredConversation,
   deleteSession,
   recordPendingSpawn,
@@ -99,9 +100,12 @@ export {
   markSessionDead,
   markSessionFirstTurn,
   listResumeCandidates,
-  bindSessionToTask
+  bindSessionToTask,
+  relinquishSession,
+  claimedByOtherTasks,
+  listSharedSessionClaims
 } from './ops'
-export type { CreateImportedTaskInput, TaskSessionSummary } from './ops'
+export type { CreateImportedTaskInput, SharedSessionClaim, TaskSessionSummary } from './ops'
 export { taskSessionStore } from './task-session-store'
 export {
   configureTaskRuntimeAdapters,

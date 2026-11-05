@@ -12,6 +12,7 @@ import type {
   OutgoingUserMessage,
   ResultEvent,
   ChatSavedSummary,
+  ChatTurnState,
   ChatTurnStatus
 } from '@slayzone/terminal-contracts'
 import {
@@ -54,6 +55,7 @@ import {
   type ConversationRegistry
 } from './live-conversations'
 import { ChatEventLog, type BufferedEvent } from '../chat-events-store'
+import { ChatBackgroundWork } from './chat-background-work'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
 // typed `string`. `shared/chat-mode-catalog.ts` owns the per-mode vocabulary.
@@ -95,7 +97,16 @@ export type { BufferedEvent } from '../chat-events-store'
  * sessions in `not-spawned` are excluded from `listChatSessions` so the registry
  * never advertises them as live.
  */
-export type ChatTerminalState = 'not-spawned' | 'starting' | 'running' | 'idle' | 'error' | 'dead'
+export type { ChatTurnState }
+
+/**
+ * A chat agent's state as clients see it: its turn state, or `background` —
+ * the turn is over and nothing waits on the user, but a background sub-agent
+ * still runs (a terminal agent's `background`, see `agent-tree.ts`). Derived
+ * (`reportedStateOf`); the turn state alone gates sends, the queue and the
+ * watchdog, so background work never holds a message back.
+ */
+export type ChatTerminalState = ChatTurnState | 'background'
 
 /** Where a tab's saved events live. Default: nowhere (tests, standalone). */
 export interface ChatEventStore {
@@ -170,6 +181,14 @@ export interface TransportDeps {
     newState: ChatTerminalState,
     oldState: ChatTerminalState
   ) => void
+  /**
+   * Broadcast the session's count of background commands still running (the
+   * dot's jobs orbit): the default publishes it on the pty event stream
+   * (`pty.onBackgroundJobs`), as a terminal agent's count is.
+   */
+  broadcastBackgroundJobs: (sessionId: string, count: number) => void
+  /** The same count for a host that relays it (the computer → its hub). Default none. */
+  onBackgroundJobsChange?: (sessionId: string, count: number) => void
   /**
    * Notify main-process global state listeners (e.g. task-automation). Default
    * no-op. chat-handlers wires this to pty-manager's listener set so chat
@@ -314,7 +333,14 @@ interface ChatTab {
   startedAt: string
   /** Last event flow timestamp (ms). Drives idle-age threshold in agent-status panel. */
   lastOutputTime: number
-  terminalState: ChatTerminalState
+  /** The turn state machine (gates sends, the queue drainer, the watchdog). */
+  terminalState: ChatTurnState
+  /** The state clients were last told (`reportedStateOf`). */
+  reportedState: ChatTerminalState
+  /** What the current process runs in the background (sub-agents, commands). */
+  work: ChatBackgroundWork
+  /** The background-job count clients were last told. */
+  reportedJobs: number
   /** The current process was spawned with --resume. */
   usedResume: boolean
   /** A fresh-start retry after a failed resume is already scheduled. */
@@ -617,6 +643,9 @@ export function createChatTransport(
     broadcastStateChange: (sessionId, newState, oldState) => {
       publishChatStateChange(sessionId, newState, oldState)
       electronBroadcast('pty:state-change')(sessionId, newState, oldState)
+    },
+    broadcastBackgroundJobs: (sessionId, count) => {
+      ptyEvents.emit('background-jobs', sessionId, count)
     },
     persistEvent: () => {
       // No-op default: side effects are wired in main via configureTransport().
@@ -947,7 +976,7 @@ export function createChatTransport(
     tab.watchdogTimer.unref?.()
   }
 
-  function transitionState(tab: ChatTab, next: ChatTerminalState): void {
+  function transitionState(tab: ChatTab, next: ChatTurnState): void {
     if (tab.terminalState === next) return
     // A process the host is stopping only ends: nothing it still says (a late
     // `result`, a prompt) brings the tab back. A respawn clears `tab.proc` first.
@@ -956,20 +985,57 @@ export function createChatTransport(
     if (next === 'idle' || next === 'error' || next === 'dead') {
       clearWatchdog(tab)
     }
-    const old = tab.terminalState
     tab.terminalState = next
     const stateSessionId = stateKey(tab)
     // The startup card's agent count: a routed start waits on its computer for an
     // admission slot until `onSpawn` (→ `idle`); an in-process spawn launches at once.
     if (next === 'starting') agentStarts.mark(stateSessionId, deps.backend ? 'queued' : 'booting')
     else agentStarts.clear(stateSessionId)
-    deps.broadcastStateChange(stateSessionId, next, old)
-    deps.onStateChange?.(stateSessionId, next, old)
+    publishState(tab)
     // Edge-trigger: any time we land in `idle` (post-result, post-spawn, etc.)
     // give the queue drainer a chance to push the next user-message. Scheduled
     // via setImmediate so the drain's dispatch path doesn't re-enter the event
     // pipeline inside the current event tick.
     if (next === 'idle') kickQueueDrainer(tab)
+  }
+
+  /**
+   * The state clients see: the turn's, except a turn that is over with nothing
+   * waiting on the user while a background sub-agent still runs — `background`
+   * (the ladder of `agent-tree.ts`: needs you > working > helpers > idle).
+   */
+  function reportedStateOf(tab: ChatTab): ChatTerminalState {
+    if (
+      tab.terminalState === 'idle' &&
+      tab.pendingPrompts.size === 0 &&
+      tab.work.counts().subAgents > 0
+    )
+      return 'background'
+    return tab.terminalState
+  }
+
+  /** Tell clients the tab's state and background-job count, when they changed. */
+  function publishState(tab: ChatTab): void {
+    const sessionId = stateKey(tab)
+    const next = reportedStateOf(tab)
+    const old = tab.reportedState
+    if (next !== old) {
+      tab.reportedState = next
+      deps.broadcastStateChange(sessionId, next, old)
+      deps.onStateChange?.(sessionId, next, old)
+    }
+    const jobs = tab.closed ? 0 : tab.work.counts().jobs
+    if (jobs !== tab.reportedJobs) {
+      tab.reportedJobs = jobs
+      deps.broadcastBackgroundJobs(sessionId, jobs)
+      deps.onBackgroundJobsChange?.(sessionId, jobs)
+    }
+  }
+
+  /** The tab's process is new, replaced or gone: none of the old one's work runs on. */
+  function clearBackgroundWork(tab: ChatTab): void {
+    tab.work.clear()
+    publishState(tab)
   }
 
   /**
@@ -1004,7 +1070,7 @@ export function createChatTransport(
    * gate "should I pop?" — a send during a running turn would interleave with
    * the in-flight assistant response on the subprocess's stdin.
    */
-  function getSessionTerminalState(tabId: string): ChatTerminalState | null {
+  function getSessionTerminalState(tabId: string): ChatTurnState | null {
     const tab = tabs.get(tabId)
     return tab ? tab.terminalState : null
   }
@@ -1219,6 +1285,9 @@ export function createChatTransport(
     // Folded into the projection before any client can ask for rows after it.
     void tab.projection.then((p) => p?.apply(entry))
     tab.lastOutputTime = Date.now()
+    // Before the state machine below: a turn's end with a background sub-agent
+    // still running is ONE move, running → background, never through idle.
+    tab.work.apply(event)
     deps.broadcastEvent(tab.tabId, event, seq, undefined, at)
     try {
       deps.persistEvent(tab.tabId, seq, event)
@@ -1290,6 +1359,8 @@ export function createChatTransport(
         transitionState(tab, 'dead')
       }
     }
+    // Background work or the pending prompts changed without a turn move.
+    publishState(tab)
 
     // Liveness watchdog: while `running`, (re)arm on every forward-progress event.
     if (
@@ -1958,6 +2029,9 @@ export function createChatTransport(
       startedAt: new Date().toISOString(),
       lastOutputTime: Date.now(),
       terminalState: 'not-spawned',
+      reportedState: 'not-spawned',
+      work: new ChatBackgroundWork(),
+      reportedJobs: 0,
       usedResume: Boolean(opts.conversationId),
       retryScheduled: false,
       respawnOpts: opts,
@@ -2186,8 +2260,10 @@ export function createChatTransport(
     const gen = ++tab.gen
     const spawnId = randomUUID()
     const cliVersion = tab.optionalFlagsRefused ? null : (tab.cliVersion ?? opts.cliVersion ?? null)
-    // A new process has no prompt pending (the old one's expired with it).
+    // A new process has no prompt pending (the old one's expired with it), nor
+    // the old one's background work.
     tab.pendingPrompts.clear()
+    clearBackgroundWork(tab)
     const fork = tab.pendingFork
     // One spawn reads a switched-to conversation's past from the CLI (Codex).
     const importHistory = tab.pendingHistoryImport && resume
@@ -2674,6 +2750,16 @@ export function createChatTransport(
       return Promise.reject(new ChatTransportError('this agent cannot stop a command'))
     }
     return proc.driver.stopCommandTask(taskId)
+  }
+
+  /** Stop one running sub-agent of the tab's live process (by its row's tool_use_id). */
+  function stopSubAgent(tabId: string, toolUseId: string): Promise<void> {
+    const proc = liveProcess(tabId)
+    if (!proc) return Promise.reject(new ChatTransportError('no live session'))
+    if (!proc.driver.stopSubAgent) {
+      return Promise.reject(new ChatTransportError('this agent cannot stop a sub-agent'))
+    }
+    return proc.driver.stopSubAgent(toolUseId)
   }
 
   /** Move a running foreground command of the tab's live process to the background. */
@@ -3573,6 +3659,7 @@ export function createChatTransport(
   function removeSession(tabId: string): Promise<void> {
     const tab = tabs.get(tabId)
     if (!tab) return closing.get(tabId) ?? Promise.resolve()
+    tab.work.clear()
     transitionState(tab, 'dead')
     deps.userInputTracker.clear(stateKey(tab))
     tabs.delete(tabId)
@@ -3869,13 +3956,15 @@ export function createChatTransport(
     for (const tab of tabs.values()) {
       if (tab.ended) continue
       // Skip lazy hydrate-only skeletons — they advertise no live process.
-      if (tab.terminalState === 'not-spawned') continue
+      const state = tab.reportedState
+      if (state === 'not-spawned') continue
       result.push({
         sessionId: stateKey(tab),
         taskId: tab.taskId,
         mode: tab.mode,
         lastOutputTime: tab.lastOutputTime,
-        state: tab.terminalState
+        state,
+        ...(tab.reportedJobs > 0 ? { backgroundJobs: tab.reportedJobs } : {})
       })
     }
     return result
@@ -3885,8 +3974,8 @@ export function createChatTransport(
   function getChatSessionState(sessionId: string): ChatTerminalState | null {
     for (const tab of tabs.values()) {
       if (tab.ended) continue
-      if (tab.terminalState === 'not-spawned') continue
-      if (stateKey(tab) === sessionId) return tab.terminalState
+      if (tab.reportedState === 'not-spawned') continue
+      if (stateKey(tab) === sessionId) return tab.reportedState
     }
     return null
   }
@@ -3965,6 +4054,7 @@ export function createChatTransport(
     getCommandTaskOutput,
     stopCommandTask,
     backgroundCommandTask,
+    stopSubAgent,
     updateSessionChatMode,
     updateSessionChatModel,
     updateSessionChatEffort,
@@ -4038,6 +4128,7 @@ export const {
   getCommandTaskOutput,
   stopCommandTask,
   backgroundCommandTask,
+  stopSubAgent,
   updateSessionChatMode,
   updateSessionChatModel,
   updateSessionChatEffort,

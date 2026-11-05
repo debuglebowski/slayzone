@@ -3,7 +3,7 @@
  * to computers, lifecycle, recovery. No chat agent runtime and no chat storage:
  * those run on computers (`./server`, lint:server-boundary).
  */
-export { chatStorageMode, terminalStorageAgentId } from './storage-mode'
+export { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
 export type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 export {
   createChatOwnershipStore,
@@ -18,6 +18,7 @@ export {
 } from './migration'
 export { createLegacyChatSource, type LegacyChatDiagnostics } from './legacy-source'
 export { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
+export { legacySessionAmbiguous } from './legacy-session-authority'
 export { createHubChatRelay } from './hub-relay'
 export { createHubProviderConfigStore } from './hub-provider-config'
 

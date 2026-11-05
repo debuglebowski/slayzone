@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/computers",
-  "version": "0.36.4",
+  "version": "0.37.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -26,6 +26,6 @@
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "better-sqlite3": "^13.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.3"
   }
 }

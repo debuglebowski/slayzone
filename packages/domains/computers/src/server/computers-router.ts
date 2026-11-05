@@ -417,6 +417,8 @@ export const computersRouter = router({
       await requireManager(ctx, path, input.computerId)
       await storeDeleteComputer(ctx.db, input.computerId)
       auditComputer('computer.delete', input.computerId)
+      // It never reconnects: whatever waited for it (a process run it kept) lets go.
+      getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
       return { ok: true as const }
     }),
 
@@ -469,6 +471,7 @@ export const computersRouter = router({
       await requireManager(ctx, path, input.computerId)
       await storeRevokeComputer(ctx.db, input.computerId)
       auditComputer('computer.revoke', input.computerId)
+      getComputersDepsOrNull()?.onComputerRemoved?.(input.computerId)
       await getComputersDepsOrNull()?.onComputerRevoked?.(input.computerId)
       return { ok: true as const }
     })

@@ -52,6 +52,8 @@ interface ChildThread {
   row: Row
   /** The child's running turn (what a Stop interrupts). */
   turnId: string | null
+  /** Stopped between its turns: its next turn is interrupted as it starts. */
+  stopQueued?: true
 }
 
 interface Early {
@@ -107,6 +109,31 @@ export class CodexSubAgents {
       if (child.turnId && !child.row.ended) out.push({ threadId, turnId: child.turnId })
     }
     return out
+  }
+
+  /**
+   * Stop the child whose row this is: its running turn to interrupt, or
+   * `queued` when it runs none yet (before its first turn, between turns) — its
+   * next turn is interrupted as it starts ({@link takeQueuedStop}). Null: no
+   * such child, or it ended.
+   */
+  requestStop(rowId: string): { threadId: string; turnId: string } | 'queued' | null {
+    for (const [threadId, child] of this.threads) {
+      if (child.row.id !== rowId) continue
+      if (child.row.ended) return null
+      if (child.turnId) return { threadId, turnId: child.turnId }
+      child.stopQueued = true
+      return 'queued'
+    }
+    return null
+  }
+
+  /** A child's turn started: the turn a queued Stop interrupts now, once. */
+  takeQueuedStop(threadId: string): { threadId: string; turnId: string } | null {
+    const child = this.threads.get(threadId)
+    if (!child?.stopQueued || !child.turnId || child.row.ended) return null
+    delete child.stopQueued
+    return { threadId, turnId: child.turnId }
   }
 
   /** End every row still open (a past conversation: its children are gone). */

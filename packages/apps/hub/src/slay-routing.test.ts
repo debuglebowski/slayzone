@@ -6,12 +6,11 @@ function fixture(computerId: string | null = 'remote') {
     method === 'slay.setup' ? { ok: true } : { configured: false }
   )
   const resolveComputer = vi.fn(async () => computerId)
-  const gate = vi.fn(async () => {})
   return {
     request,
     resolveComputer,
-    gate,
-    executor: createRoutingSlayExecutor({ gateway: { request }, resolveComputer, gate })
+    // Its caller's owner check is the gateway's (`computer-request-authorizer.test.ts`).
+    executor: createRoutingSlayExecutor({ gateway: { request }, resolveComputer })
   }
 }
 const target = { taskId: 'task', projectId: 'project', projectPath: '/remote/repo' }
@@ -20,7 +19,6 @@ it('routes both operations to task computer without probing hub', async () => {
   expect(await f.executor.checkConfigured(target)).toBe(false)
   expect(await f.executor.setup(target)).toEqual({ ok: true })
   expect(f.resolveComputer).toHaveBeenCalledWith(target)
-  expect(f.gate).toHaveBeenCalledWith('remote')
   expect(f.request).toHaveBeenCalledWith('remote', 'slay.checkConfigured', {
     projectPath: '/remote/repo',
     projectId: 'project'
@@ -35,10 +33,8 @@ it('never falls back to hub when computer is offline or access denied', async ()
   f.request.mockRejectedValue(new Error('offline'))
   await expect(f.executor.checkConfigured(target)).rejects.toThrow('offline')
   await expect(f.executor.setup(target)).rejects.toThrow('offline')
-  f.gate.mockRejectedValue(new Error('denied'))
-  f.request.mockClear()
+  f.request.mockRejectedValue(new Error('denied'))
   await expect(f.executor.setup(target)).rejects.toThrow('denied')
-  expect(f.request).not.toHaveBeenCalled()
 })
 it('no computer: "connect a computer" — slay never runs on the hub', async () => {
   const f = fixture(null)

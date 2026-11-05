@@ -416,6 +416,10 @@ export const chatRouter = router({
   backgroundCommandTask: publicProcedure
     .input(z.object({ tabId: z.string(), toolUseId: z.string() }))
     .mutation(({ input }) => ops().backgroundCommandTask(input.tabId, input.toolUseId)),
+  // One background sub-agent (the composer's Stop), by its row's tool_use_id.
+  stopSubAgent: publicProcedure
+    .input(z.object({ tabId: z.string(), toolUseId: z.string() }))
+    .mutation(({ input }) => ops().stopSubAgent(input.tabId, input.toolUseId)),
   // `mode`: only a session of that provider counts — a tab switching provider
   // keeps its old session until the new one spawns.
   getInfo: publicProcedure

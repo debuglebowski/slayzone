@@ -83,6 +83,20 @@ describe('git.watchStart / git.watchStop', () => {
     expect(watchEvents()).toEqual([])
   })
 
+  // The hub that asked is gone: its watch ids mean nothing to the next one (it
+  // starts its own), so each reconnect used to leave one more recursive fs.watch
+  // open forever. A disconnect closes them all.
+  it('a hub disconnect closes every watch it started', async () => {
+    const onDisconnect: Array<() => void> = []
+    handlers = createGitOpHandlers(ctx(), { onHubDisconnected: (cb) => onDisconnect.push(cb) })
+    await call(HubToComputerMethods.gitWatchStart, { watchId: 'w1', worktreePath: dir })
+    await call(HubToComputerMethods.gitWatchStart, { watchId: 'w9', worktreePath: dir })
+    for (const cb of onDisconnect) cb()
+    writeFileSync(join(dir, 'c.txt'), 'x')
+    await new Promise((r) => setTimeout(r, 800))
+    expect(watchEvents(), 'nothing reported after the disconnect').toEqual([])
+  })
+
   it('refuses a checkout outside its folders', async () => {
     await expect(
       call(HubToComputerMethods.gitWatchStart, { watchId: 'w2', worktreePath: '/etc' })

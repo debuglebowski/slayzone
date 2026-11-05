@@ -3,13 +3,14 @@
  * the hub declares (`@slayzone/worktrees/git-ops`) — one implementation, not a copy.
  *
  * Every call: the op must be in the shared contract, its input must pass the
- * contract's schema, every absolute path it names must pass the jail
- * ({@link assertPathAllowed}), and every repo-relative path (a file to stage, a
+ * contract's schema, every absolute path it names is judged by the computer's one
+ * path jail (`../path-jail`), and every repo-relative path (a file to stage, a
  * conflict to write) must stay inside the op's repo — before git or fs is touched.
+ * The op then runs on the JUDGED paths, never the raw ones.
  *
  * @module computer/handlers/git-op
  */
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, relative } from 'node:path'
 import {
   ComputerNotificationMethods,
   GIT_WATCH_EVENT,
@@ -25,8 +26,8 @@ import {
   createGitWatcher,
   type GitDiffChangedPayload,
   gitOpAbsolutePaths,
-  gitOpRepoRelativePaths,
   gitOpsContract,
+  mapGitOpPaths,
   isGitOpName,
   runGitOpLocally,
   type GitOpInput,
@@ -38,18 +39,16 @@ import {
   turnGitContract,
   type TurnGitOpInput
 } from '@slayzone/agent-turns/turn-git'
-import { assertPathAllowed, JailViolationError } from '../config'
+import { jailedFs, judgePath, judgePathIn, JailViolationError } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
-function insideRepo(repo: string, rel: string): boolean {
-  if (isAbsolute(rel)) return false
-  const back = relative(repo, resolve(repo, rel))
-  return (
-    back !== '..' && !back.startsWith(`..${'/'}`) && !back.startsWith('..\\') && !isAbsolute(back)
-  )
-}
-
-export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
+export function createGitOpHandlers(
+  ctx: HandlerContext,
+  hooks: {
+    /** Register what to do when the hub connection goes away. */
+    onHubDisconnected?: (cb: () => void) => void
+  } = {}
+): HubMethodTable {
   // This process adopted the login-shell PATH at boot, and running git is its job:
   // no hub refusal here, and its diagnostics go to its own log.
   configureGitExec({
@@ -60,20 +59,47 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
     }
   })
   // Read the jail through `ctx` on every call: `computer.setAllowedRoots` edits it live.
-  const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
+  const allow = (candidate: string): string => judgePath(candidate, ctx.config.allowedRoots)
 
   async function gitOp(raw: unknown): Promise<{ result: unknown }> {
     const { op, input } = gitOpParamsSchema.parse(raw)
     if (!isGitOpName(op)) throw new Error(`unknown git op '${op}'`)
     const name: GitOpName = op
-    const parsed = gitOpsContract[name].input.parse(input) as GitOpInput<typeof name>
-    const paths = gitOpAbsolutePaths(name, parsed)
-    for (const p of paths) allow(p)
-    const repo = paths[0]
-    for (const rel of gitOpRepoRelativePaths(name, parsed)) {
-      if (!repo || !insideRepo(repo, rel))
-        throw new JailViolationError(`path '${rel}' must stay inside the repository`)
-      allow(resolve(repo, rel))
+    const asSent = gitOpsContract[name].input.parse(input) as GitOpInput<typeof name>
+    const repoRaw = gitOpAbsolutePaths(name, asSent)[0]
+    const repo = repoRaw === undefined ? undefined : allow(repoRaw)
+    // Judged, and the op runs on what was judged: each absolute path by the jail;
+    // each repo-relative one kept inside the repo (lexically, as git reads a
+    // pathspec — git itself never follows a link in the work tree) and judged as
+    // the entry it names.
+    const parsed = mapGitOpPaths(name, asSent, {
+      absolute: allow,
+      repoRelative: (rel) => {
+        if (!repo || isAbsolute(rel)) {
+          throw new JailViolationError(`path '${rel}' must stay inside the repository`)
+        }
+        let path: string
+        try {
+          path = judgePathIn(repo, rel, ctx.config.allowedRoots, { access: 'entry' }).path
+        } catch (err) {
+          if (err instanceof JailViolationError && err.message.startsWith('Path traversal')) {
+            throw new JailViolationError(`path '${rel}' must stay inside the repository`)
+          }
+          throw err
+        }
+        // The repo itself (`''`, `.`) stays as sent: a file op never widens to `.`.
+        const inRepo = relative(repo, path)
+        return inRepo === '' ? rel : inRepo
+      }
+    })
+    if (name === 'writeResolvedFile') {
+      // Written by the jail where it was judged, never through a link.
+      const { repoPath, filePath, content } = parsed as GitOpInput<'writeResolvedFile'>
+      jailedFs.writeFile(
+        judgePathIn(repoPath, filePath, ctx.config.allowedRoots, { access: 'write' }).path,
+        content
+      )
+      return { result: null }
     }
     const result = await runGitOpLocally(name, parsed)
     return { result: result ?? null }
@@ -99,13 +125,23 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
   })
 
   async function watchStart(raw: unknown): Promise<{ ok: true }> {
-    const { watchId, worktreePath } = gitWatchStartParamsSchema.parse(raw)
-    allow(worktreePath)
+    const { watchId, worktreePath: rawPath } = gitWatchStartParamsSchema.parse(raw)
+    const worktreePath = allow(rawPath)
     if (watchPaths.has(watchId)) return { ok: true }
-    watchPaths.set(watchId, worktreePath)
+    // Subscribe first: a watch that failed to start is never recorded as live.
     watcher.subscribe(worktreePath)
+    watchPaths.set(watchId, worktreePath)
     return { ok: true }
   }
+
+  // The hub that started these is gone; the next one starts its own under new ids.
+  // Left open, each reconnect added one more recursive fs.watch.
+  hooks.onHubDisconnected?.(() => {
+    for (const [watchId, worktreePath] of watchPaths) {
+      watchPaths.delete(watchId)
+      watcher.unsubscribe(worktreePath)
+    }
+  })
 
   async function watchStop(raw: unknown): Promise<{ ok: true }> {
     const { watchId } = gitWatchStopParamsSchema.parse(raw)
@@ -120,8 +156,8 @@ export function createGitOpHandlers(ctx: HandlerContext): HubMethodTable {
   async function gitTurnOp(raw: unknown): Promise<{ result: unknown }> {
     const { op, input } = gitTurnOpParamsSchema.parse(raw)
     if (!isTurnGitOpName(op)) throw new Error(`unknown turn op '${op}'`)
-    const parsed = turnGitContract[op].parse(input) as TurnGitOpInput<typeof op>
-    allow(parsed.repoPath)
+    const input0 = turnGitContract[op].parse(input) as TurnGitOpInput<typeof op>
+    const parsed = { ...input0, repoPath: allow(input0.repoPath) }
     const result = await runTurnGitOpLocally(op, parsed)
     return { result: result ?? null }
   }

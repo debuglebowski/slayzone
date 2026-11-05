@@ -149,6 +149,7 @@ export function runGitOpLocally<K extends GitOpName>(
 export {
   gitOpsContract,
   gitOpAbsolutePaths,
+  mapGitOpPaths,
   gitOpRepoRelativePaths,
   isGitOpName,
   type GitOpInput,

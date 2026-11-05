@@ -1,3 +1,4 @@
+import { Terminal as Headless } from '@xterm/headless'
 import { clampZoom, fitFontSize, MAX_FONT, MIN_FONT, readableZoom } from './terminal-scale'
 import { type TerminalLike, type XtermHost, XtermView } from './xterm-view'
 
@@ -9,12 +10,14 @@ function fakeTerminal() {
     cols: 80,
     rows: 24,
     options: { fontSize: 14 } as { fontSize: number; theme?: unknown },
-    modes: { applicationCursorKeysMode: false },
+    modes: { applicationCursorKeysMode: false, mouseTrackingMode: 'none' as string },
+    buffer: { active: { type: 'normal' as string } },
     parser: {
       registerCsiHandler: (id: { prefix?: string; final: string }) => {
         handlers.push({ id })
         return { dispose: () => undefined }
-      }
+      },
+      registerEscHandler: () => ({ dispose: () => undefined })
     },
     open: () => calls.push('open'),
     write: (data: string, done?: () => void) => {
@@ -32,12 +35,18 @@ function fakeTerminal() {
   return { term: term as unknown as TerminalLike & typeof term, calls, handlers }
 }
 
-/** A 390px wide screen; each column is 0.6 × the font size wide. */
-function host(width = 390): XtermHost & { term?: { cols: number; options: { fontSize: number } } } {
-  const h: XtermHost & { term?: { cols: number; options: { fontSize: number } } } = {
+type Sized = { cols: number; rows: number; options: { fontSize?: number } }
+/** A 390px wide screen at (0, 100); a cell is 0.6 × 1.2 the font size. */
+function host(width = 390): XtermHost & { term?: Sized } {
+  const h: XtermHost & { term?: Sized } = {
     element: {} as HTMLElement,
     viewportWidth: () => width,
-    screenWidth: () => (h.term ? h.term.cols * h.term.options.fontSize * 0.6 : 0)
+    screenRect: () => {
+      const font = h.term?.options.fontSize ?? 0
+      return h.term
+        ? { left: 0, top: 100, width: h.term.cols * font * 0.6, height: h.term.rows * font * 1.2 }
+        : { left: 0, top: 0, width: 0, height: 0 }
+    }
   }
   return h
 }
@@ -83,8 +92,11 @@ describe('XtermView', () => {
       {}
     )
     expect(options.disableStdin).toBe(true)
+    // Answer-suppression for the queries, plus the (non-consuming) mouse-encoding watch.
     expect(fake.handlers.map((h) => `${h.id.prefix ?? ''}${h.id.final}`).sort()).toEqual([
       '>q',
+      '?h',
+      '?l',
       '?n',
       'n'
     ])
@@ -136,5 +148,51 @@ describe('XtermView', () => {
     view.pinchMove(2)
     view.resize(65, 40) // fit font 10, still zoomed ×2
     expect(fake.term.options.fontSize).toBeCloseTo(20)
+  })
+})
+
+/** The view over REAL xterm (headless: the same parser and modes as @xterm/xterm). */
+function overXterm() {
+  const term = new Headless({ cols: 100, rows: 30, allowProposedApi: true })
+  const asLike = Object.assign(term, { open: () => undefined }) as unknown as TerminalLike
+  const h = host(600) // 100 cols × 0.6 × 10px font → a 10px font fits; cells 6 × 12px
+  h.term = asLike
+  const input: string[] = []
+  const view = new XtermView(() => asLike, h, { onInput: (d) => input.push(d) })
+  const write = (data: string) => new Promise<void>((done) => term.write(data, done))
+  return { term, view, input, write }
+}
+
+describe('XtermView touch scroll', () => {
+  it('a full-screen agent (alternate screen + SGR mouse, as Claude Code) gets wheel notches', async () => {
+    const { view, input, write } = overXterm()
+    expect(view.touchScrollStart()).toBe(false) // plain shell: xterm scrolls the scrollback
+    await write('\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h')
+    expect(view.touchScrollStart()).toBe(true)
+    // Finger at cell (3, 2) drags 25px down (2 lines of 12px): two notches up.
+    view.touchScrollMove(25, 15, 100 + 20)
+    expect(input).toEqual(['\x1b[<64;3;2M\x1b[<64;3;2M'])
+    view.touchScrollMove(-13, 15, 100 + 20)
+    expect(input.at(-1)).toBe('\x1b[<65;3;2M')
+  })
+
+  it('follows the encoding xterm uses: X10 bytes after DECRST 1006 or a reset', async () => {
+    const { view, input, write } = overXterm()
+    await write('\x1b[?1000h\x1b[?1006h\x1b[?1006l')
+    view.touchScrollStart()
+    view.touchScrollMove(-12, 0, 100)
+    expect(input).toEqual([`\x1b[M${String.fromCharCode(97, 33, 33)}`])
+    await write('\x1b[?1006h\x1bc\x1b[?1000h') // RIS drops SGR; tracking back on
+    view.touchScrollStart()
+    view.touchScrollMove(-12, 0, 100)
+    expect(input.at(-1)).toBe(`\x1b[M${String.fromCharCode(97, 33, 33)}`)
+  })
+
+  it('the alternate screen without the mouse gets arrow keys (in the cursor-key mode)', async () => {
+    const { view, input, write } = overXterm()
+    await write('\x1b[?1049h\x1b[?1h')
+    expect(view.touchScrollStart()).toBe(true)
+    view.touchScrollMove(12, 0, 100)
+    expect(input).toEqual(['\x1bOA'])
   })
 })

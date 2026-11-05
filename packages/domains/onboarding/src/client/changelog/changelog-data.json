@@ -1,5 +1,156 @@
 [
   {
+    "version": "0.37.2",
+    "date": "2026-11-04",
+    "tagline": "Sessions stay put",
+    "items": [
+      {
+        "category": "fix",
+        "title": "Agents no longer fenced by a shared session",
+        "description": "When two tasks claimed the same Claude session, the second task now starts fresh instead of its agent being blocked."
+      },
+      {
+        "category": "fix",
+        "title": "Background browser views render",
+        "description": "Browser panels in background tasks no longer get stuck at a tiny size or behind the loading cover."
+      }
+    ]
+  },
+  {
+    "version": "0.37.1",
+    "date": "2026-11-04",
+    "tagline": "Stop stray sub-agents",
+    "items": [
+      {
+        "category": "feature",
+        "title": "Stop background sub-agents",
+        "description": "Sub-agents still running after a turn show in a pill above the composer, where you can open or stop each one (Claude and Codex)."
+      },
+      {
+        "category": "fix",
+        "title": "Agents resume after 0.37.0 upgrade",
+        "description": "Terminal Claude sessions resume again, and moved task history no longer blocks agents from starting."
+      },
+      {
+        "category": "fix",
+        "title": "Agents start under bash",
+        "description": "Fixed agents failing to launch when your login shell is bash."
+      }
+    ]
+  },
+  {
+    "version": "0.37.0",
+    "date": "2026-11-04",
+    "tagline": "Steer agents mid-turn",
+    "items": [
+      {
+        "category": "breaking",
+        "title": "Screenshot shortcut moved",
+        "description": "Browser screenshots move to Cmd+Shift+Y; Cmd+Shift+S now toggles the artifacts sidebar."
+      },
+      {
+        "category": "breaking",
+        "title": "`slay processes kill` renamed",
+        "description": "Use `slay processes remove` instead; scripts that call `kill` must be updated."
+      },
+      {
+        "category": "feature",
+        "title": "Send into a running turn",
+        "description": "Press Cmd+Shift+Enter, or send a queued message, to deliver it to the agent without waiting for the turn to end."
+      },
+      {
+        "category": "feature",
+        "title": "Change settings mid-turn",
+        "description": "Switch Claude permission mode, model and effort while a turn is running."
+      },
+      {
+        "category": "feature",
+        "title": "Chat image attachments",
+        "description": "Attach images to chat messages and preview them on hover."
+      },
+      {
+        "category": "feature",
+        "title": "Side questions with /btw",
+        "description": "Ask a quick side question without interrupting the main conversation."
+      },
+      {
+        "category": "feature",
+        "title": "Per-provider chat defaults",
+        "description": "Set a default permission mode, model and effort for each provider."
+      },
+      {
+        "category": "feature",
+        "title": "Per-turn file changes",
+        "description": "Each turn records its workspace changes so you can review them from the turn."
+      },
+      {
+        "category": "feature",
+        "title": "Drive chat agents from the CLI",
+        "description": "New `slay chat` and `slay agent` commands send messages, wait for turns, read transcripts and answer prompts."
+      },
+      {
+        "category": "feature",
+        "title": "Process controls in the CLI",
+        "description": "`slay processes start`, `stop` and `restart` control processes and stop their whole process tree."
+      },
+      {
+        "category": "feature",
+        "title": "Startup progress",
+        "description": "A sidebar card shows agents starting and tabs loading while the workspace restores."
+      },
+      {
+        "category": "improvement",
+        "title": "Codex chat upgrades",
+        "description": "Codex chat adds prompt history, a permission timing choice, background terminal tracking and sub-agent rows."
+      },
+      {
+        "category": "improvement",
+        "title": "Cleaner chat layout",
+        "description": "Compact composer footer, flatter messages, plan cards, sub-agent rows, readable turn triggers and a resizable threads panel."
+      },
+      {
+        "category": "improvement",
+        "title": "Escape key in chat",
+        "description": "Esc returns a message the agent has not started yet, and double Esc clears or restores the draft."
+      },
+      {
+        "category": "improvement",
+        "title": "Artifacts sidebar",
+        "description": "Toggle the artifacts sidebar with Cmd+Shift+S; its visibility and width are kept per task."
+      },
+      {
+        "category": "improvement",
+        "title": "Terminal modes are now agents",
+        "description": "Settings and pickers call terminal modes “agents”; existing tasks and templates migrate automatically."
+      },
+      {
+        "category": "fix",
+        "title": "Reliable chat stop and restore",
+        "description": "Stop takes effect at once, late output no longer reopens a stopped turn, and false draft conflicts are gone."
+      },
+      {
+        "category": "fix",
+        "title": "Chat scrolling",
+        "description": "Auto-scroll stops when you scroll away or type, and no longer jumps on history navigation."
+      },
+      {
+        "category": "fix",
+        "title": "Tabs kept on boot",
+        "description": "Saved tabs survive a failed startup read and task tabs no longer time out while booting."
+      },
+      {
+        "category": "fix",
+        "title": "Worktree session resume",
+        "description": "Claude sessions that moved into a worktree resume correctly."
+      },
+      {
+        "category": "fix",
+        "title": "Quit and sleep handling",
+        "description": "The packaged app no longer hangs on quit, and agents are no longer killed after the machine wakes from sleep."
+      }
+    ]
+  },
+  {
     "version": "0.36.4",
     "date": "2026-11-01",
     "tagline": "Deeper chats, steadier sessions",

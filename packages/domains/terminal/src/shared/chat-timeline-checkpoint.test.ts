@@ -153,4 +153,26 @@ describe('reducer version', () => {
       }
     }
   })
+
+  test('every file a hashed source imports values from is hashed too', () => {
+    const hashed = new Set(REDUCER_SOURCES.map((p) => new URL(p, import.meta.url).href))
+    for (const path of REDUCER_SOURCES) {
+      const fileUrl = new URL(path, import.meta.url)
+      const src = readFileSync(fileUrl, 'utf8')
+      // `import type { … }` never matches: `type` sits between the keyword and the brace.
+      // Re-exports are left out: passed through for callers (selectors), never called by the reducer.
+      for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'(\.\.?\/[^']+)'/g)) {
+        const values = m[1]
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s && !s.startsWith('type '))
+        if (values.length === 0) continue
+        const target = new URL(m[2].endsWith('.ts') ? m[2] : `${m[2]}.ts`, fileUrl).href
+        expect(
+          hashed.has(target),
+          `${path} takes { ${values.join(', ')} } from ${m[2]}: add it to REDUCER_SOURCES`
+        ).toBe(true)
+      }
+    }
+  })
 })

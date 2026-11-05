@@ -186,6 +186,7 @@ export const chatOperationSchemas = {
   commandTaskOutput: z.tuple([id, id]),
   stopCommandTask: z.tuple([id, id]),
   backgroundCommandTask: z.tuple([id, id]),
+  stopSubAgent: z.tuple([id, id]),
   getWorkspaceChanges: z.tuple([id, id]),
   getWorkspaceFileDiff: z.tuple([id, id, z.string().max(10000)]),
   inspectPermissions: taskMode,

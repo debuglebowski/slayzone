@@ -22,7 +22,8 @@ import {
   recordConversation,
   getCurrentConversationId,
   getConversationFirstSeenAt,
-  listResumeCandidates
+  listResumeCandidates,
+  claimedByOtherTasks
 } from './ops/index.js'
 
 /** Capabilities the healer needs from packages built on top of task. */
@@ -90,7 +91,14 @@ export function registerConversationHealer(
       // into a reset.
       const legacyHistory = task.provider_config?.[mode]?.conversationHistory ?? []
       const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
-      const history = [...new Set([...owned, ...legacyHistory])]
+      // One task per provider session. `owned` already excludes other tasks'
+      // sessions (`listResumeCandidates`); the pre-ledger list does not — its
+      // SessionStart hook appended whatever `/resume` picked in a shared cwd, a
+      // parent's or sibling's session included. Repointing to one would make two
+      // tasks drive one transcript, so those ids are never candidates.
+      const merged = [...new Set([...owned, ...legacyHistory])]
+      const foreign = await claimedByOtherTasks(db, taskId, merged)
+      const history = merged.filter((id) => !foreign.has(id))
       const storedInHistory = history.includes(storedId)
 
       // Where each transcript is, on the disk of the computer the agent runs on,

@@ -37,6 +37,116 @@ export function computerStatus(row: ComputerStatusRow): {
   return { label: `Offline · last seen ${new Date(row.lastSeenAt).toLocaleString()}`, tone: 'idle' }
 }
 
+/** Every phase a computer's auto-upgrade reports. The status schema is built from this. */
+export const COMPUTER_UPGRADE_PHASES = [
+  'checking',
+  'installing',
+  'waiting-for-idle',
+  'restarting',
+  'probation',
+  'connected',
+  'rollback',
+  'failed',
+  'maintenance-required'
+] as const
+export type ComputerUpgradePhase = (typeof COMPUTER_UPGRADE_PHASES)[number]
+
+/** The fields of a reported upgrade status the labels read. */
+export interface ComputerUpgradeRow {
+  phase: ComputerUpgradePhase
+  currentVersion: string
+  hostVersion: string
+  version?: string
+  target?: string
+  error?: string
+  retryAt?: number
+  maintenanceReason?: string
+}
+
+/** The failed-check target the upgrader uses before it knows a release. */
+const DISCOVERY_TARGET = 'discovery'
+
+/**
+ * What an upgrade adds to the status column, or null when there is nothing to say.
+ * `connected` (on the release the hub wants) and `checking` (the periodic poll) are
+ * the steady state: printing them on every row was noise.
+ */
+function upgradeStatusLabel(
+  u: ComputerUpgradeRow
+): { label: string; detail?: string; tone: ComputerStatusTone } | null {
+  const target = u.target ?? 'new release'
+  switch (u.phase) {
+    case 'checking':
+    case 'connected':
+      return null
+    case 'installing':
+      return { label: 'Upgrading', detail: `Installing ${target}`, tone: 'ok' }
+    case 'waiting-for-idle':
+      return { label: 'Upgrading', detail: `${target} · waiting for idle`, tone: 'ok' }
+    case 'restarting':
+      return { label: 'Upgrading', detail: `Restarting into ${target}`, tone: 'ok' }
+    case 'probation':
+      return { label: 'Upgrading', detail: `Verifying ${target}`, tone: 'ok' }
+    case 'rollback':
+      return { label: 'Rolling back', detail: `to ${target}`, tone: 'bad' }
+    case 'maintenance-required':
+      return { label: 'Upgrade blocked', detail: 'host maintenance pending', tone: 'bad' }
+    case 'failed': {
+      if (u.target === DISCOVERY_TARGET || u.target == null)
+        return { label: 'Update check failed', tone: 'bad' }
+      const retry = u.retryAt != null ? ` · retry ${new Date(u.retryAt).toLocaleTimeString()}` : ''
+      return { label: 'Upgrade failed', detail: `${u.target}${retry}`, tone: 'bad' }
+    }
+  }
+}
+
+/**
+ * A computer row's status cell: connection and upgrade as ONE field, because an
+ * upgrade is a state of the computer, not metadata about it.
+ *
+ * Connection trouble outranks the upgrade: a computer that cannot take work (or was
+ * revoked) is not reporting, so its last upgrade phase is stale.
+ */
+export function computerRowStatus(
+  row: ComputerStatusRow & { upgradeStatus?: ComputerUpgradeRow | null }
+): { label: string; detail?: string; tone: ComputerStatusTone } {
+  const conn = computerStatus(row)
+  if (conn.tone !== 'ok' || !row.upgradeStatus) return conn
+  return upgradeStatusLabel(row.upgradeStatus) ?? conn
+}
+
+/** Hover text for an upgrade: why it failed or is blocked, else which versions. */
+export function computerUpgradeTitle(u: ComputerUpgradeRow): string {
+  return (
+    u.error ??
+    u.maintenanceReason ??
+    `Connector ${u.version ?? u.currentVersion} · host ${u.hostVersion}`
+  )
+}
+
+/**
+ * What a default computer reports. The computer app's `DEFAULT_CAPABILITIES` is
+ * asserted equal to this, so the two cannot drift.
+ */
+export const STANDARD_COMPUTER_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
+
+/**
+ * How a computer's capabilities differ from the standard set, or null when they do
+ * not. Every default computer reports the same four, so listing them on each row
+ * said nothing; what matters is a computer that cannot (or can additionally) do X.
+ */
+export function capabilityNote(capabilities: readonly string[]): string | null {
+  if (capabilities.length === 0) return 'no capabilities'
+  const have = new Set(capabilities)
+  const standard = new Set<string>(STANDARD_COMPUTER_CAPABILITIES)
+  const missing = STANDARD_COMPUTER_CAPABILITIES.filter((c) => !have.has(c))
+  const extra = capabilities.filter((c) => !standard.has(c))
+  const parts: string[] = []
+  if (missing.length > 0) parts.push(`no ${missing.join(', ')}`)
+  if (extra.length > 0) parts.push(extra.map((c) => `+${c}`).join(', '))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 /**
  * A computer's name for a binding: no computer (null) runs on the hub's own machine,
  * "Local"; an id the list does not hold (revoked, another user's) is unknown.

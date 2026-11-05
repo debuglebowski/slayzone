@@ -10,8 +10,14 @@
  * never runs git or reads a checkout itself.
  */
 import type { SlayzoneDb } from '@slayzone/platform'
+import { computerPathWithin, normalizeComputerPath } from '@slayzone/platform/computer-path'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
-import { gitOpAbsolutePaths, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
+import {
+  gitOpAbsolutePaths,
+  gitOpTimeoutMs,
+  type GitOpInput,
+  type GitOpName
+} from '../shared/git-ops-contract'
 import type { GitOpResult } from './git-ops'
 import { getGitWatcher } from './git-watcher'
 import { getWorktreesRouterDepsOrNull, type WorktreesComputerTarget } from './worktrees-router-deps'
@@ -20,7 +26,11 @@ export interface GitOpTransport {
   /** One `git.op` request to `computerId`; answers the op's result. */
   request(
     computerId: string,
-    params: { op: GitOpName; input: unknown; mutates: boolean }
+    params: { op: GitOpName; input: unknown; mutates: boolean },
+    /** The op's own limit ({@link gitOpTimeoutMs}) — pass it on as the request's. */
+    timeoutMs: number,
+    /** What the op works on, as resolved (a task's checkout, a project …): its gate. */
+    target: WorktreesComputerTarget
   ): Promise<unknown>
   /** Start watching a checkout there (`git.watchStart`); reports arrive via
    *  {@link deliverGitWatchEvent}. */
@@ -36,7 +46,16 @@ export function setGitOpTransport(next: GitOpTransport | null): void {
   routedWatches.clear()
 }
 
-/** Resolve the computer an op or watch on `path` runs on (null = this hub's disk). */
+/** What an op on `path` works on: an explicit target, else whose checkout the path is. */
+async function targetFor(
+  target: WorktreesComputerTarget | undefined,
+  path: string | undefined,
+  db: SlayzoneDb | undefined
+): Promise<WorktreesComputerTarget> {
+  return target ?? (db && path ? await gitTargetForPath(db, path) : null) ?? {}
+}
+
+/** Resolve the computer an op or watch on `path` runs on (null = none). */
 async function computerFor(
   target: WorktreesComputerTarget | undefined,
   path: string | undefined,
@@ -44,9 +63,7 @@ async function computerFor(
 ): Promise<string | null> {
   const deps = getWorktreesRouterDepsOrNull()
   if (!deps) return null
-  // An explicit target wins; else the path names whose checkout this is.
-  const resolvedTarget = target ?? (db && path ? await gitTargetForPath(db, path) : null) ?? {}
-  return deps.getWorkspace().resolveComputer(resolvedTarget)
+  return deps.getWorkspace().resolveComputer(await targetFor(target, path, db))
 }
 
 /** The panel's watches, refcounted per checkout path: many panels on one checkout = one watch. */
@@ -126,41 +143,45 @@ export function gitWatchComputerGone(computerId: string): void {
   }
 }
 
-function trimSlashes(p: string): string {
-  return p.length > 1 ? p.replace(/\/+$/, '') : p
-}
-
 /**
  * Whose checkout `path` is, as the hub records it: a task's worktree (the task's
  * computer), else a project's folder on a computer (`project_placements`, not
  * forgotten) — the longest match, at a path boundary. The same folder on several
  * computers names only the project (its default computer decides). Null: unknown.
+ *
+ * Both sides — the asked path and every stored one — are compared in the ONE form
+ * the owner policy also uses (`@slayzone/platform/computer-path`), so routing and
+ * the policy never disagree on whose a path is (G2), and a Windows path stored with
+ * `/` still matches (G5). In JS: SQL cannot normalize the stored side.
  */
 export async function gitTargetForPath(
   db: SlayzoneDb,
   path: string
 ): Promise<WorktreesComputerTarget | null> {
-  const p = trimSlashes(path)
-  // `inside(col)`: p is col, or lies under col/ (substr compare: no LIKE escaping).
-  const inside = (col: string) => `(${col} = ? OR substr(?, 1, length(${col}) + 1) = ${col} || '/')`
-  const task = await db.get<{ id: string; worktree_path: string }>(
-    `SELECT id, worktree_path FROM tasks
-      WHERE worktree_path IS NOT NULL AND worktree_path != '' AND ${inside('worktree_path')}
-      ORDER BY length(worktree_path) DESC LIMIT 1`,
-    [p, p]
+  const p = normalizeComputerPath(path)
+  const under = (root: string) => computerPathWithin(p, root)
+  let task: { id: string; root: string } | null = null
+  for (const row of await db.all<{ id: string; worktree_path: string }>(
+    `SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path != ''`
+  )) {
+    const root = normalizeComputerPath(row.worktree_path)
+    if (under(root) && (!task || root.length > task.root.length)) task = { id: row.id, root }
+  }
+  const placements = (
+    await db.all<{ computer_id: string; project_id: string; root_path: string }>(
+      `SELECT computer_id, project_id, root_path FROM project_placements
+        WHERE status != 'forgotten' AND root_path != ''`
+    )
   )
-  const placements = await db.all<{ computer_id: string; project_id: string; root_path: string }>(
-    `SELECT computer_id, project_id, root_path FROM project_placements
-      WHERE status != 'forgotten' AND root_path != '' AND ${inside('root_path')}
-      ORDER BY length(root_path) DESC`,
-    [p, p]
-  )
+    .map((r) => ({ ...r, root: normalizeComputerPath(r.root_path) }))
+    .filter((r) => under(r.root))
+    .sort((a, b) => b.root.length - a.root.length)
   const longest = placements[0]
-  if (task && (!longest || task.worktree_path.length >= longest.root_path.length)) {
+  if (task && (!longest || task.root.length >= longest.root.length)) {
     return { taskId: task.id }
   }
   if (!longest) return null
-  const same = placements.filter((r) => r.root_path === longest.root_path)
+  const same = placements.filter((r) => r.root === longest.root)
   const computers = new Set(same.map((r) => r.computer_id))
   const projects = new Set(same.map((r) => r.project_id))
   if (computers.size === 1)
@@ -175,7 +196,14 @@ export async function executeGitOp<K extends GitOpName>(
   db?: SlayzoneDb
 ): Promise<GitOpResult<K>> {
   const repoPath = gitOpAbsolutePaths(op, input as GitOpInput<K>)[0]
-  const computerId = await computerFor(target, repoPath, db)
+  const deps = getWorktreesRouterDepsOrNull()
+  const resolved = await targetFor(target, repoPath, db)
+  const computerId = deps ? await deps.getWorkspace().resolveComputer(resolved) : null
   if (computerId == null || !transport) refuseNoComputer({ op: `worktrees.${op}` })
-  return (await transport.request(computerId, { op, input, mutates })) as GitOpResult<K>
+  return (await transport.request(
+    computerId,
+    { op, input, mutates },
+    gitOpTimeoutMs(op),
+    resolved
+  )) as GitOpResult<K>
 }

@@ -13,6 +13,12 @@ The tRPC client: links, the boot singleton, multi-hub federation (`FederationPro
   (`closeHubClient`) and its QueryClient dropped, so a later sign-in starts fresh. Never
   the default hub. Desktop never shrinks `hubs` while running (adding a hub reloads the
   window, removing one relaunches), so this only fires in the mobile app.
+- Desktop-host procedures (`menu.*` and the host `app.*` routers listed in
+  `src/shared/host-paths.ts`) run in the Electron host, reached only through the local
+  hub's bridge. Every other hub's client forwards them to the local hub
+  (`hostRouteLink`), so a pane in a remote hub's `HubScope` keeps Cmd+W, windows,
+  shell, browser views etc. A new `app.*` router must be classified there
+  (`apps/api/src/host-paths.test.ts` fails otherwise). No local hub → no forwarding.
 
 ## Typed views
 

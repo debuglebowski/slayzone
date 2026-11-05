@@ -9,6 +9,7 @@ import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ProcessEntry } from './ProcessesPanel.types'
+import { OLD_RUN_UNREACHABLE_MESSAGE } from '@slayzone/processes/shared'
 
 type Children = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', async (importOriginal) => ({
@@ -16,9 +17,15 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   TooltipTrigger: ({ children }: Children) => <>{children}</>,
   TooltipContent: () => null,
   useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged,
-  toast: { error: (message: string) => toastErrors.push(message) }
+  toast: {
+    error: (message: string, opts?: { action?: { label: string; onClick: () => void } }) => {
+      toastErrors.push(message)
+      toastActions.push(opts?.action ?? null)
+    }
+  }
 }))
 let toastErrors: string[] = []
+let toastActions: Array<{ label: string; onClick: () => void } | null> = []
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: Error) => void }
 function deferred<T>(): Deferred<T> {
@@ -591,6 +598,29 @@ describe('ProcessesPanel row actions', () => {
     await settle()
     expect(labels()).toEqual(['Watcher'])
     expect(toastErrors).toEqual([])
+  })
+
+  // G3: the previous run's computer is offline — not a survivor. The toast says so and
+  // offers "Start anyway", which restarts without that run.
+  it("a restart refused because the old run's computer is offline offers Start anyway", async () => {
+    const calls: unknown[] = []
+    mutations.restart = async (input) => {
+      calls.push(input)
+      if (!(input as { startAnyway?: boolean }).startAnyway) {
+        throw new Error(OLD_RUN_UNREACHABLE_MESSAGE)
+      }
+      return true
+    }
+    toastActions = []
+    await loaded([proc('a', 't1', 'Dev server')])
+    click('restart-a')
+    await settle()
+    expect(toastErrors).toEqual([`Couldn't restart Dev server: ${OLD_RUN_UNREACHABLE_MESSAGE}`])
+    expect(toastActions[0]?.label).toBe('Start anyway')
+    await act(async () => toastActions[0]!.onClick())
+    await settle()
+    expect(calls).toEqual([{ processId: 'a' }, { processId: 'a', startAnyway: true }])
+    expect(unhandled).toEqual([])
   })
 
   for (const action of ['remove', 'stop', 'restart'] as const) {

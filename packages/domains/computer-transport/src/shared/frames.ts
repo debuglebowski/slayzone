@@ -275,11 +275,32 @@ export const ptyDataParamsSchema = z.object({
 })
 export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 
+/**
+ * A string a computer reports about its sessions (titles, prompt text, ids, URLs,
+ * error text, exit signals) — kept in the hub's state and DB, so bounded. Cut, not
+ * rejected: an oversized title must not drop the state signal carrying it.
+ */
+const bounded = (max: number) => z.string().transform((v) => (v.length > max ? v.slice(0, max) : v))
+const boundedNonEmpty = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .transform((v) => (v.length > max ? v.slice(0, max) : v))
+const SIGNAL_TEXT_MAX = 16 * 1024
+const SIGNAL_TITLE_MAX = 1024
+const SIGNAL_ID_MAX = 256
+const SIGNAL_URL_MAX = 2048
+const SIGNAL_URLS_MAX = 32
+const EXIT_SIGNAL_MAX = 64
+const devServerUrlsSchema = z
+  .array(boundedNonEmpty(SIGNAL_URL_MAX))
+  .transform((urls) => urls.slice(0, SIGNAL_URLS_MAX))
+
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   /**
    * A lifecycle cause the code cannot carry — today `startup-timeout`: the
    * computer killed a session that produced no output within the spawn's
@@ -393,14 +414,14 @@ export const ptyDetectionParamsSchema = z.object({
 export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
 
 const ptySignalErrorSchema = z.object({
-  code: z.string().min(1),
-  message: z.string(),
+  code: boundedNonEmpty(SIGNAL_ID_MAX),
+  message: bounded(SIGNAL_TEXT_MAX),
   recoverable: z.boolean()
 })
 
 const ptySignalPromptSchema = z.object({
   type: z.enum(['permission', 'question', 'input']),
-  text: z.string(),
+  text: bounded(SIGNAL_TEXT_MAX),
   position: z.number()
 })
 
@@ -412,10 +433,10 @@ const ptySignalPromptSchema = z.object({
  */
 export const ptyDetectedSnapshotSchema = z.object({
   activity: z.enum(['working', 'idle', 'unknown']).nullable(),
-  title: z.string().nullable(),
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
   prompt: ptySignalPromptSchema.nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable(),
   error: ptySignalErrorSchema.nullable()
 })
 export type PtyDetectedSnapshot = z.infer<typeof ptyDetectedSnapshotSchema>
@@ -446,9 +467,9 @@ export const ptySignalPayloadSchema = z.object({
   firstOutput: z.literal(true).optional(),
   suppressOutput: z.boolean(),
   prompt: ptySignalPromptSchema.nullable(),
-  title: z.string().nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable()
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable()
 })
 export type PtySignalPayload = z.infer<typeof ptySignalPayloadSchema>
 
@@ -479,7 +500,7 @@ export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   reason: z.string().min(1).optional(),
   /** The spawn attempt that exited. */
   spawnId: z.string().min(1).optional(),
@@ -1368,12 +1389,32 @@ export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
  * its output. `cwd` (absolute, jailed) wins; else `projectId`'s folder on that
  * computer; else its first allowed root. `timeoutMs` ends the whole process tree.
  */
-export const execRunParamsSchema = z.object({
-  command: z.string().min(1),
-  cwd: z.string().min(1).optional(),
-  projectId: z.string().min(1).optional(),
-  timeoutMs: z.number().int().positive()
-})
+export const execRunParamsSchema = z
+  .object({
+    /** A shell command line (`/bin/sh -c`, `cmd /c` on Windows). */
+    command: z.string().min(1).optional(),
+    /**
+     * Or a program and its args, run with NO shell: the computer resolves `file` on
+     * its PATH, else under its home (`homeFallbacks`, home-relative) — so the hub
+     * builds no shell line (its quoting and `$HOME` are POSIX; the computer's may
+     * not be).
+     */
+    argv: z
+      .object({
+        file: z.string().min(1),
+        args: z.array(z.string()),
+        /** Written to the program's stdin (a multi-line prompt: never on a cmd line). */
+        stdin: z.string().optional(),
+        homeFallbacks: z.array(z.string().min(1)).max(8).optional()
+      })
+      .optional(),
+    cwd: z.string().min(1).optional(),
+    projectId: z.string().min(1).optional(),
+    timeoutMs: z.number().int().positive()
+  })
+  .refine((p) => (p.command === undefined) !== (p.argv === undefined), {
+    message: 'exec.run takes exactly one of command or argv'
+  })
 export type ExecRunParams = z.infer<typeof execRunParamsSchema>
 export const execRunResultSchema = z.object({
   stdout: z.string(),
@@ -1410,11 +1451,23 @@ export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
  * file: the offset and mtime the last parse ended at — the hub keeps them per
  * computer). Answers each changed file's new records and its new cursor.
  */
+/**
+ * A collect is paged: the first reply carries `next` when more follows, and the hub
+ * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
+ * a whole backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
+ * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ */
+const usageCollectPageSchema = z.object({
+  token: z.string().min(1).max(64),
+  index: z.number().int().nonnegative()
+})
 export const usageCollectParamsSchema = z.object({
   cursors: z.record(
     z.string(),
     z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
-  )
+  ),
+  page: usageCollectPageSchema.optional()
 })
 export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
 export const usageCollectResultSchema = z.object({
@@ -1423,10 +1476,13 @@ export const usageCollectResultSchema = z.object({
       sourceFile: z.string(),
       fileMtimeMs: z.number(),
       endOffset: z.number().int().nonnegative(),
+      /** false: more of this file's records follow on a later page; keep its cursor. */
+      complete: z.boolean().optional(),
       // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
       records: z.array(z.record(z.string(), z.unknown()))
     })
-  )
+  ),
+  next: usageCollectPageSchema.optional()
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 

@@ -200,6 +200,72 @@ test.describe('Browser view z-ordering (NativeViewLayer)', () => {
     await testInvoke(mainWindow, 'browser:show-all')
   })
 
+  test('a view parked before ever being on screen gets its size and stays live', async ({
+    mainWindow
+  }) => {
+    // Seen live 2026-11-04: a background task's browser created at the 1x1
+    // placeholder and parked off-window kept a 1x1 page forever (a fully
+    // off-window view's native host ignores setBounds) and the page was
+    // `hidden` (rAF stopped) — agents got empty dashboards.
+    // Isolated from the real task's panel: own task id, and a web-panel view in
+    // an in-memory partition (own renderer process; browser-tab kind would be
+    // registered with the extension system, which requires the shared session).
+    // Same manager bounds path as a browser tab.
+    const viewId = (await testInvoke(mainWindow, 'browser:create-view', {
+      taskId: 'park-size-probe-task',
+      tabId: 'park-size-probe',
+      partition: 'park-size-probe',
+      url: await getTestUrl('/'),
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      kind: 'web-panel'
+    })) as string
+    expect(viewId).toBeTruthy()
+    const viewport = () =>
+      testInvoke(
+        mainWindow,
+        'browser:execute-js',
+        viewId,
+        '`${innerWidth}x${innerHeight} ${document.visibilityState}`'
+      )
+    try {
+      await expect
+        .poll(async () => (await testInvoke(mainWindow, 'browser:get-url', viewId)) as string, {
+          timeout: 15_000
+        })
+        .toContain(TEST_HOST_MATCH)
+      await expect.poll(viewport, { timeout: 10_000 }).toMatch(/^1x1 /)
+
+      await testInvoke(mainWindow, 'browser:set-bounds', viewId, {
+        x: -20000,
+        y: -20000,
+        width: 800,
+        height: 600
+      })
+      await expect.poll(viewport, { timeout: 5_000 }).toBe('800x600 visible')
+
+      // Resizing while still parked reaches the page too.
+      await testInvoke(mainWindow, 'browser:set-bounds', viewId, {
+        x: -20000,
+        y: -20000,
+        width: 900,
+        height: 700
+      })
+      await expect.poll(viewport, { timeout: 5_000 }).toBe('900x700 visible')
+
+      // Live, not just sized: animation frames keep running while parked
+      // (rAF-driven charts draw).
+      const frames = (await testInvoke(
+        mainWindow,
+        'browser:execute-js',
+        viewId,
+        'new Promise((r) => { let n = 0; const t = () => { n++; requestAnimationFrame(t) }; requestAnimationFrame(t); setTimeout(() => r(n), 500) })'
+      )) as number
+      expect(frames).toBeGreaterThan(5)
+    } finally {
+      await testInvoke(mainWindow, 'browser:destroy-view', viewId)
+    }
+  })
+
   test('inactive task views are offscreen (Bug 2)', async ({ mainWindow }) => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewIdA = await getActiveViewId(mainWindow, taskId)

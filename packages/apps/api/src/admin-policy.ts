@@ -441,6 +441,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.sideQuestion.cancel': 'user',
   'chat.start': 'user',
   'chat.stopCommandTask': 'user',
+  'chat.stopSubAgent': 'user',
   'chat.backups.list': 'user',
   'chat.backups.create': 'user',
   'chat.backups.delete': 'user',

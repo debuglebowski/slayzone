@@ -212,6 +212,66 @@ export function gitOpRepoRelativePaths<K extends GitOpName>(op: K, input: GitOpI
   return fieldValues(input as Record<string, unknown>, gitOpsContract[op].repoRelative)
 }
 
+/**
+ * `input` with every path field replaced: absolute ones by `absolute(p)`, repo-
+ * relative ones by `repoRelative(p)`. The computer runs an op on the paths its jail
+ * judged, never on the raw ones the hub sent.
+ */
+export function mapGitOpPaths<K extends GitOpName>(
+  op: K,
+  input: GitOpInput<K>,
+  map: { absolute: (p: string) => string; repoRelative: (p: string) => string }
+): GitOpInput<K> {
+  const out: Record<string, unknown> = { ...(input as Record<string, unknown>) }
+  const apply = (fields: readonly string[], fn: (p: string) => string) => {
+    for (const f of fields) {
+      const v = out[f]
+      if (typeof v === 'string') out[f] = fn(v)
+      else if (Array.isArray(v)) out[f] = v.map((x) => (typeof x === 'string' ? fn(x) : x))
+    }
+  }
+  apply(gitOpsContract[op].paths, map.absolute)
+  apply(gitOpsContract[op].repoRelative, map.repoRelative)
+  return out as GitOpInput<K>
+}
+
 export function isGitOpName(name: string): name is GitOpName {
   return Object.hasOwn(gitOpsContract, name)
+}
+
+/**
+ * How long one op's request may take on its computer. Explicit for every op — the
+ * gateway's 30 s default cut off hooks and network ops while the work kept running
+ * there. Ops that run hooks (commit, merge, rebase, checkout), the network (fetch,
+ * push, pull, prune) or setup scripts (worktree, submodules — 5 min each on the
+ * computer) get minutes; reads get two.
+ */
+const LONG_GIT_OPS: ReadonlySet<string> = new Set([
+  'init',
+  'checkoutBranch',
+  'mergeIntoParent',
+  'commitFiles',
+  'continueRebase',
+  'skipRebaseCommit',
+  'fetch',
+  'push',
+  'pull',
+  'pruneRemote',
+  'rebaseOnto',
+  'mergeFrom',
+  'copyIgnoredFiles',
+  'applyStash',
+  'popStash',
+  'branchFromStash',
+  'removeWorktree',
+  'ensureBranchPushed',
+  'addWorktree',
+  'initSubmodules',
+  'runWorktreeSetupScript',
+  'startMergeNoCommit'
+])
+export const LONG_GIT_OP_TIMEOUT_MS = 15 * 60_000
+export const GIT_OP_TIMEOUT_MS = 2 * 60_000
+export function gitOpTimeoutMs(op: GitOpName): number {
+  return LONG_GIT_OPS.has(op) ? LONG_GIT_OP_TIMEOUT_MS : GIT_OP_TIMEOUT_MS
 }

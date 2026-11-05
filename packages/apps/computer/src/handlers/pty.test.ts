@@ -1105,6 +1105,32 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
+  // The hub turns relaying on (someone opened the tab) while the spawn still waits
+  // for its slot. Lost, the session never streamed: the hub already counts it on
+  // and never asks again (mobile / web tabs whose start was queued).
+  it('relay turned on while queued: the session streams once it starts', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder', 0.4))
+    const queued = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'quiet',
+        spawnId: 'attempt-1',
+        admission: 'foreground',
+        relay: false,
+        command: 'sh',
+        args: ['-c', 'printf hello-relay; exec cat'],
+        cwd
+      }) as Promise<unknown>
+    )
+    await new Promise((r) => setTimeout(r, 50))
+    expect(queued.done, 'still waiting for the slot').toBe(false)
+    await pty.handlers['pty.relay']({ sessionId: 'quiet', spawnId: 'attempt-1', on: true })
+    await waitFor(() => queued.done)
+    await waitFor(() => outputOf(notifies, 'quiet').includes('hello-relay'), 3000)
+    pty.disposeAll()
+  })
+
   it('the startup deadline counts from the start, not from the queue', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })

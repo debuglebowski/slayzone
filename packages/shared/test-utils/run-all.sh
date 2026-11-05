@@ -58,6 +58,7 @@ run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts
+run_harness packages/domains/task/src/server/ops/shared-session-claims.test.ts
 # Entity-model B — one-row-per-spawn session lifecycle (spawn→confirm→dead→bind).
 run_harness packages/domains/task/src/server/ops/agent-sessions-lifecycle.test.ts
 # v151 `in-band-clear` origin — CHECK-widening table rebuild. Guards the data copy
@@ -94,6 +95,11 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/computer-probes.test.ts
+run_harness packages/apps/hub/src/computer-exec-run.test.ts
+run_harness packages/apps/hub/src/git-op-gate.test.ts
+run_harness packages/apps/hub/src/git-op-owner-boundary.test.ts
+run_harness packages/apps/hub/src/computer-request-authorizer.test.ts
+run_harness packages/apps/hub/src/path-owner-agreement.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -250,6 +256,8 @@ run_harness packages/domains/tabs-state/src/useTabStore.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
 run_harness packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
+run_harness packages/domains/terminal/src/client/catch-up-merge.test.ts
+run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
@@ -348,6 +356,7 @@ run_harness packages/apps/cli/src/commands/computer-mint.test.ts
 # `slay computer roots` edit rules (T-27: folder limits are set on the device). Pure.
 run_harness packages/apps/cli/src/commands/computer-roots.test.ts
 run_harness packages/apps/cli/src/local-hub.test.ts
+run_harness packages/apps/cli/src/hub-config-relay.test.ts
 # server_port non-clobber guard (pure; plans/sidecar-staleness.md P4)
 run_harness packages/apps/hub/src/port-claim.test.ts
 # Wave-3.5 remote-mcp-env provider (remote hub URL + scoped task token).
@@ -518,6 +527,7 @@ run_harness packages/shared/platform/src/event-loop-stall.test.ts
 run_harness packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_harness packages/shared/platform/src/hub-addr.test.ts
+run_harness packages/shared/platform/src/computer-path.test.ts
 # Security audit events on stdout (T-03).
 run_harness packages/shared/platform/src/security-log.test.ts
 # Real client IP behind a trusted front end (T-22): the resolver, then the built hub.
@@ -548,6 +558,7 @@ run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
 run_harness packages/domains/worktrees/src/server/git-watch-routing.test.ts
 run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
@@ -746,6 +757,9 @@ run_harness packages/apps/hub/src/migration-stability-audit.test.ts
 run_harness packages/apps/hub/src/lifecycle-stability-audit.test.ts
 run_harness packages/apps/hub/src/recovery-second-pass.test.ts
 run_harness packages/apps/hub/src/computer-chat-isolation.test.ts
+run_harness packages/apps/hub/src/shared-session-ownership.test.ts
+run_harness packages/apps/hub/src/shared-session-repair.test.ts
+run_harness packages/apps/hub/src/computer-chat-live-task-fallback.test.ts
 run_harness packages/domains/chat-runtime/src/server/durability-second-pass.test.ts
 run_harness packages/apps/hub/src/content-third-pass.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-recovery-fixes.test.ts
@@ -789,6 +803,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-rewind.t
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-switch.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-fork.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-agent-turn.test.ts
+run_harness packages/domains/terminal/src/server/runtime/chat-transport-background-work.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-history.test.ts
 run_harness packages/domains/terminal/src/server/runtime/cli-version.test.ts
 
@@ -1112,6 +1127,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
+  packages/shared/transport/src/client/computerConnect.test.tsx \
   packages/shared/transport/src/client/inProcessHub.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
   packages/domains/tasks/src/client/useBoardRefresh.test.tsx \
@@ -1174,6 +1190,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/diff-view/src/DiffView.line-action.test.tsx \
   packages/domains/task-terminals/src/client/chat/diff-comments/diff-comments.test.tsx \
   packages/domains/task-terminals/src/client/chat/RewindPicker.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ComposerSubAgents.test.tsx \
   packages/domains/worktrees/src/client/ConflictFileView.test.tsx \
   packages/shared/layout/src/SplitDivider.test.tsx \
   packages/domains/file-editor/src/client/SearchableCodeView.test.tsx \
@@ -1296,6 +1313,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies-chat.test.ts \
+  packages/apps/api/src/host-paths.test.ts \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \
@@ -1309,6 +1327,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/apps/app/src/main/browser-link-context-menu.test.ts \
   packages/apps/app/src/main/browser-view-keys.test.ts \
   packages/apps/app/src/main/browser-view-nav-focus-guard.test.ts \
+  packages/apps/app/src/main/browser-view-park.test.ts \
   packages/apps/app/src/main/floating-global-agent-panel/state-machine.test.ts \
   packages/apps/app/src/preload/browser-link-task-capture.test.ts \
   packages/apps/app/src/renderer/src/components/ErrorBoundary.test.tsx \

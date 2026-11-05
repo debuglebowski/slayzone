@@ -11,16 +11,14 @@
  * names and schemas below MIRROR the agreed contract and a later integration
  * reconciles them against the canonical frames.
  *
- * EVERY path argument passes the {@link assertPathAllowed} realpath containment
+ * EVERY path argument passes the {@link judgePath} realpath containment
  * guard before any filesystem/git access.
  *
  * @module computer/handlers/git
  */
 
 import { spawn } from 'node:child_process'
-import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'node:fs'
-import { cp, mkdir } from 'node:fs/promises'
-import { dirname, resolve, sep } from 'node:path'
+import { accessSync, chmodSync, constants as fsConstants, existsSync, lstatSync } from 'node:fs'
 import {
   gitCopyIgnoredFilesParamsSchema,
   gitCreateWorktreeParamsSchema,
@@ -32,7 +30,7 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { sanitizeSpawnEnv } from '@slayzone/platform/env-manifest'
 import { z } from 'zod'
-import { assertPathAllowed } from '../config'
+import { jailedFs, judgePath, judgePathIn } from '../path-jail'
 import { execCapture, execGit } from './exec'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -70,7 +68,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   // Read the jail through `ctx` on every call, never captured:
   // `computer.setAllowedRoots` edits it live, and a captured array would keep
   // enforcing the boot-time set long after the user widened it.
-  const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
+  const allow = (candidate: string): string => judgePath(candidate, ctx.config.allowedRoots)
 
   // Result key is `isGitRepo`, matching `gitIsGitRepoResultSchema` in the SHARED
   // frame contract. It used to be `isRepo`, so the hub's parse threw
@@ -105,7 +103,8 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   async function createWorktree(rawParams: unknown): Promise<{ ok: true }> {
     const params = createWorktreeParams.parse(rawParams)
     const repoPath = allow(params.repoPath)
-    const targetPath = allow(params.worktreePath)
+    // Created by git: judged as a write (no dangling link on the way).
+    const targetPath = judgePath(params.worktreePath, ctx.config.allowedRoots, { access: 'write' })
     const args = ['worktree', 'add', targetPath]
     if (params.branch) args.push('-b', params.branch)
     if (params.sourceBranch) args.push(params.sourceBranch)
@@ -170,7 +169,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     const worktreePath = allow(params.worktreePath)
     const repoPath = allow(params.repoPath)
 
-    const scriptPath = resolve(worktreePath, SETUP_SCRIPT)
+    const scriptPath = judgePathIn(worktreePath, SETUP_SCRIPT, ctx.config.allowedRoots).path
     if (!existsSync(scriptPath)) return Promise.resolve({ ran: false })
     try {
       accessSync(scriptPath, fsConstants.X_OK)
@@ -238,23 +237,27 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       relPaths = params.customPaths ?? []
     }
 
-    const repoRoot = resolve(repoPath)
-    const wtRoot = resolve(worktreePath)
     let copied = 0
     for (const rel of relPaths) {
-      const src = resolve(repoPath, rel)
-      const dest = resolve(worktreePath, rel)
-      // Containment: never copy out of the repo or write outside the worktree.
-      if (!isInside(src, repoRoot) || !isInside(dest, wtRoot)) {
-        ctx.log('copyIgnoredFiles skipped traversal', { rel })
+      // Judged by the jail: never out of the repo, never written outside the
+      // worktree or through a link in it. Each entry is taken as itself (a link is
+      // copied as the link, verbatim — pnpm's relative node_modules links stay
+      // relative), and the jail does the copy.
+      let src: string
+      let dest: string
+      try {
+        src = judgePathIn(repoPath, rel, ctx.config.allowedRoots, { access: 'entry' }).path
+        dest = judgePathIn(worktreePath, rel, ctx.config.allowedRoots, {
+          access: 'entry',
+          subtree: true
+        }).path
+      } catch (err) {
+        ctx.log('copyIgnoredFiles skipped', { rel, error: String(err) })
         continue
       }
-      if (!existsSync(src)) continue
+      if (!lstatExists(src)) continue
       try {
-        await mkdir(dirname(dest), { recursive: true })
-        // verbatimSymlinks: else relative links (pnpm node_modules) become
-        // absolute ones pointing back into the source repo.
-        await cp(src, dest, { recursive: true, verbatimSymlinks: true })
+        jailedFs.copy(src, dest)
         copied += 1
       } catch (err) {
         ctx.log('copyIgnoredFiles copy failed', { rel, error: String(err) })
@@ -273,8 +276,11 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
   }
 }
 
-/** True when `child` is `root` itself or nested under it. */
-function isInside(child: string, root: string): boolean {
-  const c = resolve(child)
-  return c === root || c.startsWith(root + sep)
+function lstatExists(p: string): boolean {
+  try {
+    lstatSync(p)
+    return true
+  } catch {
+    return false
+  }
 }

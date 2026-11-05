@@ -19,33 +19,28 @@
  *    (Contrast `./git.ts`, which does reimplement: `@slayzone/worktrees/server`
  *    drags in electron/React and would not bundle.)
  *
- * Every path argument passes {@link assertPathAllowed} — realpath containment
- * against the computer's `allowedRoots` — before any access. The editor ops then
- * ALSO pass file-editor's own `assertWithinRoot`. Two guards, different jobs:
- * the jail bounds the machine, the root bounds the workspace.
+ * Every path argument is judged by the computer's one path jail (`../path-jail`)
+ * before any access — the machine bound (`allowedRoots`, links, protected state)
+ * and, for root-scoped ops, the workspace bound. Every WRITE is done by the jail
+ * (`jailedFs`) on the judged path, never by re-resolving `root + rel`: the file
+ * editor's own write ops did, and wrote through a link the jail had not judged (G1,
+ * G4).
  *
  * @module computer/handlers/fs
  */
 
-import { existsSync, realpathSync } from 'node:fs'
-import { mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import {
-  copy as feCopy,
-  copyIn as feCopyIn,
-  createDir as feCreateDir,
-  createFile as feCreateFile,
-  deletePath as feDeletePath,
   gitStatus as feGitStatus,
   discoverRepos as feDiscoverRepos,
   listAllFiles as feListAllFiles,
   readDir as feReadDir,
   readFile as feReadFile,
-  renamePath as feRenamePath,
   searchFiles as feSearchFiles,
-  subscribeFileWatcher,
-  writeFile as feWriteFile
+  subscribeFileWatcher
 } from '@slayzone/file-editor/server'
 import type { DirEntry, FileSearchResult, ReadFileResult } from '@slayzone/file-editor/shared'
 import {
@@ -83,7 +78,7 @@ import {
   type FsReadFileResult,
   type FsSearchFilesResult
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed, isProtectedPath } from '../config'
+import { isProtectedPath, jailedFs, judgePath, judgePathIn, type JailOptions } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /**
@@ -120,19 +115,15 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
   // as `setAgentHookUrl`), and a captured reference would keep enforcing the
   // boot-time set — the user widens the roots in Settings, the UI reports
   // success, and the computer silently keeps refusing.
-  const allow = (candidate: string, subtree = false): string =>
-    assertPathAllowed(candidate, ctx.config.allowedRoots, { subtree })
+  const allow = (candidate: string, opts?: JailOptions): string =>
+    judgePath(candidate, ctx.config.allowedRoots, opts)
   /**
-   * Jail a ROOT-SCOPED op: the root, and also the root-relative target (T-27) —
-   * the root alone would let `fs.writeFile` reach the computer's own
-   * `computer.config.json` whenever an allowed root contains it. `assertWithinRoot`
-   * in file-editor still contains the relative part. Returns the jailed root.
+   * Judge a ROOT-SCOPED op's target (T-27) — the root alone would let `fs.writeFile`
+   * reach the computer's own `computer.config.json` whenever an allowed root
+   * contains it. Returns the judged root and target.
    */
-  const allowIn = (rootPath: string, rel: string, subtree = false): string => {
-    const root = allow(rootPath)
-    allow(join(root, rel), subtree)
-    return root
-  }
+  const allowIn = (rootPath: string, rel: string, opts?: JailOptions) =>
+    judgePathIn(rootPath, rel, ctx.config.allowedRoots, opts)
 
   /** Live watches, keyed by the hub-minted watchId. */
   const watches = new Map<string, () => void>()
@@ -147,8 +138,8 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   async function removeDir(rawParams: unknown): Promise<{ ok: true }> {
     const { path } = fsRemoveDirParamsSchema.parse(rawParams)
-    const resolved = allow(path, true)
-    await rm(resolved, { recursive: true, force: true })
+    const resolved = allow(path, { access: 'entry', subtree: true })
+    jailedFs.remove(resolved, { force: true })
     ctx.log('fs removeDir', { path: resolved })
     return { ok: true }
   }
@@ -237,8 +228,8 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   async function mkdirHandler(rawParams: unknown): Promise<{ path: string }> {
     const { path } = fsMkdirParamsSchema.parse(rawParams)
-    const abs = allow(path)
-    await mkdir(abs, { recursive: true })
+    const abs = allow(path, { access: 'write' })
+    jailedFs.mkdir(abs)
     ctx.log('fs mkdir', { path: abs })
     // Re-resolve: the jail tolerates a non-existent tail, so the pre-create path
     // may still contain an uncollapsed symlinked ancestor.
@@ -254,52 +245,76 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
   function readFileHandler(rawParams: unknown): FsReadFileResult {
     const { rootPath, filePath, force } = fsReadFileParamsSchema.parse(rawParams)
-    return feReadFile(allowIn(rootPath, filePath), filePath, force)
+    const { root } = allowIn(rootPath, filePath)
+    return feReadFile(root, filePath, force)
   }
 
   function writeFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath, content } = fsWriteFileParamsSchema.parse(rawParams)
-    feWriteFile(allowIn(rootPath, filePath), filePath, content)
+    jailedFs.writeFile(allowIn(rootPath, filePath, { access: 'write' }).path, content)
     return { ok: true }
   }
 
   function createFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath } = fsCreateFileParamsSchema.parse(rawParams)
-    feCreateFile(allowIn(rootPath, filePath), filePath)
+    jailedFs.createFile(allowIn(rootPath, filePath, { access: 'write' }).path)
     return { ok: true }
   }
 
   function createDirHandler(rawParams: unknown): { ok: true } {
     const { rootPath, dirPath } = fsCreateDirParamsSchema.parse(rawParams)
-    feCreateDir(allowIn(rootPath, dirPath), dirPath)
+    jailedFs.mkdir(allowIn(rootPath, dirPath, { access: 'write' }).path)
     return { ok: true }
   }
 
   function renameHandler(rawParams: unknown): { ok: true } {
     const { rootPath, oldPath, newPath } = fsRenameParamsSchema.parse(rawParams)
-    allowIn(rootPath, newPath, true)
-    feRenamePath(allowIn(rootPath, oldPath, true), oldPath, newPath)
+    const entry = { access: 'entry', subtree: true } as const
+    jailedFs.rename(allowIn(rootPath, oldPath, entry).path, allowIn(rootPath, newPath, entry).path)
     return { ok: true }
   }
 
   function deleteHandler(rawParams: unknown): { ok: true } {
     const { rootPath, targetPath } = fsDeleteParamsSchema.parse(rawParams)
-    feDeletePath(allowIn(rootPath, targetPath, true), targetPath)
+    // The entry itself: deleting a link removes the link, never what it points at.
+    jailedFs.remove(allowIn(rootPath, targetPath, { access: 'entry', subtree: true }).path)
     return { ok: true }
   }
 
+  /**
+   * Copy a file from elsewhere on this machine into the workspace, under a free
+   * name (`a.png`, `a (1).png`, …). `absoluteSrc` is judged in its own right; each
+   * candidate name is created exclusively, so a name taken by a dangling link is
+   * skipped, never written through (G4).
+   */
   function copyInHandler(rawParams: unknown): { path: string } {
     const { rootPath, absoluteSrc, targetDir } = fsCopyInParamsSchema.parse(rawParams)
-    // `absoluteSrc` is a second absolute path on this machine, outside the root —
-    // so it needs the jail in its own right, not just `assertWithinRoot`.
     const src = allow(absoluteSrc)
-    return { path: feCopyIn(allowIn(rootPath, targetDir ?? ''), src, targetDir) }
+    let isFile = false
+    try {
+      isFile = statSync(src).isFile()
+    } catch {
+      /* missing */
+    }
+    if (!isFile) throw new Error('Source is not a file')
+    const dirRel = (targetDir ?? '').trim()
+    const dir = allowIn(rootPath, dirRel, { access: 'write' }).path
+    const ext = extname(src)
+    const stem = basename(src, ext)
+    for (let i = 0; ; i++) {
+      const name = i === 0 ? basename(src) : `${stem} (${i})${ext}`
+      if (jailedFs.copyFileToNew(src, allow(join(dir, name), { access: 'entry' }))) {
+        return { path: dirRel ? `${dirRel}/${name}` : name }
+      }
+    }
   }
 
   function copyHandler(rawParams: unknown): { ok: true } {
     const { rootPath, srcPath, destPath } = fsCopyParamsSchema.parse(rawParams)
-    allowIn(rootPath, srcPath)
-    feCopy(allowIn(rootPath, destPath, true), srcPath, destPath)
+    jailedFs.copy(
+      allowIn(rootPath, srcPath).path,
+      allowIn(rootPath, destPath, { access: 'write', subtree: true }).path
+    )
     return { ok: true }
   }
 

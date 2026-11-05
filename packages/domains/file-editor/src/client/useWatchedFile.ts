@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
+import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
 import { useWorkspaceTarget } from './workspace-target'
@@ -257,12 +257,14 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     }
   )
 
-  useSubscription(
+  const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
       { ...target, rootPath: projectPath ?? '' },
       { enabled: !!projectPath, onData: onWatchEvent }
     )
   )
+  // Refused before any computer was there ("connect a computer"): start again on a connect.
+  useResubscribeOnComputerConnect(watch)
 
   const setContent = useCallback((next: string) => {
     contentRef.current = next

@@ -11,7 +11,14 @@
  * props, which are re-sent whole on every change.
  * Web → native: `onReady` once this terminal exists (again after the web view
  * reloads: the native side then replays the session), `onModes` when the cursor-key
- * mode changes, `onInteract` on a touch (keeps the agent from idle-closing).
+ * mode changes, `onInteract` on a touch (keeps the agent from idle-closing), `onInput`
+ * with the bytes a touch scroll sends the program.
+ *
+ * Touch scroll: xterm handles a drag itself (document-level listeners) — fine for
+ * its scrollback, but a drag the PROGRAM takes (mouse wheel, alternate screen) xterm
+ * turns into input that read-only drops. Such a drag is kept from xterm (stopped at
+ * this element) and scrolled here (`XtermView.touchScrollMove`) — unless the zoomed
+ * terminal can still pan that way, which goes first.
  *
  * A DOM component file may export only its component (and types).
  */
@@ -37,6 +44,7 @@ export interface TerminalDomProps {
   onReady: () => Promise<void>
   onModes: (applicationCursorKeys: boolean) => Promise<void>
   onInteract: () => Promise<void>
+  onInput: (data: string) => Promise<void>
   ref?: Ref<TerminalDomHandle>
   dom?: DOMProps
 }
@@ -54,16 +62,17 @@ export default function TerminalDom({
   onReady,
   onModes,
   onInteract,
+  onInput,
   ref
 }: TerminalDomProps) {
   const element = useRef<HTMLDivElement>(null)
   const view = useRef<XtermView | null>(null)
   // The native side's callbacks, current in every handler; the colours the terminal
   // is created with (later ones follow in their own effect).
-  const callbacks = useRef({ onReady, onModes, onInteract })
+  const callbacks = useRef({ onReady, onModes, onInteract, onInput })
   const initialColors = useRef(colors)
   useEffect(() => {
-    callbacks.current = { onReady, onModes, onInteract }
+    callbacks.current = { onReady, onModes, onInteract, onInput }
   })
 
   useEffect(() => {
@@ -74,29 +83,62 @@ export default function TerminalDom({
       {
         element: host,
         viewportWidth: () => host.clientWidth,
-        screenWidth: () => host.querySelector('.xterm-screen')?.getBoundingClientRect().width ?? 0
+        screenRect: () =>
+          host.querySelector('.xterm-screen')?.getBoundingClientRect() ?? {
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0
+          }
       },
-      { onModes: (modes) => void callbacks.current.onModes(modes.applicationCursorKeys) },
+      {
+        onModes: (modes) => void callbacks.current.onModes(modes.applicationCursorKeys),
+        onInput: (data) => void callbacks.current.onInput(data)
+      },
       initialColors.current
     )
     view.current = created
 
     let pinchFrom = 0
     let lastTap = 0
+    // This gesture's scroll goes to the program: its events never reach xterm.
+    let owned = false
+    let lastY = 0
+    const keep = (event: TouchEvent): void => {
+      if (owned) event.stopPropagation()
+    }
+    // The zoomed terminal is taller than the view and can still pan `dy`'s way.
+    const pans = (dy: number): boolean =>
+      dy > 0 ? host.scrollTop > 0 : host.scrollTop + host.clientHeight < host.scrollHeight - 1
     const touchStart = (event: TouchEvent): void => {
       void callbacks.current.onInteract()
+      if (event.touches.length === 1) {
+        owned = created.touchScrollStart()
+        lastY = event.touches[0].clientY
+      }
+      keep(event)
       if (event.touches.length === 2) {
         pinchFrom = spread(event.touches)
         created.pinchStart()
       }
     }
     const touchMove = (event: TouchEvent): void => {
+      keep(event)
+      if (event.touches.length === 1 && owned && pinchFrom === 0) {
+        const touch = event.touches[0]
+        const dy = touch.clientY - lastY
+        lastY = touch.clientY
+        if (!pans(dy)) created.touchScrollMove(dy, touch.clientX, touch.clientY)
+        return
+      }
       if (event.touches.length !== 2 || pinchFrom === 0) return
       event.preventDefault()
       created.pinchMove(spread(event.touches) / pinchFrom)
     }
     const touchEnd = (event: TouchEvent): void => {
+      keep(event)
       if (event.touches.length > 0) return
+      owned = false
       if (pinchFrom !== 0) {
         pinchFrom = 0
         return

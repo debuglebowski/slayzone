@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -42,6 +43,8 @@ import {
   LiveBlockStoreContext,
   selectUsageSummary,
   selectBackgroundJobs,
+  selectBackgroundSubAgents,
+  type BackgroundSubAgent,
   selectCodexPlanReview,
   useChatSession
 } from '@slayzone/terminal/client'
@@ -52,7 +55,8 @@ import { useChatAttachments } from './attachments/useChatAttachments'
 import { useChatScrollMemory } from './composer-state/useChatScrollMemory'
 import { ChatViewContext } from './ChatViewContext'
 import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-state'
-import { TimelineRevealContext } from './timeline-reveal'
+import { ComposerSubAgents } from './ComposerSubAgents'
+import { flashRow, TimelineRevealContext, useRevealTimelineItem } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
 import { useChatDefaults } from './useChatDefaults'
 import { useChatModel } from './useChatModel'
@@ -74,7 +78,7 @@ import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CodexPlanPrompt } from './CodexPlanPrompt'
 import { CommandTaskContext } from './tool-cards'
-import { useCommandTaskActions } from './tool-cards/command-task-hooks'
+import { useCommandTaskActions, useStopSubAgent } from './tool-cards/command-task-hooks'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
 import { RewindPicker, type RewindPickerKind } from './RewindPicker'
@@ -233,6 +237,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       cwd
     })
     const backgroundJobs = selectBackgroundJobs(state)
+    const backgroundSubAgents = selectBackgroundSubAgents(state)
     const codexPlanReview = useMemo(
       () => (mode === 'codex-chat' ? selectCodexPlanReview(timeline, chatCollaboration) : null),
       [mode, timeline, chatCollaboration]
@@ -1044,8 +1049,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                             </>
                           }
                           backgroundJobs={
-                            backgroundJobs.length > 0 ? (
-                              <ComposerBackgroundJobs jobs={backgroundJobs} />
+                            backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (
+                              // Collapsed, side by side; an opened one takes the row.
+                              <div className="flex flex-wrap items-start gap-x-2">
+                                <ComposerBackgroundSubAgents
+                                  agents={backgroundSubAgents}
+                                  canStop={chatCapabilitiesForMode(mode).stopSubAgent}
+                                />
+                                <ComposerBackgroundJobs jobs={backgroundJobs} />
+                              </div>
                             ) : null
                           }
                           compact={props.isThread}
@@ -1206,6 +1218,34 @@ function ComposerBackgroundJobs(props: React.ComponentProps<typeof BackgroundJob
       onStop={(shell) => {
         if (shell.shellId) commandTasks.stop(shell.shellId)
       }}
+    />
+  )
+}
+
+/**
+ * Sub-agents still running after their turn: one opens its own row in its turn
+ * (scrolled to, its Sub-agents disclosure opened); Stop stops it alone.
+ */
+function ComposerBackgroundSubAgents({
+  agents,
+  canStop
+}: {
+  agents: readonly BackgroundSubAgent[]
+  canStop: boolean
+}) {
+  const stopSubAgent = useStopSubAgent()
+  const reveal = useRevealTimelineItem()
+  const focus = useContext(ToolFocusContext)
+  return (
+    <ComposerSubAgents
+      agents={agents}
+      onOpen={(agent) => {
+        const key = `sub-agent:${agent.toolUseId}`
+        focus?.request(agent.toolUseId)
+        reveal(key, { align: 'center', row: agent.row })
+        flashRow(key)
+      }}
+      onStop={canStop ? (agent) => stopSubAgent(agent.toolUseId) : undefined}
     />
   )
 }

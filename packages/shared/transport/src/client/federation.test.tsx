@@ -35,13 +35,17 @@ function localLink(id: string): TRPCLink<AnyTRPCRouter> {
           })
           observer.complete()
         } else {
-          observer.error(new Error(`unexpected op ${op.path}`) as never)
+          // Any other op answers with the hub that served it — what the
+          // host-routing tests read.
+          if (op.type === 'subscription') observer.next({ result: { type: 'started' } })
+          observer.next({ result: { type: 'data', data: `${id}|${op.path}` } })
+          if (op.type !== 'subscription') observer.complete()
         }
         return () => undefined
       })
 }
-function fakeClientFor(id: string): unknown {
-  return createTRPCClient<AnyTRPCRouter>({ links: [localLink(id)] })
+function fakeClientFor(id: string, links: TRPCLink<AnyTRPCRouter>[] = []): unknown {
+  return createTRPCClient<AnyTRPCRouter>({ links: [...links, localLink(id)] })
 }
 
 // Records the LAST opts getOrCreateHubClient was called with, per hub id — so a
@@ -60,16 +64,23 @@ vi.mock('./runtime', async (importOriginal) => {
       id: string
       url: string
       isDefault?: boolean
+      links?: TRPCLink<AnyTRPCRouter>[]
       token?: string
     }) => {
       clientOpts[opts.id] = { url: opts.url, isDefault: opts.isDefault, token: opts.token }
       let e = clients.get(opts.id)
       if (!e) {
-        e = { id: opts.id, url: opts.url, client: fakeClientFor(opts.id), wsClient: {} }
+        e = {
+          id: opts.id,
+          url: opts.url,
+          client: fakeClientFor(opts.id, opts.links),
+          wsClient: {}
+        }
         clients.set(opts.id, e)
       }
       return e
     },
+    getHubClient: (id: string) => clients.get(id) ?? null,
     closeHubClient: (id: string) => {
       closedHubs.push(id)
       return clients.delete(id)
@@ -79,7 +90,8 @@ vi.mock('./runtime', async (importOriginal) => {
 
 const { FederationProvider } = await import('./FederationProvider')
 const { HubScope } = await import('./HubScope')
-const { useTRPC } = (await import('./view')).trpcFor<AnyTRPCRouter>()
+const { trpcFor } = await import('./view')
+const { useTRPC } = trpcFor<AnyTRPCRouter>()
 const { useQuery } = await import('@tanstack/react-query')
 
 function HubLabel(): React.ReactNode {
@@ -263,5 +275,102 @@ describe('federation: a hub removed from the list', () => {
     // A render pass for the effect to run in.
     await waitFor(() => expect(screen.getByTestId('remote-a').textContent).toBe('hub:remote-a'))
     expect(closedHubs).toEqual([])
+  })
+})
+
+describe('federation: desktop-host procedures route to the local hub', () => {
+  afterEach(cleanup)
+
+  // `app.shell`, `app.window`, `menu.*`… run only in the Electron host, reached
+  // only through the LOCAL hub's bridge. A remote task pane calls them through
+  // its remote hub's client; that client must forward them to the local hub.
+  const { useTRPCClient } = trpcFor<AnyTRPCRouter>()
+  type Untyped = Record<string, Record<string, Record<string, Record<string, never>>>>
+  function Probe({ run }: { run: (c: Untyped) => Promise<unknown> }): React.ReactNode {
+    const client = useTRPCClient() as unknown as Untyped
+    const [out, setOut] = React.useState('pending')
+    React.useEffect(() => {
+      run(client).then(
+        (v) => setOut(String(v)),
+        (e: unknown) => setOut(`error:${(e as Error).message}`)
+      )
+    }, [client, run])
+    return <span>{out}</span>
+  }
+  const call =
+    (path: string, kind: 'query' | 'mutate' = 'query') =>
+    (c: Untyped) => {
+      const [a, b, d] = path.split('.')
+      const proc = (d ? c[a][b][d] : c[a][b]) as unknown as Record<
+        string,
+        (i?: unknown) => Promise<unknown>
+      >
+      return proc[kind]()
+    }
+  const subscribeOnce = (path: string) => (c: Untyped) =>
+    new Promise((resolve, reject) => {
+      const [a, b] = path.split('.')
+      const proc = c[a][b] as unknown as {
+        subscribe: (
+          i: unknown,
+          o: { onData: (d: unknown) => void; onError: (e: unknown) => void }
+        ) => { unsubscribe: () => void }
+      }
+      const sub = proc.subscribe(undefined, {
+        onData: (d) => {
+          // May fire synchronously, before `sub` is assigned.
+          queueMicrotask(() => sub.unsubscribe())
+          resolve(d)
+        },
+        onError: reject
+      })
+    })
+
+  async function inRemoteScope(
+    run: (c: Untyped) => Promise<unknown>,
+    hubs = HUBS,
+    defaultHubId = 'local',
+    scopeId = 'remote-a'
+  ): Promise<string> {
+    render(
+      <FederationProvider hubs={hubs} defaultHubId={defaultHubId}>
+        <div data-testid="probe">
+          <HubScope hubId={scopeId}>
+            <Probe run={run} />
+          </HubScope>
+        </div>
+      </FederationProvider>
+    )
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).not.toBe('pending'))
+    return screen.getByTestId('probe').textContent ?? ''
+  }
+
+  it('forwards an app.<host router> mutation to the local hub', async () => {
+    expect(await inRemoteScope(call('app.shell.openExternal', 'mutate'))).toBe(
+      'local|app.shell.openExternal'
+    )
+  })
+
+  it('forwards a menu subscription to the local hub', async () => {
+    expect(await inRemoteScope(subscribeOnce('menu.onCloseCurrentFocus'))).toBe(
+      'local|menu.onCloseCurrentFocus'
+    )
+  })
+
+  it('keeps hub-data app routers and every other path on the scoped hub', async () => {
+    expect(await inRemoteScope(call('app.backup.list'))).toBe('remote-a|app.backup.list')
+    cleanup()
+    expect(await inRemoteScope(call('task.getAll'))).toBe('remote-a|task.getAll')
+  })
+
+  it('forwards nothing when no local hub is listed (mobile / legacy remote mode)', async () => {
+    // Fresh ids: a hub's links are fixed when its client is first created.
+    const remotes = [
+      { id: 'remote-y', kind: 'remote' as const, label: 'Y', url: 'wss://y.example/trpc' },
+      { id: 'remote-z', kind: 'remote' as const, label: 'Z', url: 'wss://z.example/trpc' }
+    ]
+    expect(
+      await inRemoteScope(call('app.shell.openExternal', 'mutate'), remotes, 'remote-z', 'remote-y')
+    ).toBe('remote-y|app.shell.openExternal')
   })
 })

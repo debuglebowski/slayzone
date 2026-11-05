@@ -1,17 +1,8 @@
 import { z } from 'zod'
+import { COMPUTER_UPGRADE_PHASES } from './computer-labels'
 export const computerUpgradeStatusSchema = z
   .object({
-    phase: z.enum([
-      'checking',
-      'installing',
-      'waiting-for-idle',
-      'restarting',
-      'probation',
-      'connected',
-      'rollback',
-      'failed',
-      'maintenance-required'
-    ]),
+    phase: z.enum(COMPUTER_UPGRADE_PHASES),
     currentVersion: z.string().max(100),
     hostVersion: z.string().max(100),
     version: z.string().max(100).optional(),

@@ -62,7 +62,7 @@ import {
   RpcError,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { spawnCwd } from '../config'
+import { spawnCwd } from '../path-jail'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import { collectProcessStats, collectProcessTitles } from '@slayzone/processes/pid-stats'
@@ -72,6 +72,7 @@ import {
   type AdmissionTicket,
   type SpawnAdmission
 } from '../spawn-admission'
+import { terminateTree } from '../terminate-tree'
 import { resolveCommand } from './resolve-command'
 import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
@@ -413,22 +414,36 @@ export function createProcHandlers(
     return { pid: child.pid ?? null }
   }
 
-  function procKill(rawParams: unknown): { ok: true } {
+  /**
+   * Stop a run: the reply waits until its whole tree is gone (SIGTERM, then
+   * SIGKILL for what survives — {@link terminateTree}), so the hub marks it
+   * stopped, or starts it again, only once its port is free. `clean: false`: part
+   * of the tree outlived SIGKILL. An explicit other signal is just sent.
+   */
+  async function procKill(rawParams: unknown): Promise<{ ok: true; clean: boolean }> {
     const params = procKillParamsSchema.parse(rawParams)
     const session = procs.get(params.sessionId)
     if (!session) {
       // Idempotent: the process may already have exited (network race).
       ctx.log('proc kill on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
+      return { ok: true, clean: true }
     }
     if (params.spawnId !== undefined && session.spawnId !== params.spawnId) {
       // Meant for a process this session no longer runs: that one is already gone.
       ctx.log('proc kill for a replaced attempt', { sessionId: params.sessionId })
-      return { ok: true }
+      return { ok: true, clean: true }
     }
     session.stopping = true
-    killTree(session.child, (params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
-    return { ok: true }
+    const signal = params.signal as NodeJS.Signals | undefined
+    const leader = session.child.pid
+    if ((signal && signal !== 'SIGTERM') || typeof leader !== 'number') {
+      killTree(session.child, signal ?? 'SIGTERM')
+      return { ok: true, clean: true }
+    }
+    const clean = await terminateTree(leader)
+    if (!clean)
+      ctx.log('proc kill: part of the tree survived SIGKILL', { sessionId: params.sessionId })
+    return { ok: true, clean }
   }
 
   function procWrite(rawParams: unknown): Promise<ProcWriteResult> {

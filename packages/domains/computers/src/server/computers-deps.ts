@@ -63,15 +63,20 @@ export type ComputersDeps = {
    */
   findAccount?: FindJoinTokenAccount
   /**
-   * Issue a direct client ↔ computer capability (hub `direct-link.ts`). The router has
-   * already run the owner gate. `ip` = the client's address as the hub saw it. Absent:
-   * this host issues none, and clients use the relay.
+   * A computer was deleted or revoked: it never reconnects, so whatever waited for it
+   * (a process run it kept) is let go. Absent: nothing to tell.
    */
+  onComputerRemoved?: (computerId: string) => void
   /**
    * After a computer is revoked: drop its direct-link grants and its live connection
    * (until now a revoked computer kept working until it next reconnected).
    */
   onComputerRevoked?: (computerId: string) => Promise<void>
+  /**
+   * Issue a direct client ↔ computer capability (hub `direct-link.ts`). The router has
+   * already run the owner gate. `ip` = the client's address as the hub saw it. Absent:
+   * this host issues none, and clients use the relay.
+   */
   issueDirectLink?: (
     target: DirectLinkTarget,
     caller: { userId: string | null; ip: string | null }

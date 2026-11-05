@@ -22,6 +22,7 @@ import {
   type TimelineItem
 } from './chat-timeline'
 import { selectPendingPrompts, selectPromptForTool, hasPendingPrompt } from './chat-prompts'
+import { selectBackgroundSubAgents } from './background-sub-agents'
 
 /** A test state holds every row: its timeline as plain items. */
 const rowsOf = (s: { timeline: ReadonlyArray<TimelineItem | undefined> }): TimelineItem[] =>
@@ -1833,6 +1834,124 @@ describe('selectBackgroundJobs', () => {
     expect(selectBackgroundJobs(s)).toBe(before)
     s = apply(send(s, 'next'), [bgSpawn('spawn-3')])
     expect(selectBackgroundJobs(s)).not.toBe(before)
+  })
+})
+
+// A background sub-agent the composer lists is one that outlived its turn: the
+// open turn's own sub-agents show in that turn (its Sub-agents disclosure).
+describe('selectBackgroundSubAgents', () => {
+  const listed = (s: ChatTimelineState): string[] =>
+    selectBackgroundSubAgents(s).map((a) => a.toolUseId)
+  const send = (s: ChatTimelineState, text = 'go'): ChatTimelineState =>
+    reducer(reducer(s, { type: 'event', event: ev.turnInit() }), { type: 'user-sent', text })
+  const apply = (s: ChatTimelineState, events: AgentEvent[]): ChatTimelineState =>
+    events.reduce((acc, event) => reducer(acc, { type: 'event', event }), s)
+  const start = (id: string, description = id): AgentEvent[] => [
+    ev.call(id, 'Agent'),
+    { kind: 'sub-agent', phase: 'in-flight', toolUseId: id, description, raw: {} }
+  ]
+  const launched = (id: string): AgentEvent => ({
+    kind: 'tool-result',
+    toolUseId: id,
+    isError: false,
+    rawContent: 'Async agent launched successfully.',
+    structured: { isAsync: true, status: 'async_launched', agentId: id }
+  })
+  const ended = (id: string): AgentEvent => ({
+    kind: 'sub-agent',
+    phase: 'in-flight',
+    toolUseId: id,
+    status: 'completed',
+    raw: {}
+  })
+
+  test('a background sub-agent of the open turn: listed once that turn ends', () => {
+    let s = apply(send(initialState()), [...start('a', 'scan repo'), launched('a')])
+    expect(listed(s)).toEqual([])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['a'])
+    expect(selectBackgroundSubAgents(s)[0]).toMatchObject({ description: 'scan repo' })
+  })
+
+  test('a foreground sub-agent is never listed', () => {
+    const s = apply(send(initialState()), start('fg'))
+    expect(listed(s)).toEqual([])
+    expect(listed(reducer(s, { type: 'turn-interrupted' }))).toEqual([])
+  })
+
+  test('Stop ends the turn: its still-running background sub-agent is listed', () => {
+    let s = apply(send(initialState()), [...start('a'), launched('a')])
+    s = reducer(s, { type: 'turn-interrupted' })
+    expect(listed(s)).toEqual(['a'])
+  })
+
+  test('an earlier turn’s stays listed through the next turn; the new one waits', () => {
+    let s = apply(send(initialState()), [...start('old'), launched('old'), ev.turnResult()])
+    s = apply(send(s, 'next'), [...start('new'), launched('new')])
+    expect(isTurnOpen(s)).toBe(true)
+    expect(listed(s)).toEqual(['old'])
+    s = apply(s, [ev.turnResult()])
+    expect(listed(s)).toEqual(['old', 'new'])
+  })
+
+  test('its end takes it off the list', () => {
+    let s = apply(send(initialState()), [...start('a'), launched('a'), ev.turnResult()])
+    expect(listed(s)).toEqual(['a'])
+    s = apply(s, [ended('a')])
+    expect(listed(s)).toEqual([])
+  })
+
+  test('each names its timeline row', () => {
+    const s = apply(send(initialState()), [...start('a'), launched('a'), ev.turnResult()])
+    const [agent] = selectBackgroundSubAgents(s)
+    expect(rowsOf(s)[agent.row]).toMatchObject({ kind: 'sub-agent', toolUseId: 'a' })
+  })
+
+  test('Stop closes the turn before its result: listed through the next turn too', () => {
+    let s = apply(send(initialState()), [...start('a'), launched('a')])
+    s = reducer(s, { type: 'turn-interrupted' })
+    s = send(s, 'next')
+    expect(isTurnOpen(s)).toBe(true)
+    expect(listed(s)).toEqual(['a'])
+  })
+
+  test('one started while no turn runs (a Codex child’s own child): listed through the next turn', () => {
+    let s = apply(send(initialState()), [ev.turnResult()])
+    s = apply(s, [
+      { kind: 'sub-agent', phase: 'in-flight', toolUseId: 'g', backgrounded: true, raw: {} }
+    ])
+    expect(listed(s)).toEqual(['g'])
+    s = send(s, 'next')
+    expect(listed(s)).toEqual(['g'])
+  })
+
+  test('its row unloaded (paged history): listed by its tool id, never a throw', () => {
+    const s = apply(send(initialState()), [...start('a', 'scan'), launched('a'), ev.turnResult()])
+    const at = s.subAgentIndex.get('a') as number
+    const timeline = [...rowsOf(s)] as (TimelineItem | undefined)[]
+    timeline[at] = undefined
+    const paged = { ...s, timeline } as ChatTimelineState
+    expect(selectBackgroundSubAgents(paged)).toEqual([{ toolUseId: 'a', row: at }])
+  })
+
+  test('a row remembers the turn that started it', () => {
+    let s = apply(send(initialState()), [...start('a')])
+    expect(rowsOf(s).find((r) => r.kind === 'sub-agent')).toMatchObject({ spawnedInTurn: 0 })
+    s = apply(s, [ev.turnResult()])
+    s = apply(s, [
+      { kind: 'sub-agent', phase: 'in-flight', toolUseId: 'between', backgrounded: true, raw: {} }
+    ])
+    const between = rowsOf(s).find((r) => r.kind === 'sub-agent' && r.toolUseId === 'between')
+    expect(between && 'spawnedInTurn' in between).toBe(false)
+  })
+
+  test('the same list while its sub-agents and turn stay: a render reading it stays memoized', () => {
+    let s = apply(send(initialState()), [...start('a'), launched('a'), ev.turnResult()])
+    const before = selectBackgroundSubAgents(s)
+    s = apply(s, [ev.text('m-9', 'unrelated')])
+    expect(selectBackgroundSubAgents(s)).toBe(before)
+    s = apply(send(s, 'next'), [...start('b'), launched('b'), ev.turnResult()])
+    expect(selectBackgroundSubAgents(s)).not.toBe(before)
   })
 })
 

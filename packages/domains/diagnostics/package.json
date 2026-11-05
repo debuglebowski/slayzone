@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/diagnostics",
-  "version": "0.36.4",
+  "version": "0.37.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -24,7 +24,7 @@
   "devDependencies": {
     "@slayzone/test-utils": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^24.19.0"
+    "@types/node": "^24.19.1"
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*",

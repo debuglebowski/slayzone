@@ -83,6 +83,18 @@ describe('git.op', () => {
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('one\n')
   })
 
+  // The jail normalizes a repo-relative path before git sees it; one naming the repo
+  // itself must stay as sent — an empty `filePath` turned into `.` would stage
+  // everything.
+  it('a file op naming the repo itself is not widened to `.`', async () => {
+    writeFileSync(join(dir, 'b.txt'), 'new\n')
+    await call({ op: 'stageFile', input: { path: dir, filePath: '' } }).catch(() => undefined)
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir })
+      .toString()
+      .trim()
+    expect(staged).toBe('')
+  })
+
   it('refuses an unknown op and an input the contract rejects', async () => {
     await expect(call({ op: 'rmRf', input: { path: dir } })).rejects.toThrow(/unknown git op/)
     await expect(call({ op: 'getCurrentBranch', input: { path: 3 } })).rejects.toThrow()

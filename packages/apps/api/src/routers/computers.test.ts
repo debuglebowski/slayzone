@@ -147,6 +147,22 @@ test('computers.revokeComputer: drops the computer from the active list', async 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
 })
 
+// G3: a deleted or revoked computer never reconnects — what waited for it (a process
+// run it kept) is let go. The router tells the hub through `onComputerRemoved`.
+test('computers: delete and revoke tell the hub the computer is gone', async () => {
+  const removed: string[] = []
+  setComputersDeps({ ...fakeDeps, onComputerRemoved: (id) => removed.push(id) })
+  try {
+    const a = await registerComputer(h.slayDb, { name: 'gone-1', platform: 'darwin', version: '1' })
+    const b = await registerComputer(h.slayDb, { name: 'gone-2', platform: 'darwin', version: '1' })
+    await caller.revokeComputer({ computerId: a.id })
+    await caller.delete({ computerId: b.id })
+    expect(removed).toEqual([a.id, b.id])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})
+
 test('computers: revoke, unrevoke, delete, claim and visibility write audit lines naming the user (T-03)', async () => {
   const audit: Array<Record<string, unknown>> = []
   setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))

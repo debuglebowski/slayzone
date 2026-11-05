@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -459,7 +460,7 @@ describe('createProcHandlers — proc.kill', () => {
     // Give the child a moment to be live before signalling.
     await new Promise((r) => setTimeout(r, 100))
     const res = await proc.handlers[ProcMethods.procKill]({ sessionId: id })
-    expect(res).toEqual({ ok: true })
+    expect(res).toEqual({ ok: true, clean: true })
     await waitFor(() => exitFor(notifies, id) !== undefined)
     const exit = exitFor(notifies, id)!
     // Killed by signal → exitCode null, signal populated.
@@ -493,10 +494,51 @@ describe('createProcHandlers — proc.kill', () => {
     }
   )
 
+  // Stop / Restart wait on this reply before marking stopped or spawning again: a
+  // run that ignores SIGTERM must still be gone — port released — once it resolves,
+  // or the restarted server gets EADDRINUSE (and the old one keeps running).
+  it.skipIf(process.platform === 'win32')(
+    'a child that ignores SIGTERM and holds a port: gone, port free, when kill resolves',
+    async () => {
+      const port = await new Promise<number>((resolve) => {
+        const probe = createServer().listen(0, '127.0.0.1', () => {
+          const p = (probe.address() as { port: number }).port
+          probe.close(() => resolve(p))
+        })
+      })
+      const { notifies, ctx } = makeCtx(roots)
+      const proc = createProcHandlers(ctx)
+      const id = 'p-stubborn'
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: id,
+        command: process.execPath,
+        args: [
+          '-e',
+          `process.on('SIGTERM',()=>{});require('net').createServer().listen(${port},'127.0.0.1',()=>console.log('up'));setInterval(()=>{},1000)`
+        ],
+        env: { ELECTRON_RUN_AS_NODE: '1' }
+      })
+      await waitFor(() => dataFor(notifies, id, 'stdout').includes('up'))
+      await proc.handlers[ProcMethods.procKill]({ sessionId: id })
+      const free = await new Promise<boolean>((resolve) => {
+        const s = createServer()
+        s.once('error', () => resolve(false))
+        s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)))
+      })
+      expect(free, 'the port is released once proc.kill resolves').toBe(true)
+      await waitFor(() => exitFor(notifies, id) !== undefined, 3000)
+      proc.disposeAll()
+    },
+    20_000
+  )
+
   it('kill on an unknown id is a no-op that still acks ok', async () => {
     const { ctx } = makeCtx(roots)
     const proc = createProcHandlers(ctx)
-    expect(await proc.handlers[ProcMethods.procKill]({ sessionId: 'ghost' })).toEqual({ ok: true })
+    expect(await proc.handlers[ProcMethods.procKill]({ sessionId: 'ghost' })).toEqual({
+      ok: true,
+      clean: true
+    })
     proc.disposeAll()
   })
 })
