@@ -28,7 +28,11 @@
  * radius, not a side effect of this mirror.
  */
 import * as headless from '@xterm/headless'
+// The addon must load with Node's Buffer pool off (see ./buffer-pool-off): in import
+// order — off, the addon, on.
+import './buffer-pool-off'
 import * as graphemes from '@xterm/addon-unicode-graphemes'
+import './buffer-pool-on'
 import type { SyncQueryPart } from './sync-query-response'
 
 // Both packages ship CJS/UMD only; depending on the ESM interop in use the
