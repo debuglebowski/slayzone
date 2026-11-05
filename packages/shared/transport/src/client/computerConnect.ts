@@ -27,11 +27,13 @@ export function useComputerConnectGeneration(): number {
 /** A tRPC `useSubscription` result: restart it after a connect if it errored. */
 export function useResubscribeOnComputerConnect(sub: { status: string; reset(): void }): void {
   const current = useComputerConnectGeneration()
-  const seen = useRef(current)
+  // The connect generation last acted on: a refusal is retried once per connect
+  // since — also one that arrives after a connect landed while it was pending.
+  const actedOn = useRef(current)
   const { status, reset } = sub
   useEffect(() => {
-    if (seen.current === current) return
-    seen.current = current
-    if (status === 'error') reset()
+    if (status !== 'error' || actedOn.current === current) return
+    actedOn.current = current
+    reset()
   }, [current, status, reset])
 }

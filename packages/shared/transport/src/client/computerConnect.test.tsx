@@ -21,6 +21,22 @@ describe('resubscribe on computer connect', () => {
     expect(reset).toHaveBeenCalledTimes(1)
   })
 
+  // The connect can land while the subscription is still pending, and its refusal
+  // arrive after: it must still restart then (a computer is there now).
+  it('refused after a connect that landed while it was pending: restarts once', () => {
+    const reset = vi.fn()
+    const { rerender } = renderHook(
+      ({ status }: { status: string }) => useResubscribeOnComputerConnect({ status, reset }),
+      { initialProps: { status: 'pending' } }
+    )
+    act(() => noteComputerConnected())
+    expect(reset).not.toHaveBeenCalled()
+    rerender({ status: 'error' })
+    expect(reset).toHaveBeenCalledTimes(1)
+    rerender({ status: 'error' })
+    expect(reset, 'once per connect').toHaveBeenCalledTimes(1)
+  })
+
   it('a live one is not touched', () => {
     const reset = vi.fn()
     renderHook(() => useResubscribeOnComputerConnect({ status: 'pending', reset }))

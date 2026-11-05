@@ -9,6 +9,7 @@
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { noteComputerConnected, useSubscription } from '@slayzone/transport/client'
+import { retryFailedGitWatches } from '@slayzone/worktrees/hooks'
 import { useTRPC } from '../trpc'
 
 /** The tRPC namespaces (or single procedures) whose answers come from a computer. */
@@ -68,10 +69,14 @@ export function useComputerConnectRefetch(): void {
       onStarted: () => {
         refetch.onStarted()
         noteComputerConnected()
+        retryFailedGitWatches()
       },
       onData: (change) => {
         refetch.onData(change)
-        if (change.connected) noteComputerConnected()
+        if (!change.connected) return
+        noteComputerConnected()
+        // The git panel's watches refused before then (they poll meanwhile).
+        retryFailedGitWatches()
       }
     })
   )

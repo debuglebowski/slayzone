@@ -396,12 +396,15 @@ function acquirePath(targetPath: string, join: (state: PathWatcherState) => void
   // The fs-watcher broadcast listeners are registered by useSubscription in the
   // hooks (one per mounted hook) and routed via notifyDiffChanged /
   // notifyDiffWatchFailed. Here we only manage the refcounted watch start/stop.
+  startWatch(targetPath, state)
+}
+
+/** Start the computer's watch for a path (refused or failed: poll-only until retried). */
+function startWatch(targetPath: string, capturedState: PathWatcherState): void {
   if (!transport) {
     // Transport not wired yet (SSR / tests without injection) → poll-only.
     return
   }
-
-  const capturedState = state
   capturedState.startPromise = transport.watchStart(targetPath).then(
     () => {
       // Subscribe may have been torn down while start was in flight.
@@ -417,6 +420,19 @@ function acquirePath(targetPath: string, join: (state: PathWatcherState) => void
       console.warn('[git-diff-store] watchStart failed, poll-only mode for', targetPath, err)
     }
   )
+}
+
+/**
+ * A computer connected: start again every watch that was refused or failed (one
+ * refused during the desktop's boot window, before the local computer enrolled,
+ * otherwise stayed on polling until the panel remounted). Live or in-flight
+ * watches are left alone.
+ */
+export function retryFailedGitWatches(): void {
+  for (const [targetPath, state] of pathWatchers) {
+    if (state.watcherActive || state.startPromise || pathRefCount(state) === 0) continue
+    startWatch(targetPath, state)
+  }
 }
 
 /** Leave the path's watcher; the last one out stops the main-process watch. */
