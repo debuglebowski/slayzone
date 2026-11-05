@@ -95,6 +95,8 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
+# Round-8 review regressions on the hub's own disk (P1 paths, P2 tie).
+run_harness packages/apps/api/src/routers/review-regressions-hub-disk.test.ts
 # N5: a repeated directory-tree access check does not stat every root's folders again.
 run_harness packages/apps/api/src/access-tree-cost.test.ts
 # N3: a ws subscription stopped during its async middlewares never subscribes

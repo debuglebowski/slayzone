@@ -404,6 +404,12 @@ export const REGRESSIONS = [
     id: 'P3',
     what: 'a ws stop in the same tick as its subscribe (and out of order) never leaks',
     files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P2',
+    what: "naming a computer never wins a path tie on the hub's disk",
+    files: [`${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`]
   }
 ]
 

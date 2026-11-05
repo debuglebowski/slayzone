@@ -575,8 +575,16 @@ async function resolvePathResource(
   // access by path alone (L3). A request that names its computer is decided by the
   // folder recorded on that computer (N4: else user A could lock user B out of B's
   // own folder by registering a project at it on A's computer).
+  //
+  // Only for a path read ON that computer (`path`): a hub-disk read (`ownedPath`,
+  // `pathTree`) never gets a computer here — the computer a request names says
+  // nothing about the hub's disk (P2: A placed B's folder on A's own computer, named
+  // it, and read B's file off the hub). And a root with no computer (the hub's own,
+  // or a legacy one) never loses a tie because a computer was named: the tie denies.
   if (new Set(owners.map((o) => o.owner_user_id)).size > 1) {
-    const onIt = computerId ? owners.filter((o) => o.computer_id === computerId) : []
+    const allOnComputers = owners.every((o) => o.computer_id !== null)
+    const onIt =
+      computerId && allOnComputers ? owners.filter((o) => o.computer_id === computerId) : []
     if (onIt.length > 0 && new Set(onIt.map((o) => o.owner_user_id)).size === 1) {
       return projectsOf(onIt)
     }
@@ -612,7 +620,8 @@ async function resolvePathTree(
   req: AccessRequest
 ): Promise<Ownership> {
   const hubRoots = req.hubRoots ?? []
-  const own = await resolvePathResource(db, rawPath, hubRoots, 'nobody', req.computerId ?? null)
+  // A walk of the hub's disk: no computer breaks a tie there (P2).
+  const own = await resolvePathResource(db, rawPath, hubRoots, 'nobody', null)
   if (own.status === 'none') return NONE
   const dir = normalizePath(rawPath)
   if (dir === null) return NONE
@@ -667,8 +676,8 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?'),
   pathTree: resolvePathTree,
   // A path the hub opens on its own disk for the caller: a root of theirs, or nothing (N1).
-  ownedPath: (db, id, req) =>
-    resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', req.computerId ?? null)
+  // Read on the hub's disk: no computer breaks a tie there (P2).
+  ownedPath: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', null)
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */
