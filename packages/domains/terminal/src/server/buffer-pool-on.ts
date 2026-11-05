@@ -4,3 +4,6 @@ if (typeof Buffer !== 'undefined' && holder.__slzBufferPoolSize !== undefined) {
   Buffer.poolSize = holder.__slzBufferPoolSize
   delete holder.__slzBufferPoolSize
 }
+
+// A module, not a script: its names stay its own.
+export {}

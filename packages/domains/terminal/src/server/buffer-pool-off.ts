@@ -15,3 +15,6 @@ if (typeof Buffer !== 'undefined') {
   holder.__slzBufferPoolSize = Buffer.poolSize
   Buffer.poolSize = 0
 }
+
+// A module, not a script: its names stay its own.
+export {}
