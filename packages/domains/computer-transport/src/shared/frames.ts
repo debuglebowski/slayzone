@@ -1352,6 +1352,8 @@ export const execRunParamsSchema = z
       .object({
         file: z.string().min(1),
         args: z.array(z.string()),
+        /** Written to the program's stdin (a multi-line prompt: never on a cmd line). */
+        stdin: z.string().optional(),
         homeFallbacks: z.array(z.string().min(1)).max(8).optional()
       })
       .optional(),

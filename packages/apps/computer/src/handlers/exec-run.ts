@@ -40,24 +40,27 @@ function capped(): { push(chunk: string): void; text(): string } {
  * would, PATHEXT on Windows), else under its own home. No shell — args reach the
  * program unsplit — except a Windows `.cmd`/`.bat`, which only cmd.exe can run.
  */
-function programInvocation(
+export function programInvocation(
   argv: { file: string; args: string[]; homeFallbacks?: string[] },
   cwd: string,
-  win: boolean
-): { file: string; args: string[] } | null {
+  platform: NodeJS.Platform = process.platform
+): { file: string; args: string[]; windowsVerbatimArguments?: true } | null {
   const env = process.env as Record<string, string>
   const resolved =
-    resolveCommand(argv.file, env, cwd) ??
+    resolveCommand(argv.file, env, cwd, platform) ??
     (argv.homeFallbacks ?? [])
-      .map((rel) => resolveCommand(join(homedir(), rel), env, cwd))
+      .map((rel) => resolveCommand(join(homedir(), rel), env, cwd, platform))
       .find((p): p is string => p !== null) ??
     null
   if (!resolved) return null
-  if (win && /\.(cmd|bat)$/i.test(resolved)) {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(resolved)) {
+    // Only cmd.exe runs these. Its line is passed verbatim (Node would re-quote it)
+    // and each part quoted for cmd; the args carry no newline (the prompt is stdin).
     const quote = (a: string) => `"${a.replace(/"/g, '""')}"`
     return {
       file: 'cmd.exe',
-      args: ['/d', '/s', '/c', `"${[resolved, ...argv.args].map(quote).join(' ')}"`]
+      args: ['/d', '/s', '/c', `"${[resolved, ...argv.args].map(quote).join(' ')}"`],
+      windowsVerbatimArguments: true
     }
   }
   return { file: resolved, args: argv.args }
@@ -76,7 +79,7 @@ export function createExecRunHandlers(
     const cwd = spawnCwd(params.cwd ?? projectDir, ctx.config.allowedRoots)
     const win = process.platform === 'win32'
     const invocation = params.argv
-      ? programInvocation(params.argv, cwd, win)
+      ? programInvocation(params.argv, cwd)
       : {
           file: win ? 'cmd.exe' : '/bin/sh',
           args: win ? ['/c', params.command ?? ''] : ['-c', params.command ?? '']
@@ -89,16 +92,23 @@ export function createExecRunHandlers(
         timedOut: false
       }
     }
+    const stdin = params.argv?.stdin
     const child = spawn(invocation.file, invocation.args, {
       cwd,
       env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: !win
+      stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      detached: !win,
+      ...('windowsVerbatimArguments' in invocation ? { windowsVerbatimArguments: true } : {})
     })
+    if (stdin !== undefined && child.stdin) {
+      // A program that exits without reading it closes the pipe: not an error here.
+      child.stdin.on('error', () => undefined)
+      child.stdin.end(stdin)
+    }
     const stdout = capped()
     const stderr = capped()
-    child.stdout.on('data', (d: Buffer) => stdout.push(d.toString()))
-    child.stderr.on('data', (d: Buffer) => stderr.push(d.toString()))
+    child.stdout?.on('data', (d: Buffer) => stdout.push(d.toString()))
+    child.stderr?.on('data', (d: Buffer) => stderr.push(d.toString()))
 
     let timedOut = false
     const signalTree = (sig: NodeJS.Signals): void => {

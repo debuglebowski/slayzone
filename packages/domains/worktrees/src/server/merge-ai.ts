@@ -12,6 +12,8 @@ export interface AiCommandResult {
 export interface AiProgram {
   file: string
   args: string[]
+  /** The prompt: by stdin, never argv — a Windows cmd line ends at its first newline. */
+  stdin?: string
   /** Home-relative places to look when `file` is not on the computer's PATH. */
   homeFallbacks?: string[]
 }
@@ -40,10 +42,13 @@ export async function runAiCommand(mode: 'claude-code' | 'codex', prompt: string
     mode === 'claude-code'
       ? {
           file: 'claude',
-          args: ['--print', '--allow-dangerously-skip-permissions', prompt],
+          // `--print` with no prompt argument reads it from stdin.
+          args: ['--print', '--allow-dangerously-skip-permissions'],
+          stdin: prompt,
           homeFallbacks: ['.local/bin/claude']
         }
-      : { file: 'codex', args: [prompt] }
+      : // Headless, as the codex agent mode runs it; `-`: the prompt from stdin.
+        { file: 'codex', args: ['exec', '-'], stdin: prompt }
   const result = runner ? await runner(program, AI_COMMAND_TIMEOUT_MS) : null
   if (!result) refuseNoComputer({ op: 'worktrees.analyzeConflict' })
   if (result.timedOut) throw new Error('Timeout')

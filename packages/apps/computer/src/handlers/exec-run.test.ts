@@ -71,6 +71,18 @@ describe('exec.run with argv', () => {
     }
   })
 
+  // A multi-line prompt cannot ride a Windows cmd line (it ends at the first
+  // newline): it goes to the program's stdin, intact.
+  it.skipIf(process.platform === 'win32')('stdin reaches the program intact', async () => {
+    const res = (await run({
+      argv: { file: 'cat', args: [], stdin: 'line one\nline "two"\n' },
+      cwd: dir,
+      timeoutMs: 5000
+    })) as { stdout: string; status: number }
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('line one\nline "two"\n')
+  })
+
   it('a program found nowhere: status 127, naming it', async () => {
     const res = (await run({
       argv: { file: 'no-such-agent-cli-x', args: [] },

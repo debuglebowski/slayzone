@@ -28,7 +28,9 @@ describe('runAiCommand on a computer', () => {
     const out = await runAiCommand('codex', "it's a $(prompt)")
     expect(out).toBe('SUMMARY: ok')
     expect(seen[0]?.timeoutMs).toBe(60_000)
-    expect(seen[0]?.run).toEqual({ file: 'codex', args: ["it's a $(prompt)"] })
+    // Headless (`codex exec`), the prompt by stdin (`-`): a Windows cmd line ends
+    // at its first newline, so a multi-line prompt never rides argv.
+    expect(seen[0]?.run).toEqual({ file: 'codex', args: ['exec', '-'], stdin: "it's a $(prompt)" })
   })
 
   test("claude: on the computer's PATH, else its own ~/.local/bin/claude", async () => {
@@ -40,7 +42,8 @@ describe('runAiCommand on a computer', () => {
     await runAiCommand('claude-code', 'p')
     expect(seen[0]).toEqual({
       file: 'claude',
-      args: ['--print', '--allow-dangerously-skip-permissions', 'p'],
+      args: ['--print', '--allow-dangerously-skip-permissions'],
+      stdin: 'p',
       homeFallbacks: ['.local/bin/claude']
     })
   })
