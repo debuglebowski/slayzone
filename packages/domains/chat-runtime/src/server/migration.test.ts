@@ -16,8 +16,11 @@ async function fixture() {
   dbs.push(db)
   db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
   // From the chat-ownership migrations (187) on, minus v192: it renames
-  // `terminal_modes` / `tasks.terminal_mode`, which this skeleton DB does not have.
-  for (const migration of migrations.filter((m) => m.version >= 187 && m.version !== 192))
+  // `terminal_modes` / `tasks.terminal_mode`, and v194, which alters `computers`:
+  // this skeleton DB has neither.
+  for (const migration of migrations.filter(
+    (m) => m.version >= 187 && m.version !== 192 && m.version !== 194
+  ))
     migration.up(db)
   const ownership = createChatOwnershipStore(createSlayzoneDbAdapter(db))
   const route = await ownership.register({

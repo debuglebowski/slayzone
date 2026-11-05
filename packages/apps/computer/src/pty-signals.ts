@@ -27,10 +27,12 @@ import {
   getAdapter,
   PtyOutputDetector,
   SESSION_ERROR_WINDOW_MS,
-  TerminalReplyMirror,
   type PtyOutputDetection,
   type TerminalTheme
 } from '@slayzone/terminal/pty-detection'
+// Its own entry: the headless xterm it loads stays out of the lean detection entry,
+// which half the codebase imports (through the computer-transport frames).
+import { TerminalReplyMirror } from '@slayzone/terminal/reply-mirror'
 import type {
   PtyDetectedSnapshot,
   PtyDetectionParams,

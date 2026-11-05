@@ -32,6 +32,7 @@
     "./live-blocks": "./src/client/live-blocks.ts",
     "./runtime": "./src/server/chat-runtime.ts",
     "./pty-detection": "./src/server/pty-detection.ts",
+    "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts"
   },
   "scripts": {
