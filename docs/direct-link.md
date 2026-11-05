@@ -63,6 +63,10 @@ scroll stay on their hub calls (see *Follow-ups*).
     differs.
   - **Process exited:** the stream ends. The grant stays valid for the same session
     id until it expires, because a restarted agent reuses the id.
+- **Sent as the hub.** Revocations, resets and chat relay-watch pushes are the hub's
+  own frames: they run as the hub (`runAsSecurityActor(null, …)`), so the G2 owner
+  check never refuses an admin's revocation on a computer the admin does not own. A
+  revocation a computer could not receive is audited as `failure` and logged.
 - **Hub link loss.** Grants already issued live out their TTL but cannot renew. On
   every (re)connect the hub sends `direct.reset { keep }` with the grants it still
   holds. After a hub restart that list is empty, so every grant drops.

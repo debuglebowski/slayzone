@@ -8,8 +8,13 @@
  * every connected computer when it changes (once per tick) and to a computer when it
  * (re)connects. A computer the hub never configured relays everything.
  *
+ * Pushes are the hub's own act, sent as the hub (G2: a watch registered inside a
+ * user's request must still reach computers that user does not own). A push that
+ * fails is not counted as delivered and is retried.
+ *
  * @module hub/chat-relay-watch
  */
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 
 export interface ChatRelayConfig {
   all: boolean
@@ -25,25 +30,49 @@ export interface ChatRelayWatch {
 export function createChatRelayWatch(deps: {
   computers(): readonly string[]
   send(computerId: string, config: ChatRelayConfig): Promise<unknown>
+  /** After a failed push. Default 2 s. */
+  retryMs?: number
+  log?: (message: string, detail: Record<string, unknown>) => void
 }): ChatRelayWatch {
+  const retryMs = deps.retryMs ?? 2_000
   let allWatchers = 0
   const tabs = new Map<string, number>()
-  let lastKey = ''
+  /** The config each computer last acknowledged. */
+  const delivered = new Map<string, string>()
   let scheduled = false
+  let retry: ReturnType<typeof setTimeout> | null = null
 
   const config = (): ChatRelayConfig => ({
     all: allWatchers > 0,
     tabIds: [...tabs.keys()].sort()
   })
 
+  function send(computerId: string, next: ChatRelayConfig, key: string): Promise<void> {
+    return runAsSecurityActor(null, () => deps.send(computerId, next)).then(
+      () => {
+        delivered.set(computerId, key)
+      },
+      (err: unknown) => {
+        delivered.delete(computerId)
+        deps.log?.('chat relay watch push failed; retrying', { computerId, error: String(err) })
+        if (!retry) {
+          retry = setTimeout(() => {
+            retry = null
+            changed()
+          }, retryMs)
+          retry.unref?.()
+        }
+      }
+    )
+  }
+
   function push(): void {
     scheduled = false
     const next = config()
     const key = JSON.stringify(next)
-    if (key === lastKey) return
-    lastKey = key
     for (const computerId of deps.computers()) {
-      void deps.send(computerId, next).catch(() => undefined)
+      if (delivered.get(computerId) === key) continue
+      void send(computerId, next, key)
     }
   }
 
@@ -82,7 +111,11 @@ export function createChatRelayWatch(deps: {
       }
     },
     async computerConnected(computerId) {
-      await deps.send(computerId, config()).catch(() => undefined)
+      // A reconnected computer starts from nothing: whatever it acknowledged before
+      // is gone with its old process or link.
+      delivered.delete(computerId)
+      const next = config()
+      await send(computerId, next, JSON.stringify(next))
     }
   }
 }

@@ -1,7 +1,22 @@
 import { createChatRelayWatch } from './chat-relay-watch'
 import { createChatDirectWriteHandler } from './chat-direct-write'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
-import { createDirectLinkIssuer, type DirectLinkIssuer } from './direct-link'
+import {
+  createDirectLinkIssuer,
+  type DirectLinkIssuer,
+  type DirectRevokeOutcome
+} from './direct-link'
+
+/**
+ * A revocation a computer could not receive is already audited as a failure; say so
+ * in the hub log too. Its grants are forgotten here, the computer is reset to what
+ * the hub holds when it reconnects, and none outlives its 5-minute TTL.
+ */
+function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): void {
+  for (const f of outcome?.failed ?? []) {
+    console.warn('[direct-link] revocation not delivered', f)
+  }
+}
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
@@ -610,7 +625,9 @@ export function composeServer(opts: {
     // A closed task's direct-link grants go with its agents (direct-link.ts).
     killPtysByTaskId: (taskId: string) => {
       killPtysByTaskId(taskId)
-      void directLinkIssuer?.revoke({ by: 'task', taskId }, 'task_closed')
+      void directLinkIssuer
+        ?.revoke({ by: 'task', taskId }, 'task_closed')
+        .then(reportDirectRevokeFailures)
     },
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
@@ -1001,6 +1018,7 @@ export function composeServer(opts: {
   )
   // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
   const chatRelayWatch = createChatRelayWatch({
+    log: (message, detail) => console.warn(`[chat] ${message}`, detail),
     computers: () => computerGatewayRef?.listUsableComputers().map((c) => c.computerId) ?? [],
     send: (computerId, config) => {
       const gateway = computerGatewayRef
@@ -1501,7 +1519,9 @@ export function composeServer(opts: {
     getGateway: () => computerGatewayRef,
     connections: trpcConnections,
     revokeDirectGrants: async (userId) =>
-      directLinkIssuer?.revoke({ by: 'user', userId }, 'user_access_ended')
+      reportDirectRevokeFailures(
+        await directLinkIssuer?.revoke({ by: 'user', userId }, 'user_access_ended')
+      )
   })
   // Break-glass (break-glass.ts): off unless login is required; closing its account
   // revokes everything the account holds, like disabling any other (T-12).
@@ -1715,7 +1735,9 @@ export function composeServer(opts: {
     findAccount: joinTokenAccounts,
     // Before the gateway is up there is no computer to reach: the client relays.
     onComputerRevoked: async (computerId) => {
-      await directLinkIssuer?.revoke({ by: 'computer', computerId }, 'computer_revoked')
+      reportDirectRevokeFailures(
+        await directLinkIssuer?.revoke({ by: 'computer', computerId }, 'computer_revoked')
+      )
       // Revoking used to leave a live connection working until it next reconnected.
       computerGatewayRef?.disconnect(computerId, 'computer revoked')
     },
@@ -1855,7 +1877,12 @@ export function composeServer(opts: {
     // Every (re)connect: the computer keeps exactly the grants this hub still holds
     // (none after a hub restart), so nothing it granted outlives what the hub knows.
     computerGateway.events.on('computer-connected', ({ computer }) => {
-      void directLinkIssuer?.computerConnected(computer.computerId)
+      void directLinkIssuer?.computerConnected(computer.computerId).catch((err: unknown) =>
+        console.warn('[direct-link] reset on connect failed', {
+          computerId: computer.computerId,
+          error: String(err)
+        })
+      )
       void chatRelayWatch.computerConnected(computer.computerId)
     })
 

@@ -41,7 +41,7 @@ import type {
   DirectLinkTarget
 } from '@slayzone/computers/shared'
 import { isLoopbackAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
-import { securityEvent } from '@slayzone/platform/security-log'
+import { runAsSecurityActor, securityEvent } from '@slayzone/platform/security-log'
 
 /** The slice of the computer gateway the issuer needs. */
 export interface DirectLinkGateway {
@@ -96,16 +96,28 @@ export type DirectRevocation =
   /** Computer revoked: everything this hub granted on it. */
   | { by: 'computer'; computerId: string }
 
+/** Computers a revocation could not reach (each audited as a failure). */
+export interface DirectRevokeOutcome {
+  failed: Array<{ computerId: string; error: string }>
+}
+
+/** A hub→computer frame the hub sends on its own behalf (see computer-request-authorizer.ts). */
+function asHub<T>(fn: () => Promise<T>): Promise<T> {
+  return runAsSecurityActor(null, fn)
+}
+
 export interface DirectLinkIssuer {
   issue(target: DirectLinkTarget, caller: DirectLinkCaller): Promise<DirectLinkIssueResult>
   /** Live grant ids this hub issued on a computer (for `direct.reset`). */
   heldGrantIds(computerId: string): string[]
   /**
    * Drop grants now: forgotten here first, then revoked on each computer holding
-   * one. Best-effort on the wire — a computer that cannot be told is reset to this
-   * hub's held set when it reconnects, and a grant never outlives its TTL.
+   * one, as the hub (never the caller whose request triggered it: an admin revokes on
+   * computers the admin does not own). A computer that cannot be told is reported in
+   * `failed` and audited as a failure; it is reset to this hub's held set when it
+   * reconnects, and a grant never outlives its TTL.
    */
-  revoke(which: DirectRevocation, reason: string): Promise<void>
+  revoke(which: DirectRevocation, reason: string): Promise<DirectRevokeOutcome>
   /** A computer (re)connected: reset it to exactly the grants this hub still holds. */
   computerConnected(computerId: string): Promise<void>
 }
@@ -248,22 +260,27 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       if (which.by === 'computer' && !byComputer.has(which.computerId)) {
         byComputer.set(which.computerId, [])
       }
-      await Promise.all(
+      const results = await Promise.all(
         [...byComputer].map(async ([computerId, grantIds]) => {
           const params: DirectRevokeParams =
             which.by === 'computer' ? { by: 'all' } : { by: 'grant', grantIds }
-          await deps.gateway
-            .request(computerId, HubToComputerMethods.directRevoke, params)
-            .catch(() => undefined)
+          const error = await asHub(() =>
+            deps.gateway.request(computerId, HubToComputerMethods.directRevoke, params)
+          ).then(
+            () => null,
+            (err: unknown) => String(err)
+          )
           securityEvent({
             event: 'computer.direct_revoke',
-            outcome: 'success',
+            outcome: error === null ? 'success' : 'failure',
             targetKind: 'computer',
             targetId: computerId,
             detail: { reason, grants: grantIds.length }
           })
+          return error === null ? null : { computerId, error }
         })
       )
+      return { failed: results.filter((r) => r !== null) }
     },
 
     async computerConnected(computerId) {
@@ -271,9 +288,11 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       const keep = [...grants.values()]
         .filter((g) => g.computerId === computerId)
         .map((g) => g.grantId)
-      await deps.gateway
-        .request(computerId, HubToComputerMethods.directReset, { keep })
-        .catch(() => undefined)
+      // The computer reconnecting is told again next time if this fails; a grant it
+      // still holds meanwhile lives out its TTL.
+      await asHub(() =>
+        deps.gateway.request(computerId, HubToComputerMethods.directReset, { keep })
+      )
     }
   }
 }

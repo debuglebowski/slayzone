@@ -4,12 +4,17 @@
  */
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
-import { setSecurityLogSink } from '@slayzone/platform/security-log'
+import {
+  currentSecurityContext,
+  runWithSecurityContext,
+  setSecurityLogSink
+} from '@slayzone/platform/security-log'
 import {
   DIRECT_GRANT_TTL_MS,
   DIRECT_LINK_PROTOCOL,
   HubToComputerMethods
 } from '@slayzone/computer-transport/shared'
+import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createDirectLinkIssuer, type DirectLinkIssuerDeps } from './direct-link'
 
 let lines: Record<string, unknown>[] = []
@@ -325,9 +330,67 @@ describe('direct-link revocation', () => {
       }
     })
     await failing.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
-    // Forgotten anyway: the reconnect reset drops it on the computer.
-    await failing.issuer.revoke({ by: 'user', userId: 'u1' }, 'user_disabled')
+    lines = []
+    // Forgotten anyway: the reconnect reset drops it on the computer. The failure is
+    // reported, and audited as one.
+    const out = await failing.issuer.revoke({ by: 'user', userId: 'u1' }, 'user_disabled')
+    expect(out.failed).toEqual([{ computerId: 'c-local', error: 'Error: offline' }])
     expect(failing.issuer.heldGrantIds('c-local')).toEqual([])
+    expect(lines.filter((l) => l.event === 'computer.direct_revoke')).toEqual([
+      expect.objectContaining({ outcome: 'failure', targetId: 'c-local' })
+    ])
+  })
+
+  // G2: on a hub with login every gateway request made inside a caller's request is
+  // owner-checked against that caller. A revocation is the hub's own act: an admin
+  // disabling user B (or revoking B's computer) must still reach B's computer.
+  it('runs as the hub: an admin’s request still revokes on a computer the admin does not own', async () => {
+    const owner: Record<string, string> = { 'c-local': 'u-b' }
+    const authorize = createComputerRequestAuthorizer(async (computerId) => {
+      if (currentSecurityContext()?.actor !== owner[computerId])
+        throw new Error('not your computer')
+    })
+    if (!authorize) throw new Error('unreachable')
+    const delivered: string[] = []
+    const ctx = setup({
+      gateway: {
+        listUsableComputers: () => [
+          { computerId: 'c-local', directAddress: '127.0.0.1:1', peerLoopback: true }
+        ],
+        request: async (computerId, method) => {
+          await authorize(computerId, method)
+          delivered.push(method)
+          return { ok: true }
+        }
+      }
+    })
+    const as = <T>(actor: string, fn: () => Promise<T>) =>
+      runWithSecurityContext({ actor, ip: '127.0.0.1', route: 'test' }, fn)
+    await as('u-b', () =>
+      ctx.issuer.issue(
+        { kind: 'pty', sessionId: 't:t', taskId: 'task-1' },
+        { ...local, userId: 'u-b' }
+      )
+    )
+    lines = []
+    const out = await as('admin', () =>
+      ctx.issuer.revoke({ by: 'user', userId: 'u-b' }, 'user_disabled')
+    )
+    expect(out.failed).toEqual([])
+    expect(delivered).toEqual([HubToComputerMethods.directGrant, HubToComputerMethods.directRevoke])
+    expect(lines.filter((l) => l.event === 'computer.direct_revoke')).toEqual([
+      expect.objectContaining({ outcome: 'success', targetId: 'c-local' })
+    ])
+    await as('admin', () =>
+      ctx.issuer.revoke({ by: 'computer', computerId: 'c-local' }, 'computer_revoked')
+    )
+    await as('admin', () => ctx.issuer.computerConnected('c-local'))
+    expect(delivered).toEqual([
+      HubToComputerMethods.directGrant,
+      HubToComputerMethods.directRevoke,
+      HubToComputerMethods.directRevoke,
+      HubToComputerMethods.directReset
+    ])
   })
 
   it('resets a (re)connected computer to exactly the grants this hub still holds', async () => {
