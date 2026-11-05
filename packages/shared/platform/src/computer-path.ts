@@ -12,6 +12,10 @@
  *     where only `/` separates (a `\` is part of a name) and `//x` is `/x` — a
  *     leading `//` is NOT a UNC path (K1: it skipped the owner check);
  *   - lexical: `.`/`..` collapsed, repeated and trailing separators dropped;
+ *   - Windows aliases spelled as the drive or share they name (L6): `\\?\C:\` and
+ *     `\\.\C:\` (device paths), `\\?\UNC\srv\share`, the administrative share of
+ *     this machine (`\\localhost\C$\`, `\\127.0.0.1\c$\`, `\\::1\C$\`), and trailing
+ *     dots and spaces of a name (Windows drops them: `proj. .` is `proj`);
  *   - Unicode NFC: APFS and NTFS store either form and match both;
  *   - case-folded when the volume is case-insensitive (Windows always; macOS unless
  *     the volume was formatted case-sensitive — {@link volumeIsCaseInsensitive}).
@@ -39,12 +43,37 @@ export function isWindowsComputerPath(p: string): boolean {
 export function normalizeComputerPath(p: string): string {
   const nfc = p.normalize('NFC')
   if (isWindowsComputerPath(nfc)) {
-    const n = win32.normalize(nfc)
+    const n = win32.normalize(windowsAliasesOff(nfc))
     const root = win32.parse(n).root
     return n.length > root.length ? n.replace(/\\+$/, '') : n
   }
   const n = posix.normalize(nfc)
   return n.length > 1 ? n.replace(/\/+$/, '') : n
+}
+
+/** This machine, as the host of a Windows UNC path (its administrative shares). */
+const LOCAL_HOST = /^(localhost|127(?:\.\d{1,3}){3}|::1|\[::1\]|0:0:0:0:0:0:0:1)$/i
+
+/** A Windows path's aliases, spelled as the drive or share they name (see the module). */
+function windowsAliasesOff(p: string): string {
+  let s = p.replace(/\//g, '\\')
+  // Device paths: `\\?\` (no normalization) and `\\.\` (device namespace).
+  const device = /^\\\\[?.]\\/.exec(s)
+  if (device) {
+    const rest = s.slice(device[0].length)
+    if (/^UNC\\/i.test(rest)) s = `\\\\${rest.slice(4)}`
+    else if (/^[a-z]:(\\|$)/i.test(rest)) s = rest
+  }
+  // `\\localhost\C$\…`: this machine's drive C.
+  const share = /^\\\\([^\\]+)\\([a-z])\$(?=\\|$)/i.exec(s)
+  if (share && LOCAL_HOST.test(share[1] as string)) {
+    s = `${(share[2] as string).toUpperCase()}:${s.slice(share[0].length) || '\\'}`
+  }
+  // Windows drops trailing dots and spaces of a name (`.`/`..` stay what they are).
+  return s
+    .split('\\')
+    .map((name) => (name === '.' || name === '..' ? name : name.replace(/[. ]+$/, '') || name))
+    .join('\\')
 }
 
 /**

@@ -30,8 +30,8 @@
  *
  * @module api/access
  */
-import { existsSync, realpathSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, posix, resolve as resolvePath, sep } from 'node:path'
 import { HUB_SSO_ENV, type SlayzoneDb } from '@slayzone/platform'
 import {
   computerPathWithin,
@@ -277,18 +277,29 @@ const isWindowsPath = isWindowsComputerPath
  *  existing parent really is. `abs` is NOT normalized first and the OS resolves it
  *  (`realpathSync.native`; the JS one collapses `..` before reading links): `link/..`
  *  is the parent of where `link` points, the directory a later open really reaches,
- *  not the directory holding `link` (T-107). */
-function realpathOf(abs: string): string {
+ *  not the directory holding `link` (T-107).
+ *
+ *  Null: it exists here but cannot be resolved — refused, never compared in its
+ *  lexical form. `/.vol/<dev>/<ino>` (macOS) opens any file by its inode, and realpath
+ *  cannot spell it: read lexically, it was nobody's, so anyone could read the hub's
+ *  database through it (L6). */
+function realpathOf(abs: string): string | null {
   let head = abs
   const tail: string[] = []
   for (;;) {
+    let exists: boolean
     try {
-      if (existsSync(head)) {
+      exists = existsSync(head)
+    } catch {
+      return null
+    }
+    if (exists) {
+      try {
         const real = realpathSync.native(head)
         return tail.length ? join(real, ...tail.reverse()) : real
+      } catch {
+        return null
       }
-    } catch {
-      return resolvePath(abs) // unreadable: compare the lexical form
     }
     const parent = dirname(head)
     if (parent === head) return resolvePath(abs)
@@ -297,30 +308,109 @@ function realpathOf(abs: string): string {
   }
 }
 
+/** macOS's volfs: `/.vol/<dev>/<ino>` names a file by identity, past every path check. */
+const isVolfsPath = (p: string): boolean => {
+  if (process.platform !== 'darwin') return false
+  const n = posix.normalize(p)
+  return n === '/.vol' || n.startsWith('/.vol/')
+}
+
 /** Registered roots are resolved once per {@link ROOT_TTL_MS}, not per check. */
 const ROOT_TTL_MS = 30_000
-const rootForms = new Map<string, { form: string; at: number }>()
+const rootForms = new Map<string, { form: string | null; at: number }>()
 
 /**
- * One comparable form of a path. A Windows path (a computer's, seen by a POSIX hub)
- * keeps its own flavour; a POSIX one is resolved against this process — a relative
- * path is what a hub-local operation would open — and through symlinks, so a link
- * cannot smuggle a hub-state path past the check. `cached`: for registered roots.
+ * One comparable form of a path, or null when it cannot be resolved (refused). A
+ * Windows path seen by a POSIX hub is a computer's and keeps its own flavour; any
+ * other path is resolved against this process — a relative path is what a hub-local
+ * operation would open — and through symlinks, so a link cannot smuggle a hub-state
+ * path past the check. `cached`: for registered roots.
  */
-function normalizePath(p: string, cached = false): string {
-  if (isWindowsPath(p)) return normalizeComputerPath(p)
+function normalizePath(p: string, cached = false): string | null {
+  if (isWindowsPath(p) && process.platform !== 'win32') return normalizeComputerPath(p)
   if (cached) {
     const hit = rootForms.get(p)
     if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.form
   }
-  const abs = realpathOf(isAbsolute(p) ? p : `${process.cwd()}${sep}${p}`)
-  // NFC, as every other SlayZone comparison of a path (`computer-path.ts`).
-  const form = (abs.length > 1 ? abs.replace(/\/+$/, '') : abs).normalize('NFC')
+  const form = resolveHere(p)
   if (cached) {
     if (rootForms.size > 20_000) rootForms.clear()
     rootForms.set(p, { form, at: Date.now() })
   }
   return form
+}
+
+function resolveHere(p: string): string | null {
+  const abs = isAbsolute(p) ? p : `${process.cwd()}${sep}${p}`
+  if (isVolfsPath(abs)) return null
+  const real = realpathOf(abs)
+  if (real === null || isVolfsPath(real)) return null
+  if (isWindowsPath(real)) return normalizeComputerPath(real)
+  // NFC, as every other SlayZone comparison of a path (`computer-path.ts`).
+  return (real.length > 1 ? real.replace(/\/+$/, '') : real).normalize('NFC')
+}
+
+// ── identity: the same folder under another name ──────────────────────────────
+//
+// Some names of a folder are not its realpath and never become it: macOS firmlinks
+// (`/System/Volumes/Data/Users/…` IS `/Users/…`), bind mounts. Lexically such a path
+// is inside no root — nobody's, so anyone's (L6). The folder's identity (`dev:ino`)
+// is the same under every name, as the computer's jail already compares it: a root
+// contains a path when the root's identity is one of the path's existing folders.
+
+/** `dev:ino` of what `p` names here, or null (nothing there). */
+function identityOf(p: string): string | null {
+  try {
+    const st = statSync(p)
+    return `${st.dev}:${st.ino}`
+  } catch {
+    return null
+  }
+}
+
+const rootIdentities = new Map<string, { id: string | null; at: number }>()
+
+/** A registered root's identity here, cached like its form; null when not here. */
+function rootIdentity(root: string): string | null {
+  if (isWindowsPath(root) && process.platform !== 'win32') return null
+  const hit = rootIdentities.get(root)
+  if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.id
+  const id = identityOf(root)
+  if (rootIdentities.size > 20_000) rootIdentities.clear()
+  rootIdentities.set(root, { id, at: Date.now() })
+  return id
+}
+
+/** Each existing folder from `p` up, by identity → its spelling as a prefix of `p`. */
+type Ancestry = ReadonlyMap<string, string>
+
+function ancestryOf(p: string): Ancestry {
+  const out = new Map<string, string>()
+  if (isWindowsPath(p) && process.platform !== 'win32') return out
+  let current = p
+  for (;;) {
+    const id = identityOf(current)
+    if (id && !out.has(id)) out.set(id, current)
+    const parent = dirname(current)
+    if (parent === current) return out
+    current = parent
+  }
+}
+
+/**
+ * Where in `target` the root `root` ends (its length there), or -1 when `target` is
+ * not `root` or inside it — by name (`inside`), else by identity.
+ */
+function rootEnd(
+  target: string,
+  ancestry: Ancestry,
+  root: string,
+  inside: (child: string, root: string) => boolean
+): number {
+  if (inside(target, root)) return root.length
+  const id = rootIdentity(root)
+  const at = id ? ancestry.get(id) : undefined
+  return at === undefined ? -1 : at.length
 }
 
 /**
@@ -343,13 +433,19 @@ const within = (child: string, root: string): boolean => computerPathWithin(chil
 const withinHubRoot = (child: string, root: string): boolean =>
   computerPathWithin(child, root, pathFoldsCase(root))
 
+/** A hub state root's form; one that cannot be resolved is still protected, lexically. */
+const hubRootForm = (raw: string): string => normalizePath(raw, true) ?? resolvePath(raw)
+
 /**
  * `rawPath` is `rawRoot` or inside it, after both are resolved the way every path
  * check here resolves them (`..` and symlinks included). Empty never matches.
  */
 export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
   if (!rawPath || !rawRoot) return false
-  return within(normalizePath(rawPath), normalizePath(rawRoot, true))
+  const target = normalizePath(rawPath)
+  const root = normalizePath(rawRoot, true)
+  if (target === null || root === null) return false
+  return rootEnd(target, ancestryOf(target), root, within) >= 0
 }
 
 /** Every registered root a project's content lives under, with its owner. */
@@ -368,13 +464,16 @@ async function resolvePathResource(
 ): Promise<Ownership> {
   if (!rawPath) return NONE
   const target = normalizePath(rawPath)
+  if (target === null) return NONE
+  const ancestry = ancestryOf(target)
   // The hub's own state directory, as one more root in the competition below.
   let hubDepth = -1
   for (const raw of hubRoots) {
-    const root = normalizePath(raw, true)
-    if (!withinHubRoot(target, root)) continue
+    const root = hubRootForm(raw)
+    const end = rootEnd(target, ancestry, root, withinHubRoot)
+    if (end < 0) continue
     // `<data root>/artifacts/<taskId>/…` is a task's artifact file (artifact-store).
-    const rest = target.slice(root.length + 1).split(/[\\/]/)
+    const rest = target.slice(end + 1).split(/[\\/]/)
     if (rest[0] === 'artifacts' && rest[1]) return viaTask(db, rest[1])
     hubDepth = Math.max(hubDepth, root.length)
   }
@@ -389,7 +488,7 @@ async function resolvePathResource(
   let owners: OwnerRow[] = []
   for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
     const root = normalizePath(row.root, true)
-    if (!within(target, root)) continue
+    if (root === null || rootEnd(target, ancestry, root, within) < 0) continue
     if (root.length > depth) {
       depth = root.length
       owners = []
@@ -423,9 +522,15 @@ async function resolvePathTree(
   const own = await resolvePathResource(db, rawPath, hubRoots)
   if (own.status === 'none') return NONE
   const dir = normalizePath(rawPath)
-  for (const raw of hubRoots) if (withinHubRoot(normalizePath(raw, true), dir)) return NONE
+  if (dir === null) return NONE
+  const dirId = rootIdentity(dir)
+  // A root inside `dir`: by name, or by identity (`dir` is one of its folders).
+  const holds = (root: string, inside: (child: string, root: string) => boolean) =>
+    inside(root, dir) || (dirId !== null && ancestryOf(root).has(dirId))
+  for (const raw of hubRoots) if (holds(hubRootForm(raw), withinHubRoot)) return NONE
   for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
-    if (within(normalizePath(row.root, true), dir) && !mayAccessProject(req, row)) return NONE
+    const root = normalizePath(row.root, true)
+    if (root !== null && holds(root, within) && !mayAccessProject(req, row)) return NONE
   }
   return own
 }
