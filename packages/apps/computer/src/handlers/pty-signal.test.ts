@@ -109,7 +109,8 @@ describe('output detection on the computer (pty-signal)', () => {
       detection: { mode: 'claude-code', resuming: false }
     })
     child.say('a\x1b[cb\x1b]0;title\x07c')
-    expect(child.proc.write).toHaveBeenCalledWith('\x1b[?62;4;22c')
+    // In stream order behind `a` in the screen mirror, so a moment later.
+    await vi.waitFor(() => expect(child.proc.write).toHaveBeenCalledWith('\x1b[?62;4;22c'))
     const streamed = notifies.find((n) => n.method === 'pty.data')?.params
     expect(streamed?.data).toBe('abc')
     const backfill = pty.handlers['pty.getBufferSince']({ sessionId: 's', seq: -1 }) as {

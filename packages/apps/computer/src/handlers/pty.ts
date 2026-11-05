@@ -517,7 +517,8 @@ export function createPtyHandlers(
           session.proc.write(answer)
         }
       },
-      disk: { cwd: session.cwd, startedAt: session.startedAt }
+      disk: { cwd: session.cwd, startedAt: session.startedAt },
+      size: { cols: session.proc.cols, rows: session.proc.rows }
     })
   }
 
@@ -1084,6 +1085,7 @@ export function createPtyHandlers(
       return { ok: true }
     }
     session.proc.resize(params.cols, params.rows)
+    session.signals?.resize(params.cols, params.rows)
     return { ok: true }
   }
 

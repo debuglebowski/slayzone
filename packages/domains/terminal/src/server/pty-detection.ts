@@ -43,6 +43,7 @@ export {
   type SyncQueryResult,
   type TerminalTheme
 } from './sync-query-response'
+export { TerminalReplyMirror } from './terminal-reply-mirror'
 export { shouldHonorDetectedError } from './session-error-gate'
 export {
   PtyOutputDetector,
