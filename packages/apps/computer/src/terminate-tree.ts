@@ -12,7 +12,7 @@
  *
  * @module computer/terminate-tree
  */
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { killPidTree } from '@slayzone/platform'
 
 const POLL_INTERVAL_MS = 100
@@ -23,12 +23,17 @@ const KILL_SETTLE_MS = 1_000
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Signal 0 to the whole group: ESRCH = nobody left, EPERM = someone (not ours to
+ * signal) still in it. No `pgrep`: absent on a minimal Linux, it read every group as
+ * empty — no wait, no SIGKILL — and a sync spawn per poll blocked the event loop.
+ */
 function groupHasLiveMembers(pgid: number): boolean {
   try {
-    execFileSync('pgrep', ['-g', String(pgid)], { timeout: 2000, stdio: 'ignore' })
+    process.kill(-pgid, 0)
     return true
-  } catch {
-    return false
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
   }
 }
 
