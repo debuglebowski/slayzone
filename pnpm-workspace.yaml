@@ -4,10 +4,11 @@ packages:
   - 'packages/domains/*'
   - 'packages/shared/*'
 
-# Install only package versions published at least 30 days ago (minutes), the same age
-# Renovate waits before proposing an update. A hand bump that needs a newer version goes
-# in minimumReleaseAgeExclude below, with the reason and the date it clears the gate.
-minimumReleaseAge: 43200
+# Install only package versions published at least 14 days ago (minutes). Deliberately
+# shorter than Renovate's 30 days (renovate.json), so every version Renovate proposes
+# already clears this gate. A hand bump that needs a newer version goes in
+# minimumReleaseAgeExclude below, with the reason and the date it clears the gate.
+minimumReleaseAge: 20160
 # Exempt: TypeScript and React are always used at their latest versions.
 minimumReleaseAgeExclude:
   - typescript
