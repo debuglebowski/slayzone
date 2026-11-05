@@ -652,6 +652,7 @@ run_harness packages/domains/terminal/src/server/pty-output-detector.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
+run_harness packages/domains/terminal/src/server/terminal-reply-mirror.test.ts
 # Diagnostics — payload blob offload. Screenshots were silently truncated to 4096
 # chars by the redactor, making every recorded scramble event unprovable.
 run_harness packages/domains/diagnostics/src/server/payload-blobs.test.ts

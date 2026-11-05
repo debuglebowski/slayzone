@@ -324,7 +324,9 @@ describe('state queries are answered from a screen mirror', () => {
     const { pipeline, answers } = mirrored()
     pipeline.process('\x1b[?2004$p')
     await vi.waitFor(() => expect(answers.length).toBe(1))
-    expect(answers[0]).toMatch(/^\x1b\[\?2004;[0-4]\$y$/)
+    const [answer] = answers
+    expect(answer?.startsWith('\x1b[?2004;')).toBe(true)
+    expect(answer?.slice('\x1b[?2004;'.length)).toMatch(/^[0-4]\$y$/)
     pipeline.dispose()
   })
 })
