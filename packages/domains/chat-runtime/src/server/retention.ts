@@ -152,7 +152,7 @@ export function createChatRetention(opts: {
               if (!valid()) return 0
               const rows = db
                 .prepare(`SELECT kind,id,value,saved_at FROM records WHERE conversation_id=? AND saved_at<? AND (
-                kind IN ('draft','queue','prompt','workspace') OR
+                kind IN ('draft','queue','prompt','workspace','pinned-message') OR
                 (kind='thread' AND COALESCE(json_extract(value,'$.title'),'')<>'Thread') OR
                 (kind='settings' AND (id LIKE 'attachment-message:%' OR id LIKE 'diagnostic:%' OR id LIKE 'legacy-turn-preview:%' OR id IN ('cli-snapshot','cli-models','cli-details')))
               ) ORDER BY saved_at,kind,id LIMIT ?`)

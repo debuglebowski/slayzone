@@ -72,6 +72,9 @@ import { useChatLifecycle } from './useChatLifecycle'
 import { useChatPanelKeyboard } from './useChatPanelKeyboard'
 import { useTurnOutline } from './useTurnOutline'
 import { turnOutlinePaletteCommands } from './turn-outline-palette'
+import { pinnedMessagePaletteCommands } from './pinned-palette'
+import { usePinnedMessages } from './usePinnedMessages'
+import { PinnedMessagesPopover } from './PinnedMessagesPopover'
 import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
@@ -396,6 +399,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       rowOf: display.rowOf,
       reveal: display.revealItem
     })
+    // Pinned messages of the conversation on screen: the rows' pin buttons, the
+    // footer list, Cmd+K "Go to pinned message…" and previous / next pin.
+    const pinned = usePinnedMessages({
+      target: { tabId, taskId, mode, cwd, providerFlagsOverride },
+      conversationId: state.sessionId || null,
+      timeline: display
+    })
 
     // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
     // or at the top; `seq` re-scrolls when the same file is asked for again.
@@ -614,11 +624,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ...(inFlight ? { stop: () => void composer.handleStop() } : {}),
       reset: () => void handleReset(),
       // The turn outline: go to a turn, previous / next turn.
-      extra: turnOutlinePaletteCommands({
-        turns: turnOutline.turns,
-        reveal: display.revealItem,
-        jump: turnOutline.jump
-      })
+      extra: [
+        ...turnOutlinePaletteCommands({
+          turns: turnOutline.turns,
+          reveal: display.revealItem,
+          jump: turnOutline.jump
+        }),
+        ...pinnedMessagePaletteCommands({
+          pins: pinned.pins,
+          go: pinned.go,
+          jump: pinned.jump
+        })
+      ]
     })
     const palette = usePaletteContribution(
       taskId,
@@ -720,6 +737,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         },
         quoteReply,
         threads: threadApi.view,
+        pinnedMessages: pinned.view,
         sendToolResult,
         promptCards,
         prompts,
@@ -755,6 +773,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         takeOver,
         quoteReply,
         threadApi.view,
+        pinned.view,
         sendToolResult,
         promptCards,
         prompts,
@@ -1047,6 +1066,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                                 </div>
                               )}
                             </>
+                          }
+                          footerTools={
+                            <PinnedMessagesPopover
+                              pins={pinned.pins}
+                              go={pinned.go}
+                              unpin={pinned.unpin}
+                              inBranchOf={pinned.inBranchOf}
+                            />
                           }
                           backgroundJobs={
                             backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (

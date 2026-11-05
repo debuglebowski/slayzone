@@ -774,7 +774,7 @@ export function createChatBackups(store: ChatStorage) {
         for (const row of db
           .prepare(`SELECT * FROM (
             SELECT rowid*${stride} AS cursor,kind,id,value FROM records WHERE conversation_id=? AND
-              (kind IN ('draft','queue','prompt','workspace','thread') OR (kind='settings' AND (id LIKE 'diagnostic:%' OR id LIKE 'legacy-turn-preview:%')))
+              (kind IN ('draft','queue','prompt','workspace','thread','pinned-message') OR (kind='settings' AND (id LIKE 'diagnostic:%' OR id LIKE 'legacy-turn-preview:%')))
             ${artifactRows}${workingRows}) WHERE cursor>? ORDER BY cursor LIMIT 101`)
           .iterate(
             conversationId,

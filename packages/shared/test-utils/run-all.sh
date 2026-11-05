@@ -655,6 +655,8 @@ run_harness packages/domains/terminal/src/server/pty-output-detector.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
+# Terminal — state-dependent query replies (CPR, DECRQM, ...) answered from a headless
+# server-side screen mirror, in stream order with the stateless replies. Uses @xterm/headless.
 run_harness packages/domains/terminal/src/server/terminal-reply-mirror.test.ts
 # Terminal — the graphemes addon loads on plain Node whatever the Buffer pool offset
 # (patched decoder; a standalone computer froze at boot without it).
@@ -722,6 +724,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
@@ -1014,6 +1017,8 @@ run_harness packages/domains/task-terminals/src/client/chat/compact-entry.test.t
 run_harness packages/domains/task-terminals/src/client/chat/diff-comments/format.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/palette/chat-palette-commands.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/turn-outline-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-palette.test.ts
+run_harness packages/domains/task-terminals/src/client/chat/pinned-messages.test.ts
 run_harness packages/domains/task-terminals/src/client/get-tab-label.test.ts
 run_harness packages/domains/task/src/server/ops/create-project-guard.test.ts
 run_harness packages/domains/task/src/server/ops/create-warm-reserve.test.ts
@@ -1087,6 +1092,7 @@ run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
+run_harness packages/domains/terminal-contracts/src/chat-pinned-message.test.ts
 run_harness packages/domains/terminal-contracts/src/key-sequences.test.ts
 run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts

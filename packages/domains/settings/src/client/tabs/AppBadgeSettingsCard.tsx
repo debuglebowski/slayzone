@@ -76,6 +76,10 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
     setState({ ...state, scope })
     setSetting({ key: APP_BADGE_KEYS.scope, value: scope })
   }
+  const setOpenTabsOnly = (openTabsOnly: boolean): void => {
+    setState({ ...state, openTabsOnly })
+    setSetting({ key: APP_BADGE_KEYS.openTabsOnly, value: String(openTabsOnly) })
+  }
   const toggleProject = (key: string, on: boolean): void => {
     const keys = on ? [...state.projects, key] : state.projects.filter((k) => k !== key)
     setState({ ...state, projects: keys })
@@ -112,6 +116,15 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
               <SelectItem value="dot">Dot only</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div className={ROW}>
+          <span className="text-sm">Only tasks open in tabs</span>
+          <Switch
+            checked={state.openTabsOnly}
+            disabled={off}
+            onCheckedChange={setOpenTabsOnly}
+            data-testid="app-badge-open-tabs-only"
+          />
         </div>
         <div className={ROW}>
           <span className="text-sm">Projects</span>

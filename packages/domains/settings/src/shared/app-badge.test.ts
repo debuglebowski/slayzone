@@ -15,6 +15,7 @@ const settings = (over: Partial<AppBadgeSettings> = {}): AppBadgeSettings => ({
   style: 'count',
   scope: 'all',
   projects: [],
+  openTabsOnly: false,
   ...over
 })
 
@@ -24,7 +25,8 @@ describe('parseAppBadgeSettings', () => {
       sources: [],
       style: 'count',
       scope: 'all',
-      projects: []
+      projects: [],
+      openTabsOnly: false
     })
   })
 
@@ -34,13 +36,15 @@ describe('parseAppBadgeSettings', () => {
         [APP_BADGE_KEYS.sources]: JSON.stringify(['idle', 'bogus', 'unread', 'idle']),
         [APP_BADGE_KEYS.style]: 'separate',
         [APP_BADGE_KEYS.scope]: 'selected',
-        [APP_BADGE_KEYS.projects]: JSON.stringify(['h1:p1', 42])
+        [APP_BADGE_KEYS.projects]: JSON.stringify(['h1:p1', 42]),
+        [APP_BADGE_KEYS.openTabsOnly]: 'true'
       })
     ).toEqual({
       sources: ['unread', 'idle'],
       style: 'separate',
       scope: 'selected',
-      projects: ['h1:p1']
+      projects: ['h1:p1'],
+      openTabsOnly: true
     })
   })
 
@@ -52,7 +56,13 @@ describe('parseAppBadgeSettings', () => {
         [APP_BADGE_KEYS.scope]: 'weird',
         [APP_BADGE_KEYS.projects]: '"str"'
       })
-    ).toEqual({ sources: [], style: 'count', scope: 'all', projects: [] })
+    ).toEqual({
+      sources: [],
+      style: 'count',
+      scope: 'all',
+      projects: [],
+      openTabsOnly: false
+    })
   })
 })
 
@@ -142,5 +152,21 @@ describe('computeAppBadge', () => {
         idle: [t('b')]
       })
     ).toEqual({ text: '', count: 0 })
+  })
+
+  it('open-tabs-only counts just the tasks open as tabs', () => {
+    expect(
+      computeAppBadge(
+        settings({ openTabsOnly: true }),
+        { unread: [t('a'), t('b')], idle: [t('c')] },
+        new Set(['b', 'c'])
+      )
+    ).toEqual({ text: '2', count: 2 })
+  })
+
+  it('open-tabs-only off ignores the open set', () => {
+    expect(
+      computeAppBadge(settings(), { unread: [t('a'), t('b')], idle: [] }, new Set(['b']))
+    ).toEqual({ text: '2', count: 2 })
   })
 })

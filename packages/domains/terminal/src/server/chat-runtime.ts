@@ -12,7 +12,11 @@ export {
   type ClaudeSessionReader
 } from './runtime/chat-handlers'
 export { createChatQueueRuntime, type ChatQueueRuntime } from './runtime/chat-queue-handlers'
-export type { ChatDataOps, ProviderConfigEntry } from './runtime/chat-data-ops'
+export type {
+  ChatDataOps,
+  ChatPinnedMessageStore,
+  ProviderConfigEntry
+} from './runtime/chat-data-ops'
 export type {
   ChatQueueData,
   ChatQueueAdmissions,

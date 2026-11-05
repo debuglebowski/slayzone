@@ -2,13 +2,6 @@
   "$comment": "Reviewed decisions for production-dependency advisories (not applicable, or accepted until a date). Read by scripts/ci/audit-check.mjs: an advisory missing here, or past its expiry, fails the audit job. Re-review on expiry; remove ids the job reports as stale.",
   "entries": [
     {
-      "packages": ["body-parser"],
-      "reason": "APPLIES, accepted for now: one gzip request with trailing bytes crashes the process (still in 2.3.0, locked 2026-11-04). express.json() (default inflate) parses the hub's /mcp and agent-hook bodies; the desktop hub binds 127.0.0.1, an exposed standalone hub is reachable. The fix (2.4.0) was published 2026-10-22, so the 14-day minimumReleaseAge holds it back until 2026-11-05 11:39 UTC.",
-      "reviewed": "2026-10-24",
-      "expires": "2026-11-22",
-      "advisories": ["GHSA-27r3-jxmh-p828"]
-    },
-    {
       "packages": ["katex"],
       "reason": "katex 0.16.47: via mermaid and @lobehub/ui (remark-math); the fix is only in 0.18.2+, which neither accepts.",
       "reviewed": "2026-11-05",

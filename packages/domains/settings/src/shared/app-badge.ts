@@ -19,6 +19,8 @@ export interface AppBadgeSettings {
   scope: AppBadgeScope
   /** `appBadgeProjectKey(hubId, projectId)` — project ids are only unique within one hub. */
   projects: string[]
+  /** Count only tasks that are open as tabs. */
+  openTabsOnly: boolean
 }
 
 export interface AppBadgeTask {
@@ -38,7 +40,8 @@ export const APP_BADGE_KEYS = {
   sources: 'app_badge_sources',
   style: 'app_badge_style',
   scope: 'app_badge_scope',
-  projects: 'app_badge_projects'
+  projects: 'app_badge_projects',
+  openTabsOnly: 'app_badge_open_tabs_only'
 } as const
 
 export const APP_BADGE_SOURCES: readonly AppBadgeSource[] = ['unread', 'idle']
@@ -66,7 +69,8 @@ export function parseAppBadgeSettings(all: Record<string, string>): AppBadgeSett
     sources: APP_BADGE_SOURCES.filter((s) => saved.has(s)),
     style: STYLES.includes(style) ? style : 'count',
     scope: all[APP_BADGE_KEYS.scope] === 'selected' ? 'selected' : 'all',
-    projects: parseStringArray(all[APP_BADGE_KEYS.projects])
+    projects: parseStringArray(all[APP_BADGE_KEYS.projects]),
+    openTabsOnly: all[APP_BADGE_KEYS.openTabsOnly] === 'true'
   }
 }
 
@@ -76,14 +80,19 @@ function formatCount(n: number): string {
 
 export function computeAppBadge(
   settings: AppBadgeSettings,
-  tasks: Record<AppBadgeSource, readonly AppBadgeTask[]>
+  tasks: Record<AppBadgeSource, readonly AppBadgeTask[]>,
+  /** Task ids open as tabs; only consulted when `openTabsOnly` is on. */
+  openTaskIds: ReadonlySet<string> = new Set()
 ): AppBadge {
   const chosen = settings.scope === 'selected' ? new Set(settings.projects) : null
+  const open = settings.openTabsOnly ? openTaskIds : null
   const enabled = APP_BADGE_SOURCES.filter((s) => settings.sources.includes(s))
   const perSource = enabled.map((source) => {
     const ids = new Set<string>()
     for (const task of tasks[source]) {
-      if (!chosen || chosen.has(task.projectKey)) ids.add(task.taskId)
+      if (chosen && !chosen.has(task.projectKey)) continue
+      if (open && !open.has(task.taskId)) continue
+      ids.add(task.taskId)
     }
     return ids
   })

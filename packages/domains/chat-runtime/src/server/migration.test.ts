@@ -1,28 +1,20 @@
-import Database from 'better-sqlite3'
 import { afterEach, expect, test, vi } from 'vitest'
-import { migrations } from '../../../../shared/db-migrations/src/migrations'
-import { createSlayzoneDbAdapter } from '../../../../shared/test-utils/ipc-harness'
+import { createTestHarness, type TestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createChatMigration } from './migration'
 import { encodeTransfer } from './transfers'
 import type { ChatTransferManifest } from '../shared'
 type TestRequest = { kind: string; data: string; hash: string; manifest: ChatTransferManifest }
-const dbs: Database.Database[] = []
+const harnesses: TestHarness[] = []
 afterEach(() => {
-  for (const db of dbs.splice(0)) db.close()
+  for (const h of harnesses.splice(0)) h.cleanup()
 })
+// The real, fully migrated hub schema: a hand-picked slice of migrations on a
+// skeleton DB broke on every later migration that touches a table it lacks.
 async function fixture() {
-  const db = new Database(':memory:')
-  dbs.push(db)
-  db.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY,deleted_at TEXT,archived_at TEXT)')
-  // From the chat-ownership migrations (187) on, minus v192: it renames
-  // `terminal_modes` / `tasks.terminal_mode`, and v194, which alters `computers`:
-  // this skeleton DB has neither.
-  for (const migration of migrations.filter(
-    (m) => m.version >= 187 && m.version !== 192 && m.version !== 194
-  ))
-    migration.up(db)
-  const ownership = createChatOwnershipStore(createSlayzoneDbAdapter(db))
+  const h = await createTestHarness()
+  harnesses.push(h)
+  const ownership = createChatOwnershipStore(h.slayDb)
   const route = await ownership.register({
     id: 'c',
     taskId: 'task',

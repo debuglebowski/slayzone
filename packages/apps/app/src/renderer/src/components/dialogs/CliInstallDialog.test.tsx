@@ -6,8 +6,10 @@ import type { ComponentProps, ReactNode } from 'react'
 // The mocks render the plain intrinsic element, so the intrinsic's own prop type
 // is the honest signature. (Type-only imports survive vi.mock's hoisting because
 // they are erased before the factory ever runs.)
+const toastMock = vi.fn()
 vi.mock('@slayzone/ui', () => {
   return {
+    toast: (...args: unknown[]) => toastMock(...args),
     Button: ({ children, ...props }: ComponentProps<'button'>) => (
       <button {...props}>{children}</button>
     ),
@@ -55,16 +57,30 @@ vi.mock('@slayzone/transport/client', () => ({
 import { CliInstallDialog } from '@slayzone/settings/client/CliInstallDialog'
 
 function mockApi(
-  overrides: { onboarded?: string | null; dismissed?: string | null; installed?: boolean } = {}
+  overrides: {
+    onboarded?: string | null
+    dismissed?: string | null
+    updateDismissed?: string | null
+    installed?: boolean
+    status?: Record<string, unknown>
+  } = {}
 ) {
-  const { onboarded = 'true', dismissed = null, installed = true } = overrides
+  const {
+    onboarded = 'true',
+    dismissed = null,
+    updateDismissed = null,
+    installed = true
+  } = overrides
   trpcClientMock.settings.get.query.mockImplementation((input: { key: string }) => {
     if (input.key === 'onboarding_completed') return Promise.resolve(onboarded)
     if (input.key === 'cli_install_dismissed') return Promise.resolve(dismissed)
+    if (input.key === 'cli_update_dismissed_version') return Promise.resolve(updateDismissed)
     return Promise.resolve(null)
   })
   trpcClientMock.settings.set.mutate.mockResolvedValue(undefined)
-  trpcClientMock.app.meta.checkCliInstalled.query.mockResolvedValue({ installed })
+  trpcClientMock.app.meta.checkCliInstalled.query.mockResolvedValue(
+    overrides.status ?? { installed }
+  )
   trpcClientMock.app.meta.installCli.mutate.mockResolvedValue({ ok: true })
 }
 
@@ -95,25 +111,71 @@ describe('CliInstallDialog', () => {
     })
   })
 
-  it('should NOT show when onboarding not completed', async () => {
+  it('should NOT show (nor probe) when onboarding not completed', async () => {
     mockApi({ onboarded: null, installed: false })
     render(<CliInstallDialog />)
 
     await waitFor(() => {
-      expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
+      expect(trpcClientMock.settings.get.query).toHaveBeenCalled()
     })
+    await new Promise((r) => setTimeout(r, 0))
 
+    expect(trpcClientMock.app.meta.checkCliInstalled.query).not.toHaveBeenCalled()
     expect(screen.queryByText('Install the slay CLI')).toBeNull()
   })
 
-  it('should NOT show when user dismissed it', async () => {
+  it('should NOT show (nor probe) when user dismissed it', async () => {
     mockApi({ dismissed: 'true', installed: false })
+    render(<CliInstallDialog />)
+
+    await waitFor(() => {
+      expect(trpcClientMock.settings.get.query).toHaveBeenCalled()
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(trpcClientMock.app.meta.checkCliInstalled.query).not.toHaveBeenCalled()
+    expect(screen.queryByText('Install the slay CLI')).toBeNull()
+    expect(toastMock).not.toHaveBeenCalled()
+  })
+
+  const outdated = {
+    installed: true,
+    path: '/home/u/.local/node/bin/slay',
+    version: '0.36.0',
+    expectedVersion: '0.37.2',
+    outdated: true,
+    appManaged: false
+  }
+
+  it('outdated CLI → non-blocking notice, no dialog', async () => {
+    mockApi({ status: outdated })
+    render(<CliInstallDialog />)
+
+    await waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
+    expect(String(toastMock.mock.calls[0][0])).toContain('0.36.0')
+    expect(screen.queryByText('Install the slay CLI')).toBeNull()
+  })
+
+  it('outdated notice already dismissed for this version → silent', async () => {
+    mockApi({ status: outdated, updateDismissed: '0.37.2' })
     render(<CliInstallDialog />)
 
     await waitFor(() => {
       expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
     })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(toastMock).not.toHaveBeenCalled()
+  })
 
+  it('current CLI → nothing', async () => {
+    mockApi({ status: { ...outdated, version: '0.37.2', outdated: false } })
+    render(<CliInstallDialog />)
+
+    await waitFor(() => {
+      expect(trpcClientMock.app.meta.checkCliInstalled.query).toHaveBeenCalled()
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(toastMock).not.toHaveBeenCalled()
     expect(screen.queryByText('Install the slay CLI')).toBeNull()
   })
 })

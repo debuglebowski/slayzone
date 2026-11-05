@@ -149,9 +149,14 @@ test("work grows linearly with a line's size (no rescan of what was already buff
     feed('\n')
     return performance.now() - t
   }
+  // Best of several: one run is a few ms, so a single GC or scheduler pause on a
+  // loaded runner (the harness runs files in parallel) swung the ratio to 13 once on
+  // CI. The minimum drops such pauses but cannot hide a rescan: that is slow on
+  // every run, never just one.
+  const best = (bytes: number): number => Math.min(...Array.from({ length: 5 }, () => time(bytes)))
   time(1024 * 1024) // warm up
-  const small = Math.max(time(4 * 1024 * 1024), 1)
-  const large = time(16 * 1024 * 1024)
-  // 4× the bytes: linear ≈ 4×; rescanning the buffer every chunk ≈ 16×.
+  const small = Math.max(best(4 * 1024 * 1024), 1)
+  const large = best(16 * 1024 * 1024)
+  // 4× the bytes: linear ≈ 4× (≈3 measured); rescanning the buffer every chunk ≈ 16×.
   expect(large / small).toBeLessThan(9)
 })

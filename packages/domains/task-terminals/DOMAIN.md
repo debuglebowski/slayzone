@@ -33,6 +33,11 @@ PTY (node-pty)
 - The first question creates a durable thread through `chat.threads.create`. Each discussion uses an ordinary `ChatPanel` and its own terminal tab, event history, draft, and CLI conversation. Thread tabs stay out of the terminal tab bar.
 - “Send to main” previews an editable conclusion, then uses the main chat queue. The returned message links back to its discussion. Queued conclusions carry their source conversation ID; the queue waits rather than delivering them into a different main conversation.
 
+### Pinned messages
+
+- A user message (with an id) or a finished answer of the main conversation pins from its row (`PinnedMessageControls.tsx`); a pinned row keeps a filled pin mark. `pinned-messages.ts` decides what pins and keys a pin by the row's timeline key (`timeline-item-key.ts`, the same key the timeline renders with).
+- `usePinnedMessages.ts` lists the pins of the conversation on screen (`chat.pinnedMessages.*`, live via `onChanged`), toggles optimistically, and goes to a pin: through its page when not loaded (`row`), opening the fold a rewind put it in. The composer footer's `PinnedMessagesPopover` and Cmd+K ("Go to pinned message…", previous / next) read it.
+
 ### Main Tab
 - First tab created for a task
 - Protected - cannot be closed

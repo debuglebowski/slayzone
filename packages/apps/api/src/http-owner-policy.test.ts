@@ -109,8 +109,9 @@ describe('exhaustiveness', () => {
     expect(LIVE_REST_USER.length).toBeGreaterThan(100)
     expect(LIVE_MCP_USER.length).toBe(8)
     // Every admin route is among them (T-106): the 12 T-15 counted, plus break-glass v2's
-    // `PATCH /api/hub/computers`, minus `/api/computers/join-token` — any user mints a
-    // join token for their own computer since main's a3ddee963 (its tRPC twin too).
+    // `PATCH /api/hub/computers`, minus `POST /api/computers/join-token` (now `user`:
+    // everyone enrolls their own computer; naming someone else stays the admin's,
+    // `join-token-policy.ts`).
     expect(
       Object.keys(REST_OWNER_POLICY).filter((k) => REST_ADMIN_POLICY[k] === 'admin')
     ).toHaveLength(12)

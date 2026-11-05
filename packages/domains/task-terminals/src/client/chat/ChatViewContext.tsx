@@ -8,6 +8,7 @@ import {
   type ChatThread
 } from '@slayzone/terminal-contracts'
 import type { ConversationActionsView } from './useConversationActions'
+import type { PinnedMessagesView } from './usePinnedMessages'
 import type { DiffLineComment } from './diff-comments/format'
 import type { HistoryGap } from './HistoryGapRow'
 
@@ -56,6 +57,8 @@ export interface ChatViewState {
     start: (answerId: string, sourceMessageId: string) => void
     open: (thread: ChatThread) => void
   }
+  /** Pin / unpin rows of the conversation on screen (absent: nothing to pin yet). */
+  pinnedMessages?: PinnedMessagesView
   /** Send a failed user message again (same id). */
   retryMessage?: (id: string) => void
   /** Start the agent again (the start-failure card's Retry). */
