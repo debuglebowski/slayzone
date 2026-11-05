@@ -79,7 +79,8 @@ import {
 } from '@slayzone/terminal-contracts'
 import { useTrack } from '@slayzone/telemetry/client'
 import { TerminalStartError } from './TerminalStartError'
-import { mergeCatchUp, type SeqChunk } from './catch-up-merge'
+import type { SeqChunk } from './catch-up-merge'
+import { createCatchUpController } from './catch-up-controller'
 
 export type { TerminalProps, TerminalHandle } from './Terminal.types'
 
@@ -214,10 +215,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // so any throttled-but-pending chunks land in lastRenderedSeqRef first,
   // preventing replay from re-fetching them and double-writing.
   const forceFlushRef = useRef<(() => void) | null>(null)
-  // Live chunks that arrive while a catch-up (`replayMissed`) awaits the scrollback:
-  // held, then merged with it by seq — written to the terminal as they came, they
-  // were written again from the catch-up (duplicated, out of order). null = none.
-  const heldDuringCatchUpRef = useRef<SeqChunk[] | null>(null)
 
   // Refs for creation-only props — these are only read during PTY creation (the
   // !exists branch), never during reattach. Using refs avoids recreating initTerminal
@@ -464,51 +461,40 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     [mode, sessionId, clearBufferWithoutRestart, trpcClient, track]
   )
 
-  const takeHeld = (): SeqChunk[] => {
-    const held = heldDuringCatchUpRef.current ?? []
-    heldDuringCatchUpRef.current = null
-    return held
-  }
-  const writeChunks = (chunks: readonly SeqChunk[]): void => {
-    for (const chunk of chunks) {
-      terminalRef.current?.write(chunk.data)
-      lastRenderedSeqRef.current = chunk.seq
-    }
-  }
+  // Catch-ups from the scrollback (tab activation, a computer reconnect): one at a
+  // time, live chunks held meanwhile and merged by seq — each written once, in
+  // order, and never dropped (not even when the tab switches mid-catch-up).
+  const fetchSince = useStableCallback((afterSeq: number) =>
+    trpcClient.pty.getBufferSince.query({ sessionId, afterSeq })
+  )
+  const writeChunk = useStableCallback((chunk: SeqChunk) => {
+    terminalRef.current?.write(chunk.data)
+    lastRenderedSeqRef.current = chunk.seq
+  })
+  const writePrelude = useStableCallback((prelude: string) => {
+    terminalRef.current?.write(prelude)
+  })
+  const readRenderedSeq = useStableCallback(() => lastRenderedSeqRef.current)
+  const readClearedSeq = useStableCallback(() => clearedSeqRef.current)
+  const flushPending = useStableCallback(() => forceFlushRef.current?.())
+  const [catchUp] = useState(() =>
+    createCatchUpController({
+      fetchSince,
+      write: writeChunk,
+      writePrelude,
+      renderedSeq: readRenderedSeq,
+      clearedSeq: readClearedSeq,
+      flushPending
+    })
+  )
 
   // Write what this terminal has not rendered yet (seq > lastRenderedSeq), from the
-  // session's scrollback — the computer's, when it owns it. Gap-free: live chunks
-  // at or below the rendered seq are dropped, so nothing is written twice.
+  // session's scrollback — the computer's, when it owns it.
   const replayMissed = useStableCallback(async (isCancelled: () => boolean = () => false) => {
     if (!terminalRef.current) return
-    // Drain any throttled-but-pending chunks synchronously so
-    // lastRenderedSeqRef reflects the true rendered seq before getBufferSince
-    // captures it — otherwise the in-queue chunks come back via the missed[]
-    // array and get double-written.
-    forceFlushRef.current?.()
-    const afterSeq = lastRenderedSeqRef.current
-    if (heldDuringCatchUpRef.current === null) heldDuringCatchUpRef.current = []
-    const missed = await trpcClient.pty.getBufferSince
-      .query({ sessionId, afterSeq })
-      .catch((err: unknown) => {
-        // Release what was held: it still has to be shown.
-        writeChunks(mergeCatchUp(lastRenderedSeqRef.current, [], takeHeld(), clearedSeqRef.current))
-        throw err
-      })
-    const held = takeHeld()
-    if (isCancelled()) return
-    const chunks = mergeCatchUp(
-      lastRenderedSeqRef.current,
-      missed?.chunks ?? [],
-      held,
-      clearedSeqRef.current
-    )
-    if (chunks.length === 0) return
-    // Only show overlay when there's actually data to write
+    const { wrote } = await catchUp.run(isCancelled)
+    if (!wrote || isCancelled()) return
     setIsReplaying(true)
-    // A first restore (nothing rendered yet) into a buffer that evicted its head.
-    if (afterSeq === -1 && missed?.prelude) terminalRef.current?.write(missed.prelude)
-    writeChunks(chunks)
     // Wait for xterm to finish processing all queued writes
     if (terminalRef.current) {
       await new Promise<void>((resolve) => terminalRef.current!.write('', resolve))
@@ -748,11 +734,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       }
       lastActivityTimeRef.current = performance.now()
       // A catch-up is in flight: hold it, it is merged with the scrollback by seq.
-      const held = heldDuringCatchUpRef.current
-      if (held) {
-        held.push({ seq, data })
-        return
-      }
+      if (catchUp.hold({ seq, data })) return
       pendingChunks.push(data)
       pendingSeq = seq
       if (rafId === null) {
@@ -798,7 +780,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       unsubData()
       unsubExit()
     }
-  }, [sessionId, subscribe, subscribeExit, getCrashOutput, cleanupTask])
+  }, [sessionId, subscribe, subscribeExit, getCrashOutput, cleanupTask, catchUp])
 
   // Replay missed PTY data when task becomes active
   useEffect(() => {

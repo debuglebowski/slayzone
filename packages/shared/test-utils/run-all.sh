@@ -250,6 +250,7 @@ run_harness packages/domains/tabs-state/src/useTabStore.test.ts
 run_harness packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_harness packages/domains/terminal/src/client/catch-up-merge.test.ts
+run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
