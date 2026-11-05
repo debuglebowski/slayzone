@@ -102,7 +102,71 @@ reconnects.
 
 **Reachability rule.** The hub offers a loopback address only when both the client's
 and the computer's connections to the hub are loopback, i.e. they all run on one
-machine. A remote computer is direct only when its operator sets a public address.
+machine. A remote computer's listener is offered only when its operator sets a
+public address; without one, the client reaches it over WebRTC (below).
+
+## WebRTC (computers without a dialable listener)
+
+**Path choice, made by the hub at issue** (`computers.issueDirectLink`, which takes
+the client's `transports`):
+
+1. The computer's WebSocket listener, when this client can dial it (loopback on one
+   machine, or the operator's public address).
+2. Otherwise WebRTC, when the client says it speaks it (`transports` includes
+   `webrtc`) and the computer advertises `directRtc` in `hello` (node-datachannel
+   loaded and its listener bound).
+3. Otherwise the hub relay, with the same reasons as before. An older client sends no
+   `transports` and an older computer no `directRtc`: both keep today's behaviour.
+
+**Signaling.** The answer is `transport: 'webrtc'` with the grant and the STUN servers.
+The client creates a peer and the direct protocol's data channel
+(`slayzone-direct-v1`), gathers every candidate (at most 2 s), and sends that one
+complete offer to `computers.directRtcConnect({ grantId, sdp })`. The hub forwards it
+to the grant's computer as `direct.rtcOffer` over the computer's authenticated link
+(as the caller: the gateway's owner check applies) and returns the computer's complete
+answer. One request per peer connection; no trickle.
+
+**One code path.** The data channel carries exactly what the WebSocket carries: tRPC
+messages with the capability in the first one, split into 16 000-character pieces
+and rejoined (every SCTP stack caps a message), PING/PONG keepalive. The computer
+serves the channel through the same listener code as a WebSocket — the same grants,
+flood limits and per-address caps, counted against the client address the hub saw.
+One peer connection per computer per client, like one socket.
+
+**Security.**
+- The capability is still required: the first frame on the channel presents the
+  token, exactly as on the WebSocket. An offer alone opens nothing.
+- An offer is answered only for a live grant the hub issued to that caller, and the
+  computer answers only for a live grant that hub link registered.
+- No man in the middle: the offer and the answer carry each peer's DTLS certificate
+  fingerprint and travel only over hub-authenticated links; DTLS refuses any other
+  certificate (tested with a forged fingerprint).
+- Revocation closes the channel, which closes the peer, as it closes a WebSocket.
+- Signaling is rate-limited per user and per client address (30 per minute), and the
+  computer caps peers connecting per hub (16) and in total (64), dropping a peer that
+  has not connected within 20 s.
+- Each brokered offer is audited as `computer.direct_rtc_signal` (grant id, outcome);
+  the SDP, which carries network addresses, never is.
+
+**NAT traversal.** STUN only, no TURN: when ICE fails the client backs off and uses the
+relay, as for an unreachable listener. The hub hands both peers its STUN servers:
+
+| Var / `hub.config.json` key | Meaning |
+|---|---|
+| `SLAYZONE_HUB_STUN_ADDRESSES` / `stunAddresses` | Comma-separated `host:port` authorities (a list in the file), never `stun:` URLs. Unset = `stun.cloudflare.com:3478`; empty = none. Malformed refuses boot (B18). |
+
+**Runtimes.**
+- Computer: `node-datachannel` (libdatachannel), Node-API prebuilds per platform; loaded
+  lazily and optional — a computer where it does not load advertises no `directRtc`.
+  A standalone computer (session host + connector) answers offers in its host; the
+  host hands the connector its direct identity as values (`directIdentity`), since
+  JSON-RPC drops functions.
+  Unpacked from the desktop app's asar; optional in the npm computer; checked by the
+  packaged-app smoke.
+- Desktop: the renderer's `RTCPeerConnection`. A failed WebRTC connect is not a failed
+  WebSocket, so it cannot slow the hub's socket.
+- Mobile: `react-native-webrtc`, data channels only (no camera or microphone
+  permission), loaded on install so a build without it simply asks for no WebRTC.
 
 ## Fallback and pacing
 
@@ -187,14 +251,18 @@ applies its own limits.
 ## Diagnostics
 
 Settings → Diagnostics → **Direct link** lists each computer as either:
-- **Direct**, with its address and open leases; or
-- **Hub relay**, with why and when it retries.
+- **Direct**, with its transport — `WebSocket` and its address, or `WebRTC` on the
+  local network or through NAT (STUN) — and open leases; or
+- **Hub relay**, with why (including `WebRTC could not connect`) and when it retries.
 
 It also shows how many terminals and chats are on the direct link.
 
 ## Follow-ups
 
-- Web shell: install a probe and add its CSP origins.
+- Web shell: install a probe and add its CSP origins; it could also install the
+  browser's RTCPeerConnection for WebRTC.
+- TURN is not provided (by decision): a strict firewall that blocks both direct UDP
+  and the STUN-mapped path stays on the hub relay.
 - Clients: use direct `saveDraft` (text-only) and `saveScroll` (the server already
   serves them).
 - `interrupt` / `abortAndPop` direct, once the relay's not-ready bypass path is
