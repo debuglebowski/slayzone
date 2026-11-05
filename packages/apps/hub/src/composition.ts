@@ -26,7 +26,12 @@ import {
   createComputerChatMaintenance,
   createComputerChatCommandBarrier
 } from './computer-chat-maintenance'
-import { currentSecurityContext, runWithSecurityContext } from '@slayzone/platform/security-log'
+import {
+  currentSecurityContext,
+  runAsSecurityActor,
+  runWithSecurityContext
+} from '@slayzone/platform/security-log'
+import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
@@ -467,15 +472,19 @@ export function composeServer(opts: {
       // client's local diagnostics config stays whatever that client set.
       onConfigChanged: (next) => {
         void bridge?.appDeps.diagnosticsConfigChanged(next)
-        for (const computer of computerGatewayRef?.listComputers() ?? []) {
-          void computerGatewayRef
-            ?.request(computer.computerId, HubToComputerMethods.chatRequest, {
-              kind: 'diagnostics.configure',
-              enabled: next.enabled,
-              verbose: next.verbose
-            })
-            .catch(() => console.error('[chat] diagnostic policy sync pending'))
-        }
+        // The hub's own policy push to every computer, not the saving caller's
+        // request: run as the hub (the owner check is for callers' work).
+        runAsSecurityActor(null, () => {
+          for (const computer of computerGatewayRef?.listComputers() ?? []) {
+            void computerGatewayRef
+              ?.request(computer.computerId, HubToComputerMethods.chatRequest, {
+                kind: 'diagnostics.configure',
+                enabled: next.enabled,
+                verbose: next.verbose
+              })
+              .catch(() => console.error('[chat] diagnostic policy sync pending'))
+          }
+        })
       }
     })
   }
@@ -1006,10 +1015,14 @@ export function composeServer(opts: {
   }
   const syncChatLifecycle = (): void => {
     if (resettingForTest) return
-    for (const computer of execGateway?.listUsableComputers() ?? [])
-      void syncComputerChatLifecycle(computer.computerId).catch(() => {
-        /* Delivery remains pending for the next tick. */
-      })
+    // The hub's own housekeeping on every computer — `tasks-changed` fires inside the
+    // caller's request that changed a task, but this is not that caller's work.
+    runAsSecurityActor(null, () => {
+      for (const computer of execGateway?.listUsableComputers() ?? [])
+        void syncComputerChatLifecycle(computer.computerId).catch(() => {
+          /* Delivery remains pending for the next tick. */
+        })
+    })
   }
   notifyEvents.on('tasks-changed', syncChatLifecycle)
   // Covers startup purges, offline deletions and legacy tasks never opened in this boot.
@@ -1746,6 +1759,9 @@ export function composeServer(opts: {
       lifecycle: computerChat.lifecycle.syncNative
     })
     const computerGateway = createHubComputerGateway({
+      // THE owner check (G2): every hub→computer request, whatever routed it, is
+      // refused on a computer its caller does not own. The hub's own work passes.
+      authorizeRequest: createComputerRequestAuthorizer(placement.gate),
       beforeRequest: async (computerId, method) => {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
       },
@@ -1890,7 +1906,6 @@ export function composeServer(opts: {
         ).result
       },
       watchStart: async (computerId, params) => {
-        if (placement.gate) await placement.gate(computerId, null)
         await computerGateway.request(computerId, HubToComputerMethods.gitWatchStart, params)
       },
       watchStop: async (computerId, params) => {
@@ -1926,14 +1941,18 @@ export function composeServer(opts: {
       computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
       // The hub's machine's own computer reads the logs the old hub-disk cursors index.
       localComputerId: () => deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME),
+      // The hub's own cache of every computer's usage logs, refreshed for whoever
+      // asked: run as the hub, not as that caller.
       collect: async (computerId, cursors, page) => {
         const reply = usageCollectResultSchema.parse(
-          await computerGateway.request(
-            computerId,
-            HubToComputerMethods.usageCollect,
-            // Pages after the first carry only where to continue.
-            page ? { cursors: {}, page } : { cursors },
-            USAGE_COLLECT_TIMEOUT_MS
+          await runAsSecurityActor(null, () =>
+            computerGateway.request(
+              computerId,
+              HubToComputerMethods.usageCollect,
+              // Pages after the first carry only where to continue.
+              page ? { cursors: {}, page } : { cursors },
+              USAGE_COLLECT_TIMEOUT_MS
+            )
           )
         )
         return {
@@ -2053,8 +2072,7 @@ export function composeServer(opts: {
     setSlayExecutor(
       createRoutingSlayExecutor({
         resolveComputer: (target) => placement.forTarget(target),
-        gateway: computerGateway,
-        gate: placement.gate ? (computerId) => placement.gate!(computerId, null) : undefined
+        gateway: computerGateway
       })
     )
 
@@ -2072,13 +2090,9 @@ export function composeServer(opts: {
       gateway: computerGateway,
       local: localWorkspaceFs
     })
-    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): gated as the
-    // caller's own request on a hub with login (T-19).
-    const userWorkspaceFs = createRemoteFsAdapters({
-      gateway: computerGateway,
-      local: localWorkspaceFs,
-      gate: placement.gate
-    })
+    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): the same
+    // adapters — the caller's owner check is the gateway's, for every request (G2).
+    const userWorkspaceFs = workspaceFs
     // Project folders: where each computer keeps each project, kept in step between
     // the computer's own record and the hub's copy. The local computer is matched by
     // its deterministic id (re-enrollment keeps it), never by name.

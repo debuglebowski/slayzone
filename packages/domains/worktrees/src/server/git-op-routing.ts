@@ -10,6 +10,7 @@
  * never runs git or reads a checkout itself.
  */
 import type { SlayzoneDb } from '@slayzone/platform'
+import { computerPathWithin, normalizeComputerPath } from '@slayzone/platform/computer-path'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import {
   gitOpAbsolutePaths,
@@ -143,65 +144,44 @@ export function gitWatchComputerGone(computerId: string): void {
 }
 
 /**
- * A checkout path as the computer will resolve it, lexically: `.` and `..` segments
- * collapsed, repeated and trailing separators dropped. A Windows computer's path
- * (`C:\…`) uses `\` (or `/`); any other path only `/` — a `\` is a name character
- * there. Matched against worktrees and placements only in this form, so a `..` out
- * of a worktree never counts as that worktree (F2).
- */
-function normalizeCheckoutPath(p: string): string {
-  const windows = /^[A-Za-z]:[\\/]/.test(p)
-  const sep = windows ? '\\' : '/'
-  const parts = p.split(windows ? /[\\/]+/ : /\/+/)
-  const head = windows ? (parts.shift() ?? '') : ''
-  const absolute = !windows && p.startsWith('/')
-  const out: string[] = []
-  for (const part of parts) {
-    if (part === '' || part === '.') continue
-    if (part === '..') {
-      if (out.length > 0 && out[out.length - 1] !== '..') out.pop()
-      else if (!absolute && !windows) out.push('..')
-      continue
-    }
-    out.push(part)
-  }
-  if (windows) return `${head}${sep}${out.join(sep)}`
-  return (absolute ? '/' : '') + out.join('/') || (absolute ? '/' : '.')
-}
-
-/**
  * Whose checkout `path` is, as the hub records it: a task's worktree (the task's
  * computer), else a project's folder on a computer (`project_placements`, not
  * forgotten) — the longest match, at a path boundary. The same folder on several
  * computers names only the project (its default computer decides). Null: unknown.
+ *
+ * Both sides — the asked path and every stored one — are compared in the ONE form
+ * the owner policy also uses (`@slayzone/platform/computer-path`), so routing and
+ * the policy never disagree on whose a path is (G2), and a Windows path stored with
+ * `/` still matches (G5). In JS: SQL cannot normalize the stored side.
  */
 export async function gitTargetForPath(
   db: SlayzoneDb,
   path: string
 ): Promise<WorktreesComputerTarget | null> {
-  const p = normalizeCheckoutPath(path)
-  // `inside(col)`: p is col, or lies under col/ — or col\ (a Windows computer's
-  // folder): substr compare, no LIKE escaping. char(92) is the backslash.
-  const inside = (col: string) =>
-    `(${col} = ? OR substr(?, 1, length(${col}) + 1) IN (${col} || '/', ${col} || char(92)))`
-  const task = await db.get<{ id: string; worktree_path: string }>(
-    `SELECT id, worktree_path FROM tasks
-      WHERE worktree_path IS NOT NULL AND worktree_path != '' AND ${inside('worktree_path')}
-      ORDER BY length(worktree_path) DESC LIMIT 1`,
-    [p, p]
+  const p = normalizeComputerPath(path)
+  const under = (root: string) => computerPathWithin(p, root)
+  let task: { id: string; root: string } | null = null
+  for (const row of await db.all<{ id: string; worktree_path: string }>(
+    `SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path != ''`
+  )) {
+    const root = normalizeComputerPath(row.worktree_path)
+    if (under(root) && (!task || root.length > task.root.length)) task = { id: row.id, root }
+  }
+  const placements = (
+    await db.all<{ computer_id: string; project_id: string; root_path: string }>(
+      `SELECT computer_id, project_id, root_path FROM project_placements
+        WHERE status != 'forgotten' AND root_path != ''`
+    )
   )
-  const placements = await db.all<{ computer_id: string; project_id: string; root_path: string }>(
-    `SELECT computer_id, project_id, root_path FROM project_placements
-      WHERE status != 'forgotten' AND root_path != '' AND ${inside('root_path')}
-      ORDER BY length(root_path) DESC`,
-    [p, p]
-  )
+    .map((r) => ({ ...r, root: normalizeComputerPath(r.root_path) }))
+    .filter((r) => under(r.root))
+    .sort((a, b) => b.root.length - a.root.length)
   const longest = placements[0]
-  if (task && (!longest || task.worktree_path.length >= longest.root_path.length)) {
+  if (task && (!longest || task.root.length >= longest.root.length)) {
     return { taskId: task.id }
   }
   if (!longest) return null
-  const same = placements.filter((r) => r.root_path === longest.root_path)
+  const same = placements.filter((r) => r.root === longest.root)
   const computers = new Set(same.map((r) => r.computer_id))
   const projects = new Set(same.map((r) => r.project_id))
   if (computers.size === 1)

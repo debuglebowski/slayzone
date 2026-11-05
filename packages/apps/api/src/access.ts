@@ -31,17 +31,13 @@
  * @module api/access
  */
 import { existsSync, realpathSync } from 'node:fs'
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  posix,
-  resolve as resolvePath,
-  sep,
-  win32
-} from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
 import { HUB_SSO_ENV, type SlayzoneDb } from '@slayzone/platform'
+import {
+  computerPathWithin,
+  isWindowsComputerPath,
+  normalizeComputerPath
+} from '@slayzone/platform/computer-path'
 import { mayAccessProject, type ProjectOwnership } from '@slayzone/projects/server'
 import { agentSessionsEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
@@ -270,7 +266,10 @@ async function resolveProjectGroup(db: SlayzoneDb, id: string): Promise<Ownershi
 
 // ── paths ─────────────────────────────────────────────────────────────────────
 
-const isWindowsPath = (p: string): boolean => /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
+// A computer path's flavour, its Windows form and the boundary test are the ones git
+// routing uses too (`@slayzone/platform/computer-path`): one normalizer, so the two
+// never disagree on whose a path is (G2).
+const isWindowsPath = isWindowsComputerPath
 
 /** `abs` through symlinks: the deepest part of it that exists, plus the rest. A path
  *  that does not exist yet (a file about to be written) is judged by where its
@@ -308,7 +307,7 @@ const rootForms = new Map<string, { form: string; at: number }>()
  * cannot smuggle a hub-state path past the check. `cached`: for registered roots.
  */
 function normalizePath(p: string, cached = false): string {
-  if (isWindowsPath(p)) return win32.normalize(p).replace(/[\\/]+$/, '')
+  if (isWindowsPath(p)) return normalizeComputerPath(p)
   if (cached) {
     const hit = rootForms.get(p)
     if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.form
@@ -323,11 +322,7 @@ function normalizePath(p: string, cached = false): string {
 }
 
 /** `child` is `root` or inside it. */
-function within(child: string, root: string): boolean {
-  if (child === root) return true
-  const s = isWindowsPath(root) ? '\\' : root === posix.sep ? '' : sep
-  return child.startsWith(root + s)
-}
+const within = computerPathWithin
 
 /** Every registered root a project's content lives under, with its owner. */
 const ROOTS_SQL = `

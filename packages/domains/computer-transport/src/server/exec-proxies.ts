@@ -113,6 +113,7 @@ import {
 } from '../shared/frames'
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import type { HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
@@ -1470,12 +1471,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     setTheme(theme) {
-      for (const computer of gateway.listComputers()) {
-        // Best-effort: an older computer has no pipeline (method not found).
-        void gateway
-          .request(computer.computerId, HubToComputerMethods.ptySetTheme, { theme })
-          .catch(noop)
-      }
+      // The hub's own broadcast to every computer, not the saving caller's work on
+      // each: run as the hub (the gateway's owner check is for callers' requests).
+      runAsSecurityActor(null, () => {
+        for (const computer of gateway.listComputers()) {
+          // Best-effort: an older computer has no pipeline (method not found).
+          void gateway
+            .request(computer.computerId, HubToComputerMethods.ptySetTheme, { theme })
+            .catch(noop)
+        }
+      })
     },
 
     async warmKill(computerId: string, warmId: string) {
@@ -2649,13 +2654,8 @@ export interface RemoteFsAdaptersOptions {
   local: LocalWorkspaceFs
   /** Mint a correlation id for a watch. Injected so tests are deterministic. */
   newWatchId?: () => string
-  /**
-   * Asked before every op that reaches a computer, as the caller's own request
-   * (`work: null`): these take a computer, not a task. The hub's own maintenance on
-   * connect (widening the local computer's roots, seeding its paths) uses an
-   * instance without one.
-   */
-  gate?: ComputerWorkGate
+  // No gate of its own: whether the caller may use the computer is the gateway's one
+  // owner check (`authorizeRequest`, G2), asked for every request it sends.
 }
 
 let watchSeq = 0
@@ -2670,7 +2670,7 @@ let watchSeq = 0
  * with the same `resolveExecComputer` the pty backend uses, and pass the result.
  */
 export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): WorkspaceFsAdapters {
-  const { gateway, local, gate } = options
+  const { gateway, local } = options
   const newWatchId = options.newWatchId ?? (() => `w${++watchSeq}`)
 
   const req = async <T>(
@@ -2679,7 +2679,6 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
     params: unknown,
     schema: { parse: (v: unknown) => T }
   ): Promise<T> => {
-    if (gate) await gate(computerId, null)
     return gateway.request(computerId, method, params).then((res) => schema.parse(res))
   }
 
@@ -2920,15 +2919,13 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       gateway.events.on('computer-disconnected', onDisconnected)
       gateway.events.on('computer-lost', onDisconnected)
 
-      // A refused watch never starts (recorded like any other failure below), and its
-      // stop is never sent either: nothing reaches a computer the gate refused.
-      const admitted = gate ? gate(computerId, null) : null
-      const start = () =>
-        gateway.request(computerId, HubToComputerMethods.fsWatchStart, {
-          watchId,
-          rootPath
-        })
-      void (admitted ? admitted.then(start) : start())
+      // A watch the gateway refuses never starts (recorded like any other failure
+      // below); its stop is refused the same way.
+      const started = gateway.request(computerId, HubToComputerMethods.fsWatchStart, {
+        watchId,
+        rootPath
+      })
+      void started
         .then(() => {
           if (stopped) {
             void gateway
@@ -2956,13 +2953,13 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
         gateway.events.off('fs.change', onChange)
         gateway.events.off('computer-disconnected', onDisconnected)
         gateway.events.off('computer-lost', onDisconnected)
-        const sendStop = () =>
-          gateway.request(computerId!, HubToComputerMethods.fsWatchStop, {
-            watchId
+        // Sent at once; a stop that overtakes a still-pending start is sent again
+        // once the start is answered (above).
+        void gateway
+          .request(computerId!, HubToComputerMethods.fsWatchStop, { watchId })
+          .catch(() => {
+            /* already gone, or refused like its start */
           })
-        void (admitted ? admitted.then(sendStop) : sendStop()).catch(() => {
-          /* already gone, or never admitted */
-        })
       }
       return stop
     }

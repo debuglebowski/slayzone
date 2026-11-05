@@ -111,6 +111,13 @@ export type ComputerGatewayEvents = {
 }
 
 export interface HubComputerGatewayOptions {
+  /**
+   * THE owner check (G2): asked before EVERY hub→computer request, in the caller's
+   * request context — the one door every routed procedure goes through (git, gh, AI
+   * config, test scan, turn git, fs, exec, processes, terminals). Throw to refuse:
+   * nothing is sent. Absent: no check (a hub without login).
+   */
+  authorizeRequest?: (computerId: string, method: string) => Promise<void>
   /** Wait for durable reconciliation before normal commands. Control methods can return immediately. */
   beforeRequest?: (computerId: string, method: string, params: unknown) => Promise<void>
   /**
@@ -1125,10 +1132,12 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           throw new Error('Computer connection changed before command delivery')
         return conn.rpc.request<T>(method, params, timeoutMs, actor)
       }
+      const { authorizeRequest, beforeRequest } = options
       const sent = (
-        options.beforeRequest
+        authorizeRequest || beforeRequest
           ? Promise.resolve()
-              .then(() => options.beforeRequest!(computerId, method, params))
+              .then(() => authorizeRequest?.(computerId, method))
+              .then(() => beforeRequest?.(computerId, method, params))
               .then(send)
           : conn.rpc.request<T>(method, params, timeoutMs, actor)
       ).catch((err: unknown) => {

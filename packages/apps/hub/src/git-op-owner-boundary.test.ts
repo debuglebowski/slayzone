@@ -15,6 +15,8 @@ import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { executeGitOp, setGitOpTransport, setWorktreesRouterDeps } from '@slayzone/worktrees/hub'
 import type { ComputerWork } from '@slayzone/computer-transport/server'
 import { createGitOpGate } from './git-op-gate'
+import { createComputerRequestAuthorizer } from './computer-request-authorizer'
+import { runWithSecurityContext } from '@slayzone/platform/security-log'
 
 const h = await createTestHarness()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('pa', 'A', '#000')
@@ -35,6 +37,8 @@ const placementGate = async (computerId: string, work: ComputerWork): Promise<vo
   if (!(work.id === 'tA' && computerId === 'computer-A')) throw new Error('not its task')
 }
 const gate = createGitOpGate(placementGate, () => actor)
+/** The gateway's one owner check, as the composed hub wires it. */
+const authorize = createComputerRequestAuthorizer(placementGate)!
 
 beforeAll(() => {
   setWorktreesRouterDeps({
@@ -51,6 +55,8 @@ beforeAll(() => {
   setGitOpTransport({
     request: async (computerId, _params, _timeoutMs, target) => {
       await gate(computerId, target)
+      // What `computerGateway.request` does first, for every method.
+      await authorize(computerId, 'git.op')
       reached.push(computerId)
       return null
     },
@@ -60,11 +66,14 @@ beforeAll(() => {
 })
 afterAll(() => setGitOpTransport(null))
 
-const op = (repoPath: string) =>
-  executeGitOp('getStatusSummary', { repoPath } as never, false, h.slayDb).then(
-    () => 'ran',
-    () => 'refused'
-  )
+const op = (repoPath: string) => {
+  const run = () =>
+    executeGitOp('getStatusSummary', { repoPath } as never, false, h.slayDb).then(
+      () => 'ran',
+      () => 'refused'
+    )
+  return actor ? runWithSecurityContext({ actor, ip: null, route: null }, run) : run()
+}
 
 describe("user B and A's computer", () => {
   for (const path of [

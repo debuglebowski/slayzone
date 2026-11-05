@@ -11,7 +11,7 @@ import {
 } from '@slayzone/platform/security-log'
 import { createMemoryCredentialStore } from '../client/credential-store'
 import { HubDialer, type HubDialerOptions } from '../client/hub-dialer'
-import { ComputerTransportErrorCodes } from '../shared/frames'
+import { ComputerTransportErrorCodes, HubToComputerMethods } from '../shared/frames'
 import {
   JSON_RPC_INTERNAL_ERROR,
   JSON_RPC_METHOD_NOT_FOUND,
@@ -384,6 +384,47 @@ describe('hub → computer requests', () => {
       (e: unknown) => e
     )
     expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
+  })
+})
+
+// G2: ONE owner check for every hub→computer request — the gateway's request door,
+// which every routed procedure (git, gh, AI config, test scan, turn git, fs, exec,
+// processes, terminals) goes through. Enumerated from the method table itself, so a
+// new method cannot slip past it.
+describe('the request authorizer: the one door', () => {
+  it('every method: refused before it is sent when the authorizer refuses', async () => {
+    const authorizeRequest = vi.fn(async (_computerId: string, _method: string) => {
+      throw new Error('not your computer')
+    })
+    const hub = await startHub({ authorizeRequest })
+    const commands = vi.fn(async () => ({ ok: true }))
+    const dialer = makeDialer(hub.url, { onHubRequest: commands })
+    dialer.start()
+    await dialer.events.once('connected')
+    const methods = Object.values(HubToComputerMethods)
+    expect(methods.length).toBeGreaterThan(40)
+    for (const method of methods) {
+      await expect(hub.gateway.request('computer-1', method, {}), method).rejects.toThrow(
+        'not your computer'
+      )
+    }
+    expect(commands).not.toHaveBeenCalled()
+    expect(authorizeRequest).toHaveBeenCalledTimes(methods.length)
+    expect(authorizeRequest).toHaveBeenCalledWith('computer-1', HubToComputerMethods.gitOp)
+  })
+
+  it('an admitted request is sent, asked once', async () => {
+    const authorizeRequest = vi.fn(async () => undefined)
+    const hub = await startHub({ authorizeRequest })
+    const commands = vi.fn(async () => ({ ok: true }))
+    const dialer = makeDialer(hub.url, { onHubRequest: commands })
+    dialer.start()
+    await dialer.events.once('connected')
+    await expect(hub.gateway.request('computer-1', 'fs.writeFile', {})).resolves.toEqual({
+      ok: true
+    })
+    expect(authorizeRequest).toHaveBeenCalledTimes(1)
+    expect(commands).toHaveBeenCalledTimes(1)
   })
 })
 

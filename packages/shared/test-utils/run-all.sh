@@ -98,6 +98,8 @@ run_harness packages/apps/hub/src/computer-probes.test.ts
 run_harness packages/apps/hub/src/computer-exec-run.test.ts
 run_harness packages/apps/hub/src/git-op-gate.test.ts
 run_harness packages/apps/hub/src/git-op-owner-boundary.test.ts
+run_harness packages/apps/hub/src/computer-request-authorizer.test.ts
+run_harness packages/apps/hub/src/path-owner-agreement.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -521,6 +523,7 @@ run_harness packages/shared/platform/src/event-loop-stall.test.ts
 run_harness packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_harness packages/shared/platform/src/hub-addr.test.ts
+run_harness packages/shared/platform/src/computer-path.test.ts
 # Security audit events on stdout (T-03).
 run_harness packages/shared/platform/src/security-log.test.ts
 # Real client IP behind a trusted front end (T-22): the resolver, then the built hub.

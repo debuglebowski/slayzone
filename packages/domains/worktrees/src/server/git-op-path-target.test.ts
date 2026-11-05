@@ -78,6 +78,37 @@ describe('gitTargetForPath', () => {
     expect(await gitTargetForPath(db, 'C:\\Users\\b\\proj\\..\\other')).toBeNull()
   })
 
+  // G2: the owner policy and routing share ONE normalizer. On a POSIX path a `\` is a
+  // name character: `feat-x\y` is a sibling, not inside the worktree. A UNC path is
+  // Windows: its `..` resolves within the share.
+  test('G2: a POSIX `\\` is no boundary; UNC is Windows', async () => {
+    expect(await gitTargetForPath(db, '/home/a/worktrees/feat-x\\y')).toBeNull()
+    h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p4', 'U', '#000')
+    place('c-a', 'p4', '\\\\srv\\share\\a-wt')
+    expect(await gitTargetForPath(db, '\\\\srv\\share\\a-wt\\feat\\..\\..\\x')).toBeNull()
+    expect(await gitTargetForPath(db, '\\\\srv\\share\\a-wt\\feat')).toEqual({
+      computerId: 'c-a',
+      projectId: 'p4'
+    })
+  })
+
+  // G5: the STORED side is normalized too — a placement recorded as `C:/code/proj`,
+  // or a worktree a POSIX hub built as `C:\…/task`, still matches.
+  test('G5: stored Windows paths in either separator still match', async () => {
+    h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p5', 'V', '#000')
+    place('c-b', 'p5', 'C:/code/proj')
+    expect(await gitTargetForPath(db, 'C:\\code\\proj\\src')).toEqual({
+      computerId: 'c-b',
+      projectId: 'p5'
+    })
+    h.db
+      .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
+      .run('t5', 'p5', 'T', 'C:\\code\\proj-worktrees/task')
+    expect(await gitTargetForPath(db, 'C:\\code\\proj-worktrees\\task\\x')).toEqual({
+      taskId: 't5'
+    })
+  })
+
   test('a prefix that is not a path boundary does not match', async () => {
     expect(await gitTargetForPath(db, '/home/a/project-two')).toBeNull()
   })
