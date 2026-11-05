@@ -382,4 +382,21 @@ describe('follow', () => {
     )
     expect(text).toContain('req-gap')
   })
+
+  // R3: seq 7 is saved before the watch applies (summary only), then seq 8 arrives in
+  // full within the grace. 7 must still be shown, before 8.
+  test('a full event past a summary-only seq waits until that seq is read back', async () => {
+    const text = await readSse(
+      `/api/chat/${chatTask}/follow`,
+      () => {
+        fake.watchers.clear()
+        fake.emit(chatTask, bashPrompt('req-seven'), 7)
+        fake.watchers.set(chatTask, 1)
+        fake.emit(chatTask, bashPrompt('req-eight'), 8)
+      },
+      (t) => t.includes('req-seven') && t.includes('req-eight')
+    )
+    expect(text).toContain('req-seven')
+    expect(text.indexOf('req-seven')).toBeLessThan(text.indexOf('req-eight'))
+  })
 })

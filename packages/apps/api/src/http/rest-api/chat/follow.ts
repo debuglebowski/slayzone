@@ -57,15 +57,72 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
 
       const deps = chat.deps()
       const events = deps.events
-      const apply = (event: AgentEvent, seq: number, at?: number) => {
+      // Computers send the hub full events only for watched tabs (docs/direct-link.md):
+      // this stream is a watcher. Every saved event's summary arrives regardless, so a
+      // seq the full stream did not bring (saved before the computer applied the
+      // watch) is read back from the saved history. Until it is, full events after it
+      // are held: shown in seq order, and `lastSeq` never jumps past the gap.
+      const unwatch = deps.watchEvents?.([target.tabId])
+      /** Seqs seen only as a summary so far. */
+      const summaryOnly = new Set<number>()
+      /** Full events past a summary-only seq, waiting for it. */
+      const held = new Map<number, { event: AgentEvent; at?: number }>()
+      let resync: ReturnType<typeof setTimeout> | null = null
+      let closed = false
+
+      const show = (event: AgentEvent, seq: number, at?: number) => {
         if (seq <= lastSeq) return
         lastSeq = seq
+        summaryOnly.delete(seq)
         state = reducer(state, { type: 'event', event, at, seq })
         flushRows()
         if (event.kind === 'permission-request' && !seenPrompts.has(event.requestId)) {
           seenPrompts.add(event.requestId)
           send('prompt', describeChatPrompt(event as PermissionRequestEvent, ctx))
         }
+      }
+      const gapBefore = (seq: number) => [...summaryOnly].some((s) => s > lastSeq && s < seq)
+      const drainHeld = () => {
+        for (const seq of [...held.keys()].sort((x, y) => x - y)) {
+          if (gapBefore(seq)) return
+          const e = held.get(seq)!
+          held.delete(seq)
+          show(e.event, seq, e.at)
+        }
+      }
+      const scheduleReadBack = () => {
+        // A short grace: on a watched tab the full event is usually already on its way.
+        resync ??= setTimeout(() => {
+          resync = null
+          void readBack().catch(() => scheduleReadBack())
+        }, SAVED_READ_BACK_MS)
+      }
+      const readBack = async () => {
+        if (closed || (summaryOnly.size === 0 && held.size === 0)) return
+        const missed = (await deps.ops.getBufferSince(target.tabId, lastSeq)) as Array<{
+          seq: number
+          event: AgentEvent
+          at?: number
+        }>
+        if (closed) return
+        // The saved history is complete and in order: no gap inside it.
+        for (const e of missed) {
+          held.delete(e.seq)
+          show(e.event, e.seq, e.at)
+        }
+        for (const seq of [...summaryOnly]) if (seq <= lastSeq) summaryOnly.delete(seq)
+        drainHeld()
+        if (summaryOnly.size > 0 || held.size > 0) scheduleReadBack()
+      }
+      const apply = (event: AgentEvent, seq: number, at?: number) => {
+        if (seq <= lastSeq) return
+        if (gapBefore(seq)) {
+          held.set(seq, { event, at })
+          scheduleReadBack()
+          return
+        }
+        show(event, seq, at)
+        drainHeld()
       }
       const onEvent = (
         tabId: string,
@@ -78,32 +135,10 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
         if (tabId !== target.tabId || live !== undefined) return
         apply(event, seq, at)
       }
-      // Computers send the hub full events only for watched tabs (docs/direct-link.md):
-      // this stream is a watcher. Every saved event's summary arrives regardless, so a
-      // seq the full stream did not bring (saved before the computer applied the
-      // watch) is read back from the saved history.
-      const unwatch = deps.watchEvents?.([target.tabId])
-      let savedSeq = lastSeq
-      let resync: ReturnType<typeof setTimeout> | null = null
-      let closed = false
-      const readBack = async () => {
-        resync = null
-        if (closed || savedSeq <= lastSeq) return
-        const missed = (await deps.ops.getBufferSince(target.tabId, lastSeq)) as Array<{
-          seq: number
-          event: AgentEvent
-          at?: number
-        }>
-        if (closed) return
-        for (const e of missed) apply(e.event, e.seq, e.at)
-      }
       const onSaved = (tabId: string, saved: ChatSavedSummary) => {
         if (tabId !== target.tabId || saved.seq <= lastSeq) return
-        savedSeq = Math.max(savedSeq, saved.seq)
-        // A short grace: on a watched tab the full event is already on its way.
-        resync ??= setTimeout(() => {
-          void readBack().catch(() => undefined)
-        }, SAVED_READ_BACK_MS)
+        summaryOnly.add(saved.seq)
+        scheduleReadBack()
       }
       const onExit = (tabId: string) => {
         if (tabId === target.tabId) send('exit', {})
