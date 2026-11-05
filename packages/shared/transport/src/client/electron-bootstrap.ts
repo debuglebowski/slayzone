@@ -49,6 +49,9 @@ export const electronBootstrap = {
     api().app.getHubRegistry?.() ?? Promise.resolve({ hubs: [] as HubEntry[], defaultHubId: '' }),
   // Per-hub bearer tokens (safeStorage-decrypted in main) for authed remote hubs.
   getHubTokens: () => api().app.getHubTokens?.() ?? Promise.resolve({}),
+  // Outside Electron there is no stored bearer to check.
+  checkHubSession: (payload: { hubId: string; url: string }) =>
+    api().app.checkHubSession?.(payload) ?? Promise.resolve({ state: 'none' as const }),
   setHubToken: (payload: { hubId: string; token: string }) =>
     api().app.setHubToken?.(payload) ?? Promise.resolve({ ok: true as const }),
   hubLogin: (payload: { hubId: string; url: string; email: string; password: string }) =>

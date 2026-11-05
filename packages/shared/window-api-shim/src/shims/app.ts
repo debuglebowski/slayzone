@@ -82,6 +82,7 @@ export const appShim = {
   }),
   // Fork is single-hub → no remote bearer tokens / login.
   getHubTokens: async (): Promise<Record<string, string>> => ({}),
+  checkHubSession: async () => ({ state: 'none' as const }),
   setHubToken: async (): Promise<{ ok: true }> => ({ ok: true }),
   hubLogin: async (): Promise<{ ok: false; error: string }> => ({
     ok: false,

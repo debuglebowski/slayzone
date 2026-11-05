@@ -58,6 +58,8 @@ let deviceStart = vi.fn(async (_p: { hubId: string; url: string }) => ({
   verificationUri: 'https://hub.example.com/device?user_code=ABCDEFGH',
   opened: true
 }))
+/** What the hub says about a stored bearer (`checkHubSession`), swapped per test. */
+let sessionReply: { state: string; email?: string | null } = { state: 'valid', email: null }
 let deviceWait = vi.fn(async (_p: { flowId: string }) => ({ ok: true as const }))
 
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
@@ -66,6 +68,7 @@ vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: {
     getHubRegistry: () => Promise.resolve({ hubs: registryHubs, defaultHubId: 'local' }),
     getHubTokens: () => Promise.resolve(hubTokens),
+    checkHubSession: () => Promise.resolve(sessionReply),
     probeServerHealth: (url: string) =>
       Promise.resolve(probeReplies[url] ?? { ok: false, error: 'Unreachable' }),
     hubLogin: () => Promise.resolve({ ok: true as const, token: 't' }),
@@ -296,6 +299,32 @@ describe('HubsSettingsTab — Sign in visibility', () => {
     await rowSettled()
     await waitFor(() => expect(screen.getByTestId('hub-signed-in')).toBeTruthy())
     expect(screen.queryByTestId('hub-signin-open')).toBeNull()
+  })
+
+  it('a stored token the hub refuses is an expired session, with Sign in offered again', async () => {
+    sessionReply = { state: 'expired' }
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Session expired')).toBeTruthy())
+      expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+    }
+  })
+
+  it('a sign-in that could not be checked never reads "Signed in"', async () => {
+    sessionReply = { state: 'unreachable' }
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Sign-in unverified')).toBeTruthy())
+      expect(screen.queryByText('Signed in')).toBeNull()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+    }
   })
 })
 

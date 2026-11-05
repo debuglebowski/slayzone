@@ -6,6 +6,7 @@ import {
   HubScope
 } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
+import type { HubSessionState } from '@slayzone/platform/electron-bootstrap-contract'
 import {
   Button,
   DropdownMenu,
@@ -169,6 +170,19 @@ export function HubsSettingsTab() {
     { kind: 'idle' } | { kind: 'busy' } | { kind: 'ok' } | { kind: 'fail'; error: string }
   >({ kind: 'idle' })
   const [authedHubIds, setAuthedHubIds] = useState<Set<string>>(new Set())
+  // What each hub said about its stored bearer. A stored token alone is not a
+  // session: the hub may have dropped it (expiry, an SSO re-check), and then every
+  // call there fails while the card still claimed "Signed in".
+  const [sessions, setSessions] = useState<Record<string, HubSessionState>>({})
+  const checkSession = useCallback((hub: HubEntry): void => {
+    if (!hub.url) return
+    void electronBootstrap
+      .checkHubSession({ hubId: hub.id, url: hub.url })
+      // A bridge that cannot answer (a main process from before this check) is as
+      // unknown as a hub that does not: never left "checking" forever.
+      .catch((): HubSessionState => ({ state: 'unreachable' }))
+      .then((result) => setSessions((prev) => ({ ...prev, [hub.id]: result })))
+  }, [])
   const [deviceSignIn, setDeviceSignIn] = useState<DeviceSignInState>({ kind: 'idle' })
 
   // Baseline snapshot save() diffs against to detect a pure addition (see
@@ -190,6 +204,7 @@ export function HubsSettingsTab() {
           setRemotes(nextRemotes)
           setDefaultHubId(registry.defaultHubId)
           setAuthedHubIds(new Set(Object.keys(tokens)))
+          for (const hub of nextRemotes) if (tokens[hub.id]) checkSession(hub)
           setDirty(false)
           originalRef.current = {
             remotes: nextRemotes,
@@ -214,7 +229,7 @@ export function HubsSettingsTab() {
           }
         }
       ),
-    []
+    [checkSession]
   )
 
   const openSignIn = (hubId: string): void => {
@@ -240,6 +255,8 @@ export function HubsSettingsTab() {
   const signedIn = async (hubId: string): Promise<void> => {
     setSignInState({ kind: 'ok' })
     setAuthedHubIds((prev) => new Set(prev).add(hubId))
+    const hub = remotes.find((h) => h.id === hubId)
+    if (hub) checkSession(hub)
     const tokens = await electronBootstrap.getHubTokens()
     useHubRegistryStore.getState().setTokens(tokens)
   }
@@ -622,7 +639,35 @@ export function HubsSettingsTab() {
     if (verify?.kind === 'probing') return <HubStatus tone="idle" label="Checking…" />
     if (verify?.kind === 'fail')
       return <HubStatus tone="bad" label="Unreachable" title={verify.reason} />
-    if (authedHubIds.has(h.id)) return <HubStatus tone="ok" label="Signed in" />
+    if (authedHubIds.has(h.id)) {
+      const session = sessions[h.id]
+      if (session?.state === 'expired')
+        return (
+          <HubStatus
+            tone="bad"
+            label="Session expired"
+            title="This hub no longer accepts the stored sign-in — sign in again"
+          />
+        )
+      if (session?.state === 'valid')
+        return (
+          <HubStatus
+            tone="ok"
+            label="Signed in"
+            {...(session.email ? { title: `Signed in as ${session.email}` } : {})}
+          />
+        )
+      // Never "Signed in" unconfirmed: that is the claim that hid a dead session.
+      if (session?.state === 'unreachable')
+        return (
+          <HubStatus
+            tone="bad"
+            label="Sign-in unverified"
+            title="Could not check the stored sign-in: the hub did not answer"
+          />
+        )
+      return <HubStatus tone="idle" label="Checking sign-in…" />
+    }
     if (verify?.kind === 'ok') return <HubStatus tone="ok" label="Reachable" />
     if (authNeeds[h.id] === 'gated') return <HubStatus tone="idle" label="Signed out" />
     return <HubStatus tone="idle" label="Not verified" />
@@ -705,8 +750,10 @@ export function HubsSettingsTab() {
             // report it), where withholding the button would strip the only
             // way to authenticate. An absent entry means the probe is still in
             // flight; stay quiet rather than flash a button that may not apply.
+            // An expired session needs a sign-in as much as none at all.
             const showSignIn =
-              !authedHubIds.has(h.id) && (authNeed === 'gated' || authNeed === 'unknown')
+              sessions[h.id]?.state === 'expired' ||
+              (!authedHubIds.has(h.id) && (authNeed === 'gated' || authNeed === 'unknown'))
             return hubCardFor(h.id, h.label, false, 'hub-row-remote', {
               identity: (
                 <>
