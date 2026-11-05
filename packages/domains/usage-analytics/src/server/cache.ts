@@ -67,7 +67,7 @@ async function loadCursors(db: SlayzoneDb, computerId: string): Promise<UsageCur
 }
 
 /**
- * Hand the hub's own cursors (computer_id '', what v194 kept from the hub-disk
+ * Hand the hub's own cursors (computer_id '', what v195 kept from the hub-disk
  * parse) to the computer on the hub's machine, once: moved, not copied, so they are
  * never adopted twice. A cursor the computer already has wins.
  */

@@ -71,11 +71,11 @@ describe('usage from computers', () => {
   })
 })
 
-// v194 kept the hub's own parse cursors under computer_id '' (this hub's disk). On
+// v195 kept the hub's own parse cursors under computer_id '' (this hub's disk). On
 // the desktop the local computer reads those very files: its first collect must
 // start from them, or it re-parses every log in one huge reply (81 MiB measured)
 // that times out on every refresh. Another computer's disk is not this hub's.
-describe("the hub's old cursors after v194", () => {
+describe("the hub's old cursors after v195", () => {
   test('the local computer takes them over; another computer does not', async () => {
     h.db.prepare('DELETE FROM usage_parse_state').run()
     h.db
