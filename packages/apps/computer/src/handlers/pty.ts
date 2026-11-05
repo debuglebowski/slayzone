@@ -61,7 +61,8 @@ import {
 import { writeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
-import * as pty from 'node-pty'
+import type * as pty from 'node-pty'
+import { spawnNodePty } from '../node-pty'
 import { findOnPath, getShellStartupArgs, resolveUserShell, shellExists } from '@slayzone/platform'
 import {
   nodePtyInstallProblems as readNodePtyInstallProblems,
@@ -236,7 +237,8 @@ export function createPtyHandlers(
   let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
-  const spawnPty = options.spawnPty ?? pty.spawn
+  // node-pty loads at the first spawn: a missing one fails terminals, not the computer.
+  const spawnPty = options.spawnPty ?? spawnNodePty
   const installProblems = options.nodePtyInstallProblems ?? installProblemsOnDisk
   /** Spawns waiting for an agent-start slot, keyed like `sessions`. */
   const queued = new Map<string, QueuedSpawn>()
