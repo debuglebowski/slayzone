@@ -8,7 +8,11 @@
 // whichever shape today's loader produces.
 import { describe, expect, test } from 'vitest'
 import * as headless from '@xterm/headless'
-import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
+import {
+  suppressDeviceStatusReplies,
+  suppressStateReportReplies,
+  suppressXtVersionReply
+} from './suppress-device-status'
 
 type HeadlessNs = {
   Terminal?: typeof headless.Terminal
@@ -71,9 +75,9 @@ describe('suppressDeviceStatusReplies', () => {
     term.dispose()
   })
 
-  test('queries the renderer SHOULD answer still work (DECRQM)', async () => {
-    // Scope guard: suppression must be limited to the `n` final byte. DECRQM ends
-    // in `$p` and programs use its reply for capability detection.
+  test('scope guard: only the `n` final byte is suppressed (DECRQM untouched)', async () => {
+    // DECRQM ends in `$p`; it has its own suppressor (suppressStateReportReplies),
+    // registered separately so each owner can be reasoned about on its own.
     const term = new Terminal({ allowProposedApi: true })
     suppressDeviceStatusReplies(term)
     const out = await emitted(term, '\x1b[?2026$p')
@@ -170,6 +174,43 @@ describe('suppressXtVersionReply', () => {
       (await emitted(term, '\x1b[>0q')).startsWith('\x1bP>|xterm.js('),
       'restored after dispose'
     ).toBe(true)
+    term.dispose()
+  })
+})
+
+// ── suppressStateReportReplies ──────────────────────────────────────────────
+
+describe('suppressStateReportReplies', () => {
+  test('baseline: xterm DOES answer DECRQM and DECRQSS when not suppressed', async () => {
+    const term = new Terminal({ allowProposedApi: true })
+    expect(await emitted(term, '\x1b[?2004$p')).toBe('\x1b[?2004;2$y')
+    expect(await emitted(term, '\x1b[4$p')).toBe('\x1b[4;2$y')
+    expect(await emitted(term, '\x1bP$qm\x1b\\')).toBe('\x1bP1$r0m\x1b\\')
+    term.dispose()
+  })
+
+  test('DECRQM (DEC private and ANSI) and DECRQSS produce no reply once suppressed', async () => {
+    const term = new Terminal({ allowProposedApi: true })
+    suppressStateReportReplies(term)
+    expect(await emitted(term, '\x1b[?2004$p')).toBe('')
+    expect(await emitted(term, '\x1b[4$p')).toBe('')
+    expect(await emitted(term, '\x1bP$qm\x1b\\')).toBe('')
+    term.dispose()
+  })
+
+  test('mode SETTING still applies — only the report is suppressed', async () => {
+    const term = new Terminal({ allowProposedApi: true })
+    suppressStateReportReplies(term)
+    await emitted(term, '\x1b[?2004h')
+    expect(term.modes.bracketedPasteMode).toBe(true)
+    term.dispose()
+  })
+
+  test('dispose() restores xterm answering', async () => {
+    const term = new Terminal({ allowProposedApi: true })
+    const subs = suppressStateReportReplies(term)
+    for (const s of subs) s.dispose()
+    expect(await emitted(term, '\x1b[?2004$p')).toBe('\x1b[?2004;2$y')
     term.dispose()
   })
 })

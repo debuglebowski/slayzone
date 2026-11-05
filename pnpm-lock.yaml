@@ -3043,6 +3043,9 @@ importers:
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.300
         version: 0.20.0-beta.300(@xterm/xterm@6.1.0-beta.304)
+      '@xterm/headless':
+        specifier: 6.1.0-beta.303
+        version: 6.1.0-beta.303
       '@xterm/xterm':
         specifier: 6.1.0-beta.304
         version: 6.1.0-beta.304
@@ -3077,9 +3080,6 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
-      '@xterm/headless':
-        specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303
 
   packages/domains/terminal-contracts: {}
 
