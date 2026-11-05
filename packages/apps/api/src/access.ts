@@ -323,8 +323,24 @@ function normalizePath(p: string, cached = false): string {
   return form
 }
 
-/** `child` is `root` or inside it. */
-const within = (child: string, root: string): boolean =>
+/**
+ * `child` is `root` or inside it — `root` a PROJECT root, i.e. a folder on some
+ * computer. Letter case is compared exactly (a Windows path is always folded): whether
+ * a volume folds case is the owning computer's to say, and this hub's disk says
+ * nothing about it — probing it let `/home/u/PROJ` and `/home/u/proj` of two users on
+ * a case-sensitive computer tie, and the tie let either in (L3). A case variant of a
+ * path that exists here is folded by `realpathOf` already (the OS spells it as stored);
+ * one that matches no root exactly is nobody's here, and the work it names goes to the
+ * caller's own computer, whose jail folds case for its own volume.
+ */
+const within = (child: string, root: string): boolean => computerPathWithin(child, root)
+
+/**
+ * `child` is the hub's own state root `root` or inside it. That root IS on this disk,
+ * so this disk decides its case folding (a variant spelling that does not exist yet
+ * must not slip past it either).
+ */
+const withinHubRoot = (child: string, root: string): boolean =>
   computerPathWithin(child, root, pathFoldsCase(root))
 
 /**
@@ -356,7 +372,7 @@ async function resolvePathResource(
   let hubDepth = -1
   for (const raw of hubRoots) {
     const root = normalizePath(raw, true)
-    if (!within(target, root)) continue
+    if (!withinHubRoot(target, root)) continue
     // `<data root>/artifacts/<taskId>/…` is a task's artifact file (artifact-store).
     const rest = target.slice(root.length + 1).split(/[\\/]/)
     if (rest[0] === 'artifacts' && rest[1]) return viaTask(db, rest[1])
@@ -381,7 +397,13 @@ async function resolvePathResource(
     if (root.length === depth) owners.push(row)
   }
   if (hubDepth >= 0 && hubDepth >= depth) return NONE
-  return depth < 0 ? HUB_WIDE : projectsOf(owners)
+  if (depth < 0) return HUB_WIDE
+  // The same folder recorded for two users (each on their own computer): which one
+  // a path means is not the hub's to guess, so neither gets it by path — a tie
+  // between owners never grants access (L3). A request that names its task, project
+  // or computer is decided by that instead.
+  if (new Set(owners.map((o) => o.owner_user_id)).size > 1) return NONE
+  return projectsOf(owners)
 }
 
 /**
@@ -401,7 +423,7 @@ async function resolvePathTree(
   const own = await resolvePathResource(db, rawPath, hubRoots)
   if (own.status === 'none') return NONE
   const dir = normalizePath(rawPath)
-  for (const raw of hubRoots) if (within(normalizePath(raw, true), dir)) return NONE
+  for (const raw of hubRoots) if (withinHubRoot(normalizePath(raw, true), dir)) return NONE
   for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
     if (within(normalizePath(row.root, true), dir) && !mayAccessProject(req, row)) return NONE
   }

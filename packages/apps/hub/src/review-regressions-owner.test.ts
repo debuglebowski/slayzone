@@ -94,6 +94,14 @@ describe("L3: case folding is the computer's, never the hub's disk", () => {
   })
 })
 
+test("L3: one folder recorded for two users is neither's by path (a tie never grants)", async () => {
+  project('pTieA', A, '/srv/same')
+  project('pTieB', B, '/srv/same')
+  expect(await can(A, '/srv/same/x')).toBe(false)
+  expect(await can(B, '/srv/same/x')).toBe(false)
+  sql(`DELETE FROM projects WHERE id IN ('pTieA', 'pTieB')`)
+})
+
 describe('L4: a disabled computer refuses exec.run and new worktrees', () => {
   test('exec.run starts new work', () => {
     expect(startsNewWork(M.execRun, { argv: ['claude', '-p', 'x'], timeoutMs: 1000 })).toBe(true)

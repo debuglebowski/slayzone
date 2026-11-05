@@ -15,6 +15,10 @@
  *   - Unicode NFC: APFS and NTFS store either form and match both;
  *   - case-folded when the volume is case-insensitive (Windows always; macOS unless
  *     the volume was formatted case-sensitive — {@link volumeIsCaseInsensitive}).
+ *     Only the machine that HOLDS a path can tell: the computer's jail asks its own
+ *     disk; the hub folds only its own state roots and otherwise compares a computer's
+ *     path exactly (L3: a macOS hub's probe folded two users' roots on a Linux
+ *     computer into one).
  *
  * It is a comparison KEY: what an op opens stays the path it was handed (resolved by
  * its own reader); only "is this the same path / inside that one" goes through here.
@@ -66,10 +70,11 @@ export function computerPathWithin(child: string, root: string, caseInsensitive 
 
 /**
  * Whether comparisons against `root` fold case: a Windows path always; otherwise
- * whether the volume holding it here does ({@link volumeIsCaseInsensitive}; a path
+ * whether the volume holding it HERE does ({@link volumeIsCaseInsensitive}; a path
  * that does not exist here is judged by the nearest part that does, else by this
- * OS's default). The owner policy and git routing both decide with this, so they
- * never disagree on whose a path is.
+ * OS's default). So only for a path on this machine's own disk: the computer's jail
+ * for its folders, the hub for its own state roots — never the hub for a computer's
+ * path (L3).
  */
 export function pathFoldsCase(root: string): boolean {
   if (isWindowsComputerPath(root)) return true

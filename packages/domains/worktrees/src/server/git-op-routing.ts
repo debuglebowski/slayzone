@@ -10,11 +10,7 @@
  * never runs git or reads a checkout itself.
  */
 import type { SlayzoneDb } from '@slayzone/platform'
-import {
-  computerPathWithin,
-  normalizeComputerPath,
-  pathFoldsCase
-} from '@slayzone/platform/computer-path'
+import { computerPathWithin, normalizeComputerPath } from '@slayzone/platform/computer-path'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import {
   gitOpAbsolutePaths,
@@ -163,8 +159,9 @@ export async function gitTargetForPath(
   path: string
 ): Promise<WorktreesComputerTarget | null> {
   const p = normalizeComputerPath(path)
-  // Case folded exactly as the owner policy decides it (`pathFoldsCase`).
-  const under = (root: string) => computerPathWithin(p, root, pathFoldsCase(root))
+  // Letter case compared exactly, as the owner policy compares a project root: the
+  // owning computer folds case for its own volume, the hub's disk cannot say (L3).
+  const under = (root: string) => computerPathWithin(p, root)
   let task: { id: string; root: string } | null = null
   for (const row of await db.all<{ id: string; worktree_path: string }>(
     `SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path != ''`
