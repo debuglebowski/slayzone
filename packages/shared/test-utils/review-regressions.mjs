@@ -14,7 +14,8 @@
  * follow-up) is listed under OPEN with the reason, not silently dropped.
  *
  * Reviews: round 1 ac5ca1a5, round 2 6cd61986, round 3 5cecc85d, round 4 30965427,
- * round 5 826655dd, round 6 cfbc0854 (slay task artifacts).
+ * round 5 826655dd, round 6 cfbc0854; round 7 N1: task 5d69cafd, n1-hub-path-reads-report.html
+ * (slay task artifacts).
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -317,6 +318,18 @@ export const REGRESSIONS = [
     id: 'L6',
     what: '/.vol, firmlink and Windows aliases resolve before the owner check',
     files: [rrOwner]
+  },
+  // ── round 7 ──
+  {
+    round: 7,
+    id: 'N1',
+    what: 'hub-disk path procedures need a root the caller owns; /dev /proc /sys /.vol refused',
+    files: [
+      `${hub}hub-local-path-reads.test.ts`,
+      `${P}apps/api/src/routers/hub-local-paths.test.ts`,
+      `${P}apps/api/src/routers/upload-sources.test.ts`,
+      `${P}apps/api/src/access.test.ts`
+    ]
   }
 ]
 

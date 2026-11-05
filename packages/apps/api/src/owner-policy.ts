@@ -102,6 +102,10 @@ const tab = ref('tab')
 const session = ref('session')
 const path = ref('path')
 const tree = ref('pathTree')
+/** A path the hub opens on its OWN disk for the caller: inside one of their roots, or
+ *  refused — never hub-wide (N1). `path` stays for a folder about to become a root (a
+ *  new project, a new worktree) and for what the handler bounds itself. */
+const owned = ref('ownedPath')
 const artifact = ref('artifact')
 const folder = ref('artifactFolder')
 const proc = ref('process')
@@ -517,15 +521,15 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // O-22: the caller's own projects only (export-import.ts scopes the query); the
   // whole hub is backed up at server level, never through the app.
   'app.exportImport.exportAll': listed(SCOPED_IN_HANDLER),
-  'app.exportImport.testExportAllToPath': then(checked(path('filePath')), SCOPED_IN_HANDLER),
-  'app.exportImport.testExportProjectToPath': checked(project('projectId'), path('filePath')),
+  'app.exportImport.testExportAllToPath': then(checked(owned('filePath')), SCOPED_IN_HANDLER),
+  'app.exportImport.testExportProjectToPath': checked(project('projectId'), owned('filePath')),
   'app.exportImport.testSetTaskParent': checked(task('taskId'), task('parentId')),
   'app.usage.fetch': none(HOST),
   'app.usage.test': none(HOST),
-  'app.files.pathExists': checked(path('filePath')),
+  'app.files.pathExists': checked(owned('filePath')),
   'app.files.saveTempImage': none(HOST),
   'app.shell.openExternal': none('a URL to open'),
-  'app.shell.openPath': checked(path('absPath')),
+  'app.shell.openPath': checked(owned('absPath')),
   'app.feedback.listThreads': none(FEEDBACK),
   'app.feedback.createThread': none(FEEDBACK),
   'app.feedback.getMessages': none(FEEDBACK),
@@ -675,13 +679,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.readContent': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
-  'artifacts.upload': checked(task('taskId'), path('sourcePath')),
+  'artifacts.upload': checked(task('taskId'), owned('sourcePath')),
   'artifacts.uploadBlob': checked(task('taskId'), folder('folderId')),
   'artifacts.copy': checked(artifact('artifactIds[]'), task('destTaskId'), folder('destFolderId')),
   'artifacts.pasteFiles': checked(
     task('destTaskId'),
     folder('destFolderId'),
-    path('sourcePaths[]')
+    owned('sourcePaths[]')
   ),
   // A directory upload walks the whole tree: every root under it must be the caller's.
   'artifacts.uploadDir': checked(task('taskId'), tree('dirPath'), folder('parentFolderId')),
@@ -927,7 +931,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     computer('computerId'),
     path('rootPath')
   ),
-  'fileEditor.showInFinder': checked(path('rootPath')),
+  'fileEditor.showInFinder': checked(owned('rootPath')),
   'fileEditor.watch': checked(
     task('taskId'),
     project('projectId'),
@@ -1096,7 +1100,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'projects.create': checked(path('path'), computer('computerId')),
   'projects.update': checked(project('id'), path('path')),
   'projects.delete': checked(project('id')),
-  'projects.uploadIcon': checked(project('projectId'), path('sourcePath')),
+  'projects.uploadIcon': checked(project('projectId'), owned('sourcePath')),
   'projects.reorder': checked(project('projectIds[]')),
   'projectGroups.list': listed(groups),
   'projectGroups.create': listed(groups),
@@ -1341,7 +1345,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.getRecentCommits': checked(...TARGET, path('repoPath')),
   'worktrees.getAheadBehind': checked(...TARGET, path('repoPath')),
   'worktrees.getStatusSummary': checked(...TARGET, path('repoPath')),
-  'worktrees.revealInFinder': checked(path('path')),
+  'worktrees.revealInFinder': checked(owned('path')),
   'worktrees.isDirty': checked(...TARGET, path('path')),
   'worktrees.getRemoteUrl': checked(...TARGET, path('path')),
   'worktrees.getAheadBehindUpstream': checked(...TARGET, path('path')),
@@ -1404,8 +1408,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.backup.revealInFinder': none(BACKUP),
   'app.backup.setSettings': none(BACKUP),
   'app.exportImport.import': none(IMPORT),
-  // Reads a file on the hub host: not one inside someone else's project or the hub's state.
-  'app.exportImport.testImportFromPath': checked(path('filePath')),
+  // Reads a file on the hub host: only inside one of the caller's roots (N1).
+  'app.exportImport.testImportFromPath': checked(owned('filePath')),
   // Automations are their project's: an admin manages only those in its own projects.
   'automations.getByProject': checked(project('projectId')),
   'automations.get': checked(automation('id')),
