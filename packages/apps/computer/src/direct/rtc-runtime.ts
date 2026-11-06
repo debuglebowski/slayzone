@@ -20,6 +20,29 @@ export type RtcPolyfill = typeof import('node-datachannel/polyfill')
 let loaded: RtcRuntime | undefined
 let polyfill: RtcPolyfill | undefined
 
+let resolvable: boolean | undefined
+
+/**
+ * Whether node-datachannel is installed here, without loading it (a resolve, not a
+ * native load): what the computer advertises at boot. The addon itself is loaded on
+ * the first offer ({@link loadRtcPolyfill}); a prebuild that then fails to load
+ * refuses that offer, and the client uses the hub relay.
+ */
+export function rtcRuntimeAvailable(): boolean {
+  if (resolvable !== undefined) return resolvable
+  try {
+    if (typeof require === 'function') require.resolve('node-datachannel/polyfill')
+    else
+      createRequire(process.argv[1] ?? join(process.cwd(), 'index.js')).resolve(
+        'node-datachannel/polyfill'
+      )
+    resolvable = true
+  } catch {
+    resolvable = false
+  }
+  return resolvable
+}
+
 /** node-datachannel, or null when it cannot load on this machine. */
 export function loadRtcRuntime(
   log?: (message: string, detail?: Record<string, unknown>) => void

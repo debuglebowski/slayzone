@@ -307,6 +307,58 @@ describe('startComputer direct link (docs/direct-link.md)', () => {
   })
 })
 
+describe('startComputer direct link: WebRTC addon off the boot path', () => {
+  it('dials without loading node-datachannel, advertises WebRTC, and loads it on the first offer', async () => {
+    let loads = 0
+    let startedWithLoads: number | null = null
+    let identity: { directRtc?: () => boolean } | undefined
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      rtc: {
+        available: () => true,
+        load: () => {
+          loads++
+          return null
+        }
+      },
+      createDialer: (options) => {
+        identity = options.identity as typeof identity
+        onHubRequest = options.onHubRequest as typeof onHubRequest
+        return {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => {
+            startedWithLoads = loads
+          },
+          stop: async () => undefined,
+          notify: () => true
+        } as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(startedWithLoads).not.toBeNull())
+      expect(startedWithLoads).toBe(0)
+      expect(identity?.directRtc?.()).toBe(true)
+      // The first offer loads it; here it cannot load, so the offer is refused (the
+      // client falls back to the relay).
+      await expect(
+        onHubRequest?.(
+          HubToComputerMethods.directRtcOffer,
+          { grantId: 'g', sdp: 'v=0', stunAddresses: [], clientAddress: null },
+          ACTOR
+        )
+      ).rejects.toThrow(/no WebRTC/)
+      expect(loads).toBe(1)
+    } finally {
+      await handle.stop()
+    }
+  })
+})
+
 describe('startComputer direct link: a hub grant reaches that hub’s terminals', () => {
   it('serves a real session to a client holding the grant the hub registered', async () => {
     const { createHash } = await import('node:crypto')

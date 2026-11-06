@@ -5,7 +5,7 @@ import type { DirectPtyService } from './handlers/pty'
 import type { DirectChatService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
-import { loadRtcPolyfill } from './direct/rtc-runtime'
+import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
@@ -78,6 +78,11 @@ export const COMPUTER_VERSION =
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
+  /**
+   * The WebRTC runtime (tests): whether it is installed, and loading it. Default
+   * node-datachannel (`direct/rtc-runtime.ts`).
+   */
+  rtc?: { available(): boolean; load(): RtcPolyfill | null }
   initiallyPaused?: boolean
   hookDirectory?: (hubUrl: string) => string | undefined
   createDialer?: (options: ConstructorParameters<typeof HubDialer>[0]) => HubDialer
@@ -250,8 +255,9 @@ export interface HubRequestHandlerDeps {
    */
   directGrants?: DirectGrantStore
   /**
-   * The WebRTC answerer (docs/direct-link.md), late-bound: it exists once the
-   * direct listener bound and node-datachannel loaded. Null/absent = no WebRTC.
+   * The WebRTC answerer (docs/direct-link.md), late-bound: created on the first offer
+   * once the direct listener is bound (node-datachannel loads then, off the boot
+   * path). Null/absent = no WebRTC.
    */
   getRtcAnswerer?: () => RtcAnswerer | null
 }
@@ -641,9 +647,6 @@ export function startComputer(
   })
     .then((listener) => {
       directListener = listener
-      // WebRTC rides on the listener (its channels are served like its sockets).
-      const rtc = loadRtcPolyfill(log)
-      if (rtc) rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener, log })
     })
     .catch((err: unknown) => {
       log('direct link unavailable — clients use the hub relay', { error: String(err) })
@@ -652,7 +655,22 @@ export function startComputer(
       directSettled = true
     })
   identity.directAddress = () => directListener?.advertisedAddress ?? null
-  identity.directRtc = () => rtcAnswerer !== null
+  // WebRTC rides on the listener (its channels are served like its sockets). The
+  // addon is only resolved here: loading it is left to the first offer, so dialing
+  // the hubs never waits on it.
+  const rtcRuntime = deps.rtc ?? {
+    available: rtcRuntimeAvailable,
+    load: () => loadRtcPolyfill(log)
+  }
+  identity.directRtc = () => directListener !== null && rtcRuntime.available()
+  const getRtcAnswerer = (): RtcAnswerer | null => {
+    if (rtcAnswerer || !directListener || !rtcRuntime.available()) return rtcAnswerer
+    const rtc = rtcRuntime.load()
+    if (rtc) {
+      rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener: directListener, log })
+    }
+    return rtcAnswerer
+  }
 
   /**
    * Everything that belongs to ONE hub.
@@ -756,7 +774,7 @@ export function startComputer(
       admission,
       requestLog,
       directGrants,
-      getRtcAnswerer: () => rtcAnswerer,
+      getRtcAnswerer,
       hubHost: hubHostFromUrl(hubUrl),
       // Per connection: the process-wide grant is for the primary (loopback) hub of
       // the desktop's own computer. A hub joined at runtime never edits the jail.

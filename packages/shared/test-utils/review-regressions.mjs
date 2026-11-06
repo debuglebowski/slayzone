@@ -714,6 +714,12 @@ export const REGRESSIONS = [
     id: 'DL-L5f',
     what: "the direct listener's message budget scales with the grants a socket holds (all a computer's terminals share one socket), under a per-socket ceiling",
     files: [`${P}apps/computer/src/direct/listener.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5h',
+    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC from a resolve) and loads the addon on the first offer; a failed load refuses that offer',
+    files: [`${P}apps/computer/src/main.test.ts`]
   }
 ]
 
