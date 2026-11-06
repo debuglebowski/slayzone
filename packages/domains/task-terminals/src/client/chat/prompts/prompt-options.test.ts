@@ -92,6 +92,14 @@ describe('Bash', () => {
     expect(view.tip).toBeUndefined()
   })
 
+  // Bypass still prompts (CLI safety checks, e.g. the privacy plugin's email
+  // check); switching to auto there would DOWNGRADE the session.
+  test('session in bypass: no auto row, no tip', () => {
+    const view = buildPermissionView(BASH_PLAIN, { ...ctx, permissionMode: 'bypass' })
+    expect(view.options.map((o) => o.id)).not.toContain('yes-auto')
+    expect(view.tip).toBeUndefined()
+  })
+
   test('outside the project: the directory row wins over the rule row and applies only the directory', () => {
     const dirs = {
       type: 'addDirectories',

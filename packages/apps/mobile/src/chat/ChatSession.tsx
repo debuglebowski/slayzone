@@ -306,6 +306,7 @@ function ChatView({ target }: { target: ChatTarget }) {
               submitting={session.submittingPrompts}
               answer={answer}
               autoModeAvailable={settings.autoOptedIn}
+              permissionMode={settings.mode}
               cwd={target.cwd}
               timeline={state.timeline}
               sendMessage={(text) => void sendMessage(text).catch(() => undefined)}

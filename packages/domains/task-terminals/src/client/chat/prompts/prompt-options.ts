@@ -65,6 +65,12 @@ export interface PermissionView {
 export interface PermissionViewCtx {
   /** The account has auto mode and opted in. */
   autoModeAvailable: boolean
+  /**
+   * The session's permission mode (`AgentMode`: `bypass`, `auto`, …), when known.
+   * Bypass still gets prompts (the CLI's own safety checks); offering "switch to
+   * auto" there would downgrade the session, so the row is left out.
+   */
+  permissionMode?: string | null
   /** The session's working directory (MCP rule rows name it). */
   cwd: string
   /** Subagent type of the agent that asked, when known. */
@@ -220,6 +226,7 @@ export function buildPermissionView(
   const offersAuto =
     req.toolName === 'Bash' &&
     ctx.autoModeAvailable &&
+    ctx.permissionMode !== 'bypass' &&
     !options.some((o) => o.id === 'yes-mode-auto')
   if (offersAuto) {
     options.push({
