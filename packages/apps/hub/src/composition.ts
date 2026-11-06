@@ -64,6 +64,7 @@ import {
   setBackupOps,
   setAuthEvents,
   setComputersDeps,
+  setHubDiskComputer,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
@@ -1776,6 +1777,10 @@ export function composeServer(opts: {
     // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote computers (any
     // other name) keep the fresh-uuid path.
     const localComputerName = DEFAULT_LOCAL_COMPUTER_NAME
+    // On the hub's own disk, only the co-spawned local computer's folders are the hub's
+    // (the desktop app's). A standalone hub has none: what any computer reports
+    // describes that computer's disk, never the hub's (api access.ts, Q1).
+    setHubDiskComputer(supervised ? deterministicLocalComputerId(localComputerName) : null)
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.

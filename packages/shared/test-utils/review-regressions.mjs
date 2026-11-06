@@ -416,6 +416,16 @@ export const REGRESSIONS = [
     id: 'P1',
     what: 'no procedure, REST route or MCP tool reads a hub-disk path the caller may not access',
     files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
+  },
+  // ── round 9 ──
+  {
+    round: 9,
+    id: 'Q1',
+    what: "a remote computer's folders never own anything on the hub's disk",
+    files: [
+      `${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`,
+      `${P}apps/api/src/access.test.ts`
+    ]
   }
 ]
 

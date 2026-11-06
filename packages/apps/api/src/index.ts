@@ -123,7 +123,8 @@ export {
   type OwnedResource,
   type Ownership,
   type ResourceKind,
-  requestComputerOf
+  requestComputerOf,
+  setHubDiskComputer
 } from './access'
 export {
   TRPC_OWNER_POLICY,

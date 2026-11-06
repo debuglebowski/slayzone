@@ -6,10 +6,15 @@
  *
  *   P2 — since N4, naming a computer broke a path tie: user A recorded B's folder as
  *        a placement on A's own computer, named that computer, and read B's file off
- *        the HUB's disk. The named computer says nothing about the hub's disk: a tie
- *        there denies; and a root with no computer (the hub's own, legacy) never
- *        loses a tie because a computer was named.
+ *        the HUB's disk. The named computer says nothing about the hub's disk.
+ *   Q1 — the cause underneath (round 9): what a REMOTE computer reports (its project
+ *        folders) counted as owned folders on the hub's own disk. A's computer
+ *        reporting `<B's folder>/secret.txt`, `<B's folder>/sub` or `/` gave A that
+ *        file, B's files or `/etc/hosts`; reporting B's folder exactly locked B out.
+ *        On the hub's disk, ownership comes only from records of the hub's disk:
+ *        project paths, hub-side worktrees, the hub's own local computer.
  */
+import * as fs from 'node:fs'
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,7 +22,7 @@ import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { setAuthGate } from '@slayzone/trpc-server'
 import { describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { canAccess, invalidateAccessCache, resource } from '../access'
+import { canAccess, invalidateAccessCache, resource, setHubDiskComputer } from '../access'
 import { appRouter } from '../router.js'
 
 const h = await createTestHarness()
@@ -110,14 +115,89 @@ describe('P2: naming a computer never wins a tie on the hub’s disk', () => {
     )
   }
 
-  test('hub-disk kinds: a tie denies whatever computer is named', async () => {
+  test("hub-disk kinds: A's computer's report gives A nothing, and B keeps B's own", async () => {
     for (const kind of ['ownedPath', 'pathTree'] as const) {
       expect(await decide(A, kind, 'cA'), `${kind} A on cA`).toBe(false)
-      expect(await decide(B, kind, 'cB'), `${kind} B on cB`).toBe(false)
+      expect(await decide(B, kind, 'cB'), `${kind} B on cB`).toBe(true)
     }
   })
 
   test('a root with no computer (the hub’s own) never loses a tie to a named computer', async () => {
     expect(await decide(A, 'path', 'cA')).toBe(false)
+  })
+})
+
+describe("Q1: a remote computer's folders never own anything on the hub's disk", () => {
+  const placeOnA = (root: string) =>
+    sql(
+      `INSERT OR REPLACE INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+       VALUES ('cA', 'pA', ?, 'ready', 1)`,
+      root
+    )
+  const hosts = '/etc/hosts'
+  fs.mkdirSync(join(bRoot, 'sub'), { recursive: true })
+  fs.writeFileSync(join(bRoot, 'sub', 'b.txt'), 'B-SUB')
+
+  for (const [what, placed, readPath] of [
+    ["a file of B's", join(bRoot, 'secret.txt'), join(bRoot, 'secret.txt')],
+    ["a folder deeper in B's", join(bRoot, 'sub'), join(bRoot, 'sub', 'b.txt')],
+    ['/', '/', hosts],
+    ['/etc/hosts', hosts, hosts]
+  ] as const) {
+    test(`A's computer reports ${what}: A still cannot read it`, async () => {
+      sql(`DELETE FROM project_placements WHERE computer_id = 'cA'`)
+      placeOnA(placed)
+      invalidateAccessCache()
+      expect(await outcome(as(A).artifacts.upload({ taskId: 'tA', sourcePath: readPath }))).toBe(
+        'NOT_FOUND'
+      )
+      expect(
+        await outcome(
+          as(A).artifacts.uploadDir({
+            taskId: 'tA',
+            dirPath: join(bRoot, 'sub'),
+            parentFolderId: null
+          })
+        )
+      ).toBe('NOT_FOUND')
+    })
+  }
+
+  test("A's computer reports B's folder exactly: B is not locked out", async () => {
+    sql(`DELETE FROM project_placements WHERE computer_id = 'cA'`)
+    placeOnA(bRoot)
+    invalidateAccessCache()
+    const art = await as(B).artifacts.upload({
+      taskId: 'tB',
+      sourcePath: join(bRoot, 'secret.txt')
+    })
+    expect(await as(B).artifacts.readContent({ id: art!.id })).toBe('B-SECRET')
+  })
+
+  test("the hub's own local computer is a record of the hub's disk: its folders count", async () => {
+    sql(
+      `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+       VALUES ('cLocal', 'local', 'darwin', '1', '[]', 1, ?)`,
+      A
+    )
+    const aMore = join(base, 'a-more')
+    fs.mkdirSync(aMore, { recursive: true })
+    fs.writeFileSync(join(aMore, 'x.txt'), 'A-MORE')
+    sql(
+      `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+       VALUES ('cLocal', 'pA', ?, 'ready', 1)`,
+      aMore
+    )
+    setHubDiskComputer('cLocal')
+    try {
+      invalidateAccessCache()
+      const art = await as(A).artifacts.upload({ taskId: 'tA', sourcePath: join(aMore, 'x.txt') })
+      expect(await as(A).artifacts.readContent({ id: art!.id })).toBe('A-MORE')
+      expect(
+        await outcome(as(B).artifacts.upload({ taskId: 'tB', sourcePath: join(aMore, 'x.txt') }))
+      ).toBe('NOT_FOUND')
+    } finally {
+      setHubDiskComputer(null)
+    }
   })
 })

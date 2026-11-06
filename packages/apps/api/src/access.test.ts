@@ -381,7 +381,8 @@ describe('ownedPath: a hub-local open needs a root the caller may access (N1)', 
   test("inside a root: that root's owner only", async () => {
     expect(await can(A, 'ownedPath', join(aRoot, 'README.md'))).toBe(true)
     expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(true)
-    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(true)
+    // A folder computer c1 reports is c1's disk, never the hub's (Q1).
+    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(false)
     expect(await can(B, 'ownedPath', join(aRoot, 'README.md'))).toBe(false)
     expect(await can(A, 'ownedPath', join(bNested, 'lib.ts'))).toBe(false)
   })
