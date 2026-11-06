@@ -393,6 +393,44 @@ describe('direct-link revocation', () => {
     }
   })
 
+  it('a revocation that runs before the grant is even pending (issue still awaiting its gates) also drops it', async () => {
+    for (const where of ['resolve', 'gate'] as const) {
+      let release: (() => void) | undefined
+      const wait = () => new Promise<void>((r) => (release = r))
+      const ctx = setup({
+        resolveChat: async () => {
+          if (where === 'resolve') await wait()
+          return { computerId: 'c-local', epoch: 4, taskId: 'task-1' }
+        },
+        gate: async () => {
+          if (where === 'gate') await wait()
+        }
+      })
+      const issuing = ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-1' }, local)
+      await new Promise((r) => setTimeout(r, 0))
+      // The chat moved while the issue had located (or was locating) the old epoch.
+      await ctx.issuer.revoke(
+        { by: 'target', target: { kind: 'chat', tabId: 'tab-1' } },
+        'chat_ownership_changed'
+      )
+      release?.()
+      expect(await issuing, where).toEqual({ available: false, reason: 'revoked' })
+      // Never registered: nothing on the computer to revoke, nothing held here.
+      expect(
+        ctx.requests.filter((r) => r.method === HubToComputerMethods.directGrant),
+        where
+      ).toEqual([])
+      expect(ctx.issuer.heldGrantIds('c-local'), where).toEqual([])
+    }
+  })
+
+  it('a revocation that matches nothing in flight does not refuse a later issue', async () => {
+    const ctx = setup()
+    await ctx.issuer.revoke({ by: 'target', target: { kind: 'chat', tabId: 'tab-1' } }, 'gone')
+    const out = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-1' }, local)
+    expect(out.available).toBe(true)
+  })
+
   it('revokes everything on a revoked computer', async () => {
     const { issuer, requests } = await issued()
     await issuer.revoke({ by: 'computer', computerId: 'c-local' }, 'computer_revoked')

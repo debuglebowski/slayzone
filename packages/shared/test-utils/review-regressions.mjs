@@ -737,6 +737,12 @@ export const REGRESSIONS = [
       `${P}apps/app/src/main/renderer-csp.test.ts`,
       `${P}apps/hub/src/direct-link.test.ts`
     ]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-1',
+    what: 'a revocation that runs while an issue is still locating its target or awaiting its gates drops that grant before it is registered (no stale chat grant survives an ownership move)',
+    files: [`${P}apps/hub/src/direct-link.test.ts`]
   }
 ]
 

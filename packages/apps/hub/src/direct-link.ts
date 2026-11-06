@@ -179,6 +179,26 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
   const grants = new Map<string, IssuedGrant>()
   const signalLimiter = createFixedWindowLimiter()
   const signalRule = { max: deps.signalLimitPerMinute ?? 30, windowMs: 60_000 }
+  /**
+   * Revocations an issue still in flight must see (by sequence number), kept only
+   * while one is: an issue checks every revocation since it started, so a grant it
+   * is about to make is dropped even when the revocation ran before it was held.
+   */
+  let revocationSeq = 0
+  const recentRevocations: Array<{ seq: number; which: DirectRevocation }> = []
+  const issuesInFlight = new Map<symbol, number>()
+  function revokedSince(start: number, g: IssuedGrant): boolean {
+    return recentRevocations.some((r) => r.seq > start && matches(g, r.which))
+  }
+  function pruneRevocations(): void {
+    if (issuesInFlight.size === 0) {
+      recentRevocations.length = 0
+      return
+    }
+    const oldest = Math.min(...issuesInFlight.values())
+    while (recentRevocations.length > 0 && (recentRevocations[0]?.seq ?? 0) <= oldest)
+      recentRevocations.shift()
+  }
 
   function prune(): void {
     const t = now()
@@ -229,121 +249,137 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
 
   const issuer: DirectLinkIssuer = {
     async issue(target, caller, options = {}) {
-      const located = await locate(target)
-      if ('unavailable' in located) return { available: false, reason: located.unavailable }
-      // The target's task (and computer, when named) is what the owner gate checked:
-      // the resource must lie inside it, or the check covered something else.
-      if (
-        located.taskId !== target.taskId ||
-        (target.computerId !== undefined && target.computerId !== located.computerId)
-      ) {
-        return { available: false, reason: 'wrong-target' }
-      }
-      const computer = deps.gateway
-        .listUsableComputers()
-        .find((c) => c.computerId === located.computerId)
-      if (!computer) return { available: false, reason: 'no-computer' }
-      // The WebSocket listener when this client can dial it; else WebRTC, brokered
-      // here, when both ends speak it; else the relay (the same answers as before).
-      // One spelling everywhere (`box:443` is `box`): the desktop gate and CSP
-      // compare what is issued here.
-      const listener = computer.directAddress
-        ? normalizeDirectAddress(computer.directAddress)
-        : null
-      const wsAddress =
-        listener &&
-        !(isLoopbackAuthority(listener) && !(computer.peerLoopback && isLoopbackPeer(caller.ip)))
-          ? listener
-          : null
-      const rtc =
-        wsAddress === null &&
-        computer.directRtc === true &&
-        !!options.transports?.includes('webrtc')
-      if (wsAddress === null && !rtc) {
-        return { available: false, reason: computer.directAddress ? 'unreachable' : 'no-address' }
-      }
-      // Throws on refusal: a caller the gate refuses gets the same error the relayed
-      // request would, not a silent fallback.
-      await deps.gate?.(computer.computerId, located.work)
-
-      const token = randomBytes(32).toString('base64url')
-      const params: DirectGrantParams = {
-        grantId: randomUUID(),
-        tokenHash: createHash('sha256').update(token).digest('hex'),
-        userId: caller.userId,
-        resource: located.resource,
-        ttlMs: DIRECT_GRANT_TTL_MS
-      }
-      prune()
-      const held: IssuedGrant = {
-        grantId: params.grantId,
-        computerId: computer.computerId,
-        userId: caller.userId,
-        taskId: located.taskId,
-        resource: params.resource,
-        expiresAt: now() + params.ttlMs,
-        address: rtc ? null : wsAddress,
-        pending: true
-      }
-      grants.set(params.grantId, held)
+      // Every revocation from now on is seen by this issue, even one that runs
+      // before its grant is held here (while it locates the target or awaits the
+      // gates): a chat that moved meanwhile is never granted under its old epoch.
+      const inFlight = Symbol('issue')
+      const start = revocationSeq
+      issuesInFlight.set(inFlight, start)
       try {
-        await deps.gateway.request(computer.computerId, HubToComputerMethods.directGrant, params)
-      } catch (err) {
-        grants.delete(params.grantId)
-        throw err
-      }
-      if (grants.get(params.grantId) !== held) {
-        // Revoked while registering: drop it on the computer, which holds it now.
-        await asHub(() =>
-          deps.gateway.request(computer.computerId, HubToComputerMethods.directRevoke, {
-            by: 'grant',
-            grantIds: [params.grantId]
-          } satisfies DirectRevokeParams)
-        ).catch(() => undefined)
+        const located = await locate(target)
+        if ('unavailable' in located) return { available: false, reason: located.unavailable }
+        // The target's task (and computer, when named) is what the owner gate checked:
+        // the resource must lie inside it, or the check covered something else.
+        if (
+          located.taskId !== target.taskId ||
+          (target.computerId !== undefined && target.computerId !== located.computerId)
+        ) {
+          return { available: false, reason: 'wrong-target' }
+        }
+        const computer = deps.gateway
+          .listUsableComputers()
+          .find((c) => c.computerId === located.computerId)
+        if (!computer) return { available: false, reason: 'no-computer' }
+        // The WebSocket listener when this client can dial it; else WebRTC, brokered
+        // here, when both ends speak it; else the relay (the same answers as before).
+        // One spelling everywhere (`box:443` is `box`): the desktop gate and CSP
+        // compare what is issued here.
+        const listener = computer.directAddress
+          ? normalizeDirectAddress(computer.directAddress)
+          : null
+        const wsAddress =
+          listener &&
+          !(isLoopbackAuthority(listener) && !(computer.peerLoopback && isLoopbackPeer(caller.ip)))
+            ? listener
+            : null
+        const rtc =
+          wsAddress === null &&
+          computer.directRtc === true &&
+          !!options.transports?.includes('webrtc')
+        if (wsAddress === null && !rtc) {
+          return { available: false, reason: computer.directAddress ? 'unreachable' : 'no-address' }
+        }
+        // Throws on refusal: a caller the gate refuses gets the same error the relayed
+        // request would, not a silent fallback.
+        await deps.gate?.(computer.computerId, located.work)
+
+        const token = randomBytes(32).toString('base64url')
+        const params: DirectGrantParams = {
+          grantId: randomUUID(),
+          tokenHash: createHash('sha256').update(token).digest('hex'),
+          userId: caller.userId,
+          resource: located.resource,
+          ttlMs: DIRECT_GRANT_TTL_MS
+        }
+        prune()
+        const held: IssuedGrant = {
+          grantId: params.grantId,
+          computerId: computer.computerId,
+          userId: caller.userId,
+          taskId: located.taskId,
+          resource: params.resource,
+          expiresAt: now() + params.ttlMs,
+          address: rtc ? null : wsAddress,
+          pending: true
+        }
+        if (revokedSince(start, held)) {
+          // Revoked before it was held here: never registered, nothing to undo.
+          return { available: false, reason: 'revoked' }
+        }
+        grants.set(params.grantId, held)
+        try {
+          await deps.gateway.request(computer.computerId, HubToComputerMethods.directGrant, params)
+        } catch (err) {
+          grants.delete(params.grantId)
+          throw err
+        }
+        if (grants.get(params.grantId) !== held || revokedSince(start, held)) {
+          grants.delete(params.grantId)
+          // Revoked while registering: drop it on the computer, which holds it now.
+          await asHub(() =>
+            deps.gateway.request(computer.computerId, HubToComputerMethods.directRevoke, {
+              by: 'grant',
+              grantIds: [params.grantId]
+            } satisfies DirectRevokeParams)
+          ).catch(() => undefined)
+          securityEvent({
+            event: 'computer.direct_revoke',
+            outcome: 'success',
+            targetKind: 'computer',
+            targetId: computer.computerId,
+            detail: { reason: 'revoked_while_issuing', grants: 1 }
+          })
+          return { available: false, reason: 'revoked' }
+        }
+        held.pending = false
         securityEvent({
-          event: 'computer.direct_revoke',
+          event: 'computer.direct_grant',
           outcome: 'success',
           targetKind: 'computer',
           targetId: computer.computerId,
-          detail: { reason: 'revoked_while_issuing', grants: 1 }
+          detail: {
+            grantId: params.grantId,
+            resource: params.resource.kind,
+            resourceId:
+              params.resource.kind === 'pty' ? params.resource.sessionId : params.resource.tabId,
+            ttlMs: params.ttlMs
+          }
         })
-        return { available: false, reason: 'revoked' }
-      }
-      held.pending = false
-      securityEvent({
-        event: 'computer.direct_grant',
-        outcome: 'success',
-        targetKind: 'computer',
-        targetId: computer.computerId,
-        detail: {
-          grantId: params.grantId,
-          resource: params.resource.kind,
-          resourceId:
-            params.resource.kind === 'pty' ? params.resource.sessionId : params.resource.tabId,
-          ttlMs: params.ttlMs
+        if (rtc) {
+          return {
+            available: true,
+            transport: 'webrtc',
+            computerId: computer.computerId,
+            token,
+            grantId: params.grantId,
+            expiresInMs: params.ttlMs,
+            protocol: DIRECT_LINK_PROTOCOL,
+            stunAddresses: [...(deps.stunAddresses?.() ?? [])]
+          }
         }
-      })
-      if (rtc) {
         return {
           available: true,
-          transport: 'webrtc',
+          transport: 'ws',
           computerId: computer.computerId,
+          address: wsAddress as string,
           token,
           grantId: params.grantId,
           expiresInMs: params.ttlMs,
-          protocol: DIRECT_LINK_PROTOCOL,
-          stunAddresses: [...(deps.stunAddresses?.() ?? [])]
+          protocol: DIRECT_LINK_PROTOCOL
         }
-      }
-      return {
-        available: true,
-        transport: 'ws',
-        computerId: computer.computerId,
-        address: wsAddress as string,
-        token,
-        grantId: params.grantId,
-        expiresInMs: params.ttlMs,
-        protocol: DIRECT_LINK_PROTOCOL
+      } finally {
+        issuesInFlight.delete(inFlight)
+        pruneRevocations()
       }
     },
 
@@ -406,6 +442,8 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
     },
 
     async revoke(which, reason) {
+      revocationSeq++
+      if (issuesInFlight.size > 0) recentRevocations.push({ seq: revocationSeq, which })
       prune()
       const byComputer = new Map<string, string[]>()
       for (const [id, g] of grants) {
