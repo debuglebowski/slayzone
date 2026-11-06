@@ -608,6 +608,7 @@ run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
+run_harness packages/domains/agent-turns/src/server/turn-recording.test.ts
 run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-git-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/workspace-capture.test.ts

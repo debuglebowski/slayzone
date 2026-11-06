@@ -608,6 +608,16 @@ export const REGRESSIONS = [
       execProxies,
       `${computer}handlers/pty.test.ts`
     ]
+  },
+  // ── post-merge QA (task 964073b0, agent-turn snapshots → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-turns',
+    what: 'agent terminal prompts and chat results record turn snapshots again (callers lost in daf8d3bb4); a computer-owned chat records with no hub-side preview',
+    files: [
+      `${P}domains/agent-turns/src/server/turn-recording.test.ts`,
+      `${P}domains/agent-turns/src/server/turn-tracker.test.ts`
+    ]
   }
 ]
 

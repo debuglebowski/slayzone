@@ -1,7 +1,11 @@
 import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
-import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
+import {
+  setAgentPromptReader,
+  agentPromptsEvents,
+  wireTurnRecording
+} from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerProbes } from './computer-probes'
@@ -157,6 +161,7 @@ import {
   getChatDeps,
   setExecutionContextProbe,
   setTerminalCommandProbe,
+  onPtyInputSubmit,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -1021,6 +1026,9 @@ export function composeServer(opts: {
     availability: computerChat.availability
   })
   setChatSessionSource(computerChat.relay.sessions)
+  // Turn snapshots: an agent terminal's submitted prompt and a chat turn's result.
+  // The rows live here; each snapshot's git runs on the checkout's computer.
+  wireTurnRecording(db, { onPtyInputSubmit, chatEvents: computerChat.relay.events })
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
   setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))

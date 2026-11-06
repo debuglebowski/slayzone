@@ -94,6 +94,7 @@ export {
   subscribeToStateChange,
   touchTaskMainSession,
   transitionStateFromHook,
+  onPtyInputSubmit,
   writePty
 } from './runtime/pty-manager'
 export {

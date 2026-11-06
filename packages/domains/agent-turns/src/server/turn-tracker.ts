@@ -48,6 +48,20 @@ async function resolveTabContext(
   return { taskId: tab.task_id, worktreePath, computerId }
 }
 
+/**
+ * The task's chat is owned by a computer (any owner past `legacy`): its prompts
+ * live on that computer, never on the hub — migration v187's trigger refuses a
+ * preview here. The turn itself still records, with no preview, like a terminal's.
+ */
+async function promptStaysOnComputer(db: SlayzoneDb, taskId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS owned FROM chat_ownership WHERE task_id = ? AND state <> 'legacy' LIMIT 1`
+    )
+    .get(taskId)
+  return Boolean(row)
+}
+
 function broadcastChange(worktreePath: string): void {
   // Pure domain signal — electron-free so this module lives in `server/`. The
   // tRPC `agentTurns.onChanged` subscription wraps this emitter; the Electron-
@@ -117,9 +131,10 @@ export async function recordTurnBoundary(
       terminal_tab_id: tabId,
       snapshot_sha: sha,
       head_sha_at_snap: headSha,
-      prompt_preview: isCleanPrompt(promptText)
-        ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
-        : '',
+      prompt_preview:
+        isCleanPrompt(promptText) && !(await promptStaysOnComputer(db, ctx.taskId))
+          ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
+          : '',
       created_at: Date.now()
     })
   } catch (err) {
