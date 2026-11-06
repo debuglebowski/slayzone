@@ -678,6 +678,12 @@ export const REGRESSIONS = [
     id: 'DL-L5a',
     what: "Electron main treats localhost and [::1] listeners as loopback (probed when the document's CSP has the entry, never sent to the hub), not as invalid",
     files: [`${P}apps/app/src/main/direct-link-gate.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5b',
+    what: 'two terminals of one session on the direct link: one ending never takes the other off it (each link removes only its own entry)',
+    files: [`${P}domains/terminal/src/client/direct-pty.test.ts`]
   }
 ]
 

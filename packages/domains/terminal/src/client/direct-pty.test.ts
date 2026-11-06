@@ -441,6 +441,30 @@ describe('startDirectPtyLink', () => {
   })
 })
 
+describe('two terminals of one session (double mount)', () => {
+  it('one ending does not take the other off the direct link (they share one socket)', async () => {
+    const shared = fakeLease()
+    const mk = () =>
+      startDirectPtyLink({
+        sessionId: 's1',
+        manager: {
+          acquire: async () => shared.lease as never,
+          onComputerConnected: () => () => undefined
+        },
+        deliver: () => undefined,
+        lastSeq: () => -1
+      })
+    const stopA = mk()
+    await flush()
+    const stopB = mk()
+    await flush()
+    stopA()
+    expect(directPtyFor('s1')).not.toBeNull()
+    stopB()
+    expect(directPtyFor('s1')).toBeNull()
+  })
+})
+
 describe('a session that starts after its terminal mounted', () => {
   it('is retried as soon as the session wakes (it started), not after the long retry', async () => {
     vi.useFakeTimers()

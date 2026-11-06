@@ -32,7 +32,18 @@ import { taskIdFromSessionId } from './session-id'
 type DirectPtyClient = DirectLease['client']
 
 /** Sessions with a live direct lease, for the read/write helpers below. */
-const directSessions = new Map<string, { client: DirectPtyClient; lost: () => void }>()
+interface DirectSessionLink {
+  client: DirectPtyClient
+  lost: () => void
+}
+/**
+ * Every live link per session, newest last. A session can be mounted twice (two
+ * terminals of it), and both share one socket client: each link removes only its
+ * own entry, so one ending never takes the other off the direct link.
+ */
+const directSessions = new Map<string, DirectSessionLink[]>()
+const directFor = (sessionId: string): DirectSessionLink | undefined =>
+  directSessions.get(sessionId)?.at(-1)
 
 /** How long a direct write or backfill may take (`@slayzone/transport`). */
 export const DIRECT_WRITE_DEADLINE_MS = DIRECT_CALL_DEADLINE_MS
@@ -50,7 +61,7 @@ export function onDirectPtySessionsChanged(cb: () => void): () => void {
 
 /** The direct client for a session, or null (use the hub). */
 export function directPtyFor(sessionId: string): DirectPtyClient | null {
-  return directSessions.get(sessionId)?.client ?? null
+  return directFor(sessionId)?.client ?? null
 }
 
 /** What went direct since load (diagnostics, e2e): chunks received, writes sent. */
@@ -88,22 +99,31 @@ export interface DirectPtyLinkOptions {
 export function startDirectPtyLink(opts: DirectPtyLinkOptions): () => void {
   const { sessionId } = opts
   let current: DirectLease | null = null
+  let mine: DirectSessionLink | null = null
   let sub: { unsubscribe(): void } | null = null
 
   function unlink(): void {
     sub?.unsubscribe()
     sub = null
-    if (current && directSessions.get(sessionId)?.client === current.client) {
-      directSessions.delete(sessionId)
-      noteDirectUse('pty', sessionId, false)
-      changed()
-    }
     current = null
+    const links = directSessions.get(sessionId)
+    const at = mine ? (links?.indexOf(mine) ?? -1) : -1
+    mine = null
+    if (!links || at < 0) return
+    links.splice(at, 1)
+    // Another terminal of this session is still linked: it stays direct.
+    if (links.length > 0) return
+    directSessions.delete(sessionId)
+    noteDirectUse('pty', sessionId, false)
+    changed()
   }
 
   function link(got: DirectLease): void {
     current = got
-    directSessions.set(sessionId, { client: got.client, lost: () => keeper.lost() })
+    mine = { client: got.client, lost: () => keeper.lost() }
+    const links = directSessions.get(sessionId)
+    if (links) links.push(mine)
+    else directSessions.set(sessionId, [mine])
     noteDirectUse('pty', sessionId, true)
     changed()
     // Live chunks wait until the gap since the last delivered seq is filled, so
@@ -187,7 +207,7 @@ export function ptyWrite(hub: HubPtyWrite, sessionId: string, data: string): Pro
     const e: { hub: HubPtyWrite; writer: OrderedPtyWriter } = {
       hub,
       writer: createOrderedPtyWriter({
-        isDirect: () => directSessions.has(sessionId),
+        isDirect: () => directFor(sessionId) !== undefined,
         send: (path, chunk): Promise<boolean> => sendPtyWrite(e.hub, sessionId, chunk, path)
       })
     }
@@ -215,7 +235,7 @@ async function sendPtyWrite(
   path: PtyWritePath
 ): Promise<boolean> {
   const writeId = newDirectWriteId()
-  const direct = path === 'direct' ? directSessions.get(sessionId) : undefined
+  const direct = path === 'direct' ? directFor(sessionId) : undefined
   if (direct) {
     try {
       const written = await withDirectDeadline(
@@ -239,7 +259,7 @@ async function sendPtyWrite(
  * in time) drops the lease, so the session goes back to the relay at once.
  */
 export function noteDirectPtyFailure(sessionId: string, err: unknown): void {
-  if (directCallFailure(err) === 'transport') directSessions.get(sessionId)?.lost()
+  if (directCallFailure(err) === 'transport') directFor(sessionId)?.lost()
 }
 
 /** Backfill after `afterSeq`: direct when the session has a lease, else the hub. */
@@ -248,7 +268,7 @@ export async function ptyBufferSince(
   sessionId: string,
   afterSeq: number
 ): ReturnType<HubPtyBuffer['pty']['getBufferSince']['query']> {
-  const direct = directSessions.get(sessionId)
+  const direct = directFor(sessionId)
   if (direct) {
     // Each call has its own deadline (a long paged read is not cut off).
     const res = await readDirectPtyBuffer(direct.client, sessionId, afterSeq).catch(
