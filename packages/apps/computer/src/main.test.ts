@@ -511,6 +511,55 @@ describe('startComputer runtime secondary hubs', () => {
     }
   })
 
+  it('removing a hub revokes the direct-link grants it registered (none outlive it)', async () => {
+    const { createHash } = await import('node:crypto')
+    const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+    const { wireSuperjson } = await import('@slayzone/trpc-server/wire')
+    const WebSocket = (await import('ws')).default
+    const { handle, of } = harness()
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      const b = of(B)[0]!.options
+      await vi.waitFor(() => expect(b.identity?.directAddress?.()).toBeTruthy())
+      const token = 'r'.repeat(43)
+      await b.onHubRequest?.(
+        HubToComputerMethods.directGrant,
+        {
+          grantId: 'g-b',
+          tokenHash: createHash('sha256').update(token).digest('hex'),
+          userId: null,
+          resource: { kind: 'pty', sessionId: 'b-1' },
+          ttlMs: 600_000
+        },
+        ACTOR as never
+      )
+      const authorize = async (): Promise<unknown> => {
+        const ws = createWSClient({
+          url: `ws://${b.identity?.directAddress?.()}/direct/v1`,
+          WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+          connectionParams: { token },
+          retryDelayMs: () => 60_000
+        })
+        try {
+          const trpc = createTRPCClient<import('@slayzone/transport/direct').DirectRouter>({
+            links: [wsLink({ client: ws, transformer: wireSuperjson })]
+          })
+          return await Promise.race([
+            trpc.authorize.mutate({ token }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3_000))
+          ])
+        } finally {
+          ws.close()
+        }
+      }
+      await expect(authorize()).resolves.toBeTruthy()
+      await handle.setSecondaryHubs!([])
+      await expect(authorize()).rejects.toThrow()
+    } finally {
+      await handle.stop()
+    }
+  })
+
   it('reconnects a fatally stopped secondary only when handed a join token', async () => {
     const { handle, of, fatal } = harness()
     try {

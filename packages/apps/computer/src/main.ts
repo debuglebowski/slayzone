@@ -830,6 +830,12 @@ export function startComputer(
       setHookDirectory: (directory) => dispatch.setHookDirectory(directory),
       dispose: async () => {
         disposed = true
+        // A hub no longer served grants nothing: its direct links end now (each
+        // socket holding one is closed), and its terminals and chats are no longer
+        // reachable through the listener.
+        const hubKey = hubHostFromUrl(hubUrl)
+        directGrants.revoke(hubKey, { by: 'all' })
+        if (dispatchByHub.get(hubKey) === dispatch) dispatchByHub.delete(hubKey)
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
         await dispatch.dispose()

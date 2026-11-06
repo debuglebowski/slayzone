@@ -657,6 +657,12 @@ export const REGRESSIONS = [
       `${P}shared/transport/src/client/direct-write-order.test.ts`,
       `${P}domains/terminal/src/client/direct-pty.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L3',
+    what: 'a hub the computer stops serving has its direct-link grants revoked at once; its sockets close and its terminals and chats leave the listener',
+    files: [`${P}apps/computer/src/main.test.ts`]
   }
 ]
 
