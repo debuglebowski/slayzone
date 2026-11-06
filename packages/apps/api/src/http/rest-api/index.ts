@@ -76,6 +76,7 @@ import { registerTabsSplitRoute } from './tabs/split'
 import { registerTabsRenameRoute } from './tabs/rename'
 import { registerComputersJoinTokenRoute } from './computers/join-token'
 import { registerComputersListRoute } from './computers/list'
+import { registerComputersDirectAddressesRoute } from './computers/direct-addresses'
 import { registerHubUsersRoutes } from './hub/users'
 import { registerHubComputersRoute } from './hub/computers'
 import { registerWebLoginRoute } from './hub/web-login'
@@ -191,6 +192,7 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // boot-time local-computer auto-enroll. 503 only if the computer init failed.
   registerComputersJoinTokenRoute(app, deps)
   registerComputersListRoute(app, deps)
+  registerComputersDirectAddressesRoute(app, deps)
 
   // Hub accounts: loopback-only operator user management (`slay hub users`). The
   // only way to create an account now that public signup is closed. 503 where

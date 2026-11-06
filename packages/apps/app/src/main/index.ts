@@ -82,6 +82,8 @@ import {
 } from './browser-view-manager'
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
 import { createDirectLinkGate } from './direct-link-gate'
+import { fetchIssuedDirectAddresses } from './direct-link-issued'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
 import { attachHubSocketOriginStrip } from './hub-socket-origin'
 import { applyAppBadge, parseAppBadgePayload } from './app-badge'
 import {
@@ -638,7 +640,33 @@ setBrowserViewScreenshotKeysResolver(() =>
 )
 
 /** Renderer direct links: CSP sources + main-side probe (docs/direct-link.md). */
-const directLinkGate = createDirectLinkGate()
+const directLinkGate = createDirectLinkGate({
+  // The renderer's hub, resolved here from main's own registry (never a URL the
+  // renderer names), says which addresses it issued; anything else is refused.
+  issuedByHub: async (hubId) => {
+    const config = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+    const registry = resolveHubRegistry(config)
+    const id = hubId === DIRECT_LINK_DEFAULT_HUB_ID ? resolveDefaultHubId(config, registry) : hubId
+    const hub = registry.find((h) => h.id === id)
+    if (!hub) return []
+    let origin: string | null = null
+    if (hub.kind === 'local') {
+      const port = await sidecarHandlePromise.then(
+        (h) => h.getPort(),
+        () => null
+      )
+      origin = port ? `http://127.0.0.1:${port}` : null
+    } else if (typeof hub.url === 'string') {
+      const normalized = normalizeRemoteUrl(hub.url)
+      origin = normalized ? toHubOrigin(normalized) : null
+    }
+    if (!origin) return []
+    const bearer = await createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot())
+      .get(hub.id)
+      .catch(() => null)
+    return fetchIssuedDirectAddresses(origin, bearer)
+  }
+})
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280
@@ -3869,8 +3897,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       probeRemoteHealth(typeof rawUrl === 'string' ? rawUrl : '')
     )
     // May this document open a direct-link socket to a computer now (CSP + main's probe)?
-    ipcMain.handle('app:direct-link-prepare', (event, address: unknown) =>
-      directLinkGate.prepare(event.sender.id, typeof address === 'string' ? address : '')
+    ipcMain.handle('app:direct-link-prepare', (event, address: unknown, hubId: unknown) =>
+      directLinkGate.prepare(
+        event.sender.id,
+        typeof hubId === 'string' ? hubId : '',
+        typeof address === 'string' ? address : ''
+      )
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())

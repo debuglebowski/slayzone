@@ -230,6 +230,13 @@ relayed. Loopback adds nothing: the local hub's `ws://127.0.0.1:*` already cover
 local computer, and the hub offers loopback only on one machine. No `http(s)` entry
 is added, because the probe runs in main.
 
+Main never takes the renderer's word for an address. The renderer names the hub that
+issued it (`prepareDirectLink(address, hubId)`); main resolves that hub from its own
+registry, asks it (`GET /api/computers/direct-addresses`: the listener addresses of the
+caller's live grants), and adds the origin only if the hub names it. An unknown hub, a
+refusal, a hub too old for the route, or a bad answer refuses (`not-issued`), so the
+terminal stays on the relay. At most 32 issued origins are kept, oldest dropped first.
+
 ## Computer listener limits
 
 Limits are per client address (an IPv6 address counts as its /64):

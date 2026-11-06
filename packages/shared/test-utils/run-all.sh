@@ -592,6 +592,7 @@ run_harness packages/apps/hub/src/computer-restart-survival.test.ts
 run_harness packages/apps/api/src/http/rest-api/computers/join-token.test.ts
 # T-19: the REST computer roster is the caller's own (every one for an admin).
 run_harness packages/apps/api/src/http/rest-api/computers/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/computers/direct-addresses.test.ts
 # Loopback operator account routes (`slay hub users`). The routes never touch the DB
 # (the hubUsers capability is stubbed).
 run_harness packages/apps/api/src/http/rest-api/hub/users.test.ts
@@ -1168,6 +1169,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
   packages/apps/app/src/main/direct-link-gate.test.ts \
+  packages/apps/app/src/main/direct-link-issued.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \

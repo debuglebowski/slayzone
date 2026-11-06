@@ -623,7 +623,10 @@ export interface DirectLinkHubClient {
   }
 }
 
-let installedProbe: ((address: string) => Promise<boolean>) | null = null
+/** Probe an address one hub issued (`hubId`: the manager's hub key). */
+export type DirectLinkProbe = (address: string, hubId: string) => Promise<boolean>
+
+let installedProbe: DirectLinkProbe | null = null
 let installedRtcFactory: DirectRtcPeerFactory | null = null
 
 /**
@@ -643,7 +646,7 @@ export function setDirectRtcPeerFactory(factory: DirectRtcPeerFactory | null): v
  * main process (CSP check + an HTTP probe that never touches the renderer's
  * WebSocket stack); mobile installs `defaultDirectProbe` (a plain fetch).
  */
-export function setDirectLinkProbe(probe: ((address: string) => Promise<boolean>) | null): void {
+export function setDirectLinkProbe(probe: DirectLinkProbe | null): void {
   installedProbe = probe
 }
 
@@ -677,7 +680,9 @@ export function directLinkManagerFor(
         target,
         transports: rtc ? ['ws', 'webrtc'] : ['ws']
       }),
-    probe: (address) => (installedProbe ? installedProbe(address) : Promise.resolve(false)),
+    // The hub id lets the desktop's main process ask THIS hub whether it issued the
+    // address before the renderer's CSP may name it (direct-link-gate.ts).
+    probe: (address) => (installedProbe ? installedProbe(address, hubId) : Promise.resolve(false)),
     ...(rtc ? { rtc } : {})
   })
   // A computer that (re)connects may have moved its port: drop sockets to the old

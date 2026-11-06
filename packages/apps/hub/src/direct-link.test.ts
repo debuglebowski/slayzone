@@ -242,6 +242,25 @@ describe('direct-link issuer', () => {
   })
 })
 
+describe('direct-link issued addresses (what Electron main may add to its CSP)', () => {
+  it('names only the listener addresses of live grants this caller holds', async () => {
+    let t = 1_000
+    const { issuer } = setup({ now: () => t })
+    expect(issuer.issuedAddresses('u1')).toEqual([])
+    await issuer.issue({ kind: 'pty', sessionId: 'r1', taskId: 'task-1' }, remoteClient)
+    await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    expect(issuer.issuedAddresses('u1').sort()).toEqual(['127.0.0.1:5001', 'box.example:7443'])
+    // Another caller holds none of them.
+    expect(issuer.issuedAddresses('u2')).toEqual([])
+    expect(issuer.issuedAddresses(null)).toEqual([])
+    // Revoked or expired: no longer issued.
+    await issuer.revoke({ by: 'target', target: { kind: 'pty', sessionId: 'r1' } }, 'gone')
+    expect(issuer.issuedAddresses('u1')).toEqual(['127.0.0.1:5001'])
+    t += DIRECT_GRANT_TTL_MS + 1
+    expect(issuer.issuedAddresses('u1')).toEqual([])
+  })
+})
+
 describe('direct-link revocation', () => {
   async function issued() {
     const ctx = setup()

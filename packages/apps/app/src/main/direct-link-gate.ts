@@ -10,25 +10,31 @@
  *    CSP would block is never attempted. A newly issued public address joins the
  *    header from the next document load, and until then the terminal uses the
  *    relay. Only exact `wss://` origins of addresses a hub issued are ever added
- *    (`directLinkConnectSources`). Loopback adds nothing: the local hub's
- *    `ws://127.0.0.1:*` already covers the local computer.
+ *    (`directLinkConnectSources`), and main never takes the renderer's word for
+ *    that: it asks the renderer's hub (`GET /api/computers/direct-addresses`, the
+ *    caller's live grants) and refuses an address the hub does not name, or a hub it
+ *    cannot ask. At most {@link MAX_ISSUED_ORIGINS} are kept, newest last. Loopback
+ *    adds nothing: the local hub's `ws://127.0.0.1:*` already covers the local
+ *    computer.
  */
 import { directLinkConnectSources } from './renderer-csp'
 
 const HEALTH_PATH = '/direct/v1/health'
 const LOOPBACK_ENTRY = 'ws://127.0.0.1:*'
+/** Issued origins kept for the next document's CSP (oldest dropped first). */
+export const MAX_ISSUED_ORIGINS = 32
 
 export type DirectLinkPrepareResult =
   | { ok: true }
-  | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }
+  | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
 
 export interface DirectLinkGate {
   /** `connect-src` entries for the next document load. */
   connectSources(): string[]
   /** What `connect-src` a webContents' document was given. */
   recordApplied(webContentsId: number, connectSrc: string): void
-  /** May this webContents open a socket to `address` now? */
-  prepare(webContentsId: number, address: string): Promise<DirectLinkPrepareResult>
+  /** May this webContents open a socket to `address`, issued by hub `hubId`, now? */
+  prepare(webContentsId: number, hubId: string, address: string): Promise<DirectLinkPrepareResult>
 }
 
 export async function probeDirectHealth(url: string, deadlineMs = 3_000): Promise<boolean> {
@@ -44,9 +50,16 @@ export async function probeDirectHealth(url: string, deadlineMs = 3_000): Promis
   }
 }
 
-export function createDirectLinkGate(
-  deps: { probe?: (url: string) => Promise<boolean> } = {}
-): DirectLinkGate {
+export interface DirectLinkGateDeps {
+  probe?: (url: string) => Promise<boolean>
+  /**
+   * The addresses hub `hubId` issued to this client (its live grants). Throws, or
+   * names nothing, when the hub cannot be asked: the gate then refuses.
+   */
+  issuedByHub: (hubId: string) => Promise<readonly string[]>
+}
+
+export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
   const probe = deps.probe ?? ((url: string) => probeDirectHealth(url))
   const issued = new Set<string>()
   const applied = new Map<number, Set<string>>()
@@ -56,7 +69,7 @@ export function createDirectLinkGate(
     recordApplied(webContentsId, connectSrc) {
       applied.set(webContentsId, new Set(connectSrc.split(/\s+/).filter(Boolean)))
     },
-    async prepare(webContentsId, address) {
+    async prepare(webContentsId, hubId, address) {
       if (
         typeof address !== 'string' ||
         address === '' ||
@@ -81,7 +94,18 @@ export function createDirectLinkGate(
         const [origin] = directLinkConnectSources([address])
         if (!origin) return { ok: false, reason: 'invalid' }
         if (!sources.has(origin)) {
-          issued.add(address)
+          if (!issued.has(address)) {
+            const named =
+              typeof hubId === 'string' && hubId !== ''
+                ? await deps.issuedByHub(hubId).catch(() => [] as readonly string[])
+                : []
+            if (!named.includes(address)) return { ok: false, reason: 'not-issued' }
+            issued.add(address)
+            for (const old of issued) {
+              if (issued.size <= MAX_ISSUED_ORIGINS) break
+              issued.delete(old)
+            }
+          }
           return { ok: false, reason: 'csp' }
         }
       }

@@ -88,7 +88,9 @@ setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url
 // Direct links to computers (docs/direct-link.md): main checks this document's CSP
 // and probes the computer over HTTP, so a socket that would fail is never opened —
 // a failed WebSocket here would also slow the hub's (see above).
-setDirectLinkProbe(async (address) => (await electronBootstrap.prepareDirectLink(address)).ok)
+setDirectLinkProbe(
+  async (address, hubId) => (await electronBootstrap.prepareDirectLink(address, hubId)).ok
+)
 // A computer with no listener this window can dial (a remote one, behind NAT) is
 // reached over WebRTC, brokered by the hub. A failed WebRTC connect is not a failed
 // WebSocket, so it cannot slow the hub's socket either.

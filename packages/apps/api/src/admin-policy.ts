@@ -923,6 +923,7 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'GET /api/browser/url': 'user',
   'POST /api/close-task/:id': 'user',
   'GET /api/computers': 'user',
+  'GET /api/computers/direct-addresses': 'user',
   'POST /api/computers/join-token': 'user',
   'DELETE /api/hub/users': 'admin',
   'GET /api/hub/users': 'admin',

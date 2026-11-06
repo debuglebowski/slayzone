@@ -286,6 +286,9 @@ export interface RestApiDeps {
     /** Who a join token is for, by account id or email (T-20) — the same lookup
      *  `computers.mintJoinToken` uses (`ComputersDeps.findAccount`). */
     findAccount?: FindJoinTokenAccount
+    /** Listener addresses of the caller's live direct-link grants
+     *  (`GET /api/computers/direct-addresses`). Absent: this hub issues none. */
+    directAddresses?: (userId: string | null) => string[]
   }
   /**
    * Operator account management, powering the `/api/hub/users` routes behind

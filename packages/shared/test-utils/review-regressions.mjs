@@ -627,6 +627,18 @@ export const REGRESSIONS = [
       `${P}domains/terminal/src/client/relay-subscription.test.ts`,
       `${P}domains/terminal/src/client/PtyContext.test.tsx`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-M3',
+    what: "Electron main adds a direct-link origin to the renderer's CSP only when the renderer's hub confirms it issued that address to this client; unknown hub, refusal or an old hub fail closed; the set is bounded",
+    files: [
+      `${P}apps/app/src/main/direct-link-gate.test.ts`,
+      `${P}apps/app/src/main/direct-link-issued.test.ts`,
+      `${P}apps/api/src/http/rest-api/computers/direct-addresses.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`,
+      `${P}shared/transport/src/client/direct-link.test.ts`
+    ]
   }
 ]
 

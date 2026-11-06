@@ -1601,7 +1601,9 @@ export function composeServer(opts: {
       // different connection status than the app's Computers tab.
       getGateway: () => computerGatewayRef,
       // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
-      findAccount: joinTokenAccounts
+      findAccount: joinTokenAccounts,
+      // What the desktop's main process may add to its CSP (direct-link-gate.ts).
+      directAddresses: (userId) => directLinkIssuer?.issuedAddresses(userId) ?? []
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an

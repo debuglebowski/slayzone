@@ -14,13 +14,11 @@ import { ptyBufferSince, startDirectPtyLink } from './direct-pty'
 import { usePty } from './PtyContext'
 import { useTerminalStateStore } from './useTerminalStateStore'
 import { useTRPCClient } from './trpc'
-
-/** Ambient hub id outside a HubScope (single hub, tests). */
-const DEFAULT_HUB_KEY = 'default'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
 
 export function useDirectPtyLink(sessionId: string): void {
   const trpcClient = useTRPCClient()
-  const hubId = useHubId() ?? DEFAULT_HUB_KEY
+  const hubId = useHubId() ?? DIRECT_LINK_DEFAULT_HUB_ID
   const { deliver, getLastSeq } = usePty()
   useEffect(() => {
     // A host that installed no probe (web shell, fork) stays on the relay.

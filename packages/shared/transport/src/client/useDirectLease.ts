@@ -16,16 +16,14 @@ import {
   type DirectLinkHubClient
 } from './direct-link'
 import { useHubId } from './HubScope'
-
-/** Ambient hub id outside a HubScope (single hub, tests). */
-const DEFAULT_HUB_KEY = 'default'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
 
 export function useDirectLease(
   client: unknown,
   target: DirectIssueTarget | null,
   wakeKey?: unknown
 ): { lease: DirectLease | null; lost: () => void } {
-  const hubId = useHubId() ?? DEFAULT_HUB_KEY
+  const hubId = useHubId() ?? DIRECT_LINK_DEFAULT_HUB_ID
   const [lease, setLease] = useState<DirectLease | null>(null)
   const keeperRef = useRef<DirectLeaseKeeper | null>(null)
   const wakeRef = useRef(new Set<() => void>())

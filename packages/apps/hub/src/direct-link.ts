@@ -106,6 +106,8 @@ interface IssuedGrant {
   taskId: string
   resource: DirectResource
   expiresAt: number
+  /** The listener address the client was given (null: WebRTC, no address). */
+  address: string | null
   /**
    * Being registered on the computer. Held here from before the request, so a
    * revocation that runs meanwhile matches (and forgets) it; the issue then sees
@@ -153,6 +155,12 @@ export interface DirectLinkIssuer {
   ): Promise<DirectRtcConnectResult>
   /** Live grant ids this hub issued on a computer (for `direct.reset`). */
   heldGrantIds(computerId: string): string[]
+  /**
+   * Listener addresses of the live grants this caller holds: the only addresses the
+   * desktop's main process lets its renderer's CSP name (`GET
+   * /api/computers/direct-addresses`).
+   */
+  issuedAddresses(userId: string | null): string[]
   /**
    * Drop grants now: forgotten here first, then revoked on each computer holding
    * one, as the hub (never the caller whose request triggered it: an admin revokes on
@@ -271,6 +279,7 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         taskId: located.taskId,
         resource: params.resource,
         expiresAt: now() + params.ttlMs,
+        address: rtc ? null : wsAddress,
         pending: true
       }
       grants.set(params.grantId, held)
@@ -377,6 +386,15 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         detail: { grantId }
       })
       return ok ? { ok: true, sdp: answer.data.sdp } : { ok: false, reason: 'refused' }
+    },
+
+    issuedAddresses(userId) {
+      prune()
+      const out = new Set<string>()
+      for (const g of grants.values()) {
+        if (!g.pending && g.address !== null && g.userId === userId) out.add(g.address)
+      }
+      return [...out]
     },
 
     heldGrantIds(computerId) {

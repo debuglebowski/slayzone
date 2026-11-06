@@ -404,10 +404,10 @@ describe('per-hub registry', () => {
     expect(told).toEqual(['c1'])
   })
 
-  it('probes through the installed probe (the desktop asks its main process)', async () => {
-    const asked: string[] = []
-    setDirectLinkProbe(async (address) => {
-      asked.push(address)
+  it('probes through the installed probe, naming the hub that issued the address (the desktop asks its main process, which asks that hub)', async () => {
+    const asked: Array<[string, string]> = []
+    setDirectLinkProbe(async (address, hubId) => {
+      asked.push([address, hubId])
       return false
     })
     const client = {
@@ -417,7 +417,7 @@ describe('per-hub registry', () => {
       }
     }
     expect(await directLinkManagerFor('hub-p', client).acquire(pty())).toBeNull()
-    expect(asked).toEqual(['127.0.0.1:5001'])
+    expect(asked).toEqual([['127.0.0.1:5001', 'hub-p']])
   })
 })
 

@@ -199,6 +199,8 @@ const DEEP_LINK =
   "the desktop app's own OAuth deep-link callback (app.auth.onCallback, a desktop-host event): names nothing a user owns"
 const COMPUTER =
   "the computer roster: cut in the handler to the caller's own, or every one for an admin (management metadata; computer-access.ts, T-19)"
+const DIRECT_ADDRESSES =
+  "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
 
@@ -279,6 +281,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/open-task/:id': checked(taskPrefix('params.id')),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),
+  'GET /api/computers/direct-addresses': none(DIRECT_ADDRESSES),
 
   // ── panels ──
   'GET /api/panels': none(SELF),

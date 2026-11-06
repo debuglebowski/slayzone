@@ -85,12 +85,17 @@ export interface ElectronBootstrapApp {
   }>
   /**
    * Direct link (docs/direct-link.md): may this document open a socket to a
-   * computer's listener at `address` now — allowed by its CSP, and reached by the
-   * main process's HTTP probe? Optional: an older or non-Electron host has none.
+   * computer's listener at `address`, issued by hub `hubId`, now — confirmed by
+   * that hub, allowed by the document's CSP, and reached by the main process's HTTP
+   * probe? `hubId` is a registry id, or {@link DIRECT_LINK_DEFAULT_HUB_ID} outside a
+   * hub scope. Optional: an older or non-Electron host has none.
    */
   prepareDirectLink?: (
-    address: string
-  ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }>
+    address: string,
+    hubId: string
+  ) => Promise<
+    { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
+  >
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */
@@ -121,3 +126,9 @@ export interface ElectronBootstrapAPI {
   app: ElectronBootstrapApp
   files: ElectronBootstrapFiles
 }
+
+/**
+ * The hub id a direct link names outside any hub scope (a single-hub client): the
+ * main process reads it as the registry's default hub.
+ */
+export const DIRECT_LINK_DEFAULT_HUB_ID = 'default'
