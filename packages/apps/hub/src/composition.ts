@@ -1045,6 +1045,15 @@ export function composeServer(opts: {
   // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
   const chatRelayWatch = createChatRelayWatch({
     log: (message, detail) => console.warn(`[chat] ${message}`, detail),
+    // Each computer hears only of the watched tabs it holds (mid-move: both ends).
+    computersOfTab: async (tabId) => {
+      const owner = await computerChat.ownership.forTab(tabId)
+      if (!owner || owner.state === 'deleted') return []
+      return [owner.computerId, owner.sourceComputerId, owner.destinationComputerId].filter(
+        (id): id is string => id !== null
+      )
+    },
+    onOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
     computers: () => computerGatewayRef?.listUsableComputers().map((c) => c.computerId) ?? [],
     send: (computerId, config) => {
       const gateway = computerGatewayRef

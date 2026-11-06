@@ -93,3 +93,33 @@ test('a refused push is retried, not marked delivered', async () => {
   await new Promise((r) => setTimeout(r, 30))
   expect(sent).toEqual([['a'], ['a']])
 })
+
+test('each computer is told only the watched tabs it holds; a tab whose computer is unknown goes to all; an ownership move re-routes it', async () => {
+  const sent: Array<{ computerId: string; all: boolean; tabIds: string[] }> = []
+  const owners: Record<string, string[]> = { a: ['c1'], b: ['c2'], m: ['c1', 'c2'] }
+  let moved: ((tabIds: readonly string[]) => void) | undefined
+  const watch = createChatRelayWatch({
+    computers: () => ['c1', 'c2'],
+    send: async (computerId, config) => {
+      sent.push({ computerId, ...config })
+    },
+    computersOfTab: async (tabId) => owners[tabId] ?? [],
+    onOwnershipChange: (listener) => {
+      moved = listener
+      return () => undefined
+    }
+  })
+  watch.watch(['a', 'b', 'm', 'x'])
+  await flush()
+  await flush()
+  const last = (id: string) => sent.filter((s) => s.computerId === id).at(-1)
+  expect(last('c1')).toEqual({ computerId: 'c1', all: false, tabIds: ['a', 'm', 'x'] })
+  expect(last('c2')).toEqual({ computerId: 'c2', all: false, tabIds: ['b', 'm', 'x'] })
+  // 'a' moves to c2.
+  owners.a = ['c2']
+  moved?.(['a'])
+  await flush()
+  await flush()
+  expect(last('c1')).toEqual({ computerId: 'c1', all: false, tabIds: ['m', 'x'] })
+  expect(last('c2')).toEqual({ computerId: 'c2', all: false, tabIds: ['a', 'b', 'm', 'x'] })
+})

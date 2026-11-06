@@ -684,6 +684,12 @@ export const REGRESSIONS = [
     id: 'DL-L5b',
     what: 'two terminals of one session on the direct link: one ending never takes the other off it (each link removes only its own entry)',
     files: [`${P}domains/terminal/src/client/direct-pty.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5c',
+    what: 'the hub tells each computer only the watched chat tabs it holds (unknown: all), and re-routes a tab when its ownership moves',
+    files: [`${P}apps/hub/src/chat-relay-watch.test.ts`]
   }
 ]
 
