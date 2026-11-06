@@ -225,6 +225,30 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
   }
 
   /**
+   * Folders the local computer's live tasks work in — worktrees and base dirs of
+   * tasks on it, or on no computer in a project placed on it. They never add a root
+   * (each was covered when it was made); they only keep a work-folder root from being
+   * removed while still in use (final review round 3, R3-1).
+   */
+  async function foldersInUse(computerId: string): Promise<string[]> {
+    const rows = await db.all<{ worktree_path: string | null; base_dir: string | null }>(
+      `SELECT worktree_path, base_dir FROM tasks t
+        WHERE t.deleted_at IS NULL
+          AND (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
+            SELECT 1 FROM project_placements pp
+             WHERE pp.project_id = t.project_id AND pp.computer_id = ?)))`,
+      [computerId, computerId]
+    )
+    const folders: string[] = []
+    for (const r of rows) {
+      for (const f of [r.worktree_path, r.base_dir]) {
+        if (f && isAbsolute(f)) folders.push(f)
+      }
+    }
+    return folders
+  }
+
+  /**
    * Widen the local computer's allowed roots to cover these folders. With
    * `workFolders` (the full current list), work-folder roots no longer needed are
    * removed too, and `paths` must then be every local project folder: a project that
@@ -242,7 +266,12 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     let stale: string[] = []
     let keptTracked: string[] = []
     if (workFolders) {
-      const needed = missingRootsForFolders(workFolders, [])
+      // Folders in use keep their root too (R3-1): a task worktree created under an
+      // earlier worktree base still lives there after the setting changes.
+      const needed = missingRootsForFolders(
+        [...workFolders, ...(await foldersInUse(computerId))],
+        []
+      )
       // Only roots this sync added (a root the user already had covered the folder,
       // so it was never added or tracked) and the computer still has.
       const tracked = (await trackedWorkRoots(computerId)).filter((r) => roots.includes(r))

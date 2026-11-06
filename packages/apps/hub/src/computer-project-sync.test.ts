@@ -481,3 +481,36 @@ test('M6: a work-folder root goes away with its setting or automation', async ()
   expect(roots).toContain('/Users/k')
   expect(roots).toContain('/srv/mine')
 })
+
+// Final review round 3, R3-1: changing the worktree base dropped the old base's root
+// while task worktrees still lived there — their terminal, git panel and processes
+// were refused. A root a local task's worktree still needs is never stale.
+test('R3-1: changing the worktree base keeps the old base while a worktree lives there', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/opt/x/app'] }))
+  upgraded('p1', '/opt/x/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('t-r31', 'p1', 't', ?, ?)`
+    )
+    .run('/Volumes/wt/app/task-1', LOCAL)
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(true)
+
+  raw
+    .prepare(`UPDATE settings SET value = ? WHERE key = 'worktree_base_path'`)
+    .run('/Volumes/wt2/{project-folder-name}')
+  await sync.localWorkFoldersChanged()
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', roots)).toBe(true)
+  expect(isCoveredByRoots('/Volumes/wt2/app', roots)).toBe(true)
+
+  // Once the task is gone, nothing needs the old base: it goes.
+  raw.prepare(`DELETE FROM tasks WHERE id = 't-r31'`).run()
+  await sync.localWorkFoldersChanged()
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(false)
+})

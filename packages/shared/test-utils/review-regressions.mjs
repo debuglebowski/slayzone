@@ -556,6 +556,13 @@ export const REGRESSIONS = [
     id: 'M6-low',
     what: 'roots registered for work folders are removed when no worktree base or automation needs them',
     files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  // ── round 13 ──
+  {
+    round: 13,
+    id: 'R3-1',
+    what: 'a work-folder root stays while a local task worktree still lives under it (worktree base changed)',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
   }
 ]
 
