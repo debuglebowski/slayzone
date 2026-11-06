@@ -30,6 +30,8 @@
  * @module hub/computer-project-sync
  */
 
+import { isAbsolute } from 'node:path'
+import { resolveWorktreeBasePathTemplate } from '@slayzone/worktrees/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   deletePlacement,
@@ -41,7 +43,7 @@ import {
 } from '@slayzone/computers/server'
 import { USABLE_PLACEMENT_STATUSES, type PlacementStatus } from '@slayzone/computers/shared'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
-import { missingRootsForProjects } from './local-computer-roots'
+import { missingRootsForProjects, missingRootsForFolders } from './local-computer-roots'
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
@@ -78,6 +80,12 @@ export interface SetFolderResult {
 
 export interface ComputerProjectSync {
   onConnect(computerId: string): Promise<void>
+  /**
+   * The worktree base setting or an automation's folder changed: register the local
+   * computer's work folders again (M6). Best-effort: an offline computer is widened on
+   * its next connect.
+   */
+  localWorkFoldersChanged(): Promise<void>
   /**
    * Record `path` as this project's folder on this computer.
    *
@@ -139,11 +147,54 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     )
   }
 
+  /**
+   * Folders the local computer works in besides project folders, as the desktop did
+   * with no jail (M6): the worktree base each local project resolves to when the
+   * setting names one (the default, a sibling, is covered by the project's parent),
+   * and each automation action's own absolute folder (a `{{…}}` one resolves to a
+   * project's folder, already covered).
+   */
+  async function localWorkFolders(computerId: string): Promise<string[]> {
+    const folders: string[] = []
+    const template = (
+      await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'worktree_base_path'")
+    )?.value?.trim()
+    if (template) {
+      for (const r of await listPlacements(db)) {
+        if (r.computer_id !== computerId || !r.path) continue
+        const base = resolveWorktreeBasePathTemplate(template, r.path)
+        if (base && isAbsolute(base)) folders.push(base)
+      }
+    }
+    for (const a of await db.all<{ actions: string }>('SELECT actions FROM automations')) {
+      let actions: unknown
+      try {
+        actions = JSON.parse(a.actions)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(actions)) continue
+      for (const action of actions) {
+        const cwd = (action as { params?: { cwd?: unknown } })?.params?.cwd
+        if (typeof cwd === 'string' && !cwd.includes('{{') && isAbsolute(cwd)) folders.push(cwd)
+      }
+    }
+    return folders
+  }
+
   /** Widen the local computer's allowed roots to cover these folders. */
-  async function widenRoots(computerId: string, paths: readonly string[]): Promise<void> {
-    if (!isLocal(computerId) || paths.length === 0) return
+  async function widenRoots(
+    computerId: string,
+    paths: readonly string[],
+    workFolders: readonly string[] = []
+  ): Promise<void> {
+    if (!isLocal(computerId) || (paths.length === 0 && workFolders.length === 0)) return
     const { roots } = await ops.listRoots(computerId)
-    const additions = missingRootsForProjects(paths, roots)
+    const fromProjects = missingRootsForProjects(paths, roots)
+    const additions = [
+      ...fromProjects,
+      ...missingRootsForFolders(workFolders, [...roots, ...fromProjects])
+    ]
     if (additions.length === 0) return
     await ops.setAllowedRoots(computerId, [...roots, ...additions])
     deps.record({
@@ -219,6 +270,13 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
   }
 
   return {
+    localWorkFoldersChanged() {
+      const local = deps.localComputerId
+      return withLock(local, async () => {
+        await widenRoots(local, [], await localWorkFolders(local)).catch(() => undefined)
+      })
+    },
+
     onConnect(computerId) {
       return withLock(computerId, async () => {
         const before = snapshot(await listPlacements(db), computerId)
@@ -231,7 +289,8 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
               computerId,
               (await listPlacements(db))
                 .filter((r) => r.computer_id === computerId)
-                .map((r) => r.path)
+                .map((r) => r.path),
+              await localWorkFolders(computerId)
             )
           )
         }

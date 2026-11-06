@@ -188,6 +188,7 @@ import {
   AutomationEngine,
   setAutomationsEvents,
   setAutomationCommandRouting,
+  setAutomationWrittenListener,
   type AutomationsEventMap
 } from '@slayzone/automations/server'
 import {
@@ -2184,6 +2185,15 @@ export function composeServer(opts: {
         recordDiagnosticEvent({ level, source: 'server', event, message, payload })
     })
     syncComputerProjects = (computerId) => projectSync.onConnect(computerId)
+    // The local computer's other work folders — the worktree base setting and an
+    // automation's own folder — are registered again when they change (M6).
+    if (supervised) {
+      setAutomationWrittenListener(() => void projectSync.localWorkFoldersChanged())
+      notifyEvents.on('settings-changed', (change) => {
+        if (!change || change.keys.includes('worktree_base_path'))
+          void projectSync.localWorkFoldersChanged()
+      })
+    }
     // Every Project the hub returns names the computer its work really runs on.
     // Without login a stored default IS the answer (forProject would re-read it);
     // with login it must still pass the owner check.

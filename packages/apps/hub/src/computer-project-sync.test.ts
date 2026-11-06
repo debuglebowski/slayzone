@@ -400,3 +400,55 @@ test('a folder cleared while its computer is offline is forgotten there on recon
   expect(c.map.has('p1')).toBe(false)
   expect(await row('p1', remote)).toBeNull()
 })
+
+// Final review M6: the desktop ran git and automations on its own disk with no jail.
+// Moved to the local computer, a custom worktree base outside the project's parent
+// (`/Volumes/wt/{project-folder-name}`) and an automation's own folder (`/opt/tools`)
+// were refused — functionality lost. They are registered as the local computer's
+// roots, like project folders: on connect, and again when they change. The jail
+// itself is unchanged, and a remote computer's roots are never touched.
+function automationWithCwd(cwd: string): void {
+  raw
+    .prepare(
+      `INSERT INTO automations (id, project_id, name, enabled, trigger_config, conditions, actions, sort_order)
+       VALUES (?, 'p1', 'a', 1, '{"type":"manual","params":{}}', '[]', ?, 0)`
+    )
+    .run(
+      crypto.randomUUID(),
+      JSON.stringify([{ type: 'run_command', params: { command: 'x', cwd } }])
+    )
+}
+
+test('M6: a custom worktree base and an automation folder become local roots', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  upgraded('p1', '/Users/k/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  automationWithCwd('/opt/tools')
+  automationWithCwd('{{project.path}}/sub') // a template: already the project's folder
+  const { sync } = makeSync()
+
+  await sync.onConnect(LOCAL)
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app/feature', roots)).toBe(true)
+  expect(isCoveredByRoots('/opt/tools', roots)).toBe(true)
+  expect(isCoveredByRoots('/Volumes/other', roots)).toBe(false)
+  expect(roots.some((r) => r.includes('{{'))).toBe(false)
+})
+
+test('M6: a later change is registered too, and never on a remote computer', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/srv'] }))
+  upgraded('p1', '/Users/k/app')
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  await sync.onConnect(remote)
+
+  automationWithCwd('/opt/later')
+  await sync.localWorkFoldersChanged()
+
+  expect(isCoveredByRoots('/opt/later', computers.get(LOCAL)!.roots)).toBe(true)
+  expect(computers.get(remote)!.roots).toEqual(['/srv'])
+})

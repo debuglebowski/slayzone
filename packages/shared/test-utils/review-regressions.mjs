@@ -531,6 +531,12 @@ export const REGRESSIONS = [
     id: 'M9-roots',
     what: "roots on another computer never decide a named computer's path; / is no root",
     files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M6-final',
+    what: 'a custom worktree base and an automation folder are registered as local-computer roots',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
   }
 ]
 

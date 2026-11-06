@@ -7,7 +7,8 @@ export {
   toggleAutomation,
   reorderAutomations,
   listAutomationRuns,
-  clearAutomationRuns
+  clearAutomationRuns,
+  setAutomationWrittenListener
 } from './automations-store'
 export { AutomationEngine, cronMatches, type AutomationTriggerBus } from './engine'
 
