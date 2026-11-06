@@ -523,7 +523,10 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
 //
 //   computer disk  every recorded root, with the computer it is on: a task's worktree,
 //                  a project's folder on each computer (`project_placements`), and a
-//                  pre-v176 project path.
+//                  pre-v176 project path. In a tie, a pre-v176 path of a project that
+//                  has a placement does not count — the placement is where its folder
+//                  is now (Q2: as a computer-less owner it made the tie unbreakable and
+//                  locked its owner out on their own computer).
 //   hub disk       only records OF the hub's disk: project paths, worktrees of tasks on
 //                  no computer or the hub's own, folders of the hub's own computer (the
 //                  desktop's co-spawned one, {@link setHubDiskComputer}). What a remote
@@ -535,7 +538,9 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
 type RootSource = 'computer-disk' | 'hub-disk'
 
 const COMPUTER_DISK_ROOTS_SQL = `
-  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id FROM (
+  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
+    EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
+  FROM (
     SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
     UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
     UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
@@ -543,7 +548,9 @@ const COMPUTER_DISK_ROOTS_SQL = `
   ) r JOIN projects p ON p.id = r.project_id`
 
 const HUB_DISK_ROOTS_SQL = `
-  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id FROM (
+  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
+    EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
+  FROM (
     SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
       AND (computer_id IS NULL OR computer_id = ?)
     UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
@@ -628,9 +635,12 @@ async function resolvePathResource(
   // it, and read B's file off the hub). And a root with no computer (the hub's own,
   // or a legacy one) never loses a tie because a computer was named: the tie denies.
   if (new Set(owners.map((o) => o.owner_user_id)).size > 1) {
-    const allOnComputers = owners.every((o) => o.computer_id !== null)
+    // A pre-v176 path of a project with a placement is that project's old spelling of
+    // the same folder, not one more owner (Q2).
+    const contenders = owners.filter((o) => o.computer_id !== null || !o.placed)
+    const allOnComputers = contenders.every((o) => o.computer_id !== null)
     const onIt =
-      computerId && allOnComputers ? owners.filter((o) => o.computer_id === computerId) : []
+      computerId && allOnComputers ? contenders.filter((o) => o.computer_id === computerId) : []
     if (onIt.length > 0 && new Set(onIt.map((o) => o.owner_user_id)).size === 1) {
       return projectsOf(onIt)
     }
@@ -649,7 +659,12 @@ async function resolvePathResource(
 }
 
 /** A registered root, with the project owner and the computer it is recorded on. */
-type RootRow = OwnerRow & { root: string; computer_id: string | null }
+type RootRow = OwnerRow & {
+  root: string
+  computer_id: string | null
+  /** The row's project has a folder on some computer (`project_placements`). */
+  placed: number
+}
 
 /**
  * A directory and everything under it. What decides the directory as an `ownedPath`

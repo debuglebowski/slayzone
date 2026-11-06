@@ -196,6 +196,19 @@ describe('N4: a tie is broken by the computer the request names', () => {
     // A path can carry a user's directory names: never logged.
     expect(JSON.stringify(ties)).not.toContain('/srv/n4')
   })
+  // Round-9 Q2: a project from before v176 keeps its legacy `projects.path` next to its
+  // placement. Counted as one more (computer-less) owner, it made every tie
+  // "unbreakable": B's computer reporting A's folder locked A out on A's own computer.
+  test("Q2: a legacy project path does not lock its owner out on the owner's computer", async () => {
+    project('pQ2A', A, '/srv/q2')
+    project('pQ2B', B, '/srv/q2-b')
+    sql(`UPDATE projects SET path = NULL WHERE id = 'pQ2B'`)
+    placed('cTieA', 'pQ2A', '/srv/q2')
+    placed('cTieB', 'pQ2B', '/srv/q2')
+    expect(await canOn(A, '/srv/q2/x', 'cTieA')).toBe(true)
+    expect(await canOn(B, '/srv/q2/x', 'cTieB')).toBe(true)
+    expect(await canOn(B, '/srv/q2/x', 'cTieA')).toBe(false)
+  })
   test('the gate reads the computer a request names', () => {
     expect(requestComputerOf({ target: { computerId: 'c1' }, path: '/x' })).toBe('c1')
     expect(requestComputerOf({ computerId: 'c2' })).toBe('c2')

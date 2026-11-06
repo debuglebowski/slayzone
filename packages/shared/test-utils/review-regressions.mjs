@@ -426,6 +426,12 @@ export const REGRESSIONS = [
       `${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`,
       `${P}apps/api/src/access.test.ts`
     ]
+  },
+  {
+    round: 9,
+    id: 'Q2',
+    what: "a legacy project path does not lock its owner out on the owner's computer",
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
   }
 ]
 
