@@ -888,9 +888,11 @@ test('a client write with an id is forwarded with it; the computer, not the hub,
     expect(handle.written).toEqual(['ls\r'])
     expect(opts).toEqual([{ writeId: 'w-1' }])
     expect(submits).toEqual([])
-    // Without an id (an older client): the hub analyses and forwards as before.
+    // Without an id (an older client, or the hub itself): it gets one, and the
+    // computer analyses it in the same buffer and reports its facts — never the hub.
     writePty(sid, 'pwd\r')
-    expect(submits).toEqual(['pwd\r'])
+    expect(opts.at(-1)).toEqual({ writeId: expect.stringMatching(/^hub-/) })
+    expect(submits).toEqual([])
   } finally {
     off()
     killPty(sid)

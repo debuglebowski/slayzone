@@ -56,7 +56,7 @@ const signal = (over: Partial<PtySignal>): PtySignal => ({
   ...over
 })
 
-function routedBackend(detectsOutput: boolean) {
+function routedBackend(detectsOutput: boolean, computerId?: string) {
   const specs: PtySpawnSpec[] = []
   const writes: Array<[string, unknown]> = []
   const relays: boolean[] = []
@@ -70,6 +70,7 @@ function routedBackend(detectsOutput: boolean) {
       return {
         pid: 4343,
         process: 'gemini',
+        ...(computerId ? { computerId } : {}),
         detectsOutput,
         onData: (cb: (d: string) => void) => {
           dataCb = cb
@@ -381,5 +382,27 @@ test('a write the client sent straight to the computer has the effects of a rela
   // A blank submit marks nothing, as on the relayed path.
   b.input({ submitted: '  \r', esc: false, statusCommand: false })
   expect(submitted).toEqual(['fix the bug\r'])
+  stop()
+})
+
+test('every write to a computer session is analysed on the computer, in ONE buffer: a hub-originated submit completes a line the client typed', async () => {
+  const b = routedBackend(true, 'computer-1')
+  const submitted: string[] = []
+  const stop = onPtyInputSubmit((sessionId, _taskId, line) => {
+    if (sessionId === 'mirror:one-buffer') submitted.push(line)
+  })
+  await open('mirror:one-buffer')
+  writePty('mirror:one-buffer', 'hel', 'client-1')
+  // A write the hub makes itself (submitPty, automations, the CLI) carries an id too:
+  // the computer analyses it with what the client typed, and reports the facts.
+  writePty('mirror:one-buffer', '\r')
+  expect(b.writes).toEqual([
+    ['hel', { writeId: 'client-1' }],
+    ['\r', { writeId: expect.any(String) }]
+  ])
+  // No hub-side analysis: the line arrives once, from the computer's report.
+  expect(submitted).toEqual([])
+  b.input({ submitted: 'hel\r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['hel\r'])
   stop()
 })

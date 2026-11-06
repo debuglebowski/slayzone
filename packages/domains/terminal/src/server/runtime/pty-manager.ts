@@ -3239,13 +3239,15 @@ export function writePty(sessionId: string, data: string, writeId?: string): boo
   const session = sessions.get(sessionId)
   if (!session) return false
 
-  // A client's write with its id, on a session a computer runs (docs/direct-link.md):
-  // the computer applies the id once — a late direct write may also come this way —
-  // and reports the input facts (`pty-input`), as for a direct write. Counting them
-  // here too would count a retried keystroke twice.
+  // A session a computer runs (docs/direct-link.md): the computer analyses EVERY
+  // write in one input buffer and reports the facts (`pty-input`), whichever path
+  // brought it — a client's (direct or relayed, applied once by its id) or one the
+  // hub makes itself (submitPty, automations, the CLI), which gets an id of its own.
+  // Analysing here too would split one typed line across two buffers, and count a
+  // retried keystroke twice.
   const handle = session.pty as unknown as PtyHandle
-  if (writeId !== undefined && handle.computerId !== undefined) {
-    handle.write(data, { writeId })
+  if (handle.computerId !== undefined) {
+    handle.write(data, { writeId: writeId ?? `hub-${randomUUID()}` })
     return true
   }
 

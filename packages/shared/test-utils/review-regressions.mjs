@@ -690,6 +690,15 @@ export const REGRESSIONS = [
     id: 'DL-L5c',
     what: 'the hub tells each computer only the watched chat tabs it holds (unknown: all), and re-routes a tab when its ownership moves',
     files: [`${P}apps/hub/src/chat-relay-watch.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5d',
+    what: 'every write to a computer session (client or hub-originated) is analysed on the computer in one input buffer, so a hub submit completes a line the client typed',
+    files: [
+      `${P}domains/terminal/src/server/runtime/pty-signal-mirror.test.ts`,
+      `${P}domains/terminal/src/server/runtime/pty-backend.test.ts`
+    ]
   }
 ]
 
