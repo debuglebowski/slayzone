@@ -48,8 +48,12 @@ export {
 export {
   HUB_ISSUE_GRACE_MS,
   isSignedOutDescribe,
+  issueOf,
+  useHubHealth,
   useHubIssues,
+  watchHubHealth,
   watchHubIssue,
+  type HubHealth,
   type HubIssue,
   type HubIssueEntry
 } from './hubIssues'

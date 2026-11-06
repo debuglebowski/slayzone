@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { ConnectionStateSource } from './connectDeadlineLink'
-import { useFederationOrNull } from './FederationProvider'
+import { useFederationOrNull, type ResolvedHub } from './FederationProvider'
 
 /**
  * What is wrong with a hub connection, for the app-wide banner (one per hub):
@@ -46,21 +46,39 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-export interface WatchHubIssueOptions {
+/**
+ * A hub connection's whole state: a {@link HubIssue}, or `ok` once the hub answered
+ * `hub.describe` on an open socket (`authRequired`: the hub requires login, so `ok`
+ * means it holds this app's sign-in). Null = not known yet (no socket open so far).
+ */
+export type HubHealth = { kind: 'ok'; authRequired: boolean } | HubIssue
+
+export interface WatchHubHealthOptions {
   source: ConnectionStateSource
   /** Ask the hub `hub.describe` over this same socket. */
   describe: () => Promise<unknown>
-  onIssue: (issue: HubIssue | null) => void
+  onHealth: (health: HubHealth | null) => void
   graceMs?: number
 }
 
+function sameHealth(a: HubHealth | null, b: HubHealth | null): boolean {
+  if (!a || !b) return a === b
+  if (a.kind === 'ok' || b.kind === 'ok')
+    return (
+      a.kind === b.kind &&
+      (a as { authRequired: boolean }).authRequired ===
+        (b as { authRequired: boolean }).authRequired
+    )
+  return a.kind === b.kind && a.detail === b.detail
+}
+
 /**
- * Report a hub connection's {@link HubIssue} (null when none) every time it changes.
- * Returns the stop function.
+ * Report a hub connection's {@link HubHealth} every time it changes. Returns the stop
+ * function.
  */
-export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
+export function watchHubHealth(opts: WatchHubHealthOptions): () => void {
   const graceMs = opts.graceMs ?? HUB_ISSUE_GRACE_MS
-  let current: HubIssue | null = null
+  let current: HubHealth | null = null
   let failingSince: number | null = null
   let lastFailure = ''
   let grace: ReturnType<typeof setTimeout> | null = null
@@ -70,14 +88,14 @@ export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
   let generation = 0
   let stopped = false
 
-  const report = (next: HubIssue | null): void => {
-    if (stopped) return
-    if (next && current && next.kind === current.kind && next.detail === current.detail) return
-    if (!next && !current) return
-    // The same kind keeps its start: a reworded error is not a new problem.
+  const report = (next: HubHealth | null): void => {
+    if (stopped || sameHealth(next, current)) return
+    // The same issue keeps its start: a reworded error is not a new problem.
     current =
-      next && current && next.kind === current.kind ? { ...next, since: current.since } : next
-    opts.onIssue(current)
+      next && next.kind !== 'ok' && current && current.kind === next.kind
+        ? { ...next, since: (current as HubIssue).since }
+        : next
+    opts.onHealth(current)
   }
 
   const clearGrace = (): void => {
@@ -91,6 +109,7 @@ export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
       failingSince = null
       if (wasOpen) return
       wasOpen = true
+      // Reachable again; what the hub makes of this socket is not known until it answers.
       if (current?.kind === 'unreachable') report(null)
       const asked = generation
       opts.describe().then(
@@ -103,7 +122,10 @@ export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
                   since: Date.now(),
                   detail: 'The hub requires sign-in and holds none for this app.'
                 }
-              : null
+              : {
+                  kind: 'ok',
+                  authRequired: (answer as { authRequired?: unknown } | null)?.authRequired === true
+                }
           )
         },
         (err: unknown) => {
@@ -138,10 +160,148 @@ export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
   }
 }
 
+/** The issue half of {@link HubHealth}: null for `ok` and for not-known-yet. */
+export function issueOf(health: HubHealth | null | undefined): HubIssue | null {
+  return health && health.kind !== 'ok' ? health : null
+}
+
+export interface WatchHubIssueOptions {
+  source: ConnectionStateSource
+  describe: () => Promise<unknown>
+  onIssue: (issue: HubIssue | null) => void
+  graceMs?: number
+}
+
+/** {@link watchHubHealth}, reporting only its issue (null when none). */
+export function watchHubIssue(opts: WatchHubIssueOptions): () => void {
+  let last: HubIssue | null = null
+  return watchHubHealth({
+    source: opts.source,
+    describe: opts.describe,
+    graceMs: opts.graceMs,
+    onHealth: (health) => {
+      const issue = issueOf(health)
+      if (!issue && !last) return
+      last = issue
+      opts.onIssue(issue)
+    }
+  })
+}
+
 /** The one procedure this module calls, typed structurally: transport names no router. */
 type HubDescribeClient = { hub: { describe: { query: () => Promise<unknown> } } }
 
-const NO_ISSUES: ReadonlyMap<string, HubIssue> = new Map()
+interface HealthFeed {
+  get(): HubHealth | null
+  subscribe(onChange: () => void): () => void
+}
+
+/**
+ * One watch per hub client, however many surfaces read it (the banner, the hub's card
+ * in Settings): one `hub.describe` per socket open. Keyed by the client object, which
+ * a new token replaces (`getOrCreateHubClient`), so a feed never outlives its
+ * credential. Watches only while someone listens; restarts from not-known.
+ */
+const feeds = new WeakMap<object, HealthFeed>()
+
+function healthFeedOf(ws: ResolvedHub['ws']): HealthFeed {
+  const cached = feeds.get(ws)
+  if (cached) return cached
+  const listeners = new Set<() => void>()
+  let value: HubHealth | null = null
+  let stop: (() => void) | null = null
+  const client = ws.client as unknown as HubDescribeClient
+  const feed: HealthFeed = {
+    get: () => value,
+    subscribe: (onChange) => {
+      listeners.add(onChange)
+      if (!stop) {
+        stop = watchHubHealth({
+          source: ws.wsClient.connectionState,
+          describe: () => client.hub.describe.query(),
+          onHealth: (health) => {
+            value = health
+            for (const listener of listeners) listener()
+          }
+        })
+      }
+      return () => {
+        listeners.delete(onChange)
+        if (listeners.size > 0 || !stop) return
+        stop()
+        stop = null
+        value = null
+      }
+    }
+  }
+  feeds.set(ws, feed)
+  return feed
+}
+
+interface FederationHealth {
+  subscribe(onChange: () => void): () => void
+  getSnapshot(): ReadonlyMap<string, HubHealth>
+}
+
+type Federation = NonNullable<ReturnType<typeof useFederationOrNull>>
+
+/** Every hub's feed in one store, for `useSyncExternalStore`; one per federation value. */
+const federationHealth = new WeakMap<Federation, FederationHealth>()
+
+function federationHealthOf(fed: Federation): FederationHealth {
+  const cached = federationHealth.get(fed)
+  if (cached) return cached
+  const hubFeeds: Array<[string, HealthFeed]> = []
+  for (const hub of fed.hubs) {
+    const resolved = fed.resolve(hub.id)
+    if (resolved) hubFeeds.push([hub.id, healthFeedOf(resolved.ws)])
+  }
+  const read = (): ReadonlyMap<string, HubHealth> => {
+    const map = new Map<string, HubHealth>()
+    for (const [hubId, feed] of hubFeeds) {
+      const health = feed.get()
+      if (health) map.set(hubId, health)
+    }
+    return map
+  }
+  let snapshot = read()
+  const store: FederationHealth = {
+    getSnapshot: () => snapshot,
+    subscribe: (onChange) => {
+      const changed = (): void => {
+        snapshot = read()
+        onChange()
+      }
+      const unsubs = hubFeeds.map(([, feed]) => feed.subscribe(changed))
+      // A feed another surface already watched has a value this snapshot predates.
+      changed()
+      return () => {
+        for (const unsub of unsubs) unsub()
+      }
+    }
+  }
+  federationHealth.set(fed, store)
+  return store
+}
+
+const NO_HEALTH: ReadonlyMap<string, HubHealth> = new Map()
+const noSubscribe = (): (() => void) => () => {}
+const noHealth = (): ReadonlyMap<string, HubHealth> => NO_HEALTH
+
+/**
+ * Every hub's {@link HubHealth} in the nearest federation, by hub id (absent = not
+ * known yet). Empty outside a federation. Watching a hub opens its socket, as
+ * `HubScope` does.
+ */
+export function useHubHealth(): ReadonlyMap<string, HubHealth> {
+  const fed = useFederationOrNull()
+  const store = fed ? federationHealthOf(fed) : null
+  return useSyncExternalStore(
+    store ? store.subscribe : noSubscribe,
+    store ? store.getSnapshot : noHealth,
+    store ? store.getSnapshot : noHealth
+  )
+}
 
 /** A hub with something wrong with its connection. */
 export interface HubIssueEntry {
@@ -149,49 +309,14 @@ export interface HubIssueEntry {
   issue: HubIssue
 }
 
-/**
- * Every hub in the nearest federation that has a {@link HubIssue}, in hub-list order.
- * Empty outside a federation. Watching a hub opens its socket, as `HubScope` does.
- */
+/** Every hub in the nearest federation that has a {@link HubIssue}, in hub-list order. */
 export function useHubIssues(): HubIssueEntry[] {
   const fed = useFederationOrNull()
-  // Tagged with the federation they were watched under: a new one (fresh tokens after
-  // a sign-in rebuild the hub's client) starts from nothing, without a reset render.
-  const [watched, setWatched] = useState<{ fed: unknown; issues: ReadonlyMap<string, HubIssue> }>(
-    () => ({ fed: null, issues: new Map() })
-  )
-
-  useEffect(() => {
-    if (!fed) return
-    const stops: Array<() => void> = []
-    for (const hub of fed.hubs) {
-      const resolved = fed.resolve(hub.id)
-      if (!resolved) continue
-      const client = resolved.ws.client as unknown as HubDescribeClient
-      stops.push(
-        watchHubIssue({
-          source: resolved.ws.wsClient.connectionState,
-          describe: () => client.hub.describe.query(),
-          onIssue: (issue) =>
-            setWatched((prev) => {
-              const next = new Map(prev.fed === fed ? prev.issues : undefined)
-              if (issue) next.set(hub.id, issue)
-              else next.delete(hub.id)
-              return { fed, issues: next }
-            })
-        })
-      )
-    }
-    return () => {
-      for (const stop of stops) stop()
-    }
-  }, [fed])
-
-  const issues = watched.fed === fed ? watched.issues : NO_ISSUES
+  const health = useHubHealth()
   if (!fed) return []
   const entries: HubIssueEntry[] = []
   for (const hub of fed.hubs) {
-    const issue = issues.get(hub.id)
+    const issue = issueOf(health.get(hub.id))
     if (issue) entries.push({ hub, issue })
   }
   return entries

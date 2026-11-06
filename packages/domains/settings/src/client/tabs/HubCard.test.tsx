@@ -887,43 +887,48 @@ describe('HubCard', () => {
     const widthOf = (el: Element): string =>
       (el.className.match(/\bw-(?:\d+|full|auto)\b/) ?? ['(auto)'])[0]
 
-    // Trailing slots of the header: status, primary, more.
+    // Trailing slots of the header: status, primary, refresh + more.
     const headerSlots = Array.from(header.children).slice(1).map(widthOf)
-    // Trailing cells of the row: status, actions, spacer.
+    // Trailing cells of the row: status, then ONE action column spanning the
+    // header's primary + more slots (so its icons end where `⋯` does).
     const rowCells = Array.from(screen.getByTestId('computer-row').querySelectorAll('td'))
-    const rowTrailing = rowCells.slice(-3).map(widthOf)
+    const rowTrailing = rowCells.slice(-2).map(widthOf)
+    const units = (w: string): number => Number(w.slice(2))
 
-    expect(rowTrailing).toEqual(headerSlots)
+    expect(rowTrailing[0]).toBe(headerSlots[0])
+    expect(units(rowTrailing[1]!)).toBe(units(headerSlots[1]!) + units(headerSlots[2]!))
     // ...and the leading cell matches the star button's footprint (icon-sm = size-8).
     expect(widthOf(rowCells[0]!)).toBe('w-8')
   })
 
   it('gives a computer row the same column geometry as the hub header above it', async () => {
-    // The header reserves w-8 (star) … w-36 (status) w-24 (primary) w-8 (more).
+    // The header reserves w-8 (star) … w-32 (status) w-24 (primary) w-16 (refresh + more).
     // A row that does not mirror those widths puts its status and its action under
     // nothing in particular, which is what "the rows don't line up" looks like.
     computersByHub = { local: [makeComputer({ id: 'r-local', name: 'local-computer' })] }
     await renderLocal()
     const cells = Array.from(screen.getByTestId('computer-row').querySelectorAll('td'))
     const cls = cells.map((c) => c.className)
-    // Five cells against the header's four slots plus its leading star.
-    expect(cells.length).toBe(5)
+    // Four cells: leading marker, name, status, actions.
+    expect(cells.length).toBe(4)
     expect(cls[0]).toContain('w-8') // leading marker == the star's footprint
     expect(cls[1]).toContain('pl-2') // name starts where the hub's name starts
     expect(cls[2]).toContain('w-32') // status column == the header's status slot
-    expect(cls[3]).toContain('w-24') // actions == the header's primary slot
-    expect(cls[4]).toContain('w-8') // spacer under the header's `⋯`
+    expect(cls[3]).toContain('w-40') // actions == primary (w-24) + refresh/`⋯` (w-16)
   })
 
   it('keeps the list chrome on a hub that can hold several computers', async () => {
     computersByHub = { 'hub-b': [makeComputer()] }
     await renderRemote()
     expect(screen.getByText('Computers')).toBeDefined()
-    expect(screen.getByTestId('computer-refresh')).toBeDefined()
+    // Refreshing the list is a card-wide action: it sits in the hub's header, by `⋯`.
+    expect(
+      screen.getByTestId('hub-row-remote').contains(screen.getByTestId('computer-refresh'))
+    ).toBe(true)
     // Identical geometry to the local card's row — the rail simply fills the
     // leading cell the marker fills there.
     const cells = screen.getByTestId('computer-row').querySelectorAll('td')
-    expect(cells.length).toBe(5)
+    expect(cells.length).toBe(4)
   })
 
   it('puts an in-flight upgrade in the status column, not in the meta line', async () => {

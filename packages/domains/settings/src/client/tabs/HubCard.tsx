@@ -94,6 +94,8 @@ export interface HubCardShellProps {
   primary?: ReactNode
   /** Everything else, behind `⋯`. */
   more: ReactNode
+  /** An icon action for the card as a whole, just left of `⋯` (refresh the list). */
+  headerAction?: ReactNode
   /** The card body — the computers area. */
   body: ReactNode
 }
@@ -105,6 +107,7 @@ export function HubCardShell({
   status,
   primary,
   more,
+  headerAction,
   body
 }: HubCardShellProps) {
   return (
@@ -124,12 +127,26 @@ export function HubCardShell({
         <div className="flex min-w-0 flex-1 items-center gap-2">{identity}</div>
         <div className="w-32 shrink-0">{status}</div>
         <div className="flex w-24 shrink-0 justify-end">{primary}</div>
-        <div className="flex w-8 shrink-0 justify-end">{more}</div>
+        {/* Reserved for both icons even when only `⋯` shows, so the status column
+            lines up across every card. Rows mirror the two trailing slots with ONE
+            action column of their combined width (`ROW_ACTIONS`). */}
+        <div className="flex w-16 shrink-0 items-center justify-end">
+          {headerAction}
+          {more}
+        </div>
       </div>
       <div className="border-border/60 border-t px-3 py-2">{body}</div>
     </div>
   )
 }
+
+/**
+ * A computer row's action column: as wide as the header's primary + refresh/`⋯` slots
+ * together (w-24 + w-16), right-aligned, so a row's icons end where the header's
+ * `⋯` does. One column, not two: an empty cell under the header's icons left a
+ * gap at the right of every row.
+ */
+const ROW_ACTIONS = 'w-40 py-2'
 
 /** ok = live, idle = known-but-not-live, bad = we asked and it failed. */
 export type HubStatusTone = 'ok' | 'idle' | 'bad'
@@ -233,8 +250,7 @@ function SkeletonRow({ rail = true, last = false }: { rail?: boolean; last?: boo
       <td className="w-32 py-2 pr-3">
         <Skeleton className="h-3 w-20" />
       </td>
-      <td className="w-24 py-2" />
-      <td className="w-8" />
+      <td className={ROW_ACTIONS} />
     </tr>
   )
 }
@@ -516,6 +532,7 @@ export function HubCard({
       status={status}
       primary={primary}
       more={more}
+      headerAction={singleComputer ? undefined : refresh}
       body={
         <>
           {singleComputer ? (
@@ -528,7 +545,7 @@ export function HubCard({
               </p>
             ) : null
           ) : (
-            <ComputersHeading note={note()} noteTestId="hub-computers-summary" action={refresh} />
+            <ComputersHeading note={note()} noteTestId="hub-computers-summary" />
           )}
           {/* `table-fixed`: with no column headers the values are the only thing
               setting width, so auto layout would re-flow the whole rail whenever a
@@ -611,105 +628,106 @@ export function HubCard({
                       }
                     />
                   </td>
-                  <td className="w-24 py-2 text-right">
-                    {/* Which folders this computer may touch. Offered for EVERY
+                  <td className={ROW_ACTIONS}>
+                    <div className="flex items-center justify-end">
+                      {/* Which folders this computer may touch. Offered for EVERY
                         computer, local included: the app's filesystem work now runs
                         on the computer that owns the workspace, so a project outside
                         these roots is one the UI genuinely cannot open — and the
                         local computer's default jail is only $HOME. */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      title="Folders this computer may access"
-                      onClick={() =>
-                        requestEditRoots({
-                          id: computer.id,
-                          name: computer.name,
-                          load: () =>
-                            trpcClient.workspace.listRoots.query({ computerId: computer.id }),
-                          save: (roots) =>
-                            trpcClient.workspace.setAllowedRoots.mutate({
-                              computerId: computer.id,
-                              roots
-                            })
-                        })
-                      }
-                      data-testid="computer-edit-roots"
-                    >
-                      <FolderCog className="size-3.5" />
-                    </Button>
-                    {/* The app's OWN supervised child — the one computer it can cycle
-                        as a process. Restarting kills every agent pty on this
-                        machine, so the provider gates it behind a confirm. */}
-                    {isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME && (
                       <Button
                         variant="ghost"
-                        size="sm"
-                        disabled={restarting}
-                        title="Restart local computer (stops running agents + terminals; reconnects automatically)"
-                        onClick={requestRestart}
-                        data-testid="computer-local-restart"
+                        size="icon-sm"
+                        title="Folders this computer may access"
+                        onClick={() =>
+                          requestEditRoots({
+                            id: computer.id,
+                            name: computer.name,
+                            load: () =>
+                              trpcClient.workspace.listRoots.query({ computerId: computer.id }),
+                            save: (roots) =>
+                              trpcClient.workspace.setAllowedRoots.mutate({
+                                computerId: computer.id,
+                                roots
+                              })
+                          })
+                        }
+                        data-testid="computer-edit-roots"
                       >
-                        <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
+                        <FolderCog className="size-3.5" />
                       </Button>
-                    )}
-                    {/* Disable: kept and connected, but given no new work. Every
+                      {/* The app's OWN supervised child — the one computer it can cycle
+                        as a process. Restarting kills every agent pty on this
+                        machine, so the provider gates it behind a confirm. */}
+                      {isLocalHub && computer.name === DEFAULT_LOCAL_COMPUTER_NAME && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={restarting}
+                          title="Restart local computer (stops running agents + terminals; reconnects automatically)"
+                          onClick={requestRestart}
+                          data-testid="computer-local-restart"
+                        >
+                          <RotateCw className={cn('size-3.5', restarting && 'animate-spin')} />
+                        </Button>
+                      )}
+                      {/* Disable: kept and connected, but given no new work. Every
                         computer except the app's own on the local hub, without which
                         nothing on this machine could run. The hub refuses while
                         terminals or agents run there, and says so. */}
-                    {!(isLocalHub && isOwnComputer(computer)) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={setDisabledMutation.isPending}
-                        title={
-                          computer.disabledAt != null
-                            ? 'Enable — let this computer take work again'
-                            : 'Disable — keep this computer, but send it no new work'
-                        }
-                        aria-pressed={computer.disabledAt != null}
-                        onClick={() => void toggleDisabled(computer)}
-                        data-testid={
-                          computer.disabledAt != null ? 'computer-enable' : 'computer-disable'
-                        }
-                      >
-                        {computer.disabledAt != null ? (
-                          <Power className="size-3.5" />
-                        ) : (
-                          <PowerOff className="size-3.5" />
-                        )}
-                      </Button>
-                    )}
-                    {/* The app's own computer is never deleted, on any hub: the app
+                      {!(isLocalHub && isOwnComputer(computer)) && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={setDisabledMutation.isPending}
+                          title={
+                            computer.disabledAt != null
+                              ? 'Enable — let this computer take work again'
+                              : 'Disable — keep this computer, but send it no new work'
+                          }
+                          aria-pressed={computer.disabledAt != null}
+                          onClick={() => void toggleDisabled(computer)}
+                          data-testid={
+                            computer.disabledAt != null ? 'computer-enable' : 'computer-disable'
+                          }
+                        >
+                          {computer.disabledAt != null ? (
+                            <Power className="size-3.5" />
+                          ) : (
+                            <PowerOff className="size-3.5" />
+                          )}
+                        </Button>
+                      )}
+                      {/* The app's own computer is never deleted, on any hub: the app
                         joins every hub it lists, so it would only enroll it again —
                         and on the local hub nothing on this machine could run until
                         it did. Disable it instead. Every OTHER computer can go. */}
-                    {!isOwnComputer(computer) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Delete this computer from the hub"
-                        onClick={() =>
-                          requestDelete({
-                            id: computer.id,
-                            name: computer.name,
-                            // Closed over this hub's mutation + QueryClient, so a
-                            // delete cannot be routed to the wrong hub.
-                            remove: async () => {
-                              await deleteMutation.mutateAsync({ computerId: computer.id })
-                              void queryClient.invalidateQueries(trpc.computers.list.queryFilter())
-                            }
-                          })
-                        }
-                        data-testid="computer-delete"
-                      >
-                        <Trash2 className="text-destructive size-3.5" />
-                      </Button>
-                    )}
+                      {!isOwnComputer(computer) && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Delete this computer from the hub"
+                          onClick={() =>
+                            requestDelete({
+                              id: computer.id,
+                              name: computer.name,
+                              // Closed over this hub's mutation + QueryClient, so a
+                              // delete cannot be routed to the wrong hub.
+                              remove: async () => {
+                                await deleteMutation.mutateAsync({ computerId: computer.id })
+                                void queryClient.invalidateQueries(
+                                  trpc.computers.list.queryFilter()
+                                )
+                              }
+                            })
+                          }
+                          data-testid="computer-delete"
+                        >
+                          <Trash2 className="text-destructive size-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </td>
-                  {/* Mirrors the header's `⋯` slot, so a row's action column ends
-                      exactly where the hub's primary action does. */}
-                  <td className="w-8" />
                 </tr>
               ))}
 
@@ -738,8 +756,7 @@ export function HubCard({
                     <td className="w-32 py-2 pr-3">
                       <HubStatus tone="bad" label="Could not join" />
                     </td>
-                    <td className="w-24 py-2" />
-                    <td className="w-8" />
+                    <td className={ROW_ACTIONS} />
                   </tr>
                 )}
 
@@ -792,7 +809,7 @@ export function HubCard({
                       }
                     />
                   </td>
-                  <td className="w-24 py-2 text-right">
+                  <td className={cn(ROW_ACTIONS, 'text-right')}>
                     <Button
                       variant="outline"
                       size="sm"
@@ -805,7 +822,6 @@ export function HubCard({
                       Start
                     </Button>
                   </td>
-                  <td className="w-8" />
                 </tr>
               )}
 
@@ -815,7 +831,7 @@ export function HubCard({
               {canEnroll && (
                 <tr data-testid="computer-add-row">
                   <Rail last />
-                  <td colSpan={4} className="py-1">
+                  <td colSpan={3} className="py-1">
                     {adding ? (
                       <>
                         <div className="flex items-center gap-2">

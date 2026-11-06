@@ -58,6 +58,8 @@ let deviceStart = vi.fn(async (_p: { hubId: string; url: string }) => ({
   verificationUri: 'https://hub.example.com/device?user_code=ABCDEFGH',
   opened: true
 }))
+/** The live connection's health per hub (`useHubHealth`), swapped per test. */
+let liveHealth: Map<string, Record<string, unknown>> = new Map()
 /** What the hub says about a stored bearer (`checkHubSession`), swapped per test. */
 let sessionReply: { state: string; email?: string | null } = { state: 'valid', email: null }
 let deviceWait = vi.fn(async (_p: { flowId: string }) => ({ ok: true as const }))
@@ -81,6 +83,8 @@ vi.mock('@slayzone/transport/client', () => ({
   },
   useHubRegistryStore: { getState: () => ({ setTokens: vi.fn() }) },
   useFederationOrNull: () => federation,
+  useHubHealth: () => liveHealth,
+  issueOf: (h: { kind: string } | undefined) => (h && h.kind !== 'ok' ? h : null),
   HubScope: ({ hubId, children }: { hubId: string } & Kids) => {
     renderingHubId = hubId
     return <>{children}</>
@@ -327,6 +331,35 @@ describe('HubsSettingsTab — Sign in visibility', () => {
       expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
     } finally {
       sessionReply = { state: 'valid', email: null }
+    }
+  })
+
+  it('the live connection outranks the stored-token check: open and signed in = Signed in', async () => {
+    sessionReply = { state: 'unreachable' }
+    liveHealth = new Map([['hub:remote', { kind: 'ok', authRequired: true }]])
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Signed in')).toBeTruthy())
+      expect(screen.queryByText('Sign-in unverified')).toBeNull()
+      expect(screen.queryByTestId('hub-signin-open')).toBeNull()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+      liveHealth = new Map()
+    }
+  })
+
+  it('a live connection the hub holds no sign-in for = Session expired, with Sign in', async () => {
+    liveHealth = new Map([['hub:remote', { kind: 'signin', since: 0, detail: 'x' }]])
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Session expired')).toBeTruthy())
+      expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
+    } finally {
+      liveHealth = new Map()
     }
   })
 

@@ -3,6 +3,7 @@ import {
   electronBootstrap,
   useHubRegistryStore,
   useFederationOrNull,
+  useHubHealth,
   HubScope
 } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
@@ -644,6 +645,29 @@ export function HubsSettingsTab() {
     )
   }
 
+  // What the hub makes of this app's LIVE connection, the same answer the app-wide
+  // banner shows. Settings' own check (`checkHubSession`, through main) is the
+  // fallback: for a hub not connected live yet, and for a main process too old to
+  // run it, where it can only say "unverified" about a sign-in that works.
+  const liveHealth = useHubHealth()
+  const sessionOf = (hubId: string): HubSessionState | undefined => {
+    const live = liveHealth.get(hubId)
+    if (live?.kind === 'signin') return { state: 'expired' }
+    if (live?.kind === 'ok' && live.authRequired) {
+      const checked = sessions[hubId]
+      return { state: 'valid', email: checked?.state === 'valid' ? checked.email : null }
+    }
+    return sessions[hubId]
+  }
+
+  /**
+   * A bearer is stored for this hub — unless main, asked to check it, says it holds
+   * none (`none`: cleared since the list loaded). Main is the store's owner, so its
+   * answer wins over the renderer's snapshot; never "Checking sign-in…" forever.
+   */
+  const hasStoredSignIn = (hubId: string): boolean =>
+    authedHubIds.has(hubId) && sessionOf(hubId)?.state !== 'none'
+
   /**
    * A remote hub's status, in the shared vocabulary.
    *
@@ -652,21 +676,13 @@ export function HubsSettingsTab() {
    * there is no branch that guesses, because the honest answer when nothing has
    * been asked is "not verified", not "reachable".
    */
-  /**
-   * A bearer is stored for this hub — unless main, asked to check it, says it holds
-   * none (`none`: cleared since the list loaded). Main is the store's owner, so its
-   * answer wins over the renderer's snapshot; never "Checking sign-in…" forever.
-   */
-  const hasStoredSignIn = (hubId: string): boolean =>
-    authedHubIds.has(hubId) && sessions[hubId]?.state !== 'none'
-
   const remoteStatus = (h: HubEntry): ReactNode => {
     const verify = verifyStates[h.id]
     if (verify?.kind === 'probing') return <HubStatus tone="idle" label="Checking…" />
     if (verify?.kind === 'fail')
       return <HubStatus tone="bad" label="Unreachable" title={verify.reason} />
     if (hasStoredSignIn(h.id)) {
-      const session = sessions[h.id]
+      const session = sessionOf(h.id)
       if (session?.state === 'expired')
         return (
           <HubStatus
@@ -780,7 +796,7 @@ export function HubsSettingsTab() {
             // A stored sign-in the hub refused (`expired`) or that could not be
             // confirmed (`unreachable`) needs a sign-in as much as none at all —
             // withholding it there leaves no way out of the red state.
-            const sessionState = sessions[h.id]?.state
+            const sessionState = sessionOf(h.id)?.state
             const showSignIn =
               sessionState === 'expired' ||
               sessionState === 'unreachable' ||

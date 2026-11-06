@@ -7,7 +7,13 @@ import { behaviorSubject } from '@trpc/server/observable'
 import { TRPCClientError } from '@trpc/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectionStateSource } from './connectDeadlineLink'
-import { isSignedOutDescribe, watchHubIssue, type HubIssue } from './hubIssues'
+import {
+  isSignedOutDescribe,
+  watchHubHealth,
+  watchHubIssue,
+  type HubHealth,
+  type HubIssue
+} from './hubIssues'
 
 type State = ReturnType<ConnectionStateSource['get']>
 
@@ -133,5 +139,37 @@ describe('watchHubIssue', () => {
     h.stop()
     await vi.advanceTimersByTimeAsync(10_000)
     expect(h.reports).toEqual([])
+  })
+})
+
+describe('watchHubHealth', () => {
+  function healthHarness(initial: State, describe: () => Promise<unknown>) {
+    const source = behaviorSubject<State>(initial) as unknown as ConnectionStateSource & {
+      next: (s: State) => void
+    }
+    const reports: Array<HubHealth | null> = []
+    const stop = watchHubHealth({ source, describe, onHealth: (h) => reports.push(h) })
+    return { source, reports, stop, last: () => reports.at(-1) }
+  }
+
+  it('a hub that answers with this app signed in is ok, signed in', async () => {
+    const h = healthHarness(OPEN, () => Promise.resolve(SIGNED_IN))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.last()).toEqual({ kind: 'ok', authRequired: true })
+    h.stop()
+  })
+
+  it('a hub without login is ok, with nothing to sign in to', async () => {
+    const h = healthHarness(OPEN, () => Promise.resolve({ authRequired: false, scopes: null }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.last()).toEqual({ kind: 'ok', authRequired: false })
+    h.stop()
+  })
+
+  it('nothing is reported before the hub has answered', async () => {
+    const h = healthHarness(IDLE, () => Promise.resolve(SIGNED_IN))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.reports).toEqual([])
+    h.stop()
   })
 })
