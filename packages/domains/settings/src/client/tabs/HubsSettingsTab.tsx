@@ -7,6 +7,7 @@ import {
 } from '@slayzone/transport/client'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type { HubSessionState } from '@slayzone/platform/electron-bootstrap-contract'
+import { useHubIssueBannerStore } from '../hub-issue-banner-store'
 import {
   Button,
   DropdownMenu,
@@ -205,6 +206,11 @@ export function HubsSettingsTab() {
           setDefaultHubId(registry.defaultHubId)
           setAuthedHubIds(new Set(Object.keys(tokens)))
           for (const hub of nextRemotes) if (tokens[hub.id]) checkSession(hub)
+          // The app-wide hub-issue banner's Sign in lands here (it opened Settings on
+          // this tab): start that hub's sign-in. Taken once, so it never reopens.
+          const pendingSignIn = useHubIssueBannerStore.getState().takeSignInRequest()
+          if (pendingSignIn && nextRemotes.some((h) => h.id === pendingSignIn))
+            setSignInHubId(pendingSignIn)
           setDirty(false)
           originalRef.current = {
             remotes: nextRemotes,
@@ -250,6 +256,18 @@ export function HubsSettingsTab() {
     setSignInState({ kind: 'idle' })
     setDeviceSignIn({ kind: 'idle' })
   }
+
+  const bannerMuted = useHubIssueBannerStore((s) => s.muted)
+  /** The ⋯-menu switch for a hub's connection banner (Don't show again, undone). */
+  const bannerToggle = (hubId: string, testId: string): ReactNode => (
+    <DropdownMenuCheckboxItem
+      checked={!bannerMuted.includes(hubId)}
+      onCheckedChange={(on) => useHubIssueBannerStore.getState().setMuted(hubId, !on)}
+      data-testid={testId}
+    >
+      Show connection banner
+    </DropdownMenuCheckboxItem>
+  )
 
   /** The bearer just stored for `hubId`: mark it signed in, hand it to the live registry. */
   const signedIn = async (hubId: string): Promise<void> => {
@@ -634,12 +652,20 @@ export function HubsSettingsTab() {
    * there is no branch that guesses, because the honest answer when nothing has
    * been asked is "not verified", not "reachable".
    */
+  /**
+   * A bearer is stored for this hub — unless main, asked to check it, says it holds
+   * none (`none`: cleared since the list loaded). Main is the store's owner, so its
+   * answer wins over the renderer's snapshot; never "Checking sign-in…" forever.
+   */
+  const hasStoredSignIn = (hubId: string): boolean =>
+    authedHubIds.has(hubId) && sessions[hubId]?.state !== 'none'
+
   const remoteStatus = (h: HubEntry): ReactNode => {
     const verify = verifyStates[h.id]
     if (verify?.kind === 'probing') return <HubStatus tone="idle" label="Checking…" />
     if (verify?.kind === 'fail')
       return <HubStatus tone="bad" label="Unreachable" title={verify.reason} />
-    if (authedHubIds.has(h.id)) {
+    if (hasStoredSignIn(h.id)) {
       const session = sessions[h.id]
       if (session?.state === 'expired')
         return (
@@ -738,6 +764,7 @@ export function HubsSettingsTab() {
                   >
                     Run a local hub
                   </DropdownMenuCheckboxItem>
+                  {bannerToggle('local', 'hub-banner-toggle-local')}
                 </DropdownMenuContent>
               </DropdownMenu>
             )
@@ -750,10 +777,14 @@ export function HubsSettingsTab() {
             // report it), where withholding the button would strip the only
             // way to authenticate. An absent entry means the probe is still in
             // flight; stay quiet rather than flash a button that may not apply.
-            // An expired session needs a sign-in as much as none at all.
+            // A stored sign-in the hub refused (`expired`) or that could not be
+            // confirmed (`unreachable`) needs a sign-in as much as none at all —
+            // withholding it there leaves no way out of the red state.
+            const sessionState = sessions[h.id]?.state
             const showSignIn =
-              sessions[h.id]?.state === 'expired' ||
-              (!authedHubIds.has(h.id) && (authNeed === 'gated' || authNeed === 'unknown'))
+              sessionState === 'expired' ||
+              sessionState === 'unreachable' ||
+              (!hasStoredSignIn(h.id) && (authNeed === 'gated' || authNeed === 'unknown'))
             return hubCardFor(h.id, h.label, false, 'hub-row-remote', {
               identity: (
                 <>
@@ -772,7 +803,7 @@ export function HubsSettingsTab() {
                   <span className="text-muted-foreground truncate font-mono text-xs" title={h.url}>
                     {h.url}
                   </span>
-                  {authedHubIds.has(h.id) && (
+                  {hasStoredSignIn(h.id) && (
                     <span className="sr-only" data-testid="hub-signed-in">
                       signed in
                     </span>
@@ -789,9 +820,11 @@ export function HubsSettingsTab() {
                   size="sm"
                   className="text-xs"
                   title={
-                    authNeed === 'gated'
-                      ? 'This hub requires a signed-in account'
-                      : "Could not confirm whether this hub requires sign-in — it's offered just in case"
+                    sessionState === 'expired' || sessionState === 'unreachable'
+                      ? 'Sign in again to replace the stored sign-in'
+                      : authNeed === 'gated'
+                        ? 'This hub requires a signed-in account'
+                        : "Could not confirm whether this hub requires sign-in — it's offered just in case"
                   }
                   onClick={() => openSignIn(h.id)}
                   data-testid="hub-signin-open"
@@ -824,6 +857,7 @@ export function HubsSettingsTab() {
                       <Pencil className="size-3.5" />
                       Edit name &amp; address
                     </DropdownMenuItem>
+                    {bannerToggle(h.id, 'hub-banner-toggle-remote')}
                     {/* Separated: removing a hub is the one item here that destroys
                       configuration, and it must not sit one slip away from Edit. */}
                     <DropdownMenuSeparator />
