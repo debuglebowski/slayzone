@@ -432,6 +432,12 @@ export const REGRESSIONS = [
     id: 'Q2',
     what: "a legacy project path does not lock its owner out on the owner's computer",
     files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
+  },
+  {
+    round: 9,
+    id: 'Q3',
+    what: 'the hub-disk canary seeds what users plant (computer folders, worktrees) and every input shape',
+    files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
   }
 ]
 

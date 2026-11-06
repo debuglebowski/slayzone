@@ -12,6 +12,13 @@
  * The canaries: a file in nobody's folder, a folder of user A's (B must never list it),
  * the same file through `/dev/fd/<n>` (realpath names nothing real there), and A's file.
  *
+ * The state a user can plant (round-9 Q3, so Q1 shows here): B's own REMOTE computer
+ * reports project folders at every canary and at `/`, and B's tasks there have
+ * worktrees at them — what any user's computer can claim. A's folders are recorded the
+ * ways the hub's disk records them: a legacy project path and a hub-side worktree.
+ * Inputs: every path-like field, then every string leaf, each for every union option.
+ * REST also gets a multipart and a raw-body request; every fs argument is checked.
+ *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts packages/apps/api/src/hub-disk-canary.test.ts
  */
@@ -54,7 +61,7 @@ const CONTENT_FNS = new Set([
   'link',
   'linkSync'
 ])
-const touches: Array<{ fn: string; arg: string; route: string }> = []
+const touches: Array<{ fn: string; arg: string; route: string; stack: string }> = []
 const state = { route: '', canaries: [] as string[] }
 const isCanary = (a: unknown): string | null => {
   const s = typeof a === 'string' ? a : a instanceof URL ? a.pathname : null
@@ -66,9 +73,21 @@ function watch<T extends object>(mod: T): T {
   for (const [name, fn] of Object.entries(mod)) {
     if (typeof fn !== 'function' || !CONTENT_FNS.has(name)) continue
     out[name] = (...args: unknown[]) => {
-      for (const a of args.slice(0, 2)) {
+      for (const a of args) {
         const hit = isCanary(a)
-        if (hit && state.route) touches.push({ fn: name, arg: hit, route: state.route })
+        if (hit && state.route)
+          touches.push({
+            fn: name,
+            arg: hit,
+            route: state.route,
+            // Where the read came from: a call that got past the gate earlier and
+            // changed what B owns shows up under a later route's name otherwise.
+            stack: (new Error().stack ?? '')
+              .split('\n')
+              .filter((l) => l.includes('/src/') && !l.includes('hub-disk-canary'))
+              .slice(0, 6)
+              .join(' | ')
+          })
       }
       return (fn as (...a: unknown[]) => unknown).apply(mod, args)
     }
@@ -105,6 +124,7 @@ const { setAuthGate } = await import('@slayzone/trpc-server')
 const { setHostCapabilitiesDeps } = await import('@slayzone/host-capabilities/server')
 const { createTestHarness } = await import('../../../shared/test-utils/ipc-harness.js')
 const { appRouter } = await import('./router')
+const { setHubDiskComputer } = await import('./access')
 const { registerRestApi } = await import('./http/rest-api')
 const { restRouteKey } = await import('./http/rest-api/admin-routes')
 const { bindRestPrincipal } = await import('./http/rest-api/principal')
@@ -152,6 +172,62 @@ sql(
   bRoot
 )
 sql(`INSERT INTO tasks (id, project_id, title) VALUES ('tA', 'pA', 'a'), ('tB', 'pB', 'b')`)
+// A's folders as the hub's disk records them: the legacy project path above, and a
+// hub-side worktree (a task on the hub's own local computer, the desktop's). A task on
+// no computer is NOT one: B removing B's own computer clears its tasks' computer —
+// this test found that laundering B's planted worktrees into "hub-side" ones (Q1).
+fs.mkdirSync(join(aRoot, 'wt'), { recursive: true })
+sql(
+  `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+   VALUES ('cLocal', 'local', 'darwin', '1', '[]', 1, ?)`,
+  A
+)
+setHubDiskComputer('cLocal')
+sql(
+  `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('tA2', 'pA', 'a2', ?, 'cLocal')`,
+  join(aRoot, 'wt')
+)
+// What B can plant: B's own remote computer reporting project folders at every canary
+// and at `/`, with B's tasks' worktrees there.
+sql(
+  `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+   VALUES ('cB', 'b', 'linux-x64', '1', '[]', 1, ?), ('cA', 'a', 'linux-x64', '1', '[]', 1, ?)`,
+  B,
+  A
+)
+const planted = [
+  nobodys,
+  aRoot,
+  join(aRoot, 'slz-canary-dir'),
+  join(aRoot, 'slz-canary-a.txt'),
+  looseFile,
+  '/'
+]
+planted.forEach((folder, i) => {
+  sql(
+    `INSERT INTO projects (id, name, color, owner_user_id) VALUES (?, 'B planted', '#222', ?)`,
+    `pBp${i}`,
+    B
+  )
+  sql(
+    `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+     VALUES ('cB', ?, ?, 'ready', 1)`,
+    `pBp${i}`,
+    folder
+  )
+  sql(
+    `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES (?, ?, 'p', ?, 'cB')`,
+    `tBp${i}`,
+    `pBp${i}`,
+    folder
+  )
+})
+// A's computer reporting A's own folder too (a tie B must not break by naming cB).
+sql(
+  `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+   VALUES ('cA', 'pA', ?, 'ready', 1)`,
+  aRoot
+)
 
 /** Each canary, with the extra paths its touches may take (a folder's entries). */
 const CANARIES: Array<[label: string, path: string]> = [
@@ -196,20 +272,53 @@ const isPathKey = (k: string): boolean =>
 function idFor(key: string): unknown {
   if (/taskId$|^task_id$/.test(key)) return 'tB'
   if (/projectId$|^project_id$/.test(key)) return 'pB'
+  if (/computerId$|^computer_id$/.test(key)) return 'cB'
   return 'x'
 }
+/** An id field: kept B's own in every mode, so id checks let the call through. */
+const isIdKey = (k: string): boolean => /(^id$|Id$|_id$|Ids$)/.test(k)
 
 type Def = { type: string; [k: string]: unknown }
 const defOf = (s: unknown): Def | null =>
   ((s as { _zod?: { def?: Def } })?._zod?.def ?? null) as Def | null
 
 function opaque(canary: string): Record<string, unknown> {
-  const o: Record<string, unknown> = { taskId: 'tB', projectId: 'pB', title: 'x', id: 'x' }
+  const o: Record<string, unknown> = {
+    taskId: 'tB',
+    projectId: 'pB',
+    computerId: 'cB',
+    target: { computerId: 'cB' },
+    title: 'x',
+    id: 'x'
+  }
   for (const k of PATH_KEYS) o[k] = /s$/.test(k) ? [canary] : canary
   return o
 }
 
-/** A value for `schema` with every path-like field set to `canary`. */
+/** Which leaves get the canary, and which option of every union is taken. */
+interface FillMode {
+  /** `paths`: path-like fields only; `all`: every string leaf but ids. */
+  readonly leaves: 'paths' | 'all'
+  readonly union: number
+}
+let mode: FillMode = { leaves: 'paths', union: 0 }
+
+/** Most options any union in `schema` has (each one is tried). */
+function maxUnion(schema: unknown, depth = 0): number {
+  const def = defOf(schema)
+  if (!def || depth > 8) return 1
+  const kids: unknown[] = []
+  if (def.type === 'object') kids.push(...Object.values(def.shape as Record<string, unknown>))
+  for (const k of ['innerType', 'in', 'element', 'left', 'right'] as const)
+    if (def[k]) kids.push(def[k])
+  if (def.type === 'tuple') kids.push(...(def.items as unknown[]))
+  let n = def.type === 'union' ? (def.options as unknown[]).length : 1
+  if (def.type === 'union') kids.push(...(def.options as unknown[]))
+  for (const k of kids) n = Math.max(n, maxUnion(k, depth + 1))
+  return Math.min(n, 6)
+}
+
+/** A value for `schema` with every path-like field (or string leaf) set to `canary`. */
 function fill(schema: unknown, canary: string, key = '', depth = 0): unknown {
   const def = defOf(schema)
   if (!def || depth > 8) return opaque(canary)
@@ -236,15 +345,18 @@ function fill(schema: unknown, canary: string, key = '', depth = 0): unknown {
       return [fill(def.element, canary, key, depth + 1)]
     case 'tuple':
       return (def.items as unknown[]).map((i) => fill(i, canary, key, depth + 1))
-    case 'union':
-      return fill((def.options as unknown[])[0], canary, key, depth + 1)
+    case 'union': {
+      const options = def.options as unknown[]
+      return fill(options[mode.union % options.length], canary, key, depth + 1)
+    }
     case 'intersection':
       return {
         ...(fill(def.left, canary, key, depth + 1) as object),
         ...(fill(def.right, canary, key, depth + 1) as object)
       }
     case 'string':
-      return isPathKey(key) ? canary : idFor(key)
+      if (isPathKey(key)) return canary
+      return mode.leaves === 'all' && !isIdKey(key) ? canary : idFor(key)
     case 'number':
     case 'int':
       return 0
@@ -255,7 +367,7 @@ function fill(schema: unknown, canary: string, key = '', depth = 0): unknown {
     case 'literal':
       return (def.values as unknown[])[0]
     case 'record':
-      return {}
+      return Object.fromEntries(PATH_KEYS.map((k) => [k, canary]))
     case 'null':
       return null
     default:
@@ -290,10 +402,16 @@ test(`tRPC: no procedure lets user B touch a canary on the hub's disk (${procedu
   for (const [label, canary] of CANARIES) {
     state.canaries = [canary]
     for (const [path, proc] of procedures) {
-      const input = proc._def.inputs.length ? fill(proc._def.inputs[0], canary) : undefined
-      state.route = `trpc ${path} (${label})`
-      await withTimeout(Promise.resolve().then(() => at(path)(input)))
-      state.route = ''
+      const schema = proc._def.inputs[0]
+      for (const leaves of ['paths', 'all'] as const) {
+        for (let union = 0; union < (schema ? maxUnion(schema) : 1); union++) {
+          mode = { leaves, union }
+          const input = schema ? fill(schema, canary) : undefined
+          state.route = `trpc ${path} (${label}; ${leaves}, union ${union})`
+          await withTimeout(Promise.resolve().then(() => at(path)(input)))
+          state.route = ''
+        }
+      }
     }
   }
   expect(touches, 'hub-disk canaries touched').toEqual([])
@@ -339,22 +457,47 @@ test(`REST: no route lets user B touch a canary on the hub's disk (${routes.leng
       const url = r.path.replace(/:(\w+)/g, (_m, k: string) =>
         String(idFor(k) === 'x' ? 'tB' : idFor(k))
       )
-      const q = new URLSearchParams({ path: canary, filePath: canary, dirPath: canary })
-      state.route = `${restRouteKey(r.method, r.path)} (${label})`
-      const ac = new AbortController()
-      const timer = setTimeout(() => ac.abort(), 3_000)
-      await fetch(`http://127.0.0.1:${port}${url}?${q}`, {
-        method: r.method.toUpperCase(),
-        headers: { 'content-type': 'application/json' },
-        body: r.method === 'get' ? undefined : JSON.stringify(opaque(canary)),
-        signal: ac.signal
-      })
-        .then((res) => res.arrayBuffer())
-        .catch(() => undefined)
-      clearTimeout(timer)
-      // A route may finish its work after it answered.
-      await new Promise((res) => setTimeout(res, 5))
-      state.route = ''
+      const q = new URLSearchParams(
+        Object.entries(opaque(canary)).map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : v)])
+      )
+      // JSON, multipart (fields + a file part named like a path) and a raw body.
+      const bodies: Array<[string, () => RequestInit]> = [
+        [
+          'json',
+          () => ({
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(opaque(canary))
+          })
+        ],
+        [
+          'multipart',
+          () => {
+            const form = new FormData()
+            for (const [k, v] of Object.entries(opaque(canary)))
+              form.append(k, typeof v === 'string' ? v : JSON.stringify(v))
+            form.append('file', new Blob(['x']), canary)
+            return { body: form }
+          }
+        ],
+        ['raw', () => ({ headers: { 'content-type': 'application/octet-stream' }, body: canary })]
+      ]
+      for (const [kind, init] of r.method === 'get' ? bodies.slice(0, 1) : bodies) {
+        state.route = `${restRouteKey(r.method, r.path)} (${label}; ${kind})`
+        const ac = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 3_000)
+        const req = init()
+        await fetch(`http://127.0.0.1:${port}${url}?${q}`, {
+          method: r.method.toUpperCase(),
+          ...(r.method === 'get' ? {} : req),
+          signal: ac.signal
+        })
+          .then((res) => res.arrayBuffer())
+          .catch(() => undefined)
+        clearTimeout(timer)
+        // A route may finish its work after it answered.
+        await new Promise((res) => setTimeout(res, 5))
+        state.route = ''
+      }
     }
   }
   expect(touches, 'hub-disk canaries touched').toEqual([])
