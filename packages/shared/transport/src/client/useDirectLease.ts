@@ -16,7 +16,7 @@ import {
   type DirectLinkHubClient
 } from './direct-link'
 import { useHubId } from './HubScope'
-import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 
 export function useDirectLease(
   client: unknown,

@@ -83,7 +83,7 @@ import {
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
 import { createDirectLinkGate } from './direct-link-gate'
 import { fetchIssuedDirectAddresses } from './direct-link-issued'
-import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 import { attachHubSocketOriginStrip } from './hub-socket-origin'
 import { applyAppBadge, parseAppBadgePayload } from './app-badge'
 import {

@@ -115,7 +115,8 @@ describe('TerminalController: direct link', () => {
     )
     c.setDirect(direct.client as never)
     await c.write('x')
-    const id = (direct.calls[0]?.[1] as { writeId: string }).writeId
+    const [, sent] = direct.calls[0] ?? []
+    const id = (sent as { writeId: string }).writeId
     expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'x', writeId: id }]])
     c.dispose()
   })

@@ -87,8 +87,9 @@ export interface ElectronBootstrapApp {
    * Direct link (docs/direct-link.md): may this document open a socket to a
    * computer's listener at `address`, issued by hub `hubId`, now — confirmed by
    * that hub, allowed by the document's CSP, and reached by the main process's HTTP
-   * probe? `hubId` is a registry id, or {@link DIRECT_LINK_DEFAULT_HUB_ID} outside a
-   * hub scope. Optional: an older or non-Electron host has none.
+   * probe? `hubId` is a registry id, or `DIRECT_LINK_DEFAULT_HUB_ID`
+   * (`@slayzone/platform/direct-link`) outside a hub scope. Optional: an older or
+   * non-Electron host has none.
    */
   prepareDirectLink?: (
     address: string,
@@ -126,9 +127,3 @@ export interface ElectronBootstrapAPI {
   app: ElectronBootstrapApp
   files: ElectronBootstrapFiles
 }
-
-/**
- * The hub id a direct link names outside any hub scope (a single-hub client): the
- * main process reads it as the registry's default hub.
- */
-export const DIRECT_LINK_DEFAULT_HUB_ID = 'default'

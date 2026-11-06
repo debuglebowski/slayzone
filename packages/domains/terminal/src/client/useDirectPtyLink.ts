@@ -14,7 +14,7 @@ import { ptyBufferSince, startDirectPtyLink } from './direct-pty'
 import { usePty } from './PtyContext'
 import { useTerminalStateStore } from './useTerminalStateStore'
 import { useTRPCClient } from './trpc'
-import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/electron-bootstrap-contract'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 
 export function useDirectPtyLink(sessionId: string): void {
   const trpcClient = useTRPCClient()
