@@ -30,6 +30,7 @@ import {
   hubStateRoots,
   invalidateAccessCache,
   resource,
+  setHubDiskComputer,
   type AccessRequest,
   type ResourceKind
 } from './access'
@@ -122,6 +123,11 @@ sql(
   A,
   B
 )
+
+// A's worktree is on the hub's own computer (the desktop's): a record of the hub's disk.
+// A task on no computer is not (Q1: removing a computer clears its tasks' computer).
+sql(`UPDATE tasks SET computer_id = 'cA' WHERE id = 'tA'`)
+setHubDiskComputer('cA')
 
 const req = (userId: string | null, authRequired = true): AccessRequest => ({
   authRequired,

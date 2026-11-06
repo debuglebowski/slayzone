@@ -270,6 +270,9 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_TASK_TITLE`,
       o.path
     )
+    // The same folder as the project's path: a record OF the hub's disk. A task on no
+    // computer is not one — on a standalone hub its worktree is some computer's (Q1).
+    run(`UPDATE projects SET path = ? WHERE id = ?`, o.path, o.project)
     run(
       `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-code', 0)`,
       o.tab,

@@ -527,9 +527,11 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
 //                  has a placement does not count — the placement is where its folder
 //                  is now (Q2: as a computer-less owner it made the tie unbreakable and
 //                  locked its owner out on their own computer).
-//   hub disk       only records OF the hub's disk: project paths, worktrees of tasks on
-//                  no computer or the hub's own, folders of the hub's own computer (the
-//                  desktop's co-spawned one, {@link setHubDiskComputer}). What a remote
+//   hub disk       only records OF the hub's disk: project paths, and the worktrees and
+//                  folders of the hub's own computer (the desktop's co-spawned one,
+//                  {@link setHubDiskComputer}). A task on NO computer is not one: removing
+//                  a computer clears its tasks' computer, so a user could turn the
+//                  worktrees their own remote computer reported into "hub-side" ones. What a remote
 //                  computer reports describes ITS disk: counted here, a user's computer
 //                  reporting `/` gave them every hub file, and reporting someone else's
 //                  folder locked its owner out.
@@ -552,9 +554,9 @@ const HUB_DISK_ROOTS_SQL = `
     EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
   FROM (
     SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
-      AND (computer_id IS NULL OR computer_id = ?)
+      AND computer_id = ?
     UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
-      AND (computer_id IS NULL OR computer_id = ?)
+      AND computer_id = ?
     UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
     UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
       AND computer_id = ?
