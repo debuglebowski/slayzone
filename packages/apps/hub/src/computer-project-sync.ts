@@ -195,21 +195,32 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * 2, low M6). Kept in the hub's settings: it survives a restart, and only the
    * supervised local computer is ever widened.
    */
-  async function trackedWorkRoots(): Promise<string[]> {
+  async function readTracked(): Promise<Record<string, string[]>> {
     const raw = (
       await db.get<{ value: string }>(`SELECT value FROM settings WHERE key = '${WORK_ROOTS_KEY}'`)
     )?.value
     try {
-      const parsed = raw ? (JSON.parse(raw) as unknown) : []
-      return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === 'string') : []
+      const parsed = raw ? (JSON.parse(raw) as unknown) : {}
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, string[]>)
+        : {}
     } catch {
-      return []
+      return {}
     }
   }
 
-  async function saveTrackedWorkRoots(roots: readonly string[]): Promise<void> {
+  // Keyed by computer id: a settings export imported on another machine never
+  // names that machine's local computer, so it can never remove its roots.
+  async function trackedWorkRoots(computerId: string): Promise<string[]> {
+    const list = (await readTracked())[computerId]
+    return Array.isArray(list) ? list.filter((r): r is string => typeof r === 'string') : []
+  }
+
+  async function saveTrackedWorkRoots(computerId: string, roots: readonly string[]): Promise<void> {
+    const all = await readTracked()
+    all[computerId] = [...new Set(roots)]
     await db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('${WORK_ROOTS_KEY}', ?)`, [
-      JSON.stringify([...new Set(roots)])
+      JSON.stringify(all)
     ])
   }
 
@@ -234,7 +245,7 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
       const needed = missingRootsForFolders(workFolders, [])
       // Only roots this sync added (a root the user already had covered the folder,
       // so it was never added or tracked) and the computer still has.
-      const tracked = (await trackedWorkRoots()).filter((r) => roots.includes(r))
+      const tracked = (await trackedWorkRoots(computerId)).filter((r) => roots.includes(r))
       stale = tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r])))
       keptTracked = tracked.filter((r) => !stale.includes(r))
       base = roots.filter((r) => !stale.includes(r))
@@ -244,7 +255,7 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
       ? missingRootsForFolders(workFolders, [...base, ...fromProjects])
       : []
     const additions = [...fromProjects, ...fromFolders]
-    if (workFolders) await saveTrackedWorkRoots([...keptTracked, ...fromFolders])
+    if (workFolders) await saveTrackedWorkRoots(computerId, [...keptTracked, ...fromFolders])
     if (additions.length === 0 && stale.length === 0) return
     await ops.setAllowedRoots(computerId, [...base, ...additions])
     if (stale.length > 0) {
