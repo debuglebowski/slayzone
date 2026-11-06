@@ -586,6 +586,16 @@ export const REGRESSIONS = [
       `${P}domains/task/src/server/ops/startup-purge-computer.test.ts`,
       `${P}apps/hub/src/worktree-computer-state.test.ts`
     ]
+  },
+  // ── post-merge QA (task 964073b0, row 5b) ──
+  {
+    round: 16,
+    id: 'QA-5b',
+    what: 'a project instructions edit saves with no project instructions item; every AI-config write lands on the computer; a refused save is shown, never swallowed',
+    files: [
+      `${P}domains/ai-config/src/server/ai-config-routing.test.ts`,
+      `${P}domains/file-editor/src/client/useWatchedFile.test.ts`
+    ]
   }
 ]
 
