@@ -314,7 +314,6 @@ export const computersRouter = router({
       return { ok: true as const }
     }),
 
-  /** Effective computer for a task (task binding → project default → null). */
   /**
    * A short-lived capability to reach a terminal session or chat tab directly on the
    * computer that holds it (docs/direct-link.md). The owner gate has checked the
@@ -378,6 +377,7 @@ export const computersRouter = router({
       })
     }),
 
+  /** Effective computer for a task (task binding → project default → null). */
   resolveTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
