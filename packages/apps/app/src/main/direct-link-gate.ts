@@ -20,7 +20,16 @@
 import { directLinkConnectSources } from './renderer-csp'
 
 const HEALTH_PATH = '/direct/v1/health'
-const LOOPBACK_ENTRY = 'ws://127.0.0.1:*'
+/**
+ * The `connect-src` entry that lets a document reach a loopback listener, per
+ * spelling of the loopback host. `[::1]` has none: a CSP host-source cannot name an
+ * IPv6 literal, so a listener only reachable there is relayed.
+ */
+const LOOPBACK_ENTRY: Record<string, string | null> = {
+  '127.0.0.1': 'ws://127.0.0.1:*',
+  localhost: 'ws://localhost:*',
+  '[::1]': null
+}
 /** Issued origins kept for the next document's CSP (oldest dropped first). */
 export const MAX_ISSUED_ORIGINS = 32
 
@@ -87,9 +96,10 @@ export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
         return { ok: false, reason: 'invalid' }
       }
       const sources = applied.get(webContentsId) ?? new Set<string>()
-      const loopback = host === '127.0.0.1'
+      const loopback = Object.hasOwn(LOOPBACK_ENTRY, host)
       if (loopback) {
-        if (!sources.has(LOOPBACK_ENTRY)) return { ok: false, reason: 'csp' }
+        const entry = LOOPBACK_ENTRY[host]
+        if (!entry || !sources.has(entry)) return { ok: false, reason: 'csp' }
       } else {
         const [origin] = directLinkConnectSources([address])
         if (!origin) return { ok: false, reason: 'invalid' }

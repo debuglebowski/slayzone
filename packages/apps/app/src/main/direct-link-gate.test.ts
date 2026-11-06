@@ -102,4 +102,17 @@ describe('direct-link gate', () => {
     expect(gate.connectSources().length).toBeLessThanOrEqual(32)
     expect(gate.connectSources()).toContain('wss://box99.example:1')
   })
+
+  it('treats every loopback spelling as loopback: probed when the document allows it, never sent to the hub or added', async () => {
+    const { gate, probed, asked } = setup()
+    gate.recordApplied(1, 'ws://127.0.0.1:* ws://localhost:*')
+    expect(await gate.prepare(1, 'h1', 'localhost:5001')).toEqual({ ok: true })
+    gate.recordApplied(2, 'ws://127.0.0.1:*')
+    expect(await gate.prepare(2, 'h1', 'localhost:5001')).toEqual({ ok: false, reason: 'csp' })
+    // A CSP host-source cannot name an IPv6 literal: never dialable from the renderer.
+    expect(await gate.prepare(1, 'h1', '[::1]:5001')).toEqual({ ok: false, reason: 'csp' })
+    expect(probed).toEqual(['http://localhost:5001/direct/v1/health'])
+    expect(asked).toEqual([])
+    expect(gate.connectSources()).toEqual([])
+  })
 })

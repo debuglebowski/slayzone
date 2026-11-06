@@ -672,6 +672,12 @@ export const REGRESSIONS = [
       `${P}shared/transport/src/client/direct-pty-read.test.ts`,
       `${P}domains/terminal/src/client/direct-pty.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5a',
+    what: "Electron main treats localhost and [::1] listeners as loopback (probed when the document's CSP has the entry, never sent to the hub), not as invalid",
+    files: [`${P}apps/app/src/main/direct-link-gate.test.ts`]
   }
 ]
 
