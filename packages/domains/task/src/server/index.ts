@@ -115,8 +115,12 @@ export {
 } from './ops/shared'
 // The in-process implementations (`defaultWorktreeExecAdapters`,
 // `defaultWorktreePolicyAdapters`) live in `worktrees/server`.
-export type { WorktreeExecAdapters, WorktreePolicyAdapters } from './ops/shared'
-export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
+export type {
+  WorktreeComputerState,
+  WorktreeExecAdapters,
+  WorktreePolicyAdapters
+} from './ops/shared'
+export { purgeExpiredTrash, purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
   TaskRuntimeAdapters,

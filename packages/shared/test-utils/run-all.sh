@@ -95,6 +95,10 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
+# worktree computer state for the Trash purge (R5-1)
+run_harness packages/apps/hub/src/worktree-computer-state.test.ts
+# Trash purge waits for the worktree computer (R5-1)
+run_harness packages/domains/task/src/server/ops/startup-purge-computer.test.ts
 # machine-local settings never exported or imported (R3-2)
 run_harness packages/apps/api/src/export-import-machine-local.test.ts
 # Final review H1: cron catch-up waits for the computer, runs once on connect.

@@ -1,3 +1,4 @@
+import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
@@ -84,6 +85,7 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
+  purgeExpiredTrash,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
@@ -625,7 +627,16 @@ export function composeServer(opts: {
     projectRootForTask: async (_db: SlayzoneDb, taskId: string, projectId: string) => {
       const computerId = await resolveComputerForTask(taskId).catch(() => null)
       return computerId ? recordedProjectRoot(db, projectId, computerId) : null
-    }
+    },
+    // The Trash purge removes a worktree before its task, so it asks whether the
+    // computer holding it can (R5-1). At boot none is connected: the task waits, and
+    // the purge runs again on `computer-connected` (below).
+    worktreeComputerState: createWorktreeComputerState({
+      db,
+      requireLogin: opts.requireLogin,
+      usable: () => execGateway?.listUsableComputers() ?? [],
+      forTask: (taskId) => resolveComputerForTask(taskId)
+    })
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
@@ -2064,6 +2075,10 @@ export function composeServer(opts: {
     // Cron catch-ups that waited for a computer (launch, wake) run now (H1).
     computerGateway.events.on('computer-connected', () => {
       if (!resettingForTest) void automationEngine.computerConnected()
+    })
+    // Expired Trash entries kept until their computer connected are purged now (R5-1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) bootBestEffort('trash-purge-on-connect', () => purgeExpiredTrash(db))
     })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).

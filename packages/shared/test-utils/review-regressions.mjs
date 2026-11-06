@@ -576,6 +576,16 @@ export const REGRESSIONS = [
     id: 'R4-1',
     what: 'a soft-deleted task restored after a relaunch keeps its worktree root until purged',
     files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  // ── round 15 ──
+  {
+    round: 15,
+    id: 'R5-1',
+    what: 'the Trash purge deletes a task only after its worktree is removed; no computer = keep and retry on connect; a computer gone for good never blocks',
+    files: [
+      `${P}domains/task/src/server/ops/startup-purge-computer.test.ts`,
+      `${P}apps/hub/src/worktree-computer-state.test.ts`
+    ]
   }
 ]
 
