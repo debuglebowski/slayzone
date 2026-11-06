@@ -12,7 +12,7 @@ import {
 const unadoptedWarmAgentSpy = vi.fn<(taskId: string) => { sessionId: string } | null>(() => null)
 // The claude agent tree is pure, so the real module is used (by path: the barrel
 // pulls in the native pty manager) — a hand-rolled fake would drift from its states.
-vi.mock('@slayzone/terminal/server', async () => {
+vi.mock('@slayzone/terminal/hub', async () => {
   const agentTree = await import('../../../domains/terminal/src/server/agent-tree.js')
   const lifecycle = await import('../../../domains/terminal/src/server/agent-lifecycle-router.js')
   const pty = await import('../../../domains/terminal/src/server/pty-router.js')

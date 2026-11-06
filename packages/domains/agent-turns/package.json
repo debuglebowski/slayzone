@@ -11,7 +11,8 @@
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
-    "./workspace-capture": "./src/server/workspace-capture.ts"
+    "./workspace-capture": "./src/server/workspace-capture.ts",
+    "./turn-git": "./src/server/turn-git.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

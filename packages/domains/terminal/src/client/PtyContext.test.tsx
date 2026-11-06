@@ -15,7 +15,8 @@ const procs = [
   'onPrompt',
   'onSessionDetected',
   'onDevServerDetected',
-  'onTitleChange'
+  'onTitleChange',
+  'onOutputAvailability'
 ] as const
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
@@ -180,5 +181,15 @@ describe('PtyProvider event streams', () => {
     expect(detected).toHaveBeenCalledWith('c1')
     expect(dev).toHaveBeenCalledWith('http://localhost:3000')
     expect(title.mock.calls).toEqual([['vim']])
+  })
+
+  it("routes a session's computer going offline and back to that session only", async () => {
+    const { ctx } = mount()
+    const seen = vi.fn()
+    ctx().subscribeAvailability('s1', seen)
+    await emit('onOutputAvailability', { sessionId: 's1', available: false })
+    await emit('onOutputAvailability', { sessionId: 's2', available: false })
+    await emit('onOutputAvailability', { sessionId: 's1', available: true })
+    expect(seen.mock.calls).toEqual([[false], [true]])
   })
 })

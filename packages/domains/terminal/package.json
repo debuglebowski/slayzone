@@ -11,6 +11,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server/index.ts",
+    "./hub": "./src/server/hub.ts",
+    "./shell-env": "./src/server/shell-env.ts",
     "./electron": "./src/electron/index.ts",
     "./db": "./src/server/worker-db.ts",
     "./client": "./src/client/index.ts",
@@ -29,6 +31,8 @@
     "./terminal-state": "./src/client/terminal-state-reducer.ts",
     "./live-blocks": "./src/client/live-blocks.ts",
     "./runtime": "./src/server/chat-runtime.ts",
+    "./pty-detection": "./src/server/pty-detection.ts",
+    "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts"
   },
   "scripts": {

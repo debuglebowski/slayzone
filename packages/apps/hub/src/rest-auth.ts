@@ -110,7 +110,7 @@ export type RestAuthAction = 'allow' | 'verify'
  * ({@link PASSWORD_BOOTSTRAP_PATHS}) — and never get this far: {@link withRestAuth}
  * refuses every password route first ({@link passwordRouteRefusal}).
  */
-const AUTH_BOOTSTRAP_PATHS = new Set<string>([
+const AUTH_BOOTSTRAP_PATHS = keySet([
   '/api/auth/sign-in/email',
   '/api/auth/sign-out',
   '/api/auth/get-session',
@@ -121,7 +121,7 @@ const AUTH_BOOTSTRAP_PATHS = new Set<string>([
 ])
 
 /** The members of {@link AUTH_BOOTSTRAP_PATHS} that sign in with a password. */
-const PASSWORD_BOOTSTRAP_PATHS = new Set<string>(['/api/auth/sign-in/email', '/api/auth/web-login'])
+const PASSWORD_BOOTSTRAP_PATHS = keySet(['/api/auth/sign-in/email', '/api/auth/web-login'])
 
 /**
  * Every route that takes, checks, sets or resets a password (T-10): better-auth's
@@ -163,7 +163,8 @@ export function passwordRouteRefusal(
   passwordEnabled: boolean
 ): PasswordRouteRefusal | null {
   if (passwordEnabled || !url) return null
-  const path = url.split('?')[0]
+  const path = routePathKey(url)
+  if (path === null) return null // the gate refuses it (fail closed)
   const event = PASSWORD_ROUTES.get(path)
   if (event) return { event, op: path.slice('/api/auth/'.length), route: path }
   // The link route carries a reset token in its path: never written to the audit line.
@@ -209,7 +210,7 @@ export function passwordRouteRefusal(
  *   - `app-sso/token`   — the app trades a single-use code + its PKCE verifier for a
  *                         session token.
  */
-const SSO_BOOTSTRAP_PATHS = new Set<string>([
+const SSO_BOOTSTRAP_PATHS = keySet([
   '/api/auth/sign-in/social',
   `/api/auth/callback/${ENTRA_PROVIDER_ID}`,
   '/api/auth/device/code',
@@ -248,7 +249,33 @@ const SSO_BOOTSTRAP_PATHS = new Set<string>([
  * also why the user routes put the target email in the request body rather than in
  * a `/:email` path segment.
  */
-const SELF_GUARDED = new Set<string>(['/api/computers/join-token', '/api/hub/users'])
+const SELF_GUARDED = keySet(['/api/computers/join-token', '/api/hub/users'])
+
+/** A set of route paths, in {@link routePathKey} form (every path here is literal). */
+function keySet(paths: Iterable<string>): ReadonlySet<string> {
+  return new Set([...paths].map((p) => routePathKey(p) ?? p))
+}
+
+/**
+ * A request path as express 5 routes it — the ONE form every decision here compares:
+ * the query and fragment cut, percent-encoding decoded, letter case folded (routing
+ * is case-insensitive), repeated slashes collapsed, a trailing slash dropped (not
+ * `strict`). Comparing the raw path let `/API/panels` reach the panels route with no
+ * principal (M9). Null — malformed encoding, an encoded `/` or `\`, a NUL: no single
+ * route it could be, so callers fail closed.
+ */
+export function routePathKey(url: string): string | null {
+  const raw = url.split(/[?#]/)[0] ?? ''
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+  if (/%2f|%5c|%00/i.test(raw) || decoded.includes('\0')) return null
+  const collapsed = decoded.toLowerCase().replace(/\/+/g, '/')
+  return collapsed.length > 1 ? collapsed.replace(/\/$/, '') : collapsed
+}
 
 /** The MCP tool endpoint — same power as the tRPC router, so same gating. */
 const MCP_PATH = '/mcp'
@@ -308,7 +335,9 @@ export function restAuthAction(opts: RestAuthActionOptions): RestAuthAction {
   if (!opts.hubAuthRequired) return 'allow'
   // No url at all → cannot prove the route is exempt, so demand a bearer.
   if (!opts.url) return 'verify'
-  const path = opts.url.split('?')[0]
+  const path = routePathKey(opts.url)
+  // Not one path express could route: never shown to be exempt.
+  if (path === null) return 'verify'
   if (path !== MCP_PATH && !path.startsWith('/api/')) return 'allow'
   if (SELF_GUARDED.has(path)) return 'allow'
   if (
@@ -575,8 +604,8 @@ export function withRestAuth(opts: {
             refuse(401, 'Unauthorized', 'invalid_credential', null)
             return
           }
-          const path = (req.url ?? '').split('?')[0]
-          if (!BREAK_GLASS_ROUTES.has(`${req.method ?? 'GET'} ${path}`)) {
+          const path = routePathKey(req.url ?? '')
+          if (path === null || !BREAK_GLASS_ROUTES.has(`${req.method ?? 'GET'} ${path}`)) {
             refuse(
               403,
               'a break-glass session can only manage accounts and computers',

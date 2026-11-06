@@ -23,6 +23,15 @@
  *   - Refcounts watchers by worktreePath. Last unsubscribe closes the watcher.
  *   - On ENOSPC (Linux inotify exhaustion) or any watcher error, the watcher
  *     detaches cleanly — renderer falls back to its poll timer.
+ *   - `ready(worktreePath)` resolves once the watch is LIVE (Q4): on macOS a recursive
+ *     `fs.watch` returns before its FSEvents stream runs, and a change in that window
+ *     is dropped, not delayed. A short-lived marker file in the gitdir is touched until
+ *     the watch reports it (never in the working tree: it would show in `git status`),
+ *     then one `git:diff-changed` goes out, so a change made while the watch started is
+ *     picked up too. The marker's own events are never reported. Past a cap (a loaded
+ *     machine) `ready` resolves with a rescan, and the watch keeps confirming: once it
+ *     is live, one more rescan goes out, so no change is lost in between (R10-2); and
+ *     one more once it has settled, for an event dropped in its first moments.
  */
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
@@ -30,6 +39,15 @@ import * as path from 'node:path'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 
 const DEBOUNCE_MS = 200
+/** Marker files `ready()` writes into the gitdir; their events are never reported. */
+const READY_MARKER_PREFIX = '.slayzone-watch-ready-'
+/** How often the marker is touched until the watch reports it, and for how long. */
+const READY_TOUCH_MS = 40
+const READY_TIMEOUT_MS = 3_000
+/** After the watch goes live, when one more rescan covers an event dropped in warm-up. */
+const READY_SETTLE_MS = 1_500
+/** After the cap, how long a watch keeps confirming before it is given up on. */
+const READY_GIVE_UP_MS = 60_000
 
 // First-segment exclusions (fast — split path once, check Set).
 const EXCLUDED_TOP_DIRS = new Set([
@@ -67,6 +85,12 @@ export interface GitWatcherEvents {
 
 export interface GitWatcher extends EventEmitter {
   subscribe(worktreePath: string): void
+  /**
+   * Resolves once the watch of `worktreePath` (subscribed) is live — a change after
+   * this is reported — and one `git:diff-changed` was emitted for what changed while
+   * it started. Never rejects: a watch that cannot be confirmed resolves at timeout.
+   */
+  ready(worktreePath: string): Promise<void>
   unsubscribe(worktreePath: string): void
   /** Stop all watchers (called on app quit). */
   closeAll(): void
@@ -87,6 +111,10 @@ interface WatchEntry {
   nestedCheckoutCache: Map<string, boolean>
   /** Worktree-relative submodule paths (from `.gitmodules`) — never excluded as nested. */
   submodulePaths: Set<string>
+  /** Resolves once the watch is live (see {@link GitWatcher.ready}). */
+  ready: Promise<void> | null
+  /** The pending readiness marker's file name, and what its event resolves. */
+  marker: { name: string; seen: () => void } | null
 }
 
 let enospcWarned = false
@@ -125,6 +153,15 @@ function isRefPath(relPath: string): boolean {
   return p === 'HEAD' || p === 'packed-refs' || p.startsWith('refs/')
 }
 
+/** `p` through symlinks — only its directories when `leaf` is false (a `.git` link stays). */
+function realOrSelf(p: string, leaf: boolean): string {
+  try {
+    return leaf ? fs.realpathSync(p) : path.join(fs.realpathSync(path.dirname(p)), path.basename(p))
+  } catch {
+    return p
+  }
+}
+
 /**
  * Resolve the canonical `.git` dir for a worktree. For linked worktrees,
  * `.git` is a file containing `gitdir: /path/to/real/gitdir`. For the main
@@ -138,20 +175,44 @@ function resolveGitDir(worktreePath: string): string | null {
   } catch {
     return null
   }
-  if (stat.isDirectory()) return dotGit
+  // The REAL directory (R10-3): a `.git` that is a symlink is not followed by the
+  // worktree's recursive watch, so it needs its own — and `ready()`'s marker must land
+  // where that watch sees it. A `gitdir:` file's target may be a link too.
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p)
+    } catch {
+      return p
+    }
+  }
+  if (stat.isDirectory()) return real(dotGit)
   if (!stat.isFile()) return null
   try {
     const content = fs.readFileSync(dotGit, 'utf-8').trim()
     const match = content.match(/^gitdir:\s*(.+)$/)
     if (!match) return null
     const gitdir = match[1].trim()
-    return path.isAbsolute(gitdir) ? gitdir : path.resolve(worktreePath, gitdir)
+    return real(path.isAbsolute(gitdir) ? gitdir : path.resolve(worktreePath, gitdir))
   } catch {
     return null
   }
 }
 
-export function createGitWatcher(): GitWatcher {
+export interface GitWatcherOptions {
+  /** How long `ready()` waits for the watch to go live before reporting ready anyway
+   *  (default {@link READY_TIMEOUT_MS}); tests force the capped path with 0. */
+  readyTimeoutMs?: number
+  /**
+   * Throws to refuse watching here. Default: the hub's T-06 refusal (a hub with
+   * processes switched off never watches its own disk). A computer passes none —
+   * watching its checkouts is its job.
+   */
+  refuse?: () => void
+}
+
+export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
+  const refuse = options.refuse ?? (() => assertHubLocalExecEnabled({ op: 'git.watch' }))
+  const readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS
   const entries = new Map<string, WatchEntry>()
   const emitter = new EventEmitter() as GitWatcher
 
@@ -230,6 +291,11 @@ export function createGitWatcher(): GitWatcher {
           return
         }
         const rel: string = typeof filename === 'string' ? filename : String(filename)
+        const base = path.basename(rel)
+        if (base.startsWith(READY_MARKER_PREFIX)) {
+          if (entry.marker && base === entry.marker.name) entry.marker.seen()
+          return
+        }
         const gitInRoot = !isGitDir && /^\.git[\\/]/.test(rel)
         if (!isGitDir && !gitInRoot) {
           // Working tree watcher — filter noise.
@@ -286,9 +352,9 @@ export function createGitWatcher(): GitWatcher {
   }
 
   emitter.subscribe = (worktreePath: string): void => {
-    // Watches a path on the hub's own disk: refused on a hub with processes
-    // switched off (T-06), like every other hub-local git/file access.
-    assertHubLocalExecEnabled({ op: 'git.watch' })
+    // Watches a path on this machine's disk: on the hub, refused where processes
+    // are switched off (T-06), like every other hub-local git/file access.
+    refuse()
     let entry = entries.get(worktreePath)
     if (entry) {
       entry.refCount++
@@ -302,7 +368,9 @@ export function createGitWatcher(): GitWatcher {
       closed: false,
       refsChanged: false,
       nestedCheckoutCache: new Map(),
-      submodulePaths: readSubmodulePaths(worktreePath)
+      submodulePaths: readSubmodulePaths(worktreePath),
+      ready: null,
+      marker: null
     }
     entries.set(worktreePath, entry)
 
@@ -313,7 +381,9 @@ export function createGitWatcher(): GitWatcher {
     // worktree tree so the above recursive watch doesn't see it. The main
     // checkout's `<root>/.git` is inside it — already seen, no second watcher.
     const gitdir = resolveGitDir(worktreePath)
-    if (gitdir && path.resolve(gitdir) !== path.resolve(worktreePath, '.git')) {
+    // The main checkout's own `.git` directory is inside the worktree's watch — but
+    // not when `.git` is a symlink to elsewhere (its real path then differs).
+    if (gitdir && gitdir !== realOrSelf(path.join(worktreePath, '.git'), false)) {
       openWatcher(entry, gitdir, true)
     }
 
@@ -324,6 +394,97 @@ export function createGitWatcher(): GitWatcher {
       entry.closed = true
       throw new Error('git-watcher: no watchers opened (path missing or inotify limit)')
     }
+    entry.ready = untilLive(entry, gitdir)
+  }
+
+  emitter.ready = (worktreePath: string): Promise<void> =>
+    entries.get(worktreePath)?.ready ?? Promise.resolve()
+
+  /**
+   * Touch a marker in `gitdir` until a watcher reports it, then emit one change for
+   * what happened while the watch started. Without a gitdir there is nowhere to touch
+   * that is not the user's working tree: resolved as before (no barrier).
+   */
+  function untilLive(entry: WatchEntry, gitdir: string | null): Promise<void> {
+    if (!gitdir) return Promise.resolve()
+    const name = `${READY_MARKER_PREFIX}${process.pid}-${Math.random().toString(36).slice(2)}`
+    const file = path.join(gitdir, name)
+    const refresh = (): void => {
+      if (entry.closed) return
+      try {
+        emitter.emit('git:diff-changed', { worktreePath: entry.worktreePath, refsChanged: true })
+      } catch {
+        /* listener threw — never crash the watcher */
+      }
+    }
+    return new Promise<void>((resolve) => {
+      let live = false
+      let reported = false
+      let touch: NodeJS.Timeout | null = null
+      const stop = (): void => {
+        if (touch) clearInterval(touch)
+        touch = null
+        clearTimeout(cap)
+        clearTimeout(giveUp)
+        entry.marker = null
+        fs.rm(file, { force: true }, () => undefined)
+      }
+      // The watch reported the marker: it is live. A rescan covers what changed while
+      // it started — before `ready` resolved, or after a capped one did (R10-2).
+      const seen = (): void => {
+        if (live) return
+        live = true
+        stop()
+        refresh()
+        // FSEvents can still drop an event in the first moments after its stream
+        // reports one (a loaded machine): one more rescan once it has settled.
+        const settle = setTimeout(refresh, READY_SETTLE_MS)
+        settle.unref?.()
+        if (!reported) {
+          reported = true
+          resolve()
+        }
+      }
+      // The cap: answer now (with a rescan) rather than block the caller, but keep
+      // confirming — a change made from here until the watch is live would otherwise
+      // be lost; `seen` sends one more rescan when it goes live.
+      const capped = (): void => {
+        if (reported) return
+        reported = true
+        refresh()
+        resolve()
+        if (touch) clearInterval(touch)
+        touch = setInterval(write, READY_TOUCH_MS * 5)
+      }
+      entry.marker = { name, seen }
+      const write = (): void => {
+        if (entry.closed) {
+          stop()
+          if (!reported) {
+            reported = true
+            resolve()
+          }
+          return
+        }
+        try {
+          fs.writeFileSync(file, String(Date.now()))
+        } catch {
+          // The gitdir is not writable: no barrier, as before.
+          stop()
+          if (!reported) {
+            reported = true
+            refresh()
+            resolve()
+          }
+        }
+      }
+      touch = setInterval(write, READY_TOUCH_MS)
+      const cap = setTimeout(capped, readyTimeoutMs)
+      // A watch that never reports even its own marker is broken, not slow: stop
+      // touching (the renderer's fallback poll covers it).
+      const giveUp = setTimeout(stop, readyTimeoutMs + READY_GIVE_UP_MS)
+      write()
+    })
   }
 
   emitter.unsubscribe = (worktreePath: string): void => {

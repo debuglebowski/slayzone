@@ -130,12 +130,13 @@ function executeAction(action: Action): void {
 
     case 'replay-buffer-to-main':
       if (mainWindow && !mainWindow.isDestroyed()) {
-        const result = getBufferSince(action.sessionId, -1)
-        if (result) {
+        const target = mainWindow
+        void getBufferSince(action.sessionId, -1).then((result) => {
+          if (!result || target.isDestroyed()) return
           for (const chunk of result.chunks) {
-            mainWindow.webContents.send('pty:data', action.sessionId, chunk.data, chunk.seq)
+            target.webContents.send('pty:data', action.sessionId, chunk.data, chunk.seq)
           }
-        }
+        })
       }
       return
 

@@ -4,7 +4,7 @@ import { extname } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ArtifactStore } from '@slayzone/task-artifacts/server'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
-import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/server'
+import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
 
 const reads = new Set([
@@ -292,15 +292,22 @@ export function createComputerArtifactStorage(opts: {
           const owner = data.parentId ? await location(data.parentId, true) : null
           return owner ? call(owner, 'createFolder', [data]) : local.createFolder(db, data)
         }
-      if (key === 'createArtifact')
-        return async (_db: SlayzoneDb, data: Parameters<ArtifactStore['createArtifact']>[1]) => {
+      if (key === 'createArtifact' || key === 'createArtifactFromStagedFile') {
+        // `stagedPath`: only through createArtifactFromStagedFile, a file the hub
+        // staged itself (the REST create route) — never a client-named one (P1).
+        const create = async (
+          data: Parameters<ArtifactStore['createArtifact']>[1],
+          stagedPath?: string
+        ) => {
           if (!data.folderId || !(await location(data.folderId, true)))
-            return local.createArtifact(db, data)
+            return stagedPath === undefined
+              ? local.createArtifact(db, data)
+              : local.createArtifactFromStagedFile(db, data, stagedPath)
           const a = await upload({
             taskId: data.taskId,
             title: data.title,
             folderId: data.folderId,
-            bytes: data.sourcePath ? readFileSync(data.sourcePath) : Buffer.from(data.content ?? '')
+            bytes: stagedPath ? readFileSync(stagedPath) : Buffer.from(data.content ?? '')
           })
           if (a && (data.renderMode || data.language))
             return (receiver as ArtifactStore).updateArtifact(db, {
@@ -310,6 +317,14 @@ export function createComputerArtifactStorage(opts: {
             })
           return a
         }
+        return key === 'createArtifact'
+          ? (_db: SlayzoneDb, data: Parameters<ArtifactStore['createArtifact']>[1]) => create(data)
+          : (
+              _db: SlayzoneDb,
+              data: Parameters<ArtifactStore['createArtifact']>[1],
+              stagedPath: string
+            ) => create(data, stagedPath)
+      }
       if (key === 'reorderArtifacts' || key === 'reorderFolders')
         return async (
           _db: SlayzoneDb,

@@ -216,4 +216,67 @@ describe('TerminalFeed', () => {
     await failing.start()
     expect(statuses.at(-1)).toEqual({ phase: 'error', exists: false, error: 'hub gone' })
   })
+
+  it("says its computer is offline (not a blank 'ready'), and catches up when it is back", async () => {
+    const { sink, ops } = recordingSink()
+    const statuses: unknown[] = []
+    let online = false
+    const c = client({
+      attach: async () =>
+        online
+          ? live([
+              [0, 'a'],
+              [1, 'b']
+            ])
+          : { exists: true, state: 'running', buffer: null, unavailable: 'computer-offline' }
+    })
+    const feed = new TerminalFeed('t:t', c, sink, (s) => statuses.push(s))
+    await feed.start()
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+    online = true
+    await feed.computerAvailable(true)
+    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null })
+    expect(ops.filter((op) => op.startsWith('write'))).toEqual(['write a', 'write b'])
+  })
+
+  it('goes offline while attached, and catches up from its last chunk (no gap)', async () => {
+    const { sink, ops } = recordingSink()
+    const statuses: unknown[] = []
+    const since: number[] = []
+    const c = client({
+      attach: async () => live([[0, 'a']]),
+      bufferSince: async (_sid, afterSeq) => {
+        since.push(afterSeq)
+        return buffer([
+          [1, 'b'],
+          [2, 'c']
+        ])
+      }
+    })
+    const feed = new TerminalFeed('t:t', c, sink, (s) => statuses.push(s))
+    await feed.start()
+    await feed.computerAvailable(false)
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+    await feed.computerAvailable(true)
+    expect(since).toEqual([0])
+    expect(statuses.at(-1)).toEqual({ phase: 'ready', exists: true, error: null })
+    expect(ops.filter((op) => op.startsWith('write'))).toEqual(['write a', 'write b', 'write c'])
+  })
+
+  it("a catch-up the hub answers 'computer offline' is offline, not an error", async () => {
+    const { sink } = recordingSink()
+    const statuses: unknown[] = []
+    const c = client({
+      attach: async () => live([[0, 'a']]),
+      bufferSince: async () => {
+        throw Object.assign(new Error('offline'), { data: { code: 'SERVICE_UNAVAILABLE' } })
+      }
+    })
+    const feed = new TerminalFeed('t:t', c, sink, (s) => statuses.push(s))
+    await feed.start()
+    feed.data(5, 'gap')
+    await flush()
+    await flush()
+    expect(statuses.at(-1)).toEqual({ phase: 'offline', exists: true, error: null })
+  })
 })

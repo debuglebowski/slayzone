@@ -80,10 +80,14 @@ export function useAppBadge({
       task.needs_attention &&
       !task.archived_at &&
       !isTerminalStatus(task.status, columnsByProjectId.get(task.project_id))
-    return computeAppBadge(settings, {
-      unread: tasks.filter(isUnread).map(toBadgeTask),
-      idle: idleTasks.map((t) => toBadgeTask(t.task))
-    }, new Set(openTaskIds))
+    return computeAppBadge(
+      settings,
+      {
+        unread: tasks.filter(isUnread).map(toBadgeTask),
+        idle: idleTasks.map((t) => toBadgeTask(t.task))
+      },
+      new Set(openTaskIds)
+    )
   }, [all, tasks, idleTasks, hubIdByProject, defaultHubId, columnsByProjectId, openTaskIds])
 
   const { text, count } = badge

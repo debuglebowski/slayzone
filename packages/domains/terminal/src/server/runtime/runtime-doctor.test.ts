@@ -6,8 +6,8 @@
  * must be able to start ptys. Doctor used to run every check on the hub — the
  * wrong machine for a remote computer, and blind to a broken node-pty install
  * (every agent failing with "The computer couldn't start the agent." while Doctor
- * stayed green). The computer now answers for itself (`pty.doctor`); the hub's
- * own lookups are the fallback when no computer can.
+ * stayed green). The computer answers for itself (`pty.doctor`); with no computer
+ * to ask, Doctor says "connect a computer" — never the hub's own PATH.
  */
 import { expect, test, vi } from 'vitest'
 import { getAdapter } from '../adapters'
@@ -34,33 +34,22 @@ function computer(facts: Partial<ComputerDoctorFacts> | null | Error) {
   return { doctor }
 }
 
-function hubLocal(found: Record<string, string> = {}) {
-  return {
-    shellExists: vi.fn(() => true),
-    which: vi.fn(async (binary: string) => found[binary] ?? null)
-  }
-}
-
 const inputs = (over: Partial<Parameters<typeof runDoctor>[0]> = {}) => ({
   requirements: [claude],
   computerId: 'computer-1',
   backend: computer({}),
   shell: '/bin/zsh',
-  missingShellOverride: null,
-  hubLocal: hubLocal(),
   ...over
 })
 
 test('asks the computer for the shell and binaries the agent will need there', async () => {
   const backend = computer({ binaries: [{ binary: 'claude', path: '/c/bin/claude' }] })
-  const local = hubLocal({ claude: '/hub/bin/claude' })
-  const rows = await runDoctor(inputs({ backend, hubLocal: local }))
+  const rows = await runDoctor(inputs({ backend }))
 
   expect(backend.doctor).toHaveBeenCalledWith('computer-1', {
     shell: '/bin/zsh',
     binaries: ['claude']
   })
-  expect(local.which, "the hub's disk says nothing about the computer's").not.toHaveBeenCalled()
   expect(rows).toEqual([
     { check: 'Terminal runtime', ok: true, detail: 'This computer can start terminals.' },
     { check: 'Binary found', ok: true, detail: '/c/bin/claude' }
@@ -90,39 +79,26 @@ test('a shell the computer does not have fails, naming it', async () => {
   )
 })
 
-test('a shell override the hub skips (it does not exist) is reported', async () => {
-  const rows = await runDoctor(inputs({ missingShellOverride: '/opt/fish' }))
-  expect(rows).toContainEqual({
-    check: 'Shell detected',
-    ok: false,
-    detail: 'Shell override not found: /opt/fish',
-    fix: 'Clear the shell override or set it to a valid absolute path'
-  })
-})
+const noComputerRow = {
+  check: 'Computer connected',
+  ok: false,
+  detail: expect.stringMatching(/Connect a computer/)
+}
 
-test('no computer for the task: the hub checks its own PATH, as before', async () => {
+test('no computer for the task: "connect a computer" — never the hub\'s own PATH', async () => {
   const backend = computer({})
-  const local = hubLocal({ claude: '/hub/bin/claude' })
-  const rows = await runDoctor(inputs({ computerId: null, backend, hubLocal: local }))
+  const rows = await runDoctor(inputs({ computerId: null, backend }))
   expect(backend.doctor).not.toHaveBeenCalled()
-  expect(rows).toEqual([{ check: 'Binary found', ok: true, detail: '/hub/bin/claude' }])
+  expect(rows).toEqual([noComputerRow])
 })
 
-test('a computer that predates pty.doctor: the hub checks its own PATH, as before', async () => {
-  const local = hubLocal()
-  const rows = await runDoctor(inputs({ backend: computer(null), hubLocal: local }))
-  expect(local.which).toHaveBeenCalledWith('claude')
-  expect(rows).toEqual([
-    { check: 'Binary found', ok: false, detail: 'claude not found in PATH', fix: claude.fix }
-  ])
+test('a computer that predates pty.doctor: no answer to give — "connect a computer"', async () => {
+  const rows = await runDoctor(inputs({ backend: computer(null) }))
+  expect(rows).toEqual([noComputerRow])
 })
 
 test('an unreachable computer is one failing row, not a thrown Doctor or a guess', async () => {
-  const local = hubLocal({ claude: '/hub/bin/claude' })
-  const rows = await runDoctor(
-    inputs({ backend: computer(new Error('connection closed')), hubLocal: local })
-  )
-  expect(local.which).not.toHaveBeenCalled()
+  const rows = await runDoctor(inputs({ backend: computer(new Error('connection closed')) }))
   expect(rows).toEqual([
     {
       check: 'Computer reachable',

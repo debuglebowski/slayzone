@@ -4710,6 +4710,55 @@ export const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
     }
+  },
+  {
+    version: 195,
+    up(db) {
+      // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
+      // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
+      // Existing cursors were the hub's own parse ('' = this hub's disk). A schema
+      // built from a later baseline may lack the old table: then there is nothing to keep.
+      const hadOld = !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_parse_state'")
+        .get()
+      db.exec(`CREATE TABLE usage_parse_state_by_computer (
+        computer_id TEXT NOT NULL DEFAULT '',
+        file_path TEXT NOT NULL,
+        last_offset INTEGER NOT NULL DEFAULT 0,
+        last_modified_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (computer_id, file_path)
+      );`)
+      if (hadOld) {
+        db.exec(`INSERT INTO usage_parse_state_by_computer (computer_id, file_path, last_offset, last_modified_ms)
+          SELECT '', file_path, last_offset, last_modified_ms FROM usage_parse_state;
+        DROP TABLE usage_parse_state;`)
+      }
+      db.exec(`ALTER TABLE usage_parse_state_by_computer RENAME TO usage_parse_state;`)
+    }
+  },
+  {
+    version: 196,
+    up(db) {
+      // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
+      // session lives, so the migration copies it from there. It was read from the
+      // legacy `chat_workspace_changes` (nothing writes it any more); kept here, so the
+      // legacy tables are no longer read and can be dropped.
+      db.exec(`CREATE TABLE chat_legacy_tab_computers (
+        tab_id TEXT PRIMARY KEY,
+        computer_id TEXT NOT NULL
+      );`)
+      const hasLegacy = !!db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_workspace_changes'")
+        .get()
+      if (!hasLegacy) return
+      db.exec(`INSERT INTO chat_legacy_tab_computers (tab_id, computer_id)
+        SELECT w.tab_id, w.computer_id FROM chat_workspace_changes w
+        WHERE w.computer_id IS NOT NULL AND w.id = (
+          SELECT w2.id FROM chat_workspace_changes w2
+          WHERE w2.tab_id = w.tab_id AND w2.computer_id IS NOT NULL
+          ORDER BY w2.created_at DESC, w2.id DESC LIMIT 1
+        );`)
+    }
   }
 ]
 

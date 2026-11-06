@@ -3,7 +3,7 @@ import {
   HubToComputerMethods,
   workspaceCaptureParamsSchema
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { judgePath } from '../path-jail'
 import { execCapture } from './exec'
 import type { HandlerContext, HubMethodTable } from './types'
 import type { ProjectPathStore } from '../project-paths'
@@ -13,7 +13,7 @@ export function createWorkspaceChangesHandlers(
   getProjects: () => ProjectPathStore | null
 ): HubMethodTable {
   const captures = new WorkspaceSnapshotManager()
-  const allowed = (path: string) => assertPathAllowed(path, ctx.config.allowedRoots)
+  const allowed = (path: string) => judgePath(path, ctx.config.allowedRoots)
   async function request(raw: unknown) {
     const parsed = workspaceCaptureParamsSchema.parse(raw)
     const path =

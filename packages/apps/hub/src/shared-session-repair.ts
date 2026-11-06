@@ -1,5 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { createChatOwnershipStore } from '@slayzone/chat-runtime/server'
+import { createChatOwnershipStore } from '@slayzone/chat-runtime/hub'
 import type { DiagnosticEvent } from '@slayzone/diagnostics/shared'
 import { listSharedSessionClaims, relinquishSession } from '@slayzone/task/server'
 

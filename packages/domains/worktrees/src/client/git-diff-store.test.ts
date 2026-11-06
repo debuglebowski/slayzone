@@ -21,6 +21,7 @@ import {
   _pathWatcherStats,
   _setGitDiffStoreTransport,
   notifyDiffChanged,
+  retryFailedGitWatches,
   subscribeGitPathChanges
 } from './git-diff-store'
 import type { GitDiffSnapshot } from '../shared/types'
@@ -137,6 +138,26 @@ async function flushMicrotasks(): Promise<void> {
     await Promise.resolve()
   })
 }
+
+// Final review M3 (client): a panel left while a refused start was in flight sent a
+// watchStop anyway — releasing a count that somebody else's watch held on the hub.
+describe('a refused watch start', () => {
+  it('is never followed by a watchStop', async () => {
+    let reject: (e: Error) => void = () => undefined
+    gitStub.watchStart.mockImplementation(
+      () =>
+        new Promise<void>((_, r) => {
+          reject = r
+        })
+    )
+    const stop = subscribeGitPathChanges('/repo/refused', () => undefined)
+    stop() // leaves while the start is in flight
+    reject(new Error('refused'))
+    await flushMicrotasks()
+    await flushMicrotasks()
+    expect(gitStub.watchStop).not.toHaveBeenCalled()
+  })
+})
 
 describe('git-diff-store refcount + sharing', () => {
   it('two subscribers with same params share one entry + one timer', async () => {
@@ -283,6 +304,24 @@ describe('git-diff-store refcount + sharing', () => {
     expect(h.result.current.snapshot?.unstagedPatch).toBe('recovered')
 
     h.unmount()
+  })
+
+  // A watch refused before any computer connected (the desktop's boot window:
+  // "connect a computer") fell back to 5 s polling until the panel remounted.
+  // When a computer connects, every refused watch is started again.
+  it('a refused watch starts again when a computer connects', async () => {
+    gitStub.watchStart.mockRejectedValueOnce(new Error('Connect a computer'))
+    gitStub.watchStart.mockResolvedValueOnce(undefined)
+    mount('/tmp/repo')
+    await flushMicrotasks()
+    expect(_pathWatcherStats().active, 'refused: polling').toBe(0)
+    retryFailedGitWatches()
+    await flushMicrotasks()
+    expect(gitStub.watchStart).toHaveBeenCalledTimes(2)
+    expect(_pathWatcherStats().active).toBe(1)
+    retryFailedGitWatches()
+    await flushMicrotasks()
+    expect(gitStub.watchStart, 'a live watch is not started twice').toHaveBeenCalledTimes(2)
   })
 
   it('path watcher refcount: two entries on same path share one watcher', async () => {

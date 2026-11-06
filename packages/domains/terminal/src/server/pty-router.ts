@@ -2,6 +2,19 @@ import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { getPtyDeps } from './pty-router-deps'
+import { TRPCError } from '@trpc/server'
+import { PtyOutputUnavailableError } from './runtime/pty-output-unavailable'
+
+/** A read of scrollback held by an offline computer: SERVICE_UNAVAILABLE, not a crash. */
+async function scrollback<T>(read: () => Promise<T> | T): Promise<T> {
+  try {
+    return await read()
+  } catch (err) {
+    if (err instanceof PtyOutputUnavailableError)
+      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: err.message, cause: err })
+    throw err
+  }
+}
 import { stopTaskAgents } from './task-events'
 import { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 
@@ -110,13 +123,15 @@ export const ptyRouter = router({
     .query(({ input }) => ops().ptyExists(input.sessionId)),
   getBuffer: publicProcedure
     .input(z.object({ sessionId: z.string() }))
-    .query(({ input }) => ops().ptyGetBuffer(input.sessionId)),
+    .query(({ input }) => scrollback(() => ops().ptyGetBuffer(input.sessionId))),
   clearBuffer: publicProcedure
     .input(z.object({ sessionId: z.string() }))
-    .mutation(({ input }) => ops().ptyClearBuffer(input.sessionId)),
+    .mutation(({ input }) => scrollback(() => ops().ptyClearBuffer(input.sessionId))),
   getBufferSince: publicProcedure
     .input(z.object({ sessionId: z.string(), afterSeq: z.number() }))
-    .query(({ input }) => ops().ptyGetBufferSince(input.sessionId, input.afterSeq)),
+    .query(({ input }) =>
+      scrollback(() => ops().ptyGetBufferSince(input.sessionId, input.afterSeq))
+    ),
   // One-round-trip attach for a terminal (re)mounting onto its session:
   // exists + state + the buffer after `afterSeq`, read back-to-back on the
   // server. Replaces three serial renderer→server round trips (exists → getState
@@ -129,9 +144,16 @@ export const ptyRouter = router({
     .query(async ({ input }) => {
       const exists = await ops().ptyExists(input.sessionId)
       const state = await ops().ptyGetState(input.sessionId)
-      const buffer = await ops().ptyGetBufferSince(input.sessionId, input.afterSeq)
       const size = await ops().ptyGetSize(input.sessionId)
-      return { exists, state, buffer, size }
+      try {
+        const buffer = await ops().ptyGetBufferSince(input.sessionId, input.afterSeq)
+        return { exists, state, buffer, size }
+      } catch (err) {
+        if (!(err instanceof PtyOutputUnavailableError)) throw err
+        // Its computer is offline: say so (the terminal shows it and re-attaches
+        // on `onOutputAvailability`), rather than fail or hang the attach.
+        return { exists, state, buffer: null, size, unavailable: 'computer-offline' as const }
+      }
     }),
   list: publicProcedure.query(() => ops().ptyList()),
   chatList: publicProcedure.query(() => ops().chatList()),
@@ -183,11 +205,26 @@ export const ptyRouter = router({
           if (filter && !filter.includes(sessionId)) return
           emit.next({ sessionId, data, seq })
         }
-        const ev = getPtyDeps().events
+        const { events: ev, ops: o } = getPtyDeps()
         ev.on('data', handler)
-        return () => ev.off('data', handler)
+        // Watching is what makes a session's owner stream its bytes here at all.
+        const unwatch = o?.ptyWatchOutput?.(filter ?? 'all')
+        return () => {
+          ev.off('data', handler)
+          unwatch?.()
+        }
       })
     ),
+  /** A session's computer went offline / came back (its output + scrollback). */
+  onOutputAvailability: publicProcedure.subscription(() =>
+    observable<{ sessionId: string; available: boolean }>((emit) => {
+      const handler = (sessionId: string, available: boolean): void =>
+        emit.next({ sessionId, available })
+      const ev = getPtyDeps().events
+      ev.on('output-availability', handler)
+      return () => ev.off('output-availability', handler)
+    })
+  ),
   onStateChange: publicProcedure.subscription(() =>
     observable<{ sessionId: string; newState: string; oldState: string }>((emit) => {
       const handler = (sessionId: string, newState: string, oldState: string): void =>

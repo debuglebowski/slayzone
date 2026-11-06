@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { BlobStore, createArtifactStore } from '@slayzone/task-artifacts/server'
 import type { ChatAttachmentReader } from '@slayzone/terminal/server'
-import { createChatMigrationAttachmentReader } from '@slayzone/chat-runtime/server'
+import { createChatMigrationAttachmentReader } from '@slayzone/chat-runtime/hub'
 
 export function createChatAttachmentReader(
   db: SlayzoneDb,

@@ -32,44 +32,12 @@ const EXEC_MODULE =
  */
 const ALLOWLIST = {
   // Refused by assertHubProcessesEnabled (T-04/T-05).
-  'packages/domains/processes/src/server/process-backend.ts':
-    'background processes; localProcessBackend refuses (T-04)',
-  'packages/domains/processes/src/server/process-manager.ts':
-    'background processes; every entry point refuses, boot loads no row (T-04)',
-  'packages/domains/processes/src/server/pid-stats.ts':
-    'ps/pgrep for running hub processes; none exist with processes off (T-04)',
   'packages/shared/platform/src/process-tree.ts':
-    'Windows taskkill in killPidTree; the hub calls it only from localProcessBackend, which refuses (T-04)',
-  'packages/domains/terminal/src/server/runtime/pty-backend.ts':
-    'node-pty for localPtyBackend; refuses (T-04), required on first spawn only (T-30)',
-  'packages/domains/terminal/src/server/runtime/pty-manager.ts':
-    'spawns go through getPtyBackend(); docker/ssh probe refuses (T-04)',
-  'packages/domains/terminal/src/server/runtime/chat-proc-handle.ts':
-    'in-process chat agent; refuses (T-04)',
-  'packages/domains/terminal/src/server/runtime/chat-transport-manager.ts':
-    'in-process chat agent; refuses (T-04)',
-  'packages/domains/automations/src/server/engine.ts':
-    'run_command / ai actions; refused at save and at run (T-05)',
+    'Windows taskkill in killPidTree; bundled via the @slayzone/platform barrel, never called by the hub (background processes run on computers)',
   // Refused by assertHubLocalExecEnabled, "connect a computer" (T-06).
-  'packages/domains/worktrees/src/server/exec-async.ts':
-    'the worktrees package chokepoint (hubSpawn/hubSpawnSync); refuses (T-06)',
-  'packages/domains/agent-turns/src/server/git-snapshot.ts':
-    'turn snapshots; every git spawn refuses (T-06)',
-  'packages/domains/terminal/src/server/shell-env.ts':
-    'login-shell PATH and which probes; refuse (T-06)',
   'packages/shared/platform/src/login-shell-path.ts':
-    'login-shell PATH probe; the hub runs it only through shell-env getEnrichedPathAsync, which refuses (T-06)',
-  'packages/domains/terminal/src/server/files-scan.ts':
-    '@file autocomplete git ls-files; refuses (T-06)',
-  'packages/domains/terminal/src/server/runtime/pty-store.ts':
-    'agent command which probe; refuses (T-06)',
-  'packages/domains/ai-config/src/server/handlers-store.ts':
-    'setupSlay runs slay init; refuses (T-06)',
+    'login-shell PATH probe; bundled via the @slayzone/platform barrel, never called by the hub (its caller, terminal shell-env, runs on computers)',
   'packages/apps/hub/src/shell-native.ts': 'open/xdg-open/explorer; refuse (T-06)',
-  'packages/domains/file-editor/src/server/file-ops.ts':
-    'git status, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
-  'packages/domains/file-editor/src/server/repo-discovery.ts':
-    'git repo discovery, shared with the computer; the hub reaches it only through createLocalWorkspaceFs, which refuses (T-06)',
   'packages/shared/db-migrations/src/migrations.ts':
     'v122 git backfill over existing agent_turns rows; skipped with processes off (T-06)',
   // Not reachable as exec on a hub.

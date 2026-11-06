@@ -8,14 +8,14 @@
  * @module api/domain-router-deps
  */
 import { setDiagnosticsRouterDeps } from '@slayzone/diagnostics/server'
-import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/server'
+import { getWorkspaceDeps, setFileEditorRouterDeps } from '@slayzone/file-editor/hub'
 import { setProjectsRouterDeps } from '@slayzone/projects/server'
 import { setArtifactsRouterDeps } from '@slayzone/task-artifacts/server'
 import { setTagsRouterDeps } from '@slayzone/tags/server'
-import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/server'
+import { detectChildRepos, setWorktreesRouterDeps } from '@slayzone/worktrees/hub'
 import { setMainAgentDeps } from '@slayzone/task/server'
 import { setHostCapabilitiesDeps } from '@slayzone/host-capabilities/server'
-import { setUsageRouterDeps } from '@slayzone/terminal/server'
+import { setUsageRouterDeps } from '@slayzone/terminal/hub'
 import { setTaskBrowserRouterDeps } from '@slayzone/task-browser/server'
 import { setAgentPanelsRouterDeps } from '@slayzone/agent-panels/server'
 import { setUsageAnalyticsRouterDeps } from '@slayzone/usage-analytics/server'

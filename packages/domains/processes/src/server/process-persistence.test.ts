@@ -5,13 +5,10 @@ import {
   createProcess,
   updateProcess,
   removeProcess,
-  restartProcess,
   listAllProcesses
 } from './process-manager'
 import { createDbProcessPersistence } from './process-persistence'
 import type { PersistedProcess, ProcessPersistence, ProcessRow } from './process-persistence'
-import { setProcessBackend } from './process-backend'
-import type { ProcessBackend, ProcHandle } from './process-backend'
 
 // One sequential scenario against the process manager's module state; vitest runs
 // tests in declaration order, so later tests read the state earlier ones produced.
@@ -22,7 +19,6 @@ import type { ProcessBackend, ProcHandle } from './process-backend'
 const inserts: PersistedProcess[] = []
 const updates: PersistedProcess[] = []
 const removes: Array<{ id: string; stillListed: boolean }> = []
-const pidUpdates: Array<{ id: string; pid: number | null }> = []
 const seededRow: ProcessRow = {
   id: 'seed-1',
   task_id: 'task-9',
@@ -33,43 +29,23 @@ const seededRow: ProcessRow = {
   auto_restart: 1,
   pid: null
 }
-// Three shapes of "leftover pid from an uncontrolled previous exit" that
-// reapStaleIfNeeded (wired into restartProcess) must tell apart:
-const seedMatching: ProcessRow = {
-  id: 'seed-match',
+// A row whose last run never cleared its pid (an uncontrolled exit): the hub never
+// probes or signals that pid — the run, if any, is its computer's.
+const seedLeftover: ProcessRow = {
+  id: 'seed-leftover',
   task_id: 'task-9',
   project_id: 'proj-9',
-  label: 'still running',
+  label: 'left over',
   command: 'echo seeded2',
   cwd: '/tmp',
   auto_restart: 0,
   pid: 4242
 }
-const seedMismatched: ProcessRow = {
-  id: 'seed-mismatch',
-  task_id: 'task-9',
-  project_id: 'proj-9',
-  label: 'pid reused',
-  command: 'echo seeded3',
-  cwd: '/tmp',
-  auto_restart: 0,
-  pid: 5555
-}
-const seedDead: ProcessRow = {
-  id: 'seed-dead',
-  task_id: 'task-9',
-  project_id: 'proj-9',
-  label: 'already gone',
-  command: 'echo seeded4',
-  cwd: '/tmp',
-  auto_restart: 0,
-  pid: 6666
-}
 // Set to make insert/update reject, as the database does for a NOT NULL column or a
 // project/task that does not exist.
 let refuseWrites: Error | null = null
 const fake: ProcessPersistence = {
-  loadAll: async () => [seededRow, seedMatching, seedMismatched, seedDead],
+  loadAll: async () => [seededRow, seedLeftover],
   insert: async (p) => {
     if (refuseWrites) throw refuseWrites
     inserts.push(p)
@@ -84,32 +60,10 @@ const fake: ProcessPersistence = {
     // the exit handler's auto-restart checks `processes.has`).
     removes.push({ id, stillListed: listAllProcesses().some((p) => p.id === id) })
   },
-  updatePid: async (id, pid) => {
-    pidUpdates.push({ id, pid })
-  },
+  updatePid: async () => {},
   recordPid: async () => {},
   listPidHistory: async () => [],
   removePidHistory: async () => {}
-}
-
-// Controllable fake backend for the reap scenarios: getCommandLine is driven
-// by a mutable map (pid → live command, absent = not alive); killByPid records
-// calls and simulates the kill taking effect (clears the map entry).
-const reapKillCalls: Array<{ pid: number; sig?: string }> = []
-let liveCommandByPid: Record<number, string> = {}
-const noopHandle: ProcHandle = {
-  pid: undefined,
-  onData: () => ({ dispose() {} }),
-  onExit: () => ({ dispose() {} }),
-  kill: () => {}
-}
-const reapTestBackend: ProcessBackend = {
-  spawn: () => noopHandle,
-  getCommandLine: async (pid) => liveCommandByPid[pid] ?? null,
-  killByPid: (pid, sig) => {
-    reapKillCalls.push({ pid, sig })
-    delete liveCommandByPid[pid]
-  }
 }
 
 describe('process manager lifecycle over the persistence seam', () => {
@@ -149,51 +103,8 @@ describe('process manager lifecycle over the persistence seam', () => {
     test('hydrated processes have no pid', () => {
       expect(seeded()!.pid).toBe(null)
     })
-    test('hydration carries a leftover pid through from a previous, uncleanly-terminated run', () => {
-      expect(listAllProcesses().find((p) => p.id === 'seed-match')?.pid).toBe(4242)
-    })
-  })
-
-  // --- reap-on-restart: restartProcess is the real entry point a "start this
-  //     again" click hits for a row reloaded at boot (see ProcessDialog.tsx —
-  //     an existing process always restarts, only a brand-new one spawns) ---
-  describe('reap-on-restart', () => {
-    beforeAll(() => {
-      setProcessBackend(reapTestBackend)
-    })
-
-    test('restartProcess succeeds for a hydrated row', async () => {
-      liveCommandByPid = { 4242: 'echo seeded2' } // matches seedMatching.command
-      expect(await restartProcess('seed-match')).toBe(true)
-    })
-    test('a leftover pid whose command line still matches is reaped', () => {
-      expect(reapKillCalls.map((c) => c.pid)).toContain(4242)
-    })
-    test('reaped pid is cleared from the in-memory row', () => {
-      expect(listAllProcesses().find((p) => p.id === 'seed-match')?.pid ?? null).toBe(null)
-    })
-    test('reaped pid is cleared in persistence too', () => {
-      expect(pidUpdates).toContainEqual({ id: 'seed-match', pid: null })
-    })
-
-    test('a live pid that no longer matches the stored command is left running, not killed', async () => {
-      reapKillCalls.length = 0
-      liveCommandByPid = { 5555: 'totally-unrelated-process --flag' } // does NOT match seedMismatched.command
-      await restartProcess('seed-mismatch')
-      expect(reapKillCalls.map((c) => c.pid)).not.toContain(5555)
-    })
-    test('a mismatched pid is still cleared from our own bookkeeping (it is not ours to track anymore)', () => {
-      expect(listAllProcesses().find((p) => p.id === 'seed-mismatch')?.pid ?? null).toBe(null)
-    })
-
-    test('a pid that is no longer alive is never sent a kill', async () => {
-      liveCommandByPid = {} // 6666 absent → getCommandLine resolves null → "not alive"
-      await restartProcess('seed-dead')
-      expect(reapKillCalls).toEqual([])
-    })
-    test('a dead pid is cleared from the in-memory row', () => {
-      expect(listAllProcesses().find((p) => p.id === 'seed-dead')?.pid ?? null).toBe(null)
-      setProcessBackend(null) // restore localProcessBackend for the rest of the suite
+    test('a leftover pid is not carried: the hub never probes or signals one', () => {
+      expect(listAllProcesses().find((p) => p.id === 'seed-leftover')?.pid).toBe(null)
     })
   })
 

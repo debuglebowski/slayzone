@@ -50,10 +50,11 @@ beforeEach(() => {
 
 const SID = 't:t'
 
-function hub() {
+function hub(opts: { offline?: () => boolean } = {}) {
   const calls: Array<[string, unknown]> = []
   let emitData: (data: unknown) => void = () => undefined
   let emitResize: (data: unknown) => void = () => undefined
+  let emitAvailability: (data: unknown) => void = () => undefined
   const dataInputs: unknown[] = []
   const record =
     (path: string, answer: unknown = true) =>
@@ -63,12 +64,21 @@ function hub() {
     }
   const test = trpcTest({
     procedures: {
-      'pty.attach': () => ({
-        exists: true,
-        state: 'running',
-        buffer: { chunks: [{ seq: 0, data: 'hello ' }], currentSeq: 0, prelude: '' },
-        size: { cols: 100, rows: 30 }
-      }),
+      'pty.attach': () =>
+        opts.offline?.()
+          ? {
+              exists: true,
+              state: 'running',
+              buffer: null,
+              size: { cols: 100, rows: 30 },
+              unavailable: 'computer-offline'
+            }
+          : {
+              exists: true,
+              state: 'running',
+              buffer: { chunks: [{ seq: 0, data: 'hello ' }], currentSeq: 0, prelude: '' },
+              size: { cols: 100, rows: 30 }
+            },
       'pty.getBufferSince': () => ({ chunks: [], currentSeq: 0, prelude: '' }),
       'pty.write': record('pty.write'),
       'pty.submit': record('pty.submit'),
@@ -82,6 +92,9 @@ function hub() {
       },
       'pty.onResize': (_input, emit) => {
         emitResize = emit
+      },
+      'pty.onOutputAvailability': (_input, emit) => {
+        emitAvailability = emit
       }
     }
   })
@@ -91,6 +104,7 @@ function hub() {
     dataInputs,
     emitData: (d: unknown) => act(async () => emitData(d)),
     emitResize: (d: unknown) => act(async () => emitResize(d)),
+    emitAvailability: (d: unknown) => act(async () => emitAvailability(d)),
     of: (path: string) => calls.filter(([p]) => p === path).map(([, input]) => input)
   }
 }
@@ -204,6 +218,18 @@ describe('TerminalView', () => {
     } finally {
       clock.mockRestore()
     }
+  })
+
+  it("says the session's computer is offline, then shows its output once it is back", async () => {
+    let offline = true
+    const h = hub({ offline: () => offline })
+    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await waitFor(() => expect(screen.getByText('Computer offline')).toBeTruthy())
+    expect(written()).toBe('')
+    offline = false
+    await h.emitAvailability({ sessionId: SID, available: true })
+    await waitFor(() => expect(written()).toContain('hello '))
+    expect(screen.queryByText('Computer offline')).toBeNull()
   })
 
   it('sends nothing while no agent runs', async () => {

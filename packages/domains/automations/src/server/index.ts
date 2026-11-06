@@ -7,7 +7,8 @@ export {
   toggleAutomation,
   reorderAutomations,
   listAutomationRuns,
-  clearAutomationRuns
+  clearAutomationRuns,
+  setAutomationWrittenListener
 } from './automations-store'
 export { AutomationEngine, cronMatches, type AutomationTriggerBus } from './engine'
 
@@ -24,3 +25,10 @@ export {
   type AutomationsEventMap
 } from './automations-events'
 export type { AutomationEngineLike } from './automation-engine-context'
+
+export {
+  setAutomationCommandRouting,
+  type AutomationCommand,
+  type AutomationCommandResult,
+  type AutomationCommandRouting
+} from './command-routing'

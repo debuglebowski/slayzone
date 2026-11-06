@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
+    "./record": "./src/server/diagnostics-store.ts",
     "./electron": "./src/electron/index.ts",
     "./self-heal": "./src/server/self-heal.ts",
     "./schema": "./src/server/schema.ts",

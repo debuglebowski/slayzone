@@ -26,7 +26,11 @@
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/hooks": "workspace:*",
     "@slayzone/platform": "workspace:*",
+    "@slayzone/processes": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/test-panel": "workspace:*",
+    "@slayzone/usage-analytics": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "node-pty": "^1.1.0",
     "zod": "^4.3.5"

@@ -1,9 +1,25 @@
+import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
-import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
-import { setChatSessionSource } from '@slayzone/terminal/server'
+import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
+import { createComputerProbes } from './computer-probes'
+import { createGitOpGate } from './git-op-gate'
+import { EXEC_RUN_REPLY_GRACE_MS, execRunOnComputer } from './computer-exec-run'
+
+// Explicit limits for computer requests that are not `exec.run` / git ops (those
+// carry their own): never the gateway's 30 s default.
+/** A usage collect parses every new log line on the computer (a first one: all of them). */
+const USAGE_COLLECT_TIMEOUT_MS = 5 * 60_000
+/** A test-file scan of a large checkout. */
+const COMPUTER_SCAN_TIMEOUT_MS = 2 * 60_000
+/** One AI-config fs call (read / write / stat / readdir of one file or dir). */
+const COMPUTER_FS_CALL_TIMEOUT_MS = 60_000
+/** A turn snapshot writes a tree of a whole worktree. */
+const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
+/** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
+const GH_DEFAULT_TIMEOUT_MS = 30_000
 import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
 import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
@@ -11,7 +27,12 @@ import {
   createComputerChatMaintenance,
   createComputerChatCommandBarrier
 } from './computer-chat-maintenance'
-import { runWithSecurityContext } from '@slayzone/platform/security-log'
+import {
+  currentSecurityContext,
+  runAsSecurityActor,
+  runWithSecurityContext
+} from '@slayzone/platform/security-log'
+import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
 import { EventEmitter } from 'node:events'
@@ -32,7 +53,8 @@ import {
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   assertHubIntegrationsEnabled,
-  assertHubLocalExecEnabled
+  assertHubLocalExecEnabled,
+  refuseNoComputer
 } from '@slayzone/platform/hub-switch-refusal'
 import {
   setNotifyEvents,
@@ -43,6 +65,7 @@ import {
   setBackupOps,
   setAuthEvents,
   setComputersDeps,
+  setHubDiskComputer,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
@@ -62,6 +85,7 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
+  purgeExpiredTrash,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
@@ -87,16 +111,12 @@ import {
   setPtySpawnLookups,
   setRemoteMcpEnvProvider,
   ptyEvents,
-  createChatOps,
-  setClaudeSessionReader,
   setClaudeTranscriptLocator,
-  createChatQueueOps,
-  chatEvents,
-  chatQueueEvents,
   listPtys,
   hasPty,
   hasLivePty,
   getBuffer,
+  getBufferSince,
   writePty,
   submitPty,
   killPty,
@@ -127,19 +147,19 @@ import {
   hasSessionUserInput,
   markSessionUserInput,
   clearSessionUserInputMark,
-  configureTransport,
   createDbChatDataOps,
   setPtyEnricher,
   resetTerminalRuntimeForTest,
   setAgentLifecycleEvents,
   setPtyDeps,
+  defaultConversationRegistry,
   setChatDeps,
   getChatDeps,
-  setChatAttachmentReader,
-  createWorkspaceChangesStore,
+  setExecutionContextProbe,
+  setTerminalCommandProbe,
   type AgentLifecycleEventMap,
   type PtySessionWindow
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import {
   SIDE_QUESTION_TIMEOUT_MS,
   AGENT_STARTUP_SETTING,
@@ -155,12 +175,22 @@ import {
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import { setTelemetryEvents, type TelemetryEventMap } from '@slayzone/telemetry/server'
-import { initAiConfigOps, getAiConfigOps, setSlayExecutor } from '@slayzone/ai-config/server'
+import {
+  initAiConfigOps,
+  getAiConfigOps,
+  setSlayExecutor,
+  setAiConfigFsRouting,
+  aiConfigComputerGone
+} from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
-import { createChatPromptRecorder } from '@slayzone/agent-turns/server'
+import { setTurnGitRouting } from '@slayzone/agent-turns/server'
+import { setUsageCollectRouting, type UsageCollectReply } from '@slayzone/usage-analytics/server'
+import { setTestScanRouting } from '@slayzone/test-panel/server'
 import {
   AutomationEngine,
   setAutomationsEvents,
+  setAutomationCommandRouting,
+  setAutomationWrittenListener,
   type AutomationsEventMap
 } from '@slayzone/automations/server'
 import {
@@ -177,46 +207,56 @@ import {
   updateProcess,
   stopProcess,
   removeProcess,
-  restartProcess,
+  restartProcessForUi,
   restartProcessDetailed,
   startProcess,
   removeTaskProcesses,
   listForTask,
   listAllProcesses,
   subscribeToProcessLogs,
-  setProjectCwdResolver,
+  setProcessComputerResolver,
+  setProcessComputerReachability,
+  processesComputerConnected,
+  processesComputerRemoved,
+  isAdoptedOnComputer,
+  setProcessBackend,
   killAllProcesses,
   setProcessesDeps
 } from '@slayzone/processes/server'
+import { noComputerWorkspaceFs, setWorkspaceDeps } from '@slayzone/file-editor/hub'
 import {
-  createLocalWorkspaceFs,
-  closeAllFileWatchers,
-  setWorkspaceDeps
-} from '@slayzone/file-editor/server'
-import {
-  runGhLocally,
   setGhExecutor,
   invalidateProjectReposCache,
   resetWorktreeColorsForTest,
-  defaultWorktreeExecAdapters,
+  hubWorktreeExecAdapters,
   defaultWorktreePolicyAdapters,
-  getCurrentBranch
-} from '@slayzone/worktrees/server'
+  executeGitOp,
+  setGitOpTransport,
+  setWorktreeColorDetector,
+  deliverGitWatchEvent,
+  gitWatchComputerGone,
+  gitTargetForPath,
+  setAiCommandRunner
+} from '@slayzone/worktrees/hub'
 import { createComputerProjectSync } from './computer-project-sync'
 // Computer transport: computer gateway + hub-auth + computer resolution, wired
 // unconditionally at boot (a hub always accepts computers).
 import {
   ghExecResultSchema,
-  claudeSessionReadResultSchema,
   claudeSessionLocateResultSchema,
+  gitOpResultSchema,
+  agentConfigFsResultSchema,
+  usageCollectResultSchema,
+  testPanelScanResultSchema,
+  gitWatchEventSchema,
+  GIT_WATCH_EVENT,
   HubToComputerMethods,
   projectListResultSchema
 } from '@slayzone/computer-transport/shared'
 import {
   createHubComputerGateway,
-  createRoutingChatBackend,
-  createRoutingWorkspaceCaptureBackend,
   createRoutingPtyBackend,
+  createRoutingProcessBackend,
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
   type HubComputerGateway
@@ -236,15 +276,14 @@ import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
-import { countRunningWork, startsNewWork } from './computer-new-work.js'
+import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
-  computerDisabledError,
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
-  localProjectRoot,
   recordedProjectRoot,
-  setComputerBindingChangedListener
+  setComputerBindingChangedListener,
+  setComputerRemovedListener
 } from '@slayzone/computers/server'
 import { createComputerAuthAdapters } from './computer-auth.js'
 import { createComputerPlacement, BindComputerError } from './computer-placement.js'
@@ -328,6 +367,9 @@ export type ServerComposition = {
    *  A later unit awaits this before reading the two fields above / mounting the
    *  gateway. */
   computersReady: Promise<void>
+  /** What failed the async computer init, or null. Kept, not only logged: a hub with
+   *  login refuses to boot on it (boot rule B18); the desktop runs degraded. */
+  readonly computersInitError: Error | null
   /** Feed the computer listener's bound WS URL back into the computers registry
    *  (`mintJoinToken` embeds it in a join token). The server host resolves it only
    *  after it binds its port, which happens AFTER composeServer returns — so it's a
@@ -420,6 +462,7 @@ export function composeServer(opts: {
   // Who a join token is for (T-20), read through the late-bound ref above.
   const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
+  let computersInitError: Error | null = null
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
   // Null until then, so `mintJoinToken` fails cleanly if called before the listener
@@ -445,15 +488,19 @@ export function composeServer(opts: {
       // client's local diagnostics config stays whatever that client set.
       onConfigChanged: (next) => {
         void bridge?.appDeps.diagnosticsConfigChanged(next)
-        for (const computer of computerGatewayRef?.listComputers() ?? []) {
-          void computerGatewayRef
-            ?.request(computer.computerId, HubToComputerMethods.chatRequest, {
-              kind: 'diagnostics.configure',
-              enabled: next.enabled,
-              verbose: next.verbose
-            })
-            .catch(() => console.error('[chat] diagnostic policy sync pending'))
-        }
+        // The hub's own policy push to every computer, not the saving caller's
+        // request: run as the hub (the owner check is for callers' work).
+        runAsSecurityActor(null, () => {
+          for (const computer of computerGatewayRef?.listComputers() ?? []) {
+            void computerGatewayRef
+              ?.request(computer.computerId, HubToComputerMethods.chatRequest, {
+                kind: 'diagnostics.configure',
+                enabled: next.enabled,
+                verbose: next.verbose
+              })
+              .catch(() => console.error('[chat] diagnostic policy sync pending'))
+          }
+        })
       }
     })
   }
@@ -562,7 +609,7 @@ export function composeServer(opts: {
   // not over the prior call — a partial second call would drop these fields).
   const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
-    worktrees: defaultWorktreeExecAdapters,
+    worktrees: hubWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
     removeTaskProcesses,
     killPtysByTaskId,
@@ -580,7 +627,16 @@ export function composeServer(opts: {
     projectRootForTask: async (_db: SlayzoneDb, taskId: string, projectId: string) => {
       const computerId = await resolveComputerForTask(taskId).catch(() => null)
       return computerId ? recordedProjectRoot(db, projectId, computerId) : null
-    }
+    },
+    // The Trash purge removes a worktree before its task, so it asks whether the
+    // computer holding it can (R5-1). At boot none is connected: the task waits, and
+    // the purge runs again on `computer-connected` (below).
+    worktreeComputerState: createWorktreeComputerState({
+      db,
+      requireLogin: opts.requireLogin,
+      usable: () => execGateway?.listUsableComputers() ?? [],
+      forTask: (taskId) => resolveComputerForTask(taskId)
+    })
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
@@ -611,7 +667,16 @@ export function composeServer(opts: {
   // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
   // ("No conversation found") forever with no self-heal. Same orphaned-listener
   // class as the state-change consumers wired just below.
-  registerConversationHealer(db, notifyTasksChanged, { getCurrentBranch })
+  // The branch a checkout is on comes from its computer; none (or no answer) = unknown.
+  registerConversationHealer(db, notifyTasksChanged, {
+    getCurrentBranch: (repoPath) =>
+      executeGitOp('getCurrentBranch', { path: repoPath }, false, db).catch(() => null)
+  })
+  // Worktree colors are the hub's; the worktrees they color are listed on the
+  // checkout's computer (none: no colors yet — detected again next read).
+  setWorktreeColorDetector((projectPath) =>
+    executeGitOp('listWorktrees', { repoPath: projectPath }, false, db)
+  )
   registerConversationResolver(db)
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.
@@ -980,10 +1045,14 @@ export function composeServer(opts: {
   }
   const syncChatLifecycle = (): void => {
     if (resettingForTest) return
-    for (const computer of execGateway?.listUsableComputers() ?? [])
-      void syncComputerChatLifecycle(computer.computerId).catch(() => {
-        /* Delivery remains pending for the next tick. */
-      })
+    // The hub's own housekeeping on every computer — `tasks-changed` fires inside the
+    // caller's request that changed a task, but this is not that caller's work.
+    runAsSecurityActor(null, () => {
+      for (const computer of execGateway?.listUsableComputers() ?? [])
+        void syncComputerChatLifecycle(computer.computerId).catch(() => {
+          /* Delivery remains pending for the next tick. */
+        })
+    })
   }
   notifyEvents.on('tasks-changed', syncChatLifecycle)
   // Covers startup purges, offline deletions and legacy tasks never opened in this boot.
@@ -1048,20 +1117,13 @@ export function composeServer(opts: {
   // ops here (supervised) and standalone owns its own. The Electron host no
   // longer inits it in local mode (would double-spawn auto-restart processes).
   bootBestEffort('process-manager-init', () => initProcessManager(db))
-  // Project-scoped processes re-resolve their cwd from the project's CURRENT
-  // folder at every spawn/restart (see doSpawn) instead of trusting whatever
-  // was snapshotted into the row at creation — a renamed/moved project
-  // folder used to leave every process created before the move permanently
-  // pointed at a stale, possibly-deleted directory. They run on THIS machine, so
-  // the folder is the local computer's; none there = none.
-  setProjectCwdResolver((projectId) => localProjectRoot(db, projectId))
   setProcessesDeps({
     create: createProcess,
     spawn: spawnProcess,
     update: updateProcess,
     stop: stopProcess,
     remove: removeProcess,
-    restart: restartProcess,
+    restart: restartProcessForUi,
     listForTask,
     listAll: listAllProcesses,
     removeForTask: removeTaskProcesses,
@@ -1595,6 +1657,7 @@ export function composeServer(opts: {
       hasPty,
       hasLivePty,
       getBuffer,
+      getBufferSince,
       writePty,
       submitPty,
       killPty,
@@ -1654,7 +1717,7 @@ export function composeServer(opts: {
     // id, see the local-computer dedup below) is never disabled or deleted on its own
     // hub. A standalone hub spawns no computer of its own, so it protects none.
     localComputerId: supervised ? deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME) : null,
-    // What blocks disabling a computer: its terminals and agents, asked of the
+    // What blocks disabling a computer: its terminals, agents and processes, asked of the
     // computer itself. Not connected yet (gateway still starting) = nothing runs.
     runningWorkOn: async (computerId) =>
       computerGatewayRef ? countRunningWork(computerGatewayRef, computerId) : 0,
@@ -1730,6 +1793,10 @@ export function composeServer(opts: {
     // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote computers (any
     // other name) keep the fresh-uuid path.
     const localComputerName = DEFAULT_LOCAL_COMPUTER_NAME
+    // On the hub's own disk, only the co-spawned local computer's folders are the hub's
+    // (the desktop app's). A standalone hub has none: what any computer reports
+    // describes that computer's disk, never the hub's (api access.ts, Q1).
+    setHubDiskComputer(supervised ? deterministicLocalComputerId(localComputerName) : null)
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
@@ -1737,17 +1804,15 @@ export function composeServer(opts: {
     const chatCommandBarrier = createComputerChatCommandBarrier({
       lifecycle: computerChat.lifecycle.syncNative
     })
+    const newWorkGuard = createNewWorkGuard(db)
     const computerGateway = createHubComputerGateway({
+      // THE owner check (G2): every hub→computer request, whatever routed it, is
+      // refused on a computer its caller does not own. The hub's own work passes.
+      authorizeRequest: createComputerRequestAuthorizer(placement.gate),
       beforeRequest: async (computerId, method, params) => {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
-        // A disabled computer takes no new work (`computers.setDisabled`). Every
-        // request passes here, so a binding, a resumed conversation's owner or a spec
-        // that named the computer directly is refused alike; reads, kills and
-        // maintenance are not new work and pass. One row read, spawns only.
-        if (startsNewWork(method, params)) {
-          const row = await getComputer(db, computerId)
-          if (row?.disabled_at != null) throw computerDisabledError(row.name)
-        }
+        // A disabled computer takes no new work (`computers.setDisabled`).
+        await newWorkGuard(computerId, method, params)
       },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       // The dedup is the DESKTOP hub's alone: only there is a computer of that name its
@@ -1821,15 +1886,38 @@ export function composeServer(opts: {
         )
       void reapOrphanWarms(computer.computerId)
     })
-    // Background processes are HUB-OWNED (docs/exec-boundary.md): project-level dev
-    // servers, not agents. `doSpawn` is synchronous and also driven by restart
-    // timers, so it cannot resolve a computer — its spec always carries
-    // `computerId: null`. Routing them therefore is NOT wired: enforcement would
-    // block every `pnpm dev`, and running them on the hub is the intended
-    // behavior, not a fallback.
-    //
-    // The routing backend stays available for when they become async and routable
-    // (a separate change); until then the in-process default stands.
+    // Background processes run on the computer that owns their task / project, like
+    // every other workspace exec (docs/exec-boundary.md). The manager resolves the
+    // computer before EVERY spawn (initial, start, restart, auto-restart) — async —
+    // and the backend routes by that id; with none, the process shows "connect a
+    // computer" instead of starting on the hub.
+    setProcessBackend(
+      createRoutingProcessBackend({
+        gateway: computerGateway,
+        resolveComputerId: (spec) => spec.computerId,
+        // Runs adopted after a hub restart are the manager's: a reconnect keeps them.
+        keepUntracked: isAdoptedOnComputer
+      })
+    )
+    setProcessComputerResolver(async ({ taskId, projectId }) => {
+      if (taskId) return resolveComputerForTask(taskId)
+      if (projectId) return resolveComputerForProject(projectId)
+      return resolveExecComputer(null)
+    })
+    // A kept run whose computer is offline is not a survivor (G3): it is ended, and a
+    // Start or Stop asked meanwhile done, when that computer reconnects.
+    setProcessComputerReachability((computerId) => computerGateway.isComputerUsable(computerId))
+    // A deleted or revoked computer never returns — whoever removed it (Settings,
+    // REST, a departing user's cleanup): the runs it kept are forgotten.
+    setComputerRemovedListener((computerId) => processesComputerRemoved(computerId))
+    // Auto-restart processes that found no computer start now; runs a previous hub
+    // left on this computer show as orphaned (Stop/Start reach them there).
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      if (resettingForTest) return
+      void processesComputerConnected(computer.computerId).catch(() =>
+        console.error('[processes] computer reconciliation failed')
+      )
+    })
     // Only normalized, computer-persisted chat events cross this channel.
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
       if (name !== 'chat-runtime' || resettingForTest) return
@@ -1861,7 +1949,7 @@ export function composeServer(opts: {
         // that does not exist on its own machine.
         resolveComputerId: (taskId) => resolveComputerForTask(taskId),
         gate: placement.gate,
-        local: defaultWorktreeExecAdapters
+        local: hubWorktreeExecAdapters
       })
     })
     // `gh` authenticates as whoever owns the machine it runs on. Run on the hub,
@@ -1869,42 +1957,168 @@ export function composeServer(opts: {
     // identities for one repository, and only one of them held credentials for it.
     // Route the single `spawnGh` chokepoint; the eleven typed gh functions and
     // their parsing stay here untouched.
-    setGhExecutor(async (args, opts) => {
-      // The caller's own computer on a hub with login (T-19): `gh` speaks as the
-      // machine's account, which must never be someone else's.
-      const computerId = await placement.forCaller()
-      // No computer = this hub's own disk is the only one, so its own `gh` is the
-      // only meaningful identity. Falls through to the local executor — which refuses
-      // on a hub with processes switched off (T-06): there, no computer = no `gh`.
-      if (computerId == null || !opts.cwd) return runGhLocally(args, opts)
-      const res = await computerGateway.request(computerId, HubToComputerMethods.ghExec, {
-        args,
-        cwd: opts.cwd,
-        ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
-        ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
-      })
-      return ghExecResultSchema.parse(res)
+    // The git panel: each op runs on the computer that holds the checkout (the
+    // router resolves it like the workspace fs, owner-gated with login).
+    const gateGitOp = createGitOpGate(placement.gate, () => currentSecurityContext()?.actor ?? null)
+    setGitOpTransport({
+      request: async (computerId, params, timeoutMs, target) => {
+        // A caller's op is gated as what it works on; the hub's own reads pass.
+        await gateGitOp(computerId, target)
+        return gitOpResultSchema.parse(
+          await computerGateway.request(computerId, HubToComputerMethods.gitOp, params, timeoutMs)
+        ).result
+      },
+      watchStart: async (computerId, params) => {
+        await computerGateway.request(computerId, HubToComputerMethods.gitWatchStart, params)
+      },
+      watchStop: async (computerId, params) => {
+        await computerGateway.request(computerId, HubToComputerMethods.gitWatchStop, params)
+      }
     })
-
-    // A Claude conversation's history (chat A: Sessions picker, hand-off) is read
-    // where its session file is — on the computer the task's agents run on,
-    // whose HOME and cwd the CLI used. Same resolution and gate as a chat spawn.
-    setClaudeSessionReader(async (req) => {
-      const computerId = resolveExecComputer(req.computerId)
-      if (computerId == null) throw new Error('no computer for this task')
-      if (placement.gate) await placement.gate(computerId, { kind: 'task', id: req.taskId })
+    computerGateway.events.on('event', ({ computerId, name, payload }) => {
+      if (name !== GIT_WATCH_EVENT) return
+      const parsed = gitWatchEventSchema.safeParse(payload)
+      if (parsed.success) deliverGitWatchEvent(computerId, parsed.data)
+    })
+    computerGateway.events.on('computer-disconnected', ({ computerId }) =>
+      gitWatchComputerGone(computerId)
+    )
+    computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
+    // The test panel's scan reads the project's files: on the project's computer.
+    setTestScanRouting({
+      computerFor: async ({ projectPath, projectId }) =>
+        placement.forTarget((await gitTargetForPath(db, projectPath)) ?? { projectId }),
+      scan: async (computerId, input) =>
+        testPanelScanResultSchema.parse(
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.testPanelScan,
+            input,
+            COMPUTER_SCAN_TIMEOUT_MS
+          )
+        )
+    })
+    // Agent usage logs are on the computers: each refresh asks every usable one for
+    // what is new since its own cursors.
+    setUsageCollectRouting({
+      computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
+      // The hub's machine's own computer reads the logs the old hub-disk cursors index.
+      localComputerId: () => deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME),
+      // The hub's own cache of every computer's usage logs, refreshed for whoever
+      // asked: run as the hub, not as that caller.
+      collect: async (computerId, cursors, page) => {
+        const reply = usageCollectResultSchema.parse(
+          await runAsSecurityActor(null, () =>
+            computerGateway.request(
+              computerId,
+              HubToComputerMethods.usageCollect,
+              // Pages after the first carry only where to continue.
+              page ? { cursors: {}, page } : { cursors },
+              USAGE_COLLECT_TIMEOUT_MS
+            )
+          )
+        )
+        return {
+          results: reply.results as unknown as UsageCollectReply['results'],
+          ...(reply.next ? { next: reply.next } : {})
+        }
+      }
+    })
+    // AI-config files (instructions, skills, MCP): a project's on the project's
+    // computer (by its checkout path), the computer-level ones on an explicit computer
+    // or the caller's own — each fs call one agentConfig.fs.
+    setAiConfigFsRouting({
+      computerForProject: async ({ projectPath, projectId }) => {
+        const byPath = projectPath ? await gitTargetForPath(db, projectPath) : null
+        return placement.forTarget(byPath ?? (projectId ? { projectId } : {}))
+      },
+      computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),
+      request: async (computerId, call) =>
+        agentConfigFsResultSchema.parse(
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.agentConfigFs,
+            call,
+            COMPUTER_FS_CALL_TIMEOUT_MS
+          )
+        ).result
+    })
+    computerGateway.events.on('computer-disconnected', ({ computerId }) =>
+      aiConfigComputerGone(computerId)
+    )
+    // The conflict analysis's agent CLI runs on the caller's own computer (agents run
+    // on computers); with none (null) it runs here, refused where processes are off.
+    setAiCommandRunner(async (argv, timeoutMs) => {
+      const computerId = await placement.forCaller()
+      if (computerId == null) return null
+      return execRunOnComputer(computerGateway, computerId, { argv, timeoutMs })
+    })
+    // Terminal settings probes (a mode's binary, a docker / ssh context) run on the
+    // caller's computer as one exec.run; with none, "connect a computer".
+    const computerProbes = createComputerProbes({
+      computerFor: () => placement.forCaller(),
+      run: (computerId, params) => execRunOnComputer(computerGateway, computerId, params)
+    })
+    setTerminalCommandProbe(computerProbes.command)
+    setExecutionContextProbe(computerProbes.executionContext)
+    // Automation shell actions (run_command, ai) run on the task's, else the project's,
+    // computer as one exec.run; with none, the engine refuses ("connect a computer").
+    setAutomationCommandRouting({
+      computerFor: async ({ taskId, projectId }) => {
+        if (taskId) return resolveComputerForTask(taskId)
+        if (projectId) return resolveComputerForProject(projectId)
+        return null
+      },
+      isReachable: (computerId) => computerGateway.isComputerUsable(computerId),
+      run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command)
+    })
+    // Cron catch-ups that waited for a computer (launch, wake) run now (H1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) void automationEngine.computerConnected()
+    })
+    // Expired Trash entries kept until their computer connected are purged now (R5-1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) bootBestEffort('trash-purge-on-connect', () => purgeExpiredTrash(db))
+    })
+    // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
+    // resolved like the git panel (by path, or by the task for a boundary).
+    setTurnGitRouting({
+      computerForPath: async (path) =>
+        placement.forTarget((await gitTargetForPath(db, path)) ?? {}),
+      computerForTask: (taskId) => placement.forTarget({ taskId }),
+      request: async (computerId, op, input) =>
+        gitOpResultSchema.parse(
+          await computerGateway.request(
+            computerId,
+            HubToComputerMethods.gitTurnOp,
+            { op, input },
+            TURN_GIT_OP_TIMEOUT_MS
+          )
+        ).result
+    })
+    setGhExecutor(async (args, opts) => {
+      // `gh` runs where the checkout is: the path names a task or project placement,
+      // resolved — and, with login, admitted (T-19: `gh` speaks as the machine's
+      // account, never someone else's) — like any workspace target. A path the hub
+      // does not know falls back to the caller's own computer.
+      const pathTarget = opts.cwd ? await gitTargetForPath(db, opts.cwd) : null
+      const computerId = await placement.forTarget(pathTarget ?? {})
+      // No computer: `gh` has nowhere to run ("connect a computer") — the hub never
+      // runs it itself.
+      if (computerId == null || !opts.cwd) refuseNoComputer({ op: 'gh' })
       const res = await computerGateway.request(
         computerId,
-        HubToComputerMethods.claudeSessionRead,
+        HubToComputerMethods.ghExec,
         {
-          ...(req.cwd ? { cwd: req.cwd } : {}),
-          ...(req.projectId ? { projectId: req.projectId } : {}),
-          sessionId: req.sessionId,
-          maxRecords: req.maxRecords,
-          maxBytes: req.maxBytes
-        }
+          args,
+          cwd: opts.cwd,
+          ...(opts.timeout ? { timeoutMs: opts.timeout } : {}),
+          ...(opts.stdin === undefined ? {} : { stdin: opts.stdin })
+        },
+        // `gh` ends itself at its own limit; the reply gets room after it.
+        (opts.timeout ?? GH_DEFAULT_TIMEOUT_MS) + EXEC_RUN_REPLY_GRACE_MS
       )
-      return claudeSessionReadResultSchema.parse(res)
+      return ghExecResultSchema.parse(res)
     })
 
     // Where a Claude conversation's transcript is, and which folder to resume it
@@ -1930,9 +2144,7 @@ export function composeServer(opts: {
     setSlayExecutor(
       createRoutingSlayExecutor({
         resolveComputer: (target) => placement.forTarget(target),
-        gateway: computerGateway,
-        gate: placement.gate ? (computerId) => placement.gate!(computerId, null) : undefined,
-        local: getAiConfigOps()
+        gateway: computerGateway
       })
     )
 
@@ -1941,7 +2153,8 @@ export function composeServer(opts: {
     // is the entire point: the picker must browse the filesystem the agent will
     // actually get. Serving these from the hub is what made a task on a remote
     // computer report "No repository path configured" for a path that existed.
-    const localWorkspaceFs = createLocalWorkspaceFs()
+    // No computer: "connect a computer" — the hub never reads a project folder itself.
+    const localWorkspaceFs = noComputerWorkspaceFs
     // The hub's own maintenance on connect (below): the computer is named by the
     // gateway event, not by a caller, and what it is handed is cut to its owner's
     // projects (T-19).
@@ -1949,13 +2162,9 @@ export function composeServer(opts: {
       gateway: computerGateway,
       local: localWorkspaceFs
     })
-    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): gated as the
-    // caller's own request on a hub with login (T-19).
-    const userWorkspaceFs = createRemoteFsAdapters({
-      gateway: computerGateway,
-      local: localWorkspaceFs,
-      gate: placement.gate
-    })
+    // What users reach (`workspace.*`, `fileEditor.*`, repo discovery): the same
+    // adapters — the caller's owner check is the gateway's, for every request (G2).
+    const userWorkspaceFs = workspaceFs
     // Project folders: where each computer keeps each project, kept in step between
     // the computer's own record and the hub's copy. The local computer is matched by
     // its deterministic id (re-enrollment keeps it), never by name.
@@ -1991,6 +2200,15 @@ export function composeServer(opts: {
         recordDiagnosticEvent({ level, source: 'server', event, message, payload })
     })
     syncComputerProjects = (computerId) => projectSync.onConnect(computerId)
+    // The local computer's other work folders — the worktree base setting and an
+    // automation's own folder — are registered again when they change (M6).
+    if (supervised) {
+      setAutomationWrittenListener(() => void projectSync.localWorkFoldersChanged())
+      notifyEvents.on('settings-changed', (change) => {
+        if (!change || change.keys.includes('worktree_base_path'))
+          void projectSync.localWorkFoldersChanged()
+      })
+    }
     // Every Project the hub returns names the computer its work really runs on.
     // Without login a stored default IS the answer (forProject would re-read it);
     // with login it must still pass the owner check.
@@ -2049,11 +2267,12 @@ export function composeServer(opts: {
       }
     })
   })().catch((err) => {
+    computersInitError = err instanceof Error ? err : new Error(String(err))
     recordDiagnosticEvent({
       level: 'error',
       source: 'task',
       event: 'computer.init_failed',
-      message: err instanceof Error ? err.message : String(err)
+      message: computersInitError.message
     })
   })
 
@@ -2117,7 +2336,6 @@ export function composeServer(opts: {
       clearDiagnosticsConfigCache()
       resetWorktreeColorsForTest()
       invalidateProjectReposCache()
-      closeAllFileWatchers()
       resetAgentHookStateForTest()
     } finally {
       resettingForTest = false
@@ -2139,6 +2357,9 @@ export function composeServer(opts: {
       return hubAuthRef
     },
     computersReady,
+    get computersInitError(): Error | null {
+      return computersInitError
+    },
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
     },

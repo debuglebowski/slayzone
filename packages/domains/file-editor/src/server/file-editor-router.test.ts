@@ -10,6 +10,16 @@ import * as path from 'node:path'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { fileEditorRouter } from './file-editor-router.js'
+import { setWorkspaceDeps } from './workspace-deps.js'
+import { createLocalWorkspaceFsAdapters } from './workspace-fs.js'
+
+// The local implementation under test (what a computer runs); a hub's default is
+// "connect a computer".
+setWorkspaceDeps({
+  fs: createLocalWorkspaceFsAdapters(),
+  resolveComputer: async () => null,
+  isLocalComputer: () => true
+})
 
 const h = await createTestHarness()
 const caller = fileEditorRouter.createCaller({ db: h.slayDb, dataRoot: '' })

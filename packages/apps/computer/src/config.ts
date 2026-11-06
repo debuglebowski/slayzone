@@ -12,9 +12,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { realpathSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
@@ -123,148 +122,6 @@ export const ENV_VARS = {
 } as const
 
 export const DEFAULT_CAPABILITIES = ['pty', 'git', 'fs', 'proc'] as const
-
-/**
- * Resolve `target` to an absolute canonical path, tolerating a
- * not-yet-existing tail (e.g. a worktree directory about to be created).
- *
- * Lexically normalizes `..` first, then `realpath`s the nearest EXISTING
- * ancestor to collapse symlinks (so an attacker cannot symlink out of an
- * allowed root), re-appending the non-existent remainder. This closes both the
- * lexical-`../` traversal hole and the symlinked-ancestor hole.
- */
-function realpathBoundary(target: string): string {
-  let current = resolve(target)
-  const tail: string[] = []
-  // Walk up until we hit an existing directory we can canonicalize.
-  for (;;) {
-    try {
-      const real = realpathSync.native(current)
-      return tail.length > 0 ? join(real, ...tail.reverse()) : real
-    } catch {
-      const parent = dirname(current)
-      if (parent === current) {
-        // Reached the filesystem root and nothing exists — fall back to the
-        // lexically-resolved path (already free of `..` segments).
-        return resolve(target)
-      }
-      tail.push(basename(current))
-      current = parent
-    }
-  }
-}
-
-/**
- * A path or spawn cwd the computer refuses by its own policy (T-27): outside
- * `allowedRoots`, or one of the computer's own protected state files. The
- * dispatcher maps it to `refusedByComputer` and logs the request as `refused`.
- */
-export class JailViolationError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'JailViolationError'
-  }
-}
-
-/**
- * The computer's own state — its config (which holds `allowedRoots`), its
- * credentials, and its local request log — refused to every hub frame even when
- * an allowed root contains it (the supervised default `[homedir()]` does).
- * Without this, `fs.writeFile` on `computer.config.json` would hand a hub the very
- * folder-limit change `computer.setAllowedRoots` refuses, and `fs.delete` would
- * erase the request log. Canonical absolute paths; set once at startup.
- *
- * Frame-level only: a shell the hub starts runs as this user and can still touch
- * these files. See {@link spawnCwd} for what the jail does not bound.
- */
-let protectedPaths: readonly string[] = []
-
-export function setProtectedPaths(paths: readonly string[]): void {
-  protectedPaths = paths.map((p) => realpathBoundary(p))
-}
-
-function isInside(path: string, dir: string): boolean {
-  return path === dir || path.startsWith(dir + sep)
-}
-
-/** Is `absolute` (already canonical) one of the protected state paths, or under one? */
-export function isProtectedPath(absolute: string): boolean {
-  return protectedPaths.some((guarded) => isInside(absolute, guarded))
-}
-
-/**
- * Assert that `candidate` is contained within one of `allowedRoots` and return
- * its canonical absolute path. Throws {@link JailViolationError} on traversal
- * outside every configured root (or when no roots are configured at all), or on
- * a protected state path.
- *
- * `subtree`: the caller deletes, moves or overwrites `candidate` with everything
- * under it, so an ANCESTOR of a protected path is refused too — `fs.removeDir`
- * of the computer root would take the request log with it.
- *
- * Every fs./git./proc. path argument on the computer MUST pass through this guard
- * before touching the filesystem.
- */
-export function assertPathAllowed(
-  candidate: string,
-  allowedRoots: readonly string[],
-  opts: { subtree?: boolean } = {}
-): string {
-  if (allowedRoots.length === 0) {
-    throw new JailViolationError(
-      `computer has no allowedRoots configured; refusing filesystem access to '${candidate}'`
-    )
-  }
-  const resolved = realpathBoundary(candidate)
-  for (const guarded of protectedPaths) {
-    if (isInside(resolved, guarded) || (opts.subtree && isInside(guarded, resolved))) {
-      throw new JailViolationError(
-        `path '${candidate}' holds this computer's own state (config, credentials or request log); refused`
-      )
-    }
-  }
-  for (const root of allowedRoots) {
-    let realRoot: string
-    try {
-      realRoot = realpathSync.native(resolve(root))
-    } catch {
-      // A configured root that does not exist cannot contain anything — skip it.
-      continue
-    }
-    if (isInside(resolved, realRoot)) {
-      return resolved
-    }
-  }
-  throw new JailViolationError(
-    `path '${candidate}' is outside the computer's allowedRoots [${allowedRoots.join(', ')}]`
-  )
-}
-
-/**
- * The working directory for a process the HUB starts (pty, warm pty, proc / chat
- * agent) — T-27: always inside `allowedRoots`.
- *
- * An explicit `cwd` must pass {@link assertPathAllowed}. None (a global process
- * with no project) runs in the first allowed root that exists, never the
- * computer's own launch directory, which may lie outside every root.
- *
- * WHAT THIS BOUNDS, PLAINLY. It is a cwd/argv-time guard, NOT an OS sandbox. It
- * decides where a process STARTS. It cannot bound what a running process does: a
- * shell or agent runs as this computer's OS user and can `cd /`, read `~/.ssh`,
- * or delete files anywhere that user can. The real boundary is the OS account the
- * computer runs as — run it under a dedicated account for isolation.
- */
-export function spawnCwd(cwd: string | undefined, allowedRoots: readonly string[]): string {
-  if (cwd !== undefined) return assertPathAllowed(cwd, allowedRoots)
-  for (const root of allowedRoots) {
-    try {
-      return realpathSync.native(resolve(root))
-    } catch {
-      /* absent root — try the next */
-    }
-  }
-  throw new JailViolationError('computer has no existing allowedRoots; refusing to start a process')
-}
 
 type Env = Record<string, string | undefined>
 

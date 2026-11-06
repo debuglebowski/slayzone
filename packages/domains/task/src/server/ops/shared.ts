@@ -176,6 +176,17 @@ export interface WorktreePolicyAdapters {
   resolveBasePathTemplate: (template: string, projectPath: string) => string
 }
 
+/**
+ * Whether the computer holding a task's worktree can remove it now (final review
+ * round 5, R5-1): `ready` — it is connected; `wait` — not yet (the hub's boot, a
+ * reconnect): keep the task and try again when it connects; `gone` — deleted or
+ * revoked, it will never answer: the worktree is left on it.
+ */
+export type WorktreeComputerState = 'ready' | 'wait' | 'gone'
+
+/** What {@link cleanupTaskFull} did with the task's worktree. */
+export type WorktreeCleanup = 'none' | 'removed' | 'failed'
+
 export interface TaskRuntimeAdapters {
   killPtysByTaskId: (taskId: string) => void
   removeTaskProcesses: (taskId: string) => void
@@ -205,6 +216,11 @@ export interface TaskRuntimeAdapters {
    * Unwired (no computers: tests, the fork sidecar): the legacy `projects.path`.
    */
   projectRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
+  /**
+   * The state of the computer that holds this task's worktree (R5-1). Unwired (no
+   * computers: tests, the fork sidecar): always `ready` — the worktree is local.
+   */
+  worktreeComputerState: (taskId: string) => Promise<WorktreeComputerState>
 }
 
 /** Before computers existed the hub held one path per project; with none wired it still does. */
@@ -295,7 +311,8 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   },
   worktrees: unconfiguredWorktreeExecAdapters,
   worktreePolicy: unconfiguredWorktreePolicyAdapters,
-  projectRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId)
+  projectRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId),
+  worktreeComputerState: async () => 'ready'
 }
 
 let runtimeAdapters: TaskRuntimeAdapters = defaultRuntimeAdapters
@@ -555,8 +572,10 @@ export function cleanupTaskImmediate(taskId: string): void {
 export async function cleanupTaskFull(
   db: SlayzoneDb,
   taskId: string,
-  batchIds: string[] = [taskId]
-): Promise<void> {
+  batchIds: string[] = [taskId],
+  /** The purge of a task whose computer is gone for good: there is no one to ask. */
+  opts: { skipWorktree?: boolean } = {}
+): Promise<WorktreeCleanup> {
   // Resolved first: an id that is not one plain path segment (`..` named the data dir)
   // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
   // is the single source of truth for the storage dir (<ROOT>/storage).
@@ -574,7 +593,7 @@ export async function cleanupTaskFull(
     [taskId]
   )
 
-  if (!task?.worktree_path) return
+  if (!task?.worktree_path || opts.skipWorktree) return 'none'
 
   // Skip removal if any other live task (outside this batch) still references the same worktree.
   // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
@@ -585,25 +604,26 @@ export async function cleanupTaskFull(
     `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`,
     [task.worktree_path, ...ids]
   )
-  if ((sharedRow?.n ?? 0) > 0) return
+  if ((sharedRow?.n ?? 0) > 0) return 'none'
 
   // The worktree lives on the task's computer, next to the project's folder there.
   const projectRoot = await runtimeAdapters.projectRootForTask(db, taskId, task.project_id)
 
-  if (projectRoot) {
-    try {
-      await runtimeAdapters.worktrees.removeWorktree(taskId, projectRoot, task.worktree_path)
-    } catch (err) {
-      console.error('Failed to remove worktree:', err)
-      runtimeAdapters.recordDiagnosticEvent({
-        level: 'error',
-        source: 'task',
-        event: 'task.cleanup_worktree_failed',
-        taskId,
-        projectId: task.project_id,
-        message: err instanceof Error ? err.message : String(err)
-      })
-    }
+  if (!projectRoot) return 'none'
+  try {
+    await runtimeAdapters.worktrees.removeWorktree(taskId, projectRoot, task.worktree_path)
+    return 'removed'
+  } catch (err) {
+    console.error('Failed to remove worktree:', err)
+    runtimeAdapters.recordDiagnosticEvent({
+      level: 'error',
+      source: 'task',
+      event: 'task.cleanup_worktree_failed',
+      taskId,
+      projectId: task.project_id,
+      message: err instanceof Error ? err.message : String(err)
+    })
+    return 'failed'
   }
 }
 

@@ -29,13 +29,13 @@ const unadoptedWarmAgentSpy = vi.fn<
 // Mirror the real registry-derived set (claude-code/codex/antigravity carry
 // hookDriven=true). The route uses this to decide whether hooks drive state;
 // the gemini "lifecycle only" test below exercises the false branch.
-// The `@slayzone/terminal/server` barrel pulls in the node-pty-backed pty manager
+// The `@slayzone/terminal/hub` entry pulls in the node-pty-backed pty manager
 // (native module) which vitest can't load, so it is stubbed. The claude agent-tree
 // model is PURE (no pty/DB/Electron), so rather than hand-roll a fake — which
 // would silently drift from the real state ladder — pull the actual module in by
 // path and re-export it. Deep path is deliberate and test-only: it is the one way
 // to reach the real implementation without dragging the barrel's native deps in.
-vi.mock('@slayzone/terminal/server', async () => {
+vi.mock('@slayzone/terminal/hub', async () => {
   const agentTree = await import('../../../../../domains/terminal/src/server/agent-tree.js')
   return {
     isHookDrivenMode: (mode: string) => ['claude-code', 'codex', 'antigravity'].includes(mode),

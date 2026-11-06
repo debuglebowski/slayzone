@@ -23,6 +23,7 @@
 import { expect, test } from 'vitest'
 import {
   assertAuthLoaded,
+  assertComputersReady,
   assertHubBootRules,
   assertKeptAuthSecret,
   assertSsoCredential,
@@ -850,3 +851,44 @@ test('B17: compares the raw value — a trailing newline is a different secret',
   }
   expect(rule, `B17, got ${rule}`).toBe('B17')
 })
+
+// Round-10 R10-1: a login hub whose computer startup failed served requests with no
+// project-folder host — projects.update then wrote the legacy (hub-disk) project path.
+test('B18: login required and the computer startup failed or left no folder host: refused', () => {
+  const msg = (fn: () => void): string => {
+    try {
+      fn()
+      return ''
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
+    }
+  }
+  const failed = msg(() =>
+    assertComputersReady(true, { folderHost: false, initError: new Error('auth table locked') })
+  )
+  expect(failed).toContain('SLAYZONE_HUB_REQUIRE_LOGIN=1')
+  expect(failed).toContain('auth table locked')
+  expect(bootRefusalRule(failedError(true, { folderHost: true, initError: new Error('x') }))).toBe(
+    'B18'
+  )
+  expect(msg(() => assertComputersReady(true, { folderHost: false, initError: null }))).toMatch(
+    /project folder/
+  )
+})
+
+test('B18: no login (the desktop) boots degraded as before; healthy login boots', () => {
+  assertComputersReady(false, { folderHost: false, initError: new Error('x') })
+  assertComputersReady(true, { folderHost: true, initError: null })
+})
+
+function failedError(
+  requireLogin: boolean,
+  state: { folderHost: boolean; initError: Error | null }
+): unknown {
+  try {
+    assertComputersReady(requireLogin, state)
+    return null
+  } catch (e) {
+    return e
+  }
+}

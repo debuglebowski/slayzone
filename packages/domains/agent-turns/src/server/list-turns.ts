@@ -1,125 +1,26 @@
-import { realpath } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { listTurnsForWorktree } from './db'
-import {
-  diffIsEmptyCached,
-  listTurnFilesCached,
-  listTreeBlobsCached,
-  listWorkingChangedFiles,
-  getHeadSha
-} from './git-snapshot'
+import { computerForTurnPath, runTurnGitOp } from './turn-git-routing'
 import type { AgentTurnRange } from '../shared/types'
 
-async function canonical(p: string): Promise<string> {
-  try {
-    return await realpath(p)
-  } catch {
-    return p
-  }
-}
-
 /**
- * Filter rules:
- *  1. Drop turns whose `head_sha_at_snap` is NULL (legacy row whose migration
- *     backfill failed — can't reason about it).
- *  2. Drop turns whose `prev_sha..snap_sha` is an empty diff (legacy / dedupe
- *     bypass / collapsed range).
- *  3. **Consumed check** (replaces the old strict `head_sha_at_snap == HEAD`
- *     equality). For every file the turn touched, compare the blob at that
- *     path in `tree(head_sha_at_snap)` vs `tree(HEAD)`. If *every* touched
- *     file's blob differs (or one side absent and the other defined), the
- *     work landed in HEAD's history → drop. If *any* file's blob is
- *     unchanged between snap-time HEAD and current HEAD, the file was never
- *     touched by intervening commits → that part of the turn's work is
- *     still pending → keep. Survives rebase / merge / squash / amend /
- *     external commits, where strict HEAD equality over-fires and orphans
- *     turns whose work is uncommitted.
- *  4. Drop turns whose changed files have zero overlap with the current
- *     working tree changes — a turn whose files are fully reverted (without
- *     a commit) no longer corresponds to anything in `git status`.
- *
- * Re-thread `prev_snapshot_sha` so dropped turns don't leave dangling SHAs:
- * each surviving row's prev points at the prior surviving row's snapshot, so
- * consecutive diffs remain meaningful.
- */
-async function filterAndRethread(
-  repoPath: string,
-  rows: AgentTurnRange[]
-): Promise<AgentTurnRange[]> {
-  const [workingSet, headSha] = await Promise.all([
-    listWorkingChangedFiles(repoPath),
-    getHeadSha(repoPath)
-  ])
-  const out: AgentTurnRange[] = []
-  let prevSha: string | null = null
-  // Fail-closed: if `git rev-parse HEAD` failed (broken repo, perms, etc.) we
-  // can't safely classify any row as fresh, so drop everything. Better an empty
-  // turn list than ghost turns from random history.
-  if (headSha === null) return out
-  const headBlobs = await listTreeBlobsCached(repoPath, headSha)
-  // Same fail-closed posture for HEAD's tree: if ls-tree fails we can't
-  // distinguish landed vs pending.
-  if (headBlobs === null) return out
-  for (const r of rows) {
-    // Rule 1: legacy NULL drop (head_sha_at_snap backfill failed).
-    if (r.head_sha_at_snap === null) continue
-    const from = prevSha
-    if (from !== null && (await diffIsEmptyCached(repoPath, from, r.snapshot_sha))) {
-      // Dropped: keep prevSha — next surviving row will diff against the older base.
-      continue
-    }
-    if (
-      from === null &&
-      (await diffIsEmptyCached(repoPath, `${r.snapshot_sha}^`, r.snapshot_sha))
-    ) {
-      // First turn but identical to its parent (HEAD-at-snap-time) — no real changes. Drop.
-      continue
-    }
-    const fromForFiles = from ?? `${r.snapshot_sha}^`
-    const turnFiles = await listTurnFilesCached(repoPath, fromForFiles, r.snapshot_sha)
-    // Rule 3: consumed check. Fail-closed when head-at-snap tree is unreadable
-    // (commit GC'd, repo corruption): drop, matching the getHeadSha-null
-    // posture above.
-    const headAtSnapBlobs = await listTreeBlobsCached(repoPath, r.head_sha_at_snap)
-    if (headAtSnapBlobs === null) continue
-    if (turnFiles.length > 0) {
-      const consumed = turnFiles.every((f) => {
-        const hb = headBlobs.get(f)
-        const sb = headAtSnapBlobs.get(f)
-        // Both undefined (file absent at both points) → unchanged → pending.
-        // Both defined and equal → unchanged → pending. Otherwise → changed
-        // (incl. created or deleted between then and now) → that file's work
-        // is reflected in HEAD's history.
-        return hb !== sb
-      })
-      if (consumed) continue
-    }
-    // Rule 4: file-overlap with working tree.
-    if (!turnFiles.some((f) => workingSet.has(f))) {
-      // Turn's files no longer present in working tree changes — drop, keep prevSha.
-      continue
-    }
-    out.push({ ...r, prev_snapshot_sha: from })
-    prevSha = r.snapshot_sha
-  }
-  return out
-}
-
-/**
- * All agent-turns for a worktree, filtered + rethreaded for display. Shared by
- * the `agent-turns:list` IPC handler and the tRPC `agentTurns.list` query so
- * both paths return identical results during IPC↔tRPC coexistence.
+ * All agent-turns for a worktree, filtered + rethreaded for display (the filter's
+ * rules: `filterAndRethread` in ./turn-git). Its git — the realpath and every
+ * diff the filter reads — runs on the computer that holds the checkout; the hub
+ * supplies only the rows. Shared by the tRPC `agentTurns.list` query and the
+ * Electron IPC handler.
  */
 export async function listAgentTurnsForWorktree(
   db: SlayzoneDb,
   worktreePath: string
 ): Promise<AgentTurnRange[]> {
   if (!worktreePath) return []
-  // Resolves and runs git on a path on the hub's own disk: refused on a hub with
-  // processes switched off (T-06), before the realpath probe.
-  assertHubLocalExecEnabled({ op: 'git.turns' })
-  const path = await canonical(worktreePath)
+  // No computer: refused ("connect a computer") — the hub reads no checkout itself.
+  const computerId = await computerForTurnPath(worktreePath)
+  const path = await runTurnGitOp(computerId, 'canonical', { repoPath: worktreePath })
   const raw = await listTurnsForWorktree(db, path)
-  return filterAndRethread(path, raw)
+  return runTurnGitOp(computerId, 'filterTurns', {
+    repoPath: path,
+    rows: raw as unknown as Array<Record<string, unknown>>
+  })
 }

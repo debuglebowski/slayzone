@@ -29,7 +29,7 @@ const state = vi.hoisted(() => ({
   recorded: [] as Array<{ conversationId: string }>
 }))
 
-vi.mock('@slayzone/terminal/server', async (importOriginal) => {
+vi.mock('@slayzone/terminal/hub', async (importOriginal) => {
   const real = await importOriginal<typeof import('@slayzone/terminal/server')>()
   return {
     ...real,

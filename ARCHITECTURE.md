@@ -102,12 +102,22 @@ Terminal (terminal/client)
     ↓
 getTrpcClient().pty.create.mutate({ taskId, cwd, mode })
     ↓
-terminal/main/pty-manager.ts → node-pty spawn
+hub pty-manager (session record, mode adapter builds command, policy)
+    ↓ pty.spawn {detection, relay}
+computer: node-pty spawn → output pipeline (terminal query answers, detection,
+          replay filter) → ring buffer (the ONLY scrollback)
+    ↓ pty-signal events (state, prompt, title, dev URL, conversation id)
+hub state machine mirrors them; pty.data relayed only while a client watches
     ↓
-Mode adapter builds command
-    ↓
-PTY data streams → xterm.js renders
+xterm.js renders (replay via pty.getReplay, then live, deduped by seq)
 ```
+
+The hub never parses or buffers terminal output for a computer that runs the
+pipeline (it acknowledges `detection` per session). Older computers, and retained
+session hosts, fall back to the hub doing it as before. While a session's computer
+is offline its scrollback is unavailable: clients show "Computer offline" and catch
+up from their last seq on reconnect. Idle-close stays a hub decision over the
+mirrored state.
 
 ### Task CLI on a computer
 

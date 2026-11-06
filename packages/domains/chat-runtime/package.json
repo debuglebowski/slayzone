@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./server": "./src/server/index.ts",
+    "./hub": "./src/server/hub.ts",
     "./shared": "./src/shared/index.ts",
     "./db": "./src/server/worker-db.ts"
   },

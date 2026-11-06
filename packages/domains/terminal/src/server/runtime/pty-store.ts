@@ -1,8 +1,6 @@
 import { getPtyHostBridge, type PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import {
   createPty,
   writePty,
@@ -18,6 +16,7 @@ import {
   getBuffer,
   clearBuffer,
   getBufferSince,
+  watchPtyOutput,
   listPtys,
   getState,
   setDatabase,
@@ -44,15 +43,20 @@ import type {
 } from '@slayzone/terminal-contracts'
 import { DEFAULT_AGENTS } from '@slayzone/terminal-contracts'
 import { parseShellArgs } from '../adapters/flag-parser'
-import {
-  getShellOverride,
-  resolveUserShell,
-  setShellOverride,
-  shellExists,
-  whichBinary
-} from '../shell-env'
+import { resolveUserShell, setShellOverride } from '@slayzone/platform'
 
-const execFileAsync = promisify(execFile)
+/**
+ * Whether a command's binary is on PATH where agents start — the caller's computer
+ * (the hub wires `exec.run`). None wired: "connect a computer"; the hub's own PATH
+ * says nothing about that machine.
+ */
+export type TerminalCommandProbe = (
+  bin: string
+) => Promise<{ found: boolean; path?: string; error?: string }>
+let commandProbe: TerminalCommandProbe = async () => refuseNoComputer({ op: 'agents.test' })
+export function setTerminalCommandProbe(next: TerminalCommandProbe | null): void {
+  commandProbe = next ?? (async () => refuseNoComputer({ op: 'agents.test' }))
+}
 
 /**
  * Injectable spawn-time lookups (hub/computer split, wave 2, Model A). Default
@@ -115,21 +119,14 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const agentsTest = async (
     command: string
   ): Promise<{ ok: boolean; error?: string; detail?: string }> => {
-    // `which` on THIS machine: refused on a hub with processes switched off (T-06),
-    // outside the try so the refusal is not reported as "command not found".
-    assertHubLocalExecEnabled({ op: 'agents.test' })
-    try {
-      const parts = parseShellArgs(command)
-      const bin = parts[0]
-      if (!bin) return { ok: false, error: 'No command provided' }
-
-      // Try 'which' on Unix or 'where' on Windows to see if binary exists
-      const checkCmd = process.platform === 'win32' ? 'where' : 'which'
-      const { stdout } = await execFileAsync(checkCmd, [bin])
-      return { ok: true, detail: stdout.trim() }
-    } catch (err) {
-      return { ok: false, error: 'Command not found', detail: (err as Error).message }
-    }
+    const parts = parseShellArgs(command)
+    const bin = parts[0]
+    if (!bin) return { ok: false, error: 'No command provided' }
+    // On the computer agents start on; no computer = the refusal, not "not found".
+    const probed = await commandProbe(bin)
+    return probed.found
+      ? { ok: true, detail: probed.path ?? '' }
+      : { ok: false, error: 'Command not found', detail: probed.error ?? '' }
   }
 
   const agentsGet = async (id: string): Promise<AgentDefinition | null> => {
@@ -403,6 +400,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyGetBufferSince = (sessionId: string, afterSeq: number) =>
     getBufferSince(sessionId, afterSeq)
   const ptyList = () => listPtys()
+  const ptyWatchOutput = (target: readonly string[] | 'all') => watchPtyOutput(target)
   const chatList = () => listChatSessionEntries()
   const ptyGetState = (sessionId: string) => getState(sessionId)
   const sessionList = () => listSessions()
@@ -429,15 +427,12 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     const requirements = adapter.doctorRequirements ?? []
     // A plain shell needs nothing checked (and Doctor is not offered for one).
     if (requirements.length === 0) return []
-    const override = getShellOverride()
     return runDoctor({
       requirements,
       computerId: taskId ? await lookups.resolveComputerId(taskId) : null,
       backend: getPtyBackend(),
-      // The shell pty-manager will ask the computer to spawn.
-      shell: resolveUserShell(),
-      missingShellOverride: override && !shellExists(override) ? override : null,
-      hubLocal: { shellExists, which: whichBinary }
+      // The shell pty-manager will ask the computer to spawn (the override, if set).
+      shell: resolveUserShell()
     })
   }
 
@@ -476,6 +471,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ptyGetBuffer,
     ptyClearBuffer,
     ptyGetBufferSince,
+    ptyWatchOutput,
     ptyList,
     chatList,
     ptyGetState,

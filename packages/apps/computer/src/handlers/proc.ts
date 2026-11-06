@@ -54,21 +54,26 @@ import {
   ProcRefusalReasons,
   type ProcSpawnParams,
   procSpawnParamsSchema,
+  procStatsParamsSchema,
+  type ProcStatsResult,
   type ProcWriteResult,
   procWriteParamsSchema,
   ComputerNotificationMethods,
   RpcError,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { spawnCwd } from '../config'
+import { spawnCwd } from '../path-jail'
+import { createProcGroupLedger, type LedgerOwner } from '../proc-group-ledger'
 import { ExitTombstones } from '../exit-tombstones'
-import { RingBuffer } from '../ring-buffer'
+import { RingBuffer } from '@slayzone/terminal/pty-detection'
+import { collectProcessStats, collectProcessTitles } from '@slayzone/processes/pid-stats'
 import {
   createSpawnAdmission,
   type AdmissionSlot,
   type AdmissionTicket,
   type SpawnAdmission
 } from '../spawn-admission'
+import { terminateTree } from '../terminate-tree'
 import { resolveCommand } from './resolve-command'
 import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
@@ -82,13 +87,17 @@ export const ProcMethods = {
   procKill: HubToComputerMethods.procKill,
   procWrite: HubToComputerMethods.procWrite,
   procGetBufferSince: HubToComputerMethods.procGetBufferSince,
-  procList: HubToComputerMethods.procList
+  procList: HubToComputerMethods.procList,
+  procStats: HubToComputerMethods.procStats
 } as const
 
 export const ProcNotifications = {
   procData: ComputerNotificationMethods.procData,
   procExit: ComputerNotificationMethods.procExit
 } as const
+
+/** After an exit sweep's SIGTERM, how long survivors get before SIGKILL. */
+const REAP_ESCALATE_MS = 2_000
 
 /** How many recent `writeId`s a session remembers for retry dedupe. */
 const WRITE_ID_MEMORY = 256
@@ -106,6 +115,8 @@ interface ProcSession {
   writeIds: string[]
   /** Agent-start slot held until first output or exit (admitted spawns only). */
   slot: AdmissionSlot | null
+  /** The hub asked it to stop (`proc.kill` / replacement): no exit sweep after. */
+  stopping?: boolean
 }
 
 /** An admitted spawn waiting for its start slot. */
@@ -122,11 +133,23 @@ export interface ProcHandlers {
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
+  /** Resolves once the groups a crashed host left behind are ended (M5). */
+  orphansReaped: Promise<void>
+  /** Resolves once every ledger write so far is on disk (awaited on shutdown). */
+  groupsRecorded(): Promise<void>
 }
 
 export interface ProcHandlerOptions {
   /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
   admission?: SpawnAdmission
+  /**
+   * Where spawned process groups are recorded, so the next host ends what a
+   * crashed one left running (final review M5; `proc-group-ledger.ts`). Unset: no
+   * ledger (tests that do not exercise it).
+   */
+  groupLedgerPath?: string
+  /** Tests only: the host identity entries are recorded under. */
+  ledgerOwner?: LedgerOwner
 }
 
 function refuse(reason: string, message: string, data: Record<string, unknown> = {}): RpcError {
@@ -149,6 +172,23 @@ export function createProcHandlers(
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
   const queued = new Map<string, QueuedProcSpawn>()
+  const ledger =
+    options.groupLedgerPath && PROCESS_TREE_DETACHED
+      ? createProcGroupLedger(options.groupLedgerPath, ctx.log, options.ledgerOwner)
+      : null
+  // Before any spawn of ours is recorded: a dead host's groups only.
+  const orphansReaped: Promise<void> = ledger
+    ? ledger.reapOrphans().then(
+        (ended) => {
+          if (ended > 0) ctx.log('reaped orphaned process groups', { count: ended })
+        },
+        (err) => ctx.log('orphaned process group reap failed', { error: String(err) })
+      )
+    : Promise.resolve()
+  let reapDone = !ledger
+  void orphansReaped.then(() => {
+    reapDone = true
+  })
 
   /**
    * Kill a spawned process AND everything it started. Signalling only the direct
@@ -170,6 +210,9 @@ export function createProcHandlers(
 
   function procSpawn(rawParams: unknown): { pid: number | null } | Promise<{ pid: number | null }> {
     const params = procSpawnParamsSchema.parse(rawParams)
+    // A restart right after a crash must not start beside the group it replaces
+    // (its port is still taken) — wait for the reap.
+    if (!reapDone) return orphansReaped.then(() => procSpawn(rawParams))
     if (!params.admission) return startProc(params, null)
     // An agent start: wait for a slot in the computer-wide queue (restoring many
     // chat tabs must not start every agent at once). The reply waits with it.
@@ -240,6 +283,7 @@ export function createProcHandlers(
     const existing = procs.get(params.sessionId)
     if (existing) {
       existing.revokeCli?.()
+      existing.stopping = true
       killTree(existing.child)
       procs.delete(params.sessionId)
     }
@@ -303,6 +347,8 @@ export function createProcHandlers(
     // for this sessionId. This dedupes the error+close double-fire on a failed
     // spawn (ENOENT emits both) and prevents a superseded process from tearing
     // down its replacement.
+    let groupForgotten = false
+    if (ledger && typeof child.pid === 'number') void ledger.record(child.pid)
     const settle = (payload: {
       exitCode: number | null
       signal: string | null
@@ -310,6 +356,12 @@ export function createProcHandlers(
     }): void => {
       capability?.revoke()
       releaseSlot(session)
+      if (typeof child.pid === 'number' && !groupForgotten) {
+        groupForgotten = true
+        // A group leader that exits can leave its group running (`reapGroupOnExit`
+        // sweeps that), but the exit is reported: the hub can Start again.
+        ledger?.forget(child.pid)
+      }
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
@@ -374,6 +426,26 @@ export function createProcHandlers(
     child.on('error', (err) => {
       settle({ exitCode: null, signal: null, error: err.message })
     })
+    // A process-domain leader exiting on its own can leave its group running
+    // (the server `pnpm dev` started): sweep it, so a restart does not collide.
+    if (params.reapGroupOnExit && typeof child.pid === 'number') {
+      const leader = child.pid
+      child.on('exit', () => {
+        if (session.stopping) return
+        try {
+          killPidTree(leader, 'SIGTERM')
+        } catch {
+          // Nothing left in the group.
+        }
+        setTimeout(() => {
+          try {
+            killPidTree(leader, 'SIGKILL')
+          } catch {
+            // Already gone.
+          }
+        }, REAP_ESCALATE_MS).unref()
+      })
+    }
 
     ctx.log('proc spawned', {
       sessionId: params.sessionId,
@@ -383,21 +455,36 @@ export function createProcHandlers(
     return { pid: child.pid ?? null }
   }
 
-  function procKill(rawParams: unknown): { ok: true } {
+  /**
+   * Stop a run: the reply waits until its whole tree is gone (SIGTERM, then
+   * SIGKILL for what survives — {@link terminateTree}), so the hub marks it
+   * stopped, or starts it again, only once its port is free. `clean: false`: part
+   * of the tree outlived SIGKILL. An explicit other signal is just sent.
+   */
+  async function procKill(rawParams: unknown): Promise<{ ok: true; clean: boolean }> {
     const params = procKillParamsSchema.parse(rawParams)
     const session = procs.get(params.sessionId)
     if (!session) {
       // Idempotent: the process may already have exited (network race).
       ctx.log('proc kill on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
+      return { ok: true, clean: true }
     }
     if (params.spawnId !== undefined && session.spawnId !== params.spawnId) {
       // Meant for a process this session no longer runs: that one is already gone.
       ctx.log('proc kill for a replaced attempt', { sessionId: params.sessionId })
-      return { ok: true }
+      return { ok: true, clean: true }
     }
-    killTree(session.child, (params.signal as NodeJS.Signals | undefined) ?? 'SIGTERM')
-    return { ok: true }
+    session.stopping = true
+    const signal = params.signal as NodeJS.Signals | undefined
+    const leader = session.child.pid
+    if ((signal && signal !== 'SIGTERM') || typeof leader !== 'number') {
+      killTree(session.child, signal ?? 'SIGTERM')
+      return { ok: true, clean: true }
+    }
+    const clean = await terminateTree(leader)
+    if (!clean)
+      ctx.log('proc kill: part of the tree survived SIGKILL', { sessionId: params.sessionId })
+    return { ok: true, clean }
   }
 
   function procWrite(rawParams: unknown): Promise<ProcWriteResult> {
@@ -502,6 +589,29 @@ export function createProcHandlers(
       ctx.log('proc disposed on shutdown', { sessionId })
     }
     procs.clear()
+    // Their groups were just ended: a clean quit leaves nothing to reap (R2-1).
+    ledger?.close()
+  }
+
+  /** cpu/memory + title for the asked live sessions (the hub's processes panel). */
+  async function procStats(rawParams: unknown): Promise<ProcStatsResult> {
+    const params = procStatsParamsSchema.parse(rawParams)
+    const pids = new Map<string, number>()
+    for (const id of params.sessionIds) {
+      const pid = procs.get(id)?.child.pid
+      if (typeof pid === 'number') pids.set(id, pid)
+    }
+    if (process.platform === 'win32' || pids.size === 0) return { stats: {} }
+    const [usage, titles] = await Promise.all([
+      collectProcessStats(pids),
+      collectProcessTitles(pids)
+    ])
+    const stats: ProcStatsResult['stats'] = {}
+    for (const id of pids.keys()) {
+      if (!usage[id] && !titles[id]) continue
+      stats[id] = { cpu: usage[id]?.cpu ?? 0, rss: usage[id]?.rss ?? 0, title: titles[id] ?? null }
+    }
+    return { stats }
   }
 
   const handlers: HubMethodTable = {
@@ -509,8 +619,15 @@ export function createProcHandlers(
     [ProcMethods.procKill]: procKill,
     [ProcMethods.procWrite]: procWrite,
     [ProcMethods.procGetBufferSince]: procGetBufferSince,
-    [ProcMethods.procList]: procList
+    [ProcMethods.procList]: procList,
+    [ProcMethods.procStats]: procStats
   }
 
-  return { hasWork: () => procs.size > 0 || queued.size > 0, handlers, disposeAll }
+  return {
+    hasWork: () => procs.size > 0 || queued.size > 0,
+    handlers,
+    disposeAll,
+    orphansReaped,
+    groupsRecorded: () => ledger?.settled() ?? Promise.resolve()
+  }
 }

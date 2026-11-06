@@ -11,7 +11,11 @@ import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerTransportErrorCodes, projectNotPlacedError } from '../shared/frames'
+import {
+  ComputerTransportErrorCodes,
+  PTY_SIGNAL_EVENT_NAME,
+  projectNotPlacedError
+} from '../shared/frames'
 import { RpcDisposedError, RpcError } from '../shared/rpc'
 import {
   createRemoteFsAdapters,
@@ -26,6 +30,7 @@ import {
   type RoutingGateway
 } from './exec-proxies'
 import type { ComputerDescriptor, ComputerGatewayEvents } from './hub-gateway'
+import { ComputerUpdatePendingError } from './hub-gateway'
 
 // ---------------------------------------------------------------------------
 // Fake gateway
@@ -716,6 +721,296 @@ describe('createRoutingPtyBackend', () => {
       sessionId: 'sess-1',
       seq: 0
     })
+  })
+
+  it('a piped session acked before any output owns its output: seqs pass through, replay forwards', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.getReplay', () => ({
+      chunks: [{ seq: 0, data: 'a' }],
+      prelude: '',
+      currentSeq: 0
+    }))
+    gateway.onMethod('pty.clearBuffer', () => ({ clearedSeq: 0 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(handle.ownsOutput).toBe(true)
+    const got: Array<[string, number | undefined]> = []
+    handle.onData((d, seq) => got.push([d, seq]))
+    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 0, data: 'a' })
+    expect(got).toEqual([['a', 0]])
+    expect(await handle.getReplay?.(-1)).toEqual({
+      chunks: [{ seq: 0, data: 'a' }],
+      prelude: '',
+      currentSeq: 0
+    })
+    expect(requireCall(gateway, 'pty.getReplay').params).toMatchObject({
+      sessionId: 'sess-1',
+      afterSeq: -1
+    })
+    expect(await handle.clearOutput?.()).toEqual({ clearedSeq: 0 })
+  })
+
+  it('relay on demand: spawned unrelayed, turned on at the seq the computer reached, no backfill of the gap', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.relay', () => ({ seq: 7 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false },
+      relay: false
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(requireCall(gateway, 'pty.spawn').params).toMatchObject({ relay: false })
+    const got: Array<[string, number | undefined]> = []
+    handle.onData((d, seq) => got.push([d, seq]))
+    handle.setRelay?.(true)
+    await vi.waitFor(() =>
+      expect(requireCall(gateway, 'pty.relay').params).toMatchObject({
+        sessionId: 'sess-1',
+        on: true
+      })
+    )
+    await new Promise((r) => setTimeout(r, 10))
+    gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq: 8, data: 'x' })
+    expect(got).toEqual([['x', 8]])
+    expect(gateway.calls.filter((c) => c.method === 'pty.getBufferSince')).toEqual([])
+  })
+
+  // Round-7 N7: on reconnect the relay request went out twice — from here and from
+  // the terminal runtime's availability listener (which owns that decision since L2).
+  it('resume does not resend the relay itself (the runtime asks once, on availability)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.relay', () => ({ seq: 0 }))
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: -1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false },
+      relay: false
+    })) as PtyHandle
+    await handle.whenSpawned
+    await handle.setRelay?.(true)
+    const seen: boolean[] = []
+    handle.onAvailability?.((available) => seen.push(available))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(seen).toEqual([false, true]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+  })
+
+  // N7: a computer that predates pty.relay (v0.37.2) streams every session anyway; each
+  // watch change asked it again, and failed. It is asked once.
+  it('a computer without pty.relay is asked once, and the relay reads as applied', async () => {
+    for (const refusal of [
+      new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented: pty.relay'),
+      new ComputerUpdatePendingError(
+        'pty.relay',
+        ComputerTransportErrorCodes.unimplemented,
+        '0.37.2'
+      )
+    ]) {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      gateway.onMethod('pty.relay', () => {
+        throw refusal
+      })
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const handle = (await backend.spawn({
+        ...ptySpec(),
+        detection: { mode: 'codex', resuming: false },
+        relay: false
+      })) as PtyHandle
+      await handle.whenSpawned
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(false)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+    }
+  })
+
+  it('a routed handle reports its output unavailable while the computer is away, and back on resume', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: -1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const seen: boolean[] = []
+    handle.onAvailability?.((available) => seen.push(available))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    expect(seen).toEqual([false])
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(seen).toEqual([false, true]))
+  })
+
+  it('without the ack the hub keeps owning output (older computer)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    expect(handle.ownsOutput).toBe(false)
+  })
+
+  it('reconnect replays what the computer detected while the hub was away, as one snapshot signal', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const detected = {
+      activity: 'idle',
+      title: 'Agent waiting',
+      prompt: { type: 'permission', text: 'Allow? [Y/n]', position: 0 },
+      devServerUrls: ['http://localhost:5173'],
+      conversationId: 'conv-1',
+      error: null
+    }
+    gateway.onMethod('pty.list', () => ({
+      sessions: [{ sessionId: 'sess-1', pid: 1, seq: 4, detection: true, detected }]
+    }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const signals: unknown[] = []
+    handle.onSignal?.((s) => signals.push(s))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() =>
+      expect(signals).toEqual([
+        expect.objectContaining({
+          snapshot: true,
+          activity: 'idle',
+          title: 'Agent waiting',
+          prompt: detected.prompt,
+          devServerUrls: ['http://localhost:5173'],
+          conversationId: 'conv-1'
+        })
+      ])
+    )
+  })
+
+  // Final review M1: a resume that failed before any output sent its exit error at
+  // seq -1 (nothing emitted yet), and the hub dropped every signal at or below where
+  // it took over detection (-1 for a fresh spawn) — the "session expired" overlay
+  // never showed. An error is about the exit, not about output already detected.
+  // Final review M2: past the carry window the hub sent no continuation at all, and
+  // the recovery shell's output restarted at seq 0. The seq the session reached is
+  // always sent with a continuing spawn.
+  it('a continuing spawn always says where the session seqs reached', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const first = (await backend.spawn(ptySpec())) as PtyHandle
+      await first.whenSpawned
+      for (let seq = 0; seq <= 5; seq++)
+        gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq, data: 'x' })
+      gateway.emit('pty.exit', {
+        computerId: 'computer-1',
+        sessionId: 'sess-1',
+        exitCode: 1
+      } as never)
+      // The computer's carry window is long over (its tombstone is gone).
+      vi.advanceTimersByTime(10 * 60_000)
+      const second = (await backend.spawn({
+        ...ptySpec(),
+        carryOutput: { preamble: '[recovered]' }
+      })) as PtyHandle
+      const spawns = gateway.requestsOf('pty.spawn')
+      expect((spawns.at(-1)?.params as { carryOutput?: unknown } | undefined)?.carryOutput).toEqual(
+        expect.objectContaining({ preamble: '[recovered]', afterSeq: 5 })
+      )
+      void second
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an exit error before any output (seq -1) reaches the hub', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'claude-code', resuming: true }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const signals: Array<{ error: unknown }> = []
+    handle.onSignal?.((s) => signals.push(s as never))
+    const error = { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+    gateway.emit('event', {
+      computerId: 'computer-1',
+      name: PTY_SIGNAL_EVENT_NAME,
+      payload: {
+        sessionId: 'sess-1',
+        seq: -1,
+        activity: null,
+        refreshIdleClock: false,
+        preview: '',
+        error,
+        suppressOutput: false,
+        prompt: null,
+        title: null,
+        devServerUrls: [],
+        conversationId: null
+      }
+    } as never)
+    expect(signals).toEqual([expect.objectContaining({ error })])
   })
 
   it('reconnect with the same epoch ends the sessions the computer no longer holds', async () => {
@@ -1447,6 +1742,53 @@ describe('createRoutingProcessBackend', () => {
     expect(gateway.calls).toHaveLength(0)
   })
 
+  it('a background process asks its computer to sweep its group on exit, and reads stats from it', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
+    gateway.onMethod('proc.stats', () => ({
+      stats: { 'proc-1': { cpu: 1.5, rss: 2048, title: 'node' } }
+    }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec())
+    expect(requireCall(gateway, 'proc.spawn').params).toMatchObject({ reapGroupOnExit: true })
+    expect(await backend.stats?.(['proc-1', 'unknown'])).toEqual({
+      'proc-1': { cpu: 1.5, rss: 2048, title: 'node' }
+    })
+    expect(requireCall(gateway, 'proc.stats')).toMatchObject({
+      computerId: 'computer-1',
+      params: { sessionIds: ['proc-1'] }
+    })
+  })
+
+  it('lists the runs a computer holds that this hub does not track, and ends one there', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 555, seq: 0 },
+        { sessionId: 'left-by-old-hub', pid: 777, seq: 4 }
+      ],
+      exited: []
+    }))
+    gateway.onMethod('proc.kill', () => ({ ok: true }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec())
+    expect(await backend.listSessions?.('computer-1')).toEqual([
+      { sessionId: 'left-by-old-hub', pid: 777 }
+    ])
+    await backend.killSession?.('computer-1', 'left-by-old-hub')
+    expect(requireCall(gateway, 'proc.kill')).toMatchObject({
+      computerId: 'computer-1',
+      params: { sessionId: 'left-by-old-hub' }
+    })
+  })
+
   it('remote: forwards proc.spawn, delivers proc.data in order, kill frame, exit cleanup', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 555 }))
@@ -1542,6 +1884,35 @@ describe('createRoutingProcessBackend', () => {
     })
     return { exit: () => exit }
   }
+
+  // After a hub restart the process manager adopts the runs a computer kept (they
+  // show orphaned, Stop reaches them by session) — with no handle, so this backend
+  // does not track them. A network blip and same-epoch reconnect then swept them as
+  // strays: the dev server was killed silently. Adopted runs are kept; a stray is not.
+  it('a reconnect keeps runs the process manager adopted, and still ends a stray', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    gateway.onMethod('proc.kill', () => ({ ok: true, clean: true }))
+    gateway.onMethod('proc.list', () => ({
+      sessions: [
+        { sessionId: 'proc-1', pid: 1, seq: 0 },
+        { sessionId: 'adopted-dev-server', pid: 7, seq: 3 },
+        { sessionId: 'stray', pid: 8, seq: 0 }
+      ]
+    }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null,
+      keepUntracked: (computerId, sessionId) =>
+        computerId === 'computer-1' && sessionId === 'adopted-dev-server'
+    })
+    connectProc(gateway, 'epoch-a')
+    backend.spawn(procSpec())
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connectProc(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(gateway.requestsOf('proc.kill')).toHaveLength(1))
+    expect(gateway.requestsOf('proc.kill').map((c) => c.params)).toEqual([{ sessionId: 'stray' }])
+  })
 
   it('computer-lost detaches the process rather than declaring it dead', () => {
     const gateway = new FakeGateway()
@@ -1722,7 +2093,14 @@ describe('createRoutingProcessBackend', () => {
       exit = e
     })
 
-    await vi.waitFor(() => expect(exit).toEqual({ code: null, signal: 'spawn-failed' }))
+    // The computer's reason travels with the exit, so the process log can say why.
+    await vi.waitFor(() =>
+      expect(exit).toEqual({
+        code: null,
+        signal: 'spawn-failed',
+        detail: 'path outside allowed roots'
+      })
+    )
   })
 })
 
@@ -1753,6 +2131,41 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
 const TASK = 'task-1'
 
 describe('createRemoteWorktreeAdapters', () => {
+  // A task's auto-worktree runs its setup script on the computer (5 min there);
+  // at the gateway's 30 s default the hub reported auto_worktree_setup_failed while
+  // the script kept running (a retry then hit a duplicate worktree).
+  it('every step carries an explicit timeout; create / setup / copy / remove get minutes', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
+    gateway.onMethod('git.getCurrentBranch', () => ({ branch: 'main' }))
+    gateway.onMethod('git.removeWorktree', () => ({ branchDeleted: true }))
+    gateway.onMethod('git.runWorktreeSetupScript', () => ({ ran: true, success: true, output: '' }))
+    gateway.onMethod('fs.pathExists', () => ({ exists: true }))
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'computer-1'
+    })
+    await adapters.isGitRepo(TASK, '/repo')
+    await adapters.getCurrentBranch(TASK, '/repo')
+    await adapters.pathExists(TASK, '/wt')
+    await adapters.createWorktree(TASK, '/repo', '/wt', 'feature', 'main')
+    await adapters.runWorktreeSetupScript(TASK, '/wt', '/repo', 'main')
+    await adapters.copyIgnoredFiles(TASK, '/repo', '/wt', 'none' as never, [])
+    await adapters.removeWorktree(TASK, '/proj', '/wt')
+    for (const call of gateway.calls) {
+      expect(call.timeoutMs, `${call.method}: explicit`).toBeGreaterThan(30_000)
+    }
+    for (const method of [
+      'git.createWorktree',
+      'git.runWorktreeSetupScript',
+      'git.copyIgnoredFiles',
+      'git.removeWorktree'
+    ]) {
+      expect(requireCall(gateway, method).timeoutMs, method).toBeGreaterThan(5 * 60_000)
+    }
+  })
+
   it('forwards git/fs ops to the right frames and parses the computer replies', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('git.isGitRepo', () => ({ isGitRepo: true }))
@@ -2536,25 +2949,5 @@ describe('the work gate: a computer works only for the work it was admitted for'
     await expect(adapters.pathExists('task-3', '/r')).rejects.toThrow('not yours')
     expect(asked.every((a) => a.work?.kind === 'task' && a.work.id === 'task-3')).toBe(true)
     expect(gateway.calls).toEqual([])
-  })
-
-  it("filesystem: every op is the caller's own request (work null); a refused watch never starts", async () => {
-    const gateway = new FakeGateway()
-    const { gate, asked } = gateFor('mine')
-    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs(), gate })
-    await expect(fs.listRoots('theirs')).rejects.toThrow('not yours')
-    await expect(fs.setAllowedRoots('theirs', ['/'])).rejects.toThrow('not yours')
-    await expect(fs.readFile('theirs', '/r', 'a.ts')).rejects.toThrow('not yours')
-    const stop = fs.watch('theirs', '/r', () => undefined)
-    await new Promise((r) => setImmediate(r))
-    stop()
-    expect(asked.every((a) => a.work === null)).toBe(true)
-    expect(gateway.requestsOf('fs.listRoots')).toEqual([])
-    expect(gateway.requestsOf('computer.setAllowedRoots')).toEqual([])
-    expect(gateway.requestsOf('fs.watchStart')).toEqual([])
-    expect(gateway.calls).toEqual([])
-    // With no computer the hub's own disk answers, and nothing is asked.
-    await fs.listRoots(null)
-    expect(asked).toHaveLength(4)
   })
 })

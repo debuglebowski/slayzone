@@ -14,9 +14,9 @@ import {
   type TemplateContext
 } from '@slayzone/automations/shared'
 import { taskEvents } from '@slayzone/task/server'
-import { exec } from 'child_process'
-import { assertAutomationActionsAllowed } from './hub-exec-actions'
-import { localProjectRoot } from '@slayzone/computers/server'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import { recordedProjectRoot } from '@slayzone/computers/server'
+import { getAutomationCommandRouting } from './command-routing'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
 
@@ -206,6 +206,52 @@ export class AutomationEngine {
     }
   }
 
+  /**
+   * Catch-ups waiting for their computer, by automation (H1). At launch and after
+   * sleep the computer has not connected yet: run then, the catch-up was refused,
+   * recorded as an error and its slot lost. It waits instead, like a process does,
+   * and runs when a computer connects ({@link computerConnected}). Keyed by
+   * automation, so start + resume queue it once; `catchupsRunning` keeps a second
+   * trigger from running one again while it runs.
+   */
+  private readonly pendingCatchups = new Map<
+    string,
+    { automation: Automation; event: AutomationEvent }
+  >()
+  private readonly catchupsRunning = new Set<string>()
+
+  /** A computer connected: run every catch-up that was waiting for one. */
+  async computerConnected(): Promise<void> {
+    const waiting = [...this.pendingCatchups.values()]
+    await Promise.all(
+      waiting.map(({ automation, event }) => this.runCatchupOnce(automation, event))
+    )
+  }
+
+  /** The computer for a catch-up, or null when it must wait (none, or not connected). */
+  private async catchupComputer(event: AutomationEvent): Promise<string | null> {
+    const routing = getAutomationCommandRouting()
+    if (!routing) return null
+    const computerId = await this.computerFor(event)
+    if (computerId == null) return null
+    return routing.isReachable && !routing.isReachable(computerId) ? null : computerId
+  }
+
+  private async runCatchupOnce(automation: Automation, event: AutomationEvent): Promise<void> {
+    if (this.catchupsRunning.has(automation.id)) return
+    this.catchupsRunning.add(automation.id)
+    try {
+      if ((await this.catchupComputer(event)) == null) {
+        this.pendingCatchups.set(automation.id, { automation, event })
+        return
+      }
+      this.pendingCatchups.delete(automation.id)
+      await this.executeAutomation(automation, event, 0)
+    } finally {
+      this.catchupsRunning.delete(automation.id)
+    }
+  }
+
   private catchUp(row: AutomationRow, nowFloor: Date): void {
     const automation = parseAutomationRow(row)
     const expression = automation.trigger_config.params.expression as string | undefined
@@ -223,17 +269,13 @@ export class AutomationEngine {
     while (cursor > lastRun) {
       if (cronMatches(expression, cursor)) {
         detach(
-          this.executeAutomation(
-            automation,
-            {
-              type: 'cron',
-              projectId: automation.project_id,
-              cronExpression: expression,
-              depth: 0,
-              catchup: true
-            },
-            0
-          ),
+          this.runCatchupOnce(automation, {
+            type: 'cron',
+            projectId: automation.project_id,
+            cronExpression: expression,
+            depth: 0,
+            catchup: true
+          }),
           `automation ${automation.id}`
         )
         break
@@ -404,7 +446,9 @@ export class AutomationEngine {
       [runId, automation.id, JSON.stringify(event)]
     )
 
-    const ctx = await this.buildTemplateContext(event)
+    // The computer the actions run on (the task's, else the project's); null = the hub.
+    const computerId = await this.computerFor(event)
+    const ctx = await this.buildTemplateContext(event, computerId)
     const prevDepth = this.currentDepth
     let runStatus: 'success' | 'error' = 'success'
     let runError: string | null = null
@@ -413,9 +457,10 @@ export class AutomationEngine {
       this.currentDepth = depth + 1
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
-        // Before anything is resolved or exec'd: a rule saved before the switch was
-        // turned off, or written straight into the database, is refused here.
-        assertAutomationActionsAllowed([action], { op: 'run', automationId: automation.id })
+        // Actions run on computers only: with none, before anything is resolved —
+        // "connect a computer" (nothing ever execs on the hub).
+        if (computerId == null)
+          refuseNoComputer({ op: 'automation.run', detail: { automationId: automation.id } })
         const resolved = await this.resolveAction(action, ctx)
         const actionRunId = await this.db.namedTxn('automations:start-action-run', {
           input: {
@@ -431,7 +476,7 @@ export class AutomationEngine {
         const actionStart = Date.now()
 
         try {
-          const result = await this.runResolvedAction(resolved)
+          const result = await this.runResolvedAction(resolved, computerId, event.projectId)
           await this.db.namedTxn('automations:finish-action-run', {
             id: actionRunId,
             input: {
@@ -540,31 +585,39 @@ export class AutomationEngine {
     throw new Error(`Unknown action type: "${(action as ActionConfig).type}"`)
   }
 
-  private async runResolvedAction(resolved: {
-    command: string
-    cwd?: string
-    timeoutMs: number
-  }): Promise<{ outputTail: string | null }> {
-    const result = await this.runCommand(resolved.command, resolved.cwd, resolved.timeoutMs)
-    return { outputTail: trimOutputTail(`${result.stdout}${result.stderr}`) }
+  /** The computer an event's actions run on: the task's, else the project's. */
+  private async computerFor(event: AutomationEvent): Promise<string | null> {
+    const routing = getAutomationCommandRouting()
+    if (!routing) return null
+    return routing.computerFor({
+      ...(event.taskId ? { taskId: event.taskId } : {}),
+      ...(event.projectId ? { projectId: event.projectId } : {})
+    })
   }
 
-  private runCommand(
-    command: string,
-    cwd: string | undefined,
-    timeoutMs: number
-  ): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = exec(command, { cwd, timeout: timeoutMs }, (err, stdout, stderr) => {
-        const outputTail = trimOutputTail(`${stdout}${stderr}`)
-        if (err)
-          reject(
-            new AutomationCommandError(`Command failed: ${err.message}\n${stderr}`, outputTail)
-          )
-        else resolve({ stdout, stderr })
+  private async runResolvedAction(
+    resolved: { command: string; cwd?: string; timeoutMs: number },
+    computerId: string | null,
+    projectId: string | null | undefined
+  ): Promise<{ outputTail: string | null }> {
+    const routing = getAutomationCommandRouting()
+    if (computerId == null || !routing) refuseNoComputer({ op: 'automation.run' })
+    {
+      const result = await routing.run(computerId, {
+        command: resolved.command,
+        ...(resolved.cwd ? { cwd: resolved.cwd } : {}),
+        ...(projectId ? { projectId } : {}),
+        timeoutMs: resolved.timeoutMs
       })
-      setTimeout(() => child.kill(), timeoutMs + 1000)
-    })
+      const outputTail = trimOutputTail(`${result.stdout}${result.stderr}`)
+      if (result.timedOut || result.status !== 0) {
+        throw new AutomationCommandError(
+          `Command failed${result.timedOut ? ' (timed out)' : ''}: exit ${result.status ?? 'none'}\n${result.stderr}`,
+          outputTail
+        )
+      }
+      return { outputTail }
+    }
   }
 
   // Build the timeline activity event for a completed run. Returns `null` when
@@ -598,7 +651,10 @@ export class AutomationEngine {
     }
   }
 
-  private async buildTemplateContext(event: AutomationEvent): Promise<TemplateContext> {
+  private async buildTemplateContext(
+    event: AutomationEvent,
+    computerId: string | null = null
+  ): Promise<TemplateContext> {
     const ctx: TemplateContext = {
       trigger: {
         old_status: event.oldStatus,
@@ -656,9 +712,10 @@ export class AutomationEngine {
         [event.projectId]
       )
       if (project) {
-        // Automation commands run on the hub, so `{{project.path}}` and the default
-        // cwd are the project's folder on the computer sharing the hub's machine.
-        const path = await localProjectRoot(this.db, project.id)
+        // `{{project.path}}` and the default cwd are the project's folder on the
+        // computer the actions run on (none: unknown — the run is refused anyway).
+        const path =
+          computerId != null ? await recordedProjectRoot(this.db, project.id, computerId) : null
         ctx.project = { id: project.id, name: project.name, path }
       }
     }
@@ -681,9 +738,15 @@ export class AutomationEngine {
     ])
     if (!row) throw new Error('Automation not found')
     const automation = parseAutomationRow(row)
-    // A manual run is a request: refuse it to the caller rather than recording a
-    // failed run.
-    assertAutomationActionsAllowed(automation.actions, { op: 'run', automationId: automation.id })
+    // A manual run is a request: with no computer for its project, refuse it to the
+    // caller rather than recording a failed run.
+    const computerId = await this.computerFor({
+      type: 'manual',
+      projectId: automation.project_id,
+      depth: 0
+    } as AutomationEvent)
+    if (computerId == null && automation.actions.length > 0)
+      refuseNoComputer({ op: 'automation.run', detail: { automationId: automation.id } })
 
     const event: AutomationEvent = {
       type: 'manual',

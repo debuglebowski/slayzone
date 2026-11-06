@@ -2,7 +2,8 @@
 // (`workspace-fs.ts`), and so are the routers serving them (`fileEditor`, `workspace`).
 // Composition roots wire it (`setWorkspaceDeps`); the `worktrees` router reads it
 // through its own seam, which api wires (`api/src/domain-router-deps.ts`).
-import { createLocalWorkspaceFsAdapters, type WorkspaceFsAdapters } from './workspace-fs'
+import type { WorkspaceFsAdapters } from './workspace-fs'
+import { noComputerWorkspaceFsAdapters } from './workspace-fs-none'
 
 /**
  * The workspace filesystem seam.
@@ -44,8 +45,10 @@ export type WorkspaceDeps = {
   isLocalComputer: (computerId: string | null) => boolean
 }
 
+// Until a host wires its own: no computer — "connect a computer" (the hub never
+// touches project files; a host that works on its own disk sets local adapters).
 let workspaceDeps: WorkspaceDeps = {
-  fs: createLocalWorkspaceFsAdapters(),
+  fs: noComputerWorkspaceFsAdapters,
   resolveComputer: async () => null,
   isLocalComputer: () => true
 }

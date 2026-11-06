@@ -12,6 +12,8 @@ export interface PtyAttachResult {
   /** The session's terminal size (hubs that report it; null = no session). Desktop
    *  sizes the session itself and ignores it. */
   size?: { cols: number; rows: number } | null
+  /** The session exists, but its computer (which holds the scrollback) is offline. */
+  unavailable?: 'computer-offline'
 }
 
 /** The slice of the tRPC client this helper calls. */

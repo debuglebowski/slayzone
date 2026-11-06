@@ -149,6 +149,35 @@ describe('every id named in an object input exists in its schema', () => {
   }
 })
 
+// A `target` picks the computer an op runs on (`{ taskId, projectId, computerId }`).
+// Checked only by its path, user B could aim A's task: the op then ran on A's
+// computer, inside A's folders. Every id inside a target is the caller's to name.
+describe('a computer target is owner-checked', () => {
+  const withTarget = LIVE_USER.filter((path) => {
+    const inputs = PROCS[path]!._def.inputs
+    const shape = objectShape(inputs[inputs.length - 1])
+    return !!shape && 'target' in shape
+  })
+  test('the git panel takes targets (so this checks something)', () => {
+    expect(withTarget.filter((p) => p.startsWith('worktrees.')).length).toBeGreaterThan(50)
+  })
+  for (const path of withTarget) {
+    test(path, () => {
+      const refs = (TRPC_OWNER_POLICY[path]?.ids ?? []).filter((r) => !isCustomRef(r)) as Array<{
+        at: string
+        kind: string
+      }>
+      for (const [at, kind] of [
+        ['target.taskId', 'task'],
+        ['target.projectId', 'project'],
+        ['target.computerId', 'computer']
+      ]) {
+        expect(refs, `${path}: ${at}`).toContainEqual({ at, kind })
+      }
+    })
+  }
+})
+
 describe('reading ids out of an input', () => {
   test('dotted paths, arrays, record keys and the input itself', () => {
     expect(valuesAt({ taskId: 't1' }, 'taskId')).toEqual(['t1'])

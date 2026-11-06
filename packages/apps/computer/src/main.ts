@@ -37,12 +37,8 @@ import {
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
-import {
-  effectiveHubUrls,
-  JailViolationError,
-  setProtectedPaths,
-  type ComputerConfig
-} from './config'
+import { effectiveHubUrls, type ComputerConfig } from './config'
+import { JailViolationError, setProtectedPaths } from './path-jail'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { createAgentHookServer } from './handlers/agent-hook'
@@ -52,6 +48,11 @@ import { createSlayHandlers } from './handlers/slay'
 import { createGhHandlers } from './handlers/gh'
 import { createClaudeSessionHandlers } from './handlers/claude-session'
 import { createGitHandlers } from './handlers/git'
+import { createGitOpHandlers } from './handlers/git-op'
+import { createExecRunHandlers } from './handlers/exec-run'
+import { createAgentConfigHandlers } from './handlers/agent-config'
+import { createUsageCollectHandlers } from './handlers/usage-collect'
+import { createTestScanHandlers } from './handlers/test-scan'
 import { createWorkspaceChangesHandlers } from './handlers/workspace-changes'
 import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
@@ -279,11 +280,15 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
   })
   // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
-  const proc = createProcHandlers(
-    ctx,
-    deps.getProjectPaths,
-    deps.admission ? { admission: deps.admission } : {}
-  )
+  const proc = createProcHandlers(ctx, deps.getProjectPaths, {
+    ...(deps.admission ? { admission: deps.admission } : {}),
+    // The computer's protected runtime dir: no hub frame can read or rewrite it.
+    groupLedgerPath: join(
+      deps.stateDir ?? dirname(getComputerConfigFilePath()),
+      'computer-runtime',
+      'proc-groups.json'
+    )
+  })
   const fs = createFsHandlers(ctx)
   const chat = createChatRuntimeHandlers({
     ctx,
@@ -304,12 +309,19 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     return { ok: true }
   }
 
+  /** Handlers' cleanup for a lost hub connection (their state belongs to that hub). */
+  const onHubDisconnected: Array<() => void> = []
   const table: HubMethodTable = {
     [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
     ...proc.handlers,
     ...createGitHandlers(ctx),
+    ...createGitOpHandlers(ctx, { onHubDisconnected: (cb) => onHubDisconnected.push(cb) }),
+    ...createExecRunHandlers(ctx, deps.getProjectPaths),
+    ...createAgentConfigHandlers(ctx),
+    ...createUsageCollectHandlers(ctx),
+    ...createTestScanHandlers(ctx),
     ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
     ...createComputerConfigHandlers(ctx),
@@ -391,7 +403,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()
-    await chat.close()
+    await Promise.all([chat.close(), proc.groupsRecorded()])
   }
 
   const setAgentHookUrl = (url: string): void => {
@@ -400,6 +412,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
 
   const hubDisconnected = (reason: string): void => {
     pty.dropQueued(`hub disconnected (${reason})`)
+    for (const cb of onHubDisconnected) cb()
   }
 
   let inFlight = 0

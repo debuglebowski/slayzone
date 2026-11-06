@@ -346,6 +346,79 @@ describe('processes off, zero computers: the wire shape (tRPC)', () => {
       expect(touched.slice(before.touched)).toEqual([])
     })
   }
+  // Every aiConfig procedure that reads or writes instruction files, skills or MCP
+  // config — in the project folder or under the hub's own home — refuses up front.
+  const P = { projectPath: OUTSIDE, projectId: 'p-1' }
+  const F = join(OUTSIDE, 'CLAUDE.md')
+  for (const [path, input, method] of [
+    ['aiConfig.discoverContextFiles', { projectPath: OUTSIDE }, 'GET'],
+    ['aiConfig.getComputerFiles', undefined, 'GET'],
+    ['aiConfig.readContextFile', { filePath: F, projectPath: OUTSIDE }, 'GET'],
+    ['aiConfig.writeContextFile', { filePath: F, content: 'x', projectPath: OUTSIDE }, 'POST'],
+    ['aiConfig.deleteComputerFile', { filePath: F }, 'POST'],
+    ['aiConfig.createComputerFile', { provider: 'claude', category: 'skill', slug: 's' }, 'POST'],
+    ['aiConfig.writeComputerSkill', { provider: 'claude', slug: 's', content: 'x' }, 'POST'],
+    ['aiConfig.getContextTree', P, 'GET'],
+    ['aiConfig.loadLibraryItem', { ...P, itemId: 'i', providers: ['claude'] }, 'POST'],
+    ['aiConfig.syncLinkedFile', { ...P, itemId: 'i' }, 'POST'],
+    ['aiConfig.renameContextFile', { oldPath: F, newPath: F, projectPath: OUTSIDE }, 'POST'],
+    ['aiConfig.deleteContextFile', { ...P, filePath: F }, 'POST'],
+    ['aiConfig.getRootInstructions', P, 'GET'],
+    ['aiConfig.setProjectInstructionVariant', { ...P, variantItemId: 'v' }, 'POST'],
+    ['aiConfig.saveInstructionsContent', { ...P, content: 'x' }, 'POST'],
+    ['aiConfig.saveRootInstructions', { ...P, content: 'x' }, 'POST'],
+    ['aiConfig.readProviderInstructions', { projectPath: OUTSIDE, provider: 'claude' }, 'GET'],
+    ['aiConfig.pushProviderInstructions', { ...P, provider: 'claude', content: 'x' }, 'POST'],
+    ['aiConfig.pullProviderInstructions', { ...P, provider: 'claude' }, 'POST'],
+    ['aiConfig.getProjectSkillsStatus', P, 'GET'],
+    [
+      'aiConfig.readProviderSkill',
+      { projectPath: OUTSIDE, provider: 'claude', itemId: 'i' },
+      'GET'
+    ],
+    ['aiConfig.pullProviderSkill', { ...P, provider: 'claude', itemId: 'i' }, 'POST'],
+    ['aiConfig.reconcileProjectSkills', P, 'POST'],
+    ['aiConfig.needsSync', P, 'GET'],
+    ['aiConfig.getProjectStaleSkillCount', P, 'GET'],
+    ['aiConfig.getProjectsStaleSkillCounts', [P], 'GET'],
+    ['aiConfig.syncAll', P, 'POST'],
+    ['aiConfig.checkSyncStatus', P, 'GET'],
+    ['aiConfig.discoverMcpConfigs', { projectPath: OUTSIDE }, 'GET'],
+    ['aiConfig.writeMcpServer', { projectPath: OUTSIDE, provider: 'claude' }, 'POST'],
+    ['aiConfig.removeMcpServer', { projectPath: OUTSIDE, provider: 'claude' }, 'POST'],
+    ['aiConfig.discoverComputerMcpConfigs', undefined, 'GET'],
+    ['aiConfig.writeComputerMcpServer', { provider: 'claude' }, 'POST'],
+    ['aiConfig.removeComputerMcpServer', { provider: 'claude' }, 'POST'],
+    ['aiConfig.checkSlayConfigured', { projectPath: OUTSIDE }, 'GET']
+  ] as const) {
+    test(`${path}: FORBIDDEN + NO_COMPUTER_CONNECTED, nothing read or written`, async () => {
+      const before = { lines: lines.length, exec: execCalls.length, touched: touched.length }
+      const res = await call(path, input, method)
+      expect(res.status).toBe(403)
+      expect(res.error?.data.appCode).toBe('NO_COMPUTER_CONNECTED')
+      expect(res.error?.message.startsWith('Connect a computer')).toBe(true)
+      expect(lines.length).toBe(before.lines + 1)
+      expect(lines[before.lines].event).toBe('hub.local_exec')
+      expect(execCalls.slice(before.exec)).toEqual([])
+      expect(touched.slice(before.touched)).toEqual([])
+    })
+  }
+  test('aiConfig DB-only procedures still answer (library, providers, selections)', async () => {
+    const before = lines.length
+    for (const [path, input, method] of [
+      ['aiConfig.listProviders', undefined, 'GET'],
+      ['aiConfig.listInstructionVariants', undefined, 'GET'],
+      ['aiConfig.getProjectProviders', { projectId: 'p-1' }, 'GET'],
+      ['aiConfig.listProjectSelections', { projectId: 'p-1' }, 'GET'],
+      // Clearing the variant only touches settings; no projectPath, no disk.
+      ['aiConfig.setProjectInstructionVariant', { projectId: 'p-1', variantItemId: null }, 'POST']
+    ] as const) {
+      const res = await call(path, input, method)
+      expect(res.error, path).toBeUndefined()
+      expect(res.status, path).toBe(200)
+    }
+    expect(lines.length).toBe(before)
+  })
   test('aiConfig.setupSlay: FORBIDDEN, `slay init` never runs', async () => {
     const before = execCalls.length
     const res = await call('aiConfig.setupSlay', { projectPath: OUTSIDE }, 'POST')
@@ -411,12 +484,14 @@ describe('defaults (switch unset): local, exactly as before', () => {
     expect(execCalls.length).toBeGreaterThan(before.exec)
     expect(lines.length).toBe(before.lines)
   })
-  test('worktrees.isGitRepo answers over tRPC, no refusal', async () => {
-    const before = lines.length
+  // The git panel has no hub-local fallback on ANY hub: with no computer it answers
+  // "connect a computer" and runs nothing here.
+  test('worktrees.isGitRepo with no computer: "connect a computer", no local git', async () => {
+    const before = { exec: execCalls.length }
     const res = await call('worktrees.isGitRepo', { path: OUTSIDE })
-    expect(res.status).toBe(200)
-    expect(res.error).toBeUndefined()
-    expect(lines.length).toBe(before)
+    expect(res.status).toBe(403)
+    expect(JSON.stringify(res.error)).toMatch(/Connect a computer/)
+    expect(execCalls.length).toBe(before.exec)
   })
 })
 

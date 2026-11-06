@@ -1,5 +1,5 @@
 import { setShuttingDown as setPtyShuttingDown } from './pty-manager'
-import { setShuttingDown as setChatShuttingDown } from './chat-transport-manager'
+import { localChatRuntime } from './local-chat-runtime'
 
 /**
  * Flip the per-subprocess-manager shutdown gates. Spawn/exit handlers check
@@ -11,5 +11,5 @@ import { setShuttingDown as setChatShuttingDown } from './chat-transport-manager
  */
 export function beginTerminalShutdown(): void {
   setPtyShuttingDown(true)
-  setChatShuttingDown(true)
+  localChatRuntime()?.setShuttingDown(true)
 }

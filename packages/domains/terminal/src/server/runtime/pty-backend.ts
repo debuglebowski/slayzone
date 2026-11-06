@@ -1,8 +1,7 @@
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import type * as pty from 'node-pty'
-import { assertHubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { wrapShellWithUlimit } from '../shell-env'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
+import type { TerminalTheme } from '../sync-query-response'
+import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
@@ -72,6 +71,72 @@ export interface PtySpawnSpec {
    * startup deadline counts from then. Ignored by the local backend.
    */
   admission?: PtySpawnAdmission
+  /**
+   * Ask the process owner to run output detection itself and report it as
+   * {@link PtySignal}s (`PtyHandle.onSignal`) — the owner sees the output; the hub
+   * then mirrors state instead of parsing a copy. An owner that cannot (local
+   * backend, an older computer or retained session host) leaves
+   * `PtyHandle.detectsOutput` false and the caller keeps detecting.
+   */
+  detection?: PtyDetectionSpec
+  /**
+   * This spawn continues the session's output (the recovery shell after an agent
+   * exit): the owner keeps the previous process's scrollback, adds `preamble`, and
+   * the new output follows it. Ignored by an owner that keeps no output.
+   */
+  carryOutput?: { preamble: string }
+  /**
+   * Stream the output to this side now (someone watches the session). False: the
+   * owner only buffers + detects it until `PtyHandle.setRelay(true)`. Ignored by an
+   * owner that always streams.
+   */
+  relay?: boolean
+}
+
+/** What output detection needs for one session (mirrors `PtyOutputDetector` options). */
+export interface PtyDetectionSpec {
+  mode: string
+  type?: string
+  patterns?: { working?: string | null; error?: string | null }
+  resuming: boolean
+  /** The conversation being resumed: the owner checks its transcript at a failed exit. */
+  resumeConversationId?: string
+  /** The spawn-time transcript lookup's answer, when one was made (see frames.ts). */
+  resumeTranscript?: 'found' | 'missing' | 'unknown'
+  /** What OSC colour queries are answered with (`setTerminalTheme`). */
+  theme?: TerminalTheme
+}
+
+/** One chunk's detection, reported by the owner (see `PtyOutputDetection`). */
+export interface PtySignal {
+  /** Owner's seq of the output chunk it came from. */
+  seq: number
+  /**
+   * Not one chunk: the owner's settled view after the hub was away (reattach).
+   * Applied as-is — no two-detection gate — and only new dev URLs are announced.
+   */
+  snapshot?: true
+  activity: ActivityState | null
+  refreshIdleClock: boolean
+  /** The idle-clock output happened this long before the signal (coalesced). */
+  idleClockAgoMs?: number
+  preview: string
+  error: ErrorInfo | null
+  /** A failed resume's cause, sent just before the exit (sets the error, no transition). */
+  exitError?: ErrorInfo
+  /** The session's first output (sent even when nothing is relayed). */
+  firstOutput?: true
+  suppressOutput: boolean
+  prompt: PromptInfo | null
+  title: string | null
+  devServerUrls: string[]
+  conversationId: string | null
+}
+
+/** Per-write hints for the process owner. */
+export interface PtyWriteOptions {
+  /** This write submits the session-id command (`/status`): watch for an id. */
+  watchConversationId?: true
 }
 
 /** See {@link PtySpawnSpec.admission}. */
@@ -135,11 +200,40 @@ export interface PtyHandle {
   readonly whenSpawned?: Promise<PtySpawnConfirmation>
   readonly process: string
   readonly fd?: number
-  onData(cb: (data: string) => void): { dispose(): void }
+  /** `seq`: the owner's seq for the chunk, when it {@link ownsOutput}. */
+  onData(cb: (data: string, seq?: number) => void): { dispose(): void }
   onExit(cb: (e: PtyExit) => void): { dispose(): void }
-  write(data: string): void
+  write(data: string, opts?: PtyWriteOptions): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
+  /**
+   * The owner runs the spec's `detection` (it acknowledged it): output from here on
+   * is detected THERE and arrives as `onSignal`; the caller must not detect it too.
+   * Absent/false until acknowledged, and always on a backend that cannot.
+   */
+  readonly detectsOutput?: boolean
+  /** Detections reported by the owner, for output the caller did not detect itself. */
+  onSignal?(cb: (signal: PtySignal) => void): { dispose(): void }
+  /**
+   * The owner's buffer is the session's ONLY scrollback: every chunk came through
+   * its pipeline and carries its seq (`onData`), and replay is read from it
+   * ({@link getReplay}). The caller keeps no copy. False/absent: the caller buffers.
+   */
+  readonly ownsOutput?: boolean
+  /** Replay from the owner's buffer (see `BufferSinceResult`). With {@link ownsOutput}. */
+  getReplay?(afterSeq: number): Promise<BufferSinceResult>
+  /** Clear the owner's buffer. With {@link ownsOutput}. */
+  clearOutput?(): Promise<{ clearedSeq: number }>
+  /**
+   * Start/stop streaming output to this side (see `PtySpawnSpec.relay`). Rejects when
+   * the owner did not apply it (unreachable, refused).
+   */
+  setRelay?(on: boolean): Promise<void> | void
+  /**
+   * The owner went unreachable (false; the process may well still run) or came
+   * back (true). While away, an owner-held scrollback cannot be read.
+   */
+  onAvailability?(cb: (available: boolean) => void): { dispose(): void }
 }
 
 export interface PtyBackend {
@@ -160,7 +254,11 @@ export interface PtyBackend {
     warmId: string,
     sessionId: string,
     processName: string,
-    taskId?: string
+    taskId?: string,
+    /** Run output detection on the computer from adoption on (see `PtySpawnSpec`). */
+    detection?: PtyDetectionSpec,
+    /** See `PtySpawnSpec.relay`. */
+    relay?: boolean
   ): Promise<PtyHandle>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing
@@ -180,6 +278,8 @@ export interface PtyBackend {
     }
   ): Promise<{ pid: number }>
   warmKill?(computerId: string, warmId: string): Promise<void>
+  /** The hub's terminal theme changed: tell every owner that answers terminal queries. */
+  setTheme?(theme: TerminalTheme): void
   /** Warm sessions the computer still holds — used to reap orphans on reconnect. */
   warmList?(computerId: string): Promise<Array<{ warmId: string; cwd: string; pid: number }>>
   /**
@@ -238,26 +338,6 @@ export interface BackgroundJobQuery {
 }
 
 /**
- * The in-process spawn primitive (identical to the former `spawnWrappedShell`):
- * non-transport spawns are wrapped in `/bin/sh -c 'ulimit -n 65535; exec
- * <shell> <args>'` so child processes inherit a soft fd limit high enough for
- * Bun-compiled CLIs (e.g. droid); transport (docker/ssh) spawns run as-is.
- * Exported so pty-manager's warm-pool `spawnLoginShell` shares the exact same
- * primitive rather than duplicating the wrap logic.
- */
-export function spawnLocalPty(
-  file: string,
-  args: string[],
-  options: pty.IPtyForkOptions,
-  transport: boolean
-): pty.IPty {
-  const { spawn } = loadNodePty()
-  if (transport) return spawn(file, args, options)
-  const wrapped = wrapShellWithUlimit(file, args)
-  return spawn(wrapped.file, wrapped.args, options)
-}
-
-/**
  * A local spawn on a hub whose node-pty is missing or does not load. node-pty is an
  * OPTIONAL dependency of the published `@slayzone/hub` (T-30): `npm install` skips it
  * when it cannot be built (no compiler), and a hub with
@@ -278,51 +358,19 @@ export class NodePtyUnavailableError extends Error {
   }
 }
 
-let nodePty: typeof pty | undefined
-
 /**
- * node-pty, loaded on the first local spawn rather than at import. An import-time load
- * is a top-level `require` in the hub's CJS bundle, which kills the boot of a hub that
- * has no node-pty — including one that would never spawn (processes off). Not cached on
- * failure, so a later spawn retries.
+ * The hub's default backend: none. Terminals and agents start on computers — the
+ * composition root installs the routing backend — so until then, and wherever no
+ * computer resolves, a spawn is the actionable "connect a computer"; nothing ever
+ * starts in the hub's own process. The in-process node-pty backend lives in
+ * ./pty-backend-local for hosts that spawn themselves (tests).
  */
-function loadNodePty(): typeof pty {
-  if (nodePty) return nodePty
-  try {
-    nodePty =
-      typeof require === 'function'
-        ? // CJS bundle (the hub): esbuild keeps this call where it is, external, so it
-          // resolves at first use — from the bundle's node_modules or NODE_PATH (the
-          // desktop's packaged sidecar) exactly like the import it replaces.
-          (require('node-pty') as typeof pty)
-        : // Unbundled ESM source (tests under tsx/vitest): no `require` in scope, and
-          // `import.meta` is off limits — the hub's CJS bundle compiles this file too,
-          // where esbuild warns about it and empties it. Resolve from the entry script
-          // instead: in this repo it sits below the hoisted root node_modules.
-          (createRequire(process.argv[1] ?? join(process.cwd(), 'index.js'))(
-            'node-pty'
-          ) as typeof pty)
-  } catch (err) {
-    throw new NodePtyUnavailableError(err)
-  }
-  return nodePty
-}
-
-/** Default backend: spawn in-process via node-pty. The returned raw IPty is a
- *  structural `PtyHandle`, so callers keep it as-is. Synchronous — the -l /
- *  shell fallbacks in pty-manager rely on a synchronous spawn (and their onExit
- *  recovery re-spawns run inside a synchronous callback).
- *
- *  Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`: this backend is active
- *  until the composition root installs the routing one, and a terminal or agent
- *  must never start in the hub's own process meanwhile. */
-export const localPtyBackend: PtyBackend = {
+export const noComputerPtyBackend: PtyBackend = {
   spawn(spec: PtySpawnSpec): PtyHandle {
-    assertHubProcessesEnabled('hub.process.spawn', {
+    return refuseNoComputer({
       op: 'pty.spawn',
       detail: { sessionId: spec.sessionId, taskId: spec.taskId }
     })
-    return spawnLocalPty(spec.file, spec.args, spec.options, spec.transport)
   }
 }
 
@@ -331,19 +379,15 @@ export const localPtyBackend: PtyBackend = {
 // reconnect quiesce point (no in-flight spawn/exit for a session that could
 // straddle two backends).
 //
-// The default remains `localPtyBackend` so TESTS (and any harness that never
-// wires a composition root) keep spawning in-process. In the real app the
-// composition root installs the routing backend, which requires a computer and has
-// no local fallback — see `NoComputerAvailableError`. `setPtyBackend(null)`
-// therefore means "restore the test/default in-process backend", NOT "fall back
-// to local for a routed session": once the routing backend is installed, nothing
-// resets it, so a null computer is an error rather than a silent hub spawn.
-let ptyBackend: PtyBackend = localPtyBackend
+// The default is no backend ("connect a computer"); the composition root installs
+// the routing one, a test that spawns real ptys installs `localPtyBackend`
+// (./pty-backend-local). `setPtyBackend(null)` restores the refusing default.
+let ptyBackend: PtyBackend = noComputerPtyBackend
 
 export function getPtyBackend(): PtyBackend {
   return ptyBackend
 }
 
 export function setPtyBackend(backend: PtyBackend | null): void {
-  ptyBackend = backend ?? localPtyBackend
+  ptyBackend = backend ?? noComputerPtyBackend
 }

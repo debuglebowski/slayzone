@@ -43,14 +43,26 @@ import {
   ptyWarmKillParamsSchema,
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
+  type PtyDetectionParams,
+  type PtyTheme,
+  ptySetThemeParamsSchema,
+  ptyGetReplayParamsSchema,
+  type PtyGetReplayResult,
+  ptyClearBufferParamsSchema,
+  type PtyClearBufferResult,
+  ptyRelayParamsSchema,
+  type PtyRelayResult,
+  PTY_SIGNAL_EVENT_NAME,
   RpcError,
   ComputerNotificationMethods,
   ComputerTransportErrorCodes,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
+import { writeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
-import * as pty from 'node-pty'
+import type * as pty from 'node-pty'
+import { spawnNodePty } from '../node-pty'
 import { findOnPath, getShellStartupArgs, resolveUserShell, shellExists } from '@slayzone/platform'
 import {
   nodePtyInstallProblems as readNodePtyInstallProblems,
@@ -58,9 +70,9 @@ import {
 } from '@slayzone/platform/node-pty-install'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
-import { spawnCwd } from '../config'
-import { ExitTombstones } from '../exit-tombstones'
-import { RingBuffer } from '../ring-buffer'
+import { spawnCwd } from '../path-jail'
+import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
+import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -69,6 +81,7 @@ import {
   type SpawnAdmission
 } from '../spawn-admission'
 import { buildPtySpawnEnv } from './spawn-env'
+import { createPtySessionSignals, type PtySessionSignals } from '../pty-signals'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the terminal domain's per-session buffer cap (750 KiB). */
@@ -85,6 +98,16 @@ interface PtySession {
   revokeCli?: () => void
   proc: pty.IPty
   buffer: RingBuffer
+  /**
+   * Output detection the hub asked for (`detection` on spawn/adopt): what the
+   * output says goes to the hub as `pty-signal` events. Absent: the hub detects.
+   */
+  signals?: PtySessionSignals
+  /** Stream output to the hub (`pty.data`); off while nobody watches (`pty.relay`). */
+  relay: boolean
+  /** Where and when the process started (disk conversation-id detection matches on it). */
+  cwd: string
+  startedAt: number
   /**
    * The key this session is currently filed under, read by its own onData/onExit.
    *
@@ -129,6 +152,8 @@ interface QueuedSpawn {
   cols?: number
   rows?: number
   writes: string[]
+  /** A queued write submitted `/status`: watch for a conversation id once started. */
+  watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
   run: (slot: AdmissionSlot) => unknown
   promise: Promise<unknown>
@@ -208,9 +233,12 @@ export function createPtyHandlers(
   options: PtyHandlerOptions = {}
 ): PtyHandlers {
   const sessions = new Map<string, PtySession>()
+  /** The hub's terminal theme, as last pushed (`pty.setTheme`); new pipelines start with it. */
+  let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
-  const spawnPty = options.spawnPty ?? pty.spawn
+  // node-pty loads at the first spawn: a missing one fails terminals, not the computer.
+  const spawnPty = options.spawnPty ?? spawnNodePty
   const installProblems = options.nodePtyInstallProblems ?? installProblemsOnDisk
   /** Spawns waiting for an agent-start slot, keyed like `sessions`. */
   const queued = new Map<string, QueuedSpawn>()
@@ -218,6 +246,12 @@ export function createPtyHandlers(
     string,
     { spawnId?: string; taskId?: string; promise: Promise<unknown>; cancelled: boolean }
   >()
+  /**
+   * `pty.relay` for an attempt that has no session yet (queued for a slot, or
+   * waiting out a replacement): applied when it starts, so a change made while it
+   * waited is not lost — the hub never sends it again.
+   */
+  const relayBeforeStart = new Map<string, { spawnId?: string; on: boolean }>()
 
   function serializeStart<T>(
     id: string,
@@ -347,6 +381,10 @@ export function createPtyHandlers(
       spawnId?: string
       startupTimeoutMs?: number
       taskId?: string
+      detection?: PtyDetectionParams
+      relay?: boolean
+      /** A continued buffer (`carryOutput`); absent = a fresh one. */
+      buffer?: RingBuffer
     }
   ): PtySession {
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
@@ -368,7 +406,7 @@ export function createPtyHandlers(
       throw explainSpawnFailure(err)
     }
 
-    const buffer = new RingBuffer(MAX_BUFFER_SIZE)
+    const buffer = opts.buffer ?? new RingBuffer(MAX_BUFFER_SIZE)
     let resolveExit!: () => void
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
@@ -376,6 +414,9 @@ export function createPtyHandlers(
       proc,
       buffer,
       id,
+      relay: relayAtStart(id, opts.spawnId, opts.relay),
+      cwd,
+      startedAt: Date.now(),
       ...(opts.taskId ? { taskId: opts.taskId } : {}),
       exited,
       resolveExit,
@@ -383,6 +424,7 @@ export function createPtyHandlers(
       ...(opts.spawnId !== undefined ? { spawnId: opts.spawnId } : {})
     }
     sessions.set(id, session)
+    if (opts.detection && !opts.warm) attachSignals(session, opts.detection)
     if (opts.startupTimeoutMs !== undefined) {
       // Armed at the REAL spawn, on the machine that sees the output — see the
       // module doc. Its verdict reads pending output first (drain-before-verdict).
@@ -407,29 +449,33 @@ export function createPtyHandlers(
       // whichever copy of a seq arrives first and drops the other, then emits that
       // seq exactly once, so a stream can be assembled from live frame 3 +
       // backfilled frame 4 + live frame 5. Any per-seq divergence corrupts the
-      // result — and a filter that holds a torn escape tail diverges by
-      // construction (`two` vs `two ESC [ ? 6`), losing bytes in one interleaving
-      // and stranding a half-sequence in the other.
+      // result. So whatever transforms a chunk runs ONCE, before the append, and
+      // the same string is both buffered and streamed.
       //
-      // So device-status filtering does NOT belong here. It belongs where the
-      // stream is consumed, and it already lives there: every remote frame —
-      // live or backfilled — re-enters the hub's own pty onData
-      // (`attachPtyHandlers` wraps remote handles too), which answers what it
-      // answers via `interceptSyncQueries` and strips cursor-status queries via
-      // `filterBufferData` before anything is buffered or rendered. Stripping on
-      // the computer would only risk starving a remote program of an answer the hub
-      // would otherwise have given it.
-      const seq = buffer.append(data)
+      // For a session the hub asked to run the output pipeline (`detection`), that
+      // transform happens here: terminal queries answered at once, detection run,
+      // the replay filter applied (`pty-signals.ts`, stateless per chunk). Without
+      // it (an older hub) the raw bytes go out and the hub's own pty onData answers
+      // and filters them, as it always did.
+      const processed = session.signals?.process(data)
+      const out = processed ? processed.clean : data
+      const seq = buffer.append(out)
       // A WARM session buffers but does not stream: the hub has no session to
       // route it to yet, and `pty.warmAdopt` hands the whole buffer over at
       // adopt. Emitting under a `warmId` the hub never registered would be
       // dropped anyway — and would burn a seq the adopt handover then replays.
       if (session.warm) return
+      // What the chunk says goes FIRST: a stale-resume error suppresses this very
+      // chunk on the hub, which must know before the bytes arrive.
+      if (processed) session.signals?.report(processed.detection, seq)
+      // Nobody watches it: buffered and detected, not streamed (the hub reads the
+      // buffer when someone attaches, and turns relay on).
+      if (!session.relay) return
       ctx.dialer.notify(ComputerNotificationMethods.ptyData, {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         seq,
-        data
+        data: out
       })
     })
 
@@ -444,6 +490,36 @@ export function createPtyHandlers(
     })
 
     return session
+  }
+
+  /** Start output detection for a session; ids are read live (warm adopt rekeys). */
+  function attachSignals(session: PtySession, detection: PtyDetectionParams): void {
+    session.signals?.dispose()
+    session.signals = createPtySessionSignals({
+      // The latest theme the hub pushed wins over the one it spawned with.
+      params: { ...detection, ...(theme ? { theme } : {}) },
+      ids: { sessionId: () => session.id, spawnId: () => session.spawnId },
+      emit: (payload) => {
+        if (sessions.get(session.id) !== session) return
+        ctx.dialer.notify(ComputerNotificationMethods.event, {
+          name: PTY_SIGNAL_EVENT_NAME,
+          payload
+        })
+      },
+      // Synchronously when the pty exposes its fd, so the answer reaches the program
+      // in the same read loop iteration (as the hub did); else node-pty's write.
+      respond: (answer) => {
+        const fd = (session.proc as unknown as { fd?: number }).fd
+        try {
+          if (typeof fd !== 'number') throw new Error('no fd')
+          writeSync(fd, answer)
+        } catch {
+          session.proc.write(answer)
+        }
+      },
+      disk: { cwd: session.cwd, startedAt: session.startedAt },
+      size: { cols: session.proc.cols, rows: session.proc.rows }
+    })
   }
 
   /**
@@ -471,7 +547,11 @@ export function createPtyHandlers(
     // emit exit — a superseded/disposed pty exiting must stay silent, else it
     // would tear down the replacement and confuse the hub.
     if (sessions.get(session.id) !== session) return
+    // A failed resume's cause rides a signal that lands just before the exit frame.
+    if (!session.replacing && !session.warm)
+      session.signals?.exited(exitCode, session.buffer.toString())
     sessions.delete(session.id)
+    session.signals?.dispose()
     session.deadline?.cancel()
     releaseAdmission(session)
     if (session.replacing) {
@@ -504,8 +584,13 @@ export function createPtyHandlers(
       exitCode,
       signal,
       reason,
-      // The hub never got this exit, so it may be missing output too.
-      ...(delivered ? {} : { buffer: session.buffer })
+      // The hub never got this exit, so it may be missing output too. A piped
+      // session's buffer is the ONLY copy: kept briefly for a continuing spawn.
+      ...(delivered
+        ? session.signals
+          ? { buffer: session.buffer, bufferUntil: Date.now() + CARRY_WINDOW_MS }
+          : {}
+        : { buffer: session.buffer })
     })
   }
 
@@ -534,7 +619,7 @@ export function createPtyHandlers(
     slot.release()
   }
 
-  type SpawnReply = { pid: number; startupDeadline?: true }
+  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true; seq?: number }
 
   function startSession(params: PtySpawnParams): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
@@ -544,10 +629,23 @@ export function createPtyHandlers(
           ...(params.computerShellCommand ? ['-c', params.computerShellCommand] : [])
         ]
       : params.args
+    // A continuing spawn keeps the session's scrollback: the reaped attempt's
+    // buffer (seq continues), then the hub's preamble, then the new process.
+    let carried: RingBuffer | undefined
+    if (params.carryOutput) {
+      const { fromSpawnId, afterSeq } = params.carryOutput
+      carried =
+        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ??
+        new RingBuffer(MAX_BUFFER_SIZE)
+      // No buffer left to continue: numbering continues where the hub's reached (M2).
+      if (afterSeq !== undefined) carried.continueAfter(afterSeq)
+      if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
+    }
     const session = spawnSession(params.sessionId, {
       ...params,
       command: shell,
-      args
+      args,
+      ...(carried ? { buffer: carried } : {})
     })
     ctx.log('pty spawned', {
       sessionId: params.sessionId,
@@ -556,7 +654,9 @@ export function createPtyHandlers(
     })
     return {
       pid: session.proc.pid,
-      ...(session.deadline ? { startupDeadline: true as const } : {})
+      ...(session.deadline ? { startupDeadline: true as const } : {}),
+      ...(session.signals ? { detection: true as const } : {}),
+      ...(carried ? { seq: carried.getCurrentSeq() } : {})
     }
   }
 
@@ -649,7 +749,8 @@ export function createPtyHandlers(
         // attempt — answer with it rather than killing it to start a twin.
         return {
           pid: live.proc.pid,
-          ...(live.deadline ? { startupDeadline: true as const } : {})
+          ...(live.deadline ? { startupDeadline: true as const } : {}),
+          ...(live.signals ? { detection: true as const } : {})
         }
       }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
@@ -705,6 +806,7 @@ export function createPtyHandlers(
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
       for (const data of item.writes) session.proc.write(data)
+      if (item.watchConversationId) session.signals?.watchConversationId()
       return reply
     })
   }
@@ -817,6 +919,7 @@ export function createPtyHandlers(
     pid: number
     data: string
     seq: number
+    detection?: true
   } {
     const params = ptyWarmAdoptParamsSchema.parse(rawParams)
     if (params.taskId) options.assertTaskActive?.(params.taskId)
@@ -827,7 +930,8 @@ export function createPtyHandlers(
       return {
         pid: adopted.proc.pid,
         data: adopted.buffer.toString(),
-        seq: adopted.buffer.getCurrentSeq()
+        seq: adopted.buffer.getCurrentSeq(),
+        ...(adopted.signals ? { detection: true as const } : {})
       }
     }
     const session = sessions.get(params.warmId)
@@ -857,6 +961,15 @@ export function createPtyHandlers(
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
     releaseAdmission(session)
+    if (params.relay !== undefined) session.relay = params.relay
+    if (params.detection) {
+      attachSignals(session, params.detection)
+      // What the warm output said, so the hub's mirror starts from it — read raw,
+      // THEN replay-filtered in place like everything after it. Safe to rewrite: a
+      // warm session never streamed, so no seq of it has reached anyone.
+      session.signals?.absorb(session.buffer.toString())
+      session.buffer.rewriteUnstreamed(filterBufferData)
+    }
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
     // sentinel the hub's gap detector starts from, so an adopt with no output
     // needs no special case.
@@ -867,7 +980,12 @@ export function createPtyHandlers(
       sessionId: params.sessionId,
       pid: session.proc.pid
     })
-    return { pid: session.proc.pid, data, seq }
+    return {
+      pid: session.proc.pid,
+      data,
+      seq,
+      ...(session.signals ? { detection: true as const, detected: session.signals.snapshot() } : {})
+    }
   }
 
   async function warmKill(rawParams: unknown): Promise<{ ok: true }> {
@@ -915,6 +1033,7 @@ export function createPtyHandlers(
     const live = sessions.get(params.sessionId)
     const pending = queued.get(params.sessionId)
     if (pending && (params.spawnId === undefined || pending.spawnId === params.spawnId)) {
+      relayBeforeStart.delete(params.sessionId)
       // Killed while waiting for its slot: it never runs, and ends exactly as a
       // killed process would — with an exit the hub's session settles on. The
       // exit goes out BEFORE the spawn's (error) reply, so the hub has already
@@ -969,6 +1088,13 @@ export function createPtyHandlers(
       return { ok: true }
     }
     session.proc.resize(params.cols, params.rows)
+    session.signals?.resize(params.cols, params.rows)
+    return { ok: true }
+  }
+
+  function setTheme(rawParams: unknown): { ok: true } {
+    theme = ptySetThemeParamsSchema.parse(rawParams).theme
+    for (const session of sessions.values()) session.signals?.setTheme(theme)
     return { ok: true }
   }
 
@@ -979,6 +1105,7 @@ export function createPtyHandlers(
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
       // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
       waiting.writes.push(params.data)
+      if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
     const session = sessions.get(params.sessionId)
@@ -989,6 +1116,7 @@ export function createPtyHandlers(
       return { ok: true }
     }
     session.proc.write(params.data)
+    if (params.watchConversationId) session.signals?.watchConversationId()
     return { ok: true }
   }
 
@@ -1014,10 +1142,71 @@ export function createPtyHandlers(
         // -1 on an empty buffer — the same "nothing seen yet" sentinel the hub's
         // gap detector starts from, so a session that has emitted nothing needs
         // no special case on either side.
-        seq: session.buffer.getCurrentSeq()
+        seq: session.buffer.getCurrentSeq(),
+        ...(session.signals
+          ? { detection: true as const, detected: session.signals.snapshot() }
+          : {})
       })
     }
     return { sessions: live, exited: tombstones.list() }
+  }
+
+  /** The buffer for `sessionId` + attempt `spawnId`: live, else a reaped one still kept. */
+  function bufferFor(sessionId: string, spawnId: string | undefined): RingBuffer | undefined {
+    const live = sessions.get(sessionId)
+    if (live && (spawnId === undefined || live.spawnId === spawnId)) return live.buffer
+    const exited = tombstones.get(sessionId)
+    if (exited && (spawnId === undefined || exited.spawnId === spawnId)) return exited.buffer
+    return undefined
+  }
+
+  /** Replay for a hub client (fresh terminal or reattach): this buffer is the only one. */
+  function getReplay(rawParams: unknown): PtyGetReplayResult {
+    const params = ptyGetReplayParamsSchema.parse(rawParams)
+    const buffer = bufferFor(params.sessionId, params.spawnId)
+    if (!buffer) return { chunks: [], prelude: '', currentSeq: -1 }
+    const { chunks, prelude } = buffer.getReplaySince(params.afterSeq)
+    return {
+      chunks: chunks.map((c) => ({ seq: c.seq, data: c.data })),
+      prelude,
+      currentSeq: buffer.getCurrentSeq()
+    }
+  }
+
+  /** The relay a new session starts with: a change made while it waited wins. */
+  function relayAtStart(id: string, spawnId: string | undefined, requested?: boolean): boolean {
+    const early = relayBeforeStart.get(id)
+    relayBeforeStart.delete(id)
+    if (early && (early.spawnId === undefined || early.spawnId === spawnId)) return early.on
+    return requested !== false
+  }
+
+  function relay(rawParams: unknown): PtyRelayResult {
+    const params = ptyRelayParamsSchema.parse(rawParams)
+    const id = params.sessionId
+    const matches = (spawnId: string | undefined) =>
+      params.spawnId === undefined || spawnId === params.spawnId
+    // Not started yet (queued for a slot, or replacing a session): remembered.
+    const waiting = queued.get(id) ?? starts.get(id)
+    if (waiting && matches(waiting.spawnId)) {
+      relayBeforeStart.set(id, {
+        ...(waiting.spawnId !== undefined ? { spawnId: waiting.spawnId } : {}),
+        on: params.on
+      })
+    }
+    const session = sessions.get(id)
+    if (!session || !matches(session.spawnId)) return { seq: -1 }
+    session.relay = params.on
+    return { seq: session.buffer.getCurrentSeq() }
+  }
+
+  function clearBuffer(rawParams: unknown): PtyClearBufferResult {
+    const params = ptyClearBufferParamsSchema.parse(rawParams)
+    const buffer = bufferFor(params.sessionId, params.spawnId)
+    if (!buffer) return { clearedSeq: -1 }
+    const clearedSeq = buffer.getCurrentSeq()
+    buffer.clear()
+    return { clearedSeq }
   }
 
   function getBufferSince(rawParams: unknown): {
@@ -1043,6 +1232,7 @@ export function createPtyHandlers(
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
       session.revokeCli?.()
+      session.signals?.dispose()
       session.deadline?.cancel()
       releaseAdmission(session)
       try {
@@ -1060,6 +1250,10 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyKill]: kill,
     [HubToComputerMethods.ptyResize]: resize,
     [HubToComputerMethods.ptyWrite]: write,
+    [HubToComputerMethods.ptySetTheme]: setTheme,
+    [HubToComputerMethods.ptyGetReplay]: getReplay,
+    [HubToComputerMethods.ptyClearBuffer]: clearBuffer,
+    [HubToComputerMethods.ptyRelay]: relay,
     [HubToComputerMethods.ptyGetBufferSince]: getBufferSince,
     [HubToComputerMethods.ptyList]: list,
     [HubToComputerMethods.ptyPrioritize]: prioritize,

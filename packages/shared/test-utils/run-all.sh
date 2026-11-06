@@ -98,7 +98,38 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
+# worktree computer state for the Trash purge (R5-1)
+run_harness packages/apps/hub/src/worktree-computer-state.test.ts
+# Trash purge waits for the worktree computer (R5-1)
+run_harness packages/domains/task/src/server/ops/startup-purge-computer.test.ts
+# machine-local settings never exported or imported (R3-2)
+run_harness packages/apps/api/src/export-import-machine-local.test.ts
+# Final review H1: cron catch-up waits for the computer, runs once on connect.
+run_harness packages/domains/automations/src/server/engine-catchup.test.ts
+# P1: every tRPC procedure, REST route and MCP tool, called as user B with every
+# path field set to a canary on the hub's disk: none may read, list or write it.
+run_harness packages/apps/api/src/hub-disk-canary.test.ts
+# Round-8 review regressions on the hub's own disk (P1 paths, P2 tie).
+run_harness packages/apps/api/src/routers/review-regressions-hub-disk.test.ts
+# N5: a repeated directory-tree access check does not stat every root's folders again.
+run_harness packages/apps/api/src/access-tree-cost.test.ts
+# N3: a ws subscription stopped during its async middlewares never subscribes
+# (patches/@trpc__server@11.19.0.patch; tRPC dropped that stop, leaking until close).
+run_harness packages/apps/api/src/ws-subscription-stop-race.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
+run_harness packages/apps/hub/src/computer-probes.test.ts
+run_harness packages/apps/hub/src/computer-exec-run.test.ts
+run_harness packages/apps/hub/src/git-op-gate.test.ts
+run_harness packages/apps/hub/src/git-op-owner-boundary.test.ts
+run_harness packages/apps/hub/src/computer-request-authorizer.test.ts
+run_harness packages/apps/hub/src/path-owner-agreement.test.ts
+# Round-6 review regressions (L3 case folding, L4 disabled computer, L6 path aliases):
+# part of `pnpm test:review-regressions` (review-regressions.mjs).
+run_harness packages/apps/hub/src/review-regressions-owner.test.ts
+# Round-6 L3 on any OS: a case-insensitive hub disk (mocked) must not fold a computer's path.
+run_harness packages/apps/hub/src/review-regressions-l3-folding-hub.test.ts
+# Round-6 L4 through the real gateway: a disabled computer refuses new work before sending.
+run_harness packages/apps/hub/src/computer-disabled-gateway.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -144,6 +175,10 @@ run_harness packages/apps/hub/src/local-exec-refusals.test.ts
 # A bad processes.* input is a clean error, never a hub exit (T-102): the built hub with
 # processes on (desktop, login) and off (Normain).
 run_harness packages/apps/hub/src/processes-bad-input.test.ts
+# N1: a hub-local path read needs a root the caller may access — the built hub with
+# login refuses user B's /dev/fd/<hub db> and a file in no root; the desktop's hub
+# still copies the latter.
+run_harness packages/apps/hub/src/hub-local-path-reads.test.ts
 # Backup follows the DB. Pins the restore SEQUENCE (relaunch last — it kills this
 # process) and that restore is refused on a hub the client merely connects to.
 run_harness packages/apps/hub/src/backup.test.ts
@@ -198,6 +233,9 @@ run_harness packages/apps/hub/src/owner-checks-admin-login-off.test.ts
 # Upload procedures never copy the hub's own files (DB, auth store, SSO key) or another
 # user's to a caller, and read nothing off the hub's disk with processes off (T-107).
 run_harness packages/apps/api/src/routers/upload-sources.test.ts
+# N1: the other hub-local path procedures (file probe/opener, export/import test ops,
+# AI config, file editor, git, tests panel) refuse a path in no root and /dev/fd.
+run_harness packages/apps/api/src/routers/hub-local-paths.test.ts
 # WS twin of the same boundary — the /trpc upgrade origin guard. Was an untestable
 # closure inside startServer; extracted so the "Origin: null is every sandboxed
 # iframe on the web" case is actually asserted.
@@ -254,22 +292,31 @@ run_harness packages/domains/tabs-state/src/useTabStore.test.ts
 # Explode-mode layout — column-major packing, whole-pixel rects, swap/reconcile order.
 run_harness packages/domains/app-shell/src/client/explodeLayout.test.ts
 run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
+run_harness packages/domains/terminal/src/client/catch-up-merge.test.ts
+run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_harness packages/domains/processes/src/server/process-manager.test.ts
+# Background processes on a computer: async resolve per spawn, no hub pid work, timer errors become status.
+run_harness packages/domains/processes/src/server/process-routing.test.ts
 # Persistence seam — fake ProcessPersistence records insert/update/remove; loadAll hydration.
 run_harness packages/domains/processes/src/server/process-persistence.test.ts
-# Wave-2 spawn backend seam — fake ProcessBackend streaming/exit/autoRestart/kill.
+# Spawn backend seam — fake routed ProcessBackend streaming/exit/autoRestart/kill.
 run_harness packages/domains/processes/src/server/process-backend.test.ts
-# Processes switched off: no persisted row loaded, every spawn path refused at the backend too.
+# Processes switched off: no persisted row loaded, every spawn path refused; the default backend refuses too.
 run_harness packages/domains/processes/src/server/process-switch.test.ts
-# Real trees: a run that outlived the app session reads 'orphaned'; stop/restart take escaped descendants; start/restart contract.
-run_harness packages/domains/processes/src/server/process-lifecycle.test.ts
+# Start/stop/restart contract over a routed backend; no computer = "connect a computer", never a local child.
+run_harness packages/domains/processes/src/server/process-routed-lifecycle.test.ts
+# Processes switched off but routed to computers: rows load, starts go to the computer.
+run_harness packages/domains/processes/src/server/process-switch-routed.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
+run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
+run_harness packages/domains/file-editor/src/server/watcher.test.ts
+run_harness packages/domains/file-editor/src/server/workspace-fs-none.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -409,6 +456,8 @@ run_harness packages/shared/db-migrations/src/ai-config-raw-skill-migration.test
 run_harness packages/shared/db-migrations/src/ai-config-slug-migration.test.ts
 run_harness packages/shared/db-migrations/src/codex-flags-migration.test.ts
 run_harness packages/shared/db-migrations/src/schema-too-new.test.ts
+# K4 (review regressions): migration versions unique + increasing; main's v194 → latest.
+run_harness packages/shared/db-migrations/src/review-regressions-migrations.test.ts
 # v51 on a v50 DB, with and without the column already present (drift).
 run_harness packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts
 run_harness packages/domains/projects/src/server/status-normalization.test.ts
@@ -518,6 +567,7 @@ run_harness packages/shared/platform/src/event-loop-stall.test.ts
 run_harness packages/shared/platform/src/device-status-queries.test.ts
 # hubUrlFromAddr — authority-only addresses + the scheme from the HOST (loopback → http/ws, else https/wss).
 run_harness packages/shared/platform/src/hub-addr.test.ts
+run_harness packages/shared/platform/src/computer-path.test.ts
 # Security audit events on stdout (T-03).
 run_harness packages/shared/platform/src/security-log.test.ts
 # Real client IP behind a trusted front end (T-22): the resolver, then the built hub.
@@ -546,6 +596,12 @@ run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
+run_harness packages/domains/worktrees/src/server/git-ops.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
+run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts
+run_harness packages/domains/worktrees/src/server/git-watch-routing.test.ts
+run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.
@@ -553,6 +609,7 @@ run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
 run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
+run_harness packages/domains/agent-turns/src/server/turn-git-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/workspace-capture.test.ts
 run_harness packages/domains/terminal/src/server/chat-router.test.ts
 run_harness packages/domains/terminal/src/server/chat-threads-store.test.ts
@@ -577,6 +634,10 @@ run_harness packages/domains/automations/src/shared/types.test.ts
 run_harness packages/domains/automations/src/shared/ai.test.ts
 run_harness packages/domains/automations/src/server/automations-router.test.ts
 run_harness packages/domains/automations/src/server/engine.test.ts
+run_harness packages/domains/automations/src/server/engine-routing.test.ts
+run_harness packages/domains/test-panel/src/server/scan-routing.test.ts
+run_harness packages/domains/usage-analytics/src/server/usage-routing.test.ts
+run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
@@ -618,8 +679,13 @@ run_harness packages/domains/terminal/src/client/option-as-meta.test.ts
 # reply and a Shift/Ctrl/Alt+F3 keystroke are byte-identical, so the reply must
 # never be generated rather than filtered afterwards. Uses @xterm/headless.
 run_harness packages/domains/terminal/src/client/suppress-device-status.test.ts
-# Terminal — hub replay buffer: eviction prelude + chunk immutability.
+# Terminal — pty ring buffer (hub + computer): replay prelude, verbatim backfill.
 run_harness packages/domains/terminal/src/server/ring-buffer.test.ts
+run_harness packages/domains/terminal/src/server/ring-buffer-backfill.test.ts
+# Terminal — lean pty-detection entry the computer bundles: no hub/app tree reachable.
+run_harness packages/domains/terminal/src/server/pty-detection.test.ts
+# Terminal — detection over raw pty output (activity/error/prompt/title/dev URL/conv id).
+run_harness packages/domains/terminal/src/server/pty-output-detector.test.ts
 # Terminal — server answers to timing-critical queries (CPR/DA/DSR/OSC), the
 # bounded partial-sequence hold, and the OSC catch-all's title exclusion.
 run_harness packages/domains/terminal/src/server/sync-query-response.test.ts
@@ -792,6 +858,10 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 # exists/write/start must not treat an exited session in its ~100ms drain window
 # as live (a Retry raced it; writes landed in the dead pty).
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
+# The hub mirrors owner-detected pty output (signals) instead of parsing it.
+run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
+# Round-6 review regression L2: relay requests run as the hub; a failed one is asked again.
+run_harness packages/domains/terminal/src/server/runtime/review-regressions-relay.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
@@ -1104,6 +1174,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
+  packages/shared/transport/src/client/computerConnect.test.tsx \
   packages/shared/transport/src/client/inProcessHub.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
   packages/domains/tasks/src/client/useBoardRefresh.test.tsx \
@@ -1122,6 +1193,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-browser/src/client/DeviceWebview.test.tsx \
   packages/domains/terminal/src/client/useChatSession.test.tsx \
   packages/domains/terminal/src/client/useChatAvailability.test.tsx \
+  packages/domains/terminal/src/client/useComputerOffline.test.tsx \
   packages/domains/terminal/src/client/review-integration-upgrade.test.tsx \
   packages/domains/worktrees/src/server/composite-ops.test.ts \
   packages/domains/worktrees/src/server/gh-pr-for-checkout.test.ts \
@@ -1291,13 +1363,13 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/main/agent-hooks/opencode-plugin-behavior.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies.test.ts \
   packages/domains/computer-transport/src/server/exec-proxies-chat.test.ts \
-  packages/apps/computer/src/ring-buffer.test.ts \
   packages/apps/api/src/host-paths.test.ts \
   packages/apps/api/src/scopes.test.ts \
   packages/apps/api/src/settings-admin.test.ts \
   packages/apps/api/src/trpc.test.ts \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/shared/trpc-server/src/wire-bytes.test.ts \
+  packages/shared/trpc-server/src/subscription-security-context.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 
@@ -1347,6 +1419,7 @@ run_vitest_files "vitest (tasks-changed refresh)" \
 run_vitest_files "vitest (boot idle hydration)" \
   packages/apps/app/src/renderer/src/app-shell/pane-hydration.test.ts \
   packages/apps/app/src/renderer/src/app-shell/startup-progress.test.ts \
+  packages/apps/app/src/renderer/src/app-shell/computer-connect-refetch.test.ts \
   packages/domains/sidebar/src/startup-progress-text.test.ts \
   packages/domains/task-terminals/src/client/chat/chat-loading.test.ts \
   packages/apps/app/src/renderer/src/app-shell/trigger-dedupe.test.ts \

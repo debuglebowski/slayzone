@@ -11,7 +11,7 @@ import { setSecurityLogSink } from '@slayzone/platform/security-log'
 
 /** Unadopted warm agents, by the task id they booted with. */
 const placements = new Map<string, { projectId: string; computerId: string }>()
-vi.mock('@slayzone/terminal/server', () => ({
+vi.mock('@slayzone/terminal/hub', () => ({
   unadoptedWarmAgent: (taskId: string) => {
     const p = placements.get(taskId)
     return p ? { sessionId: `pool-of-${taskId}`, ...p } : null

@@ -29,6 +29,7 @@ import {
   copyIgnoredFiles
 } from './index.js'
 import { _mock } from '../../../../shared/test-utils/mock-merge-ai.js'
+import { installLoopbackGitComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { execSync } from 'child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -100,6 +101,8 @@ describe('worktrees watcher subscriptions', () => {
 // 2. Req/res procs over real git repos. One caller, shared db + shared repo.
 // ═══════════════════════════════════════════════════════════════════════════
 const h = await createTestHarness()
+// The hub runs no git itself: the ops run on a (loopback) computer, as in production.
+installLoopbackGitComputer()
 const caller = worktreesRouter.createCaller({ db: h.slayDb, dataRoot: '' } as never)
 
 const root = h.tmpDir()

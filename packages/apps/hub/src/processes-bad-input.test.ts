@@ -20,9 +20,9 @@
  * caller's first), then the hub still answers and its process is still running. A
  * valid create still works where processes are on, and is refused where they are off.
  *
- * Same shape outside processes: `fileEditor.watch` with processes off and no computer
- * (its refusal floated: the hub exited), and a file named `...` under a hub-local
- * watch (the watcher's callback threw).
+ * Same shape outside processes: `fileEditor.watch` with no computer (its refusal
+ * floated: the hub exited). A file named `...` under a watch (whose callback threw)
+ * is the watcher's own case — it runs on computers (file-editor watcher tests).
  *
  * Native ABI: better-sqlite3 in the hub needs Electron's node.
  *
@@ -210,6 +210,33 @@ async function createProject(hub: Hub, token: string | null): Promise<string> {
   return body.data.id
 }
 
+/** A task of `projectId` whose worktree is `dir`: a hub-local root of the caller's. */
+async function taskWithWorktree(
+  hub: Hub,
+  token: string | null,
+  projectId: string,
+  dir: string
+): Promise<void> {
+  const headers = {
+    'content-type': 'application/json',
+    ...(token ? { authorization: `Bearer ${token}` } : {})
+  }
+  const base = `http://127.0.0.1:${hub.port}/api/tasks`
+  const created = await fetch(base, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ projectId, title: 'w' })
+  })
+  const body = (await created.json()) as { data?: { id: string } }
+  assert(body.data?.id, `create task: ${created.status} ${JSON.stringify(body)}`)
+  const patched = await fetch(`${base}/${body.data.id}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ worktreePath: dir })
+  })
+  expect(patched.ok, `set worktree: ${patched.status} ${await patched.text()}`).toBe(true)
+}
+
 type Proc = {
   mutate: (input?: unknown) => Promise<unknown>
   query: (input?: unknown) => Promise<unknown>
@@ -282,6 +309,8 @@ function describeHub(
     let hub: Hub
     let close = (): void => undefined
     let client: Client
+    let token: string | null = null
+    let projectId = ''
     let valid: {
       projectId: string
       taskId: null
@@ -292,8 +321,8 @@ function describeHub(
     }
     beforeAll(async () => {
       hub = await bootHub(env)
-      const token = opts.login ? await signedInUser(hub) : null
-      const projectId = await createProject(hub, token)
+      token = opts.login ? await signedInUser(hub) : null
+      projectId = await createProject(hub, token)
       const c = hubClient(hub, token)
       close = c.close
       client = c.client
@@ -433,9 +462,10 @@ function describeHub(
         expect(row.command, `row updated: ${JSON.stringify(row)}`).toBe('echo bye')
         expect(row.autoRestart, `row updated: ${JSON.stringify(row)}`).toBe(true)
       })
-      // Valid input whose spawn fails after `spawn()` returned: the child reports a
-      // missing cwd as an 'error' event, which nobody listened for.
-      test(`${name}: spawn in a cwd that does not exist → answers, the process errors, hub stays up`, async () => {
+      // Valid input whose spawn cannot run: processes run on computers, and this hub
+      // has none — the process says so (it used to start on the hub, where a missing
+      // cwd surfaced as an unlistened 'error' event).
+      test(`${name}: spawn with no computer → answers, the process errors naming it, hub stays up`, async () => {
         const spawned = String(
           await bounded(
             client.processes.spawn.mutate({ ...valid, label: 'nowhere', cwd: '/no/such/dir-t102' }),
@@ -457,25 +487,43 @@ function describeHub(
           'the process to report error'
         )
         expect(
-          row.logBuffer.some((l) => l.includes('failed to start')),
+          row.logBuffer.some((l) => l.includes('Connect a computer')),
           `the reason is in its log: ${JSON.stringify(row.logBuffer)}`
         ).toBe(true)
       })
     } else {
-      for (const op of ['create', 'spawn'] as const) {
-        test(`${name}: a valid ${op} is refused by the switch, hub stays up`, async () => {
-          const got = await codeOf(client.processes[op].mutate(valid))
-          expect(got, `expected FORBIDDEN, got ${got}`).toBe('FORBIDDEN')
-          await stillUp(hub, client, `a valid ${op}`)
-        })
-      }
+      // Processes off: nothing runs on THIS machine, but processes route to
+      // computers, so the hub manages them — and with none connected says so.
+      test(`${name}: a valid create answers (it will run on a computer), hub stays up`, async () => {
+        const id = String(await bounded(client.processes.create.mutate(valid), 'create'))
+        expect(id.length).toBeGreaterThan(0)
+        await stillUp(hub, client, 'a valid create')
+      })
+      test(`${name}: a valid spawn answers; the process errors with "connect a computer", hub stays up`, async () => {
+        const spawned = String(
+          await bounded(client.processes.spawn.mutate({ ...valid, label: 'no-computer' }), 'spawn')
+        )
+        await stillUp(hub, client, 'a valid spawn')
+        const rows = (await client.processes.listAll.query()) as Array<{
+          id: string
+          status: string
+          logBuffer: string[]
+        }>
+        const row = rows.find((x) => x.id === spawned)
+        expect(row?.status).toBe('error')
+        expect(row?.logBuffer.some((l) => l.includes('Connect a computer'))).toBe(true)
+      })
     }
 
     // The same shape outside processes: `fileEditor.watch` started its watcher in a
-    // floated `.then` (a refusal there was an unhandled rejection: processes off, no
-    // computer), and the hub-local watcher's callback threw on a file named `...`.
-    test(`${name}: fileEditor.watch ${opts.processes ? 'survives a file named "..."' : 'refusal reaches the stream'}, hub stays up`, async () => {
+    // floated `.then` (a refusal there was an unhandled rejection). The hub watches no
+    // project folder itself, so with no computer — on any hub — the refusal must reach
+    // the stream, and the hub must stay up.
+    test(`${name}: fileEditor.watch refusal reaches the stream, hub stays up`, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'slz-t102-watch-'))
+      // With login, a hub-local watch needs a root of the caller's (N1): the folder is
+      // their task's worktree (a hub without computers gives a project no folder).
+      if (opts.login) await taskWithWorktree(hub, token, projectId, dir)
       const changed: string[] = []
       let error: unknown = null
       const sub = client.fileEditor.watch.subscribe(
@@ -489,21 +537,11 @@ function describeHub(
       )
       try {
         await sleep(500)
-        if (opts.processes) {
-          mkdirSync(join(dir, '...'))
-          await sleep(300)
-          writeFileSync(join(dir, 'after.txt'), 'x')
-          await poll(
-            async () => (changed.includes('after.txt') ? true : null),
-            5_000,
-            `a change after "..." (got ${JSON.stringify(changed)}, error ${String(error)})`
-          )
-        } else {
-          await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
-          const code =
-            error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
-          expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
-        }
+        await poll(async () => (error ? true : null), 5_000, 'the refusal on the stream')
+        const code =
+          error instanceof TRPCClientError ? (error.data as { code?: string })?.code : null
+        expect(code, `refused FORBIDDEN, got ${code}`).toBe('FORBIDDEN')
+        expect(changed).toEqual([])
         await stillUp(hub, client, 'fileEditor.watch')
       } finally {
         sub.unsubscribe()

@@ -265,11 +265,32 @@ export const ptyDataParamsSchema = z.object({
 })
 export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 
+/**
+ * A string a computer reports about its sessions (titles, prompt text, ids, URLs,
+ * error text, exit signals) — kept in the hub's state and DB, so bounded. Cut, not
+ * rejected: an oversized title must not drop the state signal carrying it.
+ */
+const bounded = (max: number) => z.string().transform((v) => (v.length > max ? v.slice(0, max) : v))
+const boundedNonEmpty = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .transform((v) => (v.length > max ? v.slice(0, max) : v))
+const SIGNAL_TEXT_MAX = 16 * 1024
+const SIGNAL_TITLE_MAX = 1024
+const SIGNAL_ID_MAX = 256
+const SIGNAL_URL_MAX = 2048
+const SIGNAL_URLS_MAX = 32
+const EXIT_SIGNAL_MAX = 64
+const devServerUrlsSchema = z
+  .array(boundedNonEmpty(SIGNAL_URL_MAX))
+  .transform((urls) => urls.slice(0, SIGNAL_URLS_MAX))
+
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   /**
    * A lifecycle cause the code cannot carry — today `startup-timeout`: the
    * computer killed a session that produced no output within the spawn's
@@ -293,6 +314,120 @@ export type ComputerEventParams = z.infer<typeof computerEventParamsSchema>
  * name. Shared wire contract: the computer emits it, the hub matches on it.
  */
 export const AGENT_HOOK_EVENT_NAME = 'agent-hook'
+
+/**
+ * `ComputerEventParams.name` for what a pty's output SAYS, detected on the computer
+ * (`@slayzone/terminal/pty-detection` `PtyOutputDetector`): activity, an honored
+ * error, a prompt, the OSC title, first-seen dev-server URLs, a conversation id.
+ * Sent only for a session the hub spawned with `detection` and the computer acked
+ * (`detection: true`); the hub's state machine mirrors it instead of parsing output.
+ * A generic `event` rather than a new notification method, so an older hub (which
+ * would drop the connection on an unknown method) is unaffected — it never asks.
+ */
+export const PTY_SIGNAL_EVENT_NAME = 'pty-signal'
+
+/** The hub's terminal theme: what the computer answers OSC colour queries with. */
+export const ptyThemeSchema = z.object({
+  foreground: z.string().min(1).max(64),
+  background: z.string().min(1).max(64),
+  cursor: z.string().min(1).max(64),
+  /** ANSI palette 0-15 as displayed; absent → xterm defaults. */
+  ansi: z.array(z.string().min(1).max(64)).max(16).optional()
+})
+export type PtyTheme = z.infer<typeof ptyThemeSchema>
+
+/**
+ * Run the pty's OUTPUT PIPELINE on the computer: answer timing-critical terminal
+ * queries (with `theme`), detect what the output says (`pty-signal`), filter what is
+ * buffered and streamed. The hub then neither answers, filters nor parses it.
+ */
+export const ptyDetectionParamsSchema = z.object({
+  /** Terminal mode id (adapter selection, OSC-title policy). */
+  mode: z.string().min(1),
+  /** Adapter type override (custom modes). */
+  type: z.string().min(1).optional(),
+  /** User-defined shell-mode activity patterns. */
+  patterns: z
+    .object({
+      working: z.string().nullable().optional(),
+      error: z.string().nullable().optional()
+    })
+    .optional(),
+  /** Spawned to resume a conversation: opens the stale-resume error window. */
+  resuming: z.boolean(),
+  /** The conversation being resumed (stale-resume disk check at exit). */
+  resumeConversationId: z.string().min(1).optional(),
+  /**
+   * What the hub's spawn-time lookup (in ANY project dir — a session can move into a
+   * worktree's) found for that transcript; the exit check uses it instead of looking
+   * only beside the cwd. `unknown`: it could not tell (defer to the output scan).
+   * Absent: not looked up — check this disk beside the cwd, as before.
+   */
+  resumeTranscript: z.enum(['found', 'missing', 'unknown']).optional(),
+  /** Absent: xterm defaults until `pty.setTheme`. */
+  theme: ptyThemeSchema.optional()
+})
+export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
+
+const ptySignalErrorSchema = z.object({
+  code: boundedNonEmpty(SIGNAL_ID_MAX),
+  message: bounded(SIGNAL_TEXT_MAX),
+  recoverable: z.boolean()
+})
+
+const ptySignalPromptSchema = z.object({
+  type: z.enum(['permission', 'question', 'input']),
+  text: bounded(SIGNAL_TEXT_MAX),
+  position: z.number()
+})
+
+/**
+ * What a piped session's output has said so far, as of now: the latest activity,
+ * title, prompt (cleared by later working activity), every dev-server URL, the
+ * conversation id, an error not yet recovered from. In `pty.list`, so a hub that
+ * reattaches after a disconnect learns what it missed while away.
+ */
+export const ptyDetectedSnapshotSchema = z.object({
+  activity: z.enum(['working', 'idle', 'unknown']).nullable(),
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
+  prompt: ptySignalPromptSchema.nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable(),
+  error: ptySignalErrorSchema.nullable()
+})
+export type PtyDetectedSnapshot = z.infer<typeof ptyDetectedSnapshotSchema>
+
+export const ptySignalPayloadSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: z.string().min(1).optional(),
+  /** Seq of the output chunk this came from; -1 for a timer-only signal. */
+  seq: z.number().int(),
+  activity: z.enum(['working', 'idle', 'unknown']).nullable(),
+  /** The chunk counts as output for the silence (idle) clock. */
+  refreshIdleClock: z.boolean(),
+  /**
+   * How long BEFORE this signal that output happened — set on a coalesced
+   * idle-clock signal sent after its window, so the hub's clock reads the output's
+   * time, not the signal's. Absent = now.
+   */
+  idleClockAgoMs: z.number().int().nonnegative().optional(),
+  preview: z.string().max(200),
+  error: ptySignalErrorSchema.nullable(),
+  /**
+   * Sent just before `pty.exit` of a resume that failed: why (the transcript is gone,
+   * or the output said so). Recorded as the session's error for the exit overlay;
+   * not a state transition. Absent on every other signal.
+   */
+  exitError: ptySignalErrorSchema.optional(),
+  /** The session's first output: it started (sent even when nothing is relayed). */
+  firstOutput: z.literal(true).optional(),
+  suppressOutput: z.boolean(),
+  prompt: ptySignalPromptSchema.nullable(),
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable()
+})
+export type PtySignalPayload = z.infer<typeof ptySignalPayloadSchema>
 
 /**
  * Child-process output chunk (proc.spawn stream).
@@ -321,7 +456,7 @@ export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   reason: z.string().min(1).optional(),
   /** The spawn attempt that exited. */
   spawnId: z.string().min(1).optional(),
@@ -370,7 +505,15 @@ export const HubToComputerMethods = {
   ptyKill: 'pty.kill',
   ptyResize: 'pty.resize',
   ptyWrite: 'pty.write',
+  /** The hub's terminal theme changed; best-effort (an older computer has no pipeline). */
+  ptySetTheme: 'pty.setTheme',
   ptyGetBufferSince: 'pty.getBufferSince',
+  /** REPLAY into a fresh terminal (prelude after eviction) — a piped session's
+   *  buffer is the only one, so the hub forwards its clients' reads here. */
+  ptyGetReplay: 'pty.getReplay',
+  ptyClearBuffer: 'pty.clearBuffer',
+  /** Start/stop streaming a session's output (someone started/stopped watching it). */
+  ptyRelay: 'pty.relay',
   /** Live (non-warm) sessions the computer still holds — drives reattach. */
   ptyList: 'pty.list',
   /** Move a session still waiting for an agent-start slot to the front (tab revealed). */
@@ -391,6 +534,16 @@ export const HubToComputerMethods = {
   gitRemoveWorktree: 'git.removeWorktree',
   gitRunWorktreeSetupScript: 'git.runWorktreeSetupScript',
   gitCopyIgnoredFiles: 'git.copyIgnoredFiles',
+  /**
+   * One git panel op by name (`@slayzone/worktrees` git op contract): the computer
+   * validates `input` against the same contract and jails every path it names.
+   */
+  gitOp: 'git.op',
+  /** Watch a checkout for the git panel; changes come back as `git-watch` events. */
+  gitWatchStart: 'git.watchStart',
+  gitWatchStop: 'git.watchStop',
+  /** One agent-turn git op (`@slayzone/agent-turns/turn-git`): snapshot, filter, … */
+  gitTurnOp: 'git.turnOp',
   // raw-fs ops (routed pathExists / removeArtifactDir seams)
   slayCheckConfigured: 'slay.checkConfigured',
   slaySetup: 'slay.setup',
@@ -428,6 +581,16 @@ export const HubToComputerMethods = {
   procGetBufferSince: 'proc.getBufferSince',
   /** Live child processes the computer still holds — drives reattach. */
   procList: 'proc.list',
+  /** cpu/memory + current title of background processes (the processes panel). */
+  procStats: 'proc.stats',
+  /** One shell command run to completion (automation actions) — see exec.run below. */
+  execRun: 'exec.run',
+  /** The AI-config ops' filesystem (instructions, skills, MCP) — see below. */
+  agentConfigFs: 'agentConfig.fs',
+  /** The agents' usage logs on the computer, parsed there from the hub's cursors. */
+  usageCollect: 'usage.collect',
+  /** The test panel's file scan, in a project folder on the computer. */
+  testPanelScan: 'testPanel.scan',
   // project → path mapping. The COMPUTER owns where a project lives on its own
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
@@ -521,6 +684,37 @@ export const ptySpawnParamsSchema = z
      * no deadline here (an older hub runs its own).
      */
     startupTimeoutMs: z.number().int().positive().optional(),
+    /**
+     * Run output detection ON THE COMPUTER and report it as `pty-signal` events.
+     * Absent: no detection here (an older hub parses the output itself).
+     */
+    detection: ptyDetectionParamsSchema.optional(),
+    /**
+     * This spawn CONTINUES the session's output: a recovery shell after the agent
+     * exited. The computer reuses the reaped attempt's buffer (seq continues), appends
+     * `preamble` (the hub's "agent exited" line) and returns the seq it reached, so
+     * the session keeps ONE scrollback across the process change. Absent from an
+     * older hub; an older computer ignores it and starts fresh.
+     */
+    /**
+     * Stream this session's output to the hub (`pty.data`) — `false`: only while the
+     * hub asks (`pty.relay`), because nobody is watching it. Output is buffered and
+     * detected either way. Absent (an older hub): always streamed.
+     */
+    relay: z.boolean().optional(),
+    carryOutput: z
+      .object({
+        /** The exited attempt whose buffer continues; absent = it is long gone. */
+        fromSpawnId: z.string().min(1).optional(),
+        preamble: z.string().max(4096),
+        /**
+         * The highest seq the hub saw for this session. With no buffer to continue (the
+         * tombstone is gone), the new one starts after it: a fresh buffer at 0 was
+         * below what the terminal had shown, and its output was dropped (M2).
+         */
+        afterSeq: z.number().int().min(-1).optional()
+      })
+      .optional(),
     command: z.string().min(1),
     args: z.array(z.string()).optional(),
     /** New computers resolve their own login shell; command/args remain for older peers. */
@@ -574,7 +768,12 @@ export const ptySpawnResultSchema = z.object({
   pid: z.number().int(),
   /** The computer armed the requested `startupTimeoutMs`. Absent from a computer
    *  that predates computer-side deadlines — the hub then keeps its own. */
-  startupDeadline: z.literal(true).optional()
+  startupDeadline: z.literal(true).optional(),
+  /** The computer runs the requested `detection`. Absent from a computer (or a
+   *  retained session host) that predates it — the hub then detects itself. */
+  detection: z.literal(true).optional(),
+  /** With `carryOutput`: the highest seq already in the continued buffer. */
+  seq: z.number().int().optional()
 })
 export type PtySpawnResult = z.infer<typeof ptySpawnResultSchema>
 
@@ -680,9 +879,15 @@ export type PtyResizeParams = z.infer<typeof ptyResizeParamsSchema>
 export const ptyWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: spawnIdField,
-  data: z.string()
+  data: z.string(),
+  /** This write submits the mode's session-id command (`/status`): watch the output
+   *  for a conversation id. Ignored for a session without detection. */
+  watchConversationId: z.literal(true).optional()
 })
 export type PtyWriteParams = z.infer<typeof ptyWriteParamsSchema>
+
+export const ptySetThemeParamsSchema = z.object({ theme: ptyThemeSchema })
+export type PtySetThemeParams = z.infer<typeof ptySetThemeParamsSchema>
 
 /** Replay buffered output with `seq > since.seq` (gap recovery on reconnect). */
 export const ptyGetBufferSinceParamsSchema = z.object({
@@ -714,6 +919,43 @@ export const ptyGetBufferSinceResultSchema = z.object({
 })
 export type PtyGetBufferSinceResult = z.infer<typeof ptyGetBufferSinceResultSchema>
 
+export const ptyGetReplayParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField,
+  /** Frames with `seq > afterSeq`; -1 = a cold attach (prelude after eviction). */
+  afterSeq: z.number().int()
+})
+export type PtyGetReplayParams = z.infer<typeof ptyGetReplayParamsSchema>
+
+export const ptyGetReplayResultSchema = z.object({
+  chunks: z.array(z.object({ seq: z.number().int().nonnegative(), data: z.string() })),
+  prelude: z.string(),
+  /** Highest seq assigned; -1 when nothing (or not this attempt). */
+  currentSeq: z.number().int()
+})
+export type PtyGetReplayResult = z.infer<typeof ptyGetReplayResultSchema>
+
+export const ptyClearBufferParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField
+})
+export const ptyClearBufferResultSchema = z.object({
+  /** The seq the cleared buffer had reached; -1 when there was nothing to clear. */
+  clearedSeq: z.number().int()
+})
+export type PtyClearBufferResult = z.infer<typeof ptyClearBufferResultSchema>
+
+export const ptyRelayParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  spawnId: spawnIdField,
+  on: z.boolean()
+})
+export const ptyRelayResultSchema = z.object({
+  /** The highest seq assigned when relaying changed: live frames follow it. */
+  seq: z.number().int()
+})
+export type PtyRelayResult = z.infer<typeof ptyRelayResultSchema>
+
 /**
  * Live (non-warm) sessions the computer still holds. The computer is the AUTHORITY
  * on this — the hub's own registry is only a belief about it, and after a
@@ -732,7 +974,11 @@ export const ptyListResultSchema = z.object({
       spawnId: spawnIdField,
       pid: z.number().int(),
       /** Highest assigned seq; -1 when the session has emitted nothing yet. */
-      seq: z.number().int()
+      seq: z.number().int(),
+      /** The computer runs output detection for it (absent from older computers). */
+      detection: z.literal(true).optional(),
+      /** With `detection`: what it has detected so far. */
+      detected: ptyDetectedSnapshotSchema.optional()
     })
   ),
   /** Recently reaped sessions. Absent from older computers, which keep none. */
@@ -783,7 +1029,11 @@ export type PtyWarmSpawnResult = z.infer<typeof ptyWarmSpawnResultSchema>
 export const ptyWarmAdoptParamsSchema = z.object({
   warmId: z.string().min(1),
   taskId: z.string().min(1).optional(),
-  sessionId: z.string().min(1)
+  sessionId: z.string().min(1),
+  /** Start output detection for the adopted session (see `pty.spawn`). */
+  detection: ptyDetectionParamsSchema.optional(),
+  /** See `pty.spawn` `relay`. */
+  relay: z.boolean().optional()
 })
 export type PtyWarmAdoptParams = z.infer<typeof ptyWarmAdoptParamsSchema>
 
@@ -795,7 +1045,11 @@ export const ptyWarmAdoptResultSchema = z.object({
    * `seq`, so the first post-adopt frame is contiguous with the pre-adopt ones.
    */
   data: z.string(),
-  seq: z.number().int()
+  seq: z.number().int(),
+  /** The computer runs the requested `detection` from here on. */
+  detection: z.literal(true).optional(),
+  /** With `detection`: what the warm output (the seed) said. */
+  detected: ptyDetectedSnapshotSchema.optional()
 })
 export type PtyWarmAdoptResult = z.infer<typeof ptyWarmAdoptResultSchema>
 
@@ -1034,6 +1288,174 @@ export type ComputerShutdownParams = z.infer<typeof computerShutdownParamsSchema
 // (narrowed to the arguments task ops actually pass); the hub-side routing
 // adapters in `server/exec-proxies` forward each seam method to these frames.
 // ---------------------------------------------------------------------------
+
+/**
+ * `git.op`: run one op of the git panel's shared contract on the computer. `op` and
+ * `input` are validated THERE against `@slayzone/worktrees`' `gitOpsContract` (this
+ * package cannot import it — it would cycle), so here they are opaque. `mutates` is
+ * the hub's own declaration, read only by its audit log (writes are audited, the
+ * panel's constant reads are not); the computer ignores it.
+ */
+export const gitOpParamsSchema = z.object({
+  op: z.string().min(1),
+  input: z.unknown(),
+  mutates: z.boolean().optional()
+})
+export type GitOpParams = z.infer<typeof gitOpParamsSchema>
+/** The op's own result, JSON as is; `null` for an op with no answer. */
+export const gitOpResultSchema = z.object({ result: z.unknown() })
+export type GitOpResult = z.infer<typeof gitOpResultSchema>
+
+/**
+ * `git.watchStart`: watch the checkout at `worktreePath` (its index, refs and tracked
+ * files) for the git panel. `watchId` is HUB-minted and echoed on every report, so
+ * two hubs' or two panels' watches of one checkout never cross.
+ */
+export const gitWatchStartParamsSchema = z.object({
+  watchId: z.string().min(1),
+  worktreePath: z.string().min(1)
+})
+export type GitWatchStartParams = z.infer<typeof gitWatchStartParamsSchema>
+export const gitWatchStopParamsSchema = z.object({ watchId: z.string().min(1) })
+export type GitWatchStopParams = z.infer<typeof gitWatchStopParamsSchema>
+
+/**
+ * `ComputerEventParams.name` for a git watch report — the generic `event`
+ * notification, no dedicated method. `changed`: a debounced change (`refsChanged`:
+ * a ref moved); `failed`: the watch tore down (the panel falls back to polling).
+ */
+export const GIT_WATCH_EVENT = 'git-watch'
+export const gitWatchEventSchema = z.object({
+  watchId: z.string().min(1),
+  kind: z.enum(['changed', 'failed']),
+  refsChanged: z.boolean().optional()
+})
+export type GitWatchEvent = z.infer<typeof gitWatchEventSchema>
+
+/**
+ * `git.turnOp`: one op of `@slayzone/agent-turns`' turn-git contract, validated on
+ * the computer against it (this package cannot import it), repo jailed there.
+ * Answers `{ result }` like `git.op`.
+ */
+export const gitTurnOpParamsSchema = z.object({ op: z.string().min(1), input: z.unknown() })
+export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
+
+/**
+ * `exec.run`: run `command` through the computer's shell to completion and answer
+ * its output. `cwd` (absolute, jailed) wins; else `projectId`'s folder on that
+ * computer; else its first allowed root. `timeoutMs` ends the whole process tree.
+ */
+export const execRunParamsSchema = z
+  .object({
+    /** A shell command line (`/bin/sh -c`, `cmd /c` on Windows). */
+    command: z.string().min(1).optional(),
+    /**
+     * Or a program and its args, run with NO shell: the computer resolves `file` on
+     * its PATH, else under its home (`homeFallbacks`, home-relative) — so the hub
+     * builds no shell line (its quoting and `$HOME` are POSIX; the computer's may
+     * not be).
+     */
+    argv: z
+      .object({
+        file: z.string().min(1),
+        args: z.array(z.string()),
+        /** Written to the program's stdin (a multi-line prompt: never on a cmd line). */
+        stdin: z.string().optional(),
+        homeFallbacks: z.array(z.string().min(1)).max(8).optional()
+      })
+      .optional(),
+    cwd: z.string().min(1).optional(),
+    projectId: z.string().min(1).optional(),
+    timeoutMs: z.number().int().positive()
+  })
+  .refine((p) => (p.command === undefined) !== (p.argv === undefined), {
+    message: 'exec.run takes exactly one of command or argv'
+  })
+export type ExecRunParams = z.infer<typeof execRunParamsSchema>
+export const execRunResultSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  status: z.number().int().nullable(),
+  timedOut: z.boolean()
+})
+export type ExecRunResult = z.infer<typeof execRunResultSchema>
+
+/**
+ * `agentConfig.fs`: one call of `@slayzone/ai-config`'s `AiConfigFs` seam on the
+ * computer — a project's provider files (inside allowedRoots) or its own provider
+ * dirs under its home (`~/.claude`, …). Paths are absolute ON THE COMPUTER (built
+ * from its `homedir` answer and its project folders). Answers `{ result }`.
+ */
+const agentConfigPath = z.string().min(1)
+export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('homedir') }),
+  z.object({ op: z.literal('exists'), path: agentConfigPath }),
+  z.object({ op: z.literal('readFile'), path: agentConfigPath }),
+  z.object({ op: z.literal('writeFile'), path: agentConfigPath, content: z.string() }),
+  z.object({ op: z.literal('mkdir'), path: agentConfigPath }),
+  z.object({ op: z.literal('unlink'), path: agentConfigPath }),
+  z.object({ op: z.literal('rmdir'), path: agentConfigPath }),
+  z.object({ op: z.literal('rename'), path: agentConfigPath, to: agentConfigPath }),
+  z.object({ op: z.literal('stat'), path: agentConfigPath }),
+  z.object({ op: z.literal('readdir'), path: agentConfigPath })
+])
+export type AgentConfigFsParams = z.infer<typeof agentConfigFsParamsSchema>
+export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
+
+/**
+ * `usage.collect`: parse this computer's agent usage logs from `cursors` (per log
+ * file: the offset and mtime the last parse ended at — the hub keeps them per
+ * computer). Answers each changed file's new records and its new cursor.
+ */
+/**
+ * A collect is paged: the first reply carries `next` when more follows, and the hub
+ * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
+ * a whole backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
+ * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ */
+const usageCollectPageSchema = z.object({
+  token: z.string().min(1).max(64),
+  index: z.number().int().nonnegative()
+})
+export const usageCollectParamsSchema = z.object({
+  cursors: z.record(
+    z.string(),
+    z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
+  ),
+  page: usageCollectPageSchema.optional()
+})
+export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
+export const usageCollectResultSchema = z.object({
+  results: z.array(
+    z.object({
+      sourceFile: z.string(),
+      fileMtimeMs: z.number(),
+      endOffset: z.number().int().nonnegative(),
+      /** false: more of this file's records follow on a later page; keep its cursor. */
+      complete: z.boolean().optional(),
+      // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
+      records: z.array(z.record(z.string(), z.unknown()))
+    })
+  ),
+  next: usageCollectPageSchema.optional()
+})
+export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
+
+/**
+ * `testPanel.scan`: match the files under `projectPath` (jailed) against the
+ * project's test categories (`@slayzone/test-panel`'s scanner). Answers its
+ * `ScanResult` ({ matches: [{ path, categoryId }], totalScanned }).
+ */
+export const testPanelScanParamsSchema = z.object({
+  projectPath: z.string().min(1),
+  categories: z.array(z.object({ id: z.string(), pattern: z.string() }))
+})
+export type TestPanelScanParams = z.infer<typeof testPanelScanParamsSchema>
+export const testPanelScanResultSchema = z.object({
+  matches: z.array(z.object({ path: z.string(), categoryId: z.string() })),
+  totalScanned: z.number().int().nonnegative()
+})
 
 export const gitIsGitRepoParamsSchema = z.object({
   path: z.string().min(1)
@@ -1415,7 +1837,13 @@ export const procSpawnParamsSchema = z.object({
   cwd: z.string().min(1).optional(),
   env: z.record(z.string(), z.string()).optional(),
   /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
-  admission: ptySpawnAdmissionSchema.optional()
+  admission: ptySpawnAdmissionSchema.optional(),
+  /**
+   * When the process exits on its own, sweep its process group (SIGTERM, then
+   * SIGKILL): a `pnpm dev` shell can exit leaving its real server running, holding
+   * the port. Set by the process domain; never for an agent. Absent: left alone.
+   */
+  reapGroupOnExit: z.boolean().optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 
@@ -1499,6 +1927,25 @@ export type ProcGetBufferSinceResult = z.infer<typeof procGetBufferSinceResultSc
  * {@link ptyListResultSchema} — same role in reattach, and the two must not
  * drift.
  */
+export const procStatsParamsSchema = z.object({
+  sessionIds: z.array(z.string().min(1)).max(1000)
+})
+export const procStatsResultSchema = z.object({
+  /** Live sessions only (an unknown or exited id is absent). */
+  stats: z.record(
+    z.string(),
+    z.object({
+      /** % of one core, the shell and its children. */
+      cpu: z.number(),
+      /** Kilobytes, the shell and its children. */
+      rss: z.number(),
+      /** What the leader runs now (`ps -o comm`). */
+      title: z.string().nullable()
+    })
+  )
+})
+export type ProcStatsResult = z.infer<typeof procStatsResultSchema>
+
 export const procListResultSchema = z.object({
   sessions: z.array(
     z.object({

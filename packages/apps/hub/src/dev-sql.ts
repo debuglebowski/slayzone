@@ -5,7 +5,7 @@ import {
   notifyGlobalStateListeners,
   markSessionUserInput,
   clearSessionUserInputMark
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '@slayzone/api/txns'
 

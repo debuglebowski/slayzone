@@ -1,0 +1,332 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { ptySignalPayloadSchema, type PtySignalPayload } from '@slayzone/computer-transport/shared'
+import { createPtySessionSignals, IDLE_CLOCK_SIGNAL_MS } from './pty-signals'
+
+const ids = { sessionId: () => 's-1', spawnId: () => 'sp-1' }
+
+function harness(mode: string, resuming = false) {
+  const sent: PtySignalPayload[] = []
+  const answers: string[] = []
+  let t = 1_000
+  const pipeline = createPtySessionSignals({
+    params: { mode, resuming },
+    ids,
+    emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+    respond: (a) => answers.push(a),
+    now: () => t
+  })
+  const cleaned: string[] = []
+  /** What the pty handler does per chunk: process, buffer as `seq`, report. */
+  const signals = {
+    onOutput(data: string, seq: number) {
+      const { clean, detection } = pipeline.process(data)
+      cleaned.push(clean)
+      pipeline.report(detection, seq)
+    },
+    watchConversationId: () => pipeline.watchConversationId(),
+    dispose: () => pipeline.dispose()
+  }
+  // The first chunk always signals (`firstOutput`); prime past it so each test
+  // below sees steady-state behavior.
+  signals.onOutput('', 0)
+  sent.length = 0
+  cleaned.length = 0
+  return { sent, answers, cleaned, signals, pipeline, advance: (ms: number) => (t += ms) }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('pty signals (computer-side detection)', () => {
+  test('activity, title and dev URL reach the hub as one schema-valid signal per chunk', () => {
+    const { sent, signals } = harness('gemini')
+    signals.onOutput(`\x1b]0;Gemini busy\x07${'x'.repeat(80)} http://0.0.0.0:5173`, 7)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({
+      sessionId: 's-1',
+      spawnId: 'sp-1',
+      seq: 7,
+      activity: 'working',
+      title: 'Gemini busy',
+      devServerUrls: ['http://localhost:5173']
+    })
+  })
+
+  test('the first chunk always signals firstOutput, even saying nothing', () => {
+    const sent: PtySignalPayload[] = []
+    const pipeline = createPtySessionSignals({
+      params: { mode: 'claude-code', resuming: false },
+      ids,
+      emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+      respond: () => undefined
+    })
+    pipeline.report(pipeline.process('\x1b[2K\r spinner').detection, 0)
+    pipeline.report(pipeline.process('\x1b[2K\r spinner').detection, 1)
+    expect(sent).toEqual([expect.objectContaining({ seq: 0, firstOutput: true })])
+  })
+
+  test('a chunk that says nothing (hook-driven claude redraw) sends nothing', () => {
+    const { sent, signals } = harness('claude-code')
+    signals.onOutput('\x1b[2K\r spinner', 1)
+    expect(sent).toEqual([])
+  })
+
+  test('terminal queries are answered, in stream order, and taken out before detection', async () => {
+    // DA1 is `ESC [ c`; as text it would be output. Answered/stripped, it says nothing.
+    // Behind output still in the screen mirror, its answer waits its turn (as on the
+    // hub): replies reach the program in the order it asked.
+    const { sent, signals, answers, cleaned } = harness('claude-code')
+    signals.onOutput('before\x1b[cafter', 1)
+    expect(sent).toEqual([])
+    expect(cleaned).toEqual(['beforeafter'])
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[?62;4;22c']))
+  })
+
+  test('what is buffered + streamed is the replay-filtered chunk (OSC title out, detected)', () => {
+    const { sent, signals, cleaned } = harness('codex')
+    signals.onOutput('\x1b]0;Codex busy\x07hello', 1)
+    expect(cleaned).toEqual(['hello'])
+    expect(sent[0]?.title).toBe('Codex busy')
+  })
+
+  test("OSC colour queries are answered with the hub's theme, updated live", () => {
+    const { answers, pipeline } = harness('claude-code')
+    pipeline.setTheme({ foreground: '#112233', background: '#445566', cursor: '#778899' })
+    pipeline.process('\x1b]11;?\x07')
+    expect(answers.join('')).toContain('4444/5555/6666')
+  })
+
+  test('idle-clock-only chunks (plain shell) coalesce: leading + trailing per window', () => {
+    vi.useFakeTimers()
+    const { sent, signals, advance } = harness('terminal')
+    advance(IDLE_CLOCK_SIGNAL_MS) // past the primed first chunk's window
+    signals.onOutput('a', 1)
+    signals.onOutput('b', 2)
+    signals.onOutput('c', 3)
+    expect(sent.map((s) => s.seq)).toEqual([1])
+    advance(IDLE_CLOCK_SIGNAL_MS)
+    vi.advanceTimersByTime(IDLE_CLOCK_SIGNAL_MS)
+    expect(sent.map((s) => s.seq)).toEqual([1, 3])
+    expect(sent[1].refreshIdleClock).toBe(true)
+    signals.dispose()
+  })
+
+  test('stale-resume window: honored at start, closed after the window', () => {
+    vi.useFakeTimers()
+    const msg = 'No conversation found with session ID: x'
+    const early = harness('claude-code', true)
+    early.signals.onOutput(msg, 1)
+    expect(early.sent[0]?.error?.code).toBe('SESSION_NOT_FOUND')
+    expect(early.sent[0]?.suppressOutput).toBe(true)
+
+    const late = harness('claude-code', true)
+    vi.advanceTimersByTime(5_000)
+    late.signals.onOutput(msg, 1)
+    expect(late.sent).toEqual([])
+  })
+
+  test("codex: the conversation id is read from THIS machine's session files after first output", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'pty-signals-home-'))
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const id = '11111111-2222-3333-4444-555555555555'
+      const now = new Date()
+      const dir = join(
+        home,
+        '.codex',
+        'sessions',
+        String(now.getFullYear()),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      )
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, `rollout-x-${id}.jsonl`),
+        `${JSON.stringify({ payload: { cwd: '/work/repo' } })}\n`
+      )
+      const sent: PtySignalPayload[] = []
+      const signals = createPtySessionSignals({
+        params: { mode: 'codex', resuming: false },
+        ids,
+        emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+        respond: () => undefined,
+        disk: { cwd: '/work/repo', startedAt: Date.now() }
+      })
+      signals.report(signals.process('booting').detection, 4)
+      vi.advanceTimersByTime(3_000)
+      await vi.waitFor(() =>
+        expect(sent).toContainEqual(expect.objectContaining({ seq: 4, conversationId: id }))
+      )
+      signals.dispose()
+    } finally {
+      process.env.HOME = prevHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('failed resume: a missing transcript on THIS disk is reported before the exit', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pty-signals-exit-'))
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      const sent: PtySignalPayload[] = []
+      const make = () =>
+        createPtySessionSignals({
+          params: { mode: 'claude-code', resuming: true, resumeConversationId: 'gone-id' },
+          ids,
+          emit: (p) => sent.push(ptySignalPayloadSchema.parse(p)),
+          respond: () => undefined,
+          disk: { cwd: '/work/repo', startedAt: Date.now() }
+        })
+      const failed = make()
+      failed.exited(1, '')
+      expect(sent.at(-1)?.exitError?.code).toBe('SESSION_NOT_FOUND')
+      failed.dispose()
+
+      // A clean exit is not a failed resume; the output scan finds nothing either.
+      sent.length = 0
+      const clean = make()
+      clean.exited(0, 'bye')
+      expect(sent).toEqual([])
+      clean.dispose()
+
+      // Exit-code-agnostic string scan over the buffered output.
+      const scanned = make()
+      scanned.exited(0, 'No conversation found with session ID: gone-id')
+      expect(sent.at(-1)?.exitError?.code).toBe('SESSION_NOT_FOUND')
+      scanned.dispose()
+    } finally {
+      process.env.HOME = prevHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('snapshot: the current detected state, for a hub that was away', () => {
+    const { signals, pipeline } = harness('copilot')
+    expect(pipeline.snapshot()).toEqual({
+      activity: null,
+      title: null,
+      prompt: null,
+      devServerUrls: [],
+      conversationId: null,
+      error: null
+    })
+    signals.onOutput('\x1b]0;first\x07 http://0.0.0.0:5173', 1)
+    signals.onOutput('\x1b]0;second\x07 Proceed? [Y/n]', 2)
+    signals.onOutput('http://127.0.0.1:3000', 3)
+    expect(pipeline.snapshot()).toEqual(
+      expect.objectContaining({
+        title: 'second',
+        prompt: expect.objectContaining({ type: 'permission' }),
+        devServerUrls: ['http://localhost:5173', 'http://127.0.0.1:3000']
+      })
+    )
+  })
+
+  test('snapshot: working activity clears a stale prompt', () => {
+    const { signals, pipeline } = harness('qwen-code')
+    signals.onOutput('Continue? [Y/n]', 1)
+    signals.onOutput('⠋ working', 2)
+    expect(pipeline.snapshot()).toEqual(
+      expect.objectContaining({ activity: 'working', prompt: null })
+    )
+  })
+
+  test("failed resume: the hub's spawn-time lookup (any project dir) decides, not just beside the cwd", () => {
+    const sent: PtySignalPayload[] = []
+    const exitWith = (resumeTranscript: 'found' | 'missing' | 'unknown') => {
+      sent.length = 0
+      const p = createPtySessionSignals({
+        params: {
+          mode: 'claude-code',
+          resuming: true,
+          resumeConversationId: 'id',
+          resumeTranscript
+        },
+        ids,
+        emit: (x) => sent.push(ptySignalPayloadSchema.parse(x)),
+        respond: () => undefined,
+        disk: { cwd: '/nowhere/with/no/transcript', startedAt: Date.now() }
+      })
+      p.exited(1, '')
+      p.dispose()
+      return sent.at(-1)?.exitError?.code ?? null
+    }
+    // Moved into a worktree's project dir: found there, so not stale.
+    expect(exitWith('found')).toBeNull()
+    expect(exitWith('missing')).toBe('SESSION_NOT_FOUND')
+    // Could not tell: the output scan decides (nothing here).
+    expect(exitWith('unknown')).toBeNull()
+  })
+
+  test('not a resume: exit says nothing', () => {
+    const { sent, pipeline } = harness('claude-code')
+    pipeline.exited(1, 'No conversation found with session ID: x')
+    expect(sent).toEqual([])
+  })
+
+  test('conversation id only after /status is submitted, and only within the watch', () => {
+    vi.useFakeTimers()
+    const id = '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b'
+    const { sent, signals } = harness('gemini')
+    const found = () => sent.filter((s) => s.conversationId).map((s) => s.seq)
+    signals.onOutput(`session: ${id}`, 1)
+    expect(found()).toEqual([])
+    signals.watchConversationId()
+    signals.onOutput(`session: ${id}`, 2)
+    expect(sent.at(-1)?.conversationId).toBe(id)
+    signals.watchConversationId()
+    vi.advanceTimersByTime(5_000)
+    signals.onOutput(`session: ${id}`, 3)
+    expect(found()).toEqual([2])
+  })
+})
+
+// Main moved the answers that depend on terminal STATE (CPR, DECRQM, DECRQSS) to a
+// headless screen mirror on whoever runs the output pipeline — the renderer no
+// longer answers them. The computer runs it for its sessions, so it keeps a mirror
+// too: else those queries go unanswered and the program waits (gh/termenv, agents).
+describe('state queries are answered from a screen mirror', () => {
+  function mirrored(cols = 80, rows = 24) {
+    const answers: string[] = []
+    const pipeline = createPtySessionSignals({
+      params: { mode: 'terminal', resuming: false },
+      ids,
+      emit: () => undefined,
+      respond: (a) => answers.push(a),
+      size: { cols, rows }
+    })
+    return { pipeline, answers }
+  }
+
+  test('CPR answers where the cursor really is', async () => {
+    const { pipeline, answers } = mirrored()
+    pipeline.process('abc\x1b[6n')
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[1;4R']))
+    pipeline.dispose()
+  })
+
+  test('a resize moves the answer with the screen', async () => {
+    const { pipeline, answers } = mirrored(10, 5)
+    pipeline.resize(4, 5)
+    pipeline.process('abcdef\x1b[6n') // wraps at 4 columns
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[2;3R']))
+    pipeline.dispose()
+  })
+
+  test('DECRQM is answered (the renderer no longer does)', async () => {
+    const { pipeline, answers } = mirrored()
+    pipeline.process('\x1b[?2004$p')
+    await vi.waitFor(() => expect(answers.length).toBe(1))
+    const [answer] = answers
+    expect(answer?.startsWith('\x1b[?2004;')).toBe(true)
+    expect(answer?.slice('\x1b[?2004;'.length)).toMatch(/^[0-4]\$y$/)
+    pipeline.dispose()
+  })
+})

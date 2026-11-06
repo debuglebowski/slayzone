@@ -90,8 +90,28 @@ const HUB_CHAT_DEFAULT_PREFIXES: readonly string[] = [
 /** Server-only secrets (integrations credentials.ts). */
 const INTERNAL_PREFIXES: readonly string[] = ['integration:credential:']
 
+/**
+ * The allowed roots the hub added to its own machine's local computer for worktree
+ * bases and automation folders, so it can remove them again (hub
+ * computer-project-sync.ts, final review M6). Server-only state.
+ */
+export const LOCAL_COMPUTER_WORK_ROOTS_KEY = 'local_computer_work_roots'
+
+/**
+ * Keys that describe this one machine, never another: left out of every export and
+ * ignored by every import (final review round 3, R3-2). The local computer's id is
+ * the same on every machine, so another machine's value would act on this one.
+ * Also `internal`: the settings API neither serves nor writes them.
+ */
+const MACHINE_LOCAL_KEYS: ReadonlySet<string> = new Set([LOCAL_COMPUTER_WORK_ROOTS_KEY])
+
+export function isMachineLocalSetting(key: string): boolean {
+  return MACHINE_LOCAL_KEYS.has(key)
+}
+
 export function settingScope(key: string): SettingScope {
   if (INTERNAL_PREFIXES.some((p) => key.startsWith(p))) return 'internal'
+  if (MACHINE_LOCAL_KEYS.has(key)) return 'internal'
   if (HUB_KEYS.has(key) || HUB_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
   if (HUB_CHAT_DEFAULT_PREFIXES.some((p) => key.startsWith(p))) return 'hub'
   return 'user'

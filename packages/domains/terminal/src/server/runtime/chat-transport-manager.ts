@@ -69,6 +69,7 @@ import {
 } from '../user-input-tracker'
 import type { AgentStateRecorder } from './pty-manager'
 import { ptyEvents } from './pty-events'
+import { registerLocalChatRuntime } from './local-chat-runtime'
 import { agentStarts } from './agent-starts'
 import {
   chatSpawnError,
@@ -4157,3 +4158,17 @@ export const {
   __getOutboxStateForTests,
   __getGenerationForTests
 } = defaultChatTransport
+
+// This process runs chat agents: the pty side and the terminal lifecycle reach
+// them through the seam (the hub, which loads none of this, sees no runtime).
+registerLocalChatRuntime({
+  killByTaskId,
+  setShuttingDown,
+  listChatSessions,
+  getChatSessionState,
+  shutdownAll,
+  resetForTests: () => {
+    __resetForTests()
+    configureTransport({ watchdogTimings: undefined })
+  }
+})

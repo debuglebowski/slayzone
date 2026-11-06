@@ -400,3 +400,152 @@ test('a folder cleared while its computer is offline is forgotten there on recon
   expect(c.map.has('p1')).toBe(false)
   expect(await row('p1', remote)).toBeNull()
 })
+
+// Final review M6: the desktop ran git and automations on its own disk with no jail.
+// Moved to the local computer, a custom worktree base outside the project's parent
+// (`/Volumes/wt/{project-folder-name}`) and an automation's own folder (`/opt/tools`)
+// were refused — functionality lost. They are registered as the local computer's
+// roots, like project folders: on connect, and again when they change. The jail
+// itself is unchanged, and a remote computer's roots are never touched.
+function automationWithCwd(cwd: string): void {
+  raw
+    .prepare(
+      `INSERT INTO automations (id, project_id, name, enabled, trigger_config, conditions, actions, sort_order)
+       VALUES (?, 'p1', 'a', 1, '{"type":"manual","params":{}}', '[]', ?, 0)`
+    )
+    .run(
+      crypto.randomUUID(),
+      JSON.stringify([{ type: 'run_command', params: { command: 'x', cwd } }])
+    )
+}
+
+test('M6: a custom worktree base and an automation folder become local roots', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  upgraded('p1', '/Users/k/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  automationWithCwd('/opt/tools')
+  automationWithCwd('{{project.path}}/sub') // a template: already the project's folder
+  const { sync } = makeSync()
+
+  await sync.onConnect(LOCAL)
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app/feature', roots)).toBe(true)
+  expect(isCoveredByRoots('/opt/tools', roots)).toBe(true)
+  expect(isCoveredByRoots('/Volumes/other', roots)).toBe(false)
+  expect(roots.some((r) => r.includes('{{'))).toBe(false)
+})
+
+test('M6: a later change is registered too, and never on a remote computer', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/srv'] }))
+  upgraded('p1', '/Users/k/app')
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  await sync.onConnect(remote)
+
+  automationWithCwd('/opt/later')
+  await sync.localWorkFoldersChanged()
+
+  expect(isCoveredByRoots('/opt/later', computers.get(LOCAL)!.roots)).toBe(true)
+  expect(computers.get(remote)!.roots).toEqual(['/srv'])
+})
+
+// Final review round 2 (low, M6): roots registered for a worktree base or an
+// automation's folder stayed when the setting or the automation went away. They
+// are unregistered — only roots this sync added for work folders, never one the
+// user added, and a project still under a removed root keeps its own root.
+test('M6: a work-folder root goes away with its setting or automation', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k', '/srv/mine'], disk: ['/opt/x/app'] }))
+  upgraded('p1', '/opt/x/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  automationWithCwd('/opt')
+  automationWithCwd('/srv/mine/tool') // under a root the user added: nothing registered
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  expect(isCoveredByRoots('/Volumes/wt/app', computers.get(LOCAL)!.roots)).toBe(true)
+  expect(isCoveredByRoots('/opt/other', computers.get(LOCAL)!.roots)).toBe(true)
+
+  raw.prepare(`DELETE FROM settings WHERE key = 'worktree_base_path'`).run()
+  raw.prepare(`DELETE FROM automations`).run()
+  await sync.localWorkFoldersChanged()
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/other', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/x/app', roots)).toBe(true) // the project keeps its root
+  expect(roots).toContain('/Users/k')
+  expect(roots).toContain('/srv/mine')
+})
+
+// Final review round 3, R3-1: changing the worktree base dropped the old base's root
+// while task worktrees still lived there — their terminal, git panel and processes
+// were refused. A root a local task's worktree still needs is never stale.
+test('R3-1: changing the worktree base keeps the old base while a worktree lives there', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/opt/x/app'] }))
+  upgraded('p1', '/opt/x/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('t-r31', 'p1', 't', ?, ?)`
+    )
+    .run('/Volumes/wt/app/task-1', LOCAL)
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(true)
+
+  raw
+    .prepare(`UPDATE settings SET value = ? WHERE key = 'worktree_base_path'`)
+    .run('/Volumes/wt2/{project-folder-name}')
+  await sync.localWorkFoldersChanged()
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', roots)).toBe(true)
+  expect(isCoveredByRoots('/Volumes/wt2/app', roots)).toBe(true)
+
+  // Once the task is gone, nothing needs the old base: it goes.
+  raw.prepare(`DELETE FROM tasks WHERE id = 't-r31'`).run()
+  await sync.localWorkFoldersChanged()
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(false)
+})
+
+// Final review round 4, R4-1: a soft delete keeps the worktree on disk, and a
+// restore only clears `deleted_at`. A sync in between (the next launch) released the
+// old base's root, so the restored task was refused. A deleted task's folder counts
+// while its row exists; the root goes only when the task is purged.
+test('R4-1: a soft-deleted task restored after a relaunch keeps its worktree root', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/opt/x/app'] }))
+  upgraded('p1', '/opt/x/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('t-r41', 'p1', 't', ?, ?)`
+    )
+    .run('/Volumes/wt/app/task-1', LOCAL)
+  raw
+    .prepare(`UPDATE settings SET value = ? WHERE key = 'worktree_base_path'`)
+    .run('/Volumes/wt2/{project-folder-name}')
+  await sync.localWorkFoldersChanged()
+
+  // Soft delete, relaunch (a new sync on connect), restore.
+  raw.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't-r41'`).run()
+  const relaunched = makeSync().sync
+  await relaunched.onConnect(LOCAL)
+  raw.prepare(`UPDATE tasks SET deleted_at = NULL WHERE id = 't-r41'`).run()
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(true)
+
+  // Purged: nothing needs the old base any more.
+  raw.prepare(`DELETE FROM tasks WHERE id = 't-r41'`).run()
+  await relaunched.localWorkFoldersChanged()
+  expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(false)
+})

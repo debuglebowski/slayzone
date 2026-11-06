@@ -45,6 +45,9 @@ export type PtyEventMap = {
   prompt: [sessionId: string, prompt: unknown]
   'session-detected': [sessionId: string, conversationId: string]
   'dev-server-detected': [sessionId: string, url: string]
+  /** The session's computer went away (false) / came back (true): its output +
+   *  scrollback are unavailable meanwhile (the process may still run). */
+  'output-availability': [sessionId: string, available: boolean]
   'respawn-suggested': [taskId: string]
   'ensure-alive': [taskId: string, reqId: number, force: boolean]
   'hibernate-warn': [sessionId: string, graceSecs: number]

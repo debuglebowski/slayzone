@@ -215,19 +215,15 @@ describe('Normain hub: processes + integrations switched off', () => {
     expect(res.data).toEqual([])
   })
 
-  test('automations.create with run_command: FORBIDDEN, nothing stored', async () => {
-    const before = lines.length
+  // Automation actions run on computers, never on the hub: saving one is fine here.
+  test('automations.create with run_command: stored (it will run on a computer)', async () => {
     const res = await call('automations.create', {
       project_id: projectId,
       name: 'cmd',
       trigger_config: { type: 'manual', params: {} },
       actions: [{ type: 'run_command', params: { command: 'echo hi' } }]
     })
-    expectRefused(res, 'HUB_PROCESSES_DISABLED', 'SLAYZONE_HUB_ENABLE_PROCESSES')
-    expect(lines[before].event).toBe('automation.run_command')
-    const list = await call('automations.getByProject', { projectId }, 'GET')
-    expect(list.status).toBe(200)
-    expect(list.data).toEqual([])
+    expect(res.status).toBe(200)
   })
 
   test('automations.runManual on a rule written into the database: FORBIDDEN', async () => {
@@ -238,11 +234,9 @@ describe('Normain hub: processes + integrations switched off', () => {
          VALUES (?, ?, 'direct', 1, '{"type":"manual","params":{}}', '[]', ?, 0)`
       )
       .run(id, projectId, JSON.stringify([{ type: 'run_command', params: { command: 'echo hi' } }]))
-    const before = lines.length
     const res = await call('automations.runManual', { id })
-    expectRefused(res, 'HUB_PROCESSES_DISABLED', 'SLAYZONE_HUB_ENABLE_PROCESSES')
-    expect(lines[before].event).toBe('automation.run_command')
-    expect(lines[before].detail.op).toBe('run')
+    expect(res.status).toBe(403)
+    expect(res.error?.data.appCode).toBe('NO_COMPUTER_CONNECTED')
   })
 
   for (const [proc, input] of [

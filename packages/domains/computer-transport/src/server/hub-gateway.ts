@@ -111,6 +111,13 @@ export type ComputerGatewayEvents = {
 }
 
 export interface HubComputerGatewayOptions {
+  /**
+   * THE owner check (G2): asked before EVERY hub→computer request, in the caller's
+   * request context — the one door every routed procedure goes through (git, gh, AI
+   * config, test scan, turn git, fs, exec, processes, terminals). Throw to refuse:
+   * nothing is sent. Absent: no check (a hub without login).
+   */
+  authorizeRequest?: (computerId: string, method: string) => Promise<void>
   /** Wait for durable reconciliation before normal commands. Control methods can return immediately. */
   beforeRequest?: (computerId: string, method: string, params: unknown) => Promise<void>
   /**
@@ -327,6 +334,42 @@ interface ComputerConnection {
   heartbeatTimer: ReturnType<typeof setTimeout> | null
   authTimer: ReturnType<typeof setTimeout> | null
   closed: boolean
+}
+
+/**
+ * The computer does not know a method the hub asked for: a standalone computer's old
+ * session host survived its update (it is replaced only once nothing runs on it),
+ * and dispatches to its older handler table. Not a malfunction — an update still
+ * pending — so it says that, and keeps the JSON-RPC code for callers that check it.
+ */
+export class ComputerUpdatePendingError extends RpcError {
+  constructor(
+    readonly method: string,
+    code: number,
+    readonly computerVersion?: string
+  ) {
+    super(
+      code,
+      `This computer's SlayZone${computerVersion ? ` (${computerVersion})` : ''} is older than ` +
+        `this hub and cannot do this yet (${method}). It updates once the work running on it ` +
+        'finishes — stop its agents and processes, or restart the computer.'
+    )
+    this.name = 'ComputerUpdatePendingError'
+  }
+}
+
+/**
+ * A computer's answer to a method it does not have: its dispatcher's
+ * `-32001 unimplemented: <method>` (every release), or JSON-RPC's own -32601. Other
+ * -32001 answers (a handler declining an op) are not this.
+ */
+function isUnknownMethodAnswer(err: unknown, method: string): err is RpcError {
+  if (!(err instanceof RpcError)) return false
+  if (err.code === JSON_RPC_METHOD_NOT_FOUND) return true
+  return (
+    err.code === ComputerTransportErrorCodes.unimplemented &&
+    err.message === `unimplemented: ${method}`
+  )
 }
 
 export function createHubComputerGateway(options: HubComputerGatewayOptions): HubComputerGateway {
@@ -1089,11 +1132,19 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           throw new Error('Computer connection changed before command delivery')
         return conn.rpc.request<T>(method, params, timeoutMs, actor)
       }
-      const sent = options.beforeRequest
-        ? Promise.resolve()
-            .then(() => options.beforeRequest!(computerId, method, params))
-            .then(send)
-        : conn.rpc.request<T>(method, params, timeoutMs, actor)
+      const { authorizeRequest, beforeRequest } = options
+      const sent = (
+        authorizeRequest || beforeRequest
+          ? Promise.resolve()
+              .then(() => authorizeRequest?.(computerId, method))
+              .then(() => beforeRequest?.(computerId, method, params))
+              .then(send)
+          : conn.rpc.request<T>(method, params, timeoutMs, actor)
+      ).catch((err: unknown) => {
+        if (isUnknownMethodAnswer(err, method))
+          throw new ComputerUpdatePendingError(method, err.code, conn.descriptor?.version)
+        throw err
+      })
       if (!audited) {
         // An unaudited method (a read, a probe) still leaves a line when the computer
         // REFUSES it by its own policy (T-27) — a jail refusal is worth seeing.

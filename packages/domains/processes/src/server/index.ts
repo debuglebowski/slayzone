@@ -17,21 +17,30 @@ export {
   listAllProcesses,
   killAllProcesses,
   shutdownAllProcesses,
-  setProjectCwdResolver
+  setProcessComputerResolver,
+  processesComputerConnected,
+  isAdoptedOnComputer,
+  restartProcessForUi,
+  OldRunSurvivesError,
+  OldRunUnreachableError,
+  processesComputerRemoved,
+  setProcessComputerReachability
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
   ProcessShutdownOptions,
   ProcessShutdownResult,
-  ProjectCwdResolver,
+  ProcessComputerResolver,
+  PidStats,
   StartProcessRefusal,
   StartProcessResult
 } from './process-manager'
 export { createDbProcessPersistence } from './process-persistence'
 export type { ProcessPersistence, PersistedProcess, ProcessRow } from './process-persistence'
-export { setProcessBackend, getProcessBackend, localProcessBackend } from './process-backend'
+export { setProcessBackend, getProcessBackend, noComputerProcessBackend } from './process-backend'
 export type { ProcessBackend, ProcSpawnSpec, ProcHandle } from './process-backend'
-export { createStatsPoller } from './pid-stats'
+// The ps/pgrep stats poller is `@slayzone/processes/pid-stats` (computers, the
+// Electron host): never re-exported here, so the hub bundle does not carry it.
 // `processes.*` tRPC router + the host-injected process-manager deps it calls.
 // Composed by `@slayzone/api`; the deps are injected by the composition root.
 export { processesRouter, type ProcessesRouter, type ProcessesMounts } from './processes-router'

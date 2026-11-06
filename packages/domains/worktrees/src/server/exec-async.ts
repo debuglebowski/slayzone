@@ -1,21 +1,54 @@
 // eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: hubSpawnSync runs worktree setup scripts + submodule update synchronously and can block the hub for minutes; convert callers to hubSpawn.
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { basename } from 'path'
-import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import type { DiagnosticSource } from '@slayzone/diagnostics/shared'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/record'
+import type { DiagnosticEvent, DiagnosticSource } from '@slayzone/diagnostics/shared'
 import { mergePathLists } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { getEnrichedPath } from '@slayzone/terminal/server'
+import { getEnrichedPath } from '@slayzone/terminal/shell-env'
 
 /**
- * The ONE place this package starts a process. Everything here runs on the hub's
- * own machine (git, `gh`, setup scripts, the AI merge CLI), so on a hub with
- * `SLAYZONE_HUB_ENABLE_PROCESSES=0` each call is refused before anything spawns
- * (T-06, `NO_COMPUTER_CONNECTED`). Inside a `new Promise` executor the refusal
- * becomes a rejection; a sync caller gets the throw.
+ * Where this package's processes run and what they report to. The defaults are the
+ * HUB's: its enriched login-shell PATH, the T-06 refusal (on a hub with
+ * `SLAYZONE_HUB_ENABLE_PROCESSES=0` every spawn is refused before it starts,
+ * `NO_COMPUTER_CONNECTED`) and its diagnostics store. A computer running the same
+ * git ops (`@slayzone/worktrees/git-ops`) supplies its own PATH and log, and no
+ * refusal — running them is its job.
+ */
+export interface GitExecEnvironment {
+  /** The PATH to merge in front of the inherited one; null = inherit as is. */
+  loginShellPath(): string | null
+  /** Throws to refuse starting `command` here. */
+  refuse(command: string): void
+  diagnostic(event: DiagnosticEvent): void
+}
+
+const hubEnvironment: GitExecEnvironment = {
+  loginShellPath: () => getEnrichedPath(),
+  refuse: (command) =>
+    assertHubLocalExecEnabled({ op: 'exec', detail: { command: basename(command) } }),
+  diagnostic: (event) => recordDiagnosticEvent(event)
+}
+
+let environment: GitExecEnvironment = hubEnvironment
+
+/** Replace (part of) the exec environment; `null` restores the hub's. */
+export function configureGitExec(next: Partial<GitExecEnvironment> | null): void {
+  environment = next ? { ...hubEnvironment, ...next } : hubEnvironment
+}
+
+/** Report through the configured environment (the hub's diagnostics by default). */
+export function gitDiagnostic(event: DiagnosticEvent): void {
+  environment.diagnostic(event)
+}
+
+/**
+ * The ONE place this package starts a process — refused first where the
+ * environment says so. Inside a `new Promise` executor the refusal becomes a
+ * rejection; a sync caller gets the throw.
  */
 function refuseOnSwitchedOffHub(command: string): void {
-  assertHubLocalExecEnabled({ op: 'exec', detail: { command: basename(command) } })
+  environment.refuse(command)
 }
 
 /**
@@ -27,7 +60,7 @@ function refuseOnSwitchedOffHub(command: string): void {
 function withLoginShellPath(rest: unknown[]): unknown[] {
   const at = Array.isArray(rest[0]) ? 1 : 0
   const options = (rest[at] ?? {}) as { env?: NodeJS.ProcessEnv }
-  const enrichedPath = getEnrichedPath()
+  const enrichedPath = environment.loginShellPath()
   if (!enrichedPath) return rest
   const env = options.env ?? process.env
   const next = [...rest]
@@ -109,7 +142,7 @@ export function execAsync(
       const stderrStr = stderr.join('')
       const ok = code !== null && (opts.okExitCodes ?? [0]).includes(code)
 
-      recordDiagnosticEvent({
+      gitDiagnostic({
         level: ok ? 'info' : 'error',
         source,
         event: ok ? `${source}.command` : `${source}.command_failed`,
@@ -130,7 +163,7 @@ export function execAsync(
       if (timer) clearTimeout(timer)
       // A spawn failure never reaches 'close' with a real exit, so log it here — an
       // fd-exhausted hub otherwise fails every git call with nothing in diagnostics.
-      recordDiagnosticEvent({
+      gitDiagnostic({
         level: 'error',
         source,
         event: `${source}.spawn_failed`,

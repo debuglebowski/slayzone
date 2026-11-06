@@ -2,6 +2,7 @@
  * git-snapshot integration tests — uses a real temp git repo.
  */
 import { afterAll, describe, expect, test } from 'vitest'
+import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import {
   snapshotWorktree,
   deleteTurnRef,
@@ -17,6 +18,9 @@ import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+
+// The hub runs no git: turns' git runs on a (loopback) computer, as in production.
+installLoopbackTurnComputer()
 
 function git(repo: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' })

@@ -10,7 +10,8 @@
     "./shared": "./src/shared/index.ts",
     "./server": "./src/server/index.ts",
     "./electron": "./src/electron/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./scanner": "./src/server/scanner.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -28,6 +29,7 @@
     "react": "^19.3.1"
   },
   "devDependencies": {
+    "@slayzone/test-utils": "workspace:*",
     "@types/picomatch": "^4.0.3",
     "@types/react": "^19.3.0",
     "lucide-react": "^1.61.0"

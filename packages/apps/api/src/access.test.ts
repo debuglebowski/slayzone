@@ -8,7 +8,17 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/api/src/access.test.ts
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
@@ -20,6 +30,7 @@ import {
   hubStateRoots,
   invalidateAccessCache,
   resource,
+  setHubDiskComputer,
   type AccessRequest,
   type ResourceKind
 } from './access'
@@ -55,9 +66,15 @@ sql(
   ('tA', 'pA', 'a', ?), ('tB', 'pB', 'b', NULL), ('tU', 'pU', 'u', NULL)`,
   aWorktree
 )
+// B's folder on a remote computer c1 — a second project of B's: pB's own folder is
+// its (hub-disk) project path, and a placed project's legacy path is stale (M8).
+sql(
+  `INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pBc1', 'B on c1', '#222', ?)`,
+  B
+)
 sql(
   `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
-  VALUES ('c1', 'pB', ?, 'ok', 0)`,
+  VALUES ('c1', 'pBc1', ?, 'ok', 0)`,
   placement
 )
 sql(
@@ -83,8 +100,14 @@ sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagA', 'pA', 'x')`)
 sql(`INSERT INTO task_templates (id, project_id, name) VALUES ('tmA', 'pA', 'x')`)
 sql(`INSERT INTO test_categories (id, project_id, name, pattern) VALUES ('tcA', 'pA', 'x', '*')`)
 sql(`INSERT INTO test_labels (id, project_id, name) VALUES ('tlA', 'pA', 'x')`)
+// A queued chat message is the computer's; the hub keeps only its route (id → tab).
 sql(
-  `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES ('cqA', 'tabA', 's', 'o', 0)`
+  `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES ('convA', 'tA', 'tabA', 'claude-chat', NULL, 1, 'active')`
+)
+sql(`INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES ('cqA', 'tabA', 'convA')`)
+// The hub's legacy queue (kept one release, never read): its ids belong to no one.
+sql(
+  `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES ('cqLegacy', 'tabA', 's', 'o', 0)`
 )
 sql(
   `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES ('auA', 'pA', 'x', '{}', '[]')`
@@ -106,6 +129,11 @@ sql(
   A,
   B
 )
+
+// A's worktree is on the hub's own computer (the desktop's): a record of the hub's disk.
+// A task on no computer is not (Q1: removing a computer clears its tasks' computer).
+sql(`UPDATE tasks SET computer_id = 'cA' WHERE id = 'tA'`)
+setHubDiskComputer('cA')
 
 const req = (userId: string | null, authRequired = true): AccessRequest => ({
   authRequired,
@@ -137,7 +165,8 @@ const OF_A: Record<ResourceKind, string> = {
   path: join(aWorktree, 'src', 'index.ts'),
   automation: 'auA',
   computer: 'cA',
-  pathTree: aWorktree
+  pathTree: aWorktree,
+  ownedPath: join(aRoot, 'README.md')
 }
 
 describe('every kind: the owner, and nobody else', () => {
@@ -152,6 +181,12 @@ describe('every kind: the owner, and nobody else', () => {
       expect(await can(null, kind, OF_A[kind])).toBe(false)
     })
   }
+})
+
+describe('legacy chat queue', () => {
+  test("an item only in the hub's legacy queue authorizes no one", async () => {
+    expect(await can(A, 'chatQueueItem', 'cqLegacy')).toBe(false)
+  })
 })
 
 describe('a hub without login (the desktop app): everything, as before', () => {
@@ -291,7 +326,8 @@ describe('how each kind finds its owner', () => {
     expect(await can(A, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // holds B's project
     expect(await can(B, 'pathTree', join(aRoot, 'vendor'))).toBe(false) // A's directory
     expect(await can(B, 'pathTree', bNested)).toBe(true)
-    expect(await can(A, 'pathTree', join(base, 'elsewhere'))).toBe(true) // hub-wide, empty
+    // In nobody's root: a walk opens every file under it, so it needs a root (N1).
+    expect(await can(A, 'pathTree', join(base, 'elsewhere'))).toBe(false)
     expect(await can(A, 'pathTree', base)).toBe(false) // holds the hub root
     expect(await can(A, 'pathTree', '/')).toBe(false)
   })
@@ -332,6 +368,107 @@ describe('how each kind finds its owner', () => {
   })
   test("path: a Windows computer's path is compared as one, never as a hub path", async () => {
     expect(await can(A, 'path', 'C:\\Users\\a\\proj')).toBe(true)
+  })
+  // Round-5 K1: a leading `//` was read as a Windows UNC path — no realpath, matching
+  // no root, so "hub-wide": anyone could read the hub's database or another user's
+  // project. On POSIX `//x` IS `/x`.
+  test('K1: a leading // is the same path, not a UNC one', async () => {
+    expect(await can(A, 'path', `/${join(hubRoot, 'slayzone.data.sqlite')}`)).toBe(false)
+    expect(await can(B, 'path', `/${join(aRoot, 'README.md')}`)).toBe(false)
+    expect(await can(B, 'path', `//${join(aRoot, 'README.md')}`)).toBe(false)
+    expect(await can(A, 'path', `/${join(aRoot, 'README.md')}`)).toBe(true)
+  })
+  // K2 on the hub side: on a case-insensitive volume a different letter case (or
+  // Unicode form) of a path is the same file.
+  test.skipIf(process.platform === 'linux')(
+    'K2: case and Unicode variants of a path are the same path on a case-insensitive volume',
+    async () => {
+      expect(await can(A, 'path', join(hubRoot, 'SLAYZONE.DATA.SQLITE'))).toBe(false)
+      expect(await can(B, 'path', join(aRoot.toUpperCase(), 'README.md'))).toBe(false)
+    }
+  )
+})
+
+describe('ownedPath: a hub-local open needs a root the caller may access (N1)', () => {
+  test("inside a root: that root's owner only", async () => {
+    expect(await can(A, 'ownedPath', join(aRoot, 'README.md'))).toBe(true)
+    expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(true)
+    // A folder computer c1 reports is c1's disk, never the hub's (Q1).
+    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(false)
+    expect(await can(B, 'ownedPath', join(aRoot, 'README.md'))).toBe(false)
+    expect(await can(A, 'ownedPath', join(bNested, 'lib.ts'))).toBe(false)
+  })
+  test("in nobody's root: refused (never hub-wide)", async () => {
+    for (const p of [join(base, 'elsewhere'), '/usr/bin/git', '/etc/passwd', '/'])
+      for (const who of [A, B, ADMIN]) expect(await can(who, 'ownedPath', p)).toBe(false)
+  })
+  test("the hub's state stays refused; an artifact file is still its task's", async () => {
+    expect(await can(A, 'ownedPath', join(hubRoot, 'slayzone.data.sqlite'))).toBe(false)
+    expect(await can(A, 'ownedPath', join(hubRoot, 'artifacts', 'tA', 'arA.md'))).toBe(true)
+    expect(await can(B, 'ownedPath', join(hubRoot, 'artifacts', 'tA', 'arA.md'))).toBe(false)
+  })
+  test("a link inside your root to a file in nobody's root: refused", async () => {
+    const outside = join(base, 'nobodys-file.txt')
+    writeFileSync(outside, 'x')
+    const link = join(aRoot, 'outside-link.txt')
+    symlinkSync(outside, link)
+    expect(await can(A, 'ownedPath', link)).toBe(false)
+  })
+  test('no login (the desktop app): allowed', async () => {
+    expect(await can(null, 'ownedPath', '/etc/passwd', false)).toBe(true)
+  })
+})
+
+describe('/dev, /proc, /sys and /.vol: refused for every path kind on a hub with login (N1)', () => {
+  // A descriptor of this process: `/dev/fd/<n>` reads whatever it has open (the
+  // hub's database, on a hub), and realpath of it is no real file.
+  const dbFile = join(hubRoot, 'slayzone.data.sqlite')
+  const fd = openSync(dbFile, 'r')
+  afterAll(() => closeSync(fd))
+  const PATH_KINDS: ResourceKind[] = ['path', 'ownedPath', 'pathTree']
+  const system: [string, string][] = [
+    [`/dev/fd/${fd}`, "a descriptor of the hub's database"],
+    ['/dev/stdin', 'a /dev link to a descriptor'],
+    ['/dev', '/dev itself'],
+    ['/dev/../dev/null', '/dev spelled with ..'],
+    ['/proc/self/environ', "the hub's environment (Linux)"],
+    ['/proc/1/environ', 'another process (Linux)'],
+    ['/sys/kernel', '/sys'],
+    ['/.vol/1/2', '/.vol (macOS volfs)']
+  ]
+  if (process.platform === 'darwin') system.push([`/DEV/fd/${fd}`, '/dev in another case'])
+  for (const kind of PATH_KINDS) {
+    for (const [p, what] of system) {
+      test(`${kind} — ${what}`, async () => {
+        for (const who of [A, B, ADMIN]) expect(await can(who, kind, p)).toBe(false)
+      })
+    }
+  }
+  test('a link inside your own root to /dev/fd/<n>: refused after realpath', async () => {
+    const link = join(aRoot, 'fd-link')
+    symlinkSync(`/dev/fd/${fd}`, link)
+    for (const kind of PATH_KINDS) expect(await can(A, kind, link)).toBe(false)
+  })
+  test('a project rooted at / does not open them', async () => {
+    sql(
+      `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES ('pSlash', 'S', '#111', ?, '/')`,
+      A
+    )
+    try {
+      for (const kind of ['path', 'ownedPath'] as ResourceKind[]) {
+        expect(await can(A, kind, `/dev/fd/${fd}`)).toBe(false)
+        if (existsSync('/proc/self/environ'))
+          expect(await can(A, kind, '/proc/self/environ')).toBe(false)
+      }
+    } finally {
+      sql(`DELETE FROM projects WHERE id = 'pSlash'`)
+    }
+  })
+  test('a directory holding one cannot be walked', async () => {
+    expect(await can(A, 'pathTree', '/')).toBe(false)
+  })
+  test('no login (the desktop app): unchanged', async () => {
+    for (const kind of PATH_KINDS) expect(await can(null, kind, `/dev/fd/${fd}`, false)).toBe(true)
   })
 })
 

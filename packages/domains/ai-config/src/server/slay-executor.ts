@@ -1,4 +1,4 @@
-import { getAiConfigOps } from './ai-config-ops'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 
 export interface SlayTarget {
   projectPath: string
@@ -11,9 +11,10 @@ export interface SlayExecutor {
     input: SlayTarget
   ): Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string }
 }
+/** Until the hub wires its routing: `slay` runs on computers — none, "connect a computer". */
 let executor: SlayExecutor = {
-  checkConfigured: ({ projectPath }) => getAiConfigOps().checkSlayConfigured(projectPath),
-  setup: ({ projectPath, projectId }) => getAiConfigOps().setupSlay(projectPath, projectId)
+  checkConfigured: () => refuseNoComputer({ op: 'slay.check' }),
+  setup: () => refuseNoComputer({ op: 'slay.init' })
 }
 export function setSlayExecutor(value: SlayExecutor): void {
   executor = value

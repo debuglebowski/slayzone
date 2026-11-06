@@ -271,6 +271,10 @@ test.each([false, true])(
             "INSERT INTO chat_workspace_changes(id,tab_id,message_id,computer_id,root_path,status,created_at) VALUES(?,?,?,?,?,'captured',1)"
           )
           .run(`capture-${tab}`, tab, 'message', computerId, dir)
+        // What migration v196 backfilled from that legacy row (the read authority).
+        h.db
+          .prepare('INSERT INTO chat_legacy_tab_computers(tab_id,computer_id) VALUES(?,?)')
+          .run(tab, computerId)
         h.db
           .prepare(
             "INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,?, 'legacy-migration',1)"

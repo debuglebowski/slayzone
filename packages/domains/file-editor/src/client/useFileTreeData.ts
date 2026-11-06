@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useInsertionEffect, useRef, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
@@ -189,12 +189,14 @@ export function useFileTreeData({
     }
   )
 
-  useSubscription(
+  const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
       { ...target, rootPath: projectPath },
       { onData: onWatchEvent }
     )
   )
+  // Refused before any computer was there ("connect a computer"): start again on a connect.
+  useResubscribeOnComputerConnect(watch)
 
   useEffect(() => {
     return () => {

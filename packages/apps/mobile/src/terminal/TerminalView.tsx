@@ -81,6 +81,14 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
       }
     })
   )
+  // The session's computer went offline / came back: its output lives there.
+  useSubscription(
+    trpc.pty.onOutputAvailability.subscriptionOptions(undefined, {
+      onData: (event) => {
+        if (event.sessionId === sessionId) void controller.feed.computerAvailable(event.available)
+      }
+    })
+  )
 
   // Opened (or the agent came up while open): the user is here.
   useEffect(() => {
@@ -144,6 +152,11 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
         {status.phase === 'error' ? (
           <Text style={styles.problem} numberOfLines={2}>
             {status.error}
+          </Text>
+        ) : null}
+        {status.phase === 'offline' ? (
+          <Text style={styles.problem} numberOfLines={2}>
+            Computer offline
           </Text>
         ) : null}
       </View>

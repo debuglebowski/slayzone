@@ -19,3 +19,6 @@ export {
   toggleFileLabel
 } from './test-panel-store'
 export { testPanelRouter, type TestPanelRouter, type TestPanelMounts } from './router'
+
+export { setTestScanRouting, type TestScanRouting } from './scan-routing'
+export type { ScanCategory } from './scanner'

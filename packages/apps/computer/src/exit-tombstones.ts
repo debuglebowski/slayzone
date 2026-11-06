@@ -22,11 +22,16 @@
  */
 
 import type { ExitedSession } from '@slayzone/computer-transport/shared'
-import type { RingBuffer } from './ring-buffer'
+import type { RingBuffer } from '@slayzone/terminal/pty-detection'
 
 /** The hub's `DETACH_GRACE_MS`: past it, no hub is still tracking the session. */
 export const TOMBSTONE_TTL_MS = 10 * 60_000
 export const TOMBSTONE_MAX = 64
+/**
+ * How long a DELIVERED exit's buffer is kept for a continuing spawn
+ * (`pty.spawn carryOutput`: the recovery shell the hub starts right after the exit).
+ */
+export const CARRY_WINDOW_MS = 60_000
 
 export interface ExitTombstone {
   spawnId?: string
@@ -34,8 +39,13 @@ export interface ExitTombstone {
   exitCode: number | null
   signal: string | null
   reason?: string
-  /** Undelivered output, kept only when the exit itself was not delivered. */
+  /**
+   * The session's output: kept when the exit was not delivered (until the TTL), or
+   * for {@link CARRY_WINDOW_MS} when the next spawn may continue it.
+   */
   buffer?: RingBuffer
+  /** Drop `buffer` after this time (a carry-window buffer); absent = kept to the TTL. */
+  bufferUntil?: number
 }
 
 interface Stored extends ExitTombstone {
@@ -61,6 +71,19 @@ export class ExitTombstones {
     return this.bySession.get(sessionId)
   }
 
+  /**
+   * Hand over the buffer of the reaped attempt `spawnId` to a continuing spawn,
+   * once. Null when it is gone (other attempt, expired, never kept).
+   */
+  takeBuffer(sessionId: string, spawnId: string): RingBuffer | null {
+    const t = this.get(sessionId)
+    if (!t || t.spawnId !== spawnId || !t.buffer) return null
+    const { buffer } = t
+    t.buffer = undefined
+    t.bufferUntil = undefined
+    return buffer
+  }
+
   /** Did THIS spawn attempt already run and exit? (A keyless spawn never matches.) */
   ran(sessionId: string, spawnId: string | undefined): boolean {
     if (spawnId === undefined) return false
@@ -81,7 +104,14 @@ export class ExitTombstones {
   }
 
   private prune(): void {
-    const cutoff = Date.now() - TOMBSTONE_TTL_MS
+    const now = Date.now()
+    for (const t of this.bySession.values()) {
+      if (t.bufferUntil !== undefined && t.bufferUntil <= now) {
+        t.buffer = undefined
+        t.bufferUntil = undefined
+      }
+    }
+    const cutoff = now - TOMBSTONE_TTL_MS
     for (const [sessionId, t] of this.bySession) {
       // Insertion order is age order, so the first fresh one ends the sweep.
       if (t.at > cutoff) break

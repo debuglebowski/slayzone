@@ -143,7 +143,7 @@ export function createComputerConfigHandlers(ctx: HandlerContext): HubMethodTabl
    *
    * A root is rejected rather than silently kept when it is relative (the jail
    * compares canonical absolute prefixes, so a relative entry could never match
-   * anything) or absent from disk (`assertPathAllowed` skips unresolvable roots,
+   * anything) or absent from disk (the path jail skips unresolvable roots,
    * so keeping one would look configured while containing nothing). Both come
    * back in `rejected` so the UI can say which entry did not take, instead of
    * showing a saved list that quietly differs from the enforced one.

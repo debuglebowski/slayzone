@@ -55,6 +55,68 @@ function collectPidStats(pids: number[], cb: (stats: Map<number, PidStats>) => v
   })
 }
 
+/** Sum cpu/rss over each id's shell pid and its direct children. */
+function aggregate(
+  pidMap: Map<string, number>,
+  childMap: Map<number, number[]>,
+  pidStats: Map<number, PidStats>
+): Record<string, PidStats> {
+  const result: Record<string, PidStats> = {}
+  for (const [id, shellPid] of pidMap) {
+    const children = childMap.get(shellPid) ?? [shellPid]
+    let cpu = 0,
+      rss = 0
+    for (const cpid of children) {
+      const s = pidStats.get(cpid)
+      if (s) {
+        cpu += s.cpu
+        rss += s.rss
+      }
+    }
+    if (pidStats.has(shellPid) || children.some((c) => pidStats.has(c))) result[id] = { cpu, rss }
+  }
+  return result
+}
+
+/** One snapshot of cpu/rss (shell + children) for each id → shell pid. */
+export function collectProcessStats(
+  pidMap: Map<string, number>
+): Promise<Record<string, PidStats>> {
+  return new Promise((resolve) => {
+    if (pidMap.size === 0) return resolve({})
+    resolveChildPids(Array.from(pidMap.values()), (childMap) => {
+      const allPids = Array.from(new Set(Array.from(childMap.values()).flat()))
+      collectPidStats(allPids, (pidStats) => resolve(aggregate(pidMap, childMap, pidStats)))
+    })
+  })
+}
+
+/** The command name each id's pid runs now (`ps -o comm=`), when it is alive. */
+export function collectProcessTitles(pidMap: Map<string, number>): Promise<Record<string, string>> {
+  return new Promise((resolve) => {
+    if (pidMap.size === 0) return resolve({})
+    execFile(
+      'ps',
+      ['-o', 'pid=,comm=', '-p', Array.from(pidMap.values()).join(',')],
+      (err, out) => {
+        const byPid = new Map<number, string>()
+        if (!err) {
+          for (const line of out.trim().split('\n')) {
+            const m = line.trim().match(/^(\d+)\s+(.+)$/)
+            if (m) byPid.set(Number(m[1]), m[2].split('/').pop() ?? m[2])
+          }
+        }
+        const titles: Record<string, string> = {}
+        for (const [id, pid] of pidMap) {
+          const title = byPid.get(pid)
+          if (title) titles[id] = title
+        }
+        resolve(titles)
+      }
+    )
+  })
+}
+
 /**
  * Create a reusable stats poller. Call start()/stop() to control lifecycle.
  * `getPids` returns a map of id → shell PID for each item to track.

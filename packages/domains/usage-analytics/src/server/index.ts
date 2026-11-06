@@ -25,3 +25,11 @@ export {
   getUsageAnalyticsRouterDeps,
   type UsageAnalyticsRouterDeps
 } from './router-deps'
+
+export {
+  setUsageCollectRouting,
+  type UsageCollectPage,
+  type UsageCollectReply,
+  type UsageCollectRouting
+} from './cache'
+export type { ParseResult, UsageCursors } from './collect'

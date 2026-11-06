@@ -1,20 +1,19 @@
 import { existsSync, rmSync } from 'node:fs'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import type { WorktreeExecAdapters, WorktreePolicyAdapters } from '@slayzone/task/server'
+import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import {
   removeWorktree,
   createWorktree,
   runWorktreeSetupScript,
   getCurrentBranch,
   isGitRepo,
-  copyIgnoredFiles
+  copyIgnoredFiles,
+  detectWorktrees
 } from './git-worktree'
 import {
   getColor as getWorktreeColor,
   ensureProjectColors as ensureProjectWorktreeColors
 } from './color-registry'
-import { resolveCopyBehavior } from './composite-ops'
-import { DEFAULT_WORKTREE_BASE_PATH_TEMPLATE, resolveWorktreeBasePathTemplate } from '../shared'
 
 // In-process implementations of the task-owned worktree seams
 // (`TaskRuntimeAdapters.worktrees` / `.worktreePolicy` in `@slayzone/task/server`).
@@ -59,15 +58,12 @@ export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   getCurrentBranch: onHubDisk('branch', (_taskId, repoPath) => getCurrentBranch(repoPath)),
   isGitRepo: onHubDisk('is_git_repo', (_taskId, path) => isGitRepo(path)),
   getWorktreeColor,
-  ensureProjectWorktreeColors,
+  // This host's own disk, detected here (the hub's set lives in hub-task-adapters).
+  ensureProjectWorktreeColors: (projectPath) =>
+    ensureProjectWorktreeColors(projectPath, detectWorktrees),
   pathExists: onHubDisk('path_exists', (_taskId, p) => existsSync(p)),
   hubPathExists: (p) => existsSync(p),
   removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })
 }
 
-/** Hub-side worktree policy reads task ops make (never routed). */
-export const defaultWorktreePolicyAdapters: WorktreePolicyAdapters = {
-  resolveCopyBehavior,
-  defaultBasePathTemplate: DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
-  resolveBasePathTemplate: resolveWorktreeBasePathTemplate
-}
+export { defaultWorktreePolicyAdapters } from './hub-task-adapters'

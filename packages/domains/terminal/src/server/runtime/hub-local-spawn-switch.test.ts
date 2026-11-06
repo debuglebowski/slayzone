@@ -1,8 +1,8 @@
 /**
- * `SLAYZONE_HUB_ENABLE_PROCESSES=0` covers terminals and agents on the hub itself
- * (T-06 revision): the in-process pty and chat backends refuse — the local pty one is
- * the default until the composition root installs the routing backend — while a
- * session routed to a computer still spawns. One `hub.process.spawn` audit line per
+ * Terminals and agents never start in the hub's own process: the default pty backend
+ * (before the composition root installs the routing one, or with no computer) refuses
+ * with "connect a computer", and so does the in-process chat backend where processes
+ * are off — while a session routed to a computer still spawns. One audit line per
  * refused spawn, also through createPty's shell-fallback retry. No real shell spawns.
  */
 import { afterAll, expect, test } from 'vitest'
@@ -14,7 +14,7 @@ import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { PtySessionWindow } from '../pty-host'
 import { createPty, killPty, setDatabase, testExecutionContext } from './pty-manager'
-import { localPtyBackend, setPtyBackend, type PtyBackend } from './pty-backend'
+import { getPtyBackend, setPtyBackend, type PtyBackend } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
 import { childProcessToHandle, createLocalChatBackend } from './chat-proc-handle'
 import * as chat from './chat-transport-manager'
@@ -80,11 +80,12 @@ function fakeChild(): ChildProcess {
 
 process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
 
-test('localPtyBackend.spawn: refused, no pty started, one audit line', async () => {
+test('the default pty backend (no computer): refused, no pty started, one audit line', async () => {
+  setPtyBackend(null)
   const before = lines.length
   const kids = childPids()
   const err = await refused(() =>
-    localPtyBackend.spawn({
+    getPtyBackend().spawn({
       sessionId: 's1:s1',
       taskId: 's1',
       computerId: null,
@@ -98,12 +99,12 @@ test('localPtyBackend.spawn: refused, no pty started, one audit line', async () 
   expect(isHubSwitchedOffError(err), `expected a switch refusal, got ${err}`).toBeTruthy()
   expect(childPids(), 'no child process').toBe(kids)
   expect(lines.length, `one audit line, got ${lines.length - before}`).toBe(before + 1)
-  expect(lines[before].event, 'event hub.process.spawn').toBe('hub.process.spawn')
+  expect(lines[before].event, 'event hub.local_exec').toBe('hub.local_exec')
   expect(lines[before].detail.op, 'op pty.spawn').toBe('pty.spawn')
 })
 
 test('createPty, hub-local (no computer): refused to the caller, audited once', async () => {
-  setPtyBackend(null) // the default local backend, as before the gateway is installed
+  setPtyBackend(null) // the default: no computer, as before the gateway is installed
   const before = lines.length
   const err = await refused(() =>
     createPty({ win: fakeWin, sessionId: 'local:local', cwd: '/tmp', mode: 'terminal' } as never)

@@ -210,6 +210,8 @@ export interface Owned {
   readonly computer: string
   /** The same worktree, as a directory walked whole (T-107). */
   readonly pathTree: string
+  /** A file in that worktree, opened on the hub's own disk (N1: `ownedPath`). */
+  readonly ownedPath: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -237,7 +239,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     path: join(root, 'work', `${mark}_worktree`),
     automation: id('automation'),
     computer: id('computer'),
-    pathTree: join(root, 'work', `${mark}_worktree`)
+    pathTree: join(root, 'work', `${mark}_worktree`),
+    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md')
   }
 }
 
@@ -267,6 +270,9 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_TASK_TITLE`,
       o.path
     )
+    // The same folder as the project's path: a record OF the hub's disk. A task on no
+    // computer is not one — on a standalone hub its worktree is some computer's (Q1).
+    run(`UPDATE projects SET path = ? WHERE id = ?`, o.path, o.project)
     run(
       `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-code', 0)`,
       o.tab,
@@ -355,10 +361,25 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.project,
       o.mark
     )
+    // A queued chat message is the computer's; the hub keeps only its route — on its
+    // own chat tab, so the conversation's ownership fences nothing the other fixtures
+    // write on the task's terminal tab.
     run(
-      `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES (?, ?, 's', 'o', 0)`,
+      `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-chat', 0)`,
+      `${o.chatQueueItem}-tab`,
+      o.task
+    )
+    run(
+      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'legacy')`,
+      `conv-${o.chatQueueItem}`,
+      o.task,
+      `${o.chatQueueItem}-tab`
+    )
+    run(
+      `INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES (?, ?, ?)`,
       o.chatQueueItem,
-      o.tab
+      `${o.chatQueueItem}-tab`,
+      `conv-${o.chatQueueItem}`
     )
     run(
       `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES (?, ?, ?, '{}', '[]')`,
@@ -531,6 +552,8 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onResize': (o) => getPtyDeps().events.emit('resize', o.session, 100, 30),
   'pty.onTitleChange': (o) => getPtyDeps().events.emit('title-change', o.session, o.mark),
   'pty.onExit': (o) => getPtyDeps().events.emit('exit', o.session, 0, null),
+  'pty.onOutputAvailability': (o) =>
+    getPtyDeps().events.emit('output-availability', o.session, false),
   'pty.onPrompt': (o) => getPtyDeps().events.emit('prompt', o.session, { mark: o.mark }),
   'pty.onSessionDetected': (o) => getPtyDeps().events.emit('session-detected', o.session, o.mark),
   'pty.onDevServerDetected': (o) =>

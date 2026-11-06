@@ -204,6 +204,8 @@ export function ProcessesPanel({
   const handleRestart = useCallback(
     (proc: ProcessEntry) =>
       restartProcess({ processId: proc.id }).catch((err: unknown) =>
+        // An offline computer's kept run (G3) reads as such: it starts when that
+        // computer reconnects. No "start anyway" — that is the port collision (K5).
         reportActionError('restart', proc, err)
       ),
     [restartProcess, reportActionError]

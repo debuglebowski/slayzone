@@ -80,7 +80,7 @@ export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/
 export {
   getPtyBackend,
   setPtyBackend,
-  localPtyBackend,
+  noComputerPtyBackend,
   type BackgroundJobQuery,
   type ComputerDoctorFacts,
   type PtyBackend,
@@ -88,8 +88,11 @@ export {
   type PtyHandle,
   type PtyRuntimeProblem,
   type PtySpawnAdmission,
+  type PtyDetectionSpec,
+  type PtySignal,
   type PtySpawnConfirmation,
-  type PtySpawnSpec
+  type PtySpawnSpec,
+  type PtyWriteOptions
 } from './runtime/pty-backend'
 export {
   createDbPtySessionLedger,
@@ -145,6 +148,7 @@ export {
   hasPty,
   hasLivePty,
   getBuffer,
+  getBufferSince,
   writePty,
   submitPty,
   killPty,
@@ -310,3 +314,6 @@ export type {
 } from './runtime/chat-workspace-tracker'
 
 export { setChatSessionSource } from './runtime/session-registry'
+
+export { localPtyBackend, spawnLocalPty } from './runtime/pty-backend-local'
+export { NodePtyUnavailableError } from './runtime/pty-backend'

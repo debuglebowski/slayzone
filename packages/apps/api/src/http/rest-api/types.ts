@@ -1,7 +1,12 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
-import type { AgentId, TerminalState, PtyInfo } from '@slayzone/terminal-contracts'
+import type {
+  AgentId,
+  BufferSinceResult,
+  TerminalState,
+  PtyInfo
+} from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
@@ -87,7 +92,10 @@ export interface PtyAccess {
   hasPty: (sessionId: string) => boolean
   /** Registered and its process has not exited. */
   hasLivePty: (sessionId: string) => boolean
-  getBuffer: (sessionId: string) => string | null
+  /** The scrollback; read from the session's computer when it owns it. */
+  getBuffer: (sessionId: string) => Promise<string | null>
+  /** Replay after `afterSeq` (-1 = all), with the seq it reached. */
+  getBufferSince: (sessionId: string, afterSeq: number) => Promise<BufferSinceResult | null>
   writePty: (sessionId: string, data: string) => boolean
   submitPty: (sessionId: string, data: string) => boolean
   killPty: (sessionId: string) => boolean
@@ -95,7 +103,7 @@ export interface PtyAccess {
     taskId: string,
     opts: { force: boolean; timeoutMs: number }
   ) => Promise<'ok' | 'already-alive' | 'no-window' | 'timeout' | 'error'>
-  subscribeToPtyData: (sessionId: string, cb: (chunk: string) => void) => () => void
+  subscribeToPtyData: (sessionId: string, cb: (chunk: string, seq: number) => void) => () => void
   subscribeToStateChange: (sessionId: string, cb: (state: TerminalState) => void) => () => void
   onSessionChange: (cb: () => void) => () => void
   getState: (sessionId: string) => TerminalState | null
@@ -144,7 +152,16 @@ export interface ProcessesAccess {
  *  `StartProcessResult` (this package does not import the domain's server). */
 export type ProcessStartResult =
   | { ok: true; pid: number | null; status: string }
-  | { ok: false; reason: 'not-found' | 'already-running' | 'shutting-down' }
+  | {
+      ok: false
+      reason:
+        | 'not-found'
+        | 'already-running'
+        | 'shutting-down'
+        | 'no-computer'
+        | 'old-run-survives'
+        | 'old-run-unreachable'
+    }
 
 /** The minimal WebContents surface the browser routes drive. Structural (NOT
  *  Electron's type — this package must stay electron-free); the Electron host's

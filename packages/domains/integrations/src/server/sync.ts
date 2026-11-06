@@ -25,7 +25,7 @@ import {
 // Server entry (same fn the electron entry re-exports) — a value import of the
 // electron entry here would drag the whole pty/chat cluster into the
 // standalone server bundle and crash it on the `electron` npm shim.
-import { onTaskReachedTerminal } from '@slayzone/terminal/server'
+import { onTaskReachedTerminal } from '@slayzone/terminal/hub'
 import { createImportedTaskOp } from '@slayzone/task/server'
 import { getAdapter, getRegisteredProviders } from './adapters'
 import type { NormalizedIssue, ProviderAdapter } from './adapters'

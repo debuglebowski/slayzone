@@ -73,11 +73,12 @@ export {
   popStash,
   dropStash,
   branchFromStash,
-  getStashDiff
+  getStashDiff,
+  hasGithubRemote,
+  ensureBranchPushed
 } from './git-worktree'
 export {
   checkGhInstalled,
-  hasGithubRemote,
   listOpenPrs,
   getPrByUrl,
   getPrForCheckout,
@@ -89,10 +90,12 @@ export {
   getGhUser,
   editPrComment,
   setGhExecutor,
-  runGhLocally,
   type GhExecutor
 } from './gh-cli'
-export { runAiCommand } from './merge-ai'
+export { runGhLocally } from './gh-local'
+export { hubWorktreeExecAdapters } from './hub-task-adapters'
+export { setWorktreeColorDetector, type WorktreeDetector } from './color-registry'
+export { runAiCommand, setAiCommandRunner, type AiCommandRunner } from './merge-ai'
 export {
   listProjectRepos,
   detectChildRepos,
@@ -127,6 +130,14 @@ export {
 // `worktrees.*` tRPC router + the host seam it reads. Composed by `@slayzone/api`,
 // which also wires the seam from its workspace/app registries.
 export { worktreesRouter, type WorktreesRouter, type WorktreesMounts } from './worktrees-router'
+export {
+  setGitOpTransport,
+  executeGitOp,
+  gitTargetForPath,
+  deliverGitWatchEvent,
+  gitWatchComputerGone,
+  type GitOpTransport
+} from './git-op-routing'
 export {
   setWorktreesRouterDeps,
   getWorktreesRouterDeps,

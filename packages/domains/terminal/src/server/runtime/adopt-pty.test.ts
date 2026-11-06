@@ -170,7 +170,7 @@ test('adopt: warm scrollback reaches the RingBuffer via the data path', async ()
   })
   // onData is registered during createPty; the replay is queued as a microtask.
   await new Promise((r) => setTimeout(r, 10))
-  const buf = getBuffer(sessionId) ?? ''
+  const buf = (await getBuffer(sessionId)) ?? ''
   expect(buf, `warm scrollback not in buffer: ${JSON.stringify(buf)}`).toContain('WARM-PROMPT$ ')
   warmScrollback = ''
   killPty(sessionId)

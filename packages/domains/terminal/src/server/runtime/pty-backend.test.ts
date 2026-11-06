@@ -6,7 +6,7 @@
  *     RingBuffer seq, ptyEvents 'exit' fires on the fake's `onExit`, and
  *     writePty / resizePty / killPty reach the fake handle. The injected spec
  *     carries `computerId=null` + `transport=false` (the hub-local default).
- * (2) The default `localPtyBackend` spawns a REAL short-lived shell (echo) and
+ * (2) `localPtyBackend` (installed by the test; the default refuses) spawns a REAL short-lived shell (echo) and
  *     its output arrives through ptyEvents 'data' with a monotonic RingBuffer
  *     seq — proving the dark default path is byte-identical.
  *
@@ -33,6 +33,7 @@ import {
   type PtySpawnSpec
 } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
+import { localPtyBackend } from './pty-backend-local'
 import { agentStarts } from './agent-starts'
 
 const fakeWin = {
@@ -325,7 +326,7 @@ test('a PLAIN kill (no replace) fires ptyEvents "exit" and an unconditional list
 })
 
 test('localPtyBackend: real echo shell output reaches ptyEvents with monotonic seq', async () => {
-  setPtyBackend(null) // default in-process backend
+  setPtyBackend(localPtyBackend) // in-process; the default refuses (no computer)
   const sid = 'localEchoTask:localEchoTask'
   const marker = `SZ_BACKEND_ECHO_${Math.random().toString(36).slice(2, 8)}`
   const dataEvents: Array<[string, number]> = []

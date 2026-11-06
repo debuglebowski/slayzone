@@ -7,7 +7,6 @@ import type {
   UpdateAutomationInput
 } from '../shared'
 import { parseAutomationRow } from '../shared'
-import { assertAutomationActionsAllowed } from './hub-exec-actions'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
 
@@ -44,11 +43,10 @@ export async function getAutomation(db: SlayzoneDb, id: string): Promise<Automat
   return row ? parseAutomationRow(row) : null
 }
 
-export async function createAutomation(
+async function createAutomationRow(
   db: SlayzoneDb,
   data: CreateAutomationInput
 ): Promise<Automation> {
-  assertAutomationActionsAllowed(data.actions, { op: 'save' })
   const id = crypto.randomUUID()
   const row = await db.namedTxn('automations:create', {
     id,
@@ -63,13 +61,10 @@ export async function createAutomation(
   return parseAutomationRow(row)
 }
 
-export async function updateAutomation(
+async function updateAutomationRow(
   db: SlayzoneDb,
   data: UpdateAutomationInput
 ): Promise<Automation> {
-  if (data.actions !== undefined) {
-    assertAutomationActionsAllowed(data.actions, { op: 'save', automationId: data.id })
-  }
   const fields: string[] = []
   const values: unknown[] = []
 
@@ -165,4 +160,29 @@ export async function listAutomationRuns(
 
 export async function clearAutomationRuns(db: SlayzoneDb, automationId: string): Promise<void> {
   await db.run('DELETE FROM automation_runs WHERE automation_id = ?', [automationId])
+}
+
+/**
+ * Called after an automation is created or changed — its actions may name a folder the
+ * local computer must be allowed to work in (hub computer-project-sync, M6).
+ */
+let automationWritten: (() => void) | null = null
+export function setAutomationWrittenListener(fn: (() => void) | null): void {
+  automationWritten = fn
+}
+
+export async function createAutomation(
+  ...args: Parameters<typeof createAutomationRow>
+): ReturnType<typeof createAutomationRow> {
+  const created = await createAutomationRow(...args)
+  automationWritten?.()
+  return created
+}
+
+export async function updateAutomation(
+  ...args: Parameters<typeof updateAutomationRow>
+): ReturnType<typeof updateAutomationRow> {
+  const updated = await updateAutomationRow(...args)
+  automationWritten?.()
+  return updated
 }

@@ -251,10 +251,21 @@ export function gitStatus(rootPath: string): Promise<GitStatusMap> {
   })
 }
 
+/**
+ * Server-side limits on what a search may read (not on the wire). `readLink`: a
+ * symlink in the tree is read only through this — the path to read, or null to skip
+ * it. The computer passes its path jail: a link out of the root, or onto its own
+ * protected state, is never read (K8). Absent: links are followed, as before.
+ */
+export interface SearchFilesGuard {
+  readLink?: (absPath: string) => string | null
+}
+
 export function searchFiles(
   rootPath: string,
   query: string,
-  options?: SearchFilesOptions
+  options?: SearchFilesOptions,
+  guard: SearchFilesGuard = {}
 ): FileSearchResult[] {
   if (!query) return []
   const root = path.resolve(rootPath)
@@ -289,15 +300,24 @@ export function searchFiles(
       if (ig.ignores(e.isDirectory() ? relPath + '/' : relPath)) continue
       if (e.isDirectory()) {
         walk(path.join(dir, e.name), relPath)
+      } else if (e.isSymbolicLink() && guard.readLink) {
+        const target = guard.readLink(path.join(dir, e.name))
+        if (target !== null) searchFile(root, relPath, pattern, results, target)
       } else {
         searchFile(root, relPath, pattern, results)
       }
     }
   }
 
-  function searchFile(rootDir: string, relPath: string, re: RegExp, out: FileSearchResult[]): void {
+  function searchFile(
+    rootDir: string,
+    relPath: string,
+    re: RegExp,
+    out: FileSearchResult[],
+    readFrom?: string
+  ): void {
     if (totalMatches >= maxResults) return
-    const abs = path.join(rootDir, relPath)
+    const abs = readFrom ?? path.join(rootDir, relPath)
     let stat: fs.Stats
     try {
       stat = fs.statSync(abs)

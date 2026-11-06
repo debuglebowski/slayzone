@@ -514,6 +514,27 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  // Final review M2: a recovery shell whose agent's tombstone was gone (computer
+  // restarted, carry window over) got a fresh buffer at seq 0 — below what the
+  // terminal had already shown, so it dropped everything the shell printed. The hub
+  // says where the session's seqs reached; a fresh carried buffer continues there.
+  it('a continuing spawn with no tombstone continues after the seq the hub names', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const reply = (await pty.handlers['pty.spawn']({
+      sessionId: 'carry-fresh',
+      spawnId: 'spawn-2',
+      carryOutput: { fromSpawnId: 'spawn-gone', preamble: '[recovered]\r\n', afterSeq: 41 },
+      command: 'sh',
+      args: ['-c', 'printf shell'],
+      cwd: process.cwd()
+    })) as { seq?: number }
+    expect(reply.seq).toBe(42)
+    await waitFor(() => dataParams(notifies).some((d) => d.data.includes('shell')))
+    expect(Math.min(...dataParams(notifies).map((d) => d.seq))).toBeGreaterThan(41)
+    pty.disposeAll()
+  })
+
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
@@ -1102,6 +1123,32 @@ describe('agent-start admission', () => {
     expect(outputOf(notifies, 'first')).toContain('ready')
     expect((second.value as SpawnResult).pid).toBeGreaterThan(0)
     await waitFor(() => outputOf(notifies, 'second').includes('typed-while-queued'))
+    pty.disposeAll()
+  })
+
+  // The hub turns relaying on (someone opened the tab) while the spawn still waits
+  // for its slot. Lost, the session never streamed: the hub already counts it on
+  // and never asks again (mobile / web tabs whose start was queued).
+  it('relay turned on while queued: the session streams once it starts', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder', 0.4))
+    const queued = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'quiet',
+        spawnId: 'attempt-1',
+        admission: 'foreground',
+        relay: false,
+        command: 'sh',
+        args: ['-c', 'printf hello-relay; exec cat'],
+        cwd
+      }) as Promise<unknown>
+    )
+    await new Promise((r) => setTimeout(r, 50))
+    expect(queued.done, 'still waiting for the slot').toBe(false)
+    await pty.handlers['pty.relay']({ sessionId: 'quiet', spawnId: 'attempt-1', on: true })
+    await waitFor(() => queued.done)
+    await waitFor(() => outputOf(notifies, 'quiet').includes('hello-relay'), 3000)
     pty.disposeAll()
   })
 

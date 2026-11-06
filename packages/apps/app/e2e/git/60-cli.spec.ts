@@ -470,16 +470,18 @@ test.describe('CLI: slay', () => {
       command: string
     ): Promise<string> =>
       page.evaluate(
-        ({ label, command }) =>
+        ({ label, command, cwd }) =>
           window.getTrpcVanillaClient().processes.spawn.mutate({
             projectId: null,
             taskId: null,
             label,
             command,
-            cwd: '/tmp',
+            cwd,
             autoRestart: false
           }) as Promise<string>,
-        { label, command }
+        // Processes run on the computer, which refuses a cwd outside its folders
+        // (`/tmp` is outside `$HOME`); the test project is inside.
+        { label, command, cwd: TEST_PROJECT_PATH }
       )
 
     test.beforeAll(async ({ mainWindow }) => {

@@ -71,6 +71,7 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       observed_at INTEGER NOT NULL,
       PRIMARY KEY (project_id, mode)
     );
+    CREATE TABLE chat_legacy_tab_computers (tab_id TEXT PRIMARY KEY, computer_id TEXT NOT NULL);
     CREATE TABLE chat_workspace_changes (
       id TEXT PRIMARY KEY,
       tab_id TEXT NOT NULL REFERENCES terminal_tabs(id) ON DELETE CASCADE,

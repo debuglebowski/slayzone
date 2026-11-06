@@ -38,13 +38,13 @@ import {
   type ChatBootstrap,
   type LegacyChatDiagnostics,
   createChatMigrationAttachmentReader
-} from '@slayzone/chat-runtime/server'
-import {
-  defaultConversationRegistry,
-  type ChatDataOps,
-  type ChatAttachmentReader,
-  type ChatTerminalState
+} from '@slayzone/chat-runtime/hub'
+import type {
+  ChatDataOps,
+  ChatAttachmentReader,
+  ChatTerminalState
 } from '@slayzone/terminal/runtime'
+import { defaultConversationRegistry } from '@slayzone/terminal/hub'
 
 /** `quiesce` refused: the task's agents run, so its history migration waits. */
 class ChatMigrationDeferredError extends Error {}
@@ -332,9 +332,10 @@ export function createComputerChatServices(opts: {
   /** Computer a legacy owner's provider session ran on. One definition for the
    * migration, its session election, and the terminal-resume ambiguity fence:
    * if they disagreed, a session could be elected in one and fenced in another. */
+  // Where a legacy (hub-era) tab's agent ran: v196's record, not the legacy table.
   const sessionComputer = async (owner: HubChatOwnership) => {
     const recorded = await opts.db.get<{ computer_id: string }>(
-      'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+      'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
       [owner.tabId]
     )
     return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
@@ -772,7 +773,7 @@ export function createComputerChatServices(opts: {
           )
           const recorded = tab
             ? await opts.db.get<{ computer_id: string }>(
-                'SELECT computer_id FROM chat_workspace_changes WHERE tab_id=? AND computer_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1',
+                'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
                 [tab.id]
               )
             : null

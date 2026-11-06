@@ -15,7 +15,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { getSlayzoneHomeDir, getStorageDir, type SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
-import { hubStateRoots, type AccessRequest, type AccessScope, type ResourceKind } from '../access'
+import {
+  hubStateRoots,
+  isPathKind,
+  type AccessRequest,
+  type AccessScope,
+  type ResourceKind
+} from '../access'
 import type { HttpIdRef } from '../http-owner-policy'
 
 /** The facts `canAccess` needs, for a REST or MCP caller on a hub with login. */
@@ -258,7 +264,7 @@ export function auditOwnerDenied(opts: {
     detail: {
       reason: opts.reason,
       ...(denied ? { resource: denied.ref.kind, at: denied.ref.at } : {}),
-      ...(denied?.value && denied.ref.kind !== 'path' ? { resourceId: denied.value } : {}),
+      ...(denied?.value && !isPathKind(denied.ref.kind) ? { resourceId: denied.value } : {}),
       ...(opts.status ? { status: opts.status } : {})
     }
   })

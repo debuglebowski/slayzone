@@ -1,4 +1,3 @@
-import { whichBinary } from '@slayzone/terminal/server'
 import type {
   GhPullRequest,
   GhPrComment,
@@ -8,21 +7,11 @@ import type {
   MergePrInput,
   EditPrCommentInput
 } from '../shared/types'
-import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
-import { execAsync, execGit } from './exec-async'
+import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 
 const GH_PR_JSON_FIELDS =
   'number,title,body,url,state,headRefName,baseRefName,isCrossRepository,isDraft,author,createdAt,reviewDecision,statusCheckRollup'
-
-// Cache resolved gh path
-let ghPath: string | null | undefined
-
-async function resolveGhPath(): Promise<string | null> {
-  if (ghPath !== undefined) return ghPath
-  ghPath = await whichBinary('gh')
-  return ghPath
-}
 
 /**
  * Where `gh` actually runs.
@@ -44,16 +33,6 @@ export interface GhExecutor {
   ): Promise<{ status: number | null; stdout: string; stderr: string }>
 }
 
-/**
- * Run gh on THIS machine: the resolved binary with argv, no shell. Through the
- * user's interactive shell, its startup output (prompt themes, gitstatus) landed on
- * the stdout gh's JSON comes back on. `execAsync` supplies the login-shell PATH.
- *
- * Exported so a routed executor can delegate to it for the zero-computer case,
- * where this host's disk is the only one and its own `gh` is therefore the only
- * meaningful identity. Refused on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0`
- * (T-06): that hub has no `gh` identity of its own, so no computer = no `gh`.
- */
 /** This machine has no `gh` on its login-shell PATH. */
 export class GhNotFoundError extends Error {
   constructor() {
@@ -62,23 +41,17 @@ export class GhNotFoundError extends Error {
   }
 }
 
-export const runGhLocally: GhExecutor = async (args, opts) => {
-  assertHubLocalExecEnabled({ op: 'gh' })
-  const gh = await resolveGhPath()
-  if (!gh) throw new GhNotFoundError()
+/** No executor wired: `gh` has nowhere to run — the hub never runs it itself. */
+const noComputer: GhExecutor = async () => refuseNoComputer({ op: 'gh' })
 
-  return execAsync(gh, args, { ...opts, source: 'gh' })
-}
-
-let ghExecutor: GhExecutor = runGhLocally
+let ghExecutor: GhExecutor = noComputer
 
 /**
  * Point every gh call at a computer. Called by the hub composition once the computer
- * gateway exists; without it the local executor stands, which is correct for a
- * host with no computers.
+ * gateway exists; null = none ("connect a computer").
  */
 export function setGhExecutor(executor: GhExecutor | null): void {
-  ghExecutor = executor ?? runGhLocally
+  ghExecutor = executor ?? noComputer
 }
 
 async function spawnGh(
@@ -150,36 +123,6 @@ export async function checkGhInstalled(repoPath: string): Promise<boolean> {
   } catch (err) {
     if (err instanceof GhNotFoundError) return false
     throw err
-  }
-}
-
-export async function hasGithubRemote(repoPath: string): Promise<boolean> {
-  try {
-    const output = await execGit(['remote', '-v'], { cwd: repoPath })
-    return /github\.com/i.test(output)
-  } catch {
-    return false
-  }
-}
-
-async function ensureBranchPushed(repoPath: string): Promise<void> {
-  try {
-    await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { cwd: repoPath })
-    return // upstream exists
-  } catch {
-    // no upstream — push
-  }
-
-  const branchOutput = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })
-  const branch = branchOutput.trim()
-
-  const push = await execAsync('git', ['push', '-u', 'origin', branch], {
-    cwd: repoPath,
-    timeout: 30000
-  })
-  if (push.status !== 0) {
-    const stderr = push.stderr?.trim() || 'Unknown error'
-    throw new Error(`Failed to push branch: ${stderr}`)
   }
 }
 
@@ -257,8 +200,15 @@ export async function getPrForCheckout(
   throw new Error(`gh pr view failed: ${stderr || `exit ${result.status ?? 'spawn failure'}`}`)
 }
 
-export async function createPr(input: CreatePrInput): Promise<CreatePrResult> {
-  await ensureBranchPushed(input.repoPath)
+/**
+ * `ensurePushed`: publish the branch first — the routed `ensureBranchPushed` op (it
+ * runs on the checkout's computer).
+ */
+export async function createPr(
+  input: CreatePrInput,
+  ensurePushed: (repoPath: string) => Promise<void>
+): Promise<CreatePrResult> {
+  await ensurePushed(input.repoPath)
 
   const args = [
     'pr',

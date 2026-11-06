@@ -121,20 +121,19 @@ describe('processes switched off', () => {
     expect(processTouches).toBe(0)
   })
 
-  test('POST /api/automations with run_command: 403, nothing stored', async () => {
-    const before = lines.length
+  // Automation actions run on computers, never on the hub: saving one is fine here.
+  test('POST /api/automations with run_command: stored (it will run on a computer)', async () => {
     const res = await rest.request('POST', '/api/automations', {
       project: 'Alpha',
       name: 'cmd',
       trigger_config: { type: 'manual', params: {} },
       actions: runCommand
     })
-    expectRefused(res, 'HUB_PROCESSES_DISABLED')
-    expect(lines[before].event).toBe('automation.run_command')
+    expect(res.status).toBeLessThan(300)
     const n = h.db.prepare("SELECT COUNT(*) AS n FROM automations WHERE name = 'cmd'").get() as {
       n: number
     }
-    expect(n.n).toBe(0)
+    expect(n.n).toBe(1)
   })
 
   const directId = crypto.randomUUID()
@@ -145,15 +144,9 @@ describe('processes switched off', () => {
     )
     .run(directId, projectId)
 
-  test('PATCH /api/automations/:id setting run_command: 403, row unchanged', async () => {
-    expectRefused(
-      await rest.request('PATCH', `/api/automations/${directId}`, { actions: runCommand }),
-      'HUB_PROCESSES_DISABLED'
-    )
-    const row = h.db.prepare('SELECT actions FROM automations WHERE id = ?').get(directId) as {
-      actions: string
-    }
-    expect(row.actions).toBe('[]')
+  test('PATCH /api/automations/:id setting run_command: saved', async () => {
+    const res = await rest.request('PATCH', `/api/automations/${directId}`, { actions: [] })
+    expect(res.status).toBe(200)
   })
 
   test('PATCH /api/automations/:id renaming: still works', async () => {
@@ -161,16 +154,13 @@ describe('processes switched off', () => {
     expect(res.status).toBe(200)
   })
 
-  test('POST /api/automations/:id/run on a run_command row from the database: 403', async () => {
+  test('POST /api/automations/:id/run with no computer: 403 "connect a computer", nothing run', async () => {
     h.db
       .prepare('UPDATE automations SET actions = ? WHERE id = ?')
       .run(JSON.stringify(runCommand), directId)
-    const before = lines.length
-    expectRefused(
-      await rest.request('POST', `/api/automations/${directId}/run`),
-      'HUB_PROCESSES_DISABLED'
-    )
-    expect(lines[before].detail.op).toBe('run')
+    const res = await rest.request('POST', `/api/automations/${directId}/run`)
+    expect(res.status).toBe(403)
+    expect((res.body as Refusal).code).toBe('NO_COMPUTER_CONNECTED')
     const runs = h.db
       .prepare('SELECT COUNT(*) AS n FROM automation_runs WHERE automation_id = ?')
       .get(directId) as { n: number }

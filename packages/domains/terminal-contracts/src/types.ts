@@ -412,7 +412,7 @@ export interface BufferSinceResult {
   /**
    * State-resetting bytes to write BEFORE `chunks`. Non-empty only for a cold
    * attach (`afterSeq === -1`) into a buffer that has evicted content — see
-   * `ring-buffer.ts`'s `getChunksSince`. Empty string on reattach, always safe
+   * `ring-buffer.ts`'s `getReplaySince`. Empty string on reattach, always safe
    * to write unconditionally (a no-op).
    */
   prelude: string

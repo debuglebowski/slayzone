@@ -28,6 +28,8 @@
  * radius, not a side effect of this mirror.
  */
 import * as headless from '@xterm/headless'
+// Patched (patches/@xterm__addon-unicode-graphemes@*.patch): it decoded its width
+// tables from the wrong bytes of Node's shared Buffer pool and hung plain-Node boots.
 import * as graphemes from '@xterm/addon-unicode-graphemes'
 import type { SyncQueryPart } from './sync-query-response'
 

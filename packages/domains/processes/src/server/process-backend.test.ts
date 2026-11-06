@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest'
+// Background processes run on computers: this suite drives the manager through a
+// fake routed backend, every spawn resolved to computer 'c1'.
 import {
   spawnProcess,
   stopProcess,
   removeProcess,
   processEvents,
-  listAllProcesses
+  setProcessComputerResolver
 } from './process-manager'
 import { setProcessBackend } from './process-backend'
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from './process-backend'
@@ -62,13 +64,7 @@ const fakeBackend: ProcessBackend = {
     const h = new FakeHandle()
     spawned.push(h)
     return h
-  },
-  // Never a stale pid to reap in this suite (every spawnProcess() call mints a
-  // fresh id), so these are unreachable — stubbed only to satisfy the interface.
-  getCommandLine(): Promise<string | null> {
-    return Promise.resolve(null)
-  },
-  killByPid(): void {}
+  }
 }
 
 // The cases below are ONE sequential scenario (shared backend, shared event
@@ -79,6 +75,11 @@ const fakeBackend: ProcessBackend = {
 describe('fake backend', () => {
   beforeAll(() => {
     setProcessBackend(fakeBackend)
+    setProcessComputerResolver(async () => 'c1')
+  })
+  afterAll(() => {
+    setProcessComputerResolver(null)
+    setProcessBackend(null)
   })
 
   // --- doSpawn routes through the backend with the right spec ---
@@ -96,11 +97,8 @@ describe('fake backend', () => {
       expect(lastSpec!.taskId).toBe('task')
       expect(lastSpec!.projectId).toBe('proj')
     })
-    test('computerId is dark (null) on the local path', () => {
-      expect(lastSpec!.computerId).toBe(null)
-    })
-    test('handle.pid propagates to proc.pid', () => {
-      expect(listAllProcesses().find((p) => p.id === idA)?.pid).toBe(4242)
+    test('spec names the resolved computer', () => {
+      expect(lastSpec!.computerId).toBe('c1')
     })
 
     // --- streaming: stdout AND stderr chunks both route to the processEvents log ---
@@ -174,121 +172,6 @@ describe('fake backend', () => {
       await vi.waitFor(() =>
         expect(spawned[spawned.length - 1].killSignals.length).toBeGreaterThanOrEqual(1)
       )
-    })
-  })
-})
-
-// ==================== REAL child_process (local backend) ====================
-describe('real child_process (local backend)', () => {
-  beforeAll(() => {
-    setProcessBackend(null) // restore localProcessBackend
-  })
-
-  describe('streaming + exit', () => {
-    let idR = ''
-    const sawLog = (): boolean =>
-      logs.some((l) => l.id === idR && l.line.includes('slayzone-real-ok'))
-    const sawDone = (): boolean => statuses.some((s) => s.id === idR && s.status === 'completed')
-
-    beforeAll(async () => {
-      idR = await spawnProcess('proj', 'task', 'R', 'echo slayzone-real-ok', '/tmp', false)
-      // `exit` can fire before the final stdout `data` flushes, so wait for BOTH the
-      // log line and the completed status (deadline-bounded so a stuck child fails).
-      const deadline = Date.now() + 15000
-      while (Date.now() < deadline && !(sawLog() && sawDone())) {
-        await delay(100)
-      }
-    })
-    afterAll(() => {
-      removeProcess(idR)
-    })
-
-    test('localProcessBackend streams real stdout → processEvents log', () => {
-      expect(sawLog()).toBe(true)
-    })
-    test('localProcessBackend real exit(0) → completed', () => {
-      expect(sawDone()).toBe(true)
-    })
-  })
-
-  // === env sanitize: a user `run` process must NOT inherit the host's SlayZone
-  //     infra/secret env (localProcessBackend routes through sanitizeSpawnEnv). ===
-  describe('env sanitize', () => {
-    let idE = ''
-    const envLine = (): string =>
-      logs
-        .filter((l) => l.id === idE)
-        .map((l) => l.line)
-        .join('')
-    const sawEnv = (): boolean => envLine().includes('PATHLEN:')
-    const doneE = (): boolean => statuses.some((s) => s.id === idE && s.status === 'completed')
-
-    beforeAll(async () => {
-      process.env.SLAYZONE_HUB_TOKEN = 'leak-secret'
-      process.env.SLAYZONE_HUB_ADDRESS = 'hub.example:8443'
-      // Colon delimiters (not [brackets]) — interactive zsh globs `[]` and errors.
-      idE = await spawnProcess(
-        'proj',
-        'task',
-        'E',
-        'echo TOK:$SLAYZONE_HUB_TOKEN: ADDR:$SLAYZONE_HUB_ADDRESS: PATHLEN:${#PATH}:',
-        '/tmp',
-        false
-      )
-      const deadlineE = Date.now() + 15000
-      while (Date.now() < deadlineE && !(sawEnv() && doneE())) {
-        await delay(100)
-      }
-      delete process.env.SLAYZONE_HUB_TOKEN
-      delete process.env.SLAYZONE_HUB_ADDRESS
-    })
-    afterAll(() => {
-      removeProcess(idE)
-    })
-
-    test('sanitize case: child emitted its env line', () => {
-      expect(sawEnv()).toBe(true)
-    })
-    test('sanitize strips inherited SLAYZONE_HUB_TOKEN from a run process', () => {
-      expect(envLine()).toContain('TOK::')
-    })
-    test('sanitize strips inherited SLAYZONE_HUB_ADDRESS from a run process', () => {
-      expect(envLine()).toContain('ADDR::')
-    })
-    test('sanitize keeps a non-empty PATH for a run process', () => {
-      expect(envLine()).not.toMatch(/PATHLEN:0:/)
-    })
-  })
-
-  // === a cwd that does not exist (T-102): spawn reports it as an 'error' event after
-  //     returning; unheard, that threw out of this process. Now: a log line + error. ===
-  describe('a cwd that does not exist (T-102)', () => {
-    let idX = ''
-    const failLine = (): boolean =>
-      logs.some(
-        (l) => l.id === idX && l.line.includes('failed to start') && l.line.includes('ENOENT')
-      )
-    const erroredX = (): boolean => statuses.some((s) => s.id === idX && s.status === 'error')
-
-    beforeAll(async () => {
-      idX = await spawnProcess('proj', 'task', 'X', 'echo never', '/no/such/dir-t102', false)
-      const deadlineX = Date.now() + 5000
-      while (Date.now() < deadlineX && !(failLine() && erroredX())) {
-        await delay(50)
-      }
-    })
-    afterAll(() => {
-      removeProcess(idX)
-    })
-
-    test('missing cwd: the reason is logged (failed to start … ENOENT)', () => {
-      expect(failLine()).toBe(true)
-    })
-    test('missing cwd: status error, and this process is still running', () => {
-      expect(erroredX()).toBe(true)
-    })
-    test('missing cwd: no pid recorded', () => {
-      expect(listAllProcesses().find((p) => p.id === idX)?.pid).toBe(null)
     })
   })
 })

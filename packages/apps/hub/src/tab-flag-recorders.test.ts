@@ -10,9 +10,10 @@
  * no-op, no agent was ever recorded running, and `listAutoRestoreTasks` had nothing
  * to restore. Same orphaning that killed idle-close and the warm pool.
  *
- * So this asserts the REAL module-global state of `@slayzone/terminal/server`
- * (not injected spies): after `wireTabFlagRecorders(db)` the pty AND chat
- * managers both hold a recorder, and driving it round-trips through
+ * So this asserts the REAL module-global state of `@slayzone/terminal/hub`
+ * (not injected spies): after `wireTabFlagRecorders(db)` the pty manager holds a
+ * recorder (chat agents run on computers, which record their own state), and
+ * driving it round-trips through
  * `setTabAgentState` into the real `terminal_tabs` row — including the idle-close
  * `auto_stopped` state, which no process ever wrote before.
  *
@@ -31,12 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import {
-  getPtyAgentStateTabRecorder,
-  getChatAgentStateTabRecorder,
-  setPtyAgentStateTabRecorder,
-  setChatAgentStateTabRecorder
-} from '@slayzone/terminal/server'
+import { getPtyAgentStateTabRecorder, setPtyAgentStateTabRecorder } from '@slayzone/terminal/server'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { wireTabFlagRecorders } from './tab-flag-recorders.js'
 
@@ -60,20 +56,12 @@ const agentStateOf = (id: string): string =>
 
 test('tab-flag recorders: unwired by default (the orphaned state)', () => {
   setPtyAgentStateTabRecorder(null)
-  setChatAgentStateTabRecorder(null)
   expect(getPtyAgentStateTabRecorder()).toBe(null)
-  expect(getChatAgentStateTabRecorder()).toBe(null)
 })
 
-test('tab-flag recorders: wireTabFlagRecorders installs on BOTH pty and chat', () => {
+test('tab-flag recorders: wireTabFlagRecorders installs on the pty manager', () => {
   wireTabFlagRecorders(h.slayDb)
-  const pty = getPtyAgentStateTabRecorder()
-  const chat = getChatAgentStateTabRecorder()
-  expect(typeof pty).toBe('function')
-  expect(typeof chat).toBe('function')
-  // One recorder, two managers — a chat agent and a pty agent must flip the
-  // same column or restore is half-broken depending on the task's mode.
-  expect(pty).toBe(chat)
+  expect(typeof getPtyAgentStateTabRecorder()).toBe('function')
 })
 
 test('tab-flag recorders: installed recorder round-trips into terminal_tabs', async () => {

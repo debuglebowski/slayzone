@@ -15,7 +15,7 @@ import {
   subagentIdOf,
   unadoptedWarmAgent,
   type AgentTree
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import {
   recordConversation,
   findPendingSpawn,

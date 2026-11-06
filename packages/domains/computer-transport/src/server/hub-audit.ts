@@ -27,6 +27,15 @@ type Params = Record<string, unknown>
 interface AuditRule {
   event: SecurityEventName
   detail: (p: Params) => Record<string, unknown>
+  /** Audited only when this holds (a method that carries reads and writes). */
+  when?: (p: Params) => boolean
+}
+
+/** The repo a `git.op` acts on: the first path field its input names. */
+function gitOpRepo(input: unknown): unknown {
+  if (input === null || typeof input !== 'object') return null
+  const i = input as Params
+  return i.path ?? i.repoPath ?? i.projectPath ?? i.targetPath ?? null
 }
 
 /**
@@ -73,13 +82,37 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.warmKill': { event: 'computer.pty.kill', detail: (p) => ({ warmId: p.warmId, warm: true }) },
   'pty.resize': null,
   'pty.write': null,
+  // Appearance only (OSC colour-query answers); no session, nothing started.
+  'pty.setTheme': null,
   'pty.getBufferSince': null,
+  'pty.getReplay': null,
+  'pty.relay': null,
+  'proc.stats': null,
+  // Empties a session's scrollback (the terminal's "clear"); starts nothing.
+  'pty.clearBuffer': null,
   'pty.list': null,
   'pty.prioritize': null,
   'pty.backgroundJobs': null,
   'pty.doctor': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
+  // AI-config files: its writes (instructions, skills, MCP config) are audited, its
+  // reads are not.
+  'agentConfig.fs': {
+    event: 'computer.fs.write',
+    when: (p) => ['writeFile', 'mkdir', 'unlink', 'rmdir', 'rename'].includes(String(p.op)),
+    detail: (p) => ({ op: p.op, path: p.path, ...(p.to ? { to: p.to } : {}) })
+  },
+  // Reads the agents' own usage logs; changes nothing.
+  'usage.collect': null,
+  // Lists file names; reads no content, changes nothing.
+  'testPanel.scan': null,
+  // An automation's shell command: the program, never the command line (it can
+  // carry a templated prompt).
+  'exec.run': {
+    event: 'computer.proc.spawn',
+    detail: (p) => ({ projectId: p.projectId, program: programName(p.command), oneShot: true })
+  },
   'proc.spawn': {
     event: 'computer.proc.spawn',
     detail: (p) => ({ ...spawn(p), shell: p.shell === true })
@@ -151,7 +184,20 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
     detail: (p) => ({ repoPath: p.repoPath, worktreePath: p.worktreePath })
   },
   'git.isGitRepo': null,
+  // A watch reads; it changes nothing.
+  'git.watchStart': null,
+  // Turn snapshots: the hub's own bookkeeping refs on every agent turn (reads and
+  // `refs/slayzone/turns/*` writes) — not a user's act, so not audited.
+  'git.turnOp': null,
+  'git.watchStop': null,
   'git.getCurrentBranch': null,
+  // The git panel: its writes (stage, commit, push, checkout, …) are audited, its
+  // constant reads (status, diffs, log) are not.
+  'git.op': {
+    event: 'computer.git',
+    when: (p) => p.mutates === true,
+    detail: (p) => ({ op: p.op, repoPath: gitOpRepo(p.input) })
+  },
   'gh.exec': { event: 'computer.gh', detail: (p) => ({ subcommand: ghSubcommand(p.args) }) },
   // Read-only, like the fs reads.
   'claudeSession.read': null,
@@ -176,5 +222,6 @@ export function auditedHubCall(
   const rule = (HUB_CALL_AUDIT as Record<string, AuditRule | null | undefined>)[method]
   if (!rule) return null
   const p = params !== null && typeof params === 'object' ? (params as Params) : {}
+  if (rule.when && !rule.when(p)) return null
   return { event: rule.event, detail: { method, ...rule.detail(p) } }
 }

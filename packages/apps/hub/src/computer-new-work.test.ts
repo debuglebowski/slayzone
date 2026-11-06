@@ -57,6 +57,7 @@ describe('countRunningWork', () => {
     ptys?: string[]
     warms?: string[]
     chats?: string[]
+    procs?: string[]
     fail?: boolean
   }) => ({
     listComputers: () =>
@@ -67,6 +68,8 @@ describe('countRunningWork', () => {
         return { sessions: (opts.ptys ?? []).map((sessionId) => ({ sessionId })) } as T
       if (method === M.ptyWarmList)
         return { warms: (opts.warms ?? []).map((warmId) => ({ warmId })) } as T
+      if (method === M.procList)
+        return { sessions: (opts.procs ?? []).map((sessionId) => ({ sessionId })) } as T
       return (opts.chats ?? []).map((state) => ({ state })) as T
     }
   })

@@ -17,7 +17,7 @@ import {
   type AgentLifecycleMounts,
   type ChatMounts,
   type PtyMounts
-} from '@slayzone/terminal/server'
+} from '@slayzone/terminal/hub'
 import { processesRouter, type ProcessesMounts } from '@slayzone/processes/server'
 import { appLevelRouter } from './routers/app'
 import {
@@ -40,7 +40,7 @@ import {
   type AppLeaderboardMounts,
   type UsageAnalyticsMounts
 } from '@slayzone/usage-analytics/server'
-import type { AppUsageMounts } from '@slayzone/terminal/server'
+import type { AppUsageMounts } from '@slayzone/terminal/hub'
 import type { AppFeedbackMounts } from '@slayzone/feedback/server'
 import type { AppBrowserMounts, AppWebviewMounts } from '@slayzone/task-browser/server'
 import type { AppFloatingAgentMounts } from '@slayzone/agent-panels/server'
@@ -58,7 +58,7 @@ import {
   workspaceRouter,
   type FileEditorMounts,
   type WorkspaceMounts
-} from '@slayzone/file-editor/server'
+} from '@slayzone/file-editor/hub'
 import { historyRouter, type HistoryMounts } from '@slayzone/history/server'
 import { hubRouter } from './routers/hub'
 import { integrationsRouter, type IntegrationsMounts } from '@slayzone/integrations/server'
@@ -83,7 +83,7 @@ import {
 import { artifactsRouter, type ArtifactsMounts } from '@slayzone/task-artifacts/server'
 import { taskTerminalsRouter, type TaskTerminalsMounts } from '@slayzone/task-terminals/server'
 import { testPanelRouter, type TestPanelMounts } from '@slayzone/test-panel/server'
-import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/server'
+import { worktreesRouter, type WorktreesMounts } from '@slayzone/worktrees/hub'
 
 export const appRouter = router({
   app: appLevelRouter,

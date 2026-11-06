@@ -11,7 +11,7 @@
  * express, since it always had *a* path even for a machine that had never seen
  * the project.
  *
- * Every path passes {@link assertPathAllowed} before it is recorded, so a stored
+ * Every path passes {@link judgePath} before it is recorded, so a stored
  * mapping can never point outside the jail the computer enforces everywhere else.
  *
  * @module computer/handlers/project
@@ -28,7 +28,7 @@ import {
   type ProjectResolvePathResult,
   type ProjectSetPathResult
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { judgePath } from '../path-jail'
 import type { ProjectPathStore } from '../project-paths'
 import type { HandlerContext, HubMethodTable } from './types'
 
@@ -43,7 +43,7 @@ export function createProjectHandlers(
   ctx: HandlerContext,
   getStore: () => ProjectPathStore | null
 ): HubMethodTable {
-  const allow = (candidate: string): string => assertPathAllowed(candidate, ctx.config.allowedRoots)
+  const allow = (candidate: string): string => judgePath(candidate, ctx.config.allowedRoots)
   const store = (): ProjectPathStore => {
     const s = getStore()
     if (!s) throw new Error('project path store is still loading')

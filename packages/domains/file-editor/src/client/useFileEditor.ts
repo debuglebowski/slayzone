@@ -8,7 +8,7 @@ import {
   type SetStateAction
 } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useTrack, type Tracker } from '@slayzone/telemetry/client'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
@@ -437,12 +437,14 @@ export function useFileEditor(
       })
     }
   )
-  useSubscription(
+  const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
       { ...target, rootPath: projectPath },
       { onData: onWatchEvent }
     )
   )
+  // Refused before any computer was there ("connect a computer"): start again on a connect.
+  useResubscribeOnComputerConnect(watch)
 
   // Cleanup the shared debounce timer on unmount (the file-watch subscription
   // owned this previously).

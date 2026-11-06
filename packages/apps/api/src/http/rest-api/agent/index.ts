@@ -223,7 +223,8 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
         res.type('text/plain').send(formatChatTranscript(rows))
         return
       }
-      const buffer = agent.pty.getBuffer(agent.sessionId)
+      // The computer holds the only scrollback: a read is a round trip.
+      const buffer = await agent.pty.getBuffer(agent.sessionId)
       if (buffer === null) throw new ChatRouteError(404, 'The terminal has no session')
       const lines = buffer.split('\n')
       res

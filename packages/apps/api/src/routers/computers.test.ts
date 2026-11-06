@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { computersRouter } from '@slayzone/computers/server'
+import { computersRouter, setComputerRemovedListener } from '@slayzone/computers/server'
 import { setAuthGate } from '@slayzone/trpc-server'
 import { setComputersDeps, type ComputersDeps } from '../app-deps.js'
 import { appRouter } from '../router.js'
@@ -145,6 +145,23 @@ test('computers.revokeComputer: drops the computer from the active list', async 
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(true)
   await caller.revokeComputer({ computerId: r.id })
   expect((await caller.list()).some((row) => row.id === r.id)).toBe(false)
+})
+
+// G3 / K9: a deleted or revoked computer never reconnects — what waited for it (a
+// process run it kept) is let go. The store tells the hub, so the router's delete and
+// revoke are heard — as are REST's and a departing user's (store-level test).
+test('computers: delete and revoke tell the hub the computer is gone', async () => {
+  const removed: string[] = []
+  setComputerRemovedListener((id) => removed.push(id))
+  try {
+    const a = await registerComputer(h.slayDb, { name: 'gone-1', platform: 'darwin', version: '1' })
+    const b = await registerComputer(h.slayDb, { name: 'gone-2', platform: 'darwin', version: '1' })
+    await caller.revokeComputer({ computerId: a.id })
+    await caller.delete({ computerId: b.id })
+    expect(removed).toEqual([a.id, b.id])
+  } finally {
+    setComputerRemovedListener(null)
+  }
 })
 
 test('computers: revoke, unrevoke, delete, claim and visibility write audit lines naming the user (T-03)', async () => {

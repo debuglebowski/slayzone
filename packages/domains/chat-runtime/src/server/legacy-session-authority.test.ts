@@ -91,3 +91,38 @@ test('a session no chat owner competes for stays unclaimed and clears a stale NU
     h.cleanup()
   }
 })
+
+// Where a hub-era tab's agent ran is v196's record (chat_legacy_tab_computers), not
+// the legacy chat_workspace_changes rows it was copied from — those are to be
+// dropped. Reading them, the election lost every tab's computer once they go.
+test("a hub-era tab's computer comes from v196's record, not the legacy table", async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
+    h.db.prepare("INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task')").run()
+    const owners = createChatOwnershipStore(h.slayDb)
+    for (const tab of ['a', 'b']) {
+      h.db
+        .prepare(
+          "INSERT INTO terminal_tabs(id,task_id,mode,position,created_at) VALUES(?,'task','claude-chat',0,?)"
+        )
+        .run(tab, tab === 'a' ? '2026-01-01' : '2026-01-02')
+      // Hub-era: no computer on the owner; only v196 says where it ran.
+      h.db
+        .prepare("INSERT INTO chat_legacy_tab_computers(tab_id,computer_id) VALUES(?, 'pc1')")
+        .run(tab)
+      await owners.register({
+        id: tab,
+        taskId: 'task',
+        tabId: tab,
+        mode: 'claude-chat',
+        computerId: null,
+        epoch: 1
+      })
+    }
+    // Both ran on pc1: unambiguous, the older tab is elected.
+    expect(await legacySessionAuthority(h.slayDb, 'task', 'claude-chat', 'session')).toBe('a')
+  } finally {
+    h.cleanup()
+  }
+})

@@ -71,7 +71,7 @@ export type ComputersDeps = {
    */
   localComputerId?: string | null
   /**
-   * How many terminals and agents run on a computer right now (0 when it is not
+   * How many terminals, agents and background processes run on a computer right now (0 when it is not
    * connected: nothing can run there). Disabling waits for 0. Absent = unknown, which
    * refuses to disable rather than guess.
    */
