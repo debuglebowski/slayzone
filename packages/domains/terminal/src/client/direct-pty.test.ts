@@ -274,6 +274,32 @@ describe('startDirectPtyLink', () => {
     expect(applied).toEqual(['\r'])
   })
 
+  it('a write the computer could not take directly (session not there) goes to the hub with the same id', async () => {
+    const l = fakeLease()
+    const directIds: Array<string | undefined> = []
+    l.lease.client.pty.write.mutate = async ({ writeId }: { data: string; writeId?: string }) => {
+      directIds.push(writeId)
+      return false
+    }
+    setup([l])
+    await flush()
+    const hubIds: Array<string | undefined> = []
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ writeId }: { data: string; writeId?: string }) => {
+            hubIds.push(writeId)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    expect(await ptyWrite(hub, 's1', 'k')).toBe(true)
+    expect(hubIds).toEqual(directIds)
+    expect(hubIds).toHaveLength(1)
+  })
+
   it('every write gets its own id', async () => {
     const ids: Array<string | undefined> = []
     const hub = {

@@ -100,6 +100,26 @@ describe('TerminalController: direct link', () => {
     c.dispose()
   })
 
+  it('a write the computer could not take directly (session not started) goes to the hub, same id', async () => {
+    const hub = hubClient()
+    const direct = directClient()
+    direct.client.pty.write.mutate = (async (input: unknown) => {
+      direct.calls.push(['direct.write', input])
+      return false
+    }) as never
+    const c = new TerminalController(
+      's',
+      hub.client as never,
+      () => undefined,
+      (run) => run()
+    )
+    c.setDirect(direct.client as never)
+    await c.write('x')
+    const id = (direct.calls[0]?.[1] as { writeId: string }).writeId
+    expect(hub.calls).toEqual([['hub.write', { sessionId: 's', data: 'x', writeId: id }]])
+    c.dispose()
+  })
+
   // A half-open socket never settles a write; a closed one rejects with no code. The
   // keystroke goes to the hub, and the link is reported lost (back to the relay).
   it('a write with no answer in time, or a transport failure, goes to the hub and drops the link', async () => {

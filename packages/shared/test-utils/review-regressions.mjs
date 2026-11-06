@@ -639,6 +639,15 @@ export const REGRESSIONS = [
       `${P}apps/hub/src/direct-link.test.ts`,
       `${P}shared/transport/src/client/direct-link.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L1',
+    what: 'a keystroke sent direct to a session waiting for its start slot is queued once (not dropped); a direct write the computer did not take goes through the hub with the same id',
+    files: [
+      `${P}apps/computer/src/handlers/pty.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
   }
 ]
 

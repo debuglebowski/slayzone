@@ -173,7 +173,7 @@ interface HubPtyBuffer {
 
 /**
  * Keystrokes: direct when the session has a lease, else the hub. A direct write that
- * may not have landed (refused, socket gone, no answer in time) goes to the hub with
+ * may not have landed (refused, not taken, socket gone, no answer in time) goes to the hub with
  * the same id — the computer applies it once, so it is neither lost nor typed twice;
  * a transport failure also drops the lease.
  */
@@ -190,7 +190,9 @@ export async function ptyWrite(
         direct.client.pty.write.mutate({ sessionId, data, writeId })
       )
       stats.writes++
-      return written
+      // False: the computer had no session to take it (not started yet, or gone).
+      // The hub queues for a session waiting to start; same id, applied once.
+      if (written) return true
     } catch (err) {
       const why = directCallFailure(err)
       if (why === 'answered') throw err

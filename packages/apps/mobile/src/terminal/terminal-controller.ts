@@ -25,6 +25,9 @@ import type { HubClient } from '../hub-board'
 import { createDomSink, type DomTerminal } from './dom-sink'
 import { type FeedClient, type FeedStatus, TerminalFeed } from './terminal-feed'
 
+/** A direct write the computer answered `false` to (see `write`). */
+const NOT_TAKEN = Symbol('not-taken')
+
 /** Desktop's throttle for the "user engaged" report. */
 export const TOUCH_THROTTLE_MS = 4_000
 
@@ -102,10 +105,14 @@ export class TerminalController {
     // One id on both paths: a late direct write retried through the hub is applied
     // once by the computer (docs/direct-link.md).
     const writeId = newDirectWriteId()
-    return this.viaDirect(
-      (d) => d.pty.write.mutate({ sessionId: this.sessionId, data, writeId }),
-      () => this.client.pty.write.mutate({ sessionId: this.sessionId, data, writeId })
-    )
+    const viaHub = () => this.client.pty.write.mutate({ sessionId: this.sessionId, data, writeId })
+    return this.viaDirect<unknown>(
+      async (d) =>
+        (await d.pty.write.mutate({ sessionId: this.sessionId, data, writeId })) || NOT_TAKEN,
+      viaHub
+      // Not taken (the session had not started, or was gone there): the hub queues
+      // it for a session waiting to start. Same id, applied once.
+    ).then((r) => (r === NOT_TAKEN ? viaHub() : r))
   }
 
   /** The `ref` the web view's terminal fills with its handle (set after mount). */

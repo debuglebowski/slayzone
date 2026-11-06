@@ -1126,6 +1126,34 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
+  it('a keystroke sent DIRECT to a session still waiting for its slot is queued, once, not dropped', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    const first = settled(pty.handlers['pty.spawn'](holder('first')) as Promise<unknown>)
+    const second = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'second',
+        admission: 'foreground',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
+    )
+    await waitFor(() => first.done)
+    expect(pty.direct.write('second', 'direct-while-queued\n', 'w1')).toBe(true)
+    // The same write retried through the hub is not queued twice.
+    await pty.handlers['pty.write']({
+      sessionId: 'second',
+      data: 'direct-while-queued\n',
+      writeId: 'w1'
+    })
+    await waitFor(() => second.done)
+    await waitFor(() => outputOf(notifies, 'second').includes('direct-while-queued'))
+    await new Promise((r) => setTimeout(r, 200))
+    // cat echoes once per line written: typed echo + cat's output, for ONE write.
+    expect(outputOf(notifies, 'second').split('direct-while-queued').length - 1).toBe(2)
+    pty.disposeAll()
+  })
+
   // The hub turns relaying on (someone opened the tab) while the spawn still waits
   // for its slot. Lost, the session never streamed: the hub already counts it on
   // and never asks again (mobile / web tabs whose start was queued).

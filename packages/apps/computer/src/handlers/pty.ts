@@ -1232,18 +1232,22 @@ export function createPtyHandlers(
     }
   }
 
+  /**
+   * Input for a session still waiting for its slot: queued, not lost, and written
+   * right after the spawn (see `QueuedSpawn`). A client write arriving twice (direct,
+   * then through the hub with the same id) is queued once.
+   */
+  function queueWrite(waiting: QueuedSpawn, data: string, writeId?: string): void {
+    if (writeId !== undefined && waiting.writes.some((w) => w.writeId === writeId)) return
+    waiting.writes.push({ data, ...(writeId !== undefined ? { writeId } : {}) })
+  }
+
   function write(rawParams: unknown): { ok: true } {
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
-      // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
-      if (params.writeId !== undefined && waiting.writes.some((w) => w.writeId === params.writeId))
-        return { ok: true }
-      waiting.writes.push({
-        data: params.data,
-        ...(params.writeId !== undefined ? { writeId: params.writeId } : {})
-      })
+      queueWrite(waiting, params.data, params.writeId)
       if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
@@ -1449,6 +1453,11 @@ export function createPtyHandlers(
       )
     },
     write(sessionId, data, writeId) {
+      const waiting = queued.get(sessionId)
+      if (waiting) {
+        queueWrite(waiting, data, writeId)
+        return true
+      }
       const session = sessions.get(sessionId)
       if (!session || session.warm) return false
       applyClientWrite(session, data, writeId)
