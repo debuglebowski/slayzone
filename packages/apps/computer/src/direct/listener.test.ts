@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
-import type { DirectRouter } from '@slayzone/transport/direct'
+import { createDirectRouter, type DirectRouter } from '@slayzone/transport/direct'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
@@ -533,12 +533,23 @@ describe('direct listener: chat commands', () => {
     const { store, listener, chat } = await setup()
     const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
     const { trpc } = client(listener, token)
-    await trpc.chat.respondPermission.mutate({
+    // Permission and tool answers are no direct commands: the hub's relay refuses
+    // them while the conversation runs in the terminal.
+    const procedures = Object.keys(
+      (
+        createDirectRouter({ pty: () => null, chat: () => null }) as unknown as {
+          _def: { procedures: Record<string, unknown> }
+        }
+      )._def.procedures
+    )
+    expect(procedures).not.toContain('chat.respondPermission')
+    expect(procedures).not.toContain('chat.sendToolResult')
+    expect(procedures).toContain('chat.saveScroll')
+    await trpc.chat.saveScroll.mutate({
       tabId: 't1',
-      args: { requestId: 'r', decision: { behavior: 'allow' } },
+      anchor: { atBottom: true },
       operationId: 'op-1'
     })
-    await trpc.chat.saveScroll.mutate({ tabId: 't1', anchor: { atBottom: true } })
     await trpc.chat.saveDraft.mutate({
       tabId: 't1',
       draft: { text: 'hi', attachments: [] },
@@ -548,16 +559,9 @@ describe('direct listener: chat commands', () => {
       {
         tabId: 't1',
         epoch: 3,
-        method: 'respondPermission',
-        args: ['t1', { requestId: 'r', decision: { behavior: 'allow' } }],
-        operationId: 'op-1'
-      },
-      {
-        tabId: 't1',
-        epoch: 3,
         method: 'saveTabScroll',
         args: ['t1', { atBottom: true }],
-        operationId: expect.any(String)
+        operationId: 'op-1'
       },
       {
         tabId: 't1',
@@ -584,7 +588,7 @@ describe('direct listener: chat commands', () => {
       })
     ).rejects.toThrow()
     await expect(
-      trpc.chat.sendToolResult.mutate({ tabId: 't2', args: { toolUseId: 'u', content: 'c' } })
+      trpc.chat.saveScroll.mutate({ tabId: 't2', anchor: { atBottom: true } })
     ).rejects.toThrow(/no capability/)
     expect(chat.commands).toEqual([])
   })

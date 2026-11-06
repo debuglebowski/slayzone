@@ -1,12 +1,13 @@
 /**
- * A chat tab's history reads and simple commands over the direct link when the tab
- * has one (docs/direct-link.md), with the hub's types and the hub as the fallback:
- *  - a direct read that fails is answered by the hub, and the link is reported lost;
- *  - a direct write the computer refused (its grant ended: FORBIDDEN/UNAUTHORIZED)
- *    was not made, so it goes to the hub. Any other failure is surfaced, never
- *    repeated through the hub — it may have been applied.
- * The computer returns exactly what the hub would relay, so its answers carry the
- * hub's output types.
+ * A chat tab's history reads over the direct link when the tab has one
+ * (docs/direct-link.md), with the hub's types and the hub as the fallback: a direct
+ * read that fails is answered by the hub, and the link is reported lost. The
+ * computer returns exactly what the hub would relay, so its answers carry the hub's
+ * output types.
+ *
+ * Permission and tool answers always go through the hub: its relay refuses them
+ * while the conversation runs in the terminal, and syncs the chat's bootstrap first
+ * — checks only the hub can make.
  *
  * @module terminal/client/chat-direct
  */
@@ -15,7 +16,7 @@ import { noteDirectUse, type DirectLease } from '@slayzone/transport/direct-clie
 type Query<I, O> = { query(input: I): Promise<O> }
 type Mutation<I, O> = { mutate(input: I): Promise<O> }
 
-/** The hub chat procedures with a direct counterpart (inputs as the hub takes them). */
+/** The hub chat procedures this module routes (inputs as the hub takes them). */
 export interface ChatHubSlice {
   chat: {
     openTimeline: Query<{ tabId: string; version: string }, unknown>
@@ -42,14 +43,13 @@ type Out<P> = P extends { query(input: never): Promise<infer O> }
     : never
 
 /** What went direct since load (diagnostics, e2e). */
-const stats = { reads: 0, writes: 0, events: 0 }
+const stats = { reads: 0, events: 0 }
 const linkedTabs = new Set<string>()
 
 /** Tabs on the direct link now, and what went direct (diagnostics, e2e). */
 export function directChatStatus(): {
   tabIds: string[]
   reads: number
-  writes: number
   events: number
 } {
   return { tabIds: [...linkedTabs], ...stats }
@@ -70,11 +70,6 @@ export function noteDirectChatEvent(): void {
 if (typeof window !== 'undefined') {
   ;(window as unknown as { __slayzone_directChat?: () => unknown }).__slayzone_directChat =
     directChatStatus
-}
-
-function refused(err: unknown): boolean {
-  const code = (err as { data?: { code?: string } } | null)?.data?.code
-  return code === 'FORBIDDEN' || code === 'UNAUTHORIZED'
 }
 
 export function chatViaDirect<H extends ChatHubSlice>(
@@ -100,30 +95,24 @@ export function chatViaDirect<H extends ChatHubSlice>(
       return viaHub()
     }
   }
-  async function write<K extends 'respondPermission' | 'sendToolResult'>(
-    name: K,
-    input: In<C[K]>
-  ): Promise<Out<C[K]>> {
-    const viaHub = () => (hub.chat[name] as unknown as Mutation<In<C[K]>, Out<C[K]>>).mutate(input)
-    if (!direct) return viaHub()
-    try {
-      const out = await (direct.chat[name] as unknown as Mutation<In<C[K]>, Out<C[K]>>).mutate(
-        input
-      )
-      stats.writes++
-      return out
-    } catch (err) {
-      if (!refused(err)) throw err
-      lost()
-      return viaHub()
-    }
-  }
   return {
     openTimeline: (input: In<C['openTimeline']>) => read('openTimeline', input),
     getReplay: (input: In<C['getReplay']>) => read('getReplay', input),
     timelinePages: (input: In<C['timelinePages']>) => read('timelinePages', input),
     searchTimeline: (input: In<C['searchTimeline']>) => read('searchTimeline', input),
-    respondPermission: (input: In<C['respondPermission']>) => write('respondPermission', input),
-    sendToolResult: (input: In<C['sendToolResult']>) => write('sendToolResult', input)
+    respondPermission: (input: In<C['respondPermission']>) =>
+      (
+        hub.chat.respondPermission as unknown as Mutation<
+          In<C['respondPermission']>,
+          Out<C['respondPermission']>
+        >
+      ).mutate(input),
+    sendToolResult: (input: In<C['sendToolResult']>) =>
+      (
+        hub.chat.sendToolResult as unknown as Mutation<
+          In<C['sendToolResult']>,
+          Out<C['sendToolResult']>
+        >
+      ).mutate(input)
   }
 }

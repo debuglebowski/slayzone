@@ -699,6 +699,15 @@ export const REGRESSIONS = [
       `${P}domains/terminal/src/server/runtime/pty-signal-mirror.test.ts`,
       `${P}domains/terminal/src/server/runtime/pty-backend.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5e',
+    what: 'permission and tool answers never go direct: they take the hub, whose relay refuses them while the conversation runs in the terminal; the direct router has no such procedures',
+    files: [
+      `${P}domains/terminal/src/client/chat-direct.test.ts`,
+      `${P}apps/computer/src/direct/listener.test.ts`
+    ]
   }
 ]
 

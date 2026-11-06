@@ -36,10 +36,12 @@ permanent fallback.
 | | Direct (client ↔ computer) | Hub (control) |
 |---|---|---|
 | Terminal | attach, backfill (`getBufferSince`), live output, keystrokes | create, kill, resize, touch, interrupt, submit, state, exit, prompts |
-| Chat | history reads (`getReplay`, `openTimeline`, `timelinePages`, `searchTimeline`), the event stream, `respondPermission`, `sendToolResult`, `saveDraft` without attachments, `saveScroll` | hydrate, `send`, queue, rewind / fork, `takeOver`, `interrupt`, `abortAndPop`, drafts with attachments (the hub seals their bytes), exit, availability |
+| Chat | history reads (`getReplay`, `openTimeline`, `timelinePages`, `searchTimeline`), the event stream, `saveDraft` without attachments, `saveScroll` | hydrate, `send`, queue, rewind / fork, `takeOver`, `interrupt`, `abortAndPop`, `respondPermission` and `sendToolResult` (the hub refuses them while the conversation runs in the terminal), drafts with attachments (the hub seals their bytes), exit, availability |
 
-Clients today use direct `respondPermission` and `sendToolResult`; drafts and
-scroll stay on their hub calls (see *Follow-ups*).
+Clients today use only the direct reads and event stream; drafts and scroll stay on
+their hub calls (see *Follow-ups*). Permission and tool answers are hub calls by
+design: the hub refuses one while the conversation runs in the terminal, and syncs
+the chat's bootstrap first, checks the computer cannot make.
 
 ## Capabilities
 

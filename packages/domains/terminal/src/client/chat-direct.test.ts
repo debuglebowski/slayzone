@@ -61,7 +61,7 @@ describe('chatViaDirect', () => {
     })
   })
 
-  it('reads and writes direct while there is a lease', async () => {
+  it('reads direct while there is a lease; permission and tool answers always go through the hub (its running-in-terminal guard)', async () => {
     const h = hub()
     const d = direct()
     const c = chatViaDirect(h.client, d.client as never, () => undefined)
@@ -73,14 +73,8 @@ describe('chatViaDirect', () => {
       args: { requestId: 'r', decision: { behavior: 'allow' } }
     })
     await c.sendToolResult({ tabId: 't', args: { toolUseId: 'u', content: 'c' } })
-    expect(d.calls).toEqual([
-      'openTimeline',
-      'timelinePages',
-      'searchTimeline',
-      'respondPermission',
-      'sendToolResult'
-    ])
-    expect(h.calls).toEqual([])
+    expect(d.calls).toEqual(['openTimeline', 'timelinePages', 'searchTimeline'])
+    expect(h.calls).toEqual(['respondPermission', 'sendToolResult'])
   })
 
   it('a failed direct read falls back to the hub and reports the link lost', async () => {
@@ -96,28 +90,5 @@ describe('chatViaDirect', () => {
       name: 'getReplay'
     })
     expect(lost).toHaveBeenCalled()
-  })
-
-  it('a refused direct write (grant gone) goes to the hub; another failure is not repeated there', async () => {
-    const h = hub()
-    const refused = chatViaDirect(
-      h.client,
-      direct({ code: 'FORBIDDEN' }).client as never,
-      () => undefined
-    )
-    await refused.sendToolResult({ tabId: 't', args: { toolUseId: 'u', content: 'c' } })
-    expect(h.calls).toEqual(['sendToolResult'])
-    const broken = chatViaDirect(
-      h.client,
-      direct({ code: 'INTERNAL_SERVER_ERROR' }).client as never,
-      () => undefined
-    )
-    await expect(
-      broken.respondPermission({
-        tabId: 't',
-        args: { requestId: 'r', decision: { behavior: 'allow' } }
-      })
-    ).rejects.toThrow(/direct failed/)
-    expect(h.calls).toEqual(['sendToolResult'])
   })
 })

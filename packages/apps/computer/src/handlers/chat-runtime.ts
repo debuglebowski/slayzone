@@ -58,15 +58,11 @@ export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M :
 
 /**
  * Commands a direct-link client may send: they need only the computer's ownership
- * check. Everything that needs the hub's coordination (send, queue, rewind, …) and
- * drafts with attachments (the hub seals their bytes) stay hub calls.
+ * check. Everything that needs the hub's coordination (send, queue, rewind, …),
+ * drafts with attachments (the hub seals their bytes) and permission / tool answers
+ * (the hub refuses them while the conversation runs in the terminal) stay hub calls.
  */
-export const DIRECT_CHAT_COMMANDS = new Set([
-  'respondPermission',
-  'sendToolResult',
-  'saveTabDraft',
-  'saveTabScroll'
-] as const)
+export const DIRECT_CHAT_COMMANDS = new Set(['saveTabDraft', 'saveTabScroll'] as const)
 export type DirectChatCommand = typeof DIRECT_CHAT_COMMANDS extends Set<infer M> ? M : never
 
 /** One hub's chat, as direct-link clients reach it on this computer. */

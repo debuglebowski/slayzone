@@ -17,11 +17,9 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import {
-  chatPermissionArgsSchema,
   chatScrollAnchorSchema,
   chatTabStateExpectationsSchema,
-  chatTextDraftSchema,
-  chatToolResultArgsSchema
+  chatTextDraftSchema
 } from '@slayzone/terminal-contracts'
 import { z } from 'zod'
 
@@ -159,7 +157,7 @@ export interface DirectChatService {
   command(
     tabId: string,
     epoch: number,
-    method: 'respondPermission' | 'sendToolResult' | 'saveTabDraft' | 'saveTabScroll',
+    method: 'saveTabDraft' | 'saveTabScroll',
     args: unknown[],
     operationId: string
   ): Promise<unknown>
@@ -369,31 +367,9 @@ export function createDirectRouter(services: DirectRouterServices) {
       /**
        * Commands that need only the computer's ownership check (the hub's shapes).
        * The computer tells the hub after each, so its records stay current.
+       * Permission and tool answers are not here: they go through the hub, whose
+       * relay refuses them while the conversation runs in the terminal.
        */
-      respondPermission: t.procedure
-        .input(z.object({ tabId, args: chatPermissionArgsSchema, operationId }))
-        .mutation(({ ctx, input }) => {
-          const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.command(
-            input.tabId,
-            epoch,
-            'respondPermission',
-            [input.tabId, input.args],
-            input.operationId ?? newOperationId()
-          )
-        }),
-      sendToolResult: t.procedure
-        .input(z.object({ tabId, args: chatToolResultArgsSchema, operationId }))
-        .mutation(({ ctx, input }) => {
-          const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.command(
-            input.tabId,
-            epoch,
-            'sendToolResult',
-            [input.tabId, input.args],
-            input.operationId ?? newOperationId()
-          )
-        }),
       /** A draft with no attachments (the hub seals attached files). */
       saveDraft: t.procedure
         .input(
