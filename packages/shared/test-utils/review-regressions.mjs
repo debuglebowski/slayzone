@@ -563,6 +563,12 @@ export const REGRESSIONS = [
     id: 'R3-1',
     what: 'a work-folder root stays while a local task worktree still lives under it (worktree base changed)',
     files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  {
+    round: 13,
+    id: 'R3-2',
+    what: 'local_computer_work_roots is left out of every export and ignored on import',
+    files: [`${P}apps/api/src/export-import-machine-local.test.ts`]
   }
 ]
 

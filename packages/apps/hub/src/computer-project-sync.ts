@@ -30,6 +30,7 @@
  * @module hub/computer-project-sync
  */
 
+import { LOCAL_COMPUTER_WORK_ROOTS_KEY } from '@slayzone/settings-core/server'
 import { isAbsolute } from 'node:path'
 import { resolveWorktreeBasePathTemplate } from '@slayzone/worktrees/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -50,7 +51,7 @@ import {
 } from './local-computer-roots'
 
 /** Hub setting: the local computer's roots added for work folders (M6). */
-const WORK_ROOTS_KEY = 'local_computer_work_roots'
+const WORK_ROOTS_KEY = LOCAL_COMPUTER_WORK_ROOTS_KEY
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
@@ -209,8 +210,9 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     }
   }
 
-  // Keyed by computer id: a settings export imported on another machine never
-  // names that machine's local computer, so it can never remove its roots.
+  // Keyed by computer id. That is no guard across machines (the local computer's id
+  // is the same everywhere): the key is machine-local instead — never exported, and
+  // ignored on import (`isMachineLocalSetting`, R3-2).
   async function trackedWorkRoots(computerId: string): Promise<string[]> {
     const list = (await readTracked())[computerId]
     return Array.isArray(list) ? list.filter((r): r is string => typeof r === 'string') : []
