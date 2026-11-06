@@ -455,6 +455,12 @@ export const REGRESSIONS = [
       `${P}apps/hub/src/boot-rules.test.ts`,
       `${P}apps/api/src/hub-disk-canary.test.ts`
     ]
+  },
+  {
+    round: 10,
+    id: 'R10-3',
+    what: 'a repo whose .git is a symlink starts watching at once (real gitdir watched)',
+    files: [`${P}domains/worktrees/src/server/git-watcher.test.ts`]
   }
 ]
 

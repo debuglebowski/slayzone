@@ -146,6 +146,15 @@ function isRefPath(relPath: string): boolean {
   return p === 'HEAD' || p === 'packed-refs' || p.startsWith('refs/')
 }
 
+/** `p` through symlinks — only its directories when `leaf` is false (a `.git` link stays). */
+function realOrSelf(p: string, leaf: boolean): string {
+  try {
+    return leaf ? fs.realpathSync(p) : path.join(fs.realpathSync(path.dirname(p)), path.basename(p))
+  } catch {
+    return p
+  }
+}
+
 /**
  * Resolve the canonical `.git` dir for a worktree. For linked worktrees,
  * `.git` is a file containing `gitdir: /path/to/real/gitdir`. For the main
@@ -159,14 +168,24 @@ function resolveGitDir(worktreePath: string): string | null {
   } catch {
     return null
   }
-  if (stat.isDirectory()) return dotGit
+  // The REAL directory (R10-3): a `.git` that is a symlink is not followed by the
+  // worktree's recursive watch, so it needs its own — and `ready()`'s marker must land
+  // where that watch sees it. A `gitdir:` file's target may be a link too.
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p)
+    } catch {
+      return p
+    }
+  }
+  if (stat.isDirectory()) return real(dotGit)
   if (!stat.isFile()) return null
   try {
     const content = fs.readFileSync(dotGit, 'utf-8').trim()
     const match = content.match(/^gitdir:\s*(.+)$/)
     if (!match) return null
     const gitdir = match[1].trim()
-    return path.isAbsolute(gitdir) ? gitdir : path.resolve(worktreePath, gitdir)
+    return real(path.isAbsolute(gitdir) ? gitdir : path.resolve(worktreePath, gitdir))
   } catch {
     return null
   }
@@ -351,7 +370,9 @@ export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
     // worktree tree so the above recursive watch doesn't see it. The main
     // checkout's `<root>/.git` is inside it — already seen, no second watcher.
     const gitdir = resolveGitDir(worktreePath)
-    if (gitdir && path.resolve(gitdir) !== path.resolve(worktreePath, '.git')) {
+    // The main checkout's own `.git` directory is inside the worktree's watch — but
+    // not when `.git` is a symlink to elsewhere (its real path then differs).
+    if (gitdir && gitdir !== realOrSelf(path.join(worktreePath, '.git'), false)) {
       openWatcher(entry, gitdir, true)
     }
 

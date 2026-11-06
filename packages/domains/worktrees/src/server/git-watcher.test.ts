@@ -10,7 +10,16 @@
  *   packages/domains/worktrees/src/server/git-watcher.test.ts
  */
 import { execSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -128,4 +137,45 @@ describe('GitWatcher', () => {
     expect(await eventsAfter(read)).toEqual([])
     expect(await eventsAfter(read)).toEqual([])
   }, 15_000)
+})
+
+/** A fresh repo with one commit, under `root`. */
+function freshRepo(name: string): string {
+  const dir = join(root, name)
+  git(`init -q -b main ${dir}`, root)
+  writeFileSync(join(dir, 'a.txt'), 'a')
+  git('add a.txt', dir)
+  git('-c commit.gpgsign=false commit -qm init', dir)
+  return dir
+}
+
+// Round-10 R10-3: `ready()` touches its marker in the gitdir. A `.git` that is a
+// SYMLINK was watched only through the worktree's watch, which does not follow it, so
+// the marker was never seen: every open waited out the cap (3 s). The real gitdir is
+// resolved and watched itself — which also brings ref moves in it back.
+describe('a repo whose .git is a symlink', () => {
+  it('starts watching at once, and reports a ref move', async () => {
+    const dir = freshRepo('symlinked-git')
+    const real = join(root, 'symlinked-git.gitdir')
+    renameSync(join(dir, '.git'), real)
+    symlinkSync(real, join(dir, '.git'))
+    const w = createGitWatcher()
+    const seen: Event[] = []
+    w.on('git:diff-changed', (e: Event) => seen.push(e))
+    try {
+      const started = Date.now()
+      w.subscribe(dir)
+      await w.ready(dir)
+      expect(Date.now() - started, 'ms to start watching').toBeLessThan(1_500)
+      seen.length = 0
+      git('branch moved', dir)
+      await sleep(1_500)
+      expect(
+        seen.some((e) => e.refsChanged),
+        'a ref move in the symlinked gitdir'
+      ).toBe(true)
+    } finally {
+      w.closeAll()
+    }
+  })
 })
