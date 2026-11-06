@@ -968,7 +968,7 @@ describe('createRoutingPtyBackend', () => {
         carryOutput: { preamble: '[recovered]' }
       })) as PtyHandle
       const spawns = gateway.requestsOf('pty.spawn')
-      expect((spawns.at(-1)?.params as { carryOutput?: unknown }).carryOutput).toEqual(
+      expect((spawns.at(-1)?.params as { carryOutput?: unknown } | undefined)?.carryOutput).toEqual(
         expect.objectContaining({ preamble: '[recovered]', afterSeq: 5 })
       )
       void second
