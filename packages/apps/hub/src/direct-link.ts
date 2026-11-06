@@ -106,6 +106,12 @@ interface IssuedGrant {
   taskId: string
   resource: DirectResource
   expiresAt: number
+  /**
+   * Being registered on the computer. Held here from before the request, so a
+   * revocation that runs meanwhile matches (and forgets) it; the issue then sees
+   * it gone and revokes it on the computer once registered.
+   */
+  pending?: boolean
 }
 
 /** Which grants a revocation drops. */
@@ -257,16 +263,41 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         resource: located.resource,
         ttlMs: DIRECT_GRANT_TTL_MS
       }
-      await deps.gateway.request(computer.computerId, HubToComputerMethods.directGrant, params)
       prune()
-      grants.set(params.grantId, {
+      const held: IssuedGrant = {
         grantId: params.grantId,
         computerId: computer.computerId,
         userId: caller.userId,
         taskId: located.taskId,
         resource: params.resource,
-        expiresAt: now() + params.ttlMs
-      })
+        expiresAt: now() + params.ttlMs,
+        pending: true
+      }
+      grants.set(params.grantId, held)
+      try {
+        await deps.gateway.request(computer.computerId, HubToComputerMethods.directGrant, params)
+      } catch (err) {
+        grants.delete(params.grantId)
+        throw err
+      }
+      if (grants.get(params.grantId) !== held) {
+        // Revoked while registering: drop it on the computer, which holds it now.
+        await asHub(() =>
+          deps.gateway.request(computer.computerId, HubToComputerMethods.directRevoke, {
+            by: 'grant',
+            grantIds: [params.grantId]
+          } satisfies DirectRevokeParams)
+        ).catch(() => undefined)
+        securityEvent({
+          event: 'computer.direct_revoke',
+          outcome: 'success',
+          targetKind: 'computer',
+          targetId: computer.computerId,
+          detail: { reason: 'revoked_while_issuing', grants: 1 }
+        })
+        return { available: false, reason: 'revoked' }
+      }
+      held.pending = false
       securityEvent({
         event: 'computer.direct_grant',
         outcome: 'success',
@@ -359,6 +390,8 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       for (const [id, g] of grants) {
         if (!matches(g, which)) continue
         grants.delete(id)
+        // A pending grant is not on the computer yet: its issue revokes it there.
+        if (g.pending) continue
         byComputer.set(g.computerId, [...(byComputer.get(g.computerId) ?? []), id])
       }
       // A revoked computer drops everything this hub ever granted there, including

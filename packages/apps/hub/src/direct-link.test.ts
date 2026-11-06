@@ -327,6 +327,42 @@ describe('direct-link revocation', () => {
     })
   })
 
+  it('a revocation that runs while a grant is being registered still drops that grant', async () => {
+    for (const which of [
+      { by: 'task', taskId: 'task-1' },
+      { by: 'user', userId: 'u1' },
+      { by: 'target', target: { kind: 'pty', sessionId: 't:t' } },
+      { by: 'computer', computerId: 'c-local' }
+    ] as const) {
+      let release: (() => void) | undefined
+      const ctx = setup({
+        gateway: {
+          listUsableComputers: () => [
+            { computerId: 'c-local', directAddress: '127.0.0.1:5001', peerLoopback: true }
+          ],
+          request: async (computerId, method, params) => {
+            ctx.requests.push({ computerId, method, params: params as Record<string, unknown> })
+            if (method === HubToComputerMethods.directGrant)
+              await new Promise<void>((r) => (release = r))
+            return { ok: true }
+          }
+        }
+      })
+      const issuing = ctx.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+      await new Promise((r) => setTimeout(r, 0))
+      await ctx.issuer.revoke(which, 'race')
+      release?.()
+      expect(await issuing, which.by).toEqual({ available: false, reason: 'revoked' })
+      const grantId = ctx.requests.find((r) => r.method === HubToComputerMethods.directGrant)
+        ?.params.grantId
+      // Revoked on the computer after it registered there, and never held here.
+      const after = ctx.requests.at(-1)
+      expect(after?.method, which.by).toBe(HubToComputerMethods.directRevoke)
+      expect(after?.params, which.by).toEqual({ by: 'grant', grantIds: [grantId] })
+      expect(ctx.issuer.heldGrantIds('c-local'), which.by).toEqual([])
+    }
+  })
+
   it('revokes everything on a revoked computer', async () => {
     const { issuer, requests } = await issued()
     await issuer.revoke({ by: 'computer', computerId: 'c-local' }, 'computer_revoked')

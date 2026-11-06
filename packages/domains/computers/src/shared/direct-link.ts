@@ -29,6 +29,7 @@ export type DirectLinkTarget = DirectLinkResource & { taskId: string; computerId
  *  - `unsupported`: this hub cannot issue direct links.
  *  - `wrong-target`: the session/tab is not in the task (or on the computer) the
  *    target names.
+ *  - `revoked`: access was revoked while the link was being issued.
  */
 export type DirectLinkUnavailableReason =
   | 'no-computer'
@@ -37,6 +38,7 @@ export type DirectLinkUnavailableReason =
   | 'not-direct'
   | 'unsupported'
   | 'wrong-target'
+  | 'revoked'
 
 /**
  * How the client reaches the computer: its WebSocket listener, or a WebRTC data

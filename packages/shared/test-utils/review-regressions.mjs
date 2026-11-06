@@ -612,6 +612,12 @@ export const REGRESSIONS = [
       `${P}domains/chat-runtime/src/server/hub-ownership.test.ts`,
       `${P}apps/hub/src/direct-link.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-M4',
+    what: 'a direct grant registered while a matching revocation runs is revoked on the computer once registered, never left to live out its TTL',
+    files: [`${P}apps/hub/src/direct-link.test.ts`]
   }
 ]
 
