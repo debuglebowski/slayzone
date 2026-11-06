@@ -44,12 +44,16 @@ const A = 'user-a'
 const B = 'user-b'
 sql(
   `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES
-  ('pA', 'A', '#111', ?, ?), ('pB', 'B', '#222', ?, ?)`,
+  ('pA', 'A', '#111', ?, ?), ('pB', 'B', '#222', ?, ?), ('pAhub', 'A on the hub', '#333', ?, ?)`,
   A,
   aRoot,
   B,
-  bRoot
+  bRoot,
+  A,
+  aRoot
 )
+// pA gets a placement below, so its own path is legacy and no hub-disk root (final
+// review M8); A's folder on the hub's disk is pAhub's, a project with no placement.
 sql(`INSERT INTO tasks (id, project_id, title) VALUES ('tA', 'pA', 'a'), ('tB', 'pB', 'b')`)
 sql(
   `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
