@@ -708,6 +708,12 @@ export const REGRESSIONS = [
       `${P}domains/terminal/src/client/chat-direct.test.ts`,
       `${P}apps/computer/src/direct/listener.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5f',
+    what: "the direct listener's message budget scales with the grants a socket holds (all a computer's terminals share one socket), under a per-socket ceiling",
+    files: [`${P}apps/computer/src/direct/listener.test.ts`]
   }
 ]
 

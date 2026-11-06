@@ -254,7 +254,7 @@ describe('direct listener: flood limits', () => {
   })
 
   it('closes a socket that floods messages', async () => {
-    const { store, listener } = await setup({ messagesPerSocketPer10s: 5 })
+    const { store, listener } = await setup({ messagesPerGrantPer10s: 5 })
     const { token } = grant(store)
     // Raw frames: counted before tRPC parses anything (the tRPC client batches).
     // `?connectionParams=1` is how a tRPC client says its first frame carries them.
@@ -265,6 +265,48 @@ describe('direct listener: flood limits', () => {
     for (let i = 0; i < 20; i++)
       raw.send(JSON.stringify({ id: i + 1, method: 'query', params: { path: 'ping' } }))
     expect(await code).toBe(1008)
+  })
+})
+
+describe('direct listener: message budget scales with what the socket carries', () => {
+  // All of a computer's terminals share one socket: heavy mouse reporting in several
+  // TUIs must not trip a limit sized for one.
+  it('a socket holding more grants may send more, up to the per-socket ceiling', async () => {
+    const { store, listener } = await setup({
+      messagesPerGrantPer10s: 5,
+      messagesPerSocketPer10s: 100
+    })
+    // Three distinct targets (a newer grant on the same target supersedes the older).
+    const tokens = [
+      grant(store),
+      grant(store, { sessionId: 's2' }),
+      grant(store, { chat: { tabId: 't1', epoch: 1 } })
+    ].map((g) => g.token)
+    const raw = new WebSocket(`ws://${listener.boundAddress}/direct/v1?connectionParams=1`)
+    await new Promise<void>((resolve) => raw.once('open', () => resolve()))
+    let closed: number | null = null
+    raw.once('close', (c) => {
+      closed = c
+    })
+    raw.send(JSON.stringify({ method: 'connectionParams', data: { token: tokens[0] } }))
+    for (const [i, token] of tokens.slice(1).entries())
+      raw.send(
+        JSON.stringify({
+          id: 100 + i,
+          method: 'mutation',
+          params: { path: 'authorize', input: { json: { token } } }
+        })
+      )
+    await new Promise((r) => setTimeout(r, 200))
+    // 3 grants: 15 messages per window; 3 sent so far, 10 more stay inside it.
+    for (let i = 0; i < 10; i++)
+      raw.send(JSON.stringify({ id: i + 1, method: 'query', params: { path: 'ping' } }))
+    await new Promise((r) => setTimeout(r, 200))
+    expect(closed).toBeNull()
+    for (let i = 0; i < 10; i++)
+      raw.send(JSON.stringify({ id: i + 50, method: 'query', params: { path: 'ping' } }))
+    await new Promise((r) => setTimeout(r, 200))
+    expect(closed).toBe(1008)
   })
 })
 

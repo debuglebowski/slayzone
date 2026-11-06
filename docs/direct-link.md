@@ -249,7 +249,7 @@ Limits are per client address (an IPv6 address counts as its /64):
 | open sockets | 64 |
 | failed authentications | 20 / min, after which upgrades are refused |
 | health probes | 240 / min |
-| messages per socket | 2000 / 10 s |
+| messages per socket | 2000 / 10 s per grant it holds, at most 20000 / 10 s |
 | message size | 1 MiB |
 | grants per socket | 256 |
 | authentication deadline | 10 s |

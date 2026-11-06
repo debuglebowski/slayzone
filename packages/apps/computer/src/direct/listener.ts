@@ -22,7 +22,8 @@
  *   - open sockets;
  *   - failed authentications per minute (past it, upgrades are refused);
  *   - health probes per minute;
- *   - messages per socket;
+ *   - messages per socket: a budget per grant the socket holds (every terminal and
+ *     chat of a computer shares one socket), up to a ceiling per socket;
  *   - message size;
  *   - grants per socket.
  *
@@ -73,6 +74,9 @@ export interface DirectListenerLimits {
   socketsPerAddress: number
   failedAuthsPerMinute: number
   healthPerMinute: number
+  /** Message budget per grant the socket holds (at least one), per 10 s. */
+  messagesPerGrantPer10s: number
+  /** Ceiling on a socket's message budget, however many grants it holds. */
   messagesPerSocketPer10s: number
   maxMessageBytes: number
   grantsPerSocket: number
@@ -86,8 +90,10 @@ export const DEFAULT_DIRECT_LIMITS: DirectListenerLimits = {
   failedAuthsPerMinute: 20,
   healthPerMinute: 240,
   // Keystrokes are one message each; a paste is one message. Generous for a person,
-  // bounded for a loop.
-  messagesPerSocketPer10s: 2_000,
+  // bounded for a loop. Per grant: mouse reporting in several TUIs at once shares
+  // the computer's one socket.
+  messagesPerGrantPer10s: 2_000,
+  messagesPerSocketPer10s: 20_000,
   maxMessageBytes: 1024 * 1024,
   grantsPerSocket: 256,
   authDeadlineMs: 10_000
@@ -341,12 +347,16 @@ export async function createDirectListener(
         messages = 0
         windowEnds = t + 10_000
       }
-      if (++messages > limits.messagesPerSocketPer10s) {
+      const budget = Math.min(
+        limits.messagesPerSocketPer10s,
+        limits.messagesPerGrantPer10s * Math.max(1, state.grants.size)
+      )
+      if (++messages > budget) {
         refuse({
           limit: 'computer.direct.messages_per_socket',
           address: ip,
           route,
-          max: limits.messagesPerSocketPer10s,
+          max: budget,
           windowSec: 10
         })
         ws.close(1008, 'message rate')
