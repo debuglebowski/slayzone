@@ -66,9 +66,15 @@ sql(
   ('tA', 'pA', 'a', ?), ('tB', 'pB', 'b', NULL), ('tU', 'pU', 'u', NULL)`,
   aWorktree
 )
+// B's folder on a remote computer c1 — a second project of B's: pB's own folder is
+// its (hub-disk) project path, and a placed project's legacy path is stale (M8).
+sql(
+  `INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pBc1', 'B on c1', '#222', ?)`,
+  B
+)
 sql(
   `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
-  VALUES ('c1', 'pB', ?, 'ok', 0)`,
+  VALUES ('c1', 'pBc1', ?, 'ok', 0)`,
   placement
 )
 sql(

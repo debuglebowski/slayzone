@@ -293,6 +293,75 @@ describe('L6: hub path aliases resolve to the file they name before the owner ch
   })
 })
 
+// ── final review: owner resolution ────────────────────────────────────────────
+
+const computerOf = (id: string, owner: string) =>
+  sql(
+    `INSERT OR IGNORE INTO computers (id, name, platform, version, capabilities_json, created_at, owner_user_id)
+     VALUES (?, ?, 'linux-x64', '1', '[]', 1, ?)`,
+    id,
+    id,
+    owner
+  )
+const placeAt = (computerId: string, projectId: string, folder: string) =>
+  sql(
+    `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+     VALUES (?, ?, ?, 'ready', 1)`,
+    computerId,
+    projectId,
+    folder
+  )
+const decide = async (
+  user: string,
+  kind: 'path' | 'ownedPath',
+  path: string,
+  computerId?: string
+): Promise<boolean> => {
+  invalidateAccessCache()
+  return canAccess(
+    h.slayDb,
+    {
+      authRequired: true,
+      principal: { userId: user },
+      hubRoots: [hubRoot],
+      ...(computerId ? { computerId } : {})
+    },
+    resource(kind, path)
+  )
+}
+computerOf('cM8A', A)
+computerOf('cM8B', B)
+
+describe('M8: owner resolution gaps (final review)', () => {
+  test("a stale legacy path of B's never locks A out — with no computer named", async () => {
+    project('pM8B', B, '/srv/m8') // B's old path, before v176
+    placeAt('cM8B', 'pM8B', '/srv/m8-elsewhere') // B's project lives elsewhere now
+    project('pM8A', A, '/srv/m8')
+    sql(`UPDATE projects SET path = NULL WHERE id = 'pM8A'`)
+    placeAt('cM8A', 'pM8A', '/srv/m8')
+    expect(await decide(A, 'path', '/srv/m8/x')).toBe(true)
+    expect(await decide(B, 'path', '/srv/m8/x')).toBe(false)
+  })
+
+  test("on the hub's disk, a stale legacy path of a project placed elsewhere is no root", async () => {
+    const stale = join(base, 'm8-stale')
+    mkdirSync(stale, { recursive: true })
+    writeFileSync(join(stale, 'f.txt'), 'x')
+    project('pM8Bstale', B, stale)
+    placeAt('cM8B', 'pM8Bstale', '/srv/m8-b-now')
+    expect(await decide(B, 'ownedPath', join(stale, 'f.txt'))).toBe(false)
+  })
+
+  test.skipIf(process.platform !== 'darwin')(
+    "a longer spelling of the hub's own folder (a firmlink) does not outrank it",
+    async () => {
+      project('pM8firm', A, `/System/Volumes/Data${hubRoot}`)
+      expect(await decide(A, 'ownedPath', hubDb)).toBe(false)
+      expect(await decide(A, 'path', hubDb)).toBe(false)
+    }
+  )
+})
+
 afterAll(() => {
   h.cleanup()
   rmSync(base, { recursive: true, force: true })

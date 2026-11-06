@@ -527,7 +527,9 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
 //                  has a placement does not count — the placement is where its folder
 //                  is now (Q2: as a computer-less owner it made the tie unbreakable and
 //                  locked its owner out on their own computer).
-//   hub disk       only records OF the hub's disk: project paths, and the worktrees and
+//   hub disk       only records OF the hub's disk: project paths (not one of a project
+//                  that has a placement: its folder is on a computer now, and the old
+//                  path is stale — M8), and the worktrees and
 //                  folders of the hub's own computer (the desktop's co-spawned one,
 //                  {@link setHubDiskComputer}). A task on NO computer is not one: removing
 //                  a computer clears its tasks' computer, so a user could turn the
@@ -558,6 +560,7 @@ const HUB_DISK_ROOTS_SQL = `
     UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
       AND computer_id = ?
     UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
+      AND NOT EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = projects.id AND pp.root_path <> '')
     UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
       AND computer_id = ?
   ) r JOIN projects p ON p.id = r.project_id`
@@ -603,7 +606,9 @@ async function resolvePathResource(
     // `<data root>/artifacts/<taskId>/…` is a task's artifact file (artifact-store).
     const rest = target.slice(end + 1).split(/[\\/]/)
     if (rest[0] === 'artifacts' && rest[1]) return viaTask(db, rest[1])
-    hubDepth = Math.max(hubDepth, root.length)
+    // How deep in `target` the root reaches — not how it is spelled: a firmlink
+    // (`/System/Volumes/Data/…`) is a longer spelling of the same folder (M8).
+    hubDepth = Math.max(hubDepth, end)
   }
   // The most specific root decides: a project nested inside another one is its own,
   // and a broad project somewhere up the tree does not open it to its owner. A
@@ -616,12 +621,14 @@ async function resolvePathResource(
   let owners: RootRow[] = []
   for (const row of await rootsOf(db, source)) {
     const root = normalizePath(row.root, true)
-    if (root === null || rootEnd(target, ancestry, root, within) < 0) continue
-    if (root.length > depth) {
-      depth = root.length
+    if (root === null) continue
+    const end = rootEnd(target, ancestry, root, within)
+    if (end < 0) continue
+    if (end > depth) {
+      depth = end
       owners = []
     }
-    if (root.length === depth) owners.push(row)
+    if (end === depth) owners.push(row)
   }
   if (hubDepth >= 0 && hubDepth >= depth) return NONE
   if (depth < 0) return inNoRoot === 'hub-wide' ? HUB_WIDE : NONE
@@ -640,6 +647,10 @@ async function resolvePathResource(
     // A pre-v176 path of a project with a placement is that project's old spelling of
     // the same folder, not one more owner (Q2).
     const contenders = owners.filter((o) => o.computer_id !== null || !o.placed)
+    // Without those, one owner left: theirs — a computer named or not (M8).
+    if (contenders.length > 0 && new Set(contenders.map((o) => o.owner_user_id)).size === 1) {
+      return projectsOf(contenders)
+    }
     const allOnComputers = contenders.every((o) => o.computer_id !== null)
     const onIt =
       computerId && allOnComputers ? contenders.filter((o) => o.computer_id === computerId) : []

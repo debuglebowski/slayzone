@@ -519,6 +519,12 @@ export const REGRESSIONS = [
     id: 'M9-rest',
     what: 'REST auth decides on the path as express routes it (case, slashes, encoding); fails closed',
     files: [`${P}apps/hub/src/rest-auth.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M8-final',
+    what: 'owner resolution: one contender owns; depth by matched position; stale legacy paths no hub-disk root',
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`, `${P}apps/api/src/access.test.ts`]
   }
 ]
 
