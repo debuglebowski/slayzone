@@ -28,6 +28,8 @@ export {
   directCallFailure,
   newDirectWriteId,
   withDirectDeadline,
+  createOrderedPtyWriter,
+  type OrderedPtyWriter,
   createDirectLinkManager,
   directLinkManagerFor,
   defaultDirectProbe,

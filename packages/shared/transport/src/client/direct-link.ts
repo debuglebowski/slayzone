@@ -48,6 +48,11 @@ export {
   type DirectRtcPeerFactory
 } from './direct-rtc'
 export {
+  createOrderedPtyWriter,
+  type OrderedPtyWriter,
+  type PtyWritePath
+} from './direct-write-order'
+export {
   DIRECT_CALL_DEADLINE_MS,
   DirectDeadlineError,
   directCallFailure,

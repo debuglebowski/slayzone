@@ -300,6 +300,41 @@ describe('startDirectPtyLink', () => {
     expect(hubIds).toHaveLength(1)
   })
 
+  it('keys reach the computer in the order typed when a direct write falls back to the hub', async () => {
+    const order: string[] = []
+    const l = fakeLease()
+    let first = true
+    l.lease.client.pty.write.mutate = (input: { data: string; writeId?: string }) => {
+      if (first) {
+        first = false
+        // No answer: past the deadline it goes to the hub, and the lease drops.
+        return new Promise<boolean>(() => undefined)
+      }
+      order.push(`direct:${input.data}`)
+      return Promise.resolve(true)
+    }
+    setup([l])
+    await flush()
+    vi.useFakeTimers()
+    const hub = {
+      pty: {
+        write: {
+          mutate: async ({ data }: { data: string }) => {
+            order.push(`hub:${data}`)
+            return true
+          }
+        },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    const a = ptyWrite(hub, 's1', 'a')
+    const b = ptyWrite(hub, 's1', 'b')
+    await vi.advanceTimersByTimeAsync(DIRECT_WRITE_DEADLINE_MS + 1)
+    expect(await a).toBe(true)
+    expect(await b).toBe(true)
+    expect(order).toEqual(['hub:a', 'hub:b'])
+  })
+
   it('every write gets its own id', async () => {
     const ids: Array<string | undefined> = []
     const hub = {

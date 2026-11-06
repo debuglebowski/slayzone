@@ -648,6 +648,15 @@ export const REGRESSIONS = [
       `${P}apps/computer/src/handlers/pty.test.ts`,
       `${P}domains/terminal/src/client/direct-pty.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-L2',
+    what: 'keystrokes reach the computer in the order typed when a direct write falls back to the hub: a later key never overtakes it on the direct socket',
+    files: [
+      `${P}shared/transport/src/client/direct-write-order.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
   }
 ]
 

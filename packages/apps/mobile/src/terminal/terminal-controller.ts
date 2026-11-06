@@ -15,6 +15,7 @@
  */
 import {
   attachDirectPty,
+  createOrderedPtyWriter,
   directCallFailure,
   readDirectPtyBuffer,
   newDirectWriteId,
@@ -100,19 +101,33 @@ export class TerminalController {
     return hub()
   }
 
-  /** Keystrokes: direct while there is a link, else the hub (see `viaDirect`). */
+  /**
+   * Keystrokes: direct while there is a link, else the hub (see `viaDirect`), in the
+   * order typed across both (`createOrderedPtyWriter`).
+   */
   write(data: string): Promise<unknown> {
+    return this.writer.write(data)
+  }
+
+  private readonly writer = createOrderedPtyWriter({
+    isDirect: () => this.direct !== null,
+    send: (path, data) => this.sendWrite(path, data)
+  })
+
+  private async sendWrite(path: 'direct' | 'hub', data: string): Promise<boolean> {
     // One id on both paths: a late direct write retried through the hub is applied
     // once by the computer (docs/direct-link.md).
     const writeId = newDirectWriteId()
     const viaHub = () => this.client.pty.write.mutate({ sessionId: this.sessionId, data, writeId })
-    return this.viaDirect<unknown>(
+    if (path === 'hub') return viaHub()
+    const r = await this.viaDirect<unknown>(
       async (d) =>
         (await d.pty.write.mutate({ sessionId: this.sessionId, data, writeId })) || NOT_TAKEN,
       viaHub
-      // Not taken (the session had not started, or was gone there): the hub queues
-      // it for a session waiting to start. Same id, applied once.
-    ).then((r) => (r === NOT_TAKEN ? viaHub() : r))
+    )
+    // Not taken (the session had not started, or was gone there): the hub queues it
+    // for a session waiting to start. Same id, applied once.
+    return (r === NOT_TAKEN ? await viaHub() : r) as boolean
   }
 
   /** The `ref` the web view's terminal fills with its handle (set after mount). */

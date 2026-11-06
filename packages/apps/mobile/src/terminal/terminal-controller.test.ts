@@ -120,6 +120,44 @@ describe('TerminalController: direct link', () => {
     c.dispose()
   })
 
+  it('keys reach the computer in the order typed when a direct write falls back to the hub', async () => {
+    jest.useFakeTimers()
+    try {
+      const order: string[] = []
+      const hub = hubClient()
+      hub.client.pty.write.mutate = (async (input: { data: string }) => {
+        order.push(`hub:${input.data}`)
+        return true
+      }) as never
+      const direct = directClient()
+      let first = true
+      direct.client.pty.write.mutate = ((input: { data: string }) => {
+        if (first) {
+          first = false
+          return new Promise(() => undefined)
+        }
+        order.push(`direct:${input.data}`)
+        return Promise.resolve(true)
+      }) as never
+      const c = new TerminalController(
+        's',
+        hub.client as never,
+        () => undefined,
+        (run) => run()
+      )
+      c.setDirect(direct.client as never, () => c.setDirect(null))
+      const a = c.write('a')
+      const b = c.write('b')
+      await jest.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
+      await a
+      await b
+      expect(order).toEqual(['hub:a', 'hub:b'])
+      c.dispose()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   // A half-open socket never settles a write; a closed one rejects with no code. The
   // keystroke goes to the hub, and the link is reported lost (back to the relay).
   it('a write with no answer in time, or a transport failure, goes to the hub and drops the link', async () => {

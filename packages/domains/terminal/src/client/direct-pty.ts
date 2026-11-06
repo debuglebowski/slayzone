@@ -14,6 +14,7 @@
  * @module terminal/client/direct-pty
  */
 import {
+  createOrderedPtyWriter,
   DIRECT_CALL_DEADLINE_MS,
   directCallFailure,
   keepDirectLease,
@@ -22,7 +23,9 @@ import {
   withDirectDeadline,
   noteDirectUse,
   type DirectLease,
-  type DirectLinkManager
+  type DirectLinkManager,
+  type OrderedPtyWriter,
+  type PtyWritePath
 } from '@slayzone/transport/direct-client'
 import { taskIdFromSessionId } from './session-id'
 
@@ -175,15 +178,44 @@ interface HubPtyBuffer {
  * Keystrokes: direct when the session has a lease, else the hub. A direct write that
  * may not have landed (refused, not taken, socket gone, no answer in time) goes to the hub with
  * the same id — the computer applies it once, so it is neither lost nor typed twice;
- * a transport failure also drops the lease.
+ * a transport failure also drops the lease. Keys reach the computer in the order
+ * typed: one typed while a direct write is in flight waits for it.
  */
-export async function ptyWrite(
+export function ptyWrite(hub: HubPtyWrite, sessionId: string, data: string): Promise<boolean> {
+  let entry = writers.get(sessionId)
+  if (!entry) {
+    const e: { hub: HubPtyWrite; writer: OrderedPtyWriter } = {
+      hub,
+      writer: createOrderedPtyWriter({
+        isDirect: () => directSessions.has(sessionId),
+        send: (path, chunk): Promise<boolean> => sendPtyWrite(e.hub, sessionId, chunk, path)
+      })
+    }
+    writers.set(sessionId, e)
+    entry = e
+  }
+  entry.hub = hub
+  const own = entry
+  return own.writer.write(data).finally(() => {
+    if (own.writer.idle() && writers.get(sessionId) === own) writers.delete(sessionId)
+  })
+}
+
+/**
+ * Per session: keys go out in the order typed, across both paths
+ * (`createOrderedPtyWriter`). Dropped once idle.
+ */
+const writers = new Map<string, { hub: HubPtyWrite; writer: OrderedPtyWriter }>()
+
+/** One write, starting on `path`; a direct one that may not have landed goes to the hub. */
+async function sendPtyWrite(
   hub: HubPtyWrite,
   sessionId: string,
-  data: string
+  data: string,
+  path: PtyWritePath
 ): Promise<boolean> {
   const writeId = newDirectWriteId()
-  const direct = directSessions.get(sessionId)
+  const direct = path === 'direct' ? directSessions.get(sessionId) : undefined
   if (direct) {
     try {
       const written = await withDirectDeadline(
@@ -232,6 +264,7 @@ export function reportPtyWriteFailure(err: unknown): void {
 /** Test seam. */
 export function __resetDirectPtyForTest(): void {
   directSessions.clear()
+  writers.clear()
   stats.chunks = 0
   stats.writes = 0
 }
