@@ -525,6 +525,12 @@ export const REGRESSIONS = [
     id: 'M8-final',
     what: 'owner resolution: one contender owns; depth by matched position; stale legacy paths no hub-disk root',
     files: [`${P}apps/hub/src/review-regressions-owner.test.ts`, `${P}apps/api/src/access.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M9-roots',
+    what: "roots on another computer never decide a named computer's path; / is no root",
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
   }
 ]
 

@@ -362,6 +362,27 @@ describe('M8: owner resolution gaps (final review)', () => {
   )
 })
 
+describe('M9: roots on one computer never decide for another (on main)', () => {
+  test("B naming B's computer: A's deeper folder on A's computer does not lock B out", async () => {
+    project('pM9A', A, '/home/m9/app')
+    sql(`UPDATE projects SET path = NULL WHERE id = 'pM9A'`)
+    placeAt('cM8A', 'pM9A', '/home/m9/app')
+    project('pM9B', B, '/home/m9')
+    sql(`UPDATE projects SET path = NULL WHERE id = 'pM9B'`)
+    placeAt('cM8B', 'pM9B', '/home/m9')
+    expect(await decide(B, 'path', '/home/m9/app/x', 'cM8B')).toBe(true)
+    expect(await decide(A, 'path', '/home/m9/app/x', 'cM8A')).toBe(true)
+    expect(await decide(A, 'path', '/home/m9/app/x', 'cM8B')).toBe(false)
+  })
+
+  test("a project at / is no root: it decides nobody's path", async () => {
+    project('pM9slash', A, '/')
+    sql(`UPDATE projects SET path = NULL WHERE id = 'pM9slash'`)
+    placeAt('cM8A', 'pM9slash', '/')
+    expect(await decide(B, 'path', '/opt/m9/x')).toBe(true)
+  })
+})
+
 afterAll(() => {
   h.cleanup()
   rmSync(base, { recursive: true, force: true })

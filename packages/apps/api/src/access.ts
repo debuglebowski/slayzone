@@ -582,6 +582,12 @@ function rootsOf(db: SlayzoneDb, source: RootSource): Promise<RootRow[]> {
   return db.all<RootRow>(HUB_DISK_ROOTS_SQL, [local, local, local])
 }
 
+/** `/`, a drive root (`C:\`) or a share root: never a project folder. */
+function isFilesystemRoot(root: string): boolean {
+  if (!isWindowsPath(root)) return root === '/'
+  return /^[a-z]:\\?$/i.test(root) || /^\\\\[^\\]+\\[^\\]+\\?$/.test(root)
+}
+
 /** What a path resolution may answer for a path in no root. */
 type InNoRoot = 'hub-wide' | 'nobody'
 
@@ -620,8 +626,13 @@ async function resolvePathResource(
   let depth = -1
   let owners: RootRow[] = []
   for (const row of await rootsOf(db, source)) {
+    // A request that names its computer is about that computer's disk: another
+    // computer's folders never decide for it (M9: A's /home/u/app on A's computer
+    // locked B out of B's /home/u on B's). Legacy (computer-less) roots still count.
+    if (computerId && row.computer_id !== null && row.computer_id !== computerId) continue
     const root = normalizePath(row.root, true)
-    if (root === null) continue
+    // A filesystem root is no project folder: as one it would own every path (M9).
+    if (root === null || isFilesystemRoot(root)) continue
     const end = rootEnd(target, ancestry, root, within)
     if (end < 0) continue
     if (end > depth) {
