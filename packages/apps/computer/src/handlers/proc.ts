@@ -63,6 +63,7 @@ import {
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
 import { spawnCwd } from '../path-jail'
+import { createProcGroupLedger, type LedgerOwner } from '../proc-group-ledger'
 import { ExitTombstones } from '../exit-tombstones'
 import { RingBuffer } from '@slayzone/terminal/pty-detection'
 import { collectProcessStats, collectProcessTitles } from '@slayzone/processes/pid-stats'
@@ -132,11 +133,23 @@ export interface ProcHandlers {
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
+  /** Resolves once the groups a crashed host left behind are ended (M5). */
+  orphansReaped: Promise<void>
+  /** Resolves once every spawned group so far is in the ledger. */
+  groupsRecorded(): Promise<void>
 }
 
 export interface ProcHandlerOptions {
   /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
   admission?: SpawnAdmission
+  /**
+   * Where spawned process groups are recorded, so the next host ends what a
+   * crashed one left running (final review M5; `proc-group-ledger.ts`). Unset: no
+   * ledger (tests that do not exercise it).
+   */
+  groupLedgerPath?: string
+  /** Tests only: the host identity entries are recorded under. */
+  ledgerOwner?: LedgerOwner
 }
 
 function refuse(reason: string, message: string, data: Record<string, unknown> = {}): RpcError {
@@ -159,6 +172,23 @@ export function createProcHandlers(
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
   const queued = new Map<string, QueuedProcSpawn>()
+  const ledger =
+    options.groupLedgerPath && PROCESS_TREE_DETACHED
+      ? createProcGroupLedger(options.groupLedgerPath, ctx.log, options.ledgerOwner)
+      : null
+  // Before any spawn of ours is recorded: a dead host's groups only.
+  const orphansReaped: Promise<void> = ledger
+    ? ledger.reapOrphans().then(
+        (ended) => {
+          if (ended > 0) ctx.log('reaped orphaned process groups', { count: ended })
+        },
+        (err) => ctx.log('orphaned process group reap failed', { error: String(err) })
+      )
+    : Promise.resolve()
+  let reapDone = !ledger
+  void orphansReaped.then(() => {
+    reapDone = true
+  })
 
   /**
    * Kill a spawned process AND everything it started. Signalling only the direct
@@ -180,6 +210,9 @@ export function createProcHandlers(
 
   function procSpawn(rawParams: unknown): { pid: number | null } | Promise<{ pid: number | null }> {
     const params = procSpawnParamsSchema.parse(rawParams)
+    // A restart right after a crash must not start beside the group it replaces
+    // (its port is still taken) — wait for the reap.
+    if (!reapDone) return orphansReaped.then(() => procSpawn(rawParams))
     if (!params.admission) return startProc(params, null)
     // An agent start: wait for a slot in the computer-wide queue (restoring many
     // chat tabs must not start every agent at once). The reply waits with it.
@@ -314,6 +347,8 @@ export function createProcHandlers(
     // for this sessionId. This dedupes the error+close double-fire on a failed
     // spawn (ENOENT emits both) and prevents a superseded process from tearing
     // down its replacement.
+    let groupForgotten = false
+    if (ledger && typeof child.pid === 'number') void ledger.record(child.pid)
     const settle = (payload: {
       exitCode: number | null
       signal: string | null
@@ -321,6 +356,12 @@ export function createProcHandlers(
     }): void => {
       capability?.revoke()
       releaseSlot(session)
+      if (typeof child.pid === 'number' && !groupForgotten) {
+        groupForgotten = true
+        // A group leader that exits can leave its group running (`reapGroupOnExit`
+        // sweeps that), but the exit is reported: the hub can Start again.
+        ledger?.forget(child.pid)
+      }
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
@@ -580,5 +621,11 @@ export function createProcHandlers(
     [ProcMethods.procStats]: procStats
   }
 
-  return { hasWork: () => procs.size > 0 || queued.size > 0, handlers, disposeAll }
+  return {
+    hasWork: () => procs.size > 0 || queued.size > 0,
+    handlers,
+    disposeAll,
+    orphansReaped,
+    groupsRecorded: () => ledger?.settled() ?? Promise.resolve()
+  }
 }

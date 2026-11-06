@@ -280,11 +280,15 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
   })
   // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
-  const proc = createProcHandlers(
-    ctx,
-    deps.getProjectPaths,
-    deps.admission ? { admission: deps.admission } : {}
-  )
+  const proc = createProcHandlers(ctx, deps.getProjectPaths, {
+    ...(deps.admission ? { admission: deps.admission } : {}),
+    // The computer's protected runtime dir: no hub frame can read or rewrite it.
+    groupLedgerPath: join(
+      deps.stateDir ?? dirname(getComputerConfigFilePath()),
+      'computer-runtime',
+      'proc-groups.json'
+    )
+  })
   const fs = createFsHandlers(ctx)
   const chat = createChatRuntimeHandlers({
     ctx,

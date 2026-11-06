@@ -537,6 +537,12 @@ export const REGRESSIONS = [
     id: 'M6-final',
     what: 'a custom worktree base and an automation folder are registered as local-computer roots',
     files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M5-final',
+    what: 'process groups a crashed computer left running are ended by the next host',
+    files: [`${P}apps/computer/src/handlers/proc.test.ts`]
   }
 ]
 
