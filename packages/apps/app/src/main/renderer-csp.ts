@@ -19,6 +19,7 @@
  * This module is the single source of truth for both layers, and is kept free
  * of runtime imports so the build config can import it.
  */
+import { normalizeDirectAddress } from '@slayzone/platform/direct-link'
 
 /**
  * Directives that never depend on the runtime tRPC port.
@@ -132,14 +133,10 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 export function directLinkConnectSources(addresses: readonly string[]): string[] {
   const out = new Set<string>()
   for (const addr of addresses) {
-    if (addr === '' || /[\s/*]/.test(addr) || addr.includes('://')) continue
-    let url: URL
-    try {
-      url = new URL(`wss://${addr}`)
-    } catch {
-      continue
-    }
-    if (url.host !== addr || url.username !== '' || url.password !== '') continue
+    // `box:443` and `box` are one address (`normalizeDirectAddress`).
+    const normalized = normalizeDirectAddress(addr)
+    if (normalized === null) continue
+    const url = new URL(`wss://${normalized}`)
     if (LOOPBACK_HOSTS.has(url.hostname)) continue
     out.add(url.origin)
   }

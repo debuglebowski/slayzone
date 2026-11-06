@@ -347,6 +347,7 @@ run_harness packages/apps/hub/src/web-assets.test.ts
 run_harness packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_harness packages/shared/platform/src/hub-discovery.test.ts
+run_harness packages/shared/platform/src/direct-link.test.ts
 # OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay computer
 # create` — generated file CONTENT only; never registers with the real supervisor (P5).
 run_harness packages/shared/platform/src/service-unit.test.ts

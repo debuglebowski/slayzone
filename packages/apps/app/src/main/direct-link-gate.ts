@@ -17,6 +17,7 @@
  *    adds nothing: the local hub's `ws://127.0.0.1:*` already covers the local
  *    computer.
  */
+import { normalizeDirectAddress } from '@slayzone/platform/direct-link'
 import { directLinkConnectSources } from './renderer-csp'
 
 const HEALTH_PATH = '/direct/v1/health'
@@ -78,23 +79,12 @@ export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
     recordApplied(webContentsId, connectSrc) {
       applied.set(webContentsId, new Set(connectSrc.split(/\s+/).filter(Boolean)))
     },
-    async prepare(webContentsId, hubId, address) {
-      if (
-        typeof address !== 'string' ||
-        address === '' ||
-        /[\s/*]/.test(address) ||
-        address.includes('://')
-      )
-        return { ok: false, reason: 'invalid' }
-      let host: string
-      try {
-        const u = new URL(`http://${address}`)
-        if (u.host !== address || u.username !== '' || u.password !== '')
-          return { ok: false, reason: 'invalid' }
-        host = u.hostname
-      } catch {
-        return { ok: false, reason: 'invalid' }
-      }
+    async prepare(webContentsId, hubId, raw) {
+      // One spelling everywhere (`box:443` is `box`): what the hub issues, what is
+      // compared, named in the CSP and probed.
+      const address = normalizeDirectAddress(raw)
+      if (address === null) return { ok: false, reason: 'invalid' }
+      const host = new URL(`http://${address}`).hostname
       const sources = applied.get(webContentsId) ?? new Set<string>()
       const loopback = Object.hasOwn(LOOPBACK_ENTRY, host)
       if (loopback) {
@@ -109,7 +99,8 @@ export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
               typeof hubId === 'string' && hubId !== ''
                 ? await deps.issuedByHub(hubId).catch(() => [] as readonly string[])
                 : []
-            if (!named.includes(address)) return { ok: false, reason: 'not-issued' }
+            if (!named.some((a) => normalizeDirectAddress(a) === address))
+              return { ok: false, reason: 'not-issued' }
             issued.add(address)
             for (const old of issued) {
               if (issued.size <= MAX_ISSUED_ORIGINS) break

@@ -168,6 +168,13 @@ describe('directLinkConnectSources (docs/direct-link.md)', () => {
     ])
   })
 
+  it('names an address with an explicit default port as the same origin', () => {
+    expect(directLinkConnectSources(['box.example:443'])).toEqual(['wss://box.example'])
+    expect(directLinkConnectSources(['box.example:443', 'box.example'])).toEqual([
+      'wss://box.example'
+    ])
+  })
+
   it('adds nothing for loopback (the local hub entry already covers ws://127.0.0.1:*)', () => {
     expect(directLinkConnectSources(['127.0.0.1:5001', 'localhost:9', '[::1]:7'])).toEqual([])
   })

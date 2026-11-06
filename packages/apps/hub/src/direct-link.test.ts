@@ -261,6 +261,17 @@ describe('direct-link issued addresses (what Electron main may add to its CSP)',
   })
 })
 
+describe('direct-link issuer: address spelling', () => {
+  it("hands out and records the listener address with its scheme's default port dropped", async () => {
+    const { issuer } = setup({}, [
+      { computerId: 'c-remote', directAddress: 'Box.Example:443', peerLoopback: false }
+    ])
+    const out = await issuer.issue({ kind: 'pty', sessionId: 'r1', taskId: 'task-1' }, remoteClient)
+    expect(out).toMatchObject({ available: true, address: 'box.example' })
+    expect(issuer.issuedAddresses('u1')).toEqual(['box.example'])
+  })
+})
+
 describe('direct-link revocation', () => {
   async function issued() {
     const ctx = setup()

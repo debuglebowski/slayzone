@@ -726,6 +726,17 @@ export const REGRESSIONS = [
     id: 'DL-R2-3',
     what: 'a write carrying keys typed after its submit-Enter submits only up to the Enter; the rest starts the next line (turn tracker records the right prompt)',
     files: [`${P}domains/terminal/src/server/pty-input.test.ts`]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-2',
+    what: "a public direct address written with its scheme's default port (box:443) is one address with box: the hub issues the normalised spelling, the desktop gate and CSP accept it",
+    files: [
+      `${P}shared/platform/src/direct-link.test.ts`,
+      `${P}apps/app/src/main/direct-link-gate.test.ts`,
+      `${P}apps/app/src/main/renderer-csp.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`
+    ]
   }
 ]
 

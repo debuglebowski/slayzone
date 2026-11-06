@@ -115,4 +115,14 @@ describe('direct-link gate', () => {
     expect(asked).toEqual([])
     expect(gate.connectSources()).toEqual([])
   })
+
+  it('reads an explicit default port as the address without it: issued by the hub as one, named once in the CSP', async () => {
+    const { gate, probed } = setup(true, { h1: ['box.example'] })
+    gate.recordApplied(1, 'ws://127.0.0.1:*')
+    expect(await gate.prepare(1, 'h1', 'box.example:443')).toEqual({ ok: false, reason: 'csp' })
+    expect(gate.connectSources()).toEqual(['wss://box.example'])
+    gate.recordApplied(1, `ws://127.0.0.1:* ${gate.connectSources().join(' ')}`)
+    expect(await gate.prepare(1, 'h1', 'box.example:443')).toEqual({ ok: true })
+    expect(probed).toEqual(['https://box.example/direct/v1/health'])
+  })
 })

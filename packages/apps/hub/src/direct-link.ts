@@ -44,6 +44,7 @@ import type {
   DirectLinkTransport,
   DirectRtcConnectResult
 } from '@slayzone/computers/shared'
+import { normalizeDirectAddress } from '@slayzone/platform/direct-link'
 import { isLoopbackAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { createFixedWindowLimiter } from '@slayzone/platform/rate-limit'
 import { runAsSecurityActor, securityEvent } from '@slayzone/platform/security-log'
@@ -244,13 +245,15 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       if (!computer) return { available: false, reason: 'no-computer' }
       // The WebSocket listener when this client can dial it; else WebRTC, brokered
       // here, when both ends speak it; else the relay (the same answers as before).
+      // One spelling everywhere (`box:443` is `box`): the desktop gate and CSP
+      // compare what is issued here.
+      const listener = computer.directAddress
+        ? normalizeDirectAddress(computer.directAddress)
+        : null
       const wsAddress =
-        computer.directAddress &&
-        !(
-          isLoopbackAuthority(computer.directAddress) &&
-          !(computer.peerLoopback && isLoopbackPeer(caller.ip))
-        )
-          ? computer.directAddress
+        listener &&
+        !(isLoopbackAuthority(listener) && !(computer.peerLoopback && isLoopbackPeer(caller.ip)))
+          ? listener
           : null
       const rtc =
         wsAddress === null &&
