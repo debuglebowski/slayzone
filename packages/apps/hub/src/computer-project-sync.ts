@@ -230,13 +230,14 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * Folders the local computer's live tasks work in — worktrees and base dirs of
    * tasks on it, or on no computer in a project placed on it. They never add a root
    * (each was covered when it was made); they only keep a work-folder root from being
-   * removed while still in use (final review round 3, R3-1).
+   * removed while still in use (final review round 3, R3-1). A soft-deleted task
+   * counts too: its worktree stays on disk and a restore only clears `deleted_at`,
+   * so the root is released only once the row is purged (round 4, R4-1).
    */
   async function foldersInUse(computerId: string): Promise<string[]> {
     const rows = await db.all<{ worktree_path: string | null; base_dir: string | null }>(
       `SELECT worktree_path, base_dir FROM tasks t
-        WHERE t.deleted_at IS NULL
-          AND (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
+        WHERE (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
             SELECT 1 FROM project_placements pp
              WHERE pp.project_id = t.project_id AND pp.computer_id = ?)))`,
       [computerId, computerId]

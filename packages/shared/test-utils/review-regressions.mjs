@@ -569,6 +569,13 @@ export const REGRESSIONS = [
     id: 'R3-2',
     what: 'local_computer_work_roots is left out of every export and ignored on import',
     files: [`${P}apps/api/src/export-import-machine-local.test.ts`]
+  },
+  // ── round 14 ──
+  {
+    round: 14,
+    id: 'R4-1',
+    what: 'a soft-deleted task restored after a relaunch keeps its worktree root until purged',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
   }
 ]
 
