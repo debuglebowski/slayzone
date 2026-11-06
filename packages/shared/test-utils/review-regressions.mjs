@@ -438,6 +438,12 @@ export const REGRESSIONS = [
     id: 'Q3',
     what: 'the hub-disk canary seeds what users plant (computer folders, worktrees) and every input shape',
     files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
+  },
+  {
+    round: 9,
+    id: 'Q4',
+    what: 'git.watchStart answers once the watch is live; a change right after it is never missed',
+    files: [`${P}apps/computer/src/handlers/git-watch.test.ts`]
   }
 ]
 

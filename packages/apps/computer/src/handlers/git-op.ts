@@ -131,6 +131,9 @@ export function createGitOpHandlers(
     // Subscribe first: a watch that failed to start is never recorded as live.
     watcher.subscribe(worktreePath)
     watchPaths.set(watchId, worktreePath)
+    // Answer once the watch is live (Q4): a change right after this is reported, and
+    // one made while it started comes as the change `ready` sends.
+    await watcher.ready(worktreePath)
     return { ok: true }
   }
 
