@@ -158,6 +158,50 @@ describe('TerminalController: direct link', () => {
     }
   })
 
+  it('a long paged read over the direct link is not cut off while each page answers in time', async () => {
+    jest.useFakeTimers()
+    try {
+      const hub = hubClient()
+      const direct = directClient()
+      let page = 0
+      direct.client.pty.attach.query = (() =>
+        new Promise((r) =>
+          setTimeout(
+            () =>
+              r({
+                exists: true,
+                size: null,
+                buffer: { chunks: [{ seq: 0, data: 'p0' }], currentSeq: 3, prelude: '', more: true }
+              }),
+            DIRECT_CALL_DEADLINE_MS - 500
+          )
+        )) as never
+      direct.client.pty.getBufferSince.query = ((input: { afterSeq: number }) =>
+        new Promise((r) =>
+          setTimeout(() => {
+            page++
+            const seq = input.afterSeq + 1
+            r({ chunks: [{ seq, data: `p${seq}` }], currentSeq: 3, prelude: '', more: seq < 3 })
+          }, DIRECT_CALL_DEADLINE_MS - 500)
+        )) as never
+      const c = new TerminalController(
+        's',
+        hub.client as never,
+        () => undefined,
+        (run) => run()
+      )
+      c.setDirect(direct.client as never)
+      const restarted = c.feed.restart()
+      await jest.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS * 10)
+      await restarted
+      expect(page).toBe(3)
+      expect(hub.calls.filter(([p]) => p === 'hub.attach')).toEqual([])
+      c.dispose()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   // A half-open socket never settles a write; a closed one rejects with no code. The
   // keystroke goes to the hub, and the link is reported lost (back to the relay).
   it('a write with no answer in time, or a transport failure, goes to the hub and drops the link', async () => {

@@ -56,12 +56,14 @@ export class TerminalController {
             ...(await attachDirectPty(d, sid, afterSeq)),
             state: null
           }),
-          () => client.pty.attach.query({ sessionId: sid, afterSeq })
+          () => client.pty.attach.query({ sessionId: sid, afterSeq }),
+          false
         ),
       bufferSince: (sid, afterSeq) =>
         this.viaDirect(
           (d) => readDirectPtyBuffer(d, sid, afterSeq),
-          () => client.pty.getBufferSince.query({ sessionId: sid, afterSeq })
+          () => client.pty.getBufferSince.query({ sessionId: sid, afterSeq }),
+          false
         )
     }
     this.sink = createDomSink(() => this.terminal?.current ?? null, schedule)
@@ -83,12 +85,18 @@ export class TerminalController {
    */
   private async viaDirect<T>(
     direct: (d: DirectLease['client']) => Promise<T>,
-    hub: () => Promise<T>
+    hub: () => Promise<T>,
+    /**
+     * Whether to bound the whole call here. A paged read bounds each of its calls
+     * itself (`readDirectPtyBuffer`, `attachDirectPty`), so a long read whose pages
+     * each answer in time is not cut off.
+     */
+    deadline = true
   ): Promise<T> {
     const d = this.direct
     if (d) {
       try {
-        return await withDirectDeadline(direct(d))
+        return await (deadline ? withDirectDeadline(direct(d)) : direct(d))
       } catch (err) {
         const why = directCallFailure(err)
         if (why === 'answered') throw err

@@ -234,6 +234,14 @@ async function sendPtyWrite(
   return hub.pty.write.mutate({ sessionId, data, writeId })
 }
 
+/**
+ * A direct read for `sessionId` failed: a transport failure (socket gone, no answer
+ * in time) drops the lease, so the session goes back to the relay at once.
+ */
+export function noteDirectPtyFailure(sessionId: string, err: unknown): void {
+  if (directCallFailure(err) === 'transport') directSessions.get(sessionId)?.lost()
+}
+
 /** Backfill after `afterSeq`: direct when the session has a lease, else the hub. */
 export async function ptyBufferSince(
   hub: HubPtyBuffer,
@@ -242,12 +250,13 @@ export async function ptyBufferSince(
 ): ReturnType<HubPtyBuffer['pty']['getBufferSince']['query']> {
   const direct = directSessions.get(sessionId)
   if (direct) {
-    const res = await withDirectDeadline(
-      readDirectPtyBuffer(direct.client, sessionId, afterSeq)
-    ).catch((err: unknown) => {
-      if (directCallFailure(err) === 'transport') direct.lost()
-      return null
-    })
+    // Each call has its own deadline (a long paged read is not cut off).
+    const res = await readDirectPtyBuffer(direct.client, sessionId, afterSeq).catch(
+      (err: unknown) => {
+        if (directCallFailure(err) === 'transport') direct.lost()
+        return null
+      }
+    )
     if (res) return res
   }
   return hub.pty.getBufferSince.query({ sessionId, afterSeq })

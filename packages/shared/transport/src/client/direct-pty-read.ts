@@ -9,10 +9,15 @@
  * one whole read would have returned. A chunk evicted between pages is simply not
  * there, as it would not be for a later whole read.
  *
+ * Every call (the attach, each page) has its own deadline (`withDirectDeadline`): a
+ * half-open socket fails the read in seconds, while a long read whose pages each
+ * answer in time is never cut off. Callers do not add a deadline of their own.
+ *
  * @module transport/client/direct-pty-read
  */
 import type { TRPCClient } from '@trpc/client'
 import type { DirectBuffer, DirectRouter } from '../direct/router'
+import { withDirectDeadline } from './direct-call'
 
 /**
  * Page bound, in estimated serialised characters: a quarter of the channel's 1 MiB
@@ -72,18 +77,25 @@ async function readOn(
   }
 }
 
+/** One page, with its own deadline. */
+function pageReader(client: DirectClient, sessionId: string): PageRead {
+  return (after) =>
+    withDirectDeadline(
+      client.pty.getBufferSince.query({
+        sessionId,
+        afterSeq: after,
+        maxChars: DIRECT_BUFFER_PAGE_CHARS
+      })
+    )
+}
+
 /** `pty.getBufferSince` over the direct link, every page joined. */
 export async function readDirectPtyBuffer(
   client: DirectClient,
   sessionId: string,
   afterSeq: number
 ): Promise<DirectBuffer> {
-  const readPage: PageRead = (after) =>
-    client.pty.getBufferSince.query({
-      sessionId,
-      afterSeq: after,
-      maxChars: DIRECT_BUFFER_PAGE_CHARS
-    })
+  const readPage = pageReader(client, sessionId)
   return readOn(readPage, await readPage(afterSeq), afterSeq)
 }
 
@@ -97,16 +109,13 @@ export async function attachDirectPty(
   size: { cols: number; rows: number } | null
   buffer: DirectBuffer
 }> {
-  const attached = await client.pty.attach.query({
-    sessionId,
-    afterSeq,
-    maxChars: DIRECT_BUFFER_PAGE_CHARS
-  })
-  const readPage: PageRead = (after) =>
-    client.pty.getBufferSince.query({
+  const attached = await withDirectDeadline(
+    client.pty.attach.query({
       sessionId,
-      afterSeq: after,
+      afterSeq,
       maxChars: DIRECT_BUFFER_PAGE_CHARS
     })
+  )
+  const readPage = pageReader(client, sessionId)
   return { ...attached, buffer: await readOn(readPage, attached.buffer, afterSeq) }
 }

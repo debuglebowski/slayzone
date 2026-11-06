@@ -663,6 +663,15 @@ export const REGRESSIONS = [
     id: 'DL-L3',
     what: 'a hub the computer stops serving has its direct-link grants revoked at once; its sockets close and its terminals and chats leave the listener',
     files: [`${P}apps/computer/src/main.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L4',
+    what: 'direct terminal reads bound each call (attach and every page): a half-open socket fails the desktop attach in seconds and falls back to the hub, while a long paged read is never cut off',
+    files: [
+      `${P}shared/transport/src/client/direct-pty-read.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
   }
 ]
 

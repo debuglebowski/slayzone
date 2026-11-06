@@ -3,9 +3,10 @@
  * between two page reads. The read must notice the hole and read again from the
  * oldest chunk still kept, never hand back a scrollback with a hole in the middle.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { pageChunks } from '../direct/router'
-import { readDirectPtyBuffer } from './direct-pty-read'
+import { DIRECT_CALL_DEADLINE_MS, DirectDeadlineError } from './direct-call'
+import { attachDirectPty, readDirectPtyBuffer } from './direct-pty-read'
 
 /** A computer buffer: chunks seq 0..n-1; `evict` drops the oldest, as the ring does. */
 function fakeBuffer(n: number, size = 100_000) {
@@ -73,5 +74,62 @@ describe('readDirectPtyBuffer', () => {
     b.whenPage(() => b.churn(6))
     const out = await readDirectPtyBuffer(b.client, 's', -1)
     expect(contiguous(out.chunks.map((c) => c.seq))).toBe(true)
+  })
+})
+
+describe('direct reads have a deadline per call, not per read', () => {
+  it('a page that never answers fails the read once its own deadline passes', async () => {
+    vi.useFakeTimers()
+    try {
+      const b = fakeBuffer(10)
+      const real = (b.client as { pty: { getBufferSince: { query: (i: never) => unknown } } }).pty
+        .getBufferSince.query
+      let n = 0
+      ;(b.client as { pty: { getBufferSince: { query: unknown } } }).pty.getBufferSince.query = (
+        i: never
+      ) => (++n === 2 ? new Promise(() => undefined) : real(i))
+      const read = readDirectPtyBuffer(b.client, 's', -1)
+      const outcome = read.then(
+        () => 'resolved',
+        (err: unknown) => err
+      )
+      await vi.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
+      expect(await outcome).toBeInstanceOf(DirectDeadlineError)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a slow multi-page read still completes when each page answers in time', async () => {
+    vi.useFakeTimers()
+    try {
+      const b = fakeBuffer(10)
+      const pty = (b.client as { pty: { getBufferSince: { query: (i: never) => unknown } } }).pty
+      const real = pty.getBufferSince.query
+      pty.getBufferSince.query = (i: never) =>
+        new Promise((r) => setTimeout(() => r(real(i)), DIRECT_CALL_DEADLINE_MS - 500))
+      const read = readDirectPtyBuffer(b.client, 's', -1)
+      await vi.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS * 20)
+      expect((await read).chunks.map((c) => c.seq)).toEqual(b.seqs())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an attach that never answers fails once its deadline passes', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = {
+        pty: { attach: { query: () => new Promise(() => undefined) } }
+      } as never
+      const outcome = attachDirectPty(client, 's', -1).then(
+        () => 'resolved',
+        (err: unknown) => err
+      )
+      await vi.advanceTimersByTimeAsync(DIRECT_CALL_DEADLINE_MS + 1)
+      expect(await outcome).toBeInstanceOf(DirectDeadlineError)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

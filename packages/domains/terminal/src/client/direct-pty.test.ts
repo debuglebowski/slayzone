@@ -13,9 +13,11 @@ import {
   ptyWrite,
   startDirectPtyLink
 } from './direct-pty'
+import { __resetPtyAttachForTest, attachPty } from './pty-attach'
 
 afterEach(() => {
   __resetDirectPtyForTest()
+  __resetPtyAttachForTest()
   vi.useRealTimers()
 })
 
@@ -333,6 +335,32 @@ describe('startDirectPtyLink', () => {
     expect(await a).toBe(true)
     expect(await b).toBe(true)
     expect(order).toEqual(['hub:a', 'hub:b'])
+  })
+
+  it('a direct attach that never answers falls back to the hub at its deadline, and drops the lease', async () => {
+    const l = fakeLease()
+    ;(l.lease.client.pty.attach as { query: unknown }).query = () => new Promise(() => undefined)
+    setup([l])
+    await flush()
+    vi.useFakeTimers()
+    const hub = {
+      pty: {
+        attach: {
+          query: async () => ({
+            exists: true,
+            state: 'idle',
+            buffer: { chunks: [], currentSeq: 6 }
+          })
+        },
+        getState: { query: async () => 'idle' },
+        exists: { query: async () => true },
+        getBufferSince: { query: async () => null }
+      }
+    }
+    const attached = attachPty(hub as never, 's1', -1)
+    await vi.advanceTimersByTimeAsync(DIRECT_WRITE_DEADLINE_MS + 1)
+    expect(await attached).toMatchObject({ exists: true, buffer: { currentSeq: 6 } })
+    expect(directPtyFor('s1')).toBeNull()
   })
 
   it('every write gets its own id', async () => {
