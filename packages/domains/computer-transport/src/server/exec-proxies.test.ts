@@ -1352,6 +1352,29 @@ describe('createRoutingPtyBackend', () => {
     await expect(ask()).rejects.toThrow()
   })
 
+  it('cliVersion asks that computer; old computer → null; lost link → rejects', async () => {
+    const gateway = new FakeGateway()
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: () => 'computer-1'
+    })
+    gateway.onMethod('pty.cliVersion', () => ({ ok: true, version: '0.167.0' }))
+    await expect(backend.cliVersion?.('computer-1', 'codex')).resolves.toBe('0.167.0')
+    const call = requireCall(gateway, 'pty.cliVersion')
+    expect(call.computerId).toBe('computer-1')
+    expect(call.params).toEqual({ binary: 'codex' })
+
+    gateway.onMethod('pty.cliVersion', () => {
+      throw new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented')
+    })
+    await expect(backend.cliVersion?.('computer-1', 'codex')).resolves.toBeNull()
+
+    gateway.onMethod('pty.cliVersion', () => {
+      throw new RpcDisposedError('gone')
+    })
+    await expect(backend.cliVersion?.('computer-1', 'codex')).rejects.toThrow()
+  })
+
   it('probeBackgroundJobs: unsupported platform / old computer → null; lost link → rejects', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 7 }))

@@ -866,6 +866,7 @@ run_harness packages/domains/terminal/src/server/runtime/review-regressions-rela
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
 run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
+run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 

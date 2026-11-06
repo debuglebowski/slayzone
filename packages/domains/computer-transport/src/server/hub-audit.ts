@@ -94,6 +94,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.prioritize': null,
   'pty.backgroundJobs': null,
   'pty.doctor': null,
+  // Runs `<binary> --version` on the computer; starts no session, changes nothing.
+  'pty.cliVersion': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
   // AI-config files: its writes (instructions, skills, MCP config) are audited, its

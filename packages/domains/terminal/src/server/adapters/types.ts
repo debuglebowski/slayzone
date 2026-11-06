@@ -120,6 +120,19 @@ export interface TerminalAdapter {
    */
   readonly hookDriven?: boolean
 
+  /**
+   * Launch args that depend on the VERSION of the agent's CLI on the computer it
+   * starts on. The hub asks that computer for `binary`'s version
+   * (`PtyBackend.cliVersion`) and inserts `launchArgs(version)` right after the
+   * binary — only when the launch command really runs `binary`, and never when the
+   * version can't be told (an older CLI rejects a flag it doesn't know and exits,
+   * which is worse than going without it).
+   */
+  readonly cliVersioned?: {
+    readonly binary: string
+    launchArgs(version: string): readonly string[]
+  }
+
   /** Command to run in terminal to discover session ID. Undefined = supports --session-id at creation. */
   readonly sessionIdCommand?: string
 

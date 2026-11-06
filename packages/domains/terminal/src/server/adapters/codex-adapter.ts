@@ -10,6 +10,20 @@ import {
   type DoctorBinaryRequirement
 } from './types'
 
+/** First Codex release with `--no-daemon` (see `CodexAdapter.cliVersioned`). */
+const NO_DAEMON_SINCE: readonly [number, number, number] = [0, 156, 0]
+
+/** `0.167.0` / `0.129.0-alpha` → compared numerically; unparseable → false. */
+function isAtLeastVersion(version: string, min: readonly [number, number, number]): boolean {
+  const m = version.match(/(\d+)\.(\d+)(?:\.(\d+))?/)
+  if (!m) return false
+  const got = [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)]
+  for (let i = 0; i < 3; i++) {
+    if (got[i] !== min[i]) return got[i] > min[i]
+  }
+  return true
+}
+
 /**
  * Adapter for OpenAI Codex.
  *
@@ -36,6 +50,26 @@ export class CodexAdapter implements TerminalAdapter {
   // Infinity leaves no silence-timer to undo a wrong flip → stuck-running.
   readonly hookDriven = true
   readonly sessionIdCommand = '/status'
+
+  /**
+   * `--no-daemon` from Codex 0.156 (the release that added it).
+   *
+   * From 0.157 Codex runs every turn in a SHARED background app-server daemon — one
+   * per CODEX_HOME, started by whichever process launched codex first — and runs
+   * hooks inside that daemon, with ITS environment. The per-task identity this PTY
+   * carries (SLAYZONE_AGENT_HOOK_URL / _CONTEXT / SLAYZONE_AGENT_ID) never reaches
+   * notify.sh, which exits silently: no running spinner, no unread dot, no captured
+   * conversation id, so no turn snapshots, no usage attribution and no resume. One
+   * daemon also serves every task at once, so no env could identify the task anyway.
+   * `--no-daemon` keeps the turn in this process. Verified against codex 0.167.0:
+   * without it zero hooks reach the hook URL, with it SessionStart /
+   * UserPromptSubmit / Stop all do.
+   */
+  readonly cliVersioned = {
+    binary: 'codex',
+    launchArgs: (version: string): readonly string[] =>
+      isAtLeastVersion(version, NO_DAEMON_SINCE) ? ['--no-daemon'] : []
+  }
 
   encodeSubmit = defaultEncodeSubmit
 

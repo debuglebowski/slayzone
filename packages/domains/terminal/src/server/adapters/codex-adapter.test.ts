@@ -227,3 +227,26 @@ describe('CodexAdapter.detectConversationId', () => {
     expect(adapter.detectConversationId(data)).toBe('019d5014-bedf-7363-a87f-f476d22053d4')
   })
 })
+
+describe('CodexAdapter.launchArgsForVersion (QA 2026-11-06: hooks never reached SlayZone)', () => {
+  // Codex ≥0.157 runs every turn in a SHARED background app-server daemon (one per
+  // CODEX_HOME, started by whichever process launched codex first). Hooks execute in
+  // that daemon with ITS environment, so the per-task SLAYZONE_AGENT_HOOK_* vars the
+  // PTY carries never reach notify.sh: no spinner, no unread dot, no conversation id.
+  // `--no-daemon` (added in 0.156) keeps the turn in the TUI process, which has them.
+  test('codex 0.156+ → --no-daemon', () => {
+    expect(adapter.cliVersioned?.binary).toBe('codex')
+    expect(adapter.cliVersioned?.launchArgs('0.156.0')).toEqual(['--no-daemon'])
+    expect(adapter.cliVersioned?.launchArgs('0.167.0')).toEqual(['--no-daemon'])
+    expect(adapter.cliVersioned?.launchArgs('1.0.0')).toEqual(['--no-daemon'])
+  })
+
+  test('codex older than 0.156 → nothing (it rejects an unknown flag and exits)', () => {
+    expect(adapter.cliVersioned?.launchArgs('0.155.9')).toEqual([])
+    expect(adapter.cliVersioned?.launchArgs('0.129.0')).toEqual([])
+  })
+
+  test('an unparseable version → nothing', () => {
+    expect(adapter.cliVersioned?.launchArgs('dev')).toEqual([])
+  })
+})

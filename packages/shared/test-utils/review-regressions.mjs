@@ -596,6 +596,18 @@ export const REGRESSIONS = [
       `${P}domains/ai-config/src/server/ai-config-routing.test.ts`,
       `${P}domains/file-editor/src/client/useWatchedFile.test.ts`
     ]
+  },
+  // ── post-merge QA (task 964073b0, rows 1e/1f → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-1e1f',
+    what: 'a codex terminal starts `codex --no-daemon` when its computer runs codex ≥0.156, so hooks carry the task (spinner, unread, conversation id); older or unknown codex launches as before',
+    files: [
+      `${P}domains/terminal/src/server/adapters/codex-adapter.test.ts`,
+      `${P}domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts`,
+      execProxies,
+      `${computer}handlers/pty.test.ts`
+    ]
   }
 ]
 

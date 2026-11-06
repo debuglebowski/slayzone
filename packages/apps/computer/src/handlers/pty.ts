@@ -37,6 +37,8 @@ import {
   type PtyWarmSpawnParams,
   ptyResizeParamsSchema,
   ptyDoctorParamsSchema,
+  ptyCliVersionParamsSchema,
+  type PtyCliVersionResult,
   type PtyDoctorResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
@@ -70,6 +72,7 @@ import {
 } from '@slayzone/platform/node-pty-install'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
+import { createCliVersionProbe } from '../cli-version'
 import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
@@ -911,6 +914,16 @@ export function createPtyHandlers(
     }
   }
 
+  const cliVersions = createCliVersionProbe()
+  /** One agent CLI's version here (see `ptyCliVersionResultSchema`). */
+  async function cliVersion(rawParams: unknown): Promise<PtyCliVersionResult> {
+    const params = ptyCliVersionParamsSchema.parse(rawParams)
+    await options.pathReady
+    // The env a spawn gets (bin override dir first): the version of the binary an
+    // agent started here would run.
+    return { ok: true, version: await cliVersions.versionOf(params.binary, buildPtySpawnEnv(ctx)) }
+  }
+
   function dropQueued(reason: string): void {
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
@@ -1259,6 +1272,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyPrioritize]: prioritize,
     [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
     [HubToComputerMethods.ptyDoctor]: doctor,
+    [HubToComputerMethods.ptyCliVersion]: cliVersion,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,

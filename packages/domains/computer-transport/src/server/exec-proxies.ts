@@ -107,6 +107,7 @@ import {
   ptyWarmListResultSchema,
   ptyBackgroundJobsResultSchema,
   ptyDoctorResultSchema,
+  ptyCliVersionResultSchema,
   ptyWarmSpawnResultSchema,
   computerSetAllowedRootsResultSchema,
   isProjectNotPlacedError
@@ -1453,6 +1454,21 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const res = await gateway.request(computerId, HubToComputerMethods.ptyDoctor, ask)
         const { problems, shellExists, binaries } = ptyDoctorResultSchema.parse(res)
         return { problems, shellExists, binaries }
+      } catch (err) {
+        // A computer that predates the request can never answer: "can't tell".
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
+          return null
+        }
+        throw err
+      }
+    },
+
+    async cliVersion(computerId: string, binary: string) {
+      try {
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyCliVersion, {
+          binary
+        })
+        return ptyCliVersionResultSchema.parse(res).version
       } catch (err) {
         // A computer that predates the request can never answer: "can't tell".
         if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {

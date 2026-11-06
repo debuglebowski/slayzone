@@ -50,6 +50,7 @@ import {
   type ExecutionContext
 } from '../adapters'
 import { interpolateTemplate } from '../adapters/template-interpolation'
+import { cliVersionedLaunchArgs } from './cli-versioned-launch'
 import { parseShellArgs } from '../adapters/flag-parser'
 import {
   StateMachine,
@@ -1696,7 +1697,18 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           providerArgs && providerArgs.length > 0 ? providerArgs : parseShellArgs(defaultFlags),
         initialPrompt: initialPrompt || undefined
       })
-      const allArgs = [...binary.args]
+      // Flags the computer's own CLI version decides (codex `--no-daemon`), ahead
+      // of every other arg so they also precede a subcommand (`resume`).
+      const versionedArgs = await cliVersionedLaunchArgs({
+        adapter,
+        backend: getPtyBackend(),
+        computerId,
+        binary: binary.name,
+        args: binary.args,
+        sessionId,
+        taskId
+      })
+      const allArgs = [...versionedArgs, ...binary.args]
       if (binary.initialPrompt) allArgs.push(binary.initialPrompt)
       postSpawnCommand = buildExecCommand(binary.name, allArgs)
     }
