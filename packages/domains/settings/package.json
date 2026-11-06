@@ -46,7 +46,7 @@
     "@trpc/server": "^11.19.0",
     "lucide-react": "^1.61.0",
     "motion": "^14.6.0",
-    "zod": "^4.3.5",
+    "zod": "^4.6.6",
     "zustand": "^5.0.16"
   },
   "peerDependencies": {

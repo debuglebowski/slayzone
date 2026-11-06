@@ -71,7 +71,7 @@
     "lucide-react": "^1.61.0",
     "marked": "^18.1.1",
     "react-hook-form": "^7.90.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "electron": "^45.0.0",
