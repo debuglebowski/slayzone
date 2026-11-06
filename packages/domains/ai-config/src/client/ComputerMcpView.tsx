@@ -4,6 +4,7 @@ import { useTRPCClient } from './trpc'
 import { Button, Input, useDepsChanged } from '@slayzone/ui'
 import { PROVIDER_LABELS } from '../shared/provider-registry'
 import type { CliProvider, McpConfigFileResult } from '../shared'
+import { toastAiConfigError } from './toast-error'
 
 export function ComputerMcpView() {
   const trpcClient = useTRPCClient()
@@ -47,14 +48,23 @@ export function ComputerMcpView() {
   const handleAddServer = useCallback(
     async (provider: CliProvider) => {
       if (!newServerKey.trim() || !newServerCommand.trim()) return
-      await trpcClient.aiConfig.writeComputerMcpServer.mutate({
-        provider,
-        serverKey: newServerKey.trim(),
-        config: {
-          command: newServerCommand.trim(),
-          args: newServerArgs.trim() ? newServerArgs.split(/\s+/) : []
-        }
-      })
+      const added = await trpcClient.aiConfig.writeComputerMcpServer
+        .mutate({
+          provider,
+          serverKey: newServerKey.trim(),
+          config: {
+            command: newServerCommand.trim(),
+            args: newServerArgs.trim() ? newServerArgs.split(/\s+/) : []
+          }
+        })
+        .then(
+          () => true,
+          (err: unknown) => {
+            toastAiConfigError('Could not add MCP server', err)
+            return false
+          }
+        )
+      if (!added) return
       setAddingTo(null)
       setNewServerKey('')
       setNewServerCommand('')
@@ -66,7 +76,16 @@ export function ComputerMcpView() {
 
   const handleRemoveServer = useCallback(
     async (provider: CliProvider, serverKey: string) => {
-      await trpcClient.aiConfig.removeComputerMcpServer.mutate({ provider, serverKey })
+      const removed = await trpcClient.aiConfig.removeComputerMcpServer
+        .mutate({ provider, serverKey })
+        .then(
+          () => true,
+          (err: unknown) => {
+            toastAiConfigError('Could not remove MCP server', err)
+            return false
+          }
+        )
+      if (!removed) return
       void loadConfigs()
     },
     [trpcClient, loadConfigs]

@@ -34,6 +34,7 @@ import type { ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS } from '../shared/provider-registry'
 import { useContextManagerStore } from './useContextManagerStore'
 import { useContextManagerSlots } from './ContextManagerSlots'
+import { toastAiConfigError } from './toast-error'
 
 // Dot colors marking files with identical content (one per content hash).
 const HASH_COLORS = ['#f97316', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#eab308', '#14b8a6']
@@ -88,11 +89,16 @@ export function ComputerFilesView() {
 
   const openFile = useStableCallback(async (entry: ComputerFileEntry) => {
     if (!entry.exists) {
-      await trpcClient.aiConfig.writeContextFile.mutate({
-        filePath: entry.path,
-        content: '',
-        projectPath: ''
-      })
+      try {
+        await trpcClient.aiConfig.writeContextFile.mutate({
+          filePath: entry.path,
+          content: '',
+          projectPath: ''
+        })
+      } catch (err) {
+        toastAiConfigError('Could not create file', err)
+        return
+      }
       await loadFiles()
     }
     try {
@@ -102,8 +108,8 @@ export function ComputerFilesView() {
       })
       setContent(text)
       setSelectedPath(entry.path)
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not open file', err)
     }
   })
 
@@ -116,8 +122,8 @@ export function ComputerFilesView() {
           projectPath: ''
         })
         await loadFiles()
-      } catch {
-        // silent
+      } catch (err) {
+        toastAiConfigError('Not saved', err)
       }
     },
     [trpcClient, loadFiles]
@@ -147,8 +153,8 @@ export function ComputerFilesView() {
         setContent('')
       }
       await loadFiles()
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not delete file', err)
     }
   })
 
@@ -170,8 +176,8 @@ export function ComputerFilesView() {
       await loadFiles()
       setCreatingFile(null)
       setNewFileName('')
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not create file', err)
     }
   }
 

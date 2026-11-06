@@ -1754,11 +1754,16 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
           "SELECT * FROM ai_config_items WHERE type = 'root_instructions' AND scope = 'project' AND project_id = ?"
         )
         .get(projectId)) as AiConfigItem | undefined
-      if (!item) throw new Error('No instructions to push')
 
       const dir = path.dirname(filePath)
       if (!(await fs.exists(dir))) await fs.mkdir(dir)
       await fs.writeFile(filePath, content)
+
+      // No project instructions item (a project whose instructions were never pulled or
+      // saved through the manager): the edit is a plain file write. Creating the item
+      // here would opt the project into managed instructions — `needsSync`, and the
+      // unmanaged-root-file prune of `syncAll` — which an edit must not do.
+      if (!item) return await recomputeInstructionsResult(projectId, projectPath)
 
       const hash = contentHash(content)
       await db

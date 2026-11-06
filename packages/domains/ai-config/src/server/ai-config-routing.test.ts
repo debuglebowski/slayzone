@@ -113,3 +113,109 @@ describe('AI config on the computer', () => {
     expect(calls).toHaveLength(0)
   })
 })
+
+describe('every AI-config write lands on the computer (siblings of QA 964073b0 5b)', () => {
+  const wrote = (op: AiConfigFsCall['op'], p: string) =>
+    calls.some(
+      (c) => c.computerId === 'c1' && c.call.op === op && 'path' in c.call && c.call.path === p
+    )
+
+  test('computer-level: context file edit, skill create/write/delete, MCP add/remove', async () => {
+    route()
+    const claudeDir = path.join(computerHome, '.claude')
+    fs.mkdirSync(claudeDir, { recursive: true })
+    const globalMd = path.join(claudeDir, 'CLAUDE.md')
+    await caller.writeContextFile({ filePath: globalMd, content: 'edited', projectPath: '' })
+    expect(fs.readFileSync(globalMd, 'utf-8')).toBe('edited')
+    expect(wrote('writeFile', globalMd)).toBe(true)
+
+    const created = await caller.createComputerFile({
+      provider: 'claude',
+      category: 'skill',
+      slug: 'qa-skill'
+    })
+    expect(fs.existsSync(created.path)).toBe(true)
+
+    await caller.writeComputerSkill({ provider: 'claude', slug: 'qa-skill', content: 'v2' })
+    const skillMd = path.join(claudeDir, 'skills', 'qa-skill', 'SKILL.md')
+    expect(fs.readFileSync(skillMd, 'utf-8')).toBe('v2')
+    expect(wrote('writeFile', skillMd)).toBe(true)
+
+    await caller.deleteComputerFile({ filePath: created.path })
+    expect(fs.existsSync(created.path)).toBe(false)
+    expect(wrote('unlink', created.path)).toBe(true)
+
+    await caller.writeComputerMcpServer({
+      provider: 'claude',
+      serverKey: 'qa',
+      config: { command: 'echo', args: [] }
+    })
+    const mcp = await caller.discoverComputerMcpConfigs()
+    expect(JSON.stringify(mcp)).toContain('"qa"')
+    await caller.removeComputerMcpServer({ provider: 'claude', serverKey: 'qa' })
+    expect(JSON.stringify(await caller.discoverComputerMcpConfigs())).not.toContain('"qa"')
+  })
+
+  test('project-level: MCP add/remove, context file rename/delete', async () => {
+    route()
+    const dir = h.tmpDir()
+    await caller.writeMcpServer({
+      projectPath: dir,
+      provider: 'claude',
+      serverKey: 'qa',
+      config: { command: 'echo', args: [] }
+    })
+    expect(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8')).toContain('"qa"')
+    expect(wrote('writeFile', path.join(dir, '.mcp.json'))).toBe(true)
+    await caller.removeMcpServer({ projectPath: dir, provider: 'claude', serverKey: 'qa' })
+    expect(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8')).not.toContain('"qa"')
+
+    const from = path.join(dir, 'CLAUDE.md')
+    const to = path.join(dir, 'AGENTS.md')
+    fs.writeFileSync(from, 'x')
+    await caller.renameContextFile({ oldPath: from, newPath: to, projectPath: dir })
+    expect(fs.existsSync(to) && !fs.existsSync(from)).toBe(true)
+    await caller.deleteContextFile({ filePath: to, projectPath: dir, projectId: 'none' })
+    expect(fs.existsSync(to)).toBe(false)
+  })
+})
+
+describe('editing a project instructions file (pushProviderInstructions)', () => {
+  // QA 964073b0 row 5b: a project with no `root_instructions` item yet — the editor's
+  // save threw "No instructions to push" on the hub before any write reached the
+  // computer, and the client swallowed it.
+  test('a project with no instructions item yet: the edit is written on the computer', async () => {
+    route()
+    const projectId = crypto.randomUUID()
+    const dir = h.tmpDir()
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'line 1\n')
+    await h.slayDb
+      .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+      .run(projectId, 'fresh', '#000')
+
+    await caller.pushProviderInstructions({
+      projectId,
+      projectPath: dir,
+      provider: 'codex',
+      content: 'line 1\nline 2\n'
+    })
+
+    expect(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf-8')).toBe('line 1\nline 2\n')
+    expect(
+      calls.some(
+        (c) =>
+          c.computerId === 'c1' &&
+          c.call.op === 'writeFile' &&
+          c.call.path === path.join(dir, 'AGENTS.md')
+      )
+    ).toBe(true)
+    // Reopening the editor reads the edit back.
+    const reread = await caller.readProviderInstructions({ projectPath: dir, provider: 'codex' })
+    expect(reread.content).toBe('line 1\nline 2\n')
+    // A plain edit: the project is not opted into managed instructions.
+    const items = await h.slayDb
+      .prepare('SELECT id FROM ai_config_items WHERE project_id = ?')
+      .all(projectId)
+    expect(items).toHaveLength(0)
+  })
+})

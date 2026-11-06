@@ -17,6 +17,8 @@ export interface UseWatchedFileResult {
   setContent: (next: string) => void
   dirty: boolean
   diskChanged: boolean
+  /** Why the last save failed; null after a save succeeds. The draft stays dirty. */
+  saveError: string | null
   reloadFromDisk: () => Promise<void>
   flushNow: () => Promise<void>
   onBlur: () => void
@@ -29,23 +31,40 @@ interface PerformSaveDeps {
   originalContentRef: { current: string }
   setOriginalContent: (content: string) => void
   setDiskChanged: (changed: boolean) => void
+  setSaveError: (error: string | null) => void
+}
+
+function saveErrorMessage(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : String(err)
 }
 
 // Core save: idempotent, dedupes via savingRef. Plain module function — React
 // Compiler can't lower try/finally, and the finally must keep its exact timing.
+// Never rejects: a failed save is reported through setSaveError (the callers are
+// fire-and-forget — blur, debounce), and the draft stays dirty so the next save retries.
 async function performSaveImpl(deps: PerformSaveDeps, target: string): Promise<void> {
-  const { savingRef, saveRef, contentRef, originalContentRef, setOriginalContent, setDiskChanged } =
-    deps
+  const {
+    savingRef,
+    saveRef,
+    contentRef,
+    originalContentRef,
+    setOriginalContent,
+    setDiskChanged,
+    setSaveError
+  } = deps
   if (savingRef.current === target) return
   savingRef.current = target
   try {
     await saveRef.current(target)
+    setSaveError(null)
     // Only update baseline if no newer edits happened during the save
     if (contentRef.current === target) {
       originalContentRef.current = target
       setOriginalContent(target)
       setDiskChanged(false)
     }
+  } catch (err) {
+    setSaveError(saveErrorMessage(err))
   } finally {
     if (savingRef.current === target) {
       savingRef.current = null
@@ -78,6 +97,7 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const [content, setContentState] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [diskChanged, setDiskChanged] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const contentRef = useRef(content)
   const originalContentRef = useRef(originalContent)
@@ -112,7 +132,15 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   const performSave = useCallback(
     (target: string): Promise<void> =>
       performSaveImpl(
-        { savingRef, saveRef, contentRef, originalContentRef, setOriginalContent, setDiskChanged },
+        {
+          savingRef,
+          saveRef,
+          contentRef,
+          originalContentRef,
+          setOriginalContent,
+          setDiskChanged,
+          setSaveError
+        },
         target
       ),
     []
@@ -198,9 +226,12 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
         if (savingRef.current !== target) {
           savingRef.current = target
           // Fire-and-forget. Do not await — cleanup must return synchronously.
-          void capturedSave(target).finally(() => {
-            if (savingRef.current === target) savingRef.current = null
-          })
+          // A file swap (still mounted) shows the outgoing file's failure too.
+          void capturedSave(target)
+            .catch((err: unknown) => setSaveError(saveErrorMessage(err)))
+            .finally(() => {
+              if (savingRef.current === target) savingRef.current = null
+            })
         }
       }
     }
@@ -280,6 +311,7 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     setContent,
     dirty,
     diskChanged,
+    saveError,
     reloadFromDisk,
     flushNow,
     onBlur

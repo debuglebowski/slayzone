@@ -593,6 +593,16 @@ export const REGRESSIONS = [
     id: 'DL-canary',
     what: "the direct-link canary: no direct-router procedure (pty, chat, over WebSocket or a WebRTC data channel) touches a file on the computer's disk",
     files: [`${P}apps/computer/src/direct/direct-canary.test.ts`]
+  },
+  // ── post-merge QA (task 964073b0, row 5b) ──
+  {
+    round: 16,
+    id: 'QA-5b',
+    what: 'a project instructions edit saves with no project instructions item; every AI-config write lands on the computer; a refused save is shown, never swallowed',
+    files: [
+      `${P}domains/ai-config/src/server/ai-config-routing.test.ts`,
+      `${P}domains/file-editor/src/client/useWatchedFile.test.ts`
+    ]
   }
 ]
 

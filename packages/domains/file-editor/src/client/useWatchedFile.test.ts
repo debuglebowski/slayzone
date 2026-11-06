@@ -486,4 +486,42 @@ describe('useWatchedFile', () => {
 
     expect(result.current.diskChanged).toBe(false)
   })
+
+  // QA 964073b0 row 5b: a refused save (the hub threw) left the edit on screen, dirty,
+  // with nothing said — the blur and debounce saves are fire-and-forget.
+  it('a refused save surfaces saveError, stays dirty, and clears on the next good save', async () => {
+    const read = vi.fn(async () => 'old')
+    const save = vi
+      .fn<(content: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('No instructions to push'))
+      .mockResolvedValue(undefined)
+
+    const { result } = renderHook(
+      () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+      { wrapper }
+    )
+    await flushPromises()
+    expect(result.current.saveError).toBeNull()
+
+    act(() => {
+      result.current.setContent('new')
+    })
+    act(() => {
+      result.current.onBlur()
+    })
+    await flushPromises()
+
+    expect(save).toHaveBeenCalledWith('new')
+    expect(result.current.saveError).toBe('No instructions to push')
+    expect(result.current.dirty).toBe(true)
+
+    act(() => {
+      result.current.onBlur()
+    })
+    await flushPromises()
+
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(result.current.saveError).toBeNull()
+    expect(result.current.dirty).toBe(false)
+  })
 })
