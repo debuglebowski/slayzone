@@ -201,3 +201,34 @@ describe("Q1: a remote computer's folders never own anything on the hub's disk",
     }
   })
 })
+
+// Round-10 R10-1: a login hub whose computer startup failed had no folder host, and
+// projects.update / create then wrote the legacy project path (a record OF the hub's
+// disk) after only the computer-side check: B set pB's path to `/` and read
+// /etc/hosts. On a hub with login the legacy column is never written, whatever the
+// boot order (the hub also refuses to boot without a host: boot rule B18).
+describe("R10-1: on a login hub a project's legacy path is never written", () => {
+  test('projects.update {path}: refused, nothing recorded, and /etc/hosts stays refused', async () => {
+    const b = as(B)
+    const before = h.db.prepare("SELECT path FROM projects WHERE id = 'pB'").get()
+    expect(await outcome(b.projects.update({ id: 'pB', path: '/' } as never))).not.toBe('ok')
+    expect(h.db.prepare("SELECT path FROM projects WHERE id = 'pB'").get()).toEqual(before)
+    invalidateAccessCache()
+    expect(await outcome(b.artifacts.upload({ taskId: 'tB', sourcePath: '/etc/hosts' }))).toBe(
+      'NOT_FOUND'
+    )
+  })
+
+  test('projects.create {path}: refused, no project made', async () => {
+    const count = () =>
+      (
+        h.db.prepare("SELECT COUNT(*) AS n FROM projects WHERE name = 'R10-1'").get() as {
+          n: number
+        }
+      ).n
+    expect(
+      await outcome(as(B).projects.create({ name: 'R10-1', color: '#000', path: '/' } as never))
+    ).not.toBe('ok')
+    expect(count()).toBe(0)
+  })
+})

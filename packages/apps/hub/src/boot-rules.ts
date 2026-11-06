@@ -18,7 +18,9 @@
  *   Login required:         B2 password or SSO on · B7 SSO settings complete (and
  *                           its certificate loads, `assertSsoCredential`) ·
  *                           B11 the auth database loads (`assertAuthLoaded`, once
- *                           the database has been opened)
+ *                           the database has been opened) · B18 the computer
+ *                           startup completed and left a project-folder host
+ *                           (`assertComputersReady`)
  *
  * "Reachable from other machines" (B13) is a listen address that is not loopback OR
  * a public address that is set. The second half is deliberate: a hub on 127.0.0.1
@@ -429,6 +431,35 @@ export function assertAuthLoaded(requireLogin: boolean, hubAuth: unknown | null)
       `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but hub auth failed to initialize — refusing ` +
         `to boot a hub that cannot check who is signing in. Check the auth database in the ` +
         `hub's data directory and the hub log.`
+    )
+  }
+}
+
+/**
+ * B18 — when login is required the computer startup must have completed and left a
+ * project-folder host. Fails CLOSED: without the host, a project's folder fell back to
+ * the legacy `projects.path` column — a record of the HUB's disk — written after only
+ * the computer-side owner check, so a user could claim `/` and read every hub file
+ * (round-10 R10-1). The desktop (no login) still boots degraded, as before.
+ */
+export function assertComputersReady(
+  requireLogin: boolean,
+  state: { folderHost: boolean; initError: Error | null }
+): void {
+  if (!requireLogin) return
+  if (state.initError) {
+    throw new HubBootRefusal(
+      'B18',
+      `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but the computer startup failed ` +
+        `(${state.initError.message}) — refusing to boot a hub that cannot record where ` +
+        `project folders live. Check the hub log and its data directory.`
+    )
+  }
+  if (!state.folderHost) {
+    throw new HubBootRefusal(
+      'B18',
+      `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but no project folder host was set up — ` +
+        `refusing to boot: project folders would be recorded on the hub's own disk.`
     )
   }
 }

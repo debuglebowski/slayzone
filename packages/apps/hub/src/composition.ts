@@ -364,6 +364,9 @@ export type ServerComposition = {
    *  A later unit awaits this before reading the two fields above / mounting the
    *  gateway. */
   computersReady: Promise<void>
+  /** What failed the async computer init, or null. Kept, not only logged: a hub with
+   *  login refuses to boot on it (boot rule B18); the desktop runs degraded. */
+  readonly computersInitError: Error | null
   /** Feed the computer listener's bound WS URL back into the computers registry
    *  (`mintJoinToken` embeds it in a join token). The server host resolves it only
    *  after it binds its port, which happens AFTER composeServer returns — so it's a
@@ -456,6 +459,7 @@ export function composeServer(opts: {
   // Who a join token is for (T-20), read through the late-bound ref above.
   const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
+  let computersInitError: Error | null = null
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
   // Null until then, so `mintJoinToken` fails cleanly if called before the listener
@@ -2233,11 +2237,12 @@ export function composeServer(opts: {
       }
     })
   })().catch((err) => {
+    computersInitError = err instanceof Error ? err : new Error(String(err))
     recordDiagnosticEvent({
       level: 'error',
       source: 'task',
       event: 'computer.init_failed',
-      message: err instanceof Error ? err.message : String(err)
+      message: computersInitError.message
     })
   })
 
@@ -2322,6 +2327,9 @@ export function composeServer(opts: {
       return hubAuthRef
     },
     computersReady,
+    get computersInitError(): Error | null {
+      return computersInitError
+    },
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
     },

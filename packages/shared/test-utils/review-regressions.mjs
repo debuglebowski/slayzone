@@ -444,6 +444,17 @@ export const REGRESSIONS = [
     id: 'Q4',
     what: 'git.watchStart answers once the watch is live; a change right after it is never missed',
     files: [`${P}apps/computer/src/handlers/git-watch.test.ts`]
+  },
+  // ── round 10 ──
+  {
+    round: 10,
+    id: 'R10-1',
+    what: "a login hub never writes a project's legacy path; it refuses to boot without a folder host (B18)",
+    files: [
+      `${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`,
+      `${P}apps/hub/src/boot-rules.test.ts`,
+      `${P}apps/api/src/hub-disk-canary.test.ts`
+    ]
   }
 ]
 

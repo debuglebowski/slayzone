@@ -273,6 +273,18 @@ function idFor(key: string): unknown {
   if (/taskId$|^task_id$/.test(key)) return 'tB'
   if (/projectId$|^project_id$/.test(key)) return 'pB'
   if (/computerId$|^computer_id$/.test(key)) return 'cB'
+  if (key === 'id') return ownIdFor(state.route)
+  return 'x'
+}
+/**
+ * A bare `id`: B's own resource of the kind the route is about, so a call that edits
+ * one (projects.update) really runs — round 10: with `id: 'x'` the canary could not
+ * see projects.update write the legacy project path.
+ */
+function ownIdFor(route: string): string {
+  if (/project/i.test(route)) return 'pB'
+  if (/computer/i.test(route)) return 'cB'
+  if (/task/i.test(route)) return 'tB'
   return 'x'
 }
 /** An id field: kept B's own in every mode, so id checks let the call through. */
@@ -289,7 +301,7 @@ function opaque(canary: string): Record<string, unknown> {
     computerId: 'cB',
     target: { computerId: 'cB' },
     title: 'x',
-    id: 'x'
+    id: ownIdFor(state.route)
   }
   for (const k of PATH_KEYS) o[k] = /s$/.test(k) ? [canary] : canary
   return o
