@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildCspFloor,
-  buildRendererCsp,
-  directLinkConnectSources,
-  hubConnectSources
-} from './renderer-csp'
+import { buildCspFloor, buildRendererCsp, hubConnectSources } from './renderer-csp'
+import { directLinkConnectSources } from './direct-link-gate'
 
 describe('buildRendererCsp', () => {
   it('names the tRPC WS origin exactly when one is known', () => {

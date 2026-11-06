@@ -18,7 +18,6 @@
  *    computer.
  */
 import { normalizeDirectAddress } from '@slayzone/platform/direct-link'
-import { directLinkConnectSources } from './renderer-csp'
 
 const HEALTH_PATH = '/direct/v1/health'
 /**
@@ -114,4 +113,32 @@ export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
       return (await probe(url)) ? { ok: true } : { ok: false, reason: 'unreachable' }
     }
   }
+}
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
+/**
+ * The `connect-src` entries for computers' direct-link listeners the hub has issued
+ * to this renderer (docs/direct-link.md), as exact `wss://host[:port]` origins.
+ *
+ *   - Loopback adds nothing: the hub offers a loopback listener only when hub,
+ *     client and computer share this machine, and then the local hub's
+ *     `ws://127.0.0.1:*` already covers it. No new loopback entry, no widening.
+ *   - A public address gets its exact `wss:` origin — the scheme the hub scheme
+ *     rule derives for a non-loopback host. Never `http(s)`: the reachability
+ *     probe runs in the main process, not the renderer.
+ *   - Anything that is not a bare `host[:port]` authority is dropped, wildcards
+ *     included, so a bad value can never widen the policy.
+ */
+export function directLinkConnectSources(addresses: readonly string[]): string[] {
+  const out = new Set<string>()
+  for (const addr of addresses) {
+    // `box:443` and `box` are one address (`normalizeDirectAddress`).
+    const normalized = normalizeDirectAddress(addr)
+    if (normalized === null) continue
+    const url = new URL(`wss://${normalized}`)
+    if (LOOPBACK_HOSTS.has(url.hostname)) continue
+    out.add(url.origin)
+  }
+  return [...out]
 }
