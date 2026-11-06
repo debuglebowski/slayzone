@@ -4,7 +4,7 @@ description: "Manage tasks, subtasks, tags, and templates via the slay CLI"
 trigger: auto
 ---
 
-Task commands are the core of the slay CLI. Most commands accept an optional `[id]` argument that defaults to `$SLAYZONE_TASK_ID`, which is automatically set in every task terminal. Commands that require a project (`--project`) default to `$SLAYZONE_PROJECT_ID` (also set automatically). All ID arguments support prefix matching — e.g. `a1b2` matches a full UUID starting with `a1b2`.
+Task commands are the core of the slay CLI. Most commands accept an optional `[id]` argument identifying the task to act on. When omitted, it **auto-resolves** to your current task via `$SLAYZONE_TASK_ID` (**always** set in a task terminal). Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. Commands that require a project (`--project`) default to `$SLAYZONE_PROJECT_ID` (also set automatically). All ID arguments support prefix matching — e.g. `a1b2` matches a full UUID starting with `a1b2`.
 
 ## Task lifecycle
 
@@ -15,13 +15,13 @@ Task commands are the core of the slay CLI. Most commands accept an optional `[i
 
 - `slay tasks create <title> [--project <name|id>] [--description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--template <name|id>] [--external-id <id>] [--external-provider <provider>]` — create a task.
   - `--project` defaults to `$SLAYZONE_PROJECT_ID`
-  - If `--template` is omitted, the project's default template auto-applies (if one exists). Templates set terminal mode, initial status, priority, and provider config
+  - If `--template` is omitted, the project's default template auto-applies (if one exists). Templates set agent, initial status, priority, and provider config
   - `--external-id` enables idempotent creation: if a task with the same `(project, provider, external_id)` exists, prints "Exists" and exits cleanly — useful for sync scripts
   - Reference artifacts in descriptions via `[title](artifact:<artifact-id>)`
 
 - `slay tasks view [id]` — show task details including status, priority, description, tags, and subtasks.
 
-- `slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent]` — update a task.
+- `slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]` — update a task. `--agent` switches the task's agent (e.g. `claude-code`, `codex`, `claude-chat`): stops the running one and starts a fresh conversation.
   - `--append-description` adds text after a newline separator (mutually exclusive with `--description`)
   - `--no-due` clears the due date
   - `--parent <id>` reparents under another task in the same project; `--no-parent` makes it top-level
@@ -52,7 +52,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional `[i
 
 - `slay tasks subtask-add <title> [--parent <id>] [--description <text>] [--status <status>] [--priority <1-5>] [--external-id <id>] [--external-provider <provider>]` — add a subtask.
   - `--parent` defaults to `$SLAYZONE_TASK_ID`
-  - Subtask inherits the parent's terminal mode
+  - Subtask inherits the parent's agent
   - `--external-id` deduplication works the same as task creation
 
 ## Blocking
@@ -94,7 +94,7 @@ Tags are project-scoped — a tag name must exist in the project before it can b
 
 ## Templates
 
-Templates define defaults for new tasks: terminal mode, status, priority, provider config, panel visibility, and browser tabs.
+Templates define defaults for new tasks: agent, status, priority, provider config, panel visibility, and browser tabs.
 
 - `slay templates list [--project <name|id>] [--json]` — list templates.
   - `--project` defaults to `$SLAYZONE_PROJECT_ID`
@@ -102,11 +102,11 @@ Templates define defaults for new tasks: terminal mode, status, priority, provid
 
 - `slay templates view <id> [--json]` — view template details including all configured defaults.
 
-- `slay templates create <name> [--project <name|id>] [--terminal-mode <mode>] [--priority <1-5>] [--status <status>] [--default] [--description <text>]` — create a template.
+- `slay templates create <name> [--project <name|id>] [--agent <mode>] [--priority <1-5>] [--status <status>] [--default] [--description <text>]` — create a template.
   - `--project` defaults to `$SLAYZONE_PROJECT_ID`
   - `--default` makes it the project default, clearing any existing default (transactional)
 
-- `slay templates update <id> [--name <n>] [--terminal-mode <m>] [--priority <1-5>] [--status <s>] [--default] [--no-default] [--description <text>]` — update a template.
+- `slay templates update <id> [--name <n>] [--agent <m>] [--priority <1-5>] [--status <s>] [--default] [--no-default] [--description <text>]` — update a template.
   - `--default` clears all other defaults
   - `--no-default` unsets only this template's default flag
 
