@@ -139,6 +139,26 @@ async function flushMicrotasks(): Promise<void> {
   })
 }
 
+// Final review M3 (client): a panel left while a refused start was in flight sent a
+// watchStop anyway — releasing a count that somebody else's watch held on the hub.
+describe('a refused watch start', () => {
+  it('is never followed by a watchStop', async () => {
+    let reject: (e: Error) => void = () => undefined
+    gitStub.watchStart.mockImplementation(
+      () =>
+        new Promise<void>((_, r) => {
+          reject = r
+        })
+    )
+    const stop = subscribeGitPathChanges('/repo/refused', () => undefined)
+    stop() // leaves while the start is in flight
+    reject(new Error('refused'))
+    await flushMicrotasks()
+    await flushMicrotasks()
+    expect(gitStub.watchStop).not.toHaveBeenCalled()
+  })
+})
+
 describe('git-diff-store refcount + sharing', () => {
   it('two subscribers with same params share one entry + one timer', async () => {
     const h1 = mount('/tmp/repo', { pollIntervalMs: 5000 })

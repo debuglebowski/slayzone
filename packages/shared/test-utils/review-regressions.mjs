@@ -498,6 +498,15 @@ export const REGRESSIONS = [
       `${P}apps/computer/src/handlers/pty.test.ts`,
       `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
     ]
+  },
+  {
+    round: 11,
+    id: 'M3-final',
+    what: 'a panel joining a git watch start that fails is told; a refused start is never stopped',
+    files: [
+      `${P}domains/worktrees/src/server/git-watch-routing.test.ts`,
+      `${P}domains/worktrees/src/client/git-diff-store.test.ts`
+    ]
   }
 ]
 

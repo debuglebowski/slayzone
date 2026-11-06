@@ -71,6 +71,8 @@ interface RoutedWatch {
   computerId: string
   watchId: string
   count: number
+  /** The computer's start: a panel joining while it is in flight waits for it (M3). */
+  started: Promise<void>
 }
 const routedWatches = new Map<string, RoutedWatch>()
 let watchSeq = 0
@@ -78,29 +80,31 @@ let watchSeq = 0
 /** `worktrees.watchStart`: watch where the checkout lives. */
 export async function watchGitCheckout(worktreePath: string, db?: SlayzoneDb): Promise<void> {
   const existing = routedWatches.get(worktreePath)
-  if (existing) {
-    existing.count++
-    return
-  }
+  if (existing) return join(existing)
   const computerId = transport ? await computerFor(undefined, worktreePath, db) : null
   const again = routedWatches.get(worktreePath)
-  if (again) {
-    again.count++
-    return
-  }
+  if (again) return join(again)
   if (computerId == null || !transport) refuseNoComputer({ op: 'worktrees.watchStart' })
-  const watch: RoutedWatch = {
-    computerId,
-    watchId: `gw-${process.pid}-${++watchSeq}`,
-    count: 1
-  }
+  const watchId = `gw-${process.pid}-${++watchSeq}`
+  const started = transport.watchStart(computerId, { watchId, worktreePath })
+  const watch: RoutedWatch = { computerId, watchId, count: 1, started }
   routedWatches.set(worktreePath, watch)
   try {
-    await transport.watchStart(computerId, { watchId: watch.watchId, worktreePath })
+    await started
   } catch (err) {
-    if (routedWatches.get(worktreePath) === watch) routedWatches.delete(worktreePath)
+    // Everyone counted on it is told — a panel that joined meanwhile too (M3).
+    if (routedWatches.get(worktreePath) === watch) {
+      routedWatches.delete(worktreePath)
+      getGitWatcher().emit('git:diff-watch-failed', { worktreePath })
+    }
     throw err
   }
+}
+
+/** Count one more panel on a watch — live once its start is (a failed one throws). */
+async function join(watch: RoutedWatch): Promise<void> {
+  watch.count++
+  await watch.started
 }
 
 /** `worktrees.watchStop`: release one subscription; the last one ends the watch. */
