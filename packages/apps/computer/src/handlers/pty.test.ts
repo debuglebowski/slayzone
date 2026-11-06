@@ -1147,10 +1147,12 @@ describe('agent-start admission', () => {
       writeId: 'w1'
     })
     await waitFor(() => second.done)
-    await waitFor(() => outputOf(notifies, 'second').includes('direct-while-queued'))
-    await new Promise((r) => setTimeout(r, 200))
     // cat echoes once per line written: typed echo + cat's output, for ONE write.
-    expect(outputOf(notifies, 'second').split('direct-while-queued').length - 1).toBe(2)
+    const count = () => outputOf(notifies, 'second').split('direct-while-queued').length - 1
+    await waitFor(() => count() >= 2)
+    // A second copy would echo twice more.
+    await new Promise((r) => setTimeout(r, 500))
+    expect(count()).toBe(2)
     pty.disposeAll()
   })
 
