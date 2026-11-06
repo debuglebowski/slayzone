@@ -618,6 +618,15 @@ export const REGRESSIONS = [
     id: 'DL-M4',
     what: 'a direct grant registered while a matching revocation runs is revoked on the computer once registered, never left to live out its TTL',
     files: [`${P}apps/hub/src/direct-link.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-M2',
+    what: 'a terminal falling back from the direct link to the hub relay reads back the output written between the two streams as soon as the relay is live',
+    files: [
+      `${P}domains/terminal/src/client/relay-subscription.test.ts`,
+      `${P}domains/terminal/src/client/PtyContext.test.tsx`
+    ]
   }
 ]
 

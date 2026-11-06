@@ -277,4 +277,59 @@ describe('PtyProvider event streams', () => {
     expect(liveDataSubs()).toEqual([['s1', 's2']])
     stop()
   })
+
+  it('reads back output written while a session fell from the direct link to the relay, without waiting for its next chunk', async () => {
+    const { ctx } = mount()
+    const got: Array<[string, number]> = []
+    ctx().subscribe('s1', (data: string, seq: number) => got.push([data, seq]))
+    await settle()
+    let lose: (() => void) | undefined
+    let directOut: ((c: { seq: number; data: string }) => void) | undefined
+    const lease = {
+      computerId: 'c1',
+      client: {
+        pty: {
+          onData: {
+            subscribe: (
+              _i: unknown,
+              o: { onStarted: () => void; onData: (c: { seq: number; data: string }) => void }
+            ) => {
+              directOut = o.onData
+              queueMicrotask(o.onStarted)
+              return { unsubscribe: () => undefined }
+            }
+          },
+          getBufferSince: { query: async () => null }
+        }
+      },
+      onLost: (cb: () => void) => {
+        lose = cb
+        return () => undefined
+      },
+      release: () => undefined
+    }
+    const stop = startDirectPtyLink({
+      sessionId: 's1',
+      manager: { acquire: async () => lease as never, onComputerConnected: () => () => undefined },
+      deliver: (data, seq) => ctx().deliver('s1', data, seq, async () => []),
+      lastSeq: () => ctx().getLastSeq('s1')
+    })
+    await settle()
+    act(() => directOut?.({ seq: 1, data: 'a' }))
+    // seq 2 was written after the direct stream died and before the relay started;
+    // the agent then prints nothing more.
+    client.pty.getBufferSince.query.mockImplementation((async (input: { afterSeq: number }) =>
+      input.afterSeq === 1 ? { chunks: [{ seq: 2, data: 'b' }], currentSeq: 2 } : null) as never)
+    act(() => lose?.())
+    await settle()
+    await settle()
+    expect(liveDataSubs()).toEqual([['s1']])
+    expect(client.pty.getBufferSince.query).toHaveBeenCalledWith({ sessionId: 's1', afterSeq: 1 })
+    expect(got).toEqual([
+      ['a', 1],
+      ['b', 2]
+    ])
+    stop()
+    client.pty.getBufferSince.query.mockImplementation(async () => null)
+  })
 })

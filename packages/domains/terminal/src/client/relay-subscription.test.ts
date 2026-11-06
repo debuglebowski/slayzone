@@ -85,3 +85,34 @@ describe('relay subscription', () => {
     expect(subs[1]?.closed).toBe(true)
   })
 })
+
+describe('relay subscription: catching up sessions that join', () => {
+  it('once the new subscription is live, names exactly the sessions it added (to read back what fell between the streams)', async () => {
+    const joined: string[][] = []
+    const subs: Array<{ started: () => void }> = []
+    const relay = createRelaySubscription({
+      open: (_ids, onStarted) => {
+        subs.push({ started: onStarted })
+        return { close: () => {} }
+      },
+      onJoined: (ids) => joined.push(ids)
+    })
+    const flush = () => new Promise((r) => setTimeout(r, 0))
+    relay.set(['a'])
+    await flush()
+    expect(joined).toEqual([])
+    subs[0]?.started()
+    expect(joined).toEqual([['a']])
+    // 'b' falls back from the direct link: joined only once its subscription is live.
+    relay.set(['a', 'b'])
+    await flush()
+    expect(joined).toEqual([['a']])
+    subs[1]?.started()
+    expect(joined).toEqual([['a'], ['b']])
+    // Leaving joins nothing.
+    relay.set(['b'])
+    await flush()
+    subs[2]?.started()
+    expect(joined).toEqual([['a'], ['b']])
+  })
+})

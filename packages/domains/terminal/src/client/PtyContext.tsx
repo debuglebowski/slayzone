@@ -77,6 +77,8 @@ const PtyContext = createContext<PtyContextValue | null>(null)
  *  set of maps is correct even when N hubs' streams fan into it. */
 interface PtyStreamSinks {
   deliver: (sessionId: string, data: string, seq: number, backfill: PtyBackfill) => void
+  /** The last seq delivered for a session (-1 = none). Stable. */
+  lastSeq: (sessionId: string) => number
   /** The sessions this hub must relay: mounted here and not on a direct link. */
   relaySessionIds: () => string[]
   onRelaySetChanged: (cb: () => void) => () => void
@@ -104,6 +106,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
   const trpcClient = useTRPCClient()
   const {
     deliver,
+    lastSeq,
     relaySessionIds,
     onRelaySetChanged,
     statesRef,
@@ -147,6 +150,22 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
           { onStarted, onData: handleData }
         )
         return { close: () => sub.unsubscribe() }
+      },
+      // A session back on the relay (its direct link ended): what the computer wrote
+      // between the two streams is read back now, not when the session next prints.
+      onJoined: (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          const after = lastSeq(sessionId)
+          if (after < 0) continue
+          const backfill = (afterSeq: number) =>
+            ptyBufferSince(trpcClient, sessionId, afterSeq).then((b) => b?.chunks ?? [])
+          void backfill(after).then(
+            (chunks) => {
+              for (const c of chunks) deliver(sessionId, c.data, c.seq, backfill)
+            },
+            () => undefined
+          )
+        }
       }
     })
     relay.set(relaySessionIds())
@@ -155,7 +174,7 @@ function PtyEventStreams({ sinks }: { sinks: PtyStreamSinks }): null {
       off()
       relay.close()
     }
-  }, [trpcClient, handleData, relaySessionIds, onRelaySetChanged])
+  }, [trpcClient, handleData, relaySessionIds, onRelaySetChanged, lastSeq, deliver])
 
   const handleExit = useStableCallback(
     async ({
@@ -329,8 +348,14 @@ export function PtyProvider({ children }: { children: ReactNode }) {
     return () => relayListenersRef.current.delete(cb)
   }, [])
   useEffect(() => onDirectPtySessionsChanged(relaySetChanged), [relaySetChanged])
+  const getLastSeq = useCallback(
+    (sessionId: string): number =>
+      statesRef.current.has(sessionId) ? delivery.lastSeq(sessionId) : -1,
+    [delivery]
+  )
   const sinks: PtyStreamSinks = {
     deliver,
+    lastSeq: getLastSeq,
     relaySessionIds,
     onRelaySetChanged,
     statesRef,
@@ -490,12 +515,6 @@ export function PtyProvider({ children }: { children: ReactNode }) {
       }
     },
     []
-  )
-
-  const getLastSeq = useCallback(
-    (sessionId: string): number =>
-      statesRef.current.has(sessionId) ? delivery.lastSeq(sessionId) : -1,
-    [delivery]
   )
 
   const getCrashOutput = useCallback((sessionId: string): string | undefined => {
