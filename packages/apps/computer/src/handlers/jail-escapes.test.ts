@@ -298,6 +298,25 @@ describe.skipIf(process.platform === 'linux')(
   }
 )
 
+// Final review M7: a folder copy judged only its top folder, and copied whatever was
+// inside — the computer's credentials included, into a readable copy in a project.
+// Protected entries are never copied, however deep.
+describe('M7: a folder copy never copies the computer’s protected state', () => {
+  it('fs.copy of a folder holding the credentials leaves them out', async () => {
+    mkdirSync(join(r, 'proj', '.state'), { recursive: true })
+    writeFileSync(join(r, 'proj', 'readme.md'), 'hi')
+    writeFileSync(join(r, 'proj', '.state', 'credentials.json'), 'SECRET-KEY')
+    setProtectedPaths([join(r, 'proj', '.state', 'credentials.json')])
+    try {
+      await fs[M.fsCopy]({ rootPath: r, srcPath: 'proj', destPath: 'copy' })
+      expect(readFileSync(join(r, 'copy', 'readme.md'), 'utf-8')).toBe('hi')
+      expect(existsSync(join(r, 'copy', '.state', 'credentials.json'))).toBe(false)
+    } finally {
+      setProtectedPaths([])
+    }
+  })
+})
+
 // Round-5 K8: the file editor's search read THROUGH links — to files outside the
 // root, or to the computer's own credentials inside it (the protected filter checked
 // the link's own path) — and readDir never judged its folder, so listing through a

@@ -507,6 +507,12 @@ export const REGRESSIONS = [
       `${P}domains/worktrees/src/server/git-watch-routing.test.ts`,
       `${P}domains/worktrees/src/client/git-diff-store.test.ts`
     ]
+  },
+  {
+    round: 11,
+    id: 'M7-final',
+    what: "a folder copy never copies the computer's protected state",
+    files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
   }
 ]
 
