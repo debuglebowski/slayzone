@@ -403,7 +403,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()
-    await chat.close()
+    await Promise.all([chat.close(), proc.groupsRecorded()])
   }
 
   const setAgentHookUrl = (url: string): void => {

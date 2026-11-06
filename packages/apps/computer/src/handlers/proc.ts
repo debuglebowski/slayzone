@@ -135,7 +135,7 @@ export interface ProcHandlers {
   disposeAll(): void
   /** Resolves once the groups a crashed host left behind are ended (M5). */
   orphansReaped: Promise<void>
-  /** Resolves once every spawned group so far is in the ledger. */
+  /** Resolves once every ledger write so far is on disk (awaited on shutdown). */
   groupsRecorded(): Promise<void>
 }
 
@@ -589,6 +589,8 @@ export function createProcHandlers(
       ctx.log('proc disposed on shutdown', { sessionId })
     }
     procs.clear()
+    // Their groups were just ended: a clean quit leaves nothing to reap (R2-1).
+    ledger?.close()
   }
 
   /** cpu/memory + title for the asked live sessions (the hub's processes panel). */
