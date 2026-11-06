@@ -177,6 +177,8 @@ export const chatOperationSchemas = {
       text: text.min(1)
     })
   ]),
+  /** Close (resolve) or reopen a thread of this tab. An older computer refuses the method. */
+  setThreadClosed: z.tuple([create.extend({ threadId: id, closed: z.boolean() })]),
   listPinnedMessages: createTuple,
   pinMessage: z.tuple([create.extend({ pin: pinnedMessage })]),
   unpinMessage: z.tuple([

@@ -879,16 +879,26 @@ export function createLocalChatData(
     clear: atomic(queueSync.clear),
     getTabIdForItem: atomic(queueSync.getTabIdForItem)
   }
+  // A thread stored before closing existed has no `closedAt`: it is open.
+  type StoredThread = Omit<ChatThread, 'closedAt'> & { closedAt?: number | null }
+  const readThread = (value: StoredThread): ChatThread => ({
+    ...value,
+    closedAt: value.closedAt ?? null
+  })
+  const maybeThread = (value: StoredThread | undefined): ChatThread | undefined =>
+    value && readThread(value)
   const threads: ChatThreadStore = {
     get: async (id) =>
-      store.findRecords('thread', undefined, { id }).find((r) => {
-        const parent = store.conversation(r.conversationId)
-        return parent?.state === 'active' && !store.isTabDeleted(parent.identity.taskId, id)
-      })?.value as ChatThread | undefined,
+      maybeThread(
+        store.findRecords('thread', undefined, { id }).find((r) => {
+          const parent = store.conversation(r.conversationId)
+          return parent?.state === 'active' && !store.isTabDeleted(parent.identity.taskId, id)
+        })?.value as StoredThread | undefined
+      ),
     listForParent: async (tabId) =>
       store
         .records(owner(tabId).id, 'thread')
-        .map((r) => r.value as ChatThread)
+        .map((r) => readThread(r.value as StoredThread))
         .filter((thread) => !store.isTabDeleted(owner(tabId).taskId, thread.id))
         .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)),
     list: async (tabId, conversationId) =>
@@ -915,6 +925,10 @@ export function createLocalChatData(
     setConversation: async (id, conversationId) => {
       const thread = await threads.get(id)
       if (thread) set(thread.parentTabId, 'thread', id, { ...thread, conversationId })
+    },
+    setClosed: async (id, closedAt) => {
+      const thread = await threads.get(id)
+      if (thread) set(thread.parentTabId, 'thread', id, { ...thread, closedAt })
     }
   }
   // A pin's record: one per row of one provider conversation of the tab.

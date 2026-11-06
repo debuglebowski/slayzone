@@ -405,7 +405,11 @@ export const chatRouter = router({
           text: z.string().trim().min(1).max(1_000_000)
         })
       )
-      .mutation(({ input }) => ops().createThread(input))
+      .mutation(({ input }) => ops().createThread(input)),
+    // Close (resolve) a thread: its agent stops, it leaves the tabs; reopen restores it.
+    setClosed: publicProcedure
+      .input(chatCreateOpts.extend({ threadId: z.string().min(1).max(200), closed: z.boolean() }))
+      .mutation(({ input }) => ops().setThreadClosed(input))
   }),
   // `/btw`: a side question answered from the conversation, never part of it.
   sideQuestion: router({

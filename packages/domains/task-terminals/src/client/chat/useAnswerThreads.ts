@@ -61,8 +61,13 @@ export function useAnswerThreads(
   // only shows threads belonging to the conversation currently on screen.
   const panel = selection?.conversationId === conversationId ? selection : null
   // A remembered thread that no longer exists (its tab went away): close.
-  if (panel?.activeId && isSuccess && !threads.some((thread) => thread.id === panel.activeId))
-    setStored({ key: storageKey, selection: null })
+  const activeThread = panel?.activeId
+    ? threads.find((thread) => thread.id === panel.activeId)
+    : undefined
+  if (panel?.activeId && isSuccess && !activeThread) setStored({ key: storageKey, selection: null })
+  // The selected thread was closed (here or in another window): "New thread".
+  else if (panel && activeThread?.closedAt != null)
+    setStored({ key: storageKey, selection: { ...panel, activeId: null } })
   useSubscription(
     trpc.chat.threads.onChanged.subscriptionOptions(
       { tabId: target.tabId },
@@ -78,7 +83,26 @@ export function useAnswerThreads(
     if (conversationId)
       setSelection(() => ({ conversationId, answerId, sourceMessageId, activeId: null }))
   })
-  const open = useStableCallback((thread: ChatThread) => {
+  const select = useStableCallback((activeId: string | null) => {
+    setSelection((prev) => (prev ? { ...prev, activeId } : null))
+  })
+  const setClosed = async (thread: ChatThread, closed: boolean): Promise<boolean> => {
+    let success = false
+    await client.chat.threads.setClosed.mutate({ ...target, threadId: thread.id, closed }).then(
+      async () => {
+        await refetchThreads()
+        success = true
+      },
+      (err: unknown) => {
+        const verb = closed ? 'close' : 'reopen'
+        toast(`Couldn't ${verb} thread: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    )
+    return success
+  }
+  /** Show a thread; a closed one reopens first (its agent resumes on the next message). */
+  const open = useStableCallback(async (thread: ChatThread): Promise<void> => {
+    if (thread.closedAt != null && !(await setClosed(thread, false))) return
     setSelection(() => ({
       conversationId: thread.parentConversationId,
       answerId: thread.answerId,
@@ -86,8 +110,21 @@ export function useAnswerThreads(
       activeId: thread.id
     }))
   })
-  const select = useStableCallback((activeId: string | null) => {
-    setSelection((prev) => (prev ? { ...prev, activeId } : null))
+  /** Close (resolve) a thread: its agent stops and it leaves the tabs. A selected
+   * one hands the selection to its next open sibling ("New thread" when none). */
+  const closeThread = useStableCallback(async (thread: ChatThread): Promise<void> => {
+    if (panel?.activeId === thread.id) {
+      const siblings = threads.filter(
+        (t) =>
+          t.answerId === thread.answerId &&
+          t.sourceMessageId === thread.sourceMessageId &&
+          (t.closedAt == null || t.id === thread.id)
+      )
+      const at = siblings.findIndex((t) => t.id === thread.id)
+      const next = siblings[at + 1] ?? siblings[at - 1]
+      select(next?.id ?? null)
+    }
+    await setClosed(thread, true)
   })
   const close = useStableCallback(() => setSelection(() => null))
   const create = useStableCallback(async (text: string): Promise<boolean> => {
@@ -125,5 +162,5 @@ export function useAnswerThreads(
     () => (enabled ? { threads, start, open } : undefined),
     [enabled, threads, start, open]
   )
-  return { threads, panel, creating, create, select, close, view }
+  return { threads, panel, creating, create, select, close, closeThread, reopen: open, view }
 }

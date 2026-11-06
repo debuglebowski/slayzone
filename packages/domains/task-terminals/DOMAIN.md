@@ -30,7 +30,7 @@ PTY (node-pty)
 
 - `chat/AssistantAnswer.tsx` owns the answer bubble, full-row hover highlight, top-right Copy/Thread/More toolbar, and shared Activities/Files/Threads/details footer. The toolbar keeps the same placement for short and long replies.
 - `chat/useAnswerThreads.ts` opens discussions for a specific answer in the current conversation. `ChatThreadsPanel` selects them with tabs and keeps visited discussions mounted so switching preserves their state. The open panel (answer + selected thread) is view state in localStorage per hub + tab (`chat/answer-threads-panel.ts`), so reload/restart reopens it; closing forgets it, and a remembered thread that no longer exists closes it.
-- The first question creates a durable thread through `chat.threads.create`. Each discussion uses an ordinary `ChatPanel` and its own terminal tab, event history, draft, and CLI conversation. Thread tabs stay out of the terminal tab bar.
+- The first question creates a durable thread through `chat.threads.create`. Each discussion uses an ordinary `ChatPanel` and its own terminal tab, event history, draft, and CLI conversation. Thread tabs stay out of the terminal tab bar. A thread can be closed (resolved) via the X on its tab (`chat.threads.setClosed`): its session stops and it leaves the tabs, but its record (`closedAt`) and history remain; the panel's "Closed threads" menu, the answer footer, or an "Open thread" link reopens it, and its next message resumes its conversation.
 - “Send to main” previews an editable conclusion, then uses the main chat queue. The returned message links back to its discussion. Queued conclusions carry their source conversation ID; the queue waits rather than delivering them into a different main conversation.
 
 ### Pinned messages

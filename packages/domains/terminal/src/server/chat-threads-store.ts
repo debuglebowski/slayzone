@@ -4,9 +4,22 @@ import type { ChatThread } from '@slayzone/terminal-contracts'
 const columns = `id, parent_tab_id AS parentTabId, task_id AS taskId, mode,
   parent_conversation_id AS parentConversationId, answer_id AS answerId,
   source_message_id AS sourceMessageId, source_uuid AS sourceUuid, title,
-  conversation_id AS conversationId, created_at AS createdAt`
+  conversation_id AS conversationId, NULL AS closedAt, created_at AS createdAt`
 
-export function createChatThreadStore(db: SlayzoneDb) {
+export interface ChatThreadStore {
+  listForParent(parentTabId: string): Promise<ChatThread[]>
+  get(id: string): Promise<ChatThread | undefined>
+  list(parentTabId: string, conversationId: string): Promise<ChatThread[]>
+  create(thread: ChatThread): Promise<void>
+  setConversation(id: string, conversationId: string | null): Promise<void>
+  /**
+   * Close (`closedAt`) or reopen (null) a thread. Absent: the storage cannot close
+   * threads (the legacy SQLite implementation, whose threads always read open).
+   */
+  setClosed?(id: string, closedAt: number | null): Promise<void>
+}
+
+export function createChatThreadStore(db: SlayzoneDb): ChatThreadStore {
   return {
     listForParent: (parentTabId: string) =>
       db.all<ChatThread>(
@@ -60,5 +73,3 @@ export function createChatThreadStore(db: SlayzoneDb) {
     }
   }
 }
-
-export type ChatThreadStore = ReturnType<typeof createChatThreadStore>
