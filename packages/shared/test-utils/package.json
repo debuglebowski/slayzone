@@ -23,6 +23,7 @@
     "./fake-codex": "./fake-codex/index.ts",
     "./fake-codex/recorded": "./fake-codex/recorded.ts",
     "./chat-long-session": "./chat-long-session/index.ts",
-    "./known-bug": "./known-bug.ts"
+    "./known-bug": "./known-bug.ts",
+    "./fixture-reaper": "./fixture-reaper.ts"
   }
 }

@@ -17,6 +17,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import { reapOnOwnerDeath } from '@slayzone/test-utils/fixture-reaper'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { hostControl, type HostHealth } from '../../computer/src/session-host'
 import { releaseEntry } from '../../computer/src/upgrade-runtime'
@@ -85,6 +86,9 @@ test.each([
   'historical %s supervisor rolls a busy contract1 host through a safe maintenance bridge',
   async (ref, oldProtocol) => {
     const dir = mkdtempSync(join(realpathSync(tmpdir()), 'historical-supervisor-'))
+    // The supervisor + session host are detached: if this worker dies before `finally`,
+    // they would respawn forever against the closed hub.
+    reapOnOwnerDeath(dir)
     symlinkSync(
       dirname(dirname(requireComputer.resolve('node-pty/package.json'))),
       join(dir, 'node_modules'),
