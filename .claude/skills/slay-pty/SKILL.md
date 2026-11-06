@@ -11,7 +11,7 @@ All commands support ID prefix matching.
 ## Commands
 
 - `slay pty list [--json]` — list active PTY sessions.
-  - Shows session ID, task ID, terminal mode, current state, and age
+  - Shows session ID, task ID, agent, current state, and age
 
 - `slay pty buffer <id>` — dump the full terminal buffer content to stdout.
   - Useful for reading what an AI agent has output without streaming
@@ -24,7 +24,7 @@ All commands support ID prefix matching.
   - If no text argument is given, reads from stdin (pipe-friendly)
   - Appends a trailing newline to submit
   - For AI modes like `claude-code`, internal newlines are encoded as Kitty shift-enter sequences (`\x1b[13;2u`) so multi-line text is submitted as a single input
-  - **Wait behavior:** by default waits for the session to reach the `idle` state (= AI CLI ready for input) before sending. Automatic for AI modes. Use `--no-wait` to send immediately (default for plain terminal modes)
+  - **Wait behavior:** by default waits for the session to reach the `idle` state (= AI CLI ready for input) before sending. Automatic for AI agents. Use `--no-wait` to send immediately (default for the plain `terminal` agent)
   - Timeout defaults to 60 seconds
 
 - `slay pty type <id> <data>` (alias: `write`) — send raw bytes to PTY stdin. **Use only when `submit` is wrong** — e.g. appending text mid-prompt without submitting, or sending exact byte sequences. No newline added, no encoding.
@@ -57,6 +57,8 @@ All commands support ID prefix matching.
 - `slay pty kill <id>` — terminate a PTY session.
 
 ## Orchestration patterns
+
+Tasks in **chat mode** (`claude-chat`, `codex-chat`) have no PTY: drive them with `slay chat`. To drive a task's main agent without caring which mode it runs in, use `slay agent` (see the `slay-chat` skill).
 
 Submit a prompt to a Claude Code session and wait for completion:
 ```bash

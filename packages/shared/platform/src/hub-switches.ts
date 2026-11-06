@@ -131,7 +131,7 @@ export const HUB_CONVEX_ADDRESS_ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
  * comma-separated authorities (`host:port`, no `stun:` scheme, env rule 5). Unset = the
  * default below; empty = none (peers then connect only where their own addresses reach
  * each other). Also `stunAddresses` in `hub.config.json`; env wins. A malformed value
- * refuses boot (rule B18): a typo that fell back to the default would quietly send every
+ * refuses boot (rule B19): a typo that fell back to the default would quietly send every
  * client's address to a server the operator did not choose.
  */
 export const HUB_STUN_ADDRESSES_ENV = 'SLAYZONE_HUB_STUN_ADDRESSES'

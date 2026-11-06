@@ -19,7 +19,8 @@ import type {
   CreateArtifactInput,
   UpdateArtifactInput,
   CreateArtifactFolderInput,
-  UpdateArtifactFolderInput
+  UpdateArtifactFolderInput,
+  RenderMode
 } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
@@ -32,40 +33,81 @@ import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-d
 // CRUD/version/folder/upload store is electron-free (@slayzone/task/server) and shared
 // with the IPC handlers (coexistence until slice 5). The 6 download procedures need
 // Electron dialogs + export renderers, which reach the host through the AppDeps
-// capability bridge (see `downloadHost` below). Complex inputs pass through unchecked —
-// the IPC path validates by TypeScript only.
-const createArtifactInput = z.unknown() as unknown as z.ZodType<CreateArtifactInput>
-const updateArtifactInput = z.unknown() as unknown as z.ZodType<
-  UpdateArtifactInput & { mutateVersion?: boolean }
->
-const reorderInput = z.unknown() as unknown as z.ZodType<
-  string[] | { folderId: string | null; artifactIds: string[] }
->
-const uploadInput = z.unknown() as unknown as z.ZodType<{
-  taskId: string
-  sourcePath: string
-  title?: string
-}>
-const uploadBlobInput = z.unknown() as unknown as z.ZodType<{
-  taskId: string
-  title: string
-  bytes: Uint8Array
-  folderId?: string | null
-  chatTabId?: string
-  operationId?: string
-}>
-const pasteFilesInput = z.unknown() as unknown as z.ZodType<{
-  sourcePaths: string[]
-  destTaskId: string
-  destFolderId: string | null
-}>
-const uploadDirInput = z.unknown() as unknown as z.ZodType<{
-  taskId: string
-  dirPath: string
-  parentFolderId: string | null
-}>
-const createFolderInput = z.unknown() as unknown as z.ZodType<CreateArtifactFolderInput>
-const updateFolderInput = z.unknown() as unknown as z.ZodType<UpdateArtifactFolderInput>
+// capability bridge (see `downloadHost` below).
+//
+// Every input is validated here (round-8 P1): an unchecked input reached the store
+// whole, and `create` forwarded a `sourcePath` nobody's policy checked — the hub read
+// any file on its own disk for any user. Unknown keys are stripped, so only what a
+// schema names reaches the store; the paths the hub reads (`upload`, `pasteFiles`,
+// `uploadDir`) are each owner-checked as `ownedPath` / `pathTree` (owner-policy.ts).
+const renderMode = z.enum([
+  'markdown',
+  'code',
+  'html-preview',
+  'svg-preview',
+  'mermaid-preview',
+  'image',
+  'pdf'
+]) satisfies z.ZodType<RenderMode>
+const createArtifactInput = z.object({
+  taskId: z.string(),
+  title: z.string(),
+  folderId: z.string().nullable().optional(),
+  renderMode: renderMode.optional(),
+  content: z.string().optional(),
+  language: z.string().nullable().optional()
+}) satisfies z.ZodType<CreateArtifactInput>
+const updateArtifactInput = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  folderId: z.string().nullable().optional(),
+  renderMode: renderMode.nullable().optional(),
+  viewMode: z.string().nullable().optional(),
+  readabilityOverride: z.enum(['compact', 'normal']).nullable().optional(),
+  widthOverride: z.enum(['narrow', 'wide']).nullable().optional(),
+  zoomPct: z.number().nullable().optional(),
+  htmlThemeOverride: z.enum(['light', 'dark']).nullable().optional(),
+  content: z.string().optional(),
+  language: z.string().nullable().optional(),
+  mutateVersion: z.boolean().optional()
+}) satisfies z.ZodType<UpdateArtifactInput & { mutateVersion?: boolean }>
+const reorderInput = z.union([
+  z.array(z.string()),
+  z.object({ folderId: z.string().nullable(), artifactIds: z.array(z.string()) })
+])
+const uploadInput = z.object({
+  taskId: z.string(),
+  sourcePath: z.string().min(1),
+  title: z.string().optional()
+})
+const uploadBlobInput = z.object({
+  taskId: z.string(),
+  title: z.string(),
+  bytes: z.custom<Uint8Array>((v) => v instanceof Uint8Array, 'bytes must be binary'),
+  folderId: z.string().nullable().optional(),
+  chatTabId: z.string().optional(),
+  operationId: z.string().optional()
+})
+const pasteFilesInput = z.object({
+  sourcePaths: z.array(z.string().min(1)),
+  destTaskId: z.string(),
+  destFolderId: z.string().nullable()
+})
+const uploadDirInput = z.object({
+  taskId: z.string(),
+  dirPath: z.string().min(1),
+  parentFolderId: z.string().nullable()
+})
+const createFolderInput = z.object({
+  taskId: z.string(),
+  name: z.string(),
+  parentId: z.string().nullable().optional()
+}) satisfies z.ZodType<CreateArtifactFolderInput>
+const updateFolderInput = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  parentId: z.string().nullable().optional()
+}) satisfies z.ZodType<UpdateArtifactFolderInput>
 const versionRef = z.union([z.number(), z.string()])
 
 const store = getArtifactStorage

@@ -97,6 +97,8 @@ export interface ChatViewState {
   }) => Promise<boolean>
   /** The account has auto mode and opted in (prompt rows offer "switch to auto mode"). */
   autoModeAvailable?: boolean
+  /** The session's permission mode (`AgentMode`); bypass hides "switch to auto mode". */
+  permissionMode?: string
   /** The session's working directory (rows that name it). */
   cwd?: string
   /**

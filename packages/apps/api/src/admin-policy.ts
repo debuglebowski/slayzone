@@ -472,6 +472,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'chat.pinnedMessages.unpin': 'user',
   'chat.threads.create': 'user',
   'chat.threads.list': 'user',
+  'chat.threads.setClosed': 'user',
   'chat.threads.onChanged': 'user',
   'computers.claim': 'admin',
   'computers.delete': 'user',

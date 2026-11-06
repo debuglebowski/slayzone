@@ -77,6 +77,18 @@ export {
   HUB_UNREACHABLE_GRACE_MS,
   type HubBadge
 } from './hubBadge'
+export {
+  HUB_ISSUE_GRACE_MS,
+  isSignedOutDescribe,
+  issueOf,
+  useHubHealth,
+  useHubIssues,
+  watchHubHealth,
+  watchHubIssue,
+  type HubHealth,
+  type HubIssue,
+  type HubIssueEntry
+} from './hubIssues'
 export { electronBootstrap } from './electron-bootstrap'
 export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'

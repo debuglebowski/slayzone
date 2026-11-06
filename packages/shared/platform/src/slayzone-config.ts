@@ -257,7 +257,7 @@ export function diagnoseHubConfig(raw: Record<string, unknown>): HubConfigProble
       })
     }
   }
-  // Its values are checked with the env form (boot rule B18); only the shape is here.
+  // Its values are checked with the env form (boot rule B19); only the shape is here.
   if (
     raw.stunAddresses !== undefined &&
     !(Array.isArray(raw.stunAddresses) && raw.stunAddresses.every((a) => typeof a === 'string'))

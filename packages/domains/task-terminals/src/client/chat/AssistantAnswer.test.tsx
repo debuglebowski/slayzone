@@ -68,6 +68,7 @@ describe('assistant answer presentation', () => {
             parentConversationId: 'conversation',
             sourceUuid: 'record',
             conversationId: 'side-conversation',
+            closedAt: null,
             createdAt: 0
           }
         ],

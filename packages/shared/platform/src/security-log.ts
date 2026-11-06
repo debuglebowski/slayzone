@@ -59,6 +59,9 @@ export const SECURITY_EVENTS = [
   'auth.web_session.revoke',
   /** A gate refused a request: REST bearer gate, tRPC auth/scope gates, /trpc origin. */
   'authz.denied',
+  /** A path two users both registered, asked for with no computer that tells them
+   *  apart: refused to both (api access.ts, N4). Never carries the path. */
+  'authz.path_tie',
   // Accounts (hub-auth `users.ts`). Accounts are disabled, never deleted.
   'user.create',
   'user.disable',
@@ -188,6 +191,8 @@ export type SecurityTargetKind =
   | 'join_token'
   | 'procedure'
   | 'hub'
+  /** A filesystem path. Its id is never logged (it can carry a user's directory names). */
+  | 'path'
 
 export interface SecurityEventInput {
   event: SecurityEventName

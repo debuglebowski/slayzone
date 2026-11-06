@@ -127,7 +127,8 @@ interface PathWatcherState {
   /** Is the main-process watcher live? `false` if watchStart failed / unavailable. */
   watcherActive: boolean
   /** Pending watchStart promise — guard against racing subscribe/unsubscribe. */
-  startPromise: Promise<void> | null
+  /** The start in flight: true once it started, false when it was refused. */
+  startPromise: Promise<boolean> | null
 }
 
 /** What changed under a watched path. */
@@ -408,16 +409,18 @@ function startWatch(targetPath: string, capturedState: PathWatcherState): void {
   capturedState.startPromise = transport.watchStart(targetPath).then(
     () => {
       // Subscribe may have been torn down while start was in flight.
-      if (pathWatchers.get(targetPath) !== capturedState) return
+      if (pathWatchers.get(targetPath) !== capturedState) return true
       capturedState.watcherActive = true
       capturedState.startPromise = null
       retimeAllForPath(targetPath)
+      return true
     },
     (err) => {
       capturedState.startPromise = null
       capturedState.watcherActive = false
       // Log once — watchStart throws on ENOSPC / path-missing; poll handles it.
       console.warn('[git-diff-store] watchStart failed, poll-only mode for', targetPath, err)
+      return false
     }
   )
 }
@@ -449,13 +452,15 @@ function releasePath(targetPath: string, leave: (state: PathWatcherState) => voi
     })
   } else if (state.startPromise && transport) {
     // Started while we were in flight — stop after start resolves, to keep
-    // main-process refcount balanced.
+    // main-process refcount balanced. A REFUSED start counted nothing: a stop then
+    // would release somebody else's watch (M3).
     const t = transport
-    void state.startPromise.then(() =>
+    void state.startPromise.then((started) => {
+      if (!started) return
       t.watchStop(targetPath).catch(() => {
         /* ignore */
       })
-    )
+    })
   }
   state.watcherActive = false
   pathWatchers.delete(targetPath)

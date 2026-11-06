@@ -46,6 +46,13 @@ const api: ElectronAPI = {
         defaultHubId: string
       }>,
     getHubTokens: () => ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
+    checkHubSession: (payload: { hubId: string; url: string }) =>
+      ipcRenderer.invoke('app:check-hub-session', payload) as Promise<
+        | { state: 'valid'; email: string | null }
+        | { state: 'expired' }
+        | { state: 'unreachable' }
+        | { state: 'none' }
+      >,
     setHubToken: (payload) =>
       ipcRenderer.invoke('app:set-hub-token', payload) as Promise<{ ok: true }>,
     hubLogin: (payload) =>

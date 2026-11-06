@@ -117,7 +117,7 @@ import {
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
-import type { HubComputerGateway } from './hub-gateway'
+import { ComputerUpdatePendingError, type HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
 // Gateway surface
@@ -992,6 +992,11 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   /** Listeners for the computer going away (false) and coming back (true). */
   availability: Set<(available: boolean) => void>
   setRelay?: (on: boolean) => Promise<void> | void
+  /**
+   * The computer has no `pty.relay` (it predates it, v0.37.2): it streams every
+   * session anyway, so the relay is never asked again (N7).
+   */
+  relayUnsupported?: boolean
 }
 
 /**
@@ -1013,6 +1018,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   /** The latest spawn attempt per session key, outliving its entry: what a
    *  continuing spawn (`carryOutput`) continues from. */
   const lastSpawnIds = new Map<string, string>()
+  /** Each session's highest seq seen, kept past its exit: a continuing spawn starts
+   *  after it even when the computer's buffer is gone (M2). Bounded by sessions. */
+  const lastSeqs = new Map<string, number>()
 
   function drain(entry: PtyEntry): void {
     if (entry.sealed) return
@@ -1111,6 +1119,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
     if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
+    if (entry.lastSeq >= 0) {
+      if (lastSeqs.size > 10_000) lastSeqs.clear()
+      lastSeqs.set(entry.key, entry.lastSeq)
+    }
     // A continuing spawn follows an exit at once; past the computer's carry window
     // there is nothing left to continue.
     const { key, spawnId } = entry
@@ -1151,7 +1163,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     const early = entry.preAckSignals ?? []
     entry.preAckSignals = null
     for (const signal of early)
-      if (signal.seq > entry.detectFromSeq) entry.signalEmitter.emit(signal)
+      if (signalIsNew(signal, entry.detectFromSeq)) entry.signalEmitter.emit(signal)
   }
   // A client wrote to the computer directly (docs/direct-link.md): the hub applies
   // what the write meant, as it would for a write it relayed.
@@ -1179,7 +1191,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         entry.preAckSignals.push(signal)
       return
     }
-    if (signal.seq <= entry.detectFromSeq) return
+    if (!signalIsNew(signal, entry.detectFromSeq)) return
     entry.signalEmitter.emit(signal)
   })
   const detach = joinDetachController<PtyEntry>({
@@ -1205,10 +1217,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       entry.sealed = false
       // A spawn confirmed by listing (its reply was lost) is acknowledged here.
       if (listed.detection) ackDetection(entry)
-      // The computer may have dropped relay state with the connection: ask again.
-      if (entry.relay !== undefined) {
-        void Promise.resolve(entry.setRelay?.(entry.relay)).catch(noop)
-      }
+      // The relay is asked again by the terminal runtime, which hears `available`
+      // above and owns that decision (L2); asking here too sent it twice (N7).
       // The computer kept detecting while the hub was away; its signals then went
       // nowhere. Its settled view brings the mirror up to date in one step.
       if (entry.detectsOutput && listed.detected) {
@@ -1344,6 +1354,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       },
       setRelay: (on: boolean): Promise<void> => {
         entry.relay = on
+        if (entry.relayUnsupported) return Promise.resolve()
         // Hub-shared state (every watcher's), so the hub's request — never the caller
         // whose watch changed it (L2).
         return runAsSecurityActor(null, () =>
@@ -1364,7 +1375,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             }
             drain(entry)
           })
-        )
+        ).catch((err: unknown) => {
+          if (!isUnknownRelayAnswer(err)) throw err
+          // An older computer: it relays everything regardless — what was asked holds.
+          entry.relayUnsupported = true
+        })
       },
       getReplay: async (afterSeq: number) =>
         ptyGetReplayResultSchema.parse(
@@ -1604,11 +1619,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // sealed until the reply says where its seqs resume, or a backfill from -1
         // would deliver that scrollback a second time.
         const continuesFrom = spec.carryOutput ? lastSpawnIds.get(key) : undefined
+        const live = sessions.get(key)
+        const continuesAfter = spec.carryOutput
+          ? Math.max(live && !live.disposed ? live.lastSeq : -1, lastSeqs.get(key) ?? -1)
+          : -1
         const { entry, handle, setPid } = register(
           computerId,
           spec.sessionId,
           spec.file,
-          continuesFrom !== undefined,
+          spec.carryOutput !== undefined,
           admitted
         )
 
@@ -1634,8 +1653,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           // Detection runs where the output is; acknowledged in the reply.
           ...(spec.detection ? { detection: spec.detection } : {}),
           ...(spec.relay !== undefined ? { relay: spec.relay } : {}),
-          ...(continuesFrom !== undefined && spec.carryOutput
-            ? { carryOutput: { fromSpawnId: continuesFrom, preamble: spec.carryOutput.preamble } }
+          ...(spec.carryOutput
+            ? {
+                carryOutput: {
+                  ...(continuesFrom !== undefined ? { fromSpawnId: continuesFrom } : {}),
+                  preamble: spec.carryOutput.preamble,
+                  ...(continuesAfter >= 0 ? { afterSeq: continuesAfter } : {})
+                }
+              }
             : {}),
           command: spec.file,
           args: spec.args,
@@ -2990,4 +3015,25 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       return stop
     }
   }
+}
+
+/** A computer's answer that it has no `pty.relay` (see {@link ComputerUpdatePendingError}). */
+function isUnknownRelayAnswer(err: unknown): boolean {
+  if (err instanceof ComputerUpdatePendingError) return err.method === HubToComputerMethods.ptyRelay
+  if (!(err instanceof RpcError)) return false
+  return (
+    err.code === -32601 ||
+    (err.code === ComputerTransportErrorCodes.unimplemented &&
+      err.message === `unimplemented: ${HubToComputerMethods.ptyRelay}`)
+  )
+}
+
+/**
+ * Whether the hub has not already detected what a signal reports. Output-derived parts
+ * up to `detectFromSeq` were detected hub-side before the computer took over; an exit
+ * error is about the exit, not output — kept whatever its seq (M1: one sent before any
+ * output, at seq -1, was dropped and the "session expired" overlay never showed).
+ */
+function signalIsNew(signal: { seq: number; error?: unknown }, detectFromSeq: number): boolean {
+  return signal.seq > detectFromSeq || signal.error != null
 }

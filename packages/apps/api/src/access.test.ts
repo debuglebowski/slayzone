@@ -30,6 +30,7 @@ import {
   hubStateRoots,
   invalidateAccessCache,
   resource,
+  setHubDiskComputer,
   type AccessRequest,
   type ResourceKind
 } from './access'
@@ -65,9 +66,15 @@ sql(
   ('tA', 'pA', 'a', ?), ('tB', 'pB', 'b', NULL), ('tU', 'pU', 'u', NULL)`,
   aWorktree
 )
+// B's folder on a remote computer c1 — a second project of B's: pB's own folder is
+// its (hub-disk) project path, and a placed project's legacy path is stale (M8).
+sql(
+  `INSERT INTO projects (id, name, color, owner_user_id) VALUES ('pBc1', 'B on c1', '#222', ?)`,
+  B
+)
 sql(
   `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
-  VALUES ('c1', 'pB', ?, 'ok', 0)`,
+  VALUES ('c1', 'pBc1', ?, 'ok', 0)`,
   placement
 )
 sql(
@@ -122,6 +129,11 @@ sql(
   A,
   B
 )
+
+// A's worktree is on the hub's own computer (the desktop's): a record of the hub's disk.
+// A task on no computer is not (Q1: removing a computer clears its tasks' computer).
+sql(`UPDATE tasks SET computer_id = 'cA' WHERE id = 'tA'`)
+setHubDiskComputer('cA')
 
 const req = (userId: string | null, authRequired = true): AccessRequest => ({
   authRequired,
@@ -381,7 +393,8 @@ describe('ownedPath: a hub-local open needs a root the caller may access (N1)', 
   test("inside a root: that root's owner only", async () => {
     expect(await can(A, 'ownedPath', join(aRoot, 'README.md'))).toBe(true)
     expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(true)
-    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(true)
+    // A folder computer c1 reports is c1's disk, never the hub's (Q1).
+    expect(await can(B, 'ownedPath', join(placement, 'x'))).toBe(false)
     expect(await can(B, 'ownedPath', join(aRoot, 'README.md'))).toBe(false)
     expect(await can(A, 'ownedPath', join(bNested, 'lib.ts'))).toBe(false)
   })

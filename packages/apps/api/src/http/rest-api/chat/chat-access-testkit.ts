@@ -25,6 +25,10 @@ export interface FakeChat {
   /** The saved history `getBufferSince` returns. */
   buffer: Array<{ seq: number; event: AgentEvent; at?: number }>
   queue: Array<{ id: string; send: string; position: number; createdAt: string }>
+  /** The live session's permission mode (`getInfo().chatMode`); undefined = not reported. */
+  chatMode: string | undefined
+  /** The account opted into Claude's auto mode (`getAutoEligibility`). */
+  autoOptedIn: boolean
   /**
    * A chat event saved on the computer, as the hub sees it: its summary always, the
    * full event only while a hub client watches the tab (`watchEvents`).
@@ -59,6 +63,8 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     status: null,
     buffer: [],
     queue: [],
+    chatMode: undefined,
+    autoOptedIn: false,
     // As the hub does for a saved event: its summary always (`saved`), the full event
     // to clients that watch it (docs/direct-link.md).
     emit: (tabId, event, seq = 1_000) => {
@@ -76,6 +82,8 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
       fake.status = { state: 'idle', turnOpen: false, pendingRequestIds: [], outboxInFlight: 0 }
       fake.buffer = []
       fake.queue = []
+      fake.chatMode = undefined
+      fake.autoOptedIn = false
       fake.watchers.clear()
     }
   }
@@ -91,11 +99,19 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
   const ops = {
     getInfo: (tabId: string) =>
       fake.status
-        ? { tabId, taskId: tabId, mode: 'claude-chat', cwd: '/live', sessionId: 'conv', pid: 1 }
+        ? {
+            tabId,
+            taskId: tabId,
+            mode: 'claude-chat',
+            cwd: '/live',
+            sessionId: 'conv',
+            pid: 1,
+            ...(fake.chatMode !== undefined ? { chatMode: fake.chatMode } : {})
+          }
         : null,
     getTurnStatus: () => fake.status,
     getBufferSince: () => fake.buffer,
-    getAutoEligibility: () => ({ eligible: false, optedIn: false }),
+    getAutoEligibility: () => ({ eligible: fake.autoOptedIn, optedIn: fake.autoOptedIn }),
     respondPermission: record('respondPermission', true),
     interrupt: record('interrupt', {}),
     abortAndPop: record('abortAndPop', { popped: true, text: 'undo me', id: 'm', content: [] }),

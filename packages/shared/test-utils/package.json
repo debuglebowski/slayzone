@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/test-utils",
-  "version": "0.37.2",
+  "version": "0.38.0",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -23,6 +23,8 @@
     "./fake-codex": "./fake-codex/index.ts",
     "./fake-codex/recorded": "./fake-codex/recorded.ts",
     "./chat-long-session": "./chat-long-session/index.ts",
-    "./known-bug": "./known-bug.ts"
+    "./known-bug": "./known-bug.ts",
+    "./fixture-reaper": "./fixture-reaper.ts",
+    "./canary-inputs": "./canary-inputs.ts"
   }
 }

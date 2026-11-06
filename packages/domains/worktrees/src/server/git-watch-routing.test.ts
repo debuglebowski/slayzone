@@ -77,4 +77,40 @@ describe('routed git watch', () => {
     await caller.watchStart({ worktreePath: '/w/t' })
     expect(calls).toEqual(['start c1 /w/t', 'start c1 /w/t'])
   })
+
+  // Final review M3: a second panel joining a start still in flight counted itself in
+  // and resolved at once; when the start then failed only the first panel heard, and
+  // the second thought it was live (30 s poll). A joiner waits for the start, and a
+  // failed start is reported to the path's subscribers.
+  test('a panel joining a start that fails is told too', async () => {
+    let fail: (err: Error) => void = () => undefined
+    setGitOpTransport({
+      ...transport,
+      watchStart: () =>
+        new Promise<void>((_, reject) => {
+          fail = reject
+        })
+    })
+    const failed: unknown[] = []
+    const on = (p: unknown) => failed.push(p)
+    getGitWatcher().on('git:diff-watch-failed', on)
+    try {
+      const first = caller.watchStart({ worktreePath: '/w/u' })
+      await new Promise((r) => setTimeout(r, 10))
+      const second = caller.watchStart({ worktreePath: '/w/u' })
+      await new Promise((r) => setTimeout(r, 10))
+      fail(new Error('computer gone'))
+      const outcomes = await Promise.allSettled([first, second])
+      expect(outcomes.map((o) => o.status)).toEqual(['rejected', 'rejected'])
+      expect(failed).toEqual([{ worktreePath: '/w/u' }])
+    } finally {
+      getGitWatcher().off('git:diff-watch-failed', on)
+      setGitOpTransport(transport)
+    }
+    // Nothing left counted: the next start is a fresh one.
+    calls.length = 0
+    await caller.watchStart({ worktreePath: '/w/u' })
+    expect(calls).toEqual(['start c1 /w/u'])
+    await caller.watchStop({ worktreePath: '/w/u' })
+  })
 })

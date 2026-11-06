@@ -206,6 +206,52 @@ export class AutomationEngine {
     }
   }
 
+  /**
+   * Catch-ups waiting for their computer, by automation (H1). At launch and after
+   * sleep the computer has not connected yet: run then, the catch-up was refused,
+   * recorded as an error and its slot lost. It waits instead, like a process does,
+   * and runs when a computer connects ({@link computerConnected}). Keyed by
+   * automation, so start + resume queue it once; `catchupsRunning` keeps a second
+   * trigger from running one again while it runs.
+   */
+  private readonly pendingCatchups = new Map<
+    string,
+    { automation: Automation; event: AutomationEvent }
+  >()
+  private readonly catchupsRunning = new Set<string>()
+
+  /** A computer connected: run every catch-up that was waiting for one. */
+  async computerConnected(): Promise<void> {
+    const waiting = [...this.pendingCatchups.values()]
+    await Promise.all(
+      waiting.map(({ automation, event }) => this.runCatchupOnce(automation, event))
+    )
+  }
+
+  /** The computer for a catch-up, or null when it must wait (none, or not connected). */
+  private async catchupComputer(event: AutomationEvent): Promise<string | null> {
+    const routing = getAutomationCommandRouting()
+    if (!routing) return null
+    const computerId = await this.computerFor(event)
+    if (computerId == null) return null
+    return routing.isReachable && !routing.isReachable(computerId) ? null : computerId
+  }
+
+  private async runCatchupOnce(automation: Automation, event: AutomationEvent): Promise<void> {
+    if (this.catchupsRunning.has(automation.id)) return
+    this.catchupsRunning.add(automation.id)
+    try {
+      if ((await this.catchupComputer(event)) == null) {
+        this.pendingCatchups.set(automation.id, { automation, event })
+        return
+      }
+      this.pendingCatchups.delete(automation.id)
+      await this.executeAutomation(automation, event, 0)
+    } finally {
+      this.catchupsRunning.delete(automation.id)
+    }
+  }
+
   private catchUp(row: AutomationRow, nowFloor: Date): void {
     const automation = parseAutomationRow(row)
     const expression = automation.trigger_config.params.expression as string | undefined
@@ -223,17 +269,13 @@ export class AutomationEngine {
     while (cursor > lastRun) {
       if (cronMatches(expression, cursor)) {
         detach(
-          this.executeAutomation(
-            automation,
-            {
-              type: 'cron',
-              projectId: automation.project_id,
-              cronExpression: expression,
-              depth: 0,
-              catchup: true
-            },
-            0
-          ),
+          this.runCatchupOnce(automation, {
+            type: 'cron',
+            projectId: automation.project_id,
+            cronExpression: expression,
+            depth: 0,
+            catchup: true
+          }),
           `automation ${automation.id}`
         )
         break

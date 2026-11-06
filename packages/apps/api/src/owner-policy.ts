@@ -749,6 +749,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.pinnedMessages.unpin': chatOpts,
   'chat.threads.list': chatOpts,
   'chat.threads.create': chatOpts,
+  'chat.threads.setClosed': chatOpts,
   'chat.sideQuestion.ask': chatOpts,
   'chat.sideQuestion.cancel': checked(tab('tabId')),
   'chat.switchConversation': chatOpts,

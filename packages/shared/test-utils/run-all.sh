@@ -37,6 +37,9 @@ fi
 # its live relay + task id and called the user's real hub. Proved end to end: a nested
 # harness run from a poisoned env spawns `slay`, and the sentinel must see no request.
 run_harness packages/shared/test-utils/caller-env.test.ts
+# Fixture reaper: a test killed before its finally (timeout, SIGKILL'd worker) must not
+# leave its spawned supervisors respawning forever against a dead hub.
+run_harness packages/shared/test-utils/fixture-reaper.test.ts
 
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/
@@ -95,6 +98,24 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
+# worktree computer state for the Trash purge (R5-1)
+run_harness packages/apps/hub/src/worktree-computer-state.test.ts
+# Trash purge waits for the worktree computer (R5-1)
+run_harness packages/domains/task/src/server/ops/startup-purge-computer.test.ts
+# machine-local settings never exported or imported (R3-2)
+run_harness packages/apps/api/src/export-import-machine-local.test.ts
+# Final review H1: cron catch-up waits for the computer, runs once on connect.
+run_harness packages/domains/automations/src/server/engine-catchup.test.ts
+# P1: every tRPC procedure, REST route and MCP tool, called as user B with every
+# path field set to a canary on the hub's disk: none may read, list or write it.
+run_harness packages/apps/api/src/hub-disk-canary.test.ts
+# Round-8 review regressions on the hub's own disk (P1 paths, P2 tie).
+run_harness packages/apps/api/src/routers/review-regressions-hub-disk.test.ts
+# N5: a repeated directory-tree access check does not stat every root's folders again.
+run_harness packages/apps/api/src/access-tree-cost.test.ts
+# N3: a ws subscription stopped during its async middlewares never subscribes
+# (patches/@trpc__server@11.19.0.patch; tRPC dropped that stop, leaking until close).
+run_harness packages/apps/api/src/ws-subscription-stop-race.test.ts
 run_harness packages/apps/hub/src/computer-auth.test.ts
 run_harness packages/apps/hub/src/computer-probes.test.ts
 run_harness packages/apps/hub/src/computer-exec-run.test.ts
@@ -105,6 +126,10 @@ run_harness packages/apps/hub/src/path-owner-agreement.test.ts
 # Round-6 review regressions (L3 case folding, L4 disabled computer, L6 path aliases):
 # part of `pnpm test:review-regressions` (review-regressions.mjs).
 run_harness packages/apps/hub/src/review-regressions-owner.test.ts
+# Round-6 L3 on any OS: a case-insensitive hub disk (mocked) must not fold a computer's path.
+run_harness packages/apps/hub/src/review-regressions-l3-folding-hub.test.ts
+# Round-6 L4 through the real gateway: a disabled computer refuses new work before sending.
+run_harness packages/apps/hub/src/computer-disabled-gateway.test.ts
 # Routing the filesystem to computers put the local computer's [homedir()] jail in
 # front of work the desktop used to do unjailed. This pins the widening policy
 # that keeps a project outside $HOME from silently breaking.
@@ -435,6 +460,8 @@ run_harness packages/shared/db-migrations/src/ai-config-raw-skill-migration.test
 run_harness packages/shared/db-migrations/src/ai-config-slug-migration.test.ts
 run_harness packages/shared/db-migrations/src/codex-flags-migration.test.ts
 run_harness packages/shared/db-migrations/src/schema-too-new.test.ts
+# K4 (review regressions): migration versions unique + increasing; main's v194 → latest.
+run_harness packages/shared/db-migrations/src/review-regressions-migrations.test.ts
 # v51 on a v50 DB, with and without the column already present (drift).
 run_harness packages/shared/db-migrations/src/worktree-source-branch-migration.test.ts
 run_harness packages/domains/projects/src/server/status-normalization.test.ts
@@ -741,6 +768,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
 run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
+run_harness packages/domains/chat-runtime/src/server/thread-close.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
@@ -1272,6 +1300,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/attachments/useChatAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/UserMessageAttachments.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatDraftPersistence.test.tsx \
+  packages/domains/task-terminals/src/client/chat/answer-threads-panel.test.ts \
   packages/domains/task-terminals/src/client/chat/composer-state/review-integration-upgrade.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/review-offline-journal-expiry.test.tsx \
   packages/domains/task-terminals/src/client/chat/composer-state/useChatScrollMemory.test.tsx \

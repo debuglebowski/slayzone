@@ -19,6 +19,7 @@ import {
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './projects-txns'
 import { attachPlacement, attachPlacements } from './project-placements'
+import { getAuthGate } from '@slayzone/trpc-server'
 import { getProjectFolderHost, NoComputerForFolderError } from './project-folders'
 
 const ALLOWED_ICON_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
@@ -154,6 +155,9 @@ export async function createProject(
     ? (data.computerId ?? (await host.computerForNewProject()))
     : (data.computerId ?? null)
   if (host && prepared.path && !computerId) throw new NoComputerForFolderError()
+  // On a hub with login a folder is only ever recorded on a computer: the legacy
+  // column is the HUB's disk, and a user's path there would make it theirs (R10-1).
+  if (!host && prepared.path) refuseLegacyPathOnLoginHub()
 
   const row = await db.namedTxn('projects:create', {
     id: prepared.id,
@@ -201,6 +205,8 @@ export async function updateProject(
   const values: unknown[] = []
   let normalizedColumns: ColumnConfig[] | null | undefined = undefined
   const host = getProjectFolderHost()
+  // Before anything changes (R10-1): a login hub never writes the legacy column.
+  if (!host && data.path?.trim()) refuseLegacyPathOnLoginHub()
 
   // The folder lives on the computer the hub uses for this project; with no
   // computers at all, in the hub column (see project-folders.ts). First, so a
@@ -405,4 +411,16 @@ export async function reorderProjects(db: SlayzoneDb, projectIds: string[]): Pro
       params: [index, id]
     }))
   )
+}
+
+/**
+ * A hub with login never writes a folder to the legacy `projects.path` column: that
+ * column describes the hub's OWN disk (api access.ts), and a user could otherwise
+ * claim any hub folder (`/`) with only the computer-side check (R10-1). Normally the
+ * folder host records it on a computer instead; without one (a degraded boot, which
+ * boot rule B18 also refuses) it is "no computer to record it on". The desktop app
+ * (no login) keeps the column, as before.
+ */
+function refuseLegacyPathOnLoginHub(): void {
+  if (getAuthGate()) throw new NoComputerForFolderError()
 }

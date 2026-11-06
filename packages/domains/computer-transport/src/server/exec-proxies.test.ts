@@ -11,7 +11,11 @@ import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerTransportErrorCodes, projectNotPlacedError } from '../shared/frames'
+import {
+  ComputerTransportErrorCodes,
+  PTY_SIGNAL_EVENT_NAME,
+  projectNotPlacedError
+} from '../shared/frames'
 import { RpcDisposedError, RpcError } from '../shared/rpc'
 import {
   createRemoteFsAdapters,
@@ -26,6 +30,7 @@ import {
   type RoutingGateway
 } from './exec-proxies'
 import type { ComputerDescriptor, ComputerGatewayEvents } from './hub-gateway'
+import { ComputerUpdatePendingError } from './hub-gateway'
 
 // ---------------------------------------------------------------------------
 // Fake gateway
@@ -820,6 +825,69 @@ describe('createRoutingPtyBackend', () => {
     expect(gateway.calls.filter((c) => c.method === 'pty.getBufferSince')).toEqual([])
   })
 
+  // Round-7 N7: on reconnect the relay request went out twice — from here and from
+  // the terminal runtime's availability listener (which owns that decision since L2).
+  it('resume does not resend the relay itself (the runtime asks once, on availability)', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    gateway.onMethod('pty.relay', () => ({ seq: 0 }))
+    gateway.onMethod('pty.list', () => ({ sessions: [{ sessionId: 'sess-1', pid: 1, seq: -1 }] }))
+    gateway.onMethod('pty.getBufferSince', () => ({ frames: [] }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'codex', resuming: false },
+      relay: false
+    })) as PtyHandle
+    await handle.whenSpawned
+    await handle.setRelay?.(true)
+    const seen: boolean[] = []
+    handle.onAvailability?.((available) => seen.push(available))
+    gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
+    connect(gateway, 'epoch-a')
+    await vi.waitFor(() => expect(seen).toEqual([false, true]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+  })
+
+  // N7: a computer that predates pty.relay (v0.37.2) streams every session anyway; each
+  // watch change asked it again, and failed. It is asked once.
+  it('a computer without pty.relay is asked once, and the relay reads as applied', async () => {
+    for (const refusal of [
+      new RpcError(ComputerTransportErrorCodes.unimplemented, 'unimplemented: pty.relay'),
+      new ComputerUpdatePendingError(
+        'pty.relay',
+        ComputerTransportErrorCodes.unimplemented,
+        '0.37.2'
+      )
+    ]) {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      gateway.onMethod('pty.relay', () => {
+        throw refusal
+      })
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const handle = (await backend.spawn({
+        ...ptySpec(),
+        detection: { mode: 'codex', resuming: false },
+        relay: false
+      })) as PtyHandle
+      await handle.whenSpawned
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(false)).resolves.toBeUndefined()
+      await expect(handle.setRelay?.(true)).resolves.toBeUndefined()
+      expect(gateway.requestsOf('pty.relay')).toHaveLength(1)
+    }
+  })
+
   it('a routed handle reports its output unavailable while the computer is away, and back on resume', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
@@ -900,6 +968,84 @@ describe('createRoutingPtyBackend', () => {
         })
       ])
     )
+  })
+
+  // Final review M1: a resume that failed before any output sent its exit error at
+  // seq -1 (nothing emitted yet), and the hub dropped every signal at or below where
+  // it took over detection (-1 for a fresh spawn) — the "session expired" overlay
+  // never showed. An error is about the exit, not about output already detected.
+  // Final review M2: past the carry window the hub sent no continuation at all, and
+  // the recovery shell's output restarted at seq 0. The seq the session reached is
+  // always sent with a continuing spawn.
+  it('a continuing spawn always says where the session seqs reached', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const first = (await backend.spawn(ptySpec())) as PtyHandle
+      await first.whenSpawned
+      for (let seq = 0; seq <= 5; seq++)
+        gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq, data: 'x' })
+      gateway.emit('pty.exit', {
+        computerId: 'computer-1',
+        sessionId: 'sess-1',
+        exitCode: 1
+      } as never)
+      // The computer's carry window is long over (its tombstone is gone).
+      vi.advanceTimersByTime(10 * 60_000)
+      const second = (await backend.spawn({
+        ...ptySpec(),
+        carryOutput: { preamble: '[recovered]' }
+      })) as PtyHandle
+      const spawns = gateway.requestsOf('pty.spawn')
+      expect((spawns.at(-1)?.params as { carryOutput?: unknown } | undefined)?.carryOutput).toEqual(
+        expect.objectContaining({ preamble: '[recovered]', afterSeq: 5 })
+      )
+      void second
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an exit error before any output (seq -1) reaches the hub', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'claude-code', resuming: true }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const signals: Array<{ error: unknown }> = []
+    handle.onSignal?.((s) => signals.push(s as never))
+    const error = { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+    gateway.emit('event', {
+      computerId: 'computer-1',
+      name: PTY_SIGNAL_EVENT_NAME,
+      payload: {
+        sessionId: 'sess-1',
+        seq: -1,
+        activity: null,
+        refreshIdleClock: false,
+        preview: '',
+        error,
+        suppressOutput: false,
+        prompt: null,
+        title: null,
+        devServerUrls: [],
+        conversationId: null
+      }
+    } as never)
+    expect(signals).toEqual([expect.objectContaining({ error })])
   })
 
   it('reconnect with the same epoch ends the sessions the computer no longer holds', async () => {

@@ -8,6 +8,7 @@ export { readThemeCache, resolveThemeCache } from './theme-cache'
 export { AppearanceProvider } from './AppearanceContext'
 export { requestSettingsReopen } from './settings-reopen'
 export { useSettingsReopenTab } from './useSettingsReopenTab'
+export { HubIssueBanners } from './HubIssueBanners'
 export { useAppearance, type AppearanceSettings } from '@slayzone/ui'
 export type { CreateTaskDraft } from '@slayzone/task-contracts'
 export {

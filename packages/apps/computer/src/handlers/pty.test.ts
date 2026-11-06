@@ -514,6 +514,27 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  // Final review M2: a recovery shell whose agent's tombstone was gone (computer
+  // restarted, carry window over) got a fresh buffer at seq 0 — below what the
+  // terminal had already shown, so it dropped everything the shell printed. The hub
+  // says where the session's seqs reached; a fresh carried buffer continues there.
+  it('a continuing spawn with no tombstone continues after the seq the hub names', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const reply = (await pty.handlers['pty.spawn']({
+      sessionId: 'carry-fresh',
+      spawnId: 'spawn-2',
+      carryOutput: { fromSpawnId: 'spawn-gone', preamble: '[recovered]\r\n', afterSeq: 41 },
+      command: 'sh',
+      args: ['-c', 'printf shell'],
+      cwd: process.cwd()
+    })) as { seq?: number }
+    expect(reply.seq).toBe(42)
+    await waitFor(() => dataParams(notifies).some((d) => d.data.includes('shell')))
+    expect(Math.min(...dataParams(notifies).map((d) => d.seq))).toBeGreaterThan(41)
+    pty.disposeAll()
+  })
+
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)

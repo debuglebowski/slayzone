@@ -107,8 +107,12 @@ export function createExecRunHandlers(
     }
     const stdout = capped()
     const stderr = capped()
-    child.stdout?.on('data', (d: Buffer) => stdout.push(d.toString()))
-    child.stderr?.on('data', (d: Buffer) => stderr.push(d.toString()))
+    // Decoded as one stream (M4): per chunk, a character split across two pipe
+    // chunks came out as U+FFFD.
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', (d: string) => stdout.push(d))
+    child.stderr?.on('data', (d: string) => stderr.push(d))
 
     let timedOut = false
     const signalTree = (sig: NodeJS.Signals): void => {

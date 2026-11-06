@@ -23,6 +23,7 @@
 import { expect, test } from 'vitest'
 import {
   assertAuthLoaded,
+  assertComputersReady,
   assertHubBootRules,
   assertKeptAuthSecret,
   assertSsoCredential,
@@ -851,15 +852,56 @@ test('B17: compares the raw value — a trailing newline is a different secret',
   expect(rule, `B17, got ${rule}`).toBe('B17')
 })
 
-console.log('\nB18: STUN servers for WebRTC direct links')
+// Round-10 R10-1: a login hub whose computer startup failed served requests with no
+// project-folder host — projects.update then wrote the legacy (hub-disk) project path.
+test('B18: login required and the computer startup failed or left no folder host: refused', () => {
+  const msg = (fn: () => void): string => {
+    try {
+      fn()
+      return ''
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
+    }
+  }
+  const failed = msg(() =>
+    assertComputersReady(true, { folderHost: false, initError: new Error('auth table locked') })
+  )
+  expect(failed).toContain('SLAYZONE_HUB_REQUIRE_LOGIN=1')
+  expect(failed).toContain('auth table locked')
+  expect(bootRefusalRule(failedError(true, { folderHost: true, initError: new Error('x') }))).toBe(
+    'B18'
+  )
+  expect(msg(() => assertComputersReady(true, { folderHost: false, initError: null }))).toMatch(
+    /project folder/
+  )
+})
+
+test('B18: no login (the desktop) boots degraded as before; healthy login boots', () => {
+  assertComputersReady(false, { folderHost: false, initError: new Error('x') })
+  assertComputersReady(true, { folderHost: true, initError: null })
+})
+
+function failedError(
+  requireLogin: boolean,
+  state: { folderHost: boolean; initError: Error | null }
+): unknown {
+  try {
+    assertComputersReady(requireLogin, state)
+    return null
+  } catch (e) {
+    return e
+  }
+}
+
+console.log('\nB19: STUN servers for WebRTC direct links')
 console.log('─'.repeat(40))
 
-test('B18: unset, empty and host:port lists boot; anything else refuses, naming the value', () => {
+test('B19: unset, empty and host:port lists boot; anything else refuses, naming the value', () => {
   for (const v of [undefined, '', 'stun.cloudflare.com:3478', 'a.example:1,b.example:2']) {
     assertBoots({ env: v === undefined ? {} : { SLAYZONE_HUB_STUN_ADDRESSES: v } })
   }
   for (const v of ['stun:a.example:1', 'https://a.example', 'a.example:1/x']) {
     assertRefuses({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }, 'SLAYZONE_HUB_STUN_ADDRESSES', v)
-    expect(refusedRule({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }), `'${v}' is B18`).toBe('B18')
+    expect(refusedRule({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }), `'${v}' is B19`).toBe('B19')
   }
 })

@@ -220,14 +220,18 @@ export function AssistantAnswer({
               {discussions.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => threads?.open(discussions[0])}
+                  onClick={() => {
+                    // The first open thread; all closed → the panel's "New thread"
+                    // view, where the closed list reopens them.
+                    const first = discussions.find((thread) => thread.closedAt == null)
+                    if (first) void threads?.open(first)
+                    else threads?.start(discussions[0].answerId, discussions[0].sourceMessageId)
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
                 >
                   <MessageSquare className="size-3" />
                   <span className="font-medium text-foreground">Threads</span>
-                  <span>
-                    {discussions.length} {discussions.length === 1 ? 'item' : 'items'}
-                  </span>
+                  <span>{threadCountLabel(discussions)}</span>
                   <ChevronRight className="size-3" />
                 </button>
               )}
@@ -238,4 +242,12 @@ export function AssistantAnswer({
       </div>
     </div>
   )
+}
+
+/** "2 items", "1 open · 1 closed", or "2 closed". */
+function threadCountLabel(discussions: { closedAt: number | null }[]): string {
+  const closed = discussions.filter((thread) => thread.closedAt != null).length
+  const open = discussions.length - closed
+  if (!closed) return `${open} ${open === 1 ? 'item' : 'items'}`
+  return open ? `${open} open · ${closed} closed` : `${closed} closed`
 }

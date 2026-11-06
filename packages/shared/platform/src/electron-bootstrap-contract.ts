@@ -32,6 +32,11 @@ export interface ElectronBootstrapApp {
   /** Per-hub bearer tokens (hubId → token), safeStorage-decrypted in main.
    *  Threaded into the tRPC client's connectionParams for authed remote hubs. */
   getHubTokens: () => Promise<Record<string, string>>
+  /**
+   * Whether the bearer stored for a remote hub still signs in there: `expired` = the
+   * hub refused it (sign in again), `unreachable` = no answer, `none` = no bearer.
+   */
+  checkHubSession: (payload: { hubId: string; url: string }) => Promise<HubSessionState>
   /** Persist (or clear, empty token) a hub's bearer token, safeStorage-encrypted. */
   setHubToken: (payload: { hubId: string; token: string }) => Promise<{ ok: true }>
   /** Sign in to a remote hub (email+password) main-side; stores the bearer token. */
@@ -98,6 +103,13 @@ export interface ElectronBootstrapApp {
   dataReady: () => void
   bootMark: (label: string) => void
 }
+
+/** {@link ElectronBootstrapAPI.checkHubSession}'s answer. */
+export type HubSessionState =
+  | { state: 'valid'; email: string | null }
+  | { state: 'expired' }
+  | { state: 'unreachable' }
+  | { state: 'none' }
 
 export interface ElectronBootstrapFiles {
   getDropPaths: () => string[]

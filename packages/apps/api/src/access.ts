@@ -42,6 +42,7 @@ import {
   normalizeComputerPath,
   pathFoldsCase
 } from '@slayzone/platform/computer-path'
+import { securityEvent } from '@slayzone/platform/security-log'
 import { mayAccessProject, type ProjectOwnership } from '@slayzone/projects/server'
 import { agentSessionsEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
@@ -161,6 +162,20 @@ export interface AccessRequest {
    * to read or write. Optional: a caller that never resolves paths may omit it.
    */
   readonly hubRoots?: readonly string[]
+  /**
+   * The computer the request names (its `target.computerId` / `computerId`), if any:
+   * the folder recorded on THAT computer decides a path two users both registered
+   * (N4). The gateway's owner check still refuses a computer the caller does not own.
+   */
+  readonly computerId?: string | null
+}
+
+/** The computer a procedure's raw input names — `target.computerId`, else `computerId`. */
+export function requestComputerOf(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null
+  const input = raw as { target?: { computerId?: unknown } | null; computerId?: unknown }
+  const named = input.target?.computerId ?? input.computerId
+  return typeof named === 'string' && named !== '' ? named : null
 }
 
 /**
@@ -434,6 +449,22 @@ function ancestryOf(p: string): Ancestry {
   }
 }
 
+const rootAncestries = new Map<string, { ancestry: Ancestry; at: number }>()
+
+/**
+ * A registered root's {@link ancestryOf}, remembered for {@link ROOT_TTL_MS} like its
+ * form and identity: a tree check asks it of EVERY root, and uncached that was every
+ * folder above every task's worktree, statted on each check (N5).
+ */
+function rootAncestry(root: string): Ancestry {
+  const hit = rootAncestries.get(root)
+  if (hit && Date.now() - hit.at < ROOT_TTL_MS) return hit.ancestry
+  const ancestry = ancestryOf(root)
+  if (rootAncestries.size > 20_000) rootAncestries.clear()
+  rootAncestries.set(root, { ancestry, at: Date.now() })
+  return ancestry
+}
+
 /**
  * Where in `target` the root `root` ends (its length there), or -1 when `target` is
  * not `root` or inside it — by name (`inside`), else by identity.
@@ -485,14 +516,77 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
   return rootEnd(target, ancestryOf(target), root, within) >= 0
 }
 
-/** Every registered root a project's content lives under, with its owner. */
-const ROOTS_SQL = `
-  SELECT r.root AS root, p.owner_user_id AS owner_user_id FROM (
-    SELECT project_id, worktree_path AS root FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
-    UNION ALL SELECT project_id, base_dir FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
-    UNION ALL SELECT id, path FROM projects WHERE path IS NOT NULL AND path <> ''
-    UNION ALL SELECT project_id, root_path FROM project_placements WHERE root_path <> ''
+// ── roots: who owns a folder, by the disk it is on ────────────────────────────
+//
+// ONE resolver ({@link resolvePathResource}) decides a path against a set of roots;
+// WHICH roots is its input, by the disk the read happens on (Q1):
+//
+//   computer disk  every recorded root, with the computer it is on: a task's worktree,
+//                  a project's folder on each computer (`project_placements`), and a
+//                  pre-v176 project path. In a tie, a pre-v176 path of a project that
+//                  has a placement does not count — the placement is where its folder
+//                  is now (Q2: as a computer-less owner it made the tie unbreakable and
+//                  locked its owner out on their own computer).
+//   hub disk       only records OF the hub's disk: project paths (not one of a project
+//                  that has a placement: its folder is on a computer now, and the old
+//                  path is stale — M8), and the worktrees and
+//                  folders of the hub's own computer (the desktop's co-spawned one,
+//                  {@link setHubDiskComputer}). A task on NO computer is not one: removing
+//                  a computer clears its tasks' computer, so a user could turn the
+//                  worktrees their own remote computer reported into "hub-side" ones. What a remote
+//                  computer reports describes ITS disk: counted here, a user's computer
+//                  reporting `/` gave them every hub file, and reporting someone else's
+//                  folder locked its owner out.
+
+/** Where a path is read, and so which records say who owns it. */
+type RootSource = 'computer-disk' | 'hub-disk'
+
+const COMPUTER_DISK_ROOTS_SQL = `
+  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
+    EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
+  FROM (
+    SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
+    UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
+    UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
+    UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
   ) r JOIN projects p ON p.id = r.project_id`
+
+const HUB_DISK_ROOTS_SQL = `
+  SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
+    EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
+  FROM (
+    SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
+      AND computer_id = ?
+    UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
+      AND computer_id = ?
+    UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
+      AND NOT EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = projects.id AND pp.root_path <> '')
+    UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
+      AND computer_id = ?
+  ) r JOIN projects p ON p.id = r.project_id`
+
+/**
+ * The computer that shares the hub's disk — the desktop app's co-spawned local
+ * computer — or null (a standalone hub: no computer's folders are on its disk). Set
+ * by the hub's composition.
+ */
+let hubDiskComputerId: string | null = null
+export function setHubDiskComputer(computerId: string | null): void {
+  hubDiskComputerId = computerId
+  invalidateAccessCache()
+}
+
+function rootsOf(db: SlayzoneDb, source: RootSource): Promise<RootRow[]> {
+  if (source === 'computer-disk') return db.all<RootRow>(COMPUTER_DISK_ROOTS_SQL)
+  const local = hubDiskComputerId ?? ''
+  return db.all<RootRow>(HUB_DISK_ROOTS_SQL, [local, local, local])
+}
+
+/** `/`, a drive root (`C:\`) or a share root: never a project folder. */
+function isFilesystemRoot(root: string): boolean {
+  if (!isWindowsPath(root)) return root === '/'
+  return /^[a-z]:\\?$/i.test(root) || /^\\\\[^\\]+\\[^\\]+\\?$/.test(root)
+}
 
 /** What a path resolution may answer for a path in no root. */
 type InNoRoot = 'hub-wide' | 'nobody'
@@ -501,7 +595,9 @@ async function resolvePathResource(
   db: SlayzoneDb,
   rawPath: string,
   hubRoots: readonly string[],
-  inNoRoot: InNoRoot = 'hub-wide'
+  inNoRoot: InNoRoot = 'hub-wide',
+  computerId: string | null = null,
+  source: RootSource = 'computer-disk'
 ): Promise<Ownership> {
   if (!rawPath) return NONE
   const target = normalizePath(rawPath)
@@ -516,7 +612,9 @@ async function resolvePathResource(
     // `<data root>/artifacts/<taskId>/…` is a task's artifact file (artifact-store).
     const rest = target.slice(end + 1).split(/[\\/]/)
     if (rest[0] === 'artifacts' && rest[1]) return viaTask(db, rest[1])
-    hubDepth = Math.max(hubDepth, root.length)
+    // How deep in `target` the root reaches — not how it is spelled: a firmlink
+    // (`/System/Volumes/Data/…`) is a longer spelling of the same folder (M8).
+    hubDepth = Math.max(hubDepth, end)
   }
   // The most specific root decides: a project nested inside another one is its own,
   // and a broad project somewhere up the tree does not open it to its owner. A
@@ -526,24 +624,70 @@ async function resolvePathResource(
   // and a new root cannot be registered there (that path is refused), so nobody can
   // claim the hub's own files by creating a project over them.
   let depth = -1
-  let owners: OwnerRow[] = []
-  for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
+  let owners: RootRow[] = []
+  for (const row of await rootsOf(db, source)) {
+    // A request that names its computer is about that computer's disk: another
+    // computer's folders never decide for it (M9: A's /home/u/app on A's computer
+    // locked B out of B's /home/u on B's). Legacy (computer-less) roots still count.
+    if (computerId && row.computer_id !== null && row.computer_id !== computerId) continue
     const root = normalizePath(row.root, true)
-    if (root === null || rootEnd(target, ancestry, root, within) < 0) continue
-    if (root.length > depth) {
-      depth = root.length
+    // A filesystem root is no project folder: as one it would own every path (M9).
+    if (root === null || isFilesystemRoot(root)) continue
+    const end = rootEnd(target, ancestry, root, within)
+    if (end < 0) continue
+    if (end > depth) {
+      depth = end
       owners = []
     }
-    if (root.length === depth) owners.push(row)
+    if (end === depth) owners.push(row)
   }
   if (hubDepth >= 0 && hubDepth >= depth) return NONE
   if (depth < 0) return inNoRoot === 'hub-wide' ? HUB_WIDE : NONE
   // The same folder recorded for two users (each on their own computer): which one
-  // a path means is not the hub's to guess, so neither gets it by path — a tie
-  // between owners never grants access (L3). A request that names its task, project
-  // or computer is decided by that instead.
-  if (new Set(owners.map((o) => o.owner_user_id)).size > 1) return NONE
+  // a path means is not the hub's to guess — a tie between owners never grants
+  // access by path alone (L3). A request that names its computer is decided by the
+  // folder recorded on that computer (N4: else user A could lock user B out of B's
+  // own folder by registering a project at it on A's computer).
+  //
+  // Only for a path read ON that computer (`path`): a hub-disk read (`ownedPath`,
+  // `pathTree`) never gets a computer here — the computer a request names says
+  // nothing about the hub's disk (P2: A placed B's folder on A's own computer, named
+  // it, and read B's file off the hub). And a root with no computer (the hub's own,
+  // or a legacy one) never loses a tie because a computer was named: the tie denies.
+  if (new Set(owners.map((o) => o.owner_user_id)).size > 1) {
+    // A pre-v176 path of a project with a placement is that project's old spelling of
+    // the same folder, not one more owner (Q2).
+    const contenders = owners.filter((o) => o.computer_id !== null || !o.placed)
+    // Without those, one owner left: theirs — a computer named or not (M8).
+    if (contenders.length > 0 && new Set(contenders.map((o) => o.owner_user_id)).size === 1) {
+      return projectsOf(contenders)
+    }
+    const allOnComputers = contenders.every((o) => o.computer_id !== null)
+    const onIt =
+      computerId && allOnComputers ? contenders.filter((o) => o.computer_id === computerId) : []
+    if (onIt.length > 0 && new Set(onIt.map((o) => o.owner_user_id)).size === 1) {
+      return projectsOf(onIt)
+    }
+    // Audited: a user may be locked out of a folder by someone else's project.
+    // Never the path itself — it can carry a user's directory names.
+    securityEvent({
+      event: 'authz.path_tie',
+      outcome: 'denied',
+      targetKind: 'path',
+      targetId: null,
+      detail: { owners: owners.length, computerNamed: computerId !== null }
+    })
+    return NONE
+  }
   return projectsOf(owners)
+}
+
+/** A registered root, with the project owner and the computer it is recorded on. */
+type RootRow = OwnerRow & {
+  root: string
+  computer_id: string | null
+  /** The row's project has a folder on some computer (`project_placements`). */
+  placed: number
 }
 
 /**
@@ -561,18 +705,19 @@ async function resolvePathTree(
   req: AccessRequest
 ): Promise<Ownership> {
   const hubRoots = req.hubRoots ?? []
-  const own = await resolvePathResource(db, rawPath, hubRoots, 'nobody')
+  // A walk of the hub's disk: no computer breaks a tie there (P2).
+  const own = await resolvePathResource(db, rawPath, hubRoots, 'nobody', null, 'hub-disk')
   if (own.status === 'none') return NONE
   const dir = normalizePath(rawPath)
   if (dir === null) return NONE
   const dirId = rootIdentity(dir)
   // A root inside `dir`: by name, or by identity (`dir` is one of its folders).
   const holds = (root: string, inside: (child: string, root: string) => boolean) =>
-    inside(root, dir) || (dirId !== null && ancestryOf(root).has(dirId))
+    inside(root, dir) || (dirId !== null && rootAncestry(root).has(dirId))
   for (const raw of hubRoots) if (holds(hubRootForm(raw), withinHubRoot)) return NONE
   // A walk from `/` (or any folder holding one) would reach a system directory.
   if (!isWindowsPath(dir) && SYSTEM_DIRS.some((d) => holds(d, within))) return NONE
-  for (const row of await db.all<OwnerRow & { root: string }>(ROOTS_SQL)) {
+  for (const row of await rootsOf(db, 'hub-disk')) {
     const root = normalizePath(row.root, true)
     if (root !== null && holds(root, within) && !mayAccessProject(req, row)) return NONE
   }
@@ -607,7 +752,8 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
     WHERE r.id = ?`),
   aiConfigItem: resolveAiConfigItem,
   projectGroup: resolveProjectGroup,
-  path: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? []),
+  path: (db, id, req) =>
+    resolvePathResource(db, id, req.hubRoots ?? [], 'hub-wide', req.computerId ?? null),
   // An automation rule (T-106): its project's, like its runs.
   automation: viaProjectColumn('automations'),
   // Its owner row stands in for a project's: it carries no members, so sharing (T-100)
@@ -615,7 +761,9 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   computer: viaQuery('SELECT owner_user_id FROM computers WHERE id = ?'),
   pathTree: resolvePathTree,
   // A path the hub opens on its own disk for the caller: a root of theirs, or nothing (N1).
-  ownedPath: (db, id, req) => resolvePathResource(db, id, req.hubRoots ?? [], 'nobody')
+  // Read on the hub's disk: no computer breaks a tie there (P2).
+  ownedPath: (db, id, req) =>
+    resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', null, 'hub-disk')
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

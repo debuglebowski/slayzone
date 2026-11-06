@@ -94,8 +94,12 @@ import {
   writeBootSettings,
   resolveHubRegistry,
   resolveDefaultHubId,
+  normalizeRemoteUrl,
+  toHubOrigin,
   LOCAL_HUB_ID
 } from './boot-config'
+import { checkHubSession } from '@slayzone/hub-auth/client'
+import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
 import {
@@ -3727,6 +3731,19 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     const hubTokens = () => createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot())
     ipcMain.handle('app:get-hub-tokens', () =>
       getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
+    )
+    // Whether a stored bearer still signs in (Settings' "Signed in" vs "Session
+    // expired"). A stored token alone said "Signed in" for a session the hub had long
+    // dropped, while every call to that hub failed.
+    ipcMain.handle(
+      'app:check-hub-session',
+      async (_event, payload: { hubId: string; url: string }) => {
+        const token = await hubTokens().get(payload.hubId)
+        if (!token) return { state: 'none' as const }
+        const normalized = normalizeRemoteUrl(payload.url)
+        if (!normalized) return { state: 'unreachable' as const }
+        return checkHubSession(nodeHubTransport, toHubOrigin(normalized), token)
+      }
     )
     ipcMain.handle(
       'app:set-hub-token',

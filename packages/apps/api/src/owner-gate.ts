@@ -30,6 +30,7 @@ import {
   createAccessScope,
   hubStateRoots,
   isPathKind,
+  requestComputerOf,
   type AccessRequest,
   type AccessScope,
   type OwnedResource
@@ -131,13 +132,14 @@ export async function checkOwnership(opts: {
   if (!rule) throw refuse(opts.path, 'owner_unclassified')
   // The auth gate has already refused a call without a principal on this hub.
   const userId = opts.ctx.principal?.userId ?? ''
+  const raw = rule.ids && rule.ids.length > 0 ? await opts.getRawInput() : undefined
   const scope = createAccessScope(
     opts.ctx.db,
-    accessRequestOf(opts.ctx),
+    // The computer the request names breaks a path tie between two owners (N4).
+    { ...accessRequestOf(opts.ctx), computerId: requestComputerOf(raw) },
     opts.type === 'subscription' ? { ttlMs: STREAM_DECISION_TTL_MS } : {}
   )
   if (rule.ids && rule.ids.length > 0) {
-    const raw = await opts.getRawInput()
     if (rule.needsOne && !hasOneOf(raw, rule.needsOne)) throw refuse(opts.path, 'ownerless')
     for (const r of resourcesIn(raw, rule)) {
       if (!(await scope.allows(r))) throw refuse(opts.path, 'not_owner', r)

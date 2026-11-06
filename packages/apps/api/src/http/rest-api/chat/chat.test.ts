@@ -127,6 +127,23 @@ describe('status + prompts', () => {
     expect(res.body.data[0].kind).toBe('permission')
     expect(res.body.data[0].options.map((o) => o.id)).toContain('no')
   })
+
+  // Bypass still gets prompts (the CLI's own safety checks); "switch to auto"
+  // there would downgrade the session, so the CLI offers it only outside bypass.
+  test.each([
+    ['auto-accept', true],
+    ['bypass', false]
+  ])('session in %s: "switch to auto mode" offered = %s', async (chatMode, offered) => {
+    fake.autoOptedIn = true
+    fake.chatMode = chatMode
+    fake.buffer = [{ seq: 1, event: bashPrompt('r1') }]
+    fake.status = { state: 'idle', turnOpen: true, pendingRequestIds: ['r1'], outboxInFlight: 0 }
+    const res = await rest.request<Ok<Array<{ options: Array<{ id: string }> }>>>(
+      'GET',
+      `/api/chat/${chatTask}/prompts`
+    )
+    expect(res.body.data[0].options.map((o) => o.id).includes('yes-auto')).toBe(offered)
+  })
 })
 
 describe('answering a prompt', () => {

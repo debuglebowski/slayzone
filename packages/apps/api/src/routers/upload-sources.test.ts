@@ -262,13 +262,18 @@ describe('T-107 a project rooted at <ROOT> or at / (its owner sets the path)', (
     ).toBe('NOT_FOUND')
   })
   test('a project at / still gives no hub state, SSO file or other user', async () => {
-    const slash = await a.projects.create({
-      name: 'slash',
-      color: '#000000',
-      path: join(base, 'x')
-    })
+    // A login hub no longer lets a user record a project path at all (R10-1): the
+    // row is one left from before, as an upgraded database may hold.
+    expect(
+      await outcome(a.projects.create({ name: 'slash', color: '#000000', path: '/' }))
+    ).not.toBe('ok')
+    const slash = { id: 'p-slash' }
+    sql(
+      `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES (?, 'slash', '#000', ?, '/')`,
+      slash.id,
+      A
+    )
     try {
-      await a.projects.update({ id: slash.id, path: '/' } as never)
       for (const src of [hubDb, authDb, ssoKey, ssoCert, join(bRoot, 'secret.txt')]) {
         expect(await outcome(a.artifacts.upload({ taskId: 'tA', sourcePath: src }))).toBe(
           'NOT_FOUND'

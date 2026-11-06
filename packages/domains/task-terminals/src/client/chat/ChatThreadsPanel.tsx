@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, MessageSquare, Plus, X } from 'lucide-react'
+import { Archive, ArrowUp, MessageSquare, Plus, X } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import {
   cn,
@@ -7,7 +7,12 @@ import {
   useAppearance,
   CHAT_THREADS_DEFAULT_WIDTH,
   CHAT_THREADS_MIN_WIDTH,
-  CHAT_THREADS_MAX_WIDTH
+  CHAT_THREADS_MAX_WIDTH,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger
 } from '@slayzone/ui'
 import type { ChatThread } from '@slayzone/terminal-contracts'
 import { useTRPC } from '../trpc'
@@ -23,16 +28,25 @@ export function ChatThreadsPanel({
   onSelect,
   onCreate,
   onClose,
+  onCloseThread,
+  onReopenThread,
   renderThread
 }: {
+  /** This answer's threads, open and closed. */
   threads: ChatThread[]
   activeId: string | null
   creating: boolean
   onSelect: (id: string | null) => void
   onCreate: (text: string) => Promise<boolean>
+  /** Hide the panel (the threads stay as they are). */
   onClose: () => void
+  /** Close (resolve) one thread: it leaves the tabs, reopenable from the closed list. */
+  onCloseThread: (thread: ChatThread) => void
+  onReopenThread: (thread: ChatThread) => void
   renderThread: (thread: ChatThread, active: boolean) => ReactNode
 }) {
+  const openThreads = threads.filter((thread) => thread.closedAt == null)
+  const closedThreads = threads.filter((thread) => thread.closedAt != null)
   const [draft, setDraft] = useState('')
   const [visited, setVisited] = useState<ReadonlySet<string>>(
     () => new Set(activeId ? [activeId] : [])
@@ -75,38 +89,57 @@ export function ChatThreadsPanel({
           aria-label="Threads for this answer"
           className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
           onKeyDown={(e) => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) || !threads.length)
+            const tabs = openThreads
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key) || !tabs.length) return
+            if (!(e.target instanceof HTMLElement) || e.target.getAttribute('role') !== 'tab')
               return
             e.preventDefault()
-            const at = threads.findIndex((t) => t.id === activeId)
+            const at = tabs.findIndex((t) => t.id === activeId)
             const next =
               e.key === 'Home'
                 ? 0
                 : e.key === 'End'
-                  ? threads.length - 1
-                  : (at + (e.key === 'ArrowRight' ? 1 : -1) + threads.length) % threads.length
-            onSelect(threads[next].id)
-            const id = threads[next].id
+                  ? tabs.length - 1
+                  : (at + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+            onSelect(tabs[next].id)
+            const id = tabs[next].id
             requestAnimationFrame(() => document.getElementById(`thread-tab-${id}`)?.focus())
           }}
         >
-          {threads.map((thread) => (
-            <button
+          {openThreads.map((thread) => (
+            <div
               key={thread.id}
-              id={`thread-tab-${thread.id}`}
-              role="tab"
-              type="button"
-              aria-selected={thread.id === activeId}
-              tabIndex={thread.id === activeId ? 0 : -1}
-              title={thread.title}
-              onClick={() => onSelect(thread.id)}
               className={cn(
-                'h-7 max-w-36 shrink-0 truncate rounded border border-transparent px-2 text-xs text-muted-foreground hover:bg-muted/60',
+                'group/thread-tab flex h-7 max-w-40 shrink-0 items-center rounded border border-transparent text-xs text-muted-foreground hover:bg-muted/60',
                 thread.id === activeId && 'border-border bg-surface-2 text-foreground'
               )}
             >
-              {thread.title}
-            </button>
+              <button
+                id={`thread-tab-${thread.id}`}
+                role="tab"
+                type="button"
+                aria-selected={thread.id === activeId}
+                tabIndex={thread.id === activeId ? 0 : -1}
+                title={thread.title}
+                onClick={() => onSelect(thread.id)}
+                className="h-full min-w-0 truncate pl-2 pr-1 outline-none focus-visible:underline"
+              >
+                {thread.title}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close thread: ${thread.title}`}
+                title="Close thread (reopen it from the closed list)"
+                tabIndex={thread.id === activeId ? 0 : -1}
+                onClick={() => onCloseThread(thread)}
+                className={cn(
+                  'mr-1 flex size-4 shrink-0 items-center justify-center rounded opacity-0 hover:bg-muted group-hover/thread-tab:opacity-100 focus-visible:opacity-100',
+                  thread.id === activeId && 'opacity-100'
+                )}
+              >
+                <X className="size-3" />
+              </button>
+            </div>
           ))}
           {activeId === null && (
             <span className="flex h-7 items-center whitespace-nowrap rounded border border-border bg-surface-2 px-2 text-xs">
@@ -114,6 +147,29 @@ export function ChatThreadsPanel({
             </span>
           )}
         </div>
+        {closedThreads.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Closed threads (${closedThreads.length})`}
+                title="Closed threads"
+                className="flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-xs text-muted-foreground hover:bg-muted/60"
+              >
+                <Archive className="size-3.5" />
+                {closedThreads.length}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="bottom">
+              <DropdownMenuLabel>Closed threads · select to reopen</DropdownMenuLabel>
+              {closedThreads.map((thread) => (
+                <DropdownMenuItem key={thread.id} onSelect={() => onReopenThread(thread)}>
+                  <span className="max-w-64 truncate">{thread.title}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <button
           type="button"
           aria-label="New thread"
@@ -132,7 +188,7 @@ export function ChatThreadsPanel({
           <X className="size-3.5" />
         </button>
       </header>
-      {threads
+      {openThreads
         .filter((thread) => visited.has(thread.id) || thread.id === activeId)
         .map((thread) => (
           <div

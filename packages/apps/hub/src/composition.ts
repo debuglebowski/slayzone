@@ -17,6 +17,7 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
     console.warn('[direct-link] revocation not delivered', f)
   }
 }
+import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
@@ -83,6 +84,7 @@ import {
   setBackupOps,
   setAuthEvents,
   setComputersDeps,
+  setHubDiskComputer,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
@@ -102,6 +104,7 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
+  purgeExpiredTrash,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
@@ -207,6 +210,7 @@ import {
   AutomationEngine,
   setAutomationsEvents,
   setAutomationCommandRouting,
+  setAutomationWrittenListener,
   type AutomationsEventMap
 } from '@slayzone/automations/server'
 import {
@@ -292,9 +296,8 @@ import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import { webLogin, webSessionCookieSecure } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
-import { countRunningWork, startsNewWork } from './computer-new-work.js'
+import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
-  computerDisabledError,
   DEFAULT_LOCAL_COMPUTER_NAME,
   deterministicLocalComputerId,
   getComputer,
@@ -384,6 +387,9 @@ export type ServerComposition = {
    *  A later unit awaits this before reading the two fields above / mounting the
    *  gateway. */
   computersReady: Promise<void>
+  /** What failed the async computer init, or null. Kept, not only logged: a hub with
+   *  login refuses to boot on it (boot rule B18); the desktop runs degraded. */
+  readonly computersInitError: Error | null
   /** Feed the computer listener's bound WS URL back into the computers registry
    *  (`mintJoinToken` embeds it in a join token). The server host resolves it only
    *  after it binds its port, which happens AFTER composeServer returns — so it's a
@@ -478,6 +484,7 @@ export function composeServer(opts: {
   // Who a join token is for (T-20), read through the late-bound ref above.
   const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
   let computersReady: Promise<void> = Promise.resolve()
+  let computersInitError: Error | null = null
   // Computer listener info the computers router bakes into a join token — bound late
   // by the server host (setComputerListenerInfo) once it knows its own computer URL.
   // Null until then, so `mintJoinToken` fails cleanly if called before the listener
@@ -648,7 +655,16 @@ export function composeServer(opts: {
     projectRootForTask: async (_db: SlayzoneDb, taskId: string, projectId: string) => {
       const computerId = await resolveComputerForTask(taskId).catch(() => null)
       return computerId ? recordedProjectRoot(db, projectId, computerId) : null
-    }
+    },
+    // The Trash purge removes a worktree before its task, so it asks whether the
+    // computer holding it can (R5-1). At boot none is connected: the task waits, and
+    // the purge runs again on `computer-connected` (below).
+    worktreeComputerState: createWorktreeComputerState({
+      db,
+      requireLogin: opts.requireLogin,
+      usable: () => execGateway?.listUsableComputers() ?? [],
+      forTask: (taskId) => resolveComputerForTask(taskId)
+    })
   }
   configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
@@ -1834,6 +1850,10 @@ export function composeServer(opts: {
     // SLAYZONE_SUPERVISED=1), so they can't silently diverge. Remote computers (any
     // other name) keep the fresh-uuid path.
     const localComputerName = DEFAULT_LOCAL_COMPUTER_NAME
+    // On the hub's own disk, only the co-spawned local computer's folders are the hub's
+    // (the desktop app's). A standalone hub has none: what any computer reports
+    // describes that computer's disk, never the hub's (api access.ts, Q1).
+    setHubDiskComputer(supervised ? deterministicLocalComputerId(localComputerName) : null)
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
@@ -1841,20 +1861,15 @@ export function composeServer(opts: {
     const chatCommandBarrier = createComputerChatCommandBarrier({
       lifecycle: computerChat.lifecycle.syncNative
     })
+    const newWorkGuard = createNewWorkGuard(db)
     const computerGateway = createHubComputerGateway({
       // THE owner check (G2): every hub→computer request, whatever routed it, is
       // refused on a computer its caller does not own. The hub's own work passes.
       authorizeRequest: createComputerRequestAuthorizer(placement.gate),
       beforeRequest: async (computerId, method, params) => {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
-        // A disabled computer takes no new work (`computers.setDisabled`). Every
-        // request passes here, so a binding, a resumed conversation's owner or a spec
-        // that named the computer directly is refused alike; reads, kills and
-        // maintenance are not new work and pass. One row read, spawns only.
-        if (startsNewWork(method, params)) {
-          const row = await getComputer(db, computerId)
-          if (row?.disabled_at != null) throw computerDisabledError(row.name)
-        }
+        // A disabled computer takes no new work (`computers.setDisabled`).
+        await newWorkGuard(computerId, method, params)
       },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       // The dedup is the DESKTOP hub's alone: only there is a computer of that name its
@@ -2157,7 +2172,16 @@ export function composeServer(opts: {
         if (projectId) return resolveComputerForProject(projectId)
         return null
       },
+      isReachable: (computerId) => computerGateway.isComputerUsable(computerId),
       run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command)
+    })
+    // Cron catch-ups that waited for a computer (launch, wake) run now (H1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) void automationEngine.computerConnected()
+    })
+    // Expired Trash entries kept until their computer connected are purged now (R5-1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) bootBestEffort('trash-purge-on-connect', () => purgeExpiredTrash(db))
     })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).
@@ -2279,6 +2303,15 @@ export function composeServer(opts: {
         recordDiagnosticEvent({ level, source: 'server', event, message, payload })
     })
     syncComputerProjects = (computerId) => projectSync.onConnect(computerId)
+    // The local computer's other work folders — the worktree base setting and an
+    // automation's own folder — are registered again when they change (M6).
+    if (supervised) {
+      setAutomationWrittenListener(() => void projectSync.localWorkFoldersChanged())
+      notifyEvents.on('settings-changed', (change) => {
+        if (!change || change.keys.includes('worktree_base_path'))
+          void projectSync.localWorkFoldersChanged()
+      })
+    }
     // Every Project the hub returns names the computer its work really runs on.
     // Without login a stored default IS the answer (forProject would re-read it);
     // with login it must still pass the owner check.
@@ -2337,11 +2370,12 @@ export function composeServer(opts: {
       }
     })
   })().catch((err) => {
+    computersInitError = err instanceof Error ? err : new Error(String(err))
     recordDiagnosticEvent({
       level: 'error',
       source: 'task',
       event: 'computer.init_failed',
-      message: err instanceof Error ? err.message : String(err)
+      message: computersInitError.message
     })
   })
 
@@ -2426,6 +2460,9 @@ export function composeServer(opts: {
       return hubAuthRef
     },
     computersReady,
+    get computersInitError(): Error | null {
+      return computersInitError
+    },
     setComputerListenerInfo: (info) => {
       computerHubUrl = info.hubUrl
     },

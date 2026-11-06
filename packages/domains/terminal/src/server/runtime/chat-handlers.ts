@@ -1199,6 +1199,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
         sourceUuid: source.atMessageUuid,
         title: o.title,
         conversationId: null,
+        closedAt: null,
         createdAt: Date.now()
       }
       await data.threads.create(thread)
@@ -1211,6 +1212,24 @@ export function createChatOps(opts: ChatHandlerOpts) {
         content: [{ type: 'text', text: o.text }]
       })
       return thread
+    },
+
+    /**
+     * Close (resolve) or reopen a thread of this tab. Closing stops its session
+     * (its history stays; a reopened thread resumes its conversation on the next
+     * message) and hides it from the thread tabs.
+     */
+    setThreadClosed: async (
+      o: ChatCreateOpts & { threadId: string; closed: boolean }
+    ): Promise<void> => {
+      if (!data.threads?.setClosed) throw new Error('Closing threads is unavailable')
+      const thread = await data.threads.get(o.threadId)
+      if (!thread || thread.parentTabId !== o.tabId || thread.taskId !== o.taskId)
+        throw new Error('Thread not found')
+      // Awaited: its last events are written before it reads closed.
+      if (o.closed) await removeSession(thread.id)
+      await data.threads.setClosed(thread.id, o.closed ? Date.now() : null)
+      chatEvents.emit('threads-changed', o.tabId)
     },
 
     /**

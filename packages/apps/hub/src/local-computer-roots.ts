@@ -19,7 +19,8 @@
  * SIBLING of the project — so a jail containing only project paths would admit
  * the checkout and then refuse every worktree created from it. A custom
  * `worktree_base_path` pointing somewhere else entirely still needs a manual
- * entry; nothing here can infer it.
+ * entry; nothing here can infer it — so it, and an automation's own folder, are
+ * registered as folders of their own ({@link missingRootsForFolders}, final review M6).
  *
  * @module hub/local-computer-roots
  */
@@ -43,6 +44,32 @@ function realpathOrSelf(p: string): string {
   } catch {
     return p
   }
+}
+
+/**
+ * Which of `folders` (each one itself, not its parent — a worktree base or an
+ * automation's folder) are missing from `currentRoots`. A filesystem root is never
+ * inferred. Real paths are added too, as for projects.
+ */
+export function missingRootsForFolders(
+  folders: readonly string[],
+  currentRoots: readonly string[],
+  realpath: (p: string) => string = realpathOrSelf
+): string[] {
+  const additions: string[] = []
+  for (const folder of folders) {
+    const lexical = resolve(folder)
+    for (const candidate of new Set([lexical, realpath(lexical)])) {
+      if (candidate === resolve(candidate, '..')) continue
+      if (isCoveredByRoots(candidate, currentRoots)) continue
+      if (additions.some((a) => isCoveredByRoots(candidate, [a]))) continue
+      for (let i = additions.length - 1; i >= 0; i--) {
+        if (isCoveredByRoots(additions[i] as string, [candidate])) additions.splice(i, 1)
+      }
+      additions.push(candidate)
+    }
+  }
+  return additions
 }
 
 /**

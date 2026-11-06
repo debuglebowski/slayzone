@@ -558,6 +558,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   // Side threads: `create` forks a new conversation, like `fork`.
   'chat.threads.create': 'never',
   'chat.threads.list': 'agent',
+  'chat.threads.setClosed': 'never',
   'chat.threads.onChanged': 'agent',
   'chat.timelinePages': 'agent',
   'chat.workspaceChanges.get': 'agent',

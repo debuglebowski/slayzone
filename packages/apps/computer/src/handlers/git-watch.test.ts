@@ -75,9 +75,79 @@ describe('git.watchStart / git.watchStop', () => {
     )
   }, 12_000)
 
+  // Round-9 Q4: on macOS a recursive fs.watch returns before its FSEvents stream is
+  // live, and a change in that window is DROPPED, not delayed — the git panel then
+  // showed stale state until the next change or the 30 s fallback poll. watchStart
+  // now answers only once the watch is live: a change made right after it is seen,
+  // every time.
+  it('a change made right after watchStart is never missed (25 fresh watches, no delay)', async () => {
+    // Started side by side, as a window full of git panels does: FSEvents start-up
+    // takes longest then, so the dead window is widest.
+    const repos = Array.from({ length: 25 }, () => {
+      const repo = realpathSync(mkdtempSync(join(tmpdir(), 'computer-git-watch-race-')))
+      execFileSync('git', ['init', '-q'], { cwd: repo })
+      return repo
+    })
+    // Only an event AFTER the write counts: one sent as the watch starts says nothing
+    // about whether the write itself was seen.
+    const wroteAt = new Map<string, number>()
+    try {
+      await Promise.all(
+        repos.map(async (repo, i) => {
+          await call(HubToComputerMethods.gitWatchStart, {
+            watchId: `race-${i}`,
+            worktreePath: repo
+          })
+          wroteAt.set(`race-${i}`, sent.length)
+          writeFileSync(join(repo, 'a.txt'), String(i))
+        })
+      )
+      // Reported within the debounce once the watch is live; on a loaded machine the
+      // watch may go live after the readiness cap (3 s), and then its late rescan
+      // reports it (R10-2). So: each change is reported — by a deadline past the cap.
+      const seenAll = (): string[] => {
+        const seen = new Set<string>()
+        sent.forEach((m, at) => {
+          const e = m.params as { name?: string; payload?: { watchId: string; kind: string } }
+          if (m.method !== ComputerNotificationMethods.event || e.name !== GIT_WATCH_EVENT) return
+          const p = e.payload
+          if (p && p.kind === 'changed' && at >= (wroteAt.get(p.watchId) ?? Infinity))
+            seen.add(p.watchId)
+        })
+        return repos.map((_, i) => `race-${i}`).filter((id) => !seen.has(id))
+      }
+      const deadline = Date.now() + 15_000
+      while (seenAll().length > 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      const misses = seenAll()
+      const detail = misses.map((id) => {
+        const at = sent
+          .map((m, i) => ({ m, i }))
+          .filter(({ m }) => {
+            const e = m.params as { name?: string; payload?: { watchId?: string } }
+            return e.name === GIT_WATCH_EVENT && e.payload?.watchId === id
+          })
+          .map(
+            ({ m, i }) =>
+              `${(m.params as { payload: { kind: string } }).payload.kind}@${i - (wroteAt.get(id) ?? 0)}`
+          )
+        return `${id}: [${at.join(' ')}]`
+      })
+      expect(misses, `missed: ${detail.join('; ')}`).toEqual([])
+    } finally {
+      for (let i = 0; i < repos.length; i++) {
+        await call(HubToComputerMethods.gitWatchStop, { watchId: `race-${i}` })
+        rmSync(repos[i] as string, { recursive: true, force: true })
+      }
+    }
+  }, 120_000)
+
   it('stops reporting once stopped', async () => {
     await call(HubToComputerMethods.gitWatchStart, { watchId: 'w1', worktreePath: dir })
     await call(HubToComputerMethods.gitWatchStop, { watchId: 'w1' })
+    // The start's own change (see `ready`) came before the stop; none may come after.
+    sent.length = 0
     writeFileSync(join(dir, 'b.txt'), 'x')
     await new Promise((r) => setTimeout(r, 600))
     expect(watchEvents()).toEqual([])
@@ -92,6 +162,7 @@ describe('git.watchStart / git.watchStop', () => {
     await call(HubToComputerMethods.gitWatchStart, { watchId: 'w1', worktreePath: dir })
     await call(HubToComputerMethods.gitWatchStart, { watchId: 'w9', worktreePath: dir })
     for (const cb of onDisconnect) cb()
+    sent.length = 0 // the starts' own changes came before the disconnect
     writeFileSync(join(dir, 'c.txt'), 'x')
     await new Promise((r) => setTimeout(r, 800))
     expect(watchEvents(), 'nothing reported after the disconnect').toEqual([])

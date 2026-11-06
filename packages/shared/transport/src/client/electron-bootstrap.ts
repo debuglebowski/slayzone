@@ -49,6 +49,11 @@ export const electronBootstrap = {
     api().app.getHubRegistry?.() ?? Promise.resolve({ hubs: [] as HubEntry[], defaultHubId: '' }),
   // Per-hub bearer tokens (safeStorage-decrypted in main) for authed remote hubs.
   getHubTokens: () => api().app.getHubTokens?.() ?? Promise.resolve({}),
+  // A host without the check (a main/preload from before it) cannot say whether a
+  // bearer is stored, so `unreachable` (unknown), never `none` (no bearer). Hosts with
+  // no bearer store at all (web shell, fork shim) implement it and answer `none`.
+  checkHubSession: (payload: { hubId: string; url: string }) =>
+    api().app.checkHubSession?.(payload) ?? Promise.resolve({ state: 'unreachable' as const }),
   setHubToken: (payload: { hubId: string; token: string }) =>
     api().app.setHubToken?.(payload) ?? Promise.resolve({ ok: true as const }),
   hubLogin: (payload: { hubId: string; url: string; email: string; password: string }) =>

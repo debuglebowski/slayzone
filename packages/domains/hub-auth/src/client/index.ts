@@ -62,7 +62,7 @@ export {
   type PendingAppSignIn,
   type PkceCrypto
 } from './app-sign-in'
-export { fetchSessionEmail } from './session'
+export { checkHubSession, fetchSessionEmail, type HubSessionCheck } from './session'
 export type { HubTokenStore } from './token-store'
 export {
   SIGN_IN_ERROR_PARAMS,

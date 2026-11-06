@@ -591,7 +591,9 @@ export function createComputerChatServices(opts: {
               'getTabState',
               'saveTabDraft',
               'saveTabScroll',
-              'listThreads'
+              'listThreads',
+              // A thread's own conversation, not the one the terminal runs.
+              'setThreadClosed'
             ].includes(method)
           ) {
             const context = await bootstrap(owner)

@@ -11,7 +11,7 @@
  *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
  *                           B15 trusted proxies are IPs/CIDRs ·
  *                           B16 session retention is a whole number of days ·
- *                           B18 STUN servers are host:port authorities
+ *                           B19 STUN servers are host:port authorities
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
  *   (B13)                   dev endpoint · B14 auth secret in env · B17 it matches any
@@ -19,7 +19,9 @@
  *   Login required:         B2 password or SSO on · B7 SSO settings complete (and
  *                           its certificate loads, `assertSsoCredential`) ·
  *                           B11 the auth database loads (`assertAuthLoaded`, once
- *                           the database has been opened)
+ *                           the database has been opened) · B18 the computer
+ *                           startup completed and left a project-folder host
+ *                           (`assertComputersReady`)
  *
  * "Reachable from other machines" (B13) is a listen address that is not loopback OR
  * a public address that is set. The second half is deliberate: a hub on 127.0.0.1
@@ -160,7 +162,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B18, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B19, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -273,11 +275,11 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const retention = readHubSessionRetentionDays(env)
   if (!retention.ok) throw new HubBootRefusal('B16', retention.message)
 
-  // B18 — the STUN servers for WebRTC direct links are host:port authorities. A typo
+  // B19 — the STUN servers for WebRTC direct links are host:port authorities. A typo
   // that fell back to the default would send every client's address to a server the
   // operator did not choose.
   const stun = readHubStunAddresses(env)
-  if (!stun.ok) throw new HubBootRefusal('B18', stun.message)
+  if (!stun.ok) throw new HubBootRefusal('B19', stun.message)
 
   const sso = resolveHubSso(env)
   if (switches.requireLogin) {
@@ -437,6 +439,35 @@ export function assertAuthLoaded(requireLogin: boolean, hubAuth: unknown | null)
       `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but hub auth failed to initialize — refusing ` +
         `to boot a hub that cannot check who is signing in. Check the auth database in the ` +
         `hub's data directory and the hub log.`
+    )
+  }
+}
+
+/**
+ * B18 — when login is required the computer startup must have completed and left a
+ * project-folder host. Fails CLOSED: without the host, a project's folder fell back to
+ * the legacy `projects.path` column — a record of the HUB's disk — written after only
+ * the computer-side owner check, so a user could claim `/` and read every hub file
+ * (round-10 R10-1). The desktop (no login) still boots degraded, as before.
+ */
+export function assertComputersReady(
+  requireLogin: boolean,
+  state: { folderHost: boolean; initError: Error | null }
+): void {
+  if (!requireLogin) return
+  if (state.initError) {
+    throw new HubBootRefusal(
+      'B18',
+      `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but the computer startup failed ` +
+        `(${state.initError.message}) — refusing to boot a hub that cannot record where ` +
+        `project folders live. Check the hub log and its data directory.`
+    )
+  }
+  if (!state.folderHost) {
+    throw new HubBootRefusal(
+      'B18',
+      `[slayzone] ${HUB_SWITCH_ENV.requireLogin}=1 but no project folder host was set up — ` +
+        `refusing to boot: project folders would be recorded on the hub's own disk.`
     )
   }
 }

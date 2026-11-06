@@ -104,6 +104,24 @@ describe('exec.run', () => {
     })
   })
 
+  // Final review M4: each pipe chunk was decoded on its own, so a character split
+  // across two chunks came out as U+FFFD. A 3-byte character written as 1 + 2 bytes,
+  // in two separate writes the pipe delivers separately, on stdout and stderr.
+  it('a multi-byte character split across pipe chunks survives', async () => {
+    const node = JSON.stringify(process.execPath)
+    const script = JSON.stringify(
+      "const b=Buffer.from('€');for(const s of [process.stdout,process.stderr]){s.write(b.subarray(0,1));}" +
+        'setTimeout(()=>{for(const s of [process.stdout,process.stderr])s.write(b.subarray(1))},100)'
+    )
+    const out = (await run({
+      command: `ELECTRON_RUN_AS_NODE=1 ${node} -e ${script}`,
+      cwd: dir,
+      timeoutMs: 10_000
+    })) as { stdout: string; stderr: string }
+    expect(out.stdout).toBe('€')
+    expect(out.stderr).toBe('€')
+  })
+
   it("a project id: the project's folder on this computer", async () => {
     const out = (await run({ command: 'pwd', projectId: 'p1', timeoutMs: 10_000 })) as {
       stdout: string

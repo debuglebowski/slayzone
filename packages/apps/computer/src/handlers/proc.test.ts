@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -727,5 +728,78 @@ describe('proc.spawn for a project this computer has no folder for', () => {
     await waitFor(() => exitFor(notifies, 'p-root') !== undefined)
     expect(realpathSync(dataFor(notifies, 'p-root', 'stdout').trim())).toBe(realpathSync(roots[0]))
     proc.disposeAll()
+  })
+})
+
+// Final review M5: proc leaders are spawned detached, so a computer that is
+// SIGKILLed or crashes leaves `pnpm dev` running — the row reads stopped with no
+// Stop, and the next Start hits "address in use". Each spawned group is written to
+// a ledger under the computer's state dir; the next session host reaps the groups
+// a dead host left behind. A live host's groups, and a pid reused by an unrelated
+// process, are never touched.
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+describe.skipIf(process.platform === 'win32')('M5: groups orphaned by a crashed computer', () => {
+  it('the next host reaps a dead host group, never a live host group', async () => {
+    const ledger = join(dir, 'computer-runtime', 'proc-groups.json')
+    const { ctx } = makeCtx(roots)
+    // The crashed host: same ledger, an owner identity that is no longer running.
+    const dead = createProcHandlers(ctx, undefined, {
+      groupLedgerPath: ledger,
+      ledgerOwner: { pid: process.pid, startedAt: 'a host that crashed' }
+    })
+    const live = createProcHandlers(ctx, undefined, { groupLedgerPath: ledger })
+    await dead.orphansReaped
+    await live.orphansReaped
+    const orphan = (await dead.handlers[ProcMethods.procSpawn]({
+      sessionId: 'orphan',
+      command: 'sh',
+      args: ['-c', 'sleep 30 & wait']
+    })) as { pid: number }
+    const kept = (await live.handlers[ProcMethods.procSpawn]({
+      sessionId: 'kept',
+      command: 'sleep',
+      args: ['30']
+    })) as { pid: number }
+    await dead.groupsRecorded()
+    await live.groupsRecorded()
+
+    const next = createProcHandlers(makeCtx(roots).ctx, undefined, { groupLedgerPath: ledger })
+    await next.orphansReaped
+
+    await waitFor(() => !groupAlive(orphan.pid))
+    expect(groupAlive(kept.pid)).toBe(true)
+    live.disposeAll()
+    next.disposeAll()
+  })
+
+  it('a recorded pid now running something else is left alone', async () => {
+    const ledger = join(dir, 'computer-runtime', 'proc-groups.json')
+    const stranger = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    mkdirSync(join(dir, 'computer-runtime'), { recursive: true })
+    writeFileSync(
+      ledger,
+      JSON.stringify({
+        groups: [
+          {
+            pgid: stranger.pid,
+            startedAt: 'Thu Jan  1 00:00:00 1970',
+            owner: { pid: process.pid, startedAt: 'a host that crashed' }
+          }
+        ]
+      })
+    )
+    const next = createProcHandlers(makeCtx(roots).ctx, undefined, { groupLedgerPath: ledger })
+    await next.orphansReaped
+    expect(groupAlive(stranger.pid!)).toBe(true)
+    process.kill(-stranger.pid!, 'SIGKILL')
+    next.disposeAll()
   })
 })

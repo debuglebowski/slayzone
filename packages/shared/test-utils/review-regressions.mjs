@@ -54,7 +54,10 @@ export const REGRESSIONS = [
     round: 1,
     id: 'H2',
     what: 'git ops and exec.run carry timeouts above the gateway default',
-    files: [`${P}domains/worktrees/src/server/git-op-timeouts.test.ts`]
+    files: [
+      `${P}domains/worktrees/src/server/git-op-timeouts.test.ts`,
+      `${hub}computer-exec-run.test.ts`
+    ]
   },
   { round: 1, id: 'H3', what: 'usage parse cursors re-keyed per computer', files: [usageRouting] },
   {
@@ -169,6 +172,19 @@ export const REGRESSIONS = [
     files: [ownerBoundary, authorizer]
   },
   { round: 2, id: 'R8', what: 'catch-up never duplicates or reorders', files: [catchUpMerge] },
+  {
+    round: 2,
+    id: 'R9',
+    what: 'lazy node-pty, bounded signal strings, the boot-window watch retry, conflict-AI argv',
+    files: [
+      `${computer}node-pty-lazy.test.ts`,
+      `${computer}native-probe.test.ts`,
+      `${P}domains/computer-transport/src/shared/frames-bounds.test.ts`,
+      `${P}domains/worktrees/src/client/git-diff-store.test.ts`,
+      `${P}domains/worktrees/src/server/merge-ai-routing.test.ts`,
+      `${hub}computer-probes.test.ts`
+    ]
+  },
   // ── round 3 ──
   {
     round: 3,
@@ -203,8 +219,8 @@ export const REGRESSIONS = [
   {
     round: 3,
     id: 'F6',
-    what: 'Windows npm shims for the conflict-AI argv',
-    files: [`${computer}handlers/resolve-command.test.ts`]
+    what: 'Windows npm shims and stdin for the conflict-AI argv',
+    files: [`${computer}handlers/resolve-command.test.ts`, `${computer}handlers/exec-run.test.ts`]
   },
   // ── round 4 ──
   {
@@ -257,8 +273,8 @@ export const REGRESSIONS = [
   {
     round: 5,
     id: 'K4',
-    what: "main's reply mirror runs on the computer",
-    files: [`${computer}pty-signals.test.ts`]
+    what: "migration versions unique and increasing; a DB at main's v194 reaches latest",
+    files: [`${P}shared/db-migrations/src/review-regressions-migrations.test.ts`]
   },
   {
     round: 5,
@@ -282,6 +298,12 @@ export const REGRESSIONS = [
     what: 'readDir and searchFiles through links stay in the jail',
     files: jail
   },
+  {
+    round: 5,
+    id: 'K4 merge',
+    what: "main's reply mirror, merged in K4, runs on the computer",
+    files: [`${computer}pty-signals.test.ts`]
+  },
   // ── round 6 ──
   {
     round: 6,
@@ -299,13 +321,13 @@ export const REGRESSIONS = [
     round: 6,
     id: 'L3',
     what: "case folding is the computer's, never the hub disk's",
-    files: [rrOwner]
+    files: [`${hub}review-regressions-l3-folding-hub.test.ts`, rrOwner]
   },
   {
     round: 6,
     id: 'L4',
     what: 'a disabled computer refuses exec.run and new worktrees',
-    files: [rrOwner]
+    files: [`${hub}computer-disabled-gateway.test.ts`, rrOwner]
   },
   {
     round: 6,
@@ -322,6 +344,12 @@ export const REGRESSIONS = [
   // ── round 7 ──
   {
     round: 7,
+    id: 'N2',
+    what: "K2's worst vector: an agentConfig.fs rename onto COMPUTER.CONFIG.JSON",
+    files: [`${computer}handlers/jail-escapes.test.ts`]
+  },
+  {
+    round: 7,
     id: 'N1',
     what: 'hub-disk path procedures need a root the caller owns; /dev /proc /sys /.vol refused',
     files: [
@@ -330,6 +358,241 @@ export const REGRESSIONS = [
       `${P}apps/api/src/routers/upload-sources.test.ts`,
       `${P}apps/api/src/access.test.ts`
     ]
+  },
+  {
+    round: 7,
+    id: 'N3',
+    what: 'a ws subscription stopped during its middlewares never subscribes',
+    files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
+  },
+  {
+    round: 7,
+    id: 'N5',
+    what: "tree access checks reuse each root's ancestry (no stat storm per check)",
+    files: [`${P}apps/api/src/access-tree-cost.test.ts`]
+  },
+  {
+    round: 7,
+    id: 'N6',
+    what: 'git routing: exact case first, else one case-insensitive candidate',
+    files: [rrOwner]
+  },
+  {
+    round: 7,
+    id: 'N7',
+    what: 'pty.relay sent once on reconnect; an old computer without it is asked once',
+    files: [
+      `${P}domains/terminal/src/server/runtime/review-regressions-relay.test.ts`,
+      `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
+    ]
+  },
+  {
+    round: 7,
+    id: 'N4',
+    what: "a path tie between owners is broken by the request's computer, else denied and audited",
+    files: [rrOwner]
+  },
+  // ── round 8 ──
+  {
+    round: 8,
+    id: 'P4',
+    what: 'the K2 rename repro protects the file as production does (red before K2)',
+    files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P3',
+    what: 'a ws stop in the same tick as its subscribe (and out of order) never leaks',
+    files: [`${P}apps/api/src/ws-subscription-stop-race.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P2',
+    what: "naming a computer never wins a path tie on the hub's disk",
+    files: [`${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`]
+  },
+  {
+    round: 8,
+    id: 'P1',
+    what: 'no procedure, REST route or MCP tool reads a hub-disk path the caller may not access',
+    files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
+  },
+  // ── round 9 ──
+  {
+    round: 9,
+    id: 'Q1',
+    what: "a remote computer's folders never own anything on the hub's disk",
+    files: [
+      `${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`,
+      `${P}apps/api/src/access.test.ts`
+    ]
+  },
+  {
+    round: 9,
+    id: 'Q2',
+    what: "a legacy project path does not lock its owner out on the owner's computer",
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
+  },
+  {
+    round: 9,
+    id: 'Q3',
+    what: 'the hub-disk canary seeds what users plant (computer folders, worktrees) and every input shape',
+    files: [`${P}apps/api/src/hub-disk-canary.test.ts`]
+  },
+  {
+    round: 9,
+    id: 'Q4',
+    what: 'git.watchStart answers once the watch is live; a change right after it is never missed',
+    files: [`${P}apps/computer/src/handlers/git-watch.test.ts`]
+  },
+  // ── round 10 ──
+  {
+    round: 10,
+    id: 'R10-1',
+    what: "a login hub never writes a project's legacy path; it refuses to boot without a folder host (B18)",
+    files: [
+      `${P}apps/api/src/routers/review-regressions-hub-disk.test.ts`,
+      `${P}apps/hub/src/boot-rules.test.ts`,
+      `${P}apps/api/src/hub-disk-canary.test.ts`
+    ]
+  },
+  {
+    round: 10,
+    id: 'R10-3',
+    what: 'a repo whose .git is a symlink starts watching at once (real gitdir watched)',
+    files: [`${P}domains/worktrees/src/server/git-watcher.test.ts`]
+  },
+  {
+    round: 10,
+    id: 'R10-2',
+    what: 'past the readiness cap a watch keeps confirming and rescans once live: no change lost',
+    files: [
+      `${P}domains/worktrees/src/server/git-watcher.test.ts`,
+      `${computer}handlers/git-watch.test.ts`
+    ]
+  },
+  {
+    round: 11,
+    id: 'H1-final',
+    what: 'cron catch-up waits for the computer and runs once when it connects',
+    files: [`${P}domains/automations/src/server/engine-catchup.test.ts`]
+  },
+  // ── round 11 ──
+  {
+    round: 11,
+    id: 'M4-final',
+    what: 'exec.run decodes output as one stream (no U+FFFD at chunk boundaries)',
+    files: [`${P}apps/computer/src/handlers/exec-run.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M1-final',
+    what: 'an exit error before any output (seq -1) reaches the hub',
+    files: [`${P}domains/computer-transport/src/server/exec-proxies.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M2-final',
+    what: "a recovery shell continues the session's seq numbering (no blank terminal)",
+    files: [
+      `${P}apps/computer/src/handlers/pty.test.ts`,
+      `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
+    ]
+  },
+  {
+    round: 11,
+    id: 'M3-final',
+    what: 'a panel joining a git watch start that fails is told; a refused start is never stopped',
+    files: [
+      `${P}domains/worktrees/src/server/git-watch-routing.test.ts`,
+      `${P}domains/worktrees/src/client/git-diff-store.test.ts`
+    ]
+  },
+  {
+    round: 11,
+    id: 'M7-final',
+    what: "a folder copy never copies the computer's protected state",
+    files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M9-rest',
+    what: 'REST auth decides on the path as express routes it (case, slashes, encoding); fails closed',
+    files: [`${P}apps/hub/src/rest-auth.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M8-final',
+    what: 'owner resolution: one contender owns; depth by matched position; stale legacy paths no hub-disk root',
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`, `${P}apps/api/src/access.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M9-roots',
+    what: "roots on another computer never decide a named computer's path; / is no root",
+    files: [`${P}apps/hub/src/review-regressions-owner.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M6-final',
+    what: 'a custom worktree base and an automation folder are registered as local-computer roots',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M5-final',
+    what: 'process groups a crashed computer left running are ended by the next host',
+    files: [`${P}apps/computer/src/handlers/proc.test.ts`]
+  },
+  // ── round 12 ──
+  {
+    round: 12,
+    id: 'R2-1',
+    what: 'the orphan reaper kills only groups it can prove are its own (boot id, live-member proof), and a clean quit leaves no entry',
+    files: [`${P}apps/computer/src/proc-group-ledger.test.ts`]
+  },
+  {
+    round: 12,
+    id: 'M6-low',
+    what: 'roots registered for work folders are removed when no worktree base or automation needs them',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  // ── round 13 ──
+  {
+    round: 13,
+    id: 'R3-1',
+    what: 'a work-folder root stays while a local task worktree still lives under it (worktree base changed)',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  {
+    round: 13,
+    id: 'R3-2',
+    what: 'local_computer_work_roots is left out of every export and ignored on import',
+    files: [`${P}apps/api/src/export-import-machine-local.test.ts`]
+  },
+  // ── round 14 ──
+  {
+    round: 14,
+    id: 'R4-1',
+    what: 'a soft-deleted task restored after a relaunch keeps its worktree root until purged',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
+  },
+  // ── round 15 ──
+  {
+    round: 15,
+    id: 'R5-1',
+    what: 'the Trash purge deletes a task only after its worktree is removed; no computer = keep and retry on connect; a computer gone for good never blocks',
+    files: [
+      `${P}domains/task/src/server/ops/startup-purge-computer.test.ts`,
+      `${P}apps/hub/src/worktree-computer-state.test.ts`
+    ]
+  },
+  // ── direct link (feat/direct-link) ──
+  {
+    round: 16,
+    id: 'DL-canary',
+    what: "the direct-link canary: no direct-router procedure (pty, chat, over WebSocket or a WebRTC data channel) touches a file on the computer's disk",
+    files: [`${P}apps/computer/src/direct/direct-canary.test.ts`]
   }
 ]
 

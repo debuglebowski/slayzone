@@ -266,6 +266,26 @@ describe.skipIf(process.platform === 'linux')(
       expect(kept()).toBe(true)
     })
 
+    // Round-7 N2: K2's worst vector — the agent config rename, onto the computer's own
+    // config in another case: `rename(2)` replaces it (the hub then owns the computer).
+    // Round-8 P4: protected as production protects it — the FILE (main.ts), not its
+    // folder: with the folder protected, any spelling under it was refused by the
+    // folder match even before K2, and this test guarded nothing.
+    it('agentConfig.fs rename onto `.state/COMPUTER.CONFIG.JSON` is refused', async () => {
+      setProtectedPaths([join(r, '.state', 'computer.config.json')])
+      writeFileSync(join(r, 'evil.json'), '{"hubUrl":"ws://evil"}')
+      expect(
+        await attempt(() =>
+          agent[M.agentConfigFs]({
+            op: 'rename',
+            path: join(r, 'evil.json'),
+            to: join(r, '.state', 'COMPUTER.CONFIG.JSON')
+          })
+        )
+      ).toBe('refused')
+      expect(kept()).toBe(true)
+    })
+
     it('a not-yet-existing protected file is refused in any case', async () => {
       setProtectedPaths([join(r, '.state', 'credentials.json')])
       expect(
@@ -277,6 +297,25 @@ describe.skipIf(process.platform === 'linux')(
     })
   }
 )
+
+// Final review M7: a folder copy judged only its top folder, and copied whatever was
+// inside — the computer's credentials included, into a readable copy in a project.
+// Protected entries are never copied, however deep.
+describe('M7: a folder copy never copies the computer’s protected state', () => {
+  it('fs.copy of a folder holding the credentials leaves them out', async () => {
+    mkdirSync(join(r, 'proj', '.state'), { recursive: true })
+    writeFileSync(join(r, 'proj', 'readme.md'), 'hi')
+    writeFileSync(join(r, 'proj', '.state', 'credentials.json'), 'SECRET-KEY')
+    setProtectedPaths([join(r, 'proj', '.state', 'credentials.json')])
+    try {
+      await fs[M.fsCopy]({ rootPath: r, srcPath: 'proj', destPath: 'copy' })
+      expect(readFileSync(join(r, 'copy', 'readme.md'), 'utf-8')).toBe('hi')
+      expect(existsSync(join(r, 'copy', '.state', 'credentials.json'))).toBe(false)
+    } finally {
+      setProtectedPaths([])
+    }
+  })
+})
 
 // Round-5 K8: the file editor's search read THROUGH links — to files outside the
 // root, or to the computer's own credentials inside it (the protected filter checked

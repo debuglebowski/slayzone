@@ -43,7 +43,13 @@ import {
   openServerDatabase,
   openServerDiagnosticsDatabase
 } from './db.js'
-import { assertAuthLoaded, assertHubBootRules, assertSsoCredential } from './boot-rules.js'
+import {
+  assertAuthLoaded,
+  assertComputersReady,
+  assertHubBootRules,
+  assertSsoCredential
+} from './boot-rules.js'
+import { getProjectFolderHost } from '@slayzone/projects/server'
 import { guardAuthRequestBody } from './auth-body-limit'
 import { composeServer } from './composition.js'
 import { deriveComputerHubUrl } from './computer-listener.js'
@@ -250,6 +256,12 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // broken auth DB makes enroll unavailable rather than unauthenticated); clients
   // do too.
   assertAuthLoaded(hubAuthRequired, hubAuth)
+  // Fail CLOSED (B18): a login hub whose computer startup failed has no project-folder
+  // host, and a folder would then be recorded on the hub's own disk.
+  assertComputersReady(hubAuthRequired, {
+    folderHost: getProjectFolderHost() !== null,
+    initError: composition.computersInitError
+  })
   setHubDescribeDeps({
     getAuthRequired: () => hubAuthRequired,
     getSwitches: () => switches

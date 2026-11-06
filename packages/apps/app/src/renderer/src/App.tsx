@@ -59,7 +59,7 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import { AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
+import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
@@ -1655,6 +1655,9 @@ function App(): React.JSX.Element {
                     explodeMode ? 'p-4' : ''
                   )}
                 >
+                  {/* One banner per hub whose connection has a problem. Same 16px
+                    frame rule as the integrations banner below. */}
+                  <HubIssueBanners className={cn(!explodeMode && 'mx-4 mt-4')} />
                   {visibleAuthFailures.length > 0 ? (
                     <div
                       data-testid="integrations-auth-failure-banner"

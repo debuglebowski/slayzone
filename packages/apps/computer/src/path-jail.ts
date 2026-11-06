@@ -496,6 +496,9 @@ function pipeFile(src: string, fd: number): void {
 }
 
 function copyEntry(src: string, dest: string): void {
+  // The computer's own state is never copied, however deep in the tree (M7): judging
+  // the top folder alone let a copy make its credentials readable in a project.
+  if (protectedHit(src, false)) return
   const st = lstatSync(src)
   if (st.isSymbolicLink()) {
     // Copied as the link it is: a copy of a link is not a write through it. Its folder
@@ -545,6 +548,7 @@ async function copyEntryAsync(
   state: { n: number; buf: Buffer }
 ): Promise<void> {
   if (++state.n % COPY_YIELD_EVERY === 0) await yieldToLoop()
+  if (protectedHit(src, false)) return // see copyEntry (M7)
   const st = await lstatAsync(src)
   if (st.isSymbolicLink() || (!st.isDirectory() && !st.isFile())) {
     copyEntry(src, dest)

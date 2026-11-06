@@ -744,6 +744,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         submittingPrompts,
         respondPermission,
         autoModeAvailable: autoCapability.optedIn,
+        permissionMode: chatMode,
         cwd,
         timeline,
         childIndex: state.childIndex,
@@ -780,6 +781,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         submittingPrompts,
         respondPermission,
         autoCapability.optedIn,
+        chatMode,
         cwd,
         timeline,
         state.childIndex,
@@ -870,7 +872,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           e.preventDefault()
                           const id = href.slice('#chat-thread:'.length)
                           const thread = threadApi.threads.find((thread) => thread.id === id)
-                          if (thread) threadApi.view?.open(thread)
+                          if (thread) void threadApi.view?.open(thread)
                           return
                         }
                         if (!/^https?:\/\//i.test(href)) return
@@ -1163,6 +1165,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         onSelect={threadApi.select}
                         onCreate={threadApi.create}
                         onClose={threadApi.close}
+                        onCloseThread={(thread) => void threadApi.closeThread(thread)}
+                        onReopenThread={(thread) => void threadApi.reopen(thread)}
                         renderThread={(thread, active) => (
                           <ChatPanel
                             tabId={thread.id}

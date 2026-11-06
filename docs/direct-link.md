@@ -153,7 +153,7 @@ relay, as for an unreachable listener. The hub hands both peers its STUN servers
 
 | Var / `hub.config.json` key | Meaning |
 |---|---|
-| `SLAYZONE_HUB_STUN_ADDRESSES` / `stunAddresses` | Comma-separated `host:port` authorities (a list in the file), never `stun:` URLs. Unset = `stun.cloudflare.com:3478`; empty = none. Malformed refuses boot (B18). |
+| `SLAYZONE_HUB_STUN_ADDRESSES` / `stunAddresses` | Comma-separated `host:port` authorities (a list in the file), never `stun:` URLs. Unset = `stun.cloudflare.com:3478`; empty = none. Malformed refuses boot (B19). |
 
 **Runtimes.**
 - Computer: `node-datachannel` (libdatachannel), Node-API prebuilds per platform; loaded

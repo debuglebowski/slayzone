@@ -30,6 +30,9 @@
  * @module hub/computer-project-sync
  */
 
+import { LOCAL_COMPUTER_WORK_ROOTS_KEY } from '@slayzone/settings-core/server'
+import { isAbsolute } from 'node:path'
+import { resolveWorktreeBasePathTemplate } from '@slayzone/worktrees/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   deletePlacement,
@@ -41,7 +44,14 @@ import {
 } from '@slayzone/computers/server'
 import { USABLE_PLACEMENT_STATUSES, type PlacementStatus } from '@slayzone/computers/shared'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
-import { missingRootsForProjects } from './local-computer-roots'
+import {
+  isCoveredByRoots,
+  missingRootsForFolders,
+  missingRootsForProjects
+} from './local-computer-roots'
+
+/** Hub setting: the local computer's roots added for work folders (M6). */
+const WORK_ROOTS_KEY = LOCAL_COMPUTER_WORK_ROOTS_KEY
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
@@ -78,6 +88,12 @@ export interface SetFolderResult {
 
 export interface ComputerProjectSync {
   onConnect(computerId: string): Promise<void>
+  /**
+   * The worktree base setting or an automation's folder changed: register the local
+   * computer's work folders again (M6). Best-effort: an offline computer is widened on
+   * its next connect.
+   */
+  localWorkFoldersChanged(): Promise<void>
   /**
    * Record `path` as this project's folder on this computer.
    *
@@ -139,13 +155,150 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     )
   }
 
-  /** Widen the local computer's allowed roots to cover these folders. */
-  async function widenRoots(computerId: string, paths: readonly string[]): Promise<void> {
-    if (!isLocal(computerId) || paths.length === 0) return
+  /**
+   * Folders the local computer works in besides project folders, as the desktop did
+   * with no jail (M6): the worktree base each local project resolves to when the
+   * setting names one (the default, a sibling, is covered by the project's parent),
+   * and each automation action's own absolute folder (a `{{…}}` one resolves to a
+   * project's folder, already covered).
+   */
+  async function localWorkFolders(computerId: string): Promise<string[]> {
+    const folders: string[] = []
+    const template = (
+      await db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'worktree_base_path'")
+    )?.value?.trim()
+    if (template) {
+      for (const r of await listPlacements(db)) {
+        if (r.computer_id !== computerId || !r.path) continue
+        const base = resolveWorktreeBasePathTemplate(template, r.path)
+        if (base && isAbsolute(base)) folders.push(base)
+      }
+    }
+    for (const a of await db.all<{ actions: string }>('SELECT actions FROM automations')) {
+      let actions: unknown
+      try {
+        actions = JSON.parse(a.actions)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(actions)) continue
+      for (const action of actions) {
+        const cwd = (action as { params?: { cwd?: unknown } })?.params?.cwd
+        if (typeof cwd === 'string' && !cwd.includes('{{') && isAbsolute(cwd)) folders.push(cwd)
+      }
+    }
+    return folders
+  }
+
+  /**
+   * Roots this sync added for work folders (not for projects, never the user's own),
+   * so they can be removed again when no work folder needs them (final review round
+   * 2, low M6). Kept in the hub's settings: it survives a restart, and only the
+   * supervised local computer is ever widened.
+   */
+  async function readTracked(): Promise<Record<string, string[]>> {
+    const raw = (
+      await db.get<{ value: string }>(`SELECT value FROM settings WHERE key = '${WORK_ROOTS_KEY}'`)
+    )?.value
+    try {
+      const parsed = raw ? (JSON.parse(raw) as unknown) : {}
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, string[]>)
+        : {}
+    } catch {
+      return {}
+    }
+  }
+
+  // Keyed by computer id. That is no guard across machines (the local computer's id
+  // is the same everywhere): the key is machine-local instead — never exported, and
+  // ignored on import (`isMachineLocalSetting`, R3-2).
+  async function trackedWorkRoots(computerId: string): Promise<string[]> {
+    const list = (await readTracked())[computerId]
+    return Array.isArray(list) ? list.filter((r): r is string => typeof r === 'string') : []
+  }
+
+  async function saveTrackedWorkRoots(computerId: string, roots: readonly string[]): Promise<void> {
+    const all = await readTracked()
+    all[computerId] = [...new Set(roots)]
+    await db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('${WORK_ROOTS_KEY}', ?)`, [
+      JSON.stringify(all)
+    ])
+  }
+
+  /**
+   * Folders the local computer's live tasks work in — worktrees and base dirs of
+   * tasks on it, or on no computer in a project placed on it. They never add a root
+   * (each was covered when it was made); they only keep a work-folder root from being
+   * removed while still in use (final review round 3, R3-1). A soft-deleted task
+   * counts too: its worktree stays on disk and a restore only clears `deleted_at`,
+   * so the root is released only once the row is purged (round 4, R4-1).
+   */
+  async function foldersInUse(computerId: string): Promise<string[]> {
+    const rows = await db.all<{ worktree_path: string | null; base_dir: string | null }>(
+      `SELECT worktree_path, base_dir FROM tasks t
+        WHERE (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
+            SELECT 1 FROM project_placements pp
+             WHERE pp.project_id = t.project_id AND pp.computer_id = ?)))`,
+      [computerId, computerId]
+    )
+    const folders: string[] = []
+    for (const r of rows) {
+      for (const f of [r.worktree_path, r.base_dir]) {
+        if (f && isAbsolute(f)) folders.push(f)
+      }
+    }
+    return folders
+  }
+
+  /**
+   * Widen the local computer's allowed roots to cover these folders. With
+   * `workFolders` (the full current list), work-folder roots no longer needed are
+   * removed too, and `paths` must then be every local project folder: a project that
+   * sat under a removed root gets its own again.
+   */
+  async function widenRoots(
+    computerId: string,
+    paths: readonly string[],
+    workFolders?: readonly string[]
+  ): Promise<void> {
+    if (!isLocal(computerId)) return
+    if (paths.length === 0 && !workFolders) return
     const { roots } = await ops.listRoots(computerId)
-    const additions = missingRootsForProjects(paths, roots)
+    let base: readonly string[] = roots
+    let stale: string[] = []
+    let keptTracked: string[] = []
+    if (workFolders) {
+      // Folders in use keep their root too (R3-1): a task worktree created under an
+      // earlier worktree base still lives there after the setting changes.
+      const needed = missingRootsForFolders(
+        [...workFolders, ...(await foldersInUse(computerId))],
+        []
+      )
+      // Only roots this sync added (a root the user already had covered the folder,
+      // so it was never added or tracked) and the computer still has.
+      const tracked = (await trackedWorkRoots(computerId)).filter((r) => roots.includes(r))
+      stale = tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r])))
+      keptTracked = tracked.filter((r) => !stale.includes(r))
+      base = roots.filter((r) => !stale.includes(r))
+    }
+    const fromProjects = missingRootsForProjects(paths, base)
+    const fromFolders = workFolders
+      ? missingRootsForFolders(workFolders, [...base, ...fromProjects])
+      : []
+    const additions = [...fromProjects, ...fromFolders]
+    if (workFolders) await saveTrackedWorkRoots(computerId, [...keptTracked, ...fromFolders])
+    if (additions.length === 0 && stale.length === 0) return
+    await ops.setAllowedRoots(computerId, [...base, ...additions])
+    if (stale.length > 0) {
+      deps.record({
+        level: 'info',
+        event: 'computer.roots_narrowed',
+        message: `local computer allowed roots: ${stale.length} work folder root(s) no longer needed`,
+        payload: { computerId, removed: stale }
+      })
+    }
     if (additions.length === 0) return
-    await ops.setAllowedRoots(computerId, [...roots, ...additions])
     deps.record({
       level: 'info',
       event: 'computer.roots_widened',
@@ -219,6 +372,18 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
   }
 
   return {
+    localWorkFoldersChanged() {
+      const local = deps.localComputerId
+      return withLock(local, async () => {
+        const projectFolders = (await listPlacements(db))
+          .filter((r) => r.computer_id === local)
+          .map((r) => r.path)
+        await widenRoots(local, projectFolders, await localWorkFolders(local)).catch(
+          () => undefined
+        )
+      })
+    },
+
     onConnect(computerId) {
       return withLock(computerId, async () => {
         const before = snapshot(await listPlacements(db), computerId)
@@ -231,7 +396,8 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
               computerId,
               (await listPlacements(db))
                 .filter((r) => r.computer_id === computerId)
-                .map((r) => r.path)
+                .map((r) => r.path),
+              await localWorkFolders(computerId)
             )
           )
         }

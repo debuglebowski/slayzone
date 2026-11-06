@@ -22,6 +22,8 @@ export interface AutomationCommandResult {
 
 export interface AutomationCommandRouting {
   computerFor(target: { taskId?: string; projectId?: string }): Promise<string | null>
+  /** Whether `computerId` is connected and can take work now. Absent = assume so. */
+  isReachable?(computerId: string): boolean
   run(computerId: string, command: AutomationCommand): Promise<AutomationCommandResult>
 }
 

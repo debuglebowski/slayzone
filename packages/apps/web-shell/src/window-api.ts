@@ -61,6 +61,7 @@ const webApiTarget: ElectronAPI = {
     // Always empty: the web shell holds no token a script can read (T-13). Its session
     // is the hub's HttpOnly cookie, which rides the `/trpc` upgrade on its own.
     getHubTokens: async (): Promise<Record<string, string>> => ({}),
+    checkHubSession: async () => ({ state: 'none' as const }),
     // No-op, for the same reason. Accepted rather than rejected — its return type has
     // no error variant (`Promise<{ok:true}>`), and desktop's own multi-hub UI calling
     // this against a browser session should degrade silently, not throw.
