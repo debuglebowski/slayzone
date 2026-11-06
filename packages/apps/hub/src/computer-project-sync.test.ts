@@ -452,3 +452,32 @@ test('M6: a later change is registered too, and never on a remote computer', asy
   expect(isCoveredByRoots('/opt/later', computers.get(LOCAL)!.roots)).toBe(true)
   expect(computers.get(remote)!.roots).toEqual(['/srv'])
 })
+
+// Final review round 2 (low, M6): roots registered for a worktree base or an
+// automation's folder stayed when the setting or the automation went away. They
+// are unregistered — only roots this sync added for work folders, never one the
+// user added, and a project still under a removed root keeps its own root.
+test('M6: a work-folder root goes away with its setting or automation', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k', '/srv/mine'], disk: ['/opt/x/app'] }))
+  upgraded('p1', '/opt/x/app')
+  raw
+    .prepare(`INSERT INTO settings (key, value) VALUES ('worktree_base_path', ?)`)
+    .run('/Volumes/wt/{project-folder-name}')
+  automationWithCwd('/opt')
+  automationWithCwd('/srv/mine/tool') // under a root the user added: nothing registered
+  const { sync } = makeSync()
+  await sync.onConnect(LOCAL)
+  expect(isCoveredByRoots('/Volumes/wt/app', computers.get(LOCAL)!.roots)).toBe(true)
+  expect(isCoveredByRoots('/opt/other', computers.get(LOCAL)!.roots)).toBe(true)
+
+  raw.prepare(`DELETE FROM settings WHERE key = 'worktree_base_path'`).run()
+  raw.prepare(`DELETE FROM automations`).run()
+  await sync.localWorkFoldersChanged()
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/wt/app', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/other', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/x/app', roots)).toBe(true) // the project keeps its root
+  expect(roots).toContain('/Users/k')
+  expect(roots).toContain('/srv/mine')
+})

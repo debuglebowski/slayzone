@@ -43,7 +43,14 @@ import {
 } from '@slayzone/computers/server'
 import { USABLE_PLACEMENT_STATUSES, type PlacementStatus } from '@slayzone/computers/shared'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
-import { missingRootsForProjects, missingRootsForFolders } from './local-computer-roots'
+import {
+  isCoveredByRoots,
+  missingRootsForFolders,
+  missingRootsForProjects
+} from './local-computer-roots'
+
+/** Hub setting: the local computer's roots added for work folders (M6). */
+const WORK_ROOTS_KEY = 'local_computer_work_roots'
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
@@ -182,21 +189,73 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     return folders
   }
 
-  /** Widen the local computer's allowed roots to cover these folders. */
+  /**
+   * Roots this sync added for work folders (not for projects, never the user's own),
+   * so they can be removed again when no work folder needs them (final review round
+   * 2, low M6). Kept in the hub's settings: it survives a restart, and only the
+   * supervised local computer is ever widened.
+   */
+  async function trackedWorkRoots(): Promise<string[]> {
+    const raw = (
+      await db.get<{ value: string }>(`SELECT value FROM settings WHERE key = '${WORK_ROOTS_KEY}'`)
+    )?.value
+    try {
+      const parsed = raw ? (JSON.parse(raw) as unknown) : []
+      return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  async function saveTrackedWorkRoots(roots: readonly string[]): Promise<void> {
+    await db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('${WORK_ROOTS_KEY}', ?)`, [
+      JSON.stringify([...new Set(roots)])
+    ])
+  }
+
+  /**
+   * Widen the local computer's allowed roots to cover these folders. With
+   * `workFolders` (the full current list), work-folder roots no longer needed are
+   * removed too, and `paths` must then be every local project folder: a project that
+   * sat under a removed root gets its own again.
+   */
   async function widenRoots(
     computerId: string,
     paths: readonly string[],
-    workFolders: readonly string[] = []
+    workFolders?: readonly string[]
   ): Promise<void> {
-    if (!isLocal(computerId) || (paths.length === 0 && workFolders.length === 0)) return
+    if (!isLocal(computerId)) return
+    if (paths.length === 0 && !workFolders) return
     const { roots } = await ops.listRoots(computerId)
-    const fromProjects = missingRootsForProjects(paths, roots)
-    const additions = [
-      ...fromProjects,
-      ...missingRootsForFolders(workFolders, [...roots, ...fromProjects])
-    ]
+    let base: readonly string[] = roots
+    let stale: string[] = []
+    let keptTracked: string[] = []
+    if (workFolders) {
+      const needed = missingRootsForFolders(workFolders, [])
+      // Only roots this sync added (a root the user already had covered the folder,
+      // so it was never added or tracked) and the computer still has.
+      const tracked = (await trackedWorkRoots()).filter((r) => roots.includes(r))
+      stale = tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r])))
+      keptTracked = tracked.filter((r) => !stale.includes(r))
+      base = roots.filter((r) => !stale.includes(r))
+    }
+    const fromProjects = missingRootsForProjects(paths, base)
+    const fromFolders = workFolders
+      ? missingRootsForFolders(workFolders, [...base, ...fromProjects])
+      : []
+    const additions = [...fromProjects, ...fromFolders]
+    if (workFolders) await saveTrackedWorkRoots([...keptTracked, ...fromFolders])
+    if (additions.length === 0 && stale.length === 0) return
+    await ops.setAllowedRoots(computerId, [...base, ...additions])
+    if (stale.length > 0) {
+      deps.record({
+        level: 'info',
+        event: 'computer.roots_narrowed',
+        message: `local computer allowed roots: ${stale.length} work folder root(s) no longer needed`,
+        payload: { computerId, removed: stale }
+      })
+    }
     if (additions.length === 0) return
-    await ops.setAllowedRoots(computerId, [...roots, ...additions])
     deps.record({
       level: 'info',
       event: 'computer.roots_widened',
@@ -273,7 +332,12 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     localWorkFoldersChanged() {
       const local = deps.localComputerId
       return withLock(local, async () => {
-        await widenRoots(local, [], await localWorkFolders(local)).catch(() => undefined)
+        const projectFolders = (await listPlacements(db))
+          .filter((r) => r.computer_id === local)
+          .map((r) => r.path)
+        await widenRoots(local, projectFolders, await localWorkFolders(local)).catch(
+          () => undefined
+        )
       })
     },
 

@@ -550,6 +550,12 @@ export const REGRESSIONS = [
     id: 'R2-1',
     what: 'the orphan reaper kills only groups it can prove are its own (boot id, live-member proof), and a clean quit leaves no entry',
     files: [`${P}apps/computer/src/proc-group-ledger.test.ts`]
+  },
+  {
+    round: 12,
+    id: 'M6-low',
+    what: 'roots registered for work folders are removed when no worktree base or automation needs them',
+    files: [`${P}apps/hub/src/computer-project-sync.test.ts`]
   }
 ]
 
