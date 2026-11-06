@@ -30,7 +30,8 @@
  *     then one `git:diff-changed` goes out, so a change made while the watch started is
  *     picked up too. The marker's own events are never reported. Past a cap (a loaded
  *     machine) `ready` resolves with a rescan, and the watch keeps confirming: once it
- *     is live, one more rescan goes out, so no change is lost in between (R10-2).
+ *     is live, one more rescan goes out, so no change is lost in between (R10-2); and
+ *     one more once it has settled, for an event dropped in its first moments.
  */
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
@@ -43,6 +44,8 @@ const READY_MARKER_PREFIX = '.slayzone-watch-ready-'
 /** How often the marker is touched until the watch reports it, and for how long. */
 const READY_TOUCH_MS = 40
 const READY_TIMEOUT_MS = 3_000
+/** After the watch goes live, when one more rescan covers an event dropped in warm-up. */
+const READY_SETTLE_MS = 1_500
 /** After the cap, how long a watch keeps confirming before it is given up on. */
 const READY_GIVE_UP_MS = 60_000
 
@@ -433,6 +436,10 @@ export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
         live = true
         stop()
         refresh()
+        // FSEvents can still drop an event in the first moments after its stream
+        // reports one (a loaded machine): one more rescan once it has settled.
+        const settle = setTimeout(refresh, READY_SETTLE_MS)
+        settle.unref?.()
         if (!reported) {
           reported = true
           resolve()

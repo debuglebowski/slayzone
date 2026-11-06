@@ -102,18 +102,39 @@ describe('git.watchStart / git.watchStop', () => {
           writeFileSync(join(repo, 'a.txt'), String(i))
         })
       )
-      // A change that was seen is reported within the 200 ms debounce; give it ample time.
-      await new Promise((r) => setTimeout(r, 2_500))
-      const seen = new Set<string>()
-      sent.forEach((m, at) => {
-        const e = m.params as { name?: string; payload?: { watchId: string; kind: string } }
-        if (m.method !== ComputerNotificationMethods.event || e.name !== GIT_WATCH_EVENT) return
-        const p = e.payload
-        if (p && p.kind === 'changed' && at >= (wroteAt.get(p.watchId) ?? Infinity))
-          seen.add(p.watchId)
+      // Reported within the debounce once the watch is live; on a loaded machine the
+      // watch may go live after the readiness cap (3 s), and then its late rescan
+      // reports it (R10-2). So: each change is reported — by a deadline past the cap.
+      const seenAll = (): string[] => {
+        const seen = new Set<string>()
+        sent.forEach((m, at) => {
+          const e = m.params as { name?: string; payload?: { watchId: string; kind: string } }
+          if (m.method !== ComputerNotificationMethods.event || e.name !== GIT_WATCH_EVENT) return
+          const p = e.payload
+          if (p && p.kind === 'changed' && at >= (wroteAt.get(p.watchId) ?? Infinity))
+            seen.add(p.watchId)
+        })
+        return repos.map((_, i) => `race-${i}`).filter((id) => !seen.has(id))
+      }
+      const deadline = Date.now() + 15_000
+      while (seenAll().length > 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      const misses = seenAll()
+      const detail = misses.map((id) => {
+        const at = sent
+          .map((m, i) => ({ m, i }))
+          .filter(({ m }) => {
+            const e = m.params as { name?: string; payload?: { watchId?: string } }
+            return e.name === GIT_WATCH_EVENT && e.payload?.watchId === id
+          })
+          .map(
+            ({ m, i }) =>
+              `${(m.params as { payload: { kind: string } }).payload.kind}@${i - (wroteAt.get(id) ?? 0)}`
+          )
+        return `${id}: [${at.join(' ')}]`
       })
-      const misses = repos.map((_, i) => `race-${i}`).filter((id) => !seen.has(id))
-      expect(misses, `missed: ${misses.join(', ')}`).toEqual([])
+      expect(misses, `missed: ${detail.join('; ')}`).toEqual([])
     } finally {
       for (let i = 0; i < repos.length; i++) {
         await call(HubToComputerMethods.gitWatchStop, { watchId: `race-${i}` })

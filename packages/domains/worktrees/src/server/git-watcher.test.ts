@@ -51,12 +51,13 @@ function git(cmd: string, cwd = repo): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** Start watching, then wait out the backend's startup noise. */
+/** Start watching, then wait out its startup: live, and past the settle rescan. */
 async function watch(): Promise<void> {
   watcher = createGitWatcher()
   watcher.on('git:diff-changed', (e: Event) => events.push(e))
   watcher.subscribe(repo)
-  await sleep(600)
+  await watcher.ready(repo)
+  await sleep(2_000)
   events = []
 }
 
@@ -205,7 +206,10 @@ describe('readiness past its cap', () => {
           writeFileSync(join(dir, 'b.txt'), 'x')
         })
       )
-      await sleep(4_000)
+      // Each change is reported once its watch goes live, however late that is (a
+      // loaded machine): wait on that, by a deadline.
+      const deadline = Date.now() + 15_000
+      while (dirs.some((d) => !seen.has(d)) && Date.now() < deadline) await sleep(100)
       expect(dirs.filter((d) => !seen.has(d)).map((d) => d.slice(root.length + 1))).toEqual([])
     } finally {
       w.closeAll()
