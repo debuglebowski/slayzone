@@ -513,6 +513,12 @@ export const REGRESSIONS = [
     id: 'M7-final',
     what: "a folder copy never copies the computer's protected state",
     files: [`${P}apps/computer/src/handlers/jail-escapes.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M9-rest',
+    what: 'REST auth decides on the path as express routes it (case, slashes, encoding); fails closed',
+    files: [`${P}apps/hub/src/rest-auth.test.ts`]
   }
 ]
 
