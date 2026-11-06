@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { chatTabTransitionSchema, type ChatTabTransition } from '../shared'
 import type { ChatComputerRequest } from './migration'
-import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
+import {
+  notifyChatOwnershipChange,
+  type ChatOwnershipStore,
+  type HubChatOwnership
+} from './hub-ownership'
 import { chatStorageMode } from './storage-mode'
 
 interface TransitionRow {
@@ -173,6 +177,8 @@ export function createHubProviderTransitions(opts: {
       selected.state === 'deleted'
     )
       throw new Error('Chat tab was deleted or changed during provider transition')
+    // The tab now holds another conversation: access granted to the old one ends.
+    notifyChatOwnershipChange(db, [from.tabId])
   }
   async function run(row: TransitionRow) {
     const owner = await ownership.get(row.conversation_id)

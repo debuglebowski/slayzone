@@ -77,6 +77,12 @@ export interface DirectLinkIssuerDeps {
   now?: () => number
   /** STUN servers handed to both WebRTC peers (`SLAYZONE_HUB_STUN_ADDRESSES`). */
   stunAddresses?: () => readonly string[]
+  /**
+   * Subscribe to chat tabs whose conversation left its owner (moved, transitioned,
+   * deleted): their grants pin the old epoch, so they are revoked at once rather
+   * than left to fail at the next renewal.
+   */
+  onChatOwnershipChange?: (listener: (tabIds: readonly string[]) => void) => () => void
   /** WebRTC offers per user, and per client address, per minute. Default 30. */
   signalLimitPerMinute?: number
 }
@@ -206,7 +212,7 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
     }
   }
 
-  return {
+  const issuer: DirectLinkIssuer = {
     async issue(target, caller, options = {}) {
       const located = await locate(target)
       if ('unavailable' in located) return { available: false, reason: located.unavailable }
@@ -395,4 +401,13 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       )
     }
   }
+  deps.onChatOwnershipChange?.((tabIds) => {
+    for (const tabId of tabIds) {
+      // Failures are audited by revoke; the computer is reset on reconnect.
+      void issuer
+        .revoke({ by: 'target', target: { kind: 'chat', tabId } }, 'chat_ownership_changed')
+        .catch(() => undefined)
+    }
+  })
+  return issuer
 }

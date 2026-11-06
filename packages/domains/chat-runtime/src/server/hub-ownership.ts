@@ -50,6 +50,30 @@ const fromRow = (r: Row): HubChatOwnership => ({
   settingsHash: r.settings_hash
 })
 const providerMode = terminalStorageAgentId
+
+type ChangeListener = (tabIds: readonly string[]) => void
+/**
+ * Listeners per database, not per store: several modules open their own store on
+ * the hub's one database, and a change any of them makes must reach every listener.
+ */
+const changeListeners = new WeakMap<SlayzoneDb, Set<ChangeListener>>()
+
+/**
+ * Signal that these tabs' conversations left their owner (a move began or
+ * committed, a provider transition, a deletion): whoever holds access granted
+ * under the old ownership (the hub's direct-link grants) must drop it now.
+ */
+export function notifyChatOwnershipChange(db: SlayzoneDb, tabIds: readonly string[]): void {
+  if (tabIds.length === 0) return
+  for (const listener of [...(changeListeners.get(db) ?? [])]) {
+    try {
+      listener(tabIds)
+    } catch {
+      // A listener's failure never fails the ownership change that already committed.
+    }
+  }
+}
+
 export function createChatOwnershipStore(db: SlayzoneDb) {
   const get = async (id: string) => {
     const row = await db.get<Row>('SELECT * FROM chat_ownership WHERE id=?', [id])
@@ -323,6 +347,8 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
         )
       )
         throw new Error('Chat ownership changed; migration cannot proceed')
+      // The source stops serving the conversation now (its writes are fenced).
+      if (result.changes) notifyChatOwnershipChange(db, [current.tabId])
       return current
     },
     async markVerified(id: string, migrationId: string, hash: string) {
@@ -341,7 +367,7 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       return r
     },
     async commitMigration(id: string, migrationId: string, hash: string) {
-      await db.run(
+      const committed = await db.run(
         `UPDATE chat_ownership SET computer_id=destination_computer_id,epoch=epoch+1,state='active',cleanup_pending=1
     WHERE id=? AND migration_id=? AND manifest_hash=? AND state='verified' AND epoch<?`,
         [id, migrationId, hash, Number.MAX_SAFE_INTEGER]
@@ -349,6 +375,7 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       const r = await required(id)
       if (r.state !== 'active' || r.migrationId !== migrationId || r.manifestHash !== hash)
         throw new Error('Migration must be verified before ownership commit')
+      if (committed.changes) notifyChatOwnershipChange(db, [r.tabId])
       return r
     },
     async completeCleanup(id: string, migrationId: string, epoch: number) {
@@ -362,6 +389,7 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       return r
     },
     async deleteConversation(id: string, minimumEpoch = 1) {
+      const before = await get(id)
       await db.batchTxn([
         {
           type: 'run',
@@ -374,8 +402,10 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
           params: [id]
         }
       ])
+      if (before) notifyChatOwnershipChange(db, [before.tabId])
     },
     async deleteForTask(taskId: string) {
+      const before = await api.forTask(taskId)
       await db.batchTxn([
         {
           type: 'run',
@@ -395,6 +425,17 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
           params: [taskId]
         }))
       ])
+      notifyChatOwnershipChange(
+        db,
+        before.filter((o) => o.state !== 'deleted').map((o) => o.tabId)
+      )
+    },
+    /** Subscribe to {@link notifyChatOwnershipChange} on this database; returns unsubscribe. */
+    onChange(listener: ChangeListener): () => void {
+      let set = changeListeners.get(db)
+      if (!set) changeListeners.set(db, (set = new Set()))
+      set.add(listener)
+      return () => set.delete(listener)
     },
     async pendingDeletions(computerId: string) {
       return db.all<{ conversationId: string; epoch: number }>(

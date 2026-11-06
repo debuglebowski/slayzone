@@ -1897,7 +1897,8 @@ export function composeServer(opts: {
         return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
       },
       ...(placement.gate ? { gate: placement.gate } : {}),
-      // Validated at boot (rule B18), so this is the parsed value.
+      onChatOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
+      // Validated at boot (rule B19), so this is the parsed value.
       stunAddresses: () => {
         const stun = readHubStunAddresses()
         return stun.ok ? stun.addresses : []

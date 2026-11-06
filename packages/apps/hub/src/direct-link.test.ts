@@ -306,6 +306,27 @@ describe('direct-link revocation', () => {
     expect(revokes(requests).map((r) => r.params)).toEqual([{ by: 'grant', grantIds: [ids.c] }])
   })
 
+  it('revokes a chat tab’s grants the moment its ownership moves (no waiting out the TTL)', async () => {
+    let changed: ((tabIds: readonly string[]) => void) | undefined
+    const ctx = setup({
+      onChatOwnershipChange: (listener) => {
+        changed = listener
+        return () => {}
+      }
+    })
+    const c = await ctx.issuer.issue({ kind: 'chat', tabId: 'tab-1', taskId: 'task-1' }, local)
+    if (!c.available) throw new Error('unreachable')
+    ctx.requests.length = 0
+    changed?.(['tab-1'])
+    await new Promise((r) => setTimeout(r, 0))
+    expect(revokes(ctx.requests).map((r) => r.params)).toEqual([
+      { by: 'grant', grantIds: [c.grantId] }
+    ])
+    expect(lines.filter((l) => l.event === 'computer.direct_revoke').at(-1)).toMatchObject({
+      detail: { reason: 'chat_ownership_changed', grants: 1 }
+    })
+  })
+
   it('revokes everything on a revoked computer', async () => {
     const { issuer, requests } = await issued()
     await issuer.revoke({ by: 'computer', computerId: 'c-local' }, 'computer_revoked')

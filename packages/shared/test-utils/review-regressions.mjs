@@ -603,6 +603,15 @@ export const REGRESSIONS = [
       `${P}domains/ai-config/src/server/ai-config-routing.test.ts`,
       `${P}domains/file-editor/src/client/useWatchedFile.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-M1',
+    what: "a chat's direct grants are revoked the moment its conversation moves, transitions or is deleted, so the direct stream never freezes until renewal",
+    files: [
+      `${P}domains/chat-runtime/src/server/hub-ownership.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`
+    ]
   }
 ]
 
