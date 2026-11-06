@@ -11,7 +11,11 @@ import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
 import { TypedEventEmitter } from '../shared/events'
-import { ComputerTransportErrorCodes, projectNotPlacedError } from '../shared/frames'
+import {
+  ComputerTransportErrorCodes,
+  PTY_SIGNAL_EVENT_NAME,
+  projectNotPlacedError
+} from '../shared/frames'
 import { RpcDisposedError, RpcError } from '../shared/rpc'
 import {
   createRemoteFsAdapters,
@@ -929,6 +933,46 @@ describe('createRoutingPtyBackend', () => {
         })
       ])
     )
+  })
+
+  // Final review M1: a resume that failed before any output sent its exit error at
+  // seq -1 (nothing emitted yet), and the hub dropped every signal at or below where
+  // it took over detection (-1 for a fresh spawn) — the "session expired" overlay
+  // never showed. An error is about the exit, not about output already detected.
+  it('an exit error before any output (seq -1) reaches the hub', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    connect(gateway, 'epoch-a')
+    const handle = (await backend.spawn({
+      ...ptySpec(),
+      detection: { mode: 'claude-code', resuming: true }
+    })) as PtyHandle
+    await handle.whenSpawned
+    const signals: Array<{ error: unknown }> = []
+    handle.onSignal?.((s) => signals.push(s as never))
+    const error = { code: 'SESSION_NOT_FOUND', message: 'Session not found', recoverable: false }
+    gateway.emit('event', {
+      computerId: 'computer-1',
+      name: PTY_SIGNAL_EVENT_NAME,
+      payload: {
+        sessionId: 'sess-1',
+        seq: -1,
+        activity: null,
+        refreshIdleClock: false,
+        preview: '',
+        error,
+        suppressOutput: false,
+        prompt: null,
+        title: null,
+        devServerUrls: [],
+        conversationId: null
+      }
+    } as never)
+    expect(signals).toEqual([expect.objectContaining({ error })])
   })
 
   it('reconnect with the same epoch ends the sessions the computer no longer holds', async () => {

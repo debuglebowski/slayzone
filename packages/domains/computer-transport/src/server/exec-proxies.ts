@@ -1151,7 +1151,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     const early = entry.preAckSignals ?? []
     entry.preAckSignals = null
     for (const signal of early)
-      if (signal.seq > entry.detectFromSeq) entry.signalEmitter.emit(signal)
+      if (signalIsNew(signal, entry.detectFromSeq)) entry.signalEmitter.emit(signal)
   }
   gateway.events.on('event', (event) => {
     if (event.name !== PTY_SIGNAL_EVENT_NAME) return
@@ -1167,7 +1167,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         entry.preAckSignals.push(signal)
       return
     }
-    if (signal.seq <= entry.detectFromSeq) return
+    if (!signalIsNew(signal, entry.detectFromSeq)) return
     entry.signalEmitter.emit(signal)
   })
   const detach = joinDetachController<PtyEntry>({
@@ -2987,4 +2987,14 @@ function isUnknownRelayAnswer(err: unknown): boolean {
     (err.code === ComputerTransportErrorCodes.unimplemented &&
       err.message === `unimplemented: ${HubToComputerMethods.ptyRelay}`)
   )
+}
+
+/**
+ * Whether the hub has not already detected what a signal reports. Output-derived parts
+ * up to `detectFromSeq` were detected hub-side before the computer took over; an exit
+ * error is about the exit, not output — kept whatever its seq (M1: one sent before any
+ * output, at seq -1, was dropped and the "session expired" overlay never showed).
+ */
+function signalIsNew(signal: { seq: number; error?: unknown }, detectFromSeq: number): boolean {
+  return signal.seq > detectFromSeq || signal.error != null
 }

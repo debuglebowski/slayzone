@@ -483,6 +483,12 @@ export const REGRESSIONS = [
     id: 'M4-final',
     what: 'exec.run decodes output as one stream (no U+FFFD at chunk boundaries)',
     files: [`${P}apps/computer/src/handlers/exec-run.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M1-final',
+    what: 'an exit error before any output (seq -1) reaches the hub',
+    files: [`${P}domains/computer-transport/src/server/exec-proxies.test.ts`]
   }
 ]
 
