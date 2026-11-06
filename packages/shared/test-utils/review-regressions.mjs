@@ -476,6 +476,13 @@ export const REGRESSIONS = [
     id: 'H1-final',
     what: 'cron catch-up waits for the computer and runs once when it connects',
     files: [`${P}domains/automations/src/server/engine-catchup.test.ts`]
+  },
+  // ── round 11 ──
+  {
+    round: 11,
+    id: 'M4-final',
+    what: 'exec.run decodes output as one stream (no U+FFFD at chunk boundaries)',
+    files: [`${P}apps/computer/src/handlers/exec-run.test.ts`]
   }
 ]
 
