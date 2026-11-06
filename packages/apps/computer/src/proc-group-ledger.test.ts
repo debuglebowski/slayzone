@@ -77,79 +77,88 @@ const ledger = () => createProcGroupLedger(ledgerPath, () => {})
 const remaining = () =>
   (JSON.parse(readFileSync(ledgerPath, 'utf8')) as { groups: unknown[] }).groups.length
 
-describe.skipIf(process.platform === 'win32')('R2-1: the reaper proves a group is ours', () => {
-  it("the reviewer's repro: an unrelated group that reused the id survives", async () => {
-    const pgid = await deadLeaderGroup()
-    writeLedger([
-      { pgid, startedAt: 'Mon Nov  2 09:00:00 2026', owner: deadOwner, boot: await currentBootId() }
-    ])
+describe.skipIf(process.platform === 'win32')(
+  'R2-1: the reaper proves a group is ours',
+  { timeout: 30_000 },
+  () => {
+    it("the reviewer's repro: an unrelated group that reused the id survives", async () => {
+      const pgid = await deadLeaderGroup()
+      writeLedger([
+        {
+          pgid,
+          startedAt: 'Mon Nov  2 09:00:00 2026',
+          owner: deadOwner,
+          boot: await currentBootId()
+        }
+      ])
 
-    expect(await ledger().reapOrphans()).toBe(0)
-    expect(groupAlive(pgid)).toBe(true)
-    expect(remaining()).toBe(0) // forgotten, not kept to be retried
-  })
+      expect(await ledger().reapOrphans()).toBe(0)
+      expect(groupAlive(pgid)).toBe(true)
+      expect(remaining()).toBe(0) // forgotten, not kept to be retried
+    })
 
-  it('an entry from another boot is dropped without a kill, even with a matching leader', async () => {
-    const leader = spawn('sleep', ['120'], { detached: true, stdio: 'ignore' })
-    const pgid = leader.pid as number
-    strays.push(pgid)
-    await waitFor(() => groupAlive(pgid))
-    const startedAt = await processStartedAt(pgid)
-    writeLedger([{ pgid, startedAt, owner: deadOwner, boot: 'a boot before a restart' }])
+    it('an entry from another boot is dropped without a kill, even with a matching leader', async () => {
+      const leader = spawn('sleep', ['120'], { detached: true, stdio: 'ignore' })
+      const pgid = leader.pid as number
+      strays.push(pgid)
+      await waitFor(() => groupAlive(pgid))
+      const startedAt = await processStartedAt(pgid)
+      writeLedger([{ pgid, startedAt, owner: deadOwner, boot: 'a boot before a restart' }])
 
-    expect(await ledger().reapOrphans()).toBe(0)
-    expect(groupAlive(pgid)).toBe(true)
-    expect(remaining()).toBe(0)
-  })
+      expect(await ledger().reapOrphans()).toBe(0)
+      expect(groupAlive(pgid)).toBe(true)
+      expect(remaining()).toBe(0)
+    })
 
-  it('a dead-leader group with a member that ran while its host was alive is ended', async () => {
-    const pgid = await deadLeaderGroup()
-    writeLedger([
-      {
-        pgid,
-        // Recorded before the member started, by a host last seen alive after it.
-        startedAt: await processStartedAt(process.pid),
-        owner: deadOwner,
-        boot: await currentBootId(),
-        aliveAt: Date.now() + 2000
+    it('a dead-leader group with a member that ran while its host was alive is ended', async () => {
+      const pgid = await deadLeaderGroup()
+      writeLedger([
+        {
+          pgid,
+          // Recorded before the member started, by a host last seen alive after it.
+          startedAt: await processStartedAt(process.pid),
+          owner: deadOwner,
+          boot: await currentBootId(),
+          aliveAt: Date.now() + 2000
+        }
+      ])
+
+      expect(await ledger().reapOrphans()).toBe(1)
+      await waitFor(() => !groupAlive(pgid))
+    })
+
+    it('a clean quit leaves no entry behind, even with a record still in flight', async () => {
+      const ctx = {
+        dialer: { notify: () => true },
+        config: {
+          hubUrl: 'ws://localhost:0/computers',
+          name: 'test',
+          allowedRoots: [tmpdir()],
+          capabilities: ['proc']
+        },
+        log: () => {}
       }
-    ])
+      const proc = createProcHandlers(ctx as never, undefined, { groupLedgerPath: ledgerPath })
+      await proc.orphansReaped
+      const settled = (await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'a',
+        command: 'sleep',
+        args: ['30']
+      })) as { pid: number }
+      strays.push(settled.pid)
+      await proc.groupsRecorded()
+      expect(remaining()).toBe(1)
+      const inFlight = (await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'b',
+        command: 'sleep',
+        args: ['30']
+      })) as { pid: number }
+      strays.push(inFlight.pid)
 
-    expect(await ledger().reapOrphans()).toBe(1)
-    await waitFor(() => !groupAlive(pgid))
-  })
+      proc.disposeAll()
+      await proc.groupsRecorded()
 
-  it('a clean quit leaves no entry behind, even with a record still in flight', async () => {
-    const ctx = {
-      dialer: { notify: () => true },
-      config: {
-        hubUrl: 'ws://localhost:0/computers',
-        name: 'test',
-        allowedRoots: [tmpdir()],
-        capabilities: ['proc']
-      },
-      log: () => {}
-    }
-    const proc = createProcHandlers(ctx as never, undefined, { groupLedgerPath: ledgerPath })
-    await proc.orphansReaped
-    const settled = (await proc.handlers[ProcMethods.procSpawn]({
-      sessionId: 'a',
-      command: 'sleep',
-      args: ['30']
-    })) as { pid: number }
-    strays.push(settled.pid)
-    await proc.groupsRecorded()
-    expect(remaining()).toBe(1)
-    const inFlight = (await proc.handlers[ProcMethods.procSpawn]({
-      sessionId: 'b',
-      command: 'sleep',
-      args: ['30']
-    })) as { pid: number }
-    strays.push(inFlight.pid)
-
-    proc.disposeAll()
-    await proc.groupsRecorded()
-
-    expect(remaining()).toBe(0)
-  })
-})
+      expect(remaining()).toBe(0)
+    })
+  }
+)

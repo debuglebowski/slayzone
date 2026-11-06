@@ -74,15 +74,23 @@ function ps(args: string[]): Promise<string> {
     execFile(
       'ps',
       args,
-      { timeout: 2000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } },
+      { timeout: 5000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } },
       (err, stdout) => resolve(err ? '' : stdout)
     )
   })
 }
 
-/** A process's start time, or '' when it is gone or `ps` failed. */
+/**
+ * A process's start time, or '' when it is gone or `ps` keeps failing. A `ps` that
+ * fails (timed out on a loaded machine) while the process is alive is retried: an
+ * unrecorded group could never be reaped after a crash.
+ */
 export async function processStartedAt(pid: number): Promise<string> {
-  return (await ps(['-o', 'lstart=', '-p', String(pid)])).trim()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const out = (await ps(['-o', 'lstart=', '-p', String(pid)])).trim()
+    if (out || !pidAlive(pid)) return out
+  }
+  return ''
 }
 
 /** `lstart` text → epoch ms (whole seconds), or NaN. */
