@@ -720,6 +720,12 @@ export const REGRESSIONS = [
     id: 'DL-L5h',
     what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC from a resolve) and loads the addon on the first offer; a failed load refuses that offer',
     files: [`${P}apps/computer/src/main.test.ts`]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-3',
+    what: 'a write carrying keys typed after its submit-Enter submits only up to the Enter; the rest starts the next line (turn tracker records the right prompt)',
+    files: [`${P}domains/terminal/src/server/pty-input.test.ts`]
   }
 ]
 

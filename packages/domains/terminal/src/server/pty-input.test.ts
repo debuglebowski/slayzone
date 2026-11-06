@@ -46,4 +46,22 @@ describe('analyzePtyInput', () => {
     expect(analyzePtyInput('/session', '\r', '/session').facts.statusCommand).toBe(true)
     expect(analyzePtyInput('/status', 'x').facts.statusCommand).toBe(false)
   })
+
+  it('splits a write at its submit-Enter: keys typed after it start the next line', () => {
+    // One write can carry Enter and what followed it (keys typed while the previous
+    // write was in flight are sent together).
+    const first = analyzePtyInput('hel', 'lo\rnext')
+    expect(first.facts.submitted).toBe('hello\r')
+    expect(first.buffer).toBe('next')
+    const kitty = analyzePtyInput('', 'a\x1b[13ub')
+    expect(kitty.facts.submitted).toBe('a\x1b[13u')
+    expect(kitty.buffer).toBe('b')
+    // The command check sees only the submitted line.
+    expect(analyzePtyInput('', 'hi\r/status').facts.statusCommand).toBe(false)
+    // Several Enters: up to the last one is submitted.
+    expect(analyzePtyInput('', 'a\rb\rc')).toMatchObject({
+      buffer: 'c',
+      facts: { submitted: 'a\rb\r' }
+    })
+  })
 })
