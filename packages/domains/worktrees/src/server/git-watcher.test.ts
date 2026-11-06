@@ -179,3 +179,36 @@ describe('a repo whose .git is a symlink', () => {
     }
   })
 })
+
+// Round-10 R10-2: when the readiness wait hit its cap (a loaded machine), the watch
+// was reported ready while it was not live, and a change in that window was lost.
+// After the cap the watch keeps confirming in the background and, once it is live,
+// sends one more change (a rescan), so nothing made in between is lost. Forced here
+// with a cap of 0: every watch is reported ready before it is live.
+describe('readiness past its cap', () => {
+  it('a change made right after a capped start is still reported (25 side by side)', async () => {
+    const dirs = Array.from({ length: 25 }, (_, i) => freshRepo(`capped-${i}`))
+    const w = createGitWatcher({ readyTimeoutMs: 0 })
+    const after = new Map<string, number>()
+    const seen = new Set<string>()
+    let n = 0
+    w.on('git:diff-changed', (e: Event) => {
+      n++
+      if (n > (after.get(e.worktreePath) ?? Number.POSITIVE_INFINITY)) seen.add(e.worktreePath)
+    })
+    try {
+      await Promise.all(
+        dirs.map(async (dir) => {
+          w.subscribe(dir)
+          await w.ready(dir)
+          after.set(dir, n)
+          writeFileSync(join(dir, 'b.txt'), 'x')
+        })
+      )
+      await sleep(4_000)
+      expect(dirs.filter((d) => !seen.has(d)).map((d) => d.slice(root.length + 1))).toEqual([])
+    } finally {
+      w.closeAll()
+    }
+  }, 60_000)
+})

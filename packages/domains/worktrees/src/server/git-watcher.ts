@@ -28,7 +28,9 @@
  *     is dropped, not delayed. A short-lived marker file in the gitdir is touched until
  *     the watch reports it (never in the working tree: it would show in `git status`),
  *     then one `git:diff-changed` goes out, so a change made while the watch started is
- *     picked up too. The marker's own events are never reported.
+ *     picked up too. The marker's own events are never reported. Past a cap (a loaded
+ *     machine) `ready` resolves with a rescan, and the watch keeps confirming: once it
+ *     is live, one more rescan goes out, so no change is lost in between (R10-2).
  */
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
@@ -41,6 +43,8 @@ const READY_MARKER_PREFIX = '.slayzone-watch-ready-'
 /** How often the marker is touched until the watch reports it, and for how long. */
 const READY_TOUCH_MS = 40
 const READY_TIMEOUT_MS = 3_000
+/** After the cap, how long a watch keeps confirming before it is given up on. */
+const READY_GIVE_UP_MS = 60_000
 
 // First-segment exclusions (fast — split path once, check Set).
 const EXCLUDED_TOP_DIRS = new Set([
@@ -192,6 +196,9 @@ function resolveGitDir(worktreePath: string): string | null {
 }
 
 export interface GitWatcherOptions {
+  /** How long `ready()` waits for the watch to go live before reporting ready anyway
+   *  (default {@link READY_TIMEOUT_MS}); tests force the capped path with 0. */
+  readyTimeoutMs?: number
   /**
    * Throws to refuse watching here. Default: the hub's T-06 refusal (a hub with
    * processes switched off never watches its own disk). A computer passes none —
@@ -202,6 +209,7 @@ export interface GitWatcherOptions {
 
 export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
   const refuse = options.refuse ?? (() => assertHubLocalExecEnabled({ op: 'git.watch' }))
+  const readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS
   const entries = new Map<string, WatchEntry>()
   const emitter = new EventEmitter() as GitWatcher
 
@@ -398,38 +406,76 @@ export function createGitWatcher(options: GitWatcherOptions = {}): GitWatcher {
     if (!gitdir) return Promise.resolve()
     const name = `${READY_MARKER_PREFIX}${process.pid}-${Math.random().toString(36).slice(2)}`
     const file = path.join(gitdir, name)
+    const refresh = (): void => {
+      if (entry.closed) return
+      try {
+        emitter.emit('git:diff-changed', { worktreePath: entry.worktreePath, refsChanged: true })
+      } catch {
+        /* listener threw — never crash the watcher */
+      }
+    }
     return new Promise<void>((resolve) => {
-      let done = false
-      const finish = (): void => {
-        if (done) return
-        done = true
-        clearInterval(touch)
-        clearTimeout(timeout)
+      let live = false
+      let reported = false
+      let touch: NodeJS.Timeout | null = null
+      const stop = (): void => {
+        if (touch) clearInterval(touch)
+        touch = null
+        clearTimeout(cap)
+        clearTimeout(giveUp)
         entry.marker = null
         fs.rm(file, { force: true }, () => undefined)
-        if (!entry.closed) {
-          try {
-            emitter.emit('git:diff-changed', {
-              worktreePath: entry.worktreePath,
-              refsChanged: true
-            })
-          } catch {
-            /* listener threw — never crash the watcher */
-          }
-        }
-        resolve()
       }
-      entry.marker = { name, seen: finish }
+      // The watch reported the marker: it is live. A rescan covers what changed while
+      // it started — before `ready` resolved, or after a capped one did (R10-2).
+      const seen = (): void => {
+        if (live) return
+        live = true
+        stop()
+        refresh()
+        if (!reported) {
+          reported = true
+          resolve()
+        }
+      }
+      // The cap: answer now (with a rescan) rather than block the caller, but keep
+      // confirming — a change made from here until the watch is live would otherwise
+      // be lost; `seen` sends one more rescan when it goes live.
+      const capped = (): void => {
+        if (reported) return
+        reported = true
+        refresh()
+        resolve()
+        if (touch) clearInterval(touch)
+        touch = setInterval(write, READY_TOUCH_MS * 5)
+      }
+      entry.marker = { name, seen }
       const write = (): void => {
-        if (entry.closed) return finish()
+        if (entry.closed) {
+          stop()
+          if (!reported) {
+            reported = true
+            resolve()
+          }
+          return
+        }
         try {
           fs.writeFileSync(file, String(Date.now()))
         } catch {
-          finish() // the gitdir is not writable: no barrier, as before
+          // The gitdir is not writable: no barrier, as before.
+          stop()
+          if (!reported) {
+            reported = true
+            refresh()
+            resolve()
+          }
         }
       }
-      const touch = setInterval(write, READY_TOUCH_MS)
-      const timeout = setTimeout(finish, READY_TIMEOUT_MS)
+      touch = setInterval(write, READY_TOUCH_MS)
+      const cap = setTimeout(capped, readyTimeoutMs)
+      // A watch that never reports even its own marker is broken, not slow: stop
+      // touching (the renderer's fallback poll covers it).
+      const giveUp = setTimeout(stop, readyTimeoutMs + READY_GIVE_UP_MS)
       write()
     })
   }

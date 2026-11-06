@@ -461,6 +461,15 @@ export const REGRESSIONS = [
     id: 'R10-3',
     what: 'a repo whose .git is a symlink starts watching at once (real gitdir watched)',
     files: [`${P}domains/worktrees/src/server/git-watcher.test.ts`]
+  },
+  {
+    round: 10,
+    id: 'R10-2',
+    what: 'past the readiness cap a watch keeps confirming and rescans once live: no change lost',
+    files: [
+      `${P}domains/worktrees/src/server/git-watcher.test.ts`,
+      `${computer}handlers/git-watch.test.ts`
+    ]
   }
 ]
 
