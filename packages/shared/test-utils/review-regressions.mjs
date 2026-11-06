@@ -618,6 +618,13 @@ export const REGRESSIONS = [
       `${P}domains/agent-turns/src/server/turn-recording.test.ts`,
       `${P}domains/agent-turns/src/server/turn-tracker.test.ts`
     ]
+  },
+  // ── post-merge QA (task 964073b0, usage: task attribution → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-usage',
+    what: "a codex task's usage is attributed to it on every refresh, including turns parsed after the file's session_meta",
+    files: [`${P}domains/usage-analytics/src/server/codex-usage-attribution.test.ts`]
   }
 ]
 

@@ -638,6 +638,7 @@ run_harness packages/domains/automations/src/server/engine.test.ts
 run_harness packages/domains/automations/src/server/engine-routing.test.ts
 run_harness packages/domains/test-panel/src/server/scan-routing.test.ts
 run_harness packages/domains/usage-analytics/src/server/usage-routing.test.ts
+run_harness packages/domains/usage-analytics/src/server/codex-usage-attribution.test.ts
 run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
