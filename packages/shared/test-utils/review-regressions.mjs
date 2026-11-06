@@ -489,6 +489,15 @@ export const REGRESSIONS = [
     id: 'M1-final',
     what: 'an exit error before any output (seq -1) reaches the hub',
     files: [`${P}domains/computer-transport/src/server/exec-proxies.test.ts`]
+  },
+  {
+    round: 11,
+    id: 'M2-final',
+    what: "a recovery shell continues the session's seq numbering (no blank terminal)",
+    files: [
+      `${P}apps/computer/src/handlers/pty.test.ts`,
+      `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
+    ]
   }
 ]
 

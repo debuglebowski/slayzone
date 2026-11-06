@@ -704,8 +704,15 @@ export const ptySpawnParamsSchema = z
     relay: z.boolean().optional(),
     carryOutput: z
       .object({
-        fromSpawnId: z.string().min(1),
-        preamble: z.string().max(4096)
+        /** The exited attempt whose buffer continues; absent = it is long gone. */
+        fromSpawnId: z.string().min(1).optional(),
+        preamble: z.string().max(4096),
+        /**
+         * The highest seq the hub saw for this session. With no buffer to continue (the
+         * tombstone is gone), the new one starts after it: a fresh buffer at 0 was
+         * below what the terminal had shown, and its output was dropped (M2).
+         */
+        afterSeq: z.number().int().min(-1).optional()
       })
       .optional(),
     command: z.string().min(1),

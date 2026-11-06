@@ -633,9 +633,12 @@ export function createPtyHandlers(
     // buffer (seq continues), then the hub's preamble, then the new process.
     let carried: RingBuffer | undefined
     if (params.carryOutput) {
+      const { fromSpawnId, afterSeq } = params.carryOutput
       carried =
-        tombstones.takeBuffer(params.sessionId, params.carryOutput.fromSpawnId) ??
+        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ??
         new RingBuffer(MAX_BUFFER_SIZE)
+      // No buffer left to continue: numbering continues where the hub's reached (M2).
+      if (afterSeq !== undefined) carried.continueAfter(afterSeq)
       if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
     }
     const session = spawnSession(params.sessionId, {

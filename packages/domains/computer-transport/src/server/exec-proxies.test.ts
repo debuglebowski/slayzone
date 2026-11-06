@@ -939,6 +939,44 @@ describe('createRoutingPtyBackend', () => {
   // seq -1 (nothing emitted yet), and the hub dropped every signal at or below where
   // it took over detection (-1 for a fresh spawn) — the "session expired" overlay
   // never showed. An error is about the exit, not about output already detected.
+  // Final review M2: past the carry window the hub sent no continuation at all, and
+  // the recovery shell's output restarted at seq 0. The seq the session reached is
+  // always sent with a continuing spawn.
+  it('a continuing spawn always says where the session seqs reached', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (spec) => spec.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      const first = (await backend.spawn(ptySpec())) as PtyHandle
+      await first.whenSpawned
+      for (let seq = 0; seq <= 5; seq++)
+        gateway.emit('pty.data', { computerId: 'computer-1', sessionId: 'sess-1', seq, data: 'x' })
+      gateway.emit('pty.exit', {
+        computerId: 'computer-1',
+        sessionId: 'sess-1',
+        exitCode: 1
+      } as never)
+      // The computer's carry window is long over (its tombstone is gone).
+      vi.advanceTimersByTime(10 * 60_000)
+      const second = (await backend.spawn({
+        ...ptySpec(),
+        carryOutput: { preamble: '[recovered]' }
+      })) as PtyHandle
+      const spawns = gateway.requestsOf('pty.spawn')
+      expect((spawns.at(-1)?.params as { carryOutput?: unknown }).carryOutput).toEqual(
+        expect.objectContaining({ preamble: '[recovered]', afterSeq: 5 })
+      )
+      void second
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('an exit error before any output (seq -1) reaches the hub', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1, detection: true }))

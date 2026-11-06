@@ -1013,6 +1013,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   /** The latest spawn attempt per session key, outliving its entry: what a
    *  continuing spawn (`carryOutput`) continues from. */
   const lastSpawnIds = new Map<string, string>()
+  /** Each session's highest seq seen, kept past its exit: a continuing spawn starts
+   *  after it even when the computer's buffer is gone (M2). Bounded by sessions. */
+  const lastSeqs = new Map<string, number>()
 
   function drain(entry: PtyEntry): void {
     if (entry.sealed) return
@@ -1111,6 +1114,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
     if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
+    if (entry.lastSeq >= 0) {
+      if (lastSeqs.size > 10_000) lastSeqs.clear()
+      lastSeqs.set(entry.key, entry.lastSeq)
+    }
     // A continuing spawn follows an exit at once; past the computer's carry window
     // there is nothing left to continue.
     const { key, spawnId } = entry
@@ -1590,11 +1597,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // sealed until the reply says where its seqs resume, or a backfill from -1
         // would deliver that scrollback a second time.
         const continuesFrom = spec.carryOutput ? lastSpawnIds.get(key) : undefined
+        const live = sessions.get(key)
+        const continuesAfter = spec.carryOutput
+          ? Math.max(live && !live.disposed ? live.lastSeq : -1, lastSeqs.get(key) ?? -1)
+          : -1
         const { entry, handle, setPid } = register(
           computerId,
           spec.sessionId,
           spec.file,
-          continuesFrom !== undefined,
+          spec.carryOutput !== undefined,
           admitted
         )
 
@@ -1620,8 +1631,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           // Detection runs where the output is; acknowledged in the reply.
           ...(spec.detection ? { detection: spec.detection } : {}),
           ...(spec.relay !== undefined ? { relay: spec.relay } : {}),
-          ...(continuesFrom !== undefined && spec.carryOutput
-            ? { carryOutput: { fromSpawnId: continuesFrom, preamble: spec.carryOutput.preamble } }
+          ...(spec.carryOutput
+            ? {
+                carryOutput: {
+                  ...(continuesFrom !== undefined ? { fromSpawnId: continuesFrom } : {}),
+                  preamble: spec.carryOutput.preamble,
+                  ...(continuesAfter >= 0 ? { afterSeq: continuesAfter } : {})
+                }
+              }
             : {}),
           command: spec.file,
           args: spec.args,
