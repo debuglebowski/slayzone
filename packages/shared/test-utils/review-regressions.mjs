@@ -470,6 +470,12 @@ export const REGRESSIONS = [
       `${P}domains/worktrees/src/server/git-watcher.test.ts`,
       `${computer}handlers/git-watch.test.ts`
     ]
+  },
+  {
+    round: 11,
+    id: 'H1-final',
+    what: 'cron catch-up waits for the computer and runs once when it connects',
+    files: [`${P}domains/automations/src/server/engine-catchup.test.ts`]
   }
 ]
 

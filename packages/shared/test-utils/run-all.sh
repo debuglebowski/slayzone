@@ -95,6 +95,8 @@ run_harness packages/apps/api/src/http/json-body.test.ts
 # T-104: no id escapes into a path. Bad task/project ids refused by every fixed tRPC
 # procedure (login off and on), REST archive-many and MCP; the data dir stays intact.
 run_harness packages/apps/api/src/path-ids.test.ts
+# Final review H1: cron catch-up waits for the computer, runs once on connect.
+run_harness packages/domains/automations/src/server/engine-catchup.test.ts
 # P1: every tRPC procedure, REST route and MCP tool, called as user B with every
 # path field set to a canary on the hub's disk: none may read, list or write it.
 run_harness packages/apps/api/src/hub-disk-canary.test.ts

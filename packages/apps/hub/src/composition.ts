@@ -2057,7 +2057,12 @@ export function composeServer(opts: {
         if (projectId) return resolveComputerForProject(projectId)
         return null
       },
+      isReachable: (computerId) => computerGateway.isComputerUsable(computerId),
       run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command)
+    })
+    // Cron catch-ups that waited for a computer (launch, wake) run now (H1).
+    computerGateway.events.on('computer-connected', () => {
+      if (!resettingForTest) void automationEngine.computerConnected()
     })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).
