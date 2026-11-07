@@ -587,4 +587,88 @@ describe('useStaleSkillCounts', () => {
     await flush()
     expect(result.current.counts.size).toBe(0)
   })
+
+  // Every file check runs on the project's computer, one round trip per linked
+  // skill per provider. The sidebar rebuilds its project list on every task change
+  // (a chat starting changes its task several times): an equal list must not
+  // count again — it flooded the computer link while chats started.
+  it('an equal project list (new array, same projects + paths) does not count again', async () => {
+    handlers['aiConfig.getProjectsStaleSkillCounts'] = async () => ({ p1: 2 })
+    const { result, rerender } = renderHook(
+      ({ projects }: ProjectsProp) => useStaleSkillCounts(projects),
+      { initialProps: { projects: [proj('p1', '/a'), proj('p2', '/b')] } }
+    )
+    await flush()
+    rerender({ projects: [proj('p1', '/a'), proj('p2', '/b')] })
+    rerender({ projects: [proj('p1', '/a'), proj('p2', '/b')] })
+    await flush()
+    expect(callsTo('aiConfig.getProjectsStaleSkillCounts')).toHaveLength(1)
+    expect([...result.current.counts]).toEqual([['p1', 2]])
+
+    // A real change still counts.
+    rerender({ projects: [proj('p1', '/a'), proj('p2', '/c')] })
+    await flush()
+    expect(callsTo('aiConfig.getProjectsStaleSkillCounts')).toHaveLength(2)
+  })
+
+  it('a project joining the list is counted alone; the others keep their counts', async () => {
+    handlers['aiConfig.getProjectsStaleSkillCounts'] = async (input) =>
+      Object.fromEntries(
+        (input as Array<{ projectId: string }>).map((p) => [
+          p.projectId,
+          p.projectId === 'p1' ? 2 : 1
+        ])
+      )
+    const { result, rerender } = renderHook(
+      ({ projects }: ProjectsProp) => useStaleSkillCounts(projects),
+      { initialProps: { projects: [proj('p1', '/a')] } }
+    )
+    await flush()
+    rerender({ projects: [proj('p1', '/a'), proj('p2', '/b')] })
+    await flush()
+    const asked = callsTo('aiConfig.getProjectsStaleSkillCounts').map((c) => c.input)
+    expect(asked).toEqual([
+      [{ projectId: 'p1', projectPath: '/a' }],
+      [{ projectId: 'p2', projectPath: '/b' }]
+    ])
+    expect([...result.current.counts].sort()).toEqual([
+      ['p1', 2],
+      ['p2', 1]
+    ])
+
+    // Leaving the list drops its count; a refresh counts every project again.
+    rerender({ projects: [proj('p2', '/b')] })
+    await flush()
+    expect([...result.current.counts]).toEqual([['p2', 1]])
+    act(() => result.current.refresh())
+    await flush()
+    expect(callsTo('aiConfig.getProjectsStaleSkillCounts').at(-1)?.input).toEqual([
+      { projectId: 'p2', projectPath: '/b' }
+    ])
+  })
+
+  it('refreshes while a count is running coalesce into one follow-up count', async () => {
+    const counts = deferredHandler('aiConfig.getProjectsStaleSkillCounts')
+    const { result } = renderHook(({ projects }: ProjectsProp) => useStaleSkillCounts(projects), {
+      initialProps: { projects: [proj('p1', '/a')] }
+    })
+    await flush()
+    expect(counts).toHaveLength(1)
+    act(() => {
+      result.current.refresh()
+      result.current.refresh()
+      result.current.refresh()
+    })
+    await flush()
+    expect(counts).toHaveLength(1)
+
+    await act(async () => counts[0].resolve({ p1: 1 }))
+    await flush()
+    // The refreshes asked after the first count started: one more, never three.
+    expect(counts).toHaveLength(2)
+    await act(async () => counts[1].resolve({ p1: 3 }))
+    await flush()
+    expect(counts).toHaveLength(2)
+    expect([...result.current.counts]).toEqual([['p1', 3]])
+  })
 })
