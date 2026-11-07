@@ -200,10 +200,19 @@ test('submitting the session-id command (gemini: /stats) tells the owner to watc
 
 test("the owner's exitError becomes the session's error carried on exit", async () => {
   const b = routedBackend(true)
+  // Only THIS session's exits: an earlier test's session, killed in afterEach on a fake
+  // backend that never reports exit, is finalized by killPty's watchdog 500 ms later —
+  // a `null` exit that landed here whenever this test ran slowly.
   const exits: Array<string | null> = []
-  ptyEvents.on('exit', (_id: string, _code: number | null, errorCode: string | null) =>
+  let exited!: () => void
+  const firstExit = new Promise<void>((resolve) => {
+    exited = resolve
+  })
+  ptyEvents.on('exit', (id: string, _code: number | null, errorCode: string | null) => {
+    if (id !== 'mirror:exit-error') return
     exits.push(errorCode)
-  )
+    exited()
+  })
   await open('mirror:exit-error')
   b.output('$ ')
   b.signal(
@@ -213,7 +222,7 @@ test("the owner's exitError becomes the session's error carried on exit", async 
     })
   )
   b.exit(0)
-  await new Promise((r) => setTimeout(r, 200))
+  await firstExit
   expect(exits).toEqual(['SESSION_NOT_FOUND'])
 })
 
