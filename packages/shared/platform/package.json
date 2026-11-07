@@ -47,7 +47,8 @@
     "./parent-watch": "./src/parent-watch.ts",
     "./node-pty-install": "./src/node-pty-install.ts",
     "./computer-launcher": "./src/computer-launcher.ts",
-    "./suspend-clock": "./src/suspend-clock.ts"
+    "./suspend-clock": "./src/suspend-clock.ts",
+    "./resolve-command": "./src/resolve-command.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -8,6 +8,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform'
 
 export interface ExecResult {
   stdout: string
@@ -24,7 +25,9 @@ export function execCapture(
   opts: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    // `git` by absolute path (cached): a bare name searches every PATH entry per spawn.
+    const file = command === 'git' ? gitCommand(opts.env ?? process.env) : command
+    const child = spawn(file, args, {
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.env ? { env: opts.env } : {}),
       stdio: ['ignore', 'pipe', 'pipe']

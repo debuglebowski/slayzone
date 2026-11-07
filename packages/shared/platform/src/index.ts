@@ -172,7 +172,7 @@ export {
   findOnPath,
   type LoginShellPathProbe
 } from './login-shell-path'
-export { resolveCommand } from './resolve-command'
+export { createCommandResolver, gitCommand, resolveCommand } from './resolve-command'
 // Re-export so main-process code can pull URL helpers from the main barrel.
 // Renderer code MUST import from '@slayzone/platform/slz-file-url' to avoid
 // pulling node:fs into the browser bundle.

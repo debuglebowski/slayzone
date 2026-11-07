@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { existsSync, readdirSync, realpathSync } from 'fs'
 import path from 'path'
 
@@ -11,7 +12,7 @@ function canonical(p: string): string {
 }
 
 function git(args: string[], cwd: string): { stdout: string; status: number } {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  const r = spawnSync(gitCommand(), args, { cwd, encoding: 'utf8' })
   return { stdout: (r.stdout ?? '').trim(), status: r.status ?? 1 }
 }
 

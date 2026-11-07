@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 // eslint-disable-next-line no-restricted-imports -- boot-time DB migration, finishes before the hub serves anything.
 import { spawnSync } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'
 // v78 uses a frozen copy of ai-config's frontmatter helpers (see the file header).
@@ -2285,7 +2286,7 @@ export const migrations: Migration[] = [
         .all() as Array<{ id: string; worktree_path: string; snapshot_sha: string }>
       const update = db.prepare(`UPDATE agent_turns SET head_sha_at_snap = ? WHERE id = ?`)
       for (const row of rows) {
-        const r = spawnSync('git', ['rev-parse', `${row.snapshot_sha}^`], {
+        const r = spawnSync(gitCommand(), ['rev-parse', `${row.snapshot_sha}^`], {
           cwd: row.worktree_path,
           encoding: 'utf-8'
         })

@@ -1,5 +1,6 @@
 /** Portable Git observation: runs on the machine owning the workspace, never changes its index. */
 import { execFile } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { createHash } from 'node:crypto'
 import { childProcessEnv } from '@slayzone/platform'
 import { writeWorkspaceTree } from './workspace-tree'
@@ -61,13 +62,14 @@ function runner(rootPath: string, timeoutMs: number) {
   ): Promise<{ text: string; truncated: boolean }> => {
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw new Error('Workspace capture timed out')
+    const childEnv = workspaceGitEnv(env) as NodeJS.ProcessEnv
     return new Promise((resolve, reject) => {
       execFile(
-        'git',
+        gitCommand(childEnv),
         ['-c', 'core.fsmonitor=false', ...args],
         {
           cwd: rootPath,
-          env: workspaceGitEnv(env) as NodeJS.ProcessEnv,
+          env: childEnv,
           encoding: 'utf8',
           timeout: remaining,
           killSignal: 'SIGKILL',

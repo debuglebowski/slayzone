@@ -349,6 +349,10 @@ run_harness_node packages/domains/computer-runtime/src/runtime.test.ts
 run_harness packages/apps/hub/src/warm-window-sockets.test.ts
 run_harness packages/apps/hub/src/web-assets.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
+# git is spawned by absolute path (cached per PATH, re-resolved when PATH changes or the
+# binary is gone); no production code spawns a bare `git`.
+run_harness packages/shared/platform/src/resolve-command.test.ts
+run_harness packages/shared/platform/src/git-command-sites.test.ts
 run_harness packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_harness packages/shared/platform/src/hub-discovery.test.ts
@@ -608,6 +612,7 @@ run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
 run_harness packages/domains/integrations/src/server/push-on-edit.test.ts
 run_harness packages/domains/worktrees/src/server/worktrees-router.test.ts
 run_harness packages/domains/worktrees/src/server/git-ops.test.ts
+run_harness packages/domains/worktrees/src/server/git-command.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-routing.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-timeouts.test.ts
 run_harness packages/domains/worktrees/src/server/git-op-path-target.test.ts

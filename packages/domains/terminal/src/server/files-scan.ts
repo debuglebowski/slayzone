@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { promises as fs } from 'node:fs'
 import * as path from 'node:path'
 import { promisify } from 'node:util'
@@ -28,7 +29,7 @@ export async function listProjectFiles(
 async function tryGitLs(cwd: string, query: string, limit: number): Promise<FileMatch[] | null> {
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      gitCommand(),
       ['ls-files', '--cached', '--others', '--exclude-standard'],
       {
         cwd,
