@@ -86,9 +86,16 @@ export interface CodexProcessScript {
   /**
    * Turns on an ephemeral fork (`thread/fork {ephemeral}` — a side question):
    * reply `reply` (default `side answer: <prompt>`) after `delayMs`, or `hang`
-   * until interrupted / unsubscribed. They run beside the main thread's turns.
+   * until interrupted / unsubscribed (`gate`: no turn id out until the test opens
+   * it). They run beside the main thread's turns.
    */
-  sideTurn?: { reply?: string; delayMs?: number; hang?: boolean }
+  sideTurn?: {
+    reply?: string
+    delayMs?: number
+    hang?: boolean
+    /** Hold back the fork turn's `turn/start` reply AND `turn/started` until `epoch.openGate(gate)`. */
+    gate?: string
+  }
   /** Run on SIGTERM before exiting (default: exit at once, like 0.159.2). */
   onSigterm?: CodexStep[]
   sigtermExitCode?: number

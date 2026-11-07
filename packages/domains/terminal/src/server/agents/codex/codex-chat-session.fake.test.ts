@@ -64,8 +64,8 @@ interface Live {
   /** The first server line matching `pred`, once the driver has handled it. */
   waitForLine(pred: (m: Json) => boolean): Promise<Json>
   /**
-   * `check()`'s first truthy value, re-checked after every event and every server
-   * line. The fake logs what it did BEFORE it writes the reply/notification that
+   * `check()`'s first truthy value, re-checked after every event, every server
+   * line and every line the driver writes. The fake logs what it did BEFORE it writes the reply/notification that
    * follows, so a log-based check is settled the moment that line arrives.
    */
   until<T>(check: () => T | undefined | null | false, what: string): Promise<T>
@@ -155,6 +155,7 @@ async function live(
     write: (line) => {
       written.push(JSON.parse(line) as Json)
       child.stdin.write(`${line}\n`)
+      wake()
     },
     emit: (e) => {
       events.push(e)
@@ -661,13 +662,60 @@ describe('CodexChatSession — side questions (/btw)', () => {
     await l.waitFor(isResult)
     const driver = l.driver as SideDriver
     const answer = driver.askSideQuestion({ requestId: 'q4', question: 'Slow?', history: [] }, 5000)
+    // The fork turn's id is out and handled (reply first, then turn/started).
     const run = await l.waitForRun((r) => r.has('side-turn'), 'the side turn')
+    const forkId = run.entries.find((e) => e.kind === 'side-turn')!.threadId
+    await l.waitForLine(
+      (m) => m.method === 'turn/started' && (m.params as Json).threadId === forkId
+    )
     expect(run.entries.filter((e) => e.kind === 'side-turn')).toHaveLength(1)
     driver.cancelSideQuestion('q4')
     await expect(answer).rejects.toThrow(/cancel/i)
     await l.waitForRun((r) => r.requests('thread/unsubscribe').length > 0, 'thread/unsubscribe')
     expect(run.requests('thread/unsubscribe')).toHaveLength(1)
     expect(run.entries.some((e) => e.kind === 'side-interrupt')).toBe(true)
+    expect(l.events.filter(isResult)).toHaveLength(1)
+  })
+
+  it('cancel before the fork turn has an id interrupts it once the id is known, then drops the fork', async () => {
+    const l = await live({
+      processes: [{ turns: [codexReply('one')], sideTurn: { hang: true, gate: 'side-id' } }]
+    })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    const driver = l.driver as SideDriver
+    const answer = driver.askSideQuestion({ requestId: 'q7', question: 'Slow?', history: [] }, 5000)
+    // The fork's turn/start is out; its reply (the id) is held back by the gate.
+    type Started = { method?: string; params?: { thread?: { id: string; ephemeral?: boolean } } }
+    const isFork = (m: Started): boolean =>
+      m.method === 'thread/started' && m.params?.thread?.ephemeral === true
+    const forkId = ((await l.waitForLine((m) => isFork(m as Started))) as Started).params!.thread!
+      .id
+    await l.until(
+      () =>
+        l.written.find((m) => m.method === 'turn/start' && (m.params as Json).threadId === forkId),
+      "the fork's turn/start"
+    )
+    driver.cancelSideQuestion('q7')
+    await expect(answer).rejects.toThrow(/cancel/i)
+    // Nothing can name the turn yet: no interrupt, and the fork is kept until it can.
+    expect(l.written.filter((m) => m.method === 'turn/interrupt')).toEqual([])
+    expect(l.written.filter((m) => m.method === 'thread/unsubscribe')).toEqual([])
+    l.openGate('side-id')
+    // Wait for the fake's own `unsubscribe` entry (its last before replying), not
+    // just the request's arrival: the asserted entries are all in by then.
+    const run = await l.waitForRun((r) => r.has('unsubscribe'), 'the fork dropped')
+    const side = run.entries.find((e) => e.kind === 'side-turn')!
+    // Stopped first (by its id, once known), then dropped: never left running unsubscribed.
+    expect(
+      run.entries
+        .filter((e) => e.kind === 'side-interrupt' || e.kind === 'unsubscribe')
+        .map((e) => [e.kind, e.turnId ?? e.threadId])
+    ).toEqual([
+      ['side-interrupt', side.turnId],
+      ['unsubscribe', side.threadId]
+    ])
+    expect(run.requests('thread/unsubscribe')).toHaveLength(1)
     expect(l.events.filter(isResult)).toHaveLength(1)
   })
 

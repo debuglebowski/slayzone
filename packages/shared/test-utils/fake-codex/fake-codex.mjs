@@ -442,11 +442,15 @@ async function startSideTurn(id, params) {
     approvalPolicy: params.approvalPolicy ?? null,
     sandboxPolicy: params.sandboxPolicy ?? null
   })
-  await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
   const spec = script.sideTurn ?? {}
+  // Interruptible from the moment its id is out (an interrupt may answer the reply at once).
   const abort = new AbortController()
   side.abort = abort
   side.turnId = turnId
+  // The reply AND turn/started carry the turn id; holding both back opens the
+  // window where the app has a side turn it cannot name yet.
+  if (spec.gate) await waitGate(spec.gate, null)
+  await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
   const started = Date.now()
   const completed = (status) => ({
     method: 'turn/completed',
@@ -465,6 +469,7 @@ async function startSideTurn(id, params) {
     params: { threadId, turn: turnObject(turnId, 'inProgress') }
   })
   try {
+    if (abort.signal.aborted) throw new Aborted()
     if (spec.hang) await sleep(2 ** 31 - 1, abort.signal)
     if (spec.delayMs) await sleep(spec.delayMs, abort.signal)
     const reply = spec.reply ?? `side answer: ${text}`
