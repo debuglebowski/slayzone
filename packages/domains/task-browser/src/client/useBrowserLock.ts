@@ -7,12 +7,35 @@ import { useSetBrowserTabLocked } from './BrowserTaskSource'
 
 interface UseBrowserLockParams {
   taskId?: string
+  /** The rendered tabs: what auto-lock watches for an agent's first touch. */
   tabs: BrowserTabsState
-  onTabsChange: (tabs: BrowserTabsState) => void
+  /**
+   * The panel's latest tabs and its one write path (BrowserPanel `tabsRef` /
+   * `commitTabsUpdate`), shared with the webview syncs. Every write here starts
+   * from `latestTabs()`: written from the render's snapshot through the parent, a
+   * lock was undone by a title sync in the same commit, which read the ref.
+   */
+  latestTabs: () => BrowserTabsState
+  commitTabs: (tabs: BrowserTabsState) => void
   activeTab: BrowserTab | null
 }
 
-export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBrowserLockParams) {
+/** `tabs` with tab `tabId` patched. */
+function patchTab(
+  tabs: BrowserTabsState,
+  tabId: string,
+  patch: Partial<BrowserTab>
+): BrowserTabsState {
+  return { ...tabs, tabs: tabs.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t)) }
+}
+
+export function useBrowserLock({
+  taskId,
+  tabs,
+  latestTabs,
+  commitTabs,
+  activeTab
+}: UseBrowserLockParams) {
   const trpc = useTRPC()
   const setLocked = useSetBrowserTabLocked()
 
@@ -44,12 +67,9 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
       // Stamp locked locally too — the DB write goes through tasks:changed,
       // but local tabs state can lag behind for a tick, leaving the lock
       // banner stale. Pre-applying here keeps the UI in sync immediately.
-      onTabsChange({
-        ...tabs,
-        tabs: tabs.tabs.map((t) => (t.id === toLock ? { ...t, locked: true } : t))
-      })
+      commitTabs(patchTab(latestTabs(), toLock, { locked: true }))
     }
-  }, [taskId, tabs, onTabsChange, setLocked])
+  }, [taskId, tabs, latestTabs, commitTabs, setLocked])
 
   // Listen for server-side trip events. The server also persists to DB and
   // notifies via tasks:changed, but renderer-local tabs state may have stale
@@ -60,17 +80,15 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
   // The old preload browser-agent listener before preload became
   // bootstrap-only.
   //
-  // Stable handler reads the latest committed tabs / onTabsChange without
+  // Stable handler reads the latest tabs / commitTabs without
   // re-subscribing (tearing down the WS sub) on every tab update.
   const handleAgentTouched = useStableCallback(
     ({ taskId: evtTaskId, tabId }: { taskId: string; tabId: string }) => {
       if (evtTaskId !== taskId) return
-      const target = tabs.tabs.find((t) => t.id === tabId)
+      const latest = latestTabs()
+      const target = latest.tabs.find((t) => t.id === tabId)
       if (!target || target.agentTouched === true) return
-      onTabsChange({
-        ...tabs,
-        tabs: tabs.tabs.map((t) => (t.id === tabId ? { ...t, agentTouched: true } : t))
-      })
+      commitTabs(patchTab(latest, tabId, { agentTouched: true }))
     }
   )
   useSubscription(
@@ -88,10 +106,7 @@ export function useBrowserLock({ taskId, tabs, onTabsChange, activeTab }: UseBro
     setLocked({ taskId, tabId: activeTab.id, locked: next })
     // Stamp locked locally (same reason as the auto-lock effect above) so
     // the banner shows/hides immediately rather than waiting for tasks:changed.
-    onTabsChange({
-      ...tabs,
-      tabs: tabs.tabs.map((t) => (t.id === activeTab.id ? { ...t, locked: next } : t))
-    })
+    commitTabs(patchTab(latestTabs(), activeTab.id, { locked: next }))
   }
 
   return { activeLocked, toggleActiveLock }
