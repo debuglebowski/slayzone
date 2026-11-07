@@ -39,7 +39,7 @@ test.describe('App icon badge', () => {
     await card.getByTestId('app-badge-source-unread').click()
     await expect.poll(() => dockBadge(electronApp)).toBe('2')
 
-    await card.getByRole('combobox').first().click()
+    await card.getByRole('combobox', { name: 'Show as' }).click()
     await mainWindow.getByRole('option', { name: 'Dot only' }).click()
     await expect.poll(() => dockBadge(electronApp)).toBe('•')
 

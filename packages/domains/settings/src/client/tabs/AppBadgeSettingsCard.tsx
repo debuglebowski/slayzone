@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Project } from '@slayzone/projects-contracts'
 import { useFederationOrNull, useHubOwnershipStore } from '@slayzone/transport/client'
@@ -87,6 +87,8 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
   }
 
   const off = state.sources.length === 0
+  const scopeLabelId = useId()
+  const styleLabelId = useId()
 
   return (
     <Card data-testid="app-badge-settings">
@@ -114,9 +116,11 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
           />
         </div>
         <div className={ROW}>
-          <span className="text-sm">Projects</span>
+          <span id={scopeLabelId} className="text-sm">
+            Projects
+          </span>
           <Select value={state.scope} onValueChange={(v) => setScope(v as AppBadgeScope)}>
-            <SelectTrigger className="w-48" disabled={off}>
+            <SelectTrigger className="w-48" disabled={off} aria-labelledby={scopeLabelId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent position="popper" side="bottom">
@@ -150,9 +154,11 @@ export function AppBadgeSettingsCard({ projects }: { projects: Project[] }) {
           </div>
         )}
         <div className={ROW}>
-          <span className="text-sm">Show as</span>
+          <span id={styleLabelId} className="text-sm">
+            Show as
+          </span>
           <Select value={state.style} onValueChange={(v) => setStyle(v as AppBadgeStyle)}>
-            <SelectTrigger className="w-48" disabled={off}>
+            <SelectTrigger className="w-48" disabled={off} aria-labelledby={styleLabelId}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent position="popper" side="bottom">
