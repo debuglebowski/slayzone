@@ -3,9 +3,11 @@
  * sidebar footer says so ("Starting up", and what is left: "12 pages · 3 terminals left"), and
  * the card goes away by itself once everything is up — it is for startup only.
  *
- * The boot is made slow on purpose (every idle callback held back), the way a busy
- * box makes it: otherwise a quick boot finishes before the card's show-delay and,
- * by design, never shows it.
+ * The boot is held on purpose (every idle callback queued until the test has seen the
+ * card, then run slowly), the way a busy box makes it: otherwise a quick boot finishes
+ * before the card's show-delay and, by design, never shows it. A fixed delay instead
+ * of the hold let a loaded run mount every page before the card showed ("3 terminals
+ * left": nothing to count down).
  *
  * Shell tabs only (`seedBootTasks`): a shell is not an agent, so the card counts
  * pages (and terminals) and never agents. Agent counting is covered by the hub's own tests
@@ -16,14 +18,29 @@ import { BOOT_TABS as TABS, openBootTabs, seedBootTasks } from '../fixtures/boot
 
 const CARD = '[data-testid="startup-progress-card"]'
 
-/** Holds every idle callback back, so hidden tabs hydrate slowly (as under load). */
-function slowIdleCallbacks(delayMs: number): void {
+/**
+ * Queues every idle callback until `window.__releaseIdle()`, then runs each `delayMs`
+ * after its turn, so hidden tabs hydrate slowly (as under load) and only once the
+ * test is watching.
+ */
+function heldIdleCallbacks(delayMs: number): void {
   const original = window.requestIdleCallback.bind(window)
-  window.requestIdleCallback = ((cb: IdleRequestCallback, opts?: IdleRequestOptions) =>
-    original((deadline) => {
-      setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), delayMs)
-      void deadline
-    }, opts)) as typeof window.requestIdleCallback
+  const held: Array<() => void> = []
+  let released = false
+  const w = window as unknown as { __releaseIdle: () => void }
+  w.__releaseIdle = () => {
+    released = true
+    for (const run of held.splice(0)) run()
+  }
+  window.requestIdleCallback = ((cb: IdleRequestCallback, opts?: IdleRequestOptions) => {
+    const run = () =>
+      original(() => {
+        setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), delayMs)
+      }, opts)
+    if (released) return run()
+    held.push(() => void run())
+    return 0
+  }) as typeof window.requestIdleCallback
 }
 
 test.describe('startup progress card', () => {
@@ -39,7 +56,7 @@ test.describe('startup progress card', () => {
     // A settled app shows no card.
     await expect(mainWindow.locator(CARD)).toHaveCount(0)
 
-    const slow = await mainWindow.addInitScript(slowIdleCallbacks, 150)
+    const slow = await mainWindow.addInitScript(heldIdleCallbacks, 150)
     await mainWindow.reload({ waitUntil: 'domcontentloaded' })
     await slow.dispose()
 
@@ -52,6 +69,9 @@ test.describe('startup progress card', () => {
     await expect(left).not.toContainText('agent')
     // The tooltip keeps the full count.
     await expect(card).toHaveAttribute('title', new RegExp(`Pages \\d+/${TABS}`))
+    await mainWindow.evaluate(() =>
+      (window as unknown as { __releaseIdle: () => void }).__releaseIdle()
+    )
 
     // It counts down as task pages mount (a finished stage drops out: 0 left).
     const pagesLeft = async (): Promise<number> =>
