@@ -66,6 +66,11 @@ import {
 } from '@slayzone/platform/service-unit'
 import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { decodeJoinToken } from '@slayzone/platform/join-token'
+import {
+  fixtureMarkerArgs,
+  killFixtureProcesses,
+  reapOnOwnerDeath
+} from '../../../../shared/test-utils/fixture-reaper.js'
 import { readServiceLogTail } from '../service'
 
 // Package roots are derived from the REPO root rather than this file's own URL: the
@@ -201,7 +206,9 @@ async function startHub(): Promise<{ port: number; root: string }> {
     '-e',
     'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))'
   ]).toString()
-  const proc = spawn(ELECTRON_BIN, [HUB_BIN], {
+  // The marker names TMP in the hub's command line, so a reaper finds it (the bin
+  // itself lives in the repo).
+  const proc = spawn(ELECTRON_BIN, [...fixtureMarkerArgs(TMP), HUB_BIN], {
     cwd: root,
     env: {
       ...scrubbedEnv(),
@@ -325,6 +332,9 @@ describe('slay computer — end-to-end against a real hub', () => {
     ensureBuilt(COMPUTER_DIR, COMPUTER_BIN, 'computer')
     ensureBuilt(CLI_DIR, CLI_BIN, 'cli')
     TMP = mkdtempSync(join(tmpdir(), 'slz-computerctl-'))
+    // Killed before its teardown (timeout, SIGKILL'd worker): the reaper kills every
+    // process rooted in TMP — hub, computers, their supervisors and session hosts.
+    reapOnOwnerDeath(TMP)
     backend = detectBackend()
 
     rejectRoot = join(TMP, 'reject')
@@ -364,7 +374,12 @@ describe('slay computer — end-to-end against a real hub', () => {
         }
       })
     }
-    if (TMP) rmSync(TMP, { recursive: true, force: true })
+    // Whatever outlived the stops above: a computer's detached session host survives
+    // its computer by design, and a test that failed early never recorded its pid.
+    if (TMP) {
+      killFixtureProcesses(TMP)
+      rmSync(TMP, { recursive: true, force: true })
+    }
   })
 
   // ---------------------------------------------------------------- rejections

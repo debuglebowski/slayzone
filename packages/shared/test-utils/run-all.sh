@@ -40,6 +40,9 @@ run_harness packages/shared/test-utils/caller-env.test.ts
 # Fixture reaper: a test killed before its finally (timeout, SIGKILL'd worker) must not
 # leave its spawned supervisors respawning forever against a dead hub.
 run_harness packages/shared/test-utils/fixture-reaper.test.ts
+# Leak guard: a file that leaves processes running in its own temp dirs fails, and they
+# are killed (fixture-guard.ts, installed for every harness file by harness-setup.ts).
+run_harness packages/shared/test-utils/fixture-guard.test.ts
 
 # Domain handler contract tests touch the harness better-sqlite3 DB (Electron node ABI,
 # which every run_harness suite runs under). Paths moved from src/main/ → src/electron/

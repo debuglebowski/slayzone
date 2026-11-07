@@ -29,6 +29,7 @@
  * computer's loop alive — while a standalone computer ignores its parent entirely.
  */
 import { TEST_ISOLATION_ENV } from '@slayzone/test-utils/caller-env'
+import { killFixtureProcesses, reapOnOwnerDeath } from '@slayzone/test-utils/fixture-reaper'
 import { afterAll, expect, test } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -139,6 +140,9 @@ function writeFakeComputer(): string {
 }
 afterAll(cleanup)
 function cleanup(): void {
+  // A real computer's detached session host outlives the computer by design: kill
+  // everything still rooted in a fixture dir before removing the dirs.
+  if (tmpDirs.length > 0) killFixtureProcesses(tmpDirs)
   for (const dir of tmpDirs) {
     try {
       fs.rmSync(dir, { recursive: true, force: true })
@@ -997,6 +1001,9 @@ async function startRealComputer(opts: {
   ensureComputerBuilt()
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-parent-death-'))
   tmpDirs.push(dir)
+  // Killed before its cleanup (timeout, SIGKILL'd worker): reap the app, the computer
+  // and the session host it starts.
+  reapOnOwnerDeath(dir)
   fs.mkdirSync(path.join(dir, 'home'))
   fs.mkdirSync(path.join(dir, 'root'))
   const probe = path.join(dir, 'probe.cjs')
@@ -1067,6 +1074,9 @@ async function startRealComputer(opts: {
         }
       }
     }
+    // A standalone computer forks its launcher and a detached session host, both under
+    // `dir`; neither dies with the computer.
+    killFixtureProcesses(dir)
     parent.stdin?.destroy()
     hub.close()
     stdinHolder?.close()
@@ -1197,6 +1207,7 @@ test('stop: the real supervised computer still exits on its own when its app sto
   ensureComputerBuilt()
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-computer-real-stop-'))
   tmpDirs.push(dir)
+  reapOnOwnerDeath(dir)
   fs.mkdirSync(path.join(dir, 'home'))
   fs.mkdirSync(path.join(dir, 'root'))
   const probe = path.join(dir, 'probe.cjs')
@@ -1236,6 +1247,7 @@ test('stop: the real supervised computer still exits on its own when its app sto
     expect(Date.now() - started, 'well inside the SIGTERM grace').toBeLessThan(3_000)
   } finally {
     await handle.stop()
+    killFixtureProcesses(dir)
     hub.close()
   }
 })

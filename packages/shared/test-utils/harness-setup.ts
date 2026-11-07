@@ -12,8 +12,13 @@
  * stand-in ports.
  */
 import { isolateFromCaller } from './caller-env'
+import { failOnLeakedFixtureProcesses, trackTempDirs } from './fixture-guard'
 import { stripVitestInjectedEnv } from './vitest-injected-env'
 
 stripVitestInjectedEnv(process.env)
 const poolId = Number(process.env.VITEST_POOL_ID)
 isolateFromCaller(process.env, Number.isInteger(poolId) ? { slot: poolId } : {})
+
+// A file that leaves processes running in its own temp dirs fails (fixture-guard.ts).
+trackTempDirs()
+failOnLeakedFixtureProcesses()
