@@ -1,8 +1,16 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
 import type { ComputerConfig } from './config'
 import { createGhHandlers } from './handlers/gh'
@@ -43,8 +51,33 @@ beforeEach(() => {
 })
 afterEach(() => {
   process.env.PATH = savedPath
+  vi.unstubAllEnvs()
   rmSync(dir, { recursive: true, force: true })
 })
+
+/**
+ * Real git, but hermetic: no system or user git config (HOME is a temp dir, the
+ * global config an empty file), and one known git binary — resolved once from the
+ * inherited PATH and linked into its own dir — so the test doesn't run through
+ * whatever shim `/usr/bin/git` is. Returns the dir to put on PATH for git.
+ */
+function isolateGit(): string {
+  const home = join(dir, 'home')
+  mkdirSync(home)
+  const globalConfig = join(dir, 'gitconfig')
+  writeFileSync(globalConfig, '')
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+  vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig)
+  const git = execFileSync('/bin/sh', ['-c', 'command -v git'], {
+    env: { PATH: savedPath ?? '' },
+    encoding: 'utf-8'
+  }).trim()
+  const gitBin = join(dir, 'git-bin')
+  mkdirSync(gitBin)
+  symlinkSync(git, join(gitBin, 'git'))
+  return gitBin
+}
 
 describe.skipIf(isWin)('adoptLoginShellPath', () => {
   it('puts the login-shell PATH first and keeps inherited entries', async () => {
@@ -54,6 +87,18 @@ describe.skipIf(isWin)('adoptLoginShellPath', () => {
     expect(entries[0]).toBe(shellOnlyBin)
     expect(entries).toContain('/inherited/only')
     expect(entries.some((e) => e.includes('gitstatus'))).toBe(false)
+    expect(adopted?.added).toEqual([shellOnlyBin])
+  })
+
+  it('merges an injected probe result the same way, without starting a shell', async () => {
+    const env: NodeJS.ProcessEnv = { PATH: `${BARE_GUI_PATH}:/inherited/only` }
+    const adopted = await adoptLoginShellPath({
+      env,
+      probe: async () => `${shellOnlyBin}:${BARE_GUI_PATH}`
+    })
+    const entries = env.PATH!.split(':')
+    expect(entries[0]).toBe(shellOnlyBin)
+    expect(entries).toContain('/inherited/only')
     expect(adopted?.added).toEqual([shellOnlyBin])
   })
 
@@ -102,37 +147,42 @@ describe.skipIf(isWin)('a computer started with the bare GUI PATH', () => {
   // Git LFS: a repo's hooks call a tool installed alongside git, not by SlayZone.
   // A stand-in name, not `git-lfs`: a real one on the machine's PATH (/usr/bin on
   // Linux CI) would pass the hook before the login-shell PATH is adopted.
+  // The login-shell probe itself is covered above; here it is a fixed answer, so the
+  // only real processes are git's.
   it('creates a worktree whose post-checkout hook needs a login-shell tool', async () => {
     script(join(shellOnlyBin, 'login-shell-lfs'), ['exit 0'])
+    const gitBin = isolateGit()
     const repo = join(dir, 'repo')
     mkdirSync(repo)
-    execFileSync('git', ['init', '-q'], { cwd: repo })
-    execFileSync(
-      'git',
-      [
-        '-c',
-        'user.email=t@example.com',
-        '-c',
-        'user.name=T',
-        'commit',
-        '-q',
-        '--allow-empty',
-        '-m',
-        'init'
-      ],
-      { cwd: repo }
-    )
+    const git = (args: string[]) =>
+      execFileSync('git', args, { cwd: repo, env: { ...process.env, PATH: gitBin } })
+    git(['init', '-q'])
+    git([
+      '-c',
+      'user.email=t@example.com',
+      '-c',
+      'user.name=T',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'init'
+    ])
     script(join(repo, '.git', 'hooks', 'post-checkout'), [
       'command -v login-shell-lfs >/dev/null 2>&1 || { echo >&2 "login-shell-lfs was not found on your path"; exit 2; }'
     ])
     const create = createGitHandlers(ctx())[GitMethods.createWorktree]
 
-    process.env.PATH = BARE_GUI_PATH
+    const guiPath = `${gitBin}:${BARE_GUI_PATH}`
+    process.env.PATH = guiPath
     await expect(
       create({ repoPath: repo, worktreePath: join(dir, 'wt-before'), branch: 'before' })
     ).rejects.toThrow(/login-shell-lfs was not found/)
 
-    await adoptLoginShellPath({ env: process.env, shell: noisyLoginShell() })
+    await adoptLoginShellPath({
+      env: process.env,
+      probe: async () => `${shellOnlyBin}:${guiPath}`
+    })
     await expect(
       create({ repoPath: repo, worktreePath: join(dir, 'wt-after'), branch: 'after' })
     ).resolves.toEqual({ ok: true })

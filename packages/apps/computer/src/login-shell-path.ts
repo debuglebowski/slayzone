@@ -22,10 +22,17 @@ import { mergePathLists, probeLoginShellPath } from '@slayzone/platform'
  * null when no probe produced a PATH (Windows, a broken shell) — `env` untouched.
  */
 export async function adoptLoginShellPath(
-  opts: { env?: NodeJS.ProcessEnv; shell?: string } = {}
+  opts: {
+    env?: NodeJS.ProcessEnv
+    shell?: string
+    /** Resolves the login-shell PATH. Default: probe `shell` with `env`. Tests inject a fixed answer. */
+    probe?: () => Promise<string | null>
+  } = {}
 ): Promise<{ added: string[] } | null> {
   const env = opts.env ?? process.env
-  const probed = await probeLoginShellPath({ env, ...(opts.shell ? { shell: opts.shell } : {}) })
+  const probed = opts.probe
+    ? await opts.probe()
+    : await probeLoginShellPath({ env, ...(opts.shell ? { shell: opts.shell } : {}) })
   if (!probed) return null
   const before = new Set((env.PATH ?? '').split(delimiter))
   env.PATH = mergePathLists(probed, env.PATH)
