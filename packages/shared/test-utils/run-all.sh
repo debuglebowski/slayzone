@@ -875,6 +875,8 @@ run_harness packages/domains/terminal/src/server/runtime/adopt-pty.test.ts
 run_harness packages/domains/terminal/src/server/runtime/pty-live.test.ts
 # The hub mirrors owner-detected pty output (signals) instead of parsing it.
 run_harness packages/domains/terminal/src/server/runtime/pty-signal-mirror.test.ts
+# Replacing a session (agent switch, restart): the outgoing exit's deferred cleanup leaves the new one registered.
+run_harness packages/domains/terminal/src/server/runtime/pty-replace-cleanup.test.ts
 # Round-6 review regression L2: relay requests run as the hub; a failed one is asked again.
 run_harness packages/domains/terminal/src/server/runtime/review-regressions-relay.test.ts
 # Terminal — createPty main-authoritative resolver wiring (null hint + ledger id ⇒ resume).

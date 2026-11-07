@@ -2280,8 +2280,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // Delay session cleanup so any trailing onData events (buffered in the PTY fd)
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
+        // Replaced meanwhile (agent switch, restart): the id and every map keyed by
+        // it belong to the NEW session now. Clearing them here dropped it — exists
+        // false, its process running attached to nothing.
+        exitSession?.replyMirror.dispose()
+        if (sessions.get(sessionId) !== exitSession) return
         dataListeners.delete(sessionId)
-        sessions.get(sessionId)?.replyMirror.dispose()
         sessions.delete(sessionId)
         sessionTaskMap.delete(sessionId)
         sessionTabMap.delete(sessionId)
