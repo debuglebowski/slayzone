@@ -311,10 +311,28 @@ export async function waitForPtySession(
           sessionId
         ),
       {
-        timeout: timeoutMs
+        timeout: timeoutMs,
+        message: `pty ${sessionId} never existed`
       }
     )
     .toBe(true)
+    .catch(async (err: Error) => {
+      // A session that never appears says nothing about why. Say what the app holds
+      // and shows instead: every live session, and the visible terminal's text.
+      const facts = await page
+        .evaluate(async () => {
+          const list = await window
+            .getTrpcVanillaClient()
+            .pty.list.query()
+            .catch((e: unknown) => String(e))
+          const shown = Array.from(document.querySelectorAll('.xterm-rows'))
+            .filter((el) => (el as HTMLElement).offsetParent !== null)
+            .map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 600))
+          return JSON.stringify({ list, shown })
+        })
+        .catch((e: unknown) => `<facts unavailable: ${String(e)}>`)
+      throw new Error(`${err.message}\n${facts}`)
+    })
 }
 
 export async function waitForNoPtySession(
