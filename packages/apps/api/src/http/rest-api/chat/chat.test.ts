@@ -363,6 +363,9 @@ async function readSse(
       pending = reader.read()
     }
   } finally {
+    // The loop leaves one read in flight. Cancelling the reader settles it (done)
+    // and closes the stream; an abort alone would reject it with nobody listening.
+    await reader.cancel()
     ac.abort()
   }
   return text
