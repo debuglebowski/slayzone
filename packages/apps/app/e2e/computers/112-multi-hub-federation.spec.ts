@@ -1507,6 +1507,20 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(page.locator('[data-testid="hub-row-local"]')).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('[data-testid="hub-row-remote"]')).toBeVisible({ timeout: 10_000 })
 
+      // The app's own computer joins every hub it lists, so Hub B ends up with two
+      // usable computers: its own and this desktop's. Wait for both — with more than
+      // one, the dialog asks which computer the project runs on.
+      await expect
+        .poll(
+          () =>
+            withHubClient(remoteHubUrl, async (c) => {
+              const rows = (await c.computers.list.query()) as Array<{ usable: boolean }>
+              return rows.filter((r) => r.usable).length
+            }),
+          { timeout: 60_000, intervals: [500, 1_000, 2_000] }
+        )
+        .toBe(2)
+
       // Close settings, then create a project targeting the REMOTE hub via the
       // dialog's hub picker, and assert it lands on the remote hub's DB.
       await page.keyboard.press('Escape')
@@ -1519,6 +1533,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // Pick the remote hub in the picker (radix Select).
       await page.locator('[data-testid="create-project-hub"]').click()
       await page.getByRole('option', { name: /Hub B/ }).click()
+      await page.locator('[data-testid="create-project-computer"]').click()
+      await page.getByRole('option', { name: /e2e-remote-hub-computer/ }).click()
       await page.getByRole('button', { name: 'Create', exact: true }).click()
 
       await expect
