@@ -150,6 +150,8 @@ export interface ProcHandlerOptions {
   groupLedgerPath?: string
   /** Tests only: the host identity entries are recorded under. */
   ledgerOwner?: LedgerOwner
+  /** Tests only: starts the child process (default: `child_process.spawn`). */
+  spawnProcess?: typeof spawn
 }
 
 function refuse(reason: string, message: string, data: Record<string, unknown> = {}): RpcError {
@@ -171,6 +173,7 @@ export function createProcHandlers(
   const procs = new Map<string, ProcSession>()
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
+  const spawnProcess = options.spawnProcess ?? spawn
   const queued = new Map<string, QueuedProcSpawn>()
   const ledger =
     options.groupLedgerPath && PROCESS_TREE_DETACHED
@@ -311,7 +314,7 @@ export function createProcHandlers(
       : { file: params.command, args: params.args ?? [] }
     let child: ChildProcess
     try {
-      child = spawn(invocation.file, invocation.args, {
+      child = spawnProcess(invocation.file, invocation.args, {
         ...(cwd ? { cwd } : {}),
         env,
         // stdin PIPED (was 'ignore') so `proc.write` can reach the child.

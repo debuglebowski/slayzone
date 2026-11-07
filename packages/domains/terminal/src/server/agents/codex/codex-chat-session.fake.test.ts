@@ -21,7 +21,8 @@ import {
   cstep,
   cx,
   type CodexScenario,
-  type FakeCodex
+  type FakeCodex,
+  type FakeCodexRun
 } from '@slayzone/test-utils/fake-codex'
 import type { ChatDriverContext, ChatSessionDriver } from '../types'
 import { codexChatBackend } from './codex-chat-session'
@@ -44,21 +45,51 @@ afterEach(() => {
   fake.dispose()
 })
 
+interface LiveOptions {
+  /** argv after the binary; default: what chat spawns (`buildSpawnArgs`). */
+  args?: string[]
+  /** Wait for the handshake's `turn-init` before handing the session over (default). */
+  awaitTurnInit?: boolean
+}
+
 interface Live {
   driver: CodexDriver
   events: AgentEvent[]
+  /** Every line the driver wrote to the server, parsed, in order. */
+  written: Json[]
+  /** Every line the server wrote, parsed, in order (each already handled by the driver). */
+  received: Json[]
+  /** The first event matching `pred`, as soon as the driver emits it. */
   waitFor(pred: (e: AgentEvent) => boolean, timeoutMs?: number): Promise<AgentEvent>
+  /** The first server line matching `pred`, once the driver has handled it. */
+  waitForLine(pred: (m: Json) => boolean): Promise<Json>
+  /**
+   * `check()`'s first truthy value, re-checked after every event, every server
+   * line and every line the driver writes. The fake logs what it did BEFORE it writes the reply/notification that
+   * follows, so a log-based check is settled the moment that line arrives.
+   */
+  until<T>(check: () => T | undefined | null | false, what: string): Promise<T>
+  /** Spawn #0's log, once `pred` holds for it. */
+  waitForRun(pred: (run: FakeCodexRun) => boolean, what: string): Promise<FakeCodexRun>
+  /** Open a gate the scenario holds (`cstep.gate`, `turnStart.gate`). */
+  openGate(name: string): void
 }
 
-/** Spawn the fake the way chat does (`codex app-server`) and drive it with the real driver. */
-async function live(scenario: CodexScenario, ctx: Partial<ChatDriverContext> = {}): Promise<Live> {
-  fake.setScenario(scenario)
-  const { args } = codexChatBackend.buildSpawnArgs({
-    sessionId: '',
-    resume: false,
-    cwd: root,
-    providerFlags: []
-  })
+/**
+ * Spawn the fake the way chat does (`codex app-server`) and drive it with the
+ * real driver over the child's stdio. No sleeps: every wait is woken by an event
+ * or a server line; the deadline only turns a hang into a readable failure.
+ */
+async function live(
+  scenario: CodexScenario,
+  ctx: Partial<ChatDriverContext> = {},
+  opts: LiveOptions = {}
+): Promise<Live> {
+  const epoch = fake.setScenario(scenario)
+  const args =
+    opts.args ??
+    codexChatBackend.buildSpawnArgs({ sessionId: '', resume: false, cwd: root, providerFlags: [] })
+      .args
   const child = spawn(path.join(fake.binDir, codexChatBackend.binaryName), args, {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
@@ -66,23 +97,69 @@ async function live(scenario: CodexScenario, ctx: Partial<ChatDriverContext> = {
   children.push(child)
   const driver = codexChatBackend.createDriver() as CodexDriver
   const events: AgentEvent[] = []
+  const written: Json[] = []
+  const received: Json[] = []
   const waiters = new Set<() => void>()
+  const wake = (): void => {
+    for (const w of [...waiters]) w()
+  }
+  let exited = ''
+  child.on('exit', (code, signal) => {
+    exited = ` (fake exited: ${code ?? signal})`
+    wake()
+  })
   let buf = ''
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', (d: string) => {
     buf += d
     let nl = buf.indexOf('\n')
     while (nl >= 0) {
-      driver.handleLine(buf.slice(0, nl))
+      const line = buf.slice(0, nl)
       buf = buf.slice(nl + 1)
+      driver.handleLine(line)
+      try {
+        received.push(JSON.parse(line) as Json)
+      } catch {
+        // a raw (malformed) line: the driver saw it, nothing to match on
+      }
+      wake()
       nl = buf.indexOf('\n')
     }
   })
+  const until = <T>(
+    check: () => T | undefined | null | false,
+    what: string,
+    timeoutMs = 5000
+  ): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const w = (): void => {
+        const hit = check()
+        if (!hit) return
+        waiters.delete(w)
+        clearTimeout(timer)
+        resolve(hit)
+      }
+      const timer = setTimeout(() => {
+        waiters.delete(w)
+        reject(
+          new Error(
+            `timeout waiting for ${what}${exited}; events: ${events.map((e) => e.kind).join(',')}; ` +
+              `server sent: ${received.map((m) => m.method ?? `#${String(m.id)}`).join(',')}`
+          )
+        )
+      }, timeoutMs)
+      waiters.add(w)
+      w()
+    })
   void driver.start({
-    write: (line) => child.stdin.write(`${line}\n`),
+    write: (line) => {
+      written.push(JSON.parse(line) as Json)
+      child.stdin.write(`${line}\n`)
+      wake()
+    },
     emit: (e) => {
       events.push(e)
-      for (const w of [...waiters]) w()
+      wake()
     },
     cwd: root,
     sessionId: '',
@@ -95,24 +172,23 @@ async function live(scenario: CodexScenario, ctx: Partial<ChatDriverContext> = {
     chatFastMode: false,
     ...ctx
   })
-  const waitFor = (pred: (e: AgentEvent) => boolean, timeoutMs = 5000): Promise<AgentEvent> =>
-    new Promise((resolve, reject) => {
-      const check = (): void => {
-        const hit = events.find(pred)
-        if (!hit) return
-        waiters.delete(check)
-        clearTimeout(timer)
-        resolve(hit)
-      }
-      const timer = setTimeout(() => {
-        waiters.delete(check)
-        reject(new Error(`timeout; events: ${events.map((e) => e.kind).join(',')}`))
-      }, timeoutMs)
-      waiters.add(check)
-      check()
-    })
-  await waitFor((e) => e.kind === 'turn-init')
-  return { driver, events, waitFor }
+  const l: Live = {
+    driver,
+    events,
+    written,
+    received,
+    waitFor: (pred, timeoutMs) => until(() => events.find(pred), 'an event', timeoutMs),
+    waitForLine: (pred) => until(() => received.find(pred), 'a server line'),
+    until,
+    waitForRun: (pred, what) =>
+      until(() => {
+        const run = epoch.run(0)
+        return run && pred(run) ? run : undefined
+      }, what),
+    openGate: (name) => epoch.openGate(name)
+  }
+  if (opts.awaitTurnInit !== false) await l.waitFor((e) => e.kind === 'turn-init')
+  return l
 }
 
 const isResult = (e: AgentEvent): boolean => e.kind === 'result'
@@ -258,12 +334,16 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
 describe('CodexChatSession — open bugs (X0)', () => {
   it('Stop before the turn has an id interrupts once the id is known (like the TUI)', async () => {
     const l = await live({
-      processes: [{ turnStart: { replyDelayMs: 500 }, defaultTurn: [cstep.hang()] }]
+      processes: [{ turnStart: { gate: 'turn-id' }, defaultTurn: [cstep.hang()] }]
     })
     l.driver.sendUserMessage('go')
-    // The turn/start reply (and turn/started) are still on their way: no id yet.
-    await l.driver.applyControl({ subtype: 'interrupt' }, 1000)
-    await new Promise((r) => setTimeout(r, 900))
+    // The turn/start reply (and turn/started) are held back: no id yet.
+    const stop = l.driver.applyControl({ subtype: 'interrupt' }, 1000)
+    // Nothing to name yet: no turn/interrupt goes out without a turn id.
+    expect(l.written.filter((m) => m.method === 'turn/interrupt')).toEqual([])
+    l.openGate('turn-id')
+    await stop
+    await l.waitFor(isResult)
     const run = fake.current().run(0)!
     expect(run.turnIds()).toHaveLength(1)
     // Audit "Codex Stop does nothing": the interrupt waits for the id, then goes.
@@ -342,8 +422,9 @@ describe('CodexChatSession — open bugs (X0)', () => {
     await l.waitFor((e) => e.kind === 'permission-request')
     await l.driver.applyControl({ subtype: 'interrupt' }, 1000)
     await l.waitFor(isResult)
-    await new Promise((r) => setTimeout(r, 200))
-    expect(fake.current().run(0)!.sentMethods()).toContain('serverRequest/resolved')
+    // The withdrawal itself, already handled by the driver when it arrives here.
+    await l.waitForLine((m) => m.method === 'serverRequest/resolved')
+    expect(l.received.map((m) => m.method)).toContain('serverRequest/resolved')
     expect(l.events.some((e) => e.kind === 'permission-cancelled' && e.requestId === '0')).toBe(
       true
     )
@@ -360,7 +441,7 @@ describe('CodexChatSession — open bugs (X0)', () => {
             [
               cstep.emit(cx.commandStarted(cmd)),
               cstep.emit(cx.commandOutput(cmd.id, 'step 1\n')),
-              cstep.sleep(1_500),
+              cstep.gate('step-2'),
               cstep.emit(cx.commandOutput(cmd.id, 'step 2\n')),
               cstep.emit(cx.commandCompleted({ ...cmd, output: 'step 1\nstep 2\n' })),
               ...codexReply('Built.')
@@ -375,15 +456,12 @@ describe('CodexChatSession — open bugs (X0)', () => {
     )
     expect(l.driver.commandTaskOutput).toBeDefined()
     const read = () => l.driver.commandTaskOutput!(cmd.id)
-    // While it runs (before its result): the output so far.
-    let running = await read()
-    for (let i = 0; i < 50 && !('output' in running && running.output.includes('step 1')); i++) {
-      await new Promise((r) => setTimeout(r, 20))
-      running = await read()
-    }
-    expect(running).toMatchObject({ state: 'running', output: 'step 1\n', truncated: false })
+    // While it runs (before its result; the fake holds step 2 at a gate): the output so far.
+    await l.waitForLine((m) => m.method === 'item/commandExecution/outputDelta')
+    expect(await read()).toMatchObject({ state: 'running', output: 'step 1\n', truncated: false })
     expect(l.events.some((e) => e.kind === 'tool-result' && e.toolUseId === cmd.id)).toBe(false)
     // Once it ended: the whole output, and its command-task says so.
+    l.openGate('step-2')
     await l.waitFor(isResult)
     expect(await read()).toMatchObject({ state: 'ended', output: 'step 1\nstep 2\n' })
     expect(
@@ -431,56 +509,12 @@ describe('CodexChatSession — open bugs (X0)', () => {
 })
 
 /** Resume of a stored thread whose `thread/resume` answers `reply` (`threads`: what the server has). */
-async function liveResume(reply: Json, threads: string[] = ['stored-thread']): Promise<Live> {
-  fake.setScenario({
-    processes: [{ handshake: { threadResume: reply } }],
-    threads
-  })
-  const child = spawn(path.join(fake.binDir, 'codex'), ['app-server'], {
-    cwd: root,
-    stdio: ['pipe', 'pipe', 'pipe']
-  })
-  children.push(child)
-  const driver = codexChatBackend.createDriver() as CodexDriver
-  const events: AgentEvent[] = []
-  let buf = ''
-  child.stdout.setEncoding('utf8')
-  child.stdout.on('data', (d: string) => {
-    buf += d
-    let nl = buf.indexOf('\n')
-    while (nl >= 0) {
-      driver.handleLine(buf.slice(0, nl))
-      buf = buf.slice(nl + 1)
-      nl = buf.indexOf('\n')
-    }
-  })
-  void driver.start({
-    write: (line) => child.stdin.write(`${line}\n`),
-    emit: (e) => events.push(e),
-    cwd: root,
-    sessionId: 'stored-thread',
-    resume: true,
-    providerFlags: [],
-    chatModel: null,
-    chatEffort: null,
-    chatMode: 'auto-accept-edits',
-    chatCollaboration: null,
-    chatFastMode: false
-  })
-  return {
-    driver,
-    events,
-    async waitFor(pred, timeoutMs = 5000) {
-      const deadline = Date.now() + timeoutMs
-      for (;;) {
-        const hit = events.find(pred)
-        if (hit) return hit
-        if (Date.now() > deadline)
-          throw new Error(`timeout; events: ${events.map((e) => e.kind).join(',')}`)
-        await new Promise((r) => setTimeout(r, 20))
-      }
-    }
-  }
+function liveResume(reply: Json, threads: string[] = ['stored-thread']): Promise<Live> {
+  return live(
+    { processes: [{ handshake: { threadResume: reply } }], threads },
+    { sessionId: 'stored-thread', resume: true, chatModel: null },
+    { args: ['app-server'], awaitTurnInit: false }
+  )
 }
 
 describe('CodexChatSession — thread commands', () => {
@@ -572,10 +606,11 @@ describe('CodexChatSession — side questions (/btw)', () => {
       approvalPolicy: 'never',
       sandboxPolicy: { type: 'readOnly' }
     })
-    // Sent before the answer resolves, but the fake records it over stdio: poll.
-    await expect
-      .poll(() => run.requests('thread/unsubscribe').map((r) => r.params.threadId))
-      .toEqual([side.params.threadId])
+    // Sent before the answer resolves; the fake records it before it replies.
+    await l.waitForRun((r) => r.requests('thread/unsubscribe').length > 0, 'thread/unsubscribe')
+    expect(run.requests('thread/unsubscribe').map((r) => r.params.threadId)).toEqual([
+      side.params.threadId
+    ])
     // Nothing of the fork reaches the main timeline.
     expect(l.events.slice(before)).toEqual([])
   })
@@ -587,7 +622,10 @@ describe('CodexChatSession — side questions (/btw)', () => {
     l.driver.sendUserMessage('first')
     await l.waitFor(isResult)
     l.driver.sendUserMessage('second')
-    await expect.poll(() => l.events.filter((e) => e.kind === 'stream-message-stop').length).toBe(2)
+    await l.until(
+      () => l.events.filter((e) => e.kind === 'stream-message-stop').length === 2,
+      'the second reply streamed'
+    )
     const before = l.events.length
     const answer = await (l.driver as SideDriver).askSideQuestion(
       { requestId: 'q2', question: 'Status?', history: [] },
@@ -624,12 +662,60 @@ describe('CodexChatSession — side questions (/btw)', () => {
     await l.waitFor(isResult)
     const driver = l.driver as SideDriver
     const answer = driver.askSideQuestion({ requestId: 'q4', question: 'Slow?', history: [] }, 5000)
-    const run = fake.current().run(0)!
-    await expect.poll(() => run.entries.filter((e) => e.kind === 'side-turn').length).toBe(1)
+    // The fork turn's id is out and handled (reply first, then turn/started).
+    const run = await l.waitForRun((r) => r.has('side-turn'), 'the side turn')
+    const forkId = run.entries.find((e) => e.kind === 'side-turn')!.threadId
+    await l.waitForLine(
+      (m) => m.method === 'turn/started' && (m.params as Json).threadId === forkId
+    )
+    expect(run.entries.filter((e) => e.kind === 'side-turn')).toHaveLength(1)
     driver.cancelSideQuestion('q4')
     await expect(answer).rejects.toThrow(/cancel/i)
-    await expect.poll(() => run.requests('thread/unsubscribe').length).toBe(1)
+    await l.waitForRun((r) => r.requests('thread/unsubscribe').length > 0, 'thread/unsubscribe')
+    expect(run.requests('thread/unsubscribe')).toHaveLength(1)
     expect(run.entries.some((e) => e.kind === 'side-interrupt')).toBe(true)
+    expect(l.events.filter(isResult)).toHaveLength(1)
+  })
+
+  it('cancel before the fork turn has an id interrupts it once the id is known, then drops the fork', async () => {
+    const l = await live({
+      processes: [{ turns: [codexReply('one')], sideTurn: { hang: true, gate: 'side-id' } }]
+    })
+    l.driver.sendUserMessage('first')
+    await l.waitFor(isResult)
+    const driver = l.driver as SideDriver
+    const answer = driver.askSideQuestion({ requestId: 'q7', question: 'Slow?', history: [] }, 5000)
+    // The fork's turn/start is out; its reply (the id) is held back by the gate.
+    type Started = { method?: string; params?: { thread?: { id: string; ephemeral?: boolean } } }
+    const isFork = (m: Started): boolean =>
+      m.method === 'thread/started' && m.params?.thread?.ephemeral === true
+    const forkId = ((await l.waitForLine((m) => isFork(m as Started))) as Started).params!.thread!
+      .id
+    await l.until(
+      () =>
+        l.written.find((m) => m.method === 'turn/start' && (m.params as Json).threadId === forkId),
+      "the fork's turn/start"
+    )
+    driver.cancelSideQuestion('q7')
+    await expect(answer).rejects.toThrow(/cancel/i)
+    // Nothing can name the turn yet: no interrupt, and the fork is kept until it can.
+    expect(l.written.filter((m) => m.method === 'turn/interrupt')).toEqual([])
+    expect(l.written.filter((m) => m.method === 'thread/unsubscribe')).toEqual([])
+    l.openGate('side-id')
+    // Wait for the fake's own `unsubscribe` entry (its last before replying), not
+    // just the request's arrival: the asserted entries are all in by then.
+    const run = await l.waitForRun((r) => r.has('unsubscribe'), 'the fork dropped')
+    const side = run.entries.find((e) => e.kind === 'side-turn')!
+    // Stopped first (by its id, once known), then dropped: never left running unsubscribed.
+    expect(
+      run.entries
+        .filter((e) => e.kind === 'side-interrupt' || e.kind === 'unsubscribe')
+        .map((e) => [e.kind, e.turnId ?? e.threadId])
+    ).toEqual([
+      ['side-interrupt', side.turnId],
+      ['unsubscribe', side.threadId]
+    ])
+    expect(run.requests('thread/unsubscribe')).toHaveLength(1)
     expect(l.events.filter(isResult)).toHaveLength(1)
   })
 
@@ -651,15 +737,8 @@ describe('CodexChatSession — side questions (/btw)', () => {
       { requestId: 'q6', question: 'Q', history: [] },
       5000
     )
-    await expect
-      .poll(
-        () =>
-          fake
-            .current()
-            .run(0)!
-            .entries.filter((e) => e.kind === 'side-turn').length
-      )
-      .toBe(1)
+    const run = await l.waitForRun((r) => r.has('side-turn'), 'the side turn')
+    expect(run.entries.filter((e) => e.kind === 'side-turn')).toHaveLength(1)
     l.driver.dispose()
     await expect(answer).rejects.toThrow(/ended/i)
   })

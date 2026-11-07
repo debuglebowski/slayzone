@@ -8,6 +8,7 @@
  *
  * @module test-utils/fake-codex
  */
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -195,6 +196,12 @@ export class FakeCodexRun extends FakeCliRun {
 export class FakeCodexEpoch extends FakeCliEpoch<FakeCodexRun> {
   constructor(dir: string) {
     super(dir, (index, logFile) => new FakeCodexRun(index, logFile), 'fake-codex')
+  }
+  /** Open gate `name` (`cstep.gate(name)`, `turnStart.gate`): every spawn waiting at it goes on. */
+  openGate(name: string): void {
+    const gates = path.join(this.dir, 'gates')
+    fs.mkdirSync(gates, { recursive: true })
+    fs.writeFileSync(path.join(gates, name), '')
   }
 }
 

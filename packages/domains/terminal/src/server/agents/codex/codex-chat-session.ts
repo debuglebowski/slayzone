@@ -444,6 +444,10 @@ interface SideRun {
   answer: string | null
   error: string | null
   ended: boolean
+  /** The fork's `turn/start` is on its way: ending now leaves stop + drop to its reply. */
+  startingTurn: boolean
+  /** Its turn's `turn/interrupt` went out (once is enough). */
+  interruptSent: boolean
   readonly done: Deferred<SideAnswer>
 }
 
@@ -1359,6 +1363,8 @@ class CodexChatSession implements ChatSessionDriver {
       answer: null,
       error: null,
       ended: false,
+      startingTurn: false,
+      interruptSent: false,
       done: deferred<SideAnswer>()
     }
     this.sideRuns.set(run.requestId, run)
@@ -1421,20 +1427,35 @@ class CodexChatSession implements ChatSessionDriver {
     }
     this.sideByThread.set(run.forkId, run)
     const effort = this.turnEffort()
-    const res = await client.request<CodexTurnStartResponse>(
-      'turn/start',
-      {
-        threadId: run.forkId,
-        input: [{ type: 'text', text: sideQuestionPrompt(request), text_elements: [] }],
-        approvalPolicy: 'never',
-        sandboxPolicy: { type: 'readOnly', networkAccess: false },
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {})
-      },
-      TURN_REQUEST_TIMEOUT_MS
-    )
+    let res: CodexTurnStartResponse
+    run.startingTurn = true
+    try {
+      res = await client.request<CodexTurnStartResponse>(
+        'turn/start',
+        {
+          threadId: run.forkId,
+          input: [{ type: 'text', text: sideQuestionPrompt(request), text_elements: [] }],
+          approvalPolicy: 'never',
+          sandboxPolicy: { type: 'readOnly', networkAccess: false },
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : {})
+        },
+        TURN_REQUEST_TIMEOUT_MS
+      )
+    } catch (err) {
+      run.startingTurn = false
+      if (run.ended) this.dropSideFork(run)
+      throw err
+    }
+    run.startingTurn = false
     run.turnId ??= res.turn.id
-    if (run.ended) this.stopSideTurn(run)
+    // Ended (cancel, timeout, session end) before the id was known: stop the turn
+    // now that it can be named, THEN drop the fork — unsubscribing alone would
+    // leave it running.
+    if (run.ended) {
+      this.interruptSideTurn(run)
+      this.dropSideFork(run)
+    }
   }
 
   /** The newest turn that is not running (null: none yet). */
@@ -1500,7 +1521,14 @@ class CodexChatSession implements ChatSessionDriver {
 
   /** Stop the fork's turn if it runs (best effort: dropping the fork ends it too). */
   private stopSideTurn(run: SideRun): void {
-    if (!run.forkId || !run.turnId || run.ended) return
+    if (run.ended) return
+    this.interruptSideTurn(run)
+  }
+
+  /** `turn/interrupt` the fork's turn, once its id is known (a later call is a no-op). */
+  private interruptSideTurn(run: SideRun): void {
+    if (!run.forkId || !run.turnId || run.interruptSent || this.disposed) return
+    run.interruptSent = true
     this.client
       ?.request('turn/interrupt', { threadId: run.forkId, turnId: run.turnId })
       .catch(() => undefined)
@@ -1510,7 +1538,8 @@ class CodexChatSession implements ChatSessionDriver {
     if (run.ended) return
     run.ended = true
     this.sideRuns.delete(run.requestId)
-    this.dropSideFork(run)
+    // A turn still starting is stopped, then its fork dropped, when its reply comes.
+    if (!run.startingTurn) this.dropSideFork(run)
     if (outcome instanceof Error) run.done.reject(outcome)
     else run.done.resolve(outcome)
   }

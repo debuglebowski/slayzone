@@ -237,6 +237,94 @@ describe('useChatPanelKeyboard Esc Esc (the TUI double-Esc: rewind)', () => {
     expect(onDoubleEscape).not.toHaveBeenCalled()
   })
 
+  // The panel re-renders between the two presses (a streamed row, a new
+  // callback identity from the parent): the gesture must survive it.
+  function setupRerendering(over: Partial<UseChatPanelKeyboardOpts> = {}) {
+    const root = document.createElement('div')
+    const composer = document.createElement('textarea')
+    root.append(composer)
+    document.body.appendChild(root)
+    composer.focus()
+    const onDoubleEscape = vi.fn()
+    const onClearDraft = vi.fn()
+    const handleStop = vi.fn()
+    const props = (p: Partial<UseChatPanelKeyboardOpts> = {}): UseChatPanelKeyboardOpts => ({
+      panelRef: { current: root },
+      scrollRef: Object.assign(() => {}, { current: null }) as never,
+      // Fresh object / callback identities on every render, like an inline prop.
+      search: { requestOpen: () => {} },
+      inFlight: false,
+      chatMode: 'auto-accept',
+      handleModeChange: () => Promise.resolve(),
+      autoCapability: { optedIn: false } as never,
+      autocomplete: { show: false },
+      handleStop: () => handleStop(),
+      mode: 'claude-chat',
+      composerRef: { current: composer },
+      draftEmpty: true,
+      onDoubleEscape: () => onDoubleEscape(),
+      onClearDraft: () => onClearDraft(),
+      ...over,
+      ...p
+    })
+    const { rerender } = renderHook((o: UseChatPanelKeyboardOpts) => useChatPanelKeyboard(o), {
+      initialProps: props()
+    })
+    return {
+      onDoubleEscape,
+      onClearDraft,
+      handleStop,
+      rerender: (p?: Partial<UseChatPanelKeyboardOpts>) => rerender(props(p))
+    }
+  }
+
+  it('a re-render between the two Escs (new callback identities) keeps the gesture: rewind', () => {
+    vi.useFakeTimers()
+    const { onDoubleEscape, rerender } = setupRerendering()
+    esc()
+    vi.advanceTimersByTime(300)
+    rerender()
+    expect(esc().defaultPrevented).toBe(true)
+    expect(onDoubleEscape).toHaveBeenCalledTimes(1)
+  })
+
+  it('a re-render between the two Escs keeps the draft-clear gesture too', () => {
+    vi.useFakeTimers()
+    const { onClearDraft, rerender } = setupRerendering({ draftEmpty: false })
+    esc()
+    vi.advanceTimersByTime(300)
+    rerender()
+    esc()
+    expect(onClearDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('a re-render does not stretch the 800 ms window', () => {
+    vi.useFakeTimers()
+    const { onDoubleEscape, rerender } = setupRerendering()
+    esc()
+    vi.advanceTimersByTime(500)
+    rerender()
+    vi.advanceTimersByTime(400)
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+  })
+
+  it('a turn ends between the two Escs: the first stopped it, the second only arms (no rewind)', () => {
+    vi.useFakeTimers()
+    const { onDoubleEscape, handleStop, rerender } = setupRerendering({ inFlight: true })
+    esc()
+    expect(handleStop).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(200)
+    rerender({ inFlight: false })
+    esc()
+    expect(onDoubleEscape).not.toHaveBeenCalled()
+    // A real pair after the stop does rewind.
+    vi.advanceTimersByTime(200)
+    esc()
+    expect(onDoubleEscape).toHaveBeenCalledTimes(1)
+    expect(handleStop).toHaveBeenCalledTimes(1)
+  })
+
   it('autocomplete open: its Esc, no rewind', () => {
     const { onDoubleEscape } = setup({ autocomplete: { show: true } })
     esc()

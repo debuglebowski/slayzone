@@ -40,7 +40,7 @@ import {
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
 import { judgePath, spawnCwd } from '../path-jail'
-import { createProcHandlers } from './proc'
+import { createProcHandlers, type ProcHandlerOptions } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
@@ -285,6 +285,8 @@ export function createChatRuntimeHandlers(opts: {
   computerId: () => string | null
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
+  /** Tests only: starts provider processes (default: `child_process.spawn`). */
+  spawnProcess?: ProcHandlerOptions['spawnProcess']
   hasTaskWork?(taskId: string): boolean
   stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
 }) {
@@ -327,7 +329,7 @@ export function createChatRuntimeHandlers(opts: {
         }
       },
       opts.getProjectPaths,
-      { admission: opts.admission }
+      { admission: opts.admission, spawnProcess: opts.spawnProcess }
     )
     localProcs = procs
     const gateway: RoutingGateway = {

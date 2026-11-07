@@ -34,11 +34,15 @@ export const RECHECK_INTERVAL_MS = 60 * 60 * 1000
 /** First pass this long after boot: after the hub listens, out of the boot steps' way. */
 export const BOOT_RECHECK_DELAY_MS = 60_000
 
+/** The scheduled callback: it returns its pass, so a test holding the timer can await
+ *  the pass it fired. Real timers ignore the result (the pass never rejects). */
+export type RecheckTick = () => Promise<RecheckReport | null>
+
 /** The timer functions the schedule uses; swapped by tests. */
 export interface RecheckTimers {
-  setTimeout: (fn: () => void, ms: number) => unknown
+  setTimeout: (fn: RecheckTick, ms: number) => unknown
   clearTimeout: (handle: unknown) => void
-  setInterval: (fn: () => void, ms: number) => unknown
+  setInterval: (fn: RecheckTick, ms: number) => unknown
   clearInterval: (handle: unknown) => void
 }
 
@@ -107,9 +111,7 @@ export function startSsoRecheck(opts: {
       running = false
     }
   }
-  const tick = (): void => {
-    void runNow()
-  }
+  const tick: RecheckTick = () => runNow()
   const unref = (h: unknown): unknown => {
     ;(h as { unref?: () => void } | null)?.unref?.()
     return h
