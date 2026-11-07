@@ -614,6 +614,7 @@ run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/db.test.ts
 run_harness packages/domains/agent-turns/src/server/git-snapshot.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-tracker.test.ts
+run_harness packages/domains/agent-turns/src/server/turn-recording.test.ts
 run_harness packages/domains/agent-turns/src/server/agent-turns-router.test.ts
 run_harness packages/domains/agent-turns/src/server/turn-git-routing.test.ts
 run_harness packages/domains/agent-turns/src/server/workspace-capture.test.ts
@@ -643,6 +644,7 @@ run_harness packages/domains/automations/src/server/engine.test.ts
 run_harness packages/domains/automations/src/server/engine-routing.test.ts
 run_harness packages/domains/test-panel/src/server/scan-routing.test.ts
 run_harness packages/domains/usage-analytics/src/server/usage-routing.test.ts
+run_harness packages/domains/usage-analytics/src/server/codex-usage-attribution.test.ts
 run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
@@ -877,6 +879,7 @@ run_harness packages/domains/terminal/src/server/runtime/review-regressions-rela
 run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test.ts
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
 run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
+run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 

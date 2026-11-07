@@ -327,6 +327,16 @@ export interface PtyBackend {
     computerId: string,
     ask: { shell: string; binaries: string[] }
   ): Promise<ComputerDoctorFacts | null>
+  /**
+   * The version of agent CLI `binary` on `computerId` — the binary an agent started
+   * there would run — e.g. `'0.167.0'`. Gates launch flags a CLI only knows from
+   * some release on (see `TerminalAdapter.cliVersioned`). Resolves `null` when
+   * nothing can tell (not on PATH, no version output, a computer that predates the
+   * request); rejects when it can't be reached.
+   *
+   * Optional: only the routing backend can answer; agents never run hub-local.
+   */
+  cliVersion?(computerId: string, binary: string): Promise<string | null>
 }
 
 /** What a computer reports about itself for Doctor — see {@link PtyBackend.doctor}. */

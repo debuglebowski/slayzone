@@ -286,7 +286,7 @@ export function createChatRuntimeHandlers(opts: {
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
   hasTaskWork?(taskId: string): boolean
-  stopTask?(taskId: string): Promise<void>
+  stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
 }) {
   let closed = false,
     resetting = false
@@ -559,7 +559,7 @@ export function createChatRuntimeHandlers(opts: {
 
       case 'task.lifecycle': {
         const applied = await r.applyTaskLifecycle(req.taskId, req.state, req.revision)
-        if (applied.state !== 'active') await opts.stopTask?.(req.taskId)
+        if (applied.state !== 'active') await opts.stopTask?.(req.taskId, applied.state)
         return applied
       }
       case 'migration.checkpoint':

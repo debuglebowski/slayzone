@@ -743,6 +743,58 @@ export const REGRESSIONS = [
     id: 'DL-R2-1',
     what: 'a revocation that runs while an issue is still locating its target or awaiting its gates drops that grant before it is registered (no stale chat grant survives an ownership move)',
     files: [`${P}apps/hub/src/direct-link.test.ts`]
+  },
+  // ── post-merge QA (task 964073b0, rows 1e/1f → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-1e1f',
+    what: 'a codex terminal starts `codex --no-daemon` when its computer runs codex ≥0.156, so hooks carry the task (spinner, unread, conversation id); older or unknown codex launches as before',
+    files: [
+      `${P}domains/terminal/src/server/adapters/codex-adapter.test.ts`,
+      `${P}domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts`,
+      execProxies,
+      `${computer}handlers/pty.test.ts`
+    ]
+  },
+  // ── post-merge QA (task 964073b0, agent-turn snapshots → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-turns',
+    what: 'agent terminal prompts and chat results record turn snapshots again (callers lost in daf8d3bb4); a computer-owned chat records with no hub-side preview',
+    files: [
+      `${P}domains/agent-turns/src/server/turn-recording.test.ts`,
+      `${P}domains/agent-turns/src/server/turn-tracker.test.ts`
+    ]
+  },
+  // ── post-merge QA (task 964073b0, usage: task attribution → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-usage',
+    what: "a codex task's usage is attributed to it on every refresh, including turns parsed after the file's session_meta",
+    files: [`${P}domains/usage-analytics/src/server/codex-usage-attribution.test.ts`]
+  },
+  // ── post-merge QA (task 964073b0, row 7a → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-7a',
+    what: "a task terminal's output survives an app/computer restart (old output, divider, new shell); not for an agent resume or a continuing spawn; gone with a kill, a deleted tab or a purged task",
+    files: [
+      `${computer}handlers/pty-history.test.ts`,
+      `${computer}handlers/chat-runtime.test.ts`,
+      `${P}domains/task-terminals/src/server/task-terminals-router.test.ts`
+    ]
+  },
+  {
+    round: 19,
+    id: 'DL-restore',
+    what: 'a terminal restored after a restart and attached over the direct link: restored output first and once, then live output once; every backfill page fits one direct message (restored output is buffered in bounded chunks)',
+    files: [`${P}apps/computer/src/handlers/pty-history.test.ts`]
+  },
+  {
+    round: 19,
+    id: 'DL-turns',
+    what: "a chat turn on the direct link records its snapshot: the turn's end is read from the saved-event signal the hub always gets, once per result whether or not the full event is relayed",
+    files: [`${P}domains/agent-turns/src/server/turn-recording.test.ts`]
   }
 ]
 

@@ -1,3 +1,4 @@
+import { tabsEvents } from './events'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { parseAgentState, type AgentState } from '@slayzone/terminal-contracts'
 import type { TerminalTab, CreateTerminalTabInput, UpdateTerminalTabInput } from '../shared/types'
@@ -240,5 +241,6 @@ export async function deleteTab(db: SlayzoneDb, tabId: string): Promise<boolean>
   if (tab.is_main === 1) return false // Can't delete main tab
 
   await db.prepare('DELETE FROM terminal_tabs WHERE id = ?').run(tabId)
+  tabsEvents.emit('tab:deleted', { taskId: tab.task_id, tabId })
   return true
 }

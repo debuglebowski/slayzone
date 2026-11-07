@@ -1586,6 +1586,83 @@ describe('pty.doctor', () => {
   })
 })
 
+describe('pty.cliVersion', () => {
+  // The hub gates version-dependent agent launch flags (codex --no-daemon) on the
+  // CLI version of the machine the agent starts on — this one.
+  const fakeCli = (dir: string, name: string, out: string): string => {
+    const file = join(dir, name)
+    writeFileSync(file, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${out}'; fi\n`)
+    chmodSync(file, 0o755)
+    return file
+  }
+  const withBinDir = async (fn: (dir: string) => Promise<void>): Promise<void> => {
+    const dir = mkdtempSync(join(tmpdir(), 'slz-cli-version-'))
+    try {
+      await fn(dir)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('reports the version of the binary a spawn here would run', async () => {
+    await withBinDir(async (dir) => {
+      fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.167.0')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      ).resolves.toEqual({ ok: true, version: '0.167.0' })
+    })
+  })
+
+  it('re-reads after the binary is replaced (an upgrade in place)', async () => {
+    await withBinDir(async (dir) => {
+      const file = fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.150.0')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      const ask = () => Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      await expect(ask()).resolves.toEqual({ ok: true, version: '0.150.0' })
+      rmSync(file)
+      fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.167.1')
+      await expect(ask()).resolves.toEqual({ ok: true, version: '0.167.1' })
+    })
+  })
+
+  it('not on PATH, or no version in its output → null', async () => {
+    await withBinDir(async (dir) => {
+      fakeCli(dir, 'slz-fake-cli', 'no version here')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      ).resolves.toEqual({ ok: true, version: null })
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-no-such-binary' }))
+      ).resolves.toEqual({ ok: true, version: null })
+    })
+  })
+
+  it('refuses a binary name that is not a plain name', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    await expect(
+      Promise.resolve().then(() => pty.handlers['pty.cliVersion']({ binary: '../bin/sh' }))
+    ).rejects.toThrow()
+  })
+})
+
 // Starting an agent somewhere else (the computer's launch directory, its home)
 // would look like it worked while running in the wrong tree.
 describe('pty.spawn for a project this computer has no folder for', () => {

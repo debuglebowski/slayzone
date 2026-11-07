@@ -15,9 +15,16 @@ export interface ChatSavedSummary {
   /** `user-message-delivery`: its state, and the error when it failed. */
   state?: string
   error?: string
+  /** Imported history (a resumed conversation's past), not something that happened now. */
+  history?: true
 }
 
 export function chatSavedSummary(event: AgentEvent, seq: number): ChatSavedSummary {
+  const summary = summarize(event, seq)
+  return (event as { history?: boolean }).history ? { ...summary, history: true } : summary
+}
+
+function summarize(event: AgentEvent, seq: number): ChatSavedSummary {
   if (event.kind === 'user-message-delivery') {
     return {
       seq,

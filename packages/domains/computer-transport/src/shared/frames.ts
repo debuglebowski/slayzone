@@ -570,6 +570,10 @@ export const HubToComputerMethods = {
   ptyBackgroundJobs: 'pty.backgroundJobs',
   /** Doctor's facts about this computer: node-pty install, the shell, agent binaries. */
   ptyDoctor: 'pty.doctor',
+  /** Version of one agent CLI as a spawn here would run it — gates version-dependent launch flags. */
+  ptyCliVersion: 'pty.cliVersion',
+  /** A tab was deleted: forget its terminal's saved output (see computer pty-history). */
+  ptyForget: 'pty.forget',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -924,6 +928,45 @@ export const ptyDoctorResultSchema = z.object({
   binaries: z.array(z.object({ binary: z.string(), path: z.string().nullable() }))
 })
 export type PtyDoctorResult = z.infer<typeof ptyDoctorResultSchema>
+
+/**
+ * `pty.cliVersion` — the version of one agent CLI on this computer, as the binary a
+ * spawn here would run (spawn PATH, bin override dir first) reports it via
+ * `--version`. The hub gates launch flags a CLI only knows from some release on
+ * (codex `--no-daemon`): an older CLI rejects an unknown flag and exits.
+ *  - `version`: the first `major.minor[.patch]` in that output; null when the binary
+ *    isn't on PATH, fails, or prints no version.
+ */
+export const ptyCliVersionParamsSchema = z
+  .object({
+    /** Plain command name only (`codex`), never a path or syntax. */
+    binary: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/)
+  })
+  .strict()
+export type PtyCliVersionParams = z.infer<typeof ptyCliVersionParamsSchema>
+
+export const ptyCliVersionResultSchema = z.object({
+  ok: z.literal(true),
+  version: z.string().nullable()
+})
+export type PtyCliVersionResult = z.infer<typeof ptyCliVersionResultSchema>
+
+/**
+ * `pty.forget` — the hub deleted the tab `sessionId` runs in: the computer deletes
+ * the output it saved for it (live or not — a tab deleted after a restart has no
+ * process). Best-effort; a computer offline then sweeps it by age.
+ */
+export const ptyForgetParamsSchema = z
+  .object({
+    sessionId: z.string().min(1).max(512),
+    taskId: z.string().min(1).max(128)
+  })
+  .strict()
+export type PtyForgetParams = z.infer<typeof ptyForgetParamsSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),

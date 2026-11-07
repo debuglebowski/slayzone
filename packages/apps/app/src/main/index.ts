@@ -2802,8 +2802,10 @@ app
               // .test exists for a single-app run; paths.ts's "e2e is one worker" note
               // predates the group computer and is true only within one group.) E2E
               // keeps the OS-assigned port and the `settings.server_port` channel.
+              // A spec that restarts the app pins it (SLAYZONE_E2E_HUB_PORT), so both
+              // launches are the same hub to the computer.
               fixedPort: isPlaywright
-                ? undefined
+                ? e2eHubPort()
                 : SIDECAR_FIXED_PORT[app.isPackaged ? 'prod' : 'dev'],
               // Diagnostics only — the SAME derivation the sidecar performs from the
               // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
@@ -5025,3 +5027,9 @@ app.on('will-quit', (event) => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
+/** `SLAYZONE_E2E_HUB_PORT` (Playwright only): a valid port, else none (OS-assigned). */
+function e2eHubPort(): number | undefined {
+  const port = Number(process.env.SLAYZONE_E2E_HUB_PORT)
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : undefined
+}

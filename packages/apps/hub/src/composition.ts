@@ -20,7 +20,11 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
 import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
-import { setAgentPromptReader, agentPromptsEvents } from '@slayzone/agent-turns/server'
+import {
+  setAgentPromptReader,
+  agentPromptsEvents,
+  wireTurnRecording
+} from '@slayzone/agent-turns/server'
 import { createLegacyChatDiagnostics, createDiagnosticTaskResolver } from './chat-diagnostics'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerProbes } from './computer-probes'
@@ -35,6 +39,8 @@ const USAGE_COLLECT_TIMEOUT_MS = 5 * 60_000
 const COMPUTER_SCAN_TIMEOUT_MS = 2 * 60_000
 /** One AI-config fs call (read / write / stat / readdir of one file or dir). */
 const COMPUTER_FS_CALL_TIMEOUT_MS = 60_000
+/** Deleting one tab's saved terminal output on its computer. */
+const PTY_FORGET_TIMEOUT_MS = 10_000
 /** A turn snapshot writes a tree of a whole worktree. */
 const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
@@ -177,6 +183,7 @@ import {
   setExecutionContextProbe,
   setTerminalCommandProbe,
   getPtyDirectTarget,
+  onPtyInputSubmit,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -321,7 +328,7 @@ import { createTrpcConnectionRegistry, type TrpcConnectionRegistry } from './trp
 import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.js'
 import { getDatabasePathFromEnv } from './db.js'
 import { resolveAuthDbPath } from './auth-db.js'
-import { createPtyEnricher } from '@slayzone/task-terminals/server'
+import { createPtyEnricher, tabsEvents } from '@slayzone/task-terminals/server'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '@slayzone/api/txns'
 
@@ -1072,6 +1079,9 @@ export function composeServer(opts: {
     watchEvents: chatRelayWatch.watch
   })
   setChatSessionSource(computerChat.relay.sessions)
+  // Turn snapshots: an agent terminal's submitted prompt and a chat turn's result.
+  // The rows live here; each snapshot's git runs on the checkout's computer.
+  wireTurnRecording(db, { onPtyInputSubmit, chatEvents: computerChat.relay.events })
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
   setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
@@ -2194,6 +2204,23 @@ export function composeServer(opts: {
     // Expired Trash entries kept until their computer connected are purged now (R5-1).
     computerGateway.events.on('computer-connected', () => {
       if (!resettingForTest) bootBestEffort('trash-purge-on-connect', () => purgeExpiredTrash(db))
+    })
+    // A deleted tab's terminal output, saved on its computer to outlive restarts,
+    // goes with it — also when nothing runs in the tab (deleted after a restart).
+    // Best-effort: a computer offline now sweeps it by age.
+    tabsEvents.on('tab:deleted', ({ taskId, tabId }) => {
+      void (async () => {
+        const computerId = await placement.forTarget({ taskId })
+        if (!computerId) return
+        await computerGateway.request(
+          computerId,
+          HubToComputerMethods.ptyForget,
+          { sessionId: `${taskId}:${tabId}`, taskId },
+          PTY_FORGET_TIMEOUT_MS
+        )
+      })().catch(() => {
+        /* best-effort, see above */
+      })
     })
     // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
     // resolved like the git panel (by path, or by the task for a boundary).

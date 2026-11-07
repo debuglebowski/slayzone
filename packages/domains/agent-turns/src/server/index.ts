@@ -24,3 +24,4 @@ export { agentPromptsEvents, type AgentPromptsEventMap } from './events'
 export type { AgentPrompt } from '../shared/types'
 
 export { setTurnGitRouting, type TurnGitRouting } from './turn-git-routing'
+export { wireTurnRecording, type TurnRecordingSources } from './turn-recording'

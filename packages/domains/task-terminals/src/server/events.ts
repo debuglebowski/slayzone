@@ -8,6 +8,8 @@ export interface TabsChangedPayload {
 export type TabsEventMap = {
   /** Emitted whenever a task's tabs change (create/split/rename/cold-start). */
   'tabs:changed': [payload: TabsChangedPayload]
+  /** A (non-main) tab row was deleted — its computer forgets the tab's saved output. */
+  'tab:deleted': [payload: { taskId: string; tabId: string }]
 }
 
 /**
