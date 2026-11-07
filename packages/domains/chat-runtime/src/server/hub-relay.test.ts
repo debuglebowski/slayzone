@@ -574,3 +574,159 @@ test('direct link: an event-signal reports every saved event to hub consumers, o
     h.cleanup()
   }
 })
+
+test('a send behind its tab hydrate reaches the computer only after the hydrate answered', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'store',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const forwarded: string[] = []
+    const request = vi.fn<ChatComputerRequest>(async (_pc, raw) => {
+      const p = raw as { kind: string; value: { identity: unknown; method: string } }
+      if (p.kind === 'bootstrap') return { ok: true, identity: p.value.identity }
+      if (p.kind === 'pendingMetadata') return []
+      if (p.kind === 'invoke') {
+        forwarded.push(p.value.method)
+        if (p.value.method === 'hydrate') return { tabId: 'tab' }
+        if (p.value.method === 'send') return { id: 'm1', state: 'queued' }
+      }
+      throw new Error('Unexpected request')
+    })
+    // The hydrate's way through the hub is slower than the send's (here: held).
+    let releaseHydrate!: () => void
+    const hydrateHeld = new Promise<void>((resolve) => {
+      releaseHydrate = resolve
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      bootstrap: async (owner) => ({
+        identity: {
+          id: owner.id,
+          taskId: owner.taskId,
+          tabId: owner.tabId,
+          mode: owner.mode,
+          epoch: owner.epoch
+        },
+        projectId: 'p',
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      request,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      migrate: async () => {
+        throw new Error('No legacy content to migrate')
+      },
+      recordConversation: async () => {},
+      beforeInvoke: async (_owner, method) => {
+        if (method === 'hydrate') await hydrateHeld
+      }
+    })
+    const hydrated = relay.ops.hydrate({
+      tabId: 'tab',
+      taskId: 'task',
+      mode: 'claude-chat',
+      cwd: '/tmp',
+      providerFlagsOverride: null
+    })
+    const sent = relay.ops.send(
+      'tab',
+      { id: 'm1', content: [{ type: 'text', text: 'hi' }] },
+      'op-1'
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(forwarded).toEqual([])
+    releaseHydrate()
+    await hydrated
+    await expect(sent).resolves.toEqual({ id: 'm1', state: 'queued' })
+    expect(forwarded).toEqual(['hydrate', 'send'])
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a failed hydrate does not hold its tab send back', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'store',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const forwarded: string[] = []
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      bootstrap: async (owner) => ({
+        identity: {
+          id: owner.id,
+          taskId: owner.taskId,
+          tabId: owner.tabId,
+          mode: owner.mode,
+          epoch: owner.epoch
+        },
+        projectId: 'p',
+        cwd: '/tmp',
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      }),
+      request: async (_pc, raw) => {
+        const p = raw as { kind: string; value: { identity: unknown; method: string } }
+        if (p.kind === 'bootstrap') return { ok: true, identity: p.value.identity }
+        if (p.kind === 'pendingMetadata') return []
+        if (p.kind === 'invoke') {
+          forwarded.push(p.value.method)
+          if (p.value.method === 'hydrate') throw new Error('hydrate failed')
+          if (p.value.method === 'send') return { id: 'm1', state: 'queued' }
+        }
+        throw new Error('Unexpected request')
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      migrate: async () => {
+        throw new Error('No legacy content to migrate')
+      },
+      recordConversation: async () => {}
+    })
+    const hydrated = relay.ops.hydrate({
+      tabId: 'tab',
+      taskId: 'task',
+      mode: 'claude-chat',
+      cwd: '/tmp',
+      providerFlagsOverride: null
+    })
+    const sent = relay.ops.send(
+      'tab',
+      { id: 'm1', content: [{ type: 'text', text: 'hi' }] },
+      'op-1'
+    )
+    await expect(hydrated).rejects.toThrow('hydrate failed')
+    await expect(sent).resolves.toEqual({ id: 'm1', state: 'queued' })
+    expect(forwarded).toEqual(['hydrate', 'send'])
+  } finally {
+    h.cleanup()
+  }
+})

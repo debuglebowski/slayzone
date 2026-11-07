@@ -688,6 +688,42 @@ export function createChatOps(opts: ChatHandlerOpts) {
     chatEvents
   } = transport
   /**
+   * Per tab: the hydrate (or start / reset) opening its session right now, from the
+   * moment its request arrived — it builds its options (stored config reads) before
+   * the session exists. A send that arrived behind it waits for it instead of being
+   * refused with "No chat session": clients send right after they hydrate, and the
+   * first message of a chat was lost when the build was slow (a busy computer).
+   */
+  const opening = new Map<string, Promise<void>>()
+  function openSession<T>(tabId: string, work: () => Promise<T>): Promise<T> {
+    // Forgotten before the caller resumes: a send right after it runs at once.
+    const done = (): void => {
+      if (opening.get(tabId) === settled) opening.delete(tabId)
+    }
+    const run = work().then(
+      (value) => {
+        done()
+        return value
+      },
+      (error: unknown) => {
+        done()
+        throw error
+      }
+    )
+    const settled = run.then(
+      () => undefined,
+      () => undefined
+    )
+    opening.set(tabId, settled)
+    return run
+  }
+  /** Run `fn` once the tab's session opening (if any) settled; at once otherwise. */
+  function afterOpening<T>(tabId: string, fn: () => T | Promise<T>): T | Promise<T> {
+    const pending = opening.get(tabId)
+    return pending ? pending.then(fn) : fn()
+  }
+
+  /**
    * A setting the live process refused (`set_model` etc.) normally falls back to
    * a kill+respawn — but with a turn open (running, parked on a prompt, or a
    * message on its way) that would cut the turn. Refuse the change instead; the
@@ -881,10 +917,11 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
   const ops = {
     supports: (mode: string): boolean => supportsChatMode(mode),
-    refuseStart: async (o: ChatCreateOpts): Promise<void> => {
-      await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-      transport.recordConversationInUse(o.tabId)
-    },
+    refuseStart: (o: ChatCreateOpts): Promise<void> =>
+      openSession(o.tabId, async () => {
+        await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+        transport.recordConversationInUse(o.tabId)
+      }),
 
     /**
      * E2E-only (the router gates it on PLAYWRIGHT): shorten the watchdog so a spec
@@ -904,9 +941,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * started lazily on the first `chat:send` (or queue drain). Idempotent —
      * reattaches to an existing live session for the same tab.
      */
-    hydrate: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      return hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
-    },
+    hydrate: (o: ChatCreateOpts): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () =>
+        hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      ),
 
     /**
      * One snapshot for (re)drawing a tab: its saved events after `afterSeq`, and
@@ -941,16 +979,17 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * keystroke. Hydrates if needed, then `ensureSpawned`. Idempotent for live
      * sessions.
      */
-    start: async (o: ChatCreateOpts & { reason?: ChatStartReason }): Promise<ChatSessionInfo> => {
-      // A restore starts in the computer's background lane: reopening a workspace
-      // must not start every agent at once.
-      const built = await buildHydrateOpts(data, o, { fresh: false })
-      await hydrateSession({
-        ...built,
-        admission: o.reason === 'restore' ? 'background' : 'foreground'
-      })
-      return ensureSpawned(o.tabId)
-    },
+    start: (o: ChatCreateOpts & { reason?: ChatStartReason }): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () => {
+        // A restore starts in the computer's background lane: reopening a workspace
+        // must not start every agent at once.
+        const built = await buildHydrateOpts(data, o, { fresh: false })
+        await hydrateSession({
+          ...built,
+          admission: o.reason === 'restore' ? 'background' : 'foreground'
+        })
+        return ensureSpawned(o.tabId)
+      }),
 
     /** Replace the running process while retaining this tab's conversation and events. */
     restart: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
@@ -969,17 +1008,18 @@ export function createChatOps(opts: ChatHandlerOpts) {
       tabId: string,
       message: OutgoingUserMessage,
       _operationId?: string
-    ): { id: string; state: string } | Promise<{ id: string; state: string }> => {
-      // Text is taken at once, as always; attached files are checked and sealed first.
-      if (message.content.every((b) => b.type === 'text'))
-        return dispatchUserMessage(tabId, message)
-      return admitAttachments({
-        tabId,
-        content: message.content,
-        lookup: data.attachments,
-        events: getEventBufferSince(tabId, -1).map((e) => e.event)
-      }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
-    },
+    ): { id: string; state: string } | Promise<{ id: string; state: string }> =>
+      afterOpening(tabId, () => {
+        // Text is taken at once, as always; attached files are checked and sealed first.
+        if (message.content.every((b) => b.type === 'text'))
+          return dispatchUserMessage(tabId, message)
+        return admitAttachments({
+          tabId,
+          content: message.content,
+          lookup: data.attachments,
+          events: getEventBufferSince(tabId, -1).map((e) => e.event)
+        }).then((content) => dispatchUserMessage(tabId, { ...message, content }))
+      }),
 
     // Inline tool-answer flows (e.g. AskUserQuestion). Resolves the pending
     // tool_use_id with a tool_result content block so the SDK's turn machinery
@@ -1403,31 +1443,32 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * race where the old child's exit broadcast could leak between IPCs and stick
      * "Session ended" in the renderer.
      */
-    reset: async (o: ChatCreateOpts): Promise<ChatSessionInfo> => {
-      if (await data.threads?.get(o.tabId))
-        throw new Error('Start another thread to begin a new side discussion.')
-      // Awaited for the same reason as `remove`.
-      await removeSession(o.tabId)
-      try {
-        await data.clearChatEventsForTab(o.tabId)
-      } catch (err) {
-        console.error('[chat-handlers] clearChatEventsForTab failed:', err)
-      }
-      try {
-        await data.clearChatQueue(o.tabId)
-      } catch (err) {
-        console.error('[chat-handlers] clearChatQueue failed:', err)
-      }
-      await data.recordConversation({
-        taskId: o.taskId,
-        mode: o.mode,
-        conversationId: null,
-        origin: 'manual-reset',
-        legacyJsonField: 'chatConversationId'
-      })
-      await data.clearChatConversationId(o.taskId, o.mode)
-      return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
-    },
+    reset: (o: ChatCreateOpts): Promise<ChatSessionInfo> =>
+      openSession(o.tabId, async () => {
+        if (await data.threads?.get(o.tabId))
+          throw new Error('Start another thread to begin a new side discussion.')
+        // Awaited for the same reason as `remove`.
+        await removeSession(o.tabId)
+        try {
+          await data.clearChatEventsForTab(o.tabId)
+        } catch (err) {
+          console.error('[chat-handlers] clearChatEventsForTab failed:', err)
+        }
+        try {
+          await data.clearChatQueue(o.tabId)
+        } catch (err) {
+          console.error('[chat-handlers] clearChatQueue failed:', err)
+        }
+        await data.recordConversation({
+          taskId: o.taskId,
+          mode: o.mode,
+          conversationId: null,
+          origin: 'manual-reset',
+          legacyJsonField: 'chatConversationId'
+        })
+        await data.clearChatConversationId(o.taskId, o.mode)
+        return hydrateSession(await buildHydrateOpts(data, o, { fresh: true }))
+      }),
 
     // The whole saved history after `afterSeq` (not just the in-memory cache).
     getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),

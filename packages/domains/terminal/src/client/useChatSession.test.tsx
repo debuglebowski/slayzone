@@ -379,7 +379,10 @@ describe('useChatSession — must keep working', () => {
 
   it('a message sent while the first load runs is confirmed, not duplicated', async () => {
     const { result } = setup()
-    await act(() => result.current.sendMessage('hi'))
+    // Shown at once; it goes out once the tab's hydrate answered.
+    await act(async () => {
+      void result.current.sendMessage('hi')
+    })
     expect(texts(result)).toEqual(['hi'])
     await finishLoad(0, [])
     expect(texts(result)).toEqual(['hi']) // still on screen before the echo lands
@@ -586,6 +589,47 @@ describe('useChatSession — answering prompts', () => {
 })
 
 describe('useChatSession — outbox', () => {
+  // The computer holds a tab's session only once its hydrate ran there; a send that
+  // overtakes it fails ("No chat session for tab") and the reply never comes.
+  it('a send while the tab hydrates goes out only once the hydrate answered', async () => {
+    const { result } = setup()
+    let done = false
+    await act(async () => {
+      void result.current.sendMessage('hi').then(() => {
+        done = true
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(texts(result)).toEqual(['hi']) // on screen at once
+    expect(sent).toEqual([])
+    await finishLoad(0, [])
+    expect(sent.map((s) => s.message.content)).toEqual([[{ type: 'text', text: 'hi' }]])
+    expect(done).toBe(true)
+  })
+
+  it('a send during a reload waits for the reload’s hydrate, not just the first one', async () => {
+    const { result } = setup()
+    await finishLoad(0, [])
+    await act(() => result.current.reload())
+    await act(async () => {
+      void result.current.sendMessage('during reload')
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(sent).toEqual([])
+    await finishLoad(1, [])
+    expect(sent).toHaveLength(1)
+  })
+
+  it('a failed hydrate does not hold the send back (it fails or goes out on its own)', async () => {
+    const { result } = setup()
+    await act(async () => {
+      void result.current.sendMessage('hi')
+      loads[0].hydrate.reject(new Error('computer offline'))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(sent).toHaveLength(1)
+  })
+
   it('a send carries a client id + content blocks and is confirmed by that id', async () => {
     const { result } = setup()
     await finishLoad(0, [])
@@ -966,7 +1010,9 @@ describe('manual/reconnect reload', () => {
     await act(() => result.current.reload())
     expect(result.current.hydrating).toBe(true)
     sendFails = null
-    await act(() => result.current.sendMessage('typed during reconnect'))
+    await act(async () => {
+      void result.current.sendMessage('typed during reconnect')
+    })
     await finishLoad(1, [])
     expect(result.current.timeline.filter((i) => i?.kind === 'user-text')).toMatchObject([
       { id, text: 'keep me', attachments: [attachment], delivery: 'failed' },

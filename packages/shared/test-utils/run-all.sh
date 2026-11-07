@@ -1100,6 +1100,8 @@ run_harness packages/domains/terminal/src/server/runtime/chat-workspace-tracker.
 run_harness packages/domains/terminal/src/server/runtime/chat-workspace.integration.test.ts
 run_harness packages/domains/terminal/src/server/workspace-changes-store.test.ts
 run_harness packages/domains/terminal/src/shared/workspace-changes.test.ts
+# Chat commands wait for the tab's latest hydrate (a reload's too); a failed one holds nothing.
+run_harness packages/domains/terminal/src/shared/chat-session-ready.test.ts
 run_harness packages/domains/terminal/src/shared/turn-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/codex-file-changes.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.codex-usage.test.ts

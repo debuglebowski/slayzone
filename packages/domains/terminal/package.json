@@ -34,7 +34,8 @@
     "./pty-detection": "./src/server/pty-detection.ts",
     "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts",
-    "./chat-direct": "./src/client/chat-direct.ts"
+    "./chat-direct": "./src/client/chat-direct.ts",
+    "./chat-session-ready": "./src/shared/chat-session-ready.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

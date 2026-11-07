@@ -80,6 +80,16 @@ const historyReadMethods = new Set([
   'searchTimeline'
 ])
 
+/** Calls that open a tab's session on the computer: a send behind one waits for it. */
+const SESSION_OPENING_OPS = new Set(['hydrate', 'start', 'reset', 'refuseStart'])
+
+/** The tab a call names: its first argument, or that argument's `tabId`. */
+function tabIdOf(first: unknown): string {
+  return first && typeof first === 'object' && 'tabId' in first
+    ? String(first.tabId)
+    : String(first)
+}
+
 /** Metadata routing only. This facade never instantiates a chat process or content store. */
 export function createHubChatRelay(opts: {
   db: SlayzoneDb
@@ -125,6 +135,33 @@ export function createHubChatRelay(opts: {
   const taskMigrations = new Map<string, Promise<void>>()
   const registrations = new Map<string, Promise<HubChatOwnership>>()
   const queueIngress = new Map<string, Promise<void>>()
+  /**
+   * Per tab: the call opening its session on the computer (hydrate, start, reset,
+   * refuseStart), from the moment it entered the hub until the computer answered.
+   * Calls take different ways through the hub (ownership, bootstrap, config reads),
+   * so a send right behind its tab's hydrate could reach the computer first; it
+   * waits here instead. A failed opening holds nothing back.
+   */
+  const opening = new Map<string, Promise<void>>()
+  function openSession<T>(tabId: string, work: () => Promise<T>): Promise<T> {
+    const run = work()
+    const settled: Promise<void> = run.then(
+      () => undefined,
+      () => undefined
+    )
+    opening.set(tabId, settled)
+    void settled.then(() => {
+      if (opening.get(tabId) === settled) opening.delete(tabId)
+    })
+    return run
+  }
+  /** Until every opening of the tab settled, one started meanwhile included. */
+  async function afterOpening(tabId: string): Promise<void> {
+    for (let pending = opening.get(tabId); pending; pending = opening.get(tabId)) {
+      await pending
+      if (opening.get(tabId) === pending) return
+    }
+  }
   function enterQueue(tabId: string) {
     const ready = queueIngress.get(tabId) ?? Promise.resolve()
     let release!: () => void
@@ -923,7 +960,23 @@ export function createHubChatRelay(opts: {
       if (updates.length < 500) return restored
     }
   }
-  async function invoke(
+  function invoke(
+    target: 'ops' | 'queue',
+    method: string,
+    args: unknown[],
+    operationId?: string
+  ): Promise<unknown> {
+    // Ordered per tab from the moment the call entered (no await before this).
+    if (target === 'ops' && SESSION_OPENING_OPS.has(method))
+      return openSession(tabIdOf(args[0]), () => invokeNow(target, method, args, operationId))
+    if (target === 'ops' && method === 'send') {
+      const tabId = tabIdOf(args[0])
+      if (opening.has(tabId))
+        return afterOpening(tabId).then(() => invokeNow(target, method, args, operationId))
+    }
+    return invokeNow(target, method, args, operationId)
+  }
+  async function invokeNow(
     target: 'ops' | 'queue',
     method: string,
     args: unknown[],
@@ -949,13 +1002,7 @@ export function createHubChatRelay(opts: {
       (target === 'ops' && ['abortAndPop', 'reset', 'remove'].includes(method))
     const ordered = (target === 'queue' && method === 'push') || clearsQueue
     const first = args[0]
-    const entry = ordered
-      ? enterQueue(
-          first && typeof first === 'object' && 'tabId' in first
-            ? String(first.tabId)
-            : String(first)
-        )
-      : undefined
+    const entry = ordered ? enterQueue(tabIdOf(first)) : undefined
     let owner: HubChatOwnership | undefined
     const commandId = operationId ?? randomUUID()
     let admission: QueueAdmission | undefined
@@ -980,10 +1027,7 @@ export function createHubChatRelay(opts: {
         (target === 'ops' && ['kill', 'abortAndPop'].includes(method)) ||
         (target === 'queue' && method === 'clear')
       ) {
-        const tabId =
-          first && typeof first === 'object' && 'tabId' in first
-            ? String(first.tabId)
-            : String(first)
+        const tabId = tabIdOf(first)
         const existing = await ownership.forTab(tabId)
         if (existing?.computerId && opts.chatRuntimeReady?.(existing.computerId) === false) {
           await opts.gate?.(existing.computerId, existing.taskId)
