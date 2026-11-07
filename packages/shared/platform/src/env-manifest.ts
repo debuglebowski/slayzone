@@ -153,6 +153,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // computers with none spawned" contract test).
   SLAYZONE_E2E_NO_COMPUTER: 'infra',
   SLAYZONE_E2E_INSTALL_HOOKS: 'infra',
+  // PLAYWRIGHT-only: the port the desktop app's hub listens on. E2E otherwise takes an
+  // OS-assigned one per launch; a spec that quits and relaunches the app pins it, as
+  // the per-channel fixed port does outside e2e, so the computer's per-hub state
+  // (chat storage, terminal history) is the same hub's across the restart.
+  SLAYZONE_E2E_HUB_PORT: 'infra',
   // PLAYWRIGHT-only: the Convex deployment (host[:port], '' = off) the desktop app's
   // renderer + hub use instead of the build's (app main convex-deployment.ts). Infra:
   // a hub started from a task terminal must not inherit a spec's deployment.

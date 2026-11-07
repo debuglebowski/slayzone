@@ -38,6 +38,7 @@ import {
   ptyResizeParamsSchema,
   ptyDoctorParamsSchema,
   ptyCliVersionParamsSchema,
+  ptyForgetParamsSchema,
   type PtyCliVersionResult,
   type PtyDoctorResult,
   ptySpawnParamsSchema,
@@ -73,6 +74,7 @@ import {
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
 import { createCliVersionProbe } from '../cli-version'
+import { restoredPrefix, type PtyHistory, type PtyHistoryTracker } from '../pty-history'
 import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
@@ -136,6 +138,8 @@ interface PtySession {
   resolveExit: () => void
   replacing?: boolean
   stopping?: Promise<void>
+  /** Keeps a task terminal's output on disk (see pty-history.ts). */
+  history?: PtyHistoryTracker
 }
 
 /**
@@ -167,7 +171,8 @@ interface QueuedSpawn {
 export interface PtyHandlers {
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
-  stopTask(taskId: string): Promise<void>
+  /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
+  stopTask(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
   handlers: HubMethodTable
   /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
@@ -199,6 +204,8 @@ export interface PtyHandlerOptions {
    * but Doctor's binary lookups read `process.env.PATH`, so they do.
    */
   pathReady?: Promise<unknown>
+  /** Where task terminals' output outlives this process. Absent: memory only. */
+  history?: PtyHistory
 }
 
 /**
@@ -236,6 +243,8 @@ export function createPtyHandlers(
   options: PtyHandlerOptions = {}
 ): PtyHandlers {
   const sessions = new Map<string, PtySession>()
+  /** Which task each session id belonged to, for a kill that arrives after its exit. */
+  const taskOfSession = new Map<string, string>()
   /** The hub's terminal theme, as last pushed (`pty.setTheme`); new pipelines start with it. */
   let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
@@ -255,6 +264,10 @@ export function createPtyHandlers(
    * waited is not lost — the hub never sends it again.
    */
   const relayBeforeStart = new Map<string, { spawnId?: string; on: boolean }>()
+  // History a tab deleted while this computer was offline left behind.
+  void options.history?.sweep().catch(() => {
+    // Best-effort: a file it could not remove is swept next start.
+  })
 
   function serializeStart<T>(
     id: string,
@@ -370,6 +383,24 @@ export function createPtyHandlers(
    * same buffering, same seq assignment, same exit handling — differing only in
    * the key it is filed under and (until adopted) the `warm` marker.
    */
+  /** A task terminal's output goes to disk too (never a warm one: no task yet). */
+  function trackHistory(session: PtySession): void {
+    if (!options.history || session.warm || !session.taskId || session.history) return
+    const buffer = session.buffer
+    session.history =
+      options.history.track(session.taskId, session.id, () => buffer.toString()) ?? undefined
+  }
+
+  /** Stop saving a session's output and delete what was saved. */
+  async function forgetHistory(sessionId: string, taskId: string | undefined): Promise<void> {
+    if (!options.history) return
+    const live = sessions.get(sessionId)
+    await live?.history?.cancel()
+    if (live) live.history = undefined
+    const owner = taskId ?? live?.taskId ?? taskOfSession.get(sessionId)
+    if (owner) await options.history.forget(owner, sessionId)
+  }
+
   function spawnSession(
     id: string,
     opts: {
@@ -391,6 +422,7 @@ export function createPtyHandlers(
     }
   ): PtySession {
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
+    if (opts.taskId && !opts.warm) taskOfSession.set(id, opts.taskId)
     const cwd = resolveCwd(opts)
     if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
 
@@ -427,6 +459,7 @@ export function createPtyHandlers(
       ...(opts.spawnId !== undefined ? { spawnId: opts.spawnId } : {})
     }
     sessions.set(id, session)
+    trackHistory(session)
     if (opts.detection && !opts.warm) attachSignals(session, opts.detection)
     if (opts.startupTimeoutMs !== undefined) {
       // Armed at the REAL spawn, on the machine that sees the output — see the
@@ -463,6 +496,7 @@ export function createPtyHandlers(
       const processed = session.signals?.process(data)
       const out = processed ? processed.clean : data
       const seq = buffer.append(out)
+      session.history?.changed()
       // A WARM session buffers but does not stream: the hub has no session to
       // route it to yet, and `pty.warmAdopt` hands the whole buffer over at
       // adopt. Emitting under a `warmId` the hub never registered would be
@@ -557,6 +591,8 @@ export function createPtyHandlers(
     session.signals?.dispose()
     session.deadline?.cancel()
     releaseAdmission(session)
+    // The last of its output, kept for the session's next start.
+    void session.history?.close()
     if (session.replacing) {
       tombstones.add(session.id, {
         spawnId: session.spawnId,
@@ -644,11 +680,22 @@ export function createPtyHandlers(
       if (afterSeq !== undefined) carried.continueAfter(afterSeq)
       if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
     }
+    // A fresh start of a task terminal begins with what it showed last time (the
+    // computer restarted since). Never for a continuing spawn — the hub still shows
+    // that output — nor an agent resume, which reprints its own conversation.
+    let restored: RingBuffer | undefined
+    if (!carried && params.taskId && options.history && !params.detection?.resuming) {
+      const saved = options.history.load(params.taskId, params.sessionId)
+      if (saved) {
+        restored = new RingBuffer(MAX_BUFFER_SIZE)
+        restored.append(restoredPrefix(saved))
+      }
+    }
     const session = spawnSession(params.sessionId, {
       ...params,
       command: shell,
       args,
-      ...(carried ? { buffer: carried } : {})
+      ...(carried ? { buffer: carried } : restored ? { buffer: restored } : {})
     })
     ctx.log('pty spawned', {
       sessionId: params.sessionId,
@@ -914,6 +961,13 @@ export function createPtyHandlers(
     }
   }
 
+  /** The hub deleted a tab: its terminal's saved output goes (live or not). */
+  async function forget(rawParams: unknown): Promise<{ ok: true }> {
+    const params = ptyForgetParamsSchema.parse(rawParams)
+    await forgetHistory(params.sessionId, params.taskId)
+    return { ok: true }
+  }
+
   const cliVersions = createCliVersionProbe()
   /** One agent CLI's version here (see `ptyCliVersionResultSchema`). */
   async function cliVersion(rawParams: unknown): Promise<PtyCliVersionResult> {
@@ -973,6 +1027,8 @@ export function createPtyHandlers(
     delete session.warm
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
+    if (params.taskId) taskOfSession.set(params.sessionId, params.taskId)
+    trackHistory(session)
     releaseAdmission(session)
     if (params.relay !== undefined) session.relay = params.relay
     if (params.detection) {
@@ -1071,14 +1127,21 @@ export function createPtyHandlers(
       cancelQueued(params.sessionId, 'killed')
       // A generation-scoped kill cancels only that queued start. Legacy
       // session-wide kills also stop any older process still running.
-      if (live && params.spawnId === undefined) await stopPty(live, params.signal)
+      if (live && params.spawnId === undefined) {
+        await forgetHistory(params.sessionId, live.taskId)
+        await stopPty(live, params.signal)
+      }
       return { ok: true }
     }
     if (!live || (params.spawnId !== undefined && live.spawnId !== params.spawnId)) {
-      // Idempotent: the session may already have exited (network race).
+      // Idempotent: the session may already have exited (network race). Its saved
+      // output goes all the same: the hub ended the session (closed, restarted).
+      if (!live) await forgetHistory(params.sessionId, undefined)
       ctx.log('pty kill on unknown session', { sessionId: params.sessionId })
       return { ok: true }
     }
+    // The hub ended it (a closed tab, a restart): its output goes, as in memory.
+    await forgetHistory(params.sessionId, live.taskId)
     await stopPty(live, params.signal)
     return { ok: true }
   }
@@ -1219,6 +1282,7 @@ export function createPtyHandlers(
     if (!buffer) return { clearedSeq: -1 }
     const clearedSeq = buffer.getCurrentSeq()
     buffer.clear()
+    sessions.get(params.sessionId)?.history?.changed()
     return { clearedSeq }
   }
 
@@ -1244,6 +1308,9 @@ export function createPtyHandlers(
   function disposeAll(): void {
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
+      // Output still waiting for its throttled write is saved before the process goes.
+      session.history?.flushSync()
+      void session.history?.cancel()
       session.revokeCli?.()
       session.signals?.dispose()
       session.deadline?.cancel()
@@ -1273,6 +1340,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
     [HubToComputerMethods.ptyDoctor]: doctor,
     [HubToComputerMethods.ptyCliVersion]: cliVersion,
+    [HubToComputerMethods.ptyForget]: forget,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,
@@ -1287,17 +1355,27 @@ export function createPtyHandlers(
       [...sessions.values(), ...queued.values()].some((s) =>
         belongsToTask(s.id, taskId, s.taskId)
       ) || [...starts.entries()].some(([id, s]) => belongsToTask(id, taskId, s.taskId)),
-    async stopTask(taskId) {
+    async stopTask(taskId, state) {
       const waiting = [...starts.entries()].filter(([id, s]) => belongsToTask(id, taskId, s.taskId))
       for (const [, s] of waiting) s.cancelled = true
       for (const s of [...queued.values()])
         if (belongsToTask(s.id, taskId, s.taskId)) cancelQueued(s.id, 'task-paused')
+      // Purged (not trashed): its terminals' saved output goes with it — stopped
+      // first, so their exits write nothing back.
+      const purge = state === 'deleted' && options.history
+      if (purge)
+        for (const s of sessions.values())
+          if (belongsToTask(s.id, taskId, s.taskId)) {
+            await s.history?.cancel()
+            s.history = undefined
+          }
       await Promise.all(
         [...sessions.values()]
           .filter((s) => belongsToTask(s.id, taskId, s.taskId))
           .map((s) => stopPty(s))
       )
       await Promise.allSettled(waiting.map(([, s]) => s.promise))
+      if (purge) await options.history?.forgetTask(taskId)
     },
     handlers,
     disposeAll,

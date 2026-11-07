@@ -524,6 +524,8 @@ export const HubToComputerMethods = {
   ptyDoctor: 'pty.doctor',
   /** Version of one agent CLI as a spawn here would run it — gates version-dependent launch flags. */
   ptyCliVersion: 'pty.cliVersion',
+  /** A tab was deleted: forget its terminal's saved output (see computer pty-history). */
+  ptyForget: 'pty.forget',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -895,6 +897,19 @@ export const ptyCliVersionResultSchema = z.object({
   version: z.string().nullable()
 })
 export type PtyCliVersionResult = z.infer<typeof ptyCliVersionResultSchema>
+
+/**
+ * `pty.forget` — the hub deleted the tab `sessionId` runs in: the computer deletes
+ * the output it saved for it (live or not — a tab deleted after a restart has no
+ * process). Best-effort; a computer offline then sweeps it by age.
+ */
+export const ptyForgetParamsSchema = z
+  .object({
+    sessionId: z.string().min(1).max(512),
+    taskId: z.string().min(1).max(128)
+  })
+  .strict()
+export type PtyForgetParams = z.infer<typeof ptyForgetParamsSchema>
 
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),

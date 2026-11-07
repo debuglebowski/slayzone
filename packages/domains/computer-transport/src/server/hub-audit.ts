@@ -96,6 +96,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.doctor': null,
   // Runs `<binary> --version` on the computer; starts no session, changes nothing.
   'pty.cliVersion': null,
+  // Deletes a deleted tab's saved scrollback on the computer — housekeeping the
+  // hub does for the user's own delete, which is audited where it happened.
+  'pty.forget': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
   // AI-config files: its writes (instructions, skills, MCP config) are audited, its

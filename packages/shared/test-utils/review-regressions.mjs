@@ -625,6 +625,17 @@ export const REGRESSIONS = [
     id: 'QA-usage',
     what: "a codex task's usage is attributed to it on every refresh, including turns parsed after the file's session_meta",
     files: [`${P}domains/usage-analytics/src/server/codex-usage-attribution.test.ts`]
+  },
+  // ── post-merge QA (task 964073b0, row 7a → task 5decc957) ──
+  {
+    round: 16,
+    id: 'QA-7a',
+    what: "a task terminal's output survives an app/computer restart (old output, divider, new shell); not for an agent resume or a continuing spawn; gone with a kill, a deleted tab or a purged task",
+    files: [
+      `${computer}handlers/pty-history.test.ts`,
+      `${computer}handlers/chat-runtime.test.ts`,
+      `${P}domains/task-terminals/src/server/task-terminals-router.test.ts`
+    ]
   }
 ]
 
