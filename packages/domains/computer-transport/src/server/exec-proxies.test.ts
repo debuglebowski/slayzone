@@ -1616,6 +1616,38 @@ describe('createRoutingPtyBackend', () => {
     expect(exit).toBeNull()
   })
 
+  it('a spawn sent before the computer ever connected is started on its first hello', async () => {
+    // A restarted app opens its task before the local computer's first hello: the
+    // spawn waits for it. With no earlier connection this hub saw, nothing can have
+    // reached a previous process, so this is no "reconnected as a different
+    // process" (which killed it: e2e terminal/108, exit 1 computer-restarted).
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => {
+      throw new RpcError(
+        ComputerTransportErrorCodes.unknownComputer,
+        "computer 'computer-1' is not connected"
+      )
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (s) => s.computerId ?? null
+    })
+    const handle = backend.spawn(ptySpec()) as PtyHandle
+    let exit: PtyExitEvent | null = null
+    handle.onExit((e) => {
+      exit = e
+    })
+    await settle()
+    expect(exit).toBeNull()
+
+    gateway.onMethod('pty.list', () => ({ sessions: [], exited: [] }))
+    gateway.onMethod('pty.spawn', () => ({ pid: 12 }))
+    connect(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(handle.pid).toBe(12))
+    expect(exit).toBeNull()
+  })
+
   it('a REAL refusal from the computer still fails the spawn', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => {

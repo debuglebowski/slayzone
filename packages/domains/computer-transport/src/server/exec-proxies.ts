@@ -769,11 +769,32 @@ function createDetachController<E extends DetachableEntry>(
     prune()
     const previousEpoch = epochByComputer.get(computerId)
     epochByComputer.set(computerId, epoch)
-    const detached = liveEntries(computerId).filter((o) => o.entry.detached)
+    let detached = liveEntries(computerId).filter((o) => o.entry.detached)
     // First contact with this computer: nothing was ever detached, and the sweep
     // below has no baseline to sweep against.
     if (previousEpoch === undefined && detached.length === 0) return
     clearGrace(computerId)
+
+    // First contact, yet spawns are waiting: they were sent while this hub had never
+    // reached the computer (a restarted app opening its task before the computer's
+    // first hello). No earlier process of it can hold them, so this is no
+    // "reconnected as a different process" — start them now, the same attempt.
+    if (previousEpoch === undefined) {
+      const waiting = detached.filter((o) => o.entry.pendingSpawn && !o.entry.disposed)
+      for (const o of waiting) {
+        o.entry.detached = false
+        o.entry.pendingSpawn?.resend()
+      }
+      if (waiting.length > 0) {
+        record('computer.sessions_resent', 'info', waiting, computerId, {
+          message:
+            `Computer connected for the first time — ${String(waiting.length)} ${kind} ` +
+            'session(s) waiting for it are starting now.'
+        })
+      }
+      detached = detached.filter((o) => !waiting.includes(o))
+      if (detached.length === 0) return
+    }
 
     // A missing epoch on EITHER side proves nothing — an old computer that cannot
     // report one, or a hub that never saw the pre-disconnect value. Absence is
