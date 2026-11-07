@@ -909,21 +909,60 @@ describe('computer-owned session lifecycle', () => {
   })
 
   it('startup deadline: any output clears it for good', async () => {
+    vi.useFakeTimers()
     const { notifies, ctx } = makeCtx()
-    const pty = createPtyHandlers(ctx)
-
-    await pty.handlers['pty.spawn']({
-      sessionId: 'talks',
-      spawnId: 'attempt-1',
-      command: 'sh',
-      args: ['-c', 'printf ready; exec sleep 30'],
-      cwd: process.cwd(),
-      startupTimeoutMs: 300
+    const child = controlledPty(9401)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
     })
-    await new Promise((r) => setTimeout(r, 900))
+    try {
+      await pty.handlers['pty.spawn']({
+        sessionId: 'talks',
+        spawnId: 'attempt-1',
+        command: 'sh',
+        args: ['-c', 'printf ready; exec sleep 30'],
+        cwd: process.cwd(),
+        startupTimeoutMs: 300
+      })
+      await vi.advanceTimersByTimeAsync(100)
+      child.emit('ready')
+      // Three times the deadline after the output: never judged hung.
+      await vi.advanceTimersByTimeAsync(900)
+      expect(child.proc.kill).not.toHaveBeenCalled()
+      expect(exitOf(notifies, 'talks')).toBeUndefined()
+    } finally {
+      child.exit()
+      pty.disposeAll()
+    }
+  })
 
-    expect(exitOf(notifies, 'talks')).toBeUndefined()
-    pty.disposeAll()
+  it('startup deadline: any output clears it for good (real pty)', async () => {
+    const { notifies, until, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    try {
+      await pty.handlers['pty.spawn']({
+        sessionId: 'talks',
+        spawnId: 'attempt-1',
+        command: 'sh',
+        args: ['-c', 'printf ready; exec cat'],
+        cwd: process.cwd(),
+        // Generous on purpose: this proves the real wiring (output marks the
+        // deadline); the timing is proven above with a controlled pty.
+        startupTimeoutMs: 60_000
+      })
+      await until(() =>
+        dataParams(notifies)
+          .map((d) => d.data)
+          .join('')
+          .includes('ready')
+      )
+      // A deadline kill would stamp the exit 'startup-timeout'; ours does not.
+      await pty.handlers['pty.kill']({ sessionId: 'talks' })
+      await until(() => exitOf(notifies, 'talks') !== undefined)
+      expect(exitOf(notifies, 'talks')!.reason).toBeUndefined()
+    } finally {
+      pty.disposeAll()
+    }
   })
 
   // P2 (product check): "under load, the startup deadline can fire before the
