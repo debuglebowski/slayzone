@@ -33,7 +33,10 @@ export async function watchTexts(page: Page, texts: string[]): Promise<void> {
   }, texts)
 }
 
-/** When `text` first appeared (wall ms), waiting up to `timeoutMs`. */
+/**
+ * When `text` first appeared (wall ms), waiting up to `timeoutMs`. Never shown: the
+ * failure carries what the chat shows instead (e.g. why a message was not sent).
+ */
 export async function seenAt(page: Page, text: string, timeoutMs = 30_000): Promise<number> {
   let at: number | undefined
   await expect
@@ -51,6 +54,18 @@ export async function seenAt(page: Page, text: string, timeoutMs = 30_000): Prom
       { timeout: timeoutMs, intervals: [50] }
     )
     .toBe(true)
+    .catch(async (error: unknown) => {
+      const shown = await page
+        .evaluate(
+          () =>
+            (document.querySelector('[data-chat-panel]:not([hidden])') as HTMLElement | null)
+              ?.innerText ?? '(no chat panel)'
+        )
+        .catch(() => '(page gone)')
+      throw new Error(`"${text}" never shown; the chat shows: ${JSON.stringify(shown)}`, {
+        cause: error
+      })
+    })
   return at as number
 }
 
@@ -74,8 +89,8 @@ export async function seedBusyWorkspace(
   db: { run(sql: string, params?: unknown[]): Promise<void> },
   repo: string,
   skills: number
-): Promise<void> {
-  if (skills <= 0) return
+): Promise<BusyProject | null> {
+  if (skills <= 0) return null
   const s = seed(page)
   const project = await s.createProject({ name: 'Busy workspace', color: '#a3e635', path: repo })
   await db.run('UPDATE projects SET starred = 1 WHERE id = ?', [project.id])
@@ -107,6 +122,48 @@ export async function seedBusyWorkspace(
       window as unknown as { __slayzone_tabStore: { setState(s: object): void } }
     ).__slayzone_tabStore.setState({ sidebarView: 'tree' })
   })
+  return { projectId: project.id, projectPath: repo }
+}
+
+export interface BusyProject {
+  projectId: string
+  projectPath: string
+}
+
+/**
+ * Artificial hub→computer RPC load (CHAT_START_RPC_LOAD=N): N stale-skill counts of
+ * the busy project in flight at all times — each one RPC per linked skill file on its
+ * computer — until the returned stop runs. What a busy workspace's sidebar did on
+ * every task change before the stale-skill fix; keeps the chat's own computer calls
+ * queued behind others, the condition that let a send overtake its tab's hydrate.
+ */
+export async function startRpcLoad(
+  page: Page,
+  project: BusyProject | null,
+  concurrency: number
+): Promise<() => Promise<void>> {
+  if (!project || concurrency <= 0) return async () => undefined
+  await page.evaluate(
+    ({ project, concurrency }) => {
+      const w = window as unknown as { __chatStartLoad?: { stop: boolean } }
+      const load = { stop: false }
+      w.__chatStartLoad = load
+      const c = window.getTrpcVanillaClient()
+      const loop = async (): Promise<void> => {
+        while (!load.stop) {
+          await c.aiConfig.getProjectsStaleSkillCounts.query([project]).catch(() => undefined)
+        }
+      }
+      for (let i = 0; i < concurrency; i++) void loop()
+    },
+    { project, concurrency }
+  )
+  return async () => {
+    await page.evaluate(() => {
+      const w = window as unknown as { __chatStartLoad?: { stop: boolean } }
+      if (w.__chatStartLoad) w.__chatStartLoad.stop = true
+    })
+  }
 }
 
 export interface ChatStartSample {

@@ -14,17 +14,23 @@ import {
   seedBusyWorkspace,
   seenAt,
   sendTimed,
-  watchTexts
+  startRpcLoad,
+  watchTexts,
+  type BusyProject
 } from '../fixtures/chat-start-measure'
 
 const WARM_RUNS = Number(process.env.CHAT_START_WARM ?? 4)
 const SKILLS = Number(process.env.CHAT_START_SKILLS ?? 0)
+// Stale-skill counts kept in flight during each chat start (needs CHAT_START_SKILLS).
+const RPC_LOAD = Number(process.env.CHAT_START_RPC_LOAD ?? 0)
+let busy: BusyProject | null = null
+let stopLoad: (() => Promise<void>) | null = null
 
 test.describe('chat start latency (Claude)', () => {
   test.beforeAll(async ({ mainWindow, electronApp }) => {
     test.setTimeout(180_000)
     await resetApp(mainWindow)
-    await seedBusyWorkspace(
+    busy = await seedBusyWorkspace(
       mainWindow,
       chatDb(electronApp),
       createIsolatedGitRepo(`busy-${Date.now()}`),
@@ -32,12 +38,21 @@ test.describe('chat start latency (Claude)', () => {
     )
   })
 
+  test.afterEach(async () => {
+    await stopLoad?.()
+    stopLoad = null
+  })
+
   for (let i = 0; i <= WARM_RUNS; i++) {
     const path = i === 0 ? 'cold' : 'warm'
-    test(`${path} #${i}: send on a new chat → agent → first reply`, async ({ chat }) => {
+    test(`${path} #${i}: send on a new chat → agent → first reply`, async ({
+      chat,
+      mainWindow
+    }) => {
       test.setTimeout(90_000)
       const answer = `reply number ${i} ok`
       const prompt = `prompt number ${i}`
+      stopLoad = await startRpcLoad(mainWindow, busy, RPC_LOAD)
       const open0 = Date.now()
       const t = await chat.openTask({
         title: `Chat start ${i}`,
