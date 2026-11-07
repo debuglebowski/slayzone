@@ -23,7 +23,8 @@ import {
   prioritizePty,
   setDatabase,
   ptyEvents,
-  getState
+  getState,
+  onPtyInputSubmit
 } from './pty-manager'
 import {
   setPtyBackend,
@@ -864,4 +865,37 @@ test('a session stays starting until its first output, then settles to idle', as
   killPty(sid)
   handle.emitExit(-2)
   setPtyBackend(null)
+})
+
+// R1 (docs/direct-link.md): a client's write carries an id. On a session a computer
+// runs, the hub forwards the id and leaves the input facts to the computer, which
+// applies the id once and reports its facts once — so a late direct write retried
+// through the hub is neither typed nor counted twice.
+test('a client write with an id is forwarded with it; the computer, not the hub, reports its submit', async () => {
+  const sid = 'write-id-task:write-id-task'
+  const opts: unknown[] = []
+  const handle = { ...makeFakeHandle(), computerId: 'c1' } as FakeHandle & { computerId: string }
+  handle.write = function (d: string, o?: unknown) {
+    this.written.push(d)
+    opts.push(o)
+  }
+  setPtyBackend({ spawn: () => handle })
+  await createPty({ win: fakeWin, sessionId: sid, cwd: '/tmp', mode: 'terminal', type: 'terminal' })
+  const submits: string[] = []
+  const off = onPtyInputSubmit((_s, _t, line) => submits.push(line))
+  try {
+    writePty(sid, 'ls\r', 'w-1')
+    expect(handle.written).toEqual(['ls\r'])
+    expect(opts).toEqual([{ writeId: 'w-1' }])
+    expect(submits).toEqual([])
+    // Without an id (an older client, or the hub itself): it gets one, and the
+    // computer analyses it in the same buffer and reports its facts — never the hub.
+    writePty(sid, 'pwd\r')
+    expect(opts.at(-1)).toEqual({ writeId: expect.stringMatching(/^hub-/) })
+    expect(submits).toEqual([])
+  } finally {
+    off()
+    killPty(sid)
+    setPtyBackend(null)
+  }
 })

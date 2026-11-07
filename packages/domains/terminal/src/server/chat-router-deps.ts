@@ -64,6 +64,12 @@ export type ChatDeps = {
   availability?(tabId: string): Promise<ChatAvailability>
   events: TypedEmitter<ChatEventMap>
   queueEvents: TypedEmitter<ChatQueueEventMap>
+  /**
+   * A client watches these tabs' events through the hub (or all): the hub then asks
+   * their computers for full events (docs/direct-link.md). Returns unwatch. Absent:
+   * computers relay everything, as before.
+   */
+  watchEvents?(tabIds: readonly string[] | 'all'): () => void
 }
 
 let chatDeps: ChatDeps | null = null

@@ -1,3 +1,5 @@
+import { attachDirectPty } from '@slayzone/transport/direct-client'
+import { directPtyFor, noteDirectPtyFailure } from './direct-pty'
 import type { TerminalState } from '@slayzone/terminal-contracts'
 
 /** What a terminal needs when it (re)attaches to its session. */
@@ -91,6 +93,22 @@ export async function attachPty(
   afterSeq: number
 ): Promise<PtyAttachResult> {
   if (consumeUnspawned(sessionId)) return { exists: false, state: null, buffer: null }
+  // The session's computer reachable directly (docs/direct-link.md): its buffer from
+  // there, and the state — a hub record — from the hub, in parallel.
+  const direct = directPtyFor(sessionId)
+  if (direct) {
+    const [attached, state] = await Promise.all([
+      // Paged: a full scrollback is larger than one WebRTC message.
+      // Each call has its own deadline: a half-open socket fails it in seconds.
+      attachDirectPty(direct, sessionId, afterSeq).catch((err: unknown) => {
+        noteDirectPtyFailure(sessionId, err)
+        return null
+      }),
+      client.pty.getState.query({ sessionId }).catch(() => null)
+    ])
+    if (attached)
+      return { exists: attached.exists, state, buffer: attached.buffer, size: attached.size }
+  }
   if (!attachUnsupported) {
     try {
       return await client.pty.attach.query({ sessionId, afterSeq })

@@ -242,3 +242,112 @@ test('lifecycle fences native starts before awaiting their stop acknowledgement'
   expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
   expect(() => h.assertTaskActive('other')).not.toThrow()
 })
+
+test('direct link: history reads under the granted epoch; a stale epoch is refused by the computer itself', async () => {
+  const { h } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  try {
+    vi.stubEnv('PLAYWRIGHT', '1')
+    await h.request({
+      kind: 'test.seedEvents',
+      route: { id: 'store', epoch: 1 },
+      fromSeq: 1,
+      events: [{ kind: 'assistant-text', messageId: 'a', text: 'direct marker' }]
+    })
+  } finally {
+    vi.unstubAllEnvs()
+  }
+  // The same answer the hub relays, for each direct read.
+  for (const [method, args] of [
+    ['getReplay', ['tab', -1]],
+    ['searchTimeline', ['tab', 'direct marker']]
+  ] as const) {
+    const relayed = await h.request({
+      kind: 'invoke',
+      value: { route: { id: 'store', epoch: 1 }, target: 'ops', method, args: [...args] }
+    })
+    expect(await h.direct.read('tab', 1, method, [...args])).toEqual(relayed)
+  }
+
+  await expect(h.direct.read('tab', 2, 'getReplay', ['tab', -1])).rejects.toThrow(/epoch/i)
+  await expect(h.direct.read('foreign', 1, 'getReplay', ['foreign', -1])).rejects.toThrow()
+  await expect(
+    h.direct.read('tab', 1, 'saveTabDraft' as never, ['tab', { text: 'x', attachments: [] }])
+  ).rejects.toThrow(/not a direct chat read/)
+  expect(
+    h.direct.watch(
+      'tab',
+      2,
+      () => undefined,
+      () => undefined
+    )
+  ).toBeNull()
+  const stop = h.direct.watch(
+    'tab',
+    1,
+    () => undefined,
+    () => undefined
+  )
+  expect(stop).not.toBeNull()
+  stop?.()
+})
+
+test('direct link: simple commands run under the granted epoch and tell the hub to drain metadata', async () => {
+  const { h, notifications } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  notifications.length = 0
+  expect(
+    await h.direct.command(
+      'tab',
+      1,
+      'saveTabDraft',
+      ['tab', { text: 'direct draft', attachments: [] }],
+      'op-1'
+    )
+  ).toEqual({ rev: 1 })
+  // The same operation again is the same receipt, not a second write.
+  expect(
+    await h.direct.command(
+      'tab',
+      1,
+      'saveTabDraft',
+      ['tab', { text: 'direct draft', attachments: [] }],
+      'op-1'
+    )
+  ).toEqual({ rev: 1 })
+  expect(
+    notifications.filter((n) => (n as { p: { name?: string } }).p?.name === 'chat-direct-write')
+  ).toEqual([
+    {
+      m: 'event',
+      p: {
+        name: 'chat-direct-write',
+        payload: { tabId: 'tab', conversationId: 'store', epoch: 1, method: 'saveTabDraft' }
+      }
+    },
+    {
+      m: 'event',
+      p: {
+        name: 'chat-direct-write',
+        payload: { tabId: 'tab', conversationId: 'store', epoch: 1, method: 'saveTabDraft' }
+      }
+    }
+  ])
+  expect(
+    await h.request({
+      kind: 'invoke',
+      value: {
+        route: { id: 'store', epoch: 1 },
+        target: 'ops',
+        method: 'getTabState',
+        args: ['tab']
+      }
+    })
+  ).toMatchObject({ draft: { text: 'direct draft' } })
+  await expect(
+    h.direct.command('tab', 2, 'saveTabScroll', ['tab', { atBottom: true }], 'op-2')
+  ).rejects.toThrow(/epoch/i)
+  await expect(h.direct.command('tab', 1, 'send' as never, ['tab', {}], 'op-3')).rejects.toThrow(
+    /not a direct chat command/
+  )
+})

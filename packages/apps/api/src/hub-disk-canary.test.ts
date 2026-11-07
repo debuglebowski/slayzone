@@ -26,41 +26,15 @@ import type * as FsNs from 'node:fs'
 import type * as FsPromisesNs from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { afterAll, expect, test, vi } from 'vitest'
+import {
+  fillInput,
+  maxUnion,
+  watchFsModule,
+  type FillMode
+} from '../../../shared/test-utils/canary-inputs'
 
 // ── fs, watched ───────────────────────────────────────────────────────────────
 
-/** fs functions that read, list or write CONTENT. stat/exists/realpath decide access
- *  (access.ts) and read nothing, so they are not touches. */
-const CONTENT_FNS = new Set([
-  'readFile',
-  'readFileSync',
-  'createReadStream',
-  'createWriteStream',
-  'open',
-  'openSync',
-  'copyFile',
-  'copyFileSync',
-  'cp',
-  'cpSync',
-  'writeFile',
-  'writeFileSync',
-  'appendFile',
-  'appendFileSync',
-  'rename',
-  'renameSync',
-  'unlink',
-  'unlinkSync',
-  'rm',
-  'rmSync',
-  'readdir',
-  'readdirSync',
-  'opendir',
-  'opendirSync',
-  'symlink',
-  'symlinkSync',
-  'link',
-  'linkSync'
-])
 const touches: Array<{ fn: string; arg: string; route: string; stack: string }> = []
 const state = { route: '', canaries: [] as string[] }
 const isCanary = (a: unknown): string | null => {
@@ -69,30 +43,22 @@ const isCanary = (a: unknown): string | null => {
   return state.canaries.some((c) => s === c || s.startsWith(`${c}/`)) ? s : null
 }
 function watch<T extends object>(mod: T): T {
-  const out: Record<string, unknown> = { ...(mod as Record<string, unknown>) }
-  for (const [name, fn] of Object.entries(mod)) {
-    if (typeof fn !== 'function' || !CONTENT_FNS.has(name)) continue
-    out[name] = (...args: unknown[]) => {
-      for (const a of args) {
-        const hit = isCanary(a)
-        if (hit && state.route)
-          touches.push({
-            fn: name,
-            arg: hit,
-            route: state.route,
-            // Where the read came from: a call that got past the gate earlier and
-            // changed what B owns shows up under a later route's name otherwise.
-            stack: (new Error().stack ?? '')
-              .split('\n')
-              .filter((l) => l.includes('/src/') && !l.includes('hub-disk-canary'))
-              .slice(0, 6)
-              .join(' | ')
-          })
-      }
-      return (fn as (...a: unknown[]) => unknown).apply(mod, args)
-    }
-  }
-  return out as T
+  return watchFsModule(mod, (fn, a) => {
+    const hit = isCanary(a)
+    if (hit && state.route)
+      touches.push({
+        fn,
+        arg: hit,
+        route: state.route,
+        // Where the read came from: a call that got past the gate earlier and
+        // changed what B owns shows up under a later route's name otherwise.
+        stack: (new Error().stack ?? '')
+          .split('\n')
+          .filter((l) => l.includes('/src/') && !l.includes('hub-disk-canary'))
+          .slice(0, 6)
+          .join(' | ')
+      })
+  })
 }
 vi.mock('node:fs', async (orig) => {
   const m = await orig<typeof FsNs>()
@@ -265,9 +231,6 @@ const PATH_KEYS = [
   'source_path',
   'file_path'
 ]
-const isPathKey = (k: string): boolean =>
-  /(^path$|^paths$|Paths?$|Dir$|^cwd$|_path$|_dir$|^dir$)/.test(k) && !/Id$/.test(k)
-
 /** A value for a field that is not a path: B's own ids, so id checks let it through. */
 function idFor(key: string): unknown {
   if (/taskId$|^task_id$/.test(key)) return 'tB'
@@ -287,13 +250,6 @@ function ownIdFor(route: string): string {
   if (/task/i.test(route)) return 'tB'
   return 'x'
 }
-/** An id field: kept B's own in every mode, so id checks let the call through. */
-const isIdKey = (k: string): boolean => /(^id$|Id$|_id$|Ids$)/.test(k)
-
-type Def = { type: string; [k: string]: unknown }
-const defOf = (s: unknown): Def | null =>
-  ((s as { _zod?: { def?: Def } })?._zod?.def ?? null) as Def | null
-
 function opaque(canary: string): Record<string, unknown> {
   const o: Record<string, unknown> = {
     taskId: 'tB',
@@ -307,86 +263,9 @@ function opaque(canary: string): Record<string, unknown> {
   return o
 }
 
-/** Which leaves get the canary, and which option of every union is taken. */
-interface FillMode {
-  /** `paths`: path-like fields only; `all`: every string leaf but ids. */
-  readonly leaves: 'paths' | 'all'
-  readonly union: number
-}
 let mode: FillMode = { leaves: 'paths', union: 0 }
-
-/** Most options any union in `schema` has (each one is tried). */
-function maxUnion(schema: unknown, depth = 0): number {
-  const def = defOf(schema)
-  if (!def || depth > 8) return 1
-  const kids: unknown[] = []
-  if (def.type === 'object') kids.push(...Object.values(def.shape as Record<string, unknown>))
-  for (const k of ['innerType', 'in', 'element', 'left', 'right'] as const)
-    if (def[k]) kids.push(def[k])
-  if (def.type === 'tuple') kids.push(...(def.items as unknown[]))
-  let n = def.type === 'union' ? (def.options as unknown[]).length : 1
-  if (def.type === 'union') kids.push(...(def.options as unknown[]))
-  for (const k of kids) n = Math.max(n, maxUnion(k, depth + 1))
-  return Math.min(n, 6)
-}
-
-/** A value for `schema` with every path-like field (or string leaf) set to `canary`. */
-function fill(schema: unknown, canary: string, key = '', depth = 0): unknown {
-  const def = defOf(schema)
-  if (!def || depth > 8) return opaque(canary)
-  switch (def.type) {
-    case 'object': {
-      const shape = def.shape as Record<string, unknown>
-      const o: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(shape)) o[k] = fill(v, canary, k, depth + 1)
-      return o
-    }
-    case 'optional':
-    case 'nullable':
-    case 'default':
-    case 'prefault':
-    case 'readonly':
-    case 'nonoptional':
-    case 'catch':
-      return fill(def.innerType, canary, key, depth + 1)
-    case 'pipe':
-      return fill(def.in, canary, key, depth + 1)
-    case 'lazy':
-      return fill((def.getter as () => unknown)(), canary, key, depth + 1)
-    case 'array':
-      return [fill(def.element, canary, key, depth + 1)]
-    case 'tuple':
-      return (def.items as unknown[]).map((i) => fill(i, canary, key, depth + 1))
-    case 'union': {
-      const options = def.options as unknown[]
-      return fill(options[mode.union % options.length], canary, key, depth + 1)
-    }
-    case 'intersection':
-      return {
-        ...(fill(def.left, canary, key, depth + 1) as object),
-        ...(fill(def.right, canary, key, depth + 1) as object)
-      }
-    case 'string':
-      if (isPathKey(key)) return canary
-      return mode.leaves === 'all' && !isIdKey(key) ? canary : idFor(key)
-    case 'number':
-    case 'int':
-      return 0
-    case 'boolean':
-      return false
-    case 'enum':
-      return Object.values(def.entries as Record<string, unknown>)[0]
-    case 'literal':
-      return (def.values as unknown[])[0]
-    case 'record':
-      return Object.fromEntries(PATH_KEYS.map((k) => [k, canary]))
-    case 'null':
-      return null
-    default:
-      // unknown / any / custom: it takes anything — so every path key there is.
-      return opaque(canary)
-  }
-}
+const fillOpts = { idFor, opaque, pathKeys: PATH_KEYS }
+const fill = (schema: unknown, canary: string): unknown => fillInput(schema, canary, mode, fillOpts)
 
 const withTimeout = (p: Promise<unknown>, ms = 3_000) =>
   Promise.race([p, new Promise((r) => setTimeout(r, ms))]).catch(() => undefined)

@@ -19,6 +19,9 @@ import type * as nodePty from 'node-pty'
 import type { ComputerConfig } from '../config'
 import { createPtyHandlers } from './pty'
 import { createPtyHistory, PTY_HISTORY_DIVIDER_TEXT } from '../pty-history'
+import type { DirectBuffer } from '@slayzone/transport/direct'
+import { DIRECT_RTC_MAX_MESSAGE_CHARS } from '../../../../shared/transport/src/direct/rtc-channel'
+import { DIRECT_BUFFER_PAGE_CHARS } from '../../../../shared/transport/src/client/direct-pty-read'
 
 const TASK = '5decc957-277f-4e1e-82a7-02fd3668df54'
 const TAB = '3d5848be-0000-4000-8000-000000000001'
@@ -232,5 +235,67 @@ describe('task terminal history across a computer restart', () => {
     utimesSync(join(dir, TASK, file), old, old)
     await createPtyHistory({ dir, flushMs: 20 }).sweep()
     expect(existsSync(join(dir, TASK))).toBe(false)
+  })
+})
+
+describe('a restored terminal over the direct link (docs/direct-link.md)', () => {
+  it('attached directly after a restart: restored output first, once, then live output once, every page within the message cap', async () => {
+    const dir = historyDir()
+    const before = computer(dir)
+    await before.spawn()
+    // A big scrollback full of escapes: its serialised size is several times its length.
+    const line = (i: number) =>
+      `\x1b[32m${String(i).padStart(6, '0')}${'\x1b[1m\x1b[0m'.repeat(8)}\r\n`
+    for (let i = 0; i < 9_000; i++) before.child.out(line(i))
+    await settle()
+    before.pty.disposeAll()
+
+    const after = computer(dir)
+    await after.spawn()
+    after.child.out('$ LIVE_BEFORE_ATTACH\r\n')
+    const attach = async (afterSeq: number) => {
+      const pages: DirectBuffer[] = []
+      let page = after.pty.direct.attach(SESSION, afterSeq, DIRECT_BUFFER_PAGE_CHARS).buffer
+      pages.push(page)
+      while (page.more) {
+        page = after.pty.direct.getBufferSince(
+          SESSION,
+          page.chunks.at(-1)?.seq ?? afterSeq,
+          DIRECT_BUFFER_PAGE_CHARS
+        )
+        pages.push(page)
+      }
+      return pages
+    }
+    const pages = await attach(-1)
+    // Each page fits one direct message (WebRTC caps a message at 1 MiB).
+    for (const p of pages)
+      expect(JSON.stringify(p).length).toBeLessThan(DIRECT_RTC_MAX_MESSAGE_CHARS)
+    const chunks = pages.flatMap((p) => p.chunks)
+    chunks.forEach((c, i) => expect(c.seq).toBe(i === 0 ? chunks[0]!.seq : chunks[i - 1]!.seq + 1))
+    const text = (pages[0]?.prelude ?? '') + chunks.map((c) => c.data).join('')
+    const last = line(8_999)
+    expect(text.split(last).length - 1).toBe(1)
+    expect(text.split(PTY_HISTORY_DIVIDER_TEXT).length - 1).toBe(1)
+    expect(text.indexOf(PTY_HISTORY_DIVIDER_TEXT)).toBeGreaterThan(text.indexOf(last))
+    expect(text.indexOf('LIVE_BEFORE_ATTACH')).toBeGreaterThan(
+      text.indexOf(PTY_HISTORY_DIVIDER_TEXT)
+    )
+
+    // Live output after the attach reaches the direct watcher once, after it.
+    const live: Array<{ seq: number; data: string }> = []
+    const stop = after.pty.direct.watch(
+      SESSION,
+      (c) => live.push(c),
+      () => undefined
+    )
+    after.child.out('LIVE_AFTER_ATTACH\r\n')
+    expect(live.map((c) => c.data)).toEqual(['LIVE_AFTER_ATTACH\r\n'])
+    expect(live[0]?.seq).toBe((chunks.at(-1)?.seq ?? -1) + 1)
+    // A backfill from the last seq read finds only that.
+    const since = after.pty.direct.getBufferSince(SESSION, chunks.at(-1)!.seq)
+    expect(since.chunks.map((c) => c.data)).toEqual(['LIVE_AFTER_ATTACH\r\n'])
+    stop?.()
+    after.pty.disposeAll()
   })
 })

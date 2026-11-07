@@ -83,6 +83,20 @@ export interface ElectronBootstrapApp {
     /** How the hub signs people in (`/health` switches). Undefined on an older hub. */
     signIn?: { sso: boolean; password: boolean }
   }>
+  /**
+   * Direct link (docs/direct-link.md): may this document open a socket to a
+   * computer's listener at `address`, issued by hub `hubId`, now — confirmed by
+   * that hub, allowed by the document's CSP, and reached by the main process's HTTP
+   * probe? `hubId` is a registry id, or `DIRECT_LINK_DEFAULT_HUB_ID`
+   * (`@slayzone/platform/direct-link`) outside a hub scope. Optional: an older or
+   * non-Electron host has none.
+   */
+  prepareDirectLink?: (
+    address: string,
+    hubId: string
+  ) => Promise<
+    { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
+  >
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

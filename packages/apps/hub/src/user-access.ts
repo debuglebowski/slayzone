@@ -58,6 +58,8 @@ export function createUserAccessRevoker(deps: {
   /** Late-bound: the gateway exists once the async computer init has run. */
   getGateway: () => Pick<HubComputerGateway, 'disconnect'> | null
   connections: Pick<TrpcConnectionRegistry, 'closeUser'>
+  /** Revoke the account's direct-link capabilities on every computer (direct-link.ts). */
+  revokeDirectGrants?: (userId: string) => Promise<void>
   log?: (message: string) => void
 }): UserAccessRevoker {
   const log = deps.log ?? ((m: string) => console.log(m))
@@ -65,6 +67,8 @@ export function createUserAccessRevoker(deps: {
   const endSessions = async (userId: string): Promise<EndedSessions> => {
     const webSessions = await revokeAllWebSessions(deps.db, userId)
     const sockets = deps.connections.closeUser(userId, 'access revoked')
+    // A direct link is a session too: it must not outlive the account's access.
+    await deps.revokeDirectGrants?.(userId)
     return { webSessions, sockets }
   }
 

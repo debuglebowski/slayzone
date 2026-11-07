@@ -108,7 +108,9 @@ const TARGET_KEYS = [
   'projectPath',
   'worktreePath',
   'branch',
-  'signal'
+  'signal',
+  // direct.grant / direct.revoke: the id is safe to keep; the token hash is not kept.
+  'grantId'
 ] as const
 
 /**

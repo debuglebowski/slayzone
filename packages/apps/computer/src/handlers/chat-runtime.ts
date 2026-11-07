@@ -1,4 +1,9 @@
-import type { ResolvedAgentHook, ChatAttachment } from '@slayzone/terminal-contracts'
+import {
+  chatSavedSummary,
+  type AgentEvent,
+  type ResolvedAgentHook,
+  type ChatAttachment
+} from '@slayzone/terminal-contracts'
 import { rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -24,6 +29,8 @@ import {
 } from '@slayzone/computer-transport/server'
 import {
   TypedEventEmitter,
+  CHAT_DIRECT_WRITE_EVENT_NAME,
+  type ChatDirectWritePayload,
   ComputerNotificationMethods,
   HubToComputerMethods,
   procDataParamsSchema,
@@ -37,6 +44,53 @@ import { createProcHandlers } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
+import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
+import { createChatRelayFilter } from '../direct/chat-relay-filter'
+
+/** History reads a direct-link client may make (docs/direct-link.md). */
+export const DIRECT_CHAT_READS = new Set([
+  'getReplay',
+  'openTimeline',
+  'timelinePages',
+  'searchTimeline'
+] as const)
+export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M : never
+
+/**
+ * Commands a direct-link client may send: they need only the computer's ownership
+ * check. Everything that needs the hub's coordination (send, queue, rewind, …),
+ * drafts with attachments (the hub seals their bytes) and permission / tool answers
+ * (the hub refuses them while the conversation runs in the terminal) stay hub calls.
+ */
+export const DIRECT_CHAT_COMMANDS = new Set(['saveTabDraft', 'saveTabScroll'] as const)
+export type DirectChatCommand = typeof DIRECT_CHAT_COMMANDS extends Set<infer M> ? M : never
+
+/** One hub's chat, as direct-link clients reach it on this computer. */
+export interface DirectChatService {
+  /**
+   * A history read for `tabId`, under the epoch the hub granted. The computer's own
+   * ownership check refuses a stale epoch, exactly as for a relayed read.
+   */
+  read(tabId: string, epoch: number, method: DirectChatRead, args: unknown[]): Promise<unknown>
+  /**
+   * A command, deduplicated by `operationId`. Then the hub is told (a journaled
+   * `chat-direct-write`) so it drains metadata as after a relayed command.
+   */
+  command(
+    tabId: string,
+    epoch: number,
+    method: DirectChatCommand,
+    args: unknown[],
+    operationId: string
+  ): Promise<unknown>
+  /** The tab's events while its epoch is still the granted one; null when it is not. */
+  watch(
+    tabId: string,
+    epoch: number,
+    onEvent: (event: DirectChatEvent) => void,
+    onEnd: (reason: 'epoch' | 'deleted' | 'disposed') => void
+  ): (() => void) | null
+}
 import type { ProjectPathStore } from '../project-paths'
 import type { SpawnAdmission } from '../spawn-admission'
 
@@ -66,6 +120,16 @@ const requestSchema = z.discriminatedUnion('kind', [
     })
   }),
   z.object({ kind: z.literal('test.reset') }),
+  /**
+   * Which tabs' full events this hub wants (docs/direct-link.md): `all`, or only
+   * `tabIds` — those a hub client watches. Saved events are always reported as an
+   * `event-signal`. Until a hub says otherwise: all.
+   */
+  z.object({
+    kind: z.literal('relay.watch'),
+    all: z.boolean(),
+    tabIds: z.array(z.string().min(1).max(200)).max(10_000)
+  }),
   z.object({ kind: z.literal('artifact.invoke'), value: computerArtifactRequestSchema }),
   z.object({ kind: z.literal('inventory') }),
   z.object({ kind: z.literal('metadata.snapshot'), id: z.string() }),
@@ -228,6 +292,9 @@ export function createChatRuntimeHandlers(opts: {
     resetting = false
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
+  const directFanout = createDirectChatFanout()
+  /** Which tabs' full events this hub wants (`relay.watch`); all until it says. */
+  const relay = createChatRelayFilter()
   function runtime() {
     if (closed || resetting) throw new Error('Chat runtime is shutting down')
     if (instance) return instance
@@ -284,6 +351,27 @@ export function createChatRuntimeHandlers(opts: {
             : null
       const owner = tabId ? instance?.storage.forTab(tabId) : null
       if (type !== 'metadata' && !owner) return
+      // Direct-link clients get the tab's events from here, not through the hub.
+      if (type === 'event' && owner) {
+        const ev = data as { event: unknown; seq: number; live?: number; at?: number }
+        directFanout.publish({ tabId: owner.identity.tabId, epoch: owner.identity.epoch }, ev)
+        // The hub always learns that an event was saved (history progress, prompts,
+        // `slay chat` waits); the event itself only while a hub client watches.
+        if (ev.live === undefined) {
+          publishToHub(owner, 'event-signal', {
+            tabId: owner.identity.tabId,
+            saved: chatSavedSummary(ev.event as AgentEvent, ev.seq)
+          })
+        }
+        if (!relay.wantsFull(owner.identity.tabId)) return
+      }
+      publishToHub(owner ?? null, type, data)
+    }
+    function publishToHub(
+      owner: { identity: { id: string; epoch: number; tabId: string } } | null,
+      type: string,
+      data: Record<string, unknown>
+    ) {
       opts.ctx.dialer.notify(ComputerNotificationMethods.event, {
         name: 'chat-runtime',
         payload: {
@@ -385,8 +473,12 @@ export function createChatRuntimeHandlers(opts: {
     }
     const r = runtime()
     switch (req.kind) {
+      case 'relay.watch':
+        relay.configure(req.all, req.tabIds)
+        return { ok: true }
       case 'conversation.delete':
         await r.deleteConversation(req.identity)
+        directFanout.end(req.identity.tabId, 'deleted')
         return { ok: true }
       case 'conversation.transition':
         return r.transitionTab(req.value)
@@ -657,8 +749,57 @@ export function createChatRuntimeHandlers(opts: {
       }
     }
   }
+  const direct: DirectChatService = {
+    async read(tabId, epoch, method, args) {
+      if (!DIRECT_CHAT_READS.has(method)) throw new Error(`not a direct chat read: ${method}`)
+      const r = runtime()
+      const owner = r.storage.forTab(tabId)
+      if (!owner) throw new Error('No chat conversation for this tab')
+      return r.invoke(
+        parseChatInvocation({
+          route: { id: owner.identity.id, epoch },
+          target: 'ops',
+          method,
+          args
+        })
+      )
+    },
+    async command(tabId, epoch, method, args, operationId) {
+      if (!DIRECT_CHAT_COMMANDS.has(method)) throw new Error(`not a direct chat command: ${method}`)
+      const r = runtime()
+      const owner = r.storage.forTab(tabId)
+      if (!owner) throw new Error('No chat conversation for this tab')
+      const result = await r.invoke(
+        parseChatInvocation({
+          route: { id: owner.identity.id, epoch },
+          target: 'ops',
+          method,
+          args,
+          operationId
+        })
+      )
+      const payload: ChatDirectWritePayload = {
+        tabId,
+        conversationId: owner.identity.id,
+        epoch,
+        method
+      }
+      opts.ctx.dialer.notify(ComputerNotificationMethods.event, {
+        name: CHAT_DIRECT_WRITE_EVENT_NAME,
+        payload
+      })
+      return result
+    },
+    watch(tabId, epoch, onEvent, onEnd) {
+      const owner = instance?.storage.forTab(tabId)
+      if (!owner || owner.state !== 'active' || owner.identity.epoch !== epoch) return null
+      return directFanout.watch(tabId, epoch, onEvent, onEnd)
+    }
+  }
+
   return {
     request,
+    direct,
     assertTaskActive(taskId: string) {
       const r = runtime()
       if (r.storage.taskLifecycle(taskId).state !== 'active')
@@ -670,6 +811,7 @@ export function createChatRuntimeHandlers(opts: {
     async close() {
       if (closed) return
       closed = true
+      directFanout.endAll()
       if (instance) await instance.close()
       localProcs?.disposeAll()
       instance = null

@@ -24,6 +24,7 @@
     "./fake-codex/recorded": "./fake-codex/recorded.ts",
     "./chat-long-session": "./chat-long-session/index.ts",
     "./known-bug": "./known-bug.ts",
-    "./fixture-reaper": "./fixture-reaper.ts"
+    "./fixture-reaper": "./fixture-reaper.ts",
+    "./canary-inputs": "./canary-inputs.ts"
   }
 }

@@ -70,7 +70,9 @@ const options = {
   // node-pty is a native addon (loads a prebuilt .node binary) and cannot be
   // bundled; keep it external and resolve it from node_modules at runtime.
   // bufferutil/utf-8-validate are optional native ws accelerators.
-  external: ['node-pty', 'better-sqlite3', 'bufferutil', 'utf-8-validate'],
+  // node-datachannel (WebRTC, docs/direct-link.md) is native too, and optional at
+  // runtime: without it the computer offers no WebRTC (rtc-runtime.ts).
+  external: ['node-pty', 'better-sqlite3', 'node-datachannel', 'bufferutil', 'utf-8-validate'],
   banner: { js: '#!/usr/bin/env node' },
   logLevel: 'info',
   // Exact input list for the dev watcher.

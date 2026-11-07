@@ -63,6 +63,8 @@ vi.mock('@slayzone/ui', () => {
   const Div = ({ children }: Kids) => <div>{children}</div>
   return {
     cn: (...xs: unknown[]) => xs.filter(Boolean).join(' '),
+    // The Direct link card's poll: inert here.
+    useVisibleInterval: () => undefined,
     Button: ({ children, variant: _v, size: _s, ...props }: Record<string, unknown> & Kids) => (
       <button {...(props as React.ComponentProps<'button'>)}>{children}</button>
     ),

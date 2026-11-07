@@ -22,6 +22,40 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  attachDirectPty,
+  readDirectPtyBuffer,
+  DIRECT_CALL_DEADLINE_MS,
+  directCallFailure,
+  newDirectWriteId,
+  withDirectDeadline,
+  createOrderedPtyWriter,
+  type OrderedPtyWriter,
+  createDirectLinkManager,
+  directLinkManagerFor,
+  defaultDirectProbe,
+  directLinkStatus,
+  directUseCounts,
+  disposeDirectLinkManagers,
+  noteDirectUse,
+  type DirectLinkComputerStatus,
+  isDirectLinkEnabled,
+  setDirectLinkProbe,
+  setDirectRtcPeerFactory,
+  type DirectLinkHubClient,
+  type DirectIssueResult,
+  type DirectLease,
+  type DirectLeaseLostReason,
+  type DirectLinkManager,
+  type DirectLinkManagerOptions,
+  type DirectRtcPeerFactory
+} from './direct-link'
+export {
+  keepDirectLease,
+  type DirectLeaseKeeper,
+  type DirectLeaseKeeperOptions
+} from './direct-lease-keeper'
+export { useDirectLease } from './useDirectLease'
+export {
   FederationProvider,
   useFederation,
   useFederationOrNull,

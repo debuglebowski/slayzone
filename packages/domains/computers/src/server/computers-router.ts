@@ -1,10 +1,16 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import {
+  currentSecurityContext,
   securityEvent,
   type SecurityEventName,
   type SecurityOutcome
 } from '@slayzone/platform/security-log'
+import {
+  DIRECT_RTC_MAX_SDP,
+  type DirectLinkIssueResult,
+  type DirectRtcConnectResult
+} from '../shared/direct-link'
 import { TRPCError } from '@trpc/server'
 import {
   router,
@@ -306,6 +312,69 @@ export const computersRouter = router({
       await storeSetProjectDefaultComputer(ctx.db, input.projectId, input.computerId)
       notifyComputerBindingChanged()
       return { ok: true as const }
+    }),
+
+  /**
+   * A short-lived capability to reach a terminal session or chat tab directly on the
+   * computer that holds it (docs/direct-link.md). The owner gate has checked the
+   * session/tab before this runs; the hub's issuer adds the placement gate and the
+   * reachability rule. `available: false` means "use the hub relay", never an error.
+   */
+  issueDirectLink: publicProcedure
+    .input(
+      z.object({
+        // A computer target (task, optionally its computer) plus the session or tab
+        // in it: owner-checked like every computer target (G2).
+        target: z.discriminatedUnion('kind', [
+          z.object({
+            kind: z.literal('pty'),
+            sessionId: z.string().min(1).max(200),
+            taskId: z.string().min(1).max(200),
+            computerId: z.string().min(1).max(200).optional()
+          }),
+          z.object({
+            kind: z.literal('chat'),
+            tabId: z.string().min(1).max(200),
+            taskId: z.string().min(1).max(200),
+            computerId: z.string().min(1).max(200).optional()
+          })
+        ]),
+        // What the client can use. Absent (an older client): WebSocket only.
+        transports: z
+          .array(z.enum(['ws', 'webrtc']))
+          .max(2)
+          .optional()
+      })
+    )
+    .mutation(async ({ ctx, input }): Promise<DirectLinkIssueResult> => {
+      const issue = getComputersDepsOrNull()?.issueDirectLink
+      if (!issue) return { available: false, reason: 'unsupported' }
+      return issue(
+        input.target,
+        { userId: ctx.principal?.userId ?? null, ip: currentSecurityContext()?.ip ?? null },
+        input.transports ? { transports: input.transports } : {}
+      )
+    }),
+
+  /**
+   * Broker a WebRTC offer for a direct-link grant the caller holds (docs/direct-link.md):
+   * the hub sends it to the grant's computer over that computer's authenticated link
+   * and returns the computer's answer. `ok: false` means "use the hub relay".
+   */
+  directRtcConnect: publicProcedure
+    .input(
+      z.object({
+        grantId: z.string().min(1).max(200),
+        sdp: z.string().min(1).max(DIRECT_RTC_MAX_SDP)
+      })
+    )
+    .mutation(async ({ ctx, input }): Promise<DirectRtcConnectResult> => {
+      const connect = getComputersDepsOrNull()?.directRtcConnect
+      if (!connect) return { ok: false, reason: 'refused' }
+      return connect(input.grantId, input.sdp, {
+        userId: ctx.principal?.userId ?? null,
+        ip: currentSecurityContext()?.ip ?? null
+      })
     }),
 
   /** Effective computer for a task (task binding → project default → null). */

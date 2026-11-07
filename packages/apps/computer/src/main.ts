@@ -1,3 +1,11 @@
+import { securityEvent } from '@slayzone/platform/security-log'
+import { createDirectListener, type DirectListener } from './direct/listener'
+import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
+import type { DirectPtyService } from './handlers/pty'
+import type { DirectChatService } from './handlers/chat-runtime'
+import { createDirectGrantHandlers } from './direct/handlers'
+import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
+import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
 import { createHash } from 'node:crypto'
 import { createPtyHistory } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
@@ -34,12 +42,13 @@ import {
   JSON_RPC_INTERNAL_ERROR,
   RpcError,
   computerShutdownParamsSchema,
+  directRtcOfferParamsSchema,
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
-import { effectiveHubUrls, type ComputerConfig } from './config'
+import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
 import { JailViolationError, setProtectedPaths } from './path-jail'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
@@ -71,6 +80,11 @@ export const COMPUTER_VERSION =
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
+  /**
+   * The WebRTC runtime (tests): whether it is installed, and loading it. Default
+   * node-datachannel (`direct/rtc-runtime.ts`).
+   */
+  rtc?: { available(): boolean; load(): RtcPolyfill | null }
   initiallyPaused?: boolean
   hookDirectory?: (hubUrl: string) => string | undefined
   createDialer?: (options: ConstructorParameters<typeof HubDialer>[0]) => HubDialer
@@ -144,6 +158,12 @@ export interface ComputerHandle {
   activate(): void | Promise<void>
   isIdle(): boolean
   setHookDirectory(hub: string, directory: string): void
+  /**
+   * The direct link's identity once its listener has settled (bound, or failed):
+   * the address clients dial and whether WebRTC offers are answered. Values, not
+   * functions: a session host hands them to its connector over JSON-RPC.
+   */
+  directIdentity?(): Promise<{ directAddress: string | null; directRtc: boolean }>
   drainForUpgrade(): boolean
   stop(): Promise<void>
 }
@@ -230,6 +250,18 @@ export interface HubRequestHandlerDeps {
    * builds its own — so terminals restore without waiting on the probe.
    */
   pathReady?: Promise<unknown>
+  /**
+   * The computer-wide direct-link grant table (docs/direct-link.md), shared by every
+   * hub; this dispatch registers into it under `hubScope`. Absent: `direct.*` is
+   * unimplemented (tests).
+   */
+  directGrants?: DirectGrantStore
+  /**
+   * The WebRTC answerer (docs/direct-link.md), late-bound: created on the first offer
+   * once the direct listener is bound (node-datachannel loads then, off the boot
+   * path). Null/absent = no WebRTC.
+   */
+  getRtcAnswerer?: () => RtcAnswerer | null
 }
 
 export interface HubRequestDispatch {
@@ -249,6 +281,10 @@ export interface HubRequestDispatch {
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
+  /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
+  directPty: DirectPtyService
+  /** This hub's chat, as direct-link clients reach it. */
+  directChat: DirectChatService
 }
 
 /**
@@ -346,8 +382,39 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
   }
 
+  const directGrantHandlers = deps.directGrants
+    ? createDirectGrantHandlers(
+        deps.directGrants,
+        deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
+      )
+    : {}
+  Object.assign(table, directGrantHandlers)
+  const directHubKey = deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
+  // Answered only for a live grant THIS hub link registered (rtc-answerer.ts).
+  const directRtcHandlers = deps.getRtcAnswerer
+    ? {
+        [HubToComputerMethods.directRtcOffer]: async (raw: unknown) => {
+          const answerer = deps.getRtcAnswerer?.()
+          if (!answerer) {
+            throw new RpcError(
+              ComputerTransportErrorCodes.refusedByComputer,
+              'this computer offers no WebRTC direct link'
+            )
+          }
+          return answerer.answer(directHubKey, directRtcOfferParamsSchema.parse(raw))
+        }
+      }
+    : {}
+  Object.assign(table, directRtcHandlers)
+
   const hub = deps.hubHost ?? 'unknown'
-  const ptyMethods = new Set(Object.keys(pty.handlers))
+  // Neither terminals nor grant bookkeeping look tools up on PATH, so neither waits
+  // for the login-shell probe; a client waits on a grant before it can attach.
+  const ptyMethods = new Set([
+    ...Object.keys(pty.handlers),
+    ...Object.keys(directGrantHandlers),
+    ...Object.keys(directRtcHandlers)
+  ])
 
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
@@ -444,6 +511,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       ctx.hookDirectory = directory
     },
     handle: trackedHandle,
+    directPty: pty.direct,
+    directChat: chat.direct,
     dispose,
     setAgentHookUrl,
     hubDisconnected,
@@ -555,6 +624,68 @@ export function startComputer(
   // ONE admission queue for every hub connection: agent starts contend for this
   // machine, whichever hub asked for them.
   const admission = createSpawnAdmission()
+  // ONE direct-link grant table: one listener serves every hub, and each hub's
+  // grants stay keyed by the link that registered them.
+  const directGrants = createDirectGrantStore()
+  // The direct-link listener (docs/direct-link.md). Its port is ephemeral by default,
+  // so hubs learn the address from enroll/hello: dialing waits for the bind (a
+  // loopback bind takes milliseconds), and a failed bind only costs the direct path.
+  let directListener: DirectListener | null = null
+  let rtcAnswerer: RtcAnswerer | null = null
+  // Bound (or failed to): a hub added from now on dials at once.
+  let directSettled = false
+  // Which hub's handlers serve a grant: the hub key a grant is registered under.
+  const dispatchByHub = new Map<string, HubRequestDispatch>()
+  const directReady: Promise<void> = createDirectListener({
+    grants: directGrants,
+    services: {
+      pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null,
+      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null
+    },
+    listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
+    ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
+    log,
+    audit: (refusal) =>
+      securityEvent({
+        event: 'computer.rate_limit',
+        outcome: 'denied',
+        actor: null,
+        ip: refusal.address,
+        route: refusal.route,
+        targetKind: 'computer',
+        detail: {
+          limit: refusal.limit,
+          max: refusal.max,
+          ...(refusal.windowSec === undefined ? {} : { windowSec: refusal.windowSec })
+        }
+      })
+  })
+    .then((listener) => {
+      directListener = listener
+    })
+    .catch((err: unknown) => {
+      log('direct link unavailable — clients use the hub relay', { error: String(err) })
+    })
+    .finally(() => {
+      directSettled = true
+    })
+  identity.directAddress = () => directListener?.advertisedAddress ?? null
+  // WebRTC rides on the listener (its channels are served like its sockets). The
+  // addon is only resolved here: loading it is left to the first offer, so dialing
+  // the hubs never waits on it.
+  const rtcRuntime = deps.rtc ?? {
+    available: rtcRuntimeAvailable,
+    load: () => loadRtcPolyfill(log)
+  }
+  identity.directRtc = () => directListener !== null && rtcRuntime.available()
+  const getRtcAnswerer = (): RtcAnswerer | null => {
+    if (rtcAnswerer || !directListener || !rtcRuntime.available()) return rtcAnswerer
+    const rtc = rtcRuntime.load()
+    if (rtc) {
+      rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener: directListener, log })
+    }
+    return rtcAnswerer
+  }
 
   /**
    * Everything that belongs to ONE hub.
@@ -657,6 +788,8 @@ export function startComputer(
       getProjectPaths: () => projectPaths,
       admission,
       requestLog,
+      directGrants,
+      getRtcAnswerer,
       hubHost: hubHostFromUrl(hubUrl),
       // Per connection: the process-wide grant is for the primary (loopback) hub of
       // the desktop's own computer. A hub joined at runtime never edits the jail.
@@ -665,6 +798,7 @@ export function startComputer(
       ...(hubAddress ? { hubAddress } : {}),
       ...(deps.pathReady ? { pathReady: deps.pathReady } : {})
     })
+    dispatchByHub.set(hubHostFromUrl(hubUrl), dispatch)
 
     // Every line carries the hub, because with more than one connection "reconnect
     // scheduled" on its own does not say which peer went away.
@@ -720,6 +854,7 @@ export function startComputer(
         return null
       })
 
+    let disposed = false
     connection = {
       dialer,
       secondary: secondary !== undefined,
@@ -727,6 +862,13 @@ export function startComputer(
       isIdle: () => dispatch.isIdle(),
       setHookDirectory: (directory) => dispatch.setHookDirectory(directory),
       dispose: async () => {
+        disposed = true
+        // A hub no longer served grants nothing: its direct links end now (each
+        // socket holding one is closed), and its terminals and chats are no longer
+        // reachable through the listener.
+        const hubKey = hubHostFromUrl(hubUrl)
+        directGrants.revoke(hubKey, { by: 'all' })
+        if (dispatchByHub.get(hubKey) === dispatch) dispatchByHub.delete(hubKey)
         // Kill live ptys/processes and close fs watches before the socket drops, so
         // nothing is orphaned and no handle keeps the stopped process alive.
         await dispatch.dispose()
@@ -744,7 +886,12 @@ export function startComputer(
     }
     // Before start: a listener attached here cannot miss the first event.
     deps.onConnection?.({ hubUrl, primary: isPrimary, dialer })
-    dialer.start()
+    // Dial once the direct listener is bound, so the first hello carries its address.
+    if (directSettled) dialer.start()
+    else
+      void directReady.then(() => {
+        if (!disposed) dialer.start()
+      })
     return connection
   }
 
@@ -762,7 +909,9 @@ export function startComputer(
   // a hub removed and re-added must not have its old connection (same credential
   // entry, same project map) still tearing down while the new one enrolls.
   let stopped = false
-  let hubChanges: Promise<void> = Promise.resolve()
+  // The first change also waits for the direct listener, so a hub added at runtime
+  // dials with the bound address in its first hello.
+  let hubChanges: Promise<void> = directReady
   const enqueueHubChange = (change: () => Promise<void>): Promise<void> => {
     const run = hubChanges.then(change)
     hubChanges = run.catch((err: unknown) =>
@@ -847,6 +996,13 @@ export function startComputer(
     // exactly one hub is the overwhelming case and every existing caller reads it;
     // `dialers` is what multi-hub callers iterate.
     dialer: primaryDialer,
+    directIdentity: async () => {
+      await directReady
+      return {
+        directAddress: identity.directAddress?.() ?? null,
+        directRtc: identity.directRtc?.() ?? false
+      }
+    },
     get dialers() {
       return [...connections.values()].map((c) => c.dialer)
     },
@@ -877,6 +1033,10 @@ export function startComputer(
       hostIdStop?.()
       if (watchLocalRoots) unwatchFile(configFile)
       await Promise.all([...connections.values()].map((c) => c.dispose()))
+      await directReady
+      await directListener?.close()
+      rtcAnswerer?.close()
+      directGrants.close()
     }
   }
   return handle

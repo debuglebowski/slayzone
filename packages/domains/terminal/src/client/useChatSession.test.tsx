@@ -36,6 +36,30 @@ const deferred = <T,>(): Deferred<T> => {
   return { promise, resolve, reject }
 }
 
+/** The direct lease `useDirectLease` answers (null: relay only). */
+let directLease: unknown = null
+/** The direct `chat.onEvent` subscription the hook opened (its handlers). */
+let directSub: {
+  onStarted?: () => void
+  onData: (d: unknown) => void
+  onError?: () => void
+} | null = null
+const fakeDirectLease = () => ({
+  computerId: 'c1',
+  client: {
+    chat: {
+      onEvent: {
+        subscribe: (_input: unknown, handlers: NonNullable<typeof directSub>) => {
+          directSub = handlers
+          return { unsubscribe: () => undefined }
+        }
+      }
+    }
+  },
+  onLost: () => () => undefined,
+  release: () => undefined
+})
+
 // One pending hydrate + buffer fetch per load, resolved by the test in its own order.
 let loads: Array<{
   cwd: string
@@ -70,7 +94,9 @@ vi.mock('@slayzone/transport/client', () => ({
   useTRPCClient: () => client,
   useSubscription: (o: { name: string; enabled: boolean; onData: (d: unknown) => void }) => {
     subs[o.name] = o.enabled ? o.onData : null
-  }
+  },
+  // No direct link unless a test sets `directLease`: everything goes through the hub.
+  useDirectLease: () => ({ lease: directLease, lost: () => undefined })
 }))
 const client = {
   chat: {
@@ -269,6 +295,29 @@ afterEach(() => {
   respondCalls.length = 0
   sent.length = 0
   sendFails = null
+  directLease = null
+  directSub = null
+})
+
+// M1: switching to the direct link is make-before-break. The hub stream stays on until
+// the computer's stream has started, so an event saved in between is never on neither.
+describe('hub → direct link switch', () => {
+  it('keeps the hub stream until the direct stream started; nothing is dropped', async () => {
+    const { result, rerender } = setup()
+    await finishLoad(0, HISTORY)
+    directLease = fakeDirectLease()
+    rerender({ cwd: '/repo' })
+    expect(directSub).not.toBeNull()
+    // Saved while the computer subscription is still being set up: only the hub has it.
+    live(3, userMsg('three'))
+    expect(texts(result)).toEqual(['one', 'two', 'three'])
+    act(() => directSub!.onStarted?.())
+    // Started: the hub stream is off; the computer delivers from here, deduped by seq.
+    expect(subs.event).toBeNull()
+    act(() => directSub!.onData({ tabId: 'tab-1', event: userMsg('three'), seq: 3 }))
+    act(() => directSub!.onData({ tabId: 'tab-1', event: userMsg('four'), seq: 4 }))
+    expect(texts(result)).toEqual(['one', 'two', 'three', 'four'])
+  })
 })
 
 describe('live CLI model lists', () => {

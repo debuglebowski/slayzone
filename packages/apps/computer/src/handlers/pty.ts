@@ -56,6 +56,8 @@ import {
   ptyRelayParamsSchema,
   type PtyRelayResult,
   PTY_SIGNAL_EVENT_NAME,
+  PTY_INPUT_EVENT_NAME,
+  type PtyInputPayload,
   RpcError,
   ComputerNotificationMethods,
   ComputerTransportErrorCodes,
@@ -77,7 +79,15 @@ import { createCliVersionProbe } from '../cli-version'
 import { restoredPrefix, type PtyHistory, type PtyHistoryTracker } from '../pty-history'
 import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
-import { filterBufferData, RingBuffer } from '@slayzone/terminal/pty-detection'
+import {
+  analyzePtyInput,
+  DEFAULT_SESSION_ID_COMMAND,
+  filterBufferData,
+  RingBuffer,
+  SESSION_ERROR_WINDOW_MS
+} from '@slayzone/terminal/pty-detection'
+import type { BufferSinceResult } from '@slayzone/terminal-contracts'
+import { pageChunks } from '@slayzone/transport/direct'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -93,13 +103,95 @@ import type { HandlerContext, HubMethodTable } from './types'
 const MAX_BUFFER_SIZE = 750 * 1024
 
 /**
+ * Largest chunk this computer adds to a buffer itself (restored output, a carried
+ * preamble). A backfill page holds whole chunks, and one direct-link message is
+ * capped at 1 MiB (docs/direct-link.md): a 750 KiB scrollback in one chunk can
+ * serialise past it. Process output already arrives in chunks this small.
+ */
+const APPENDED_PIECE_CHARS = 16 * 1024
+
+/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
+function appendInPieces(buffer: RingBuffer, text: string): void {
+  let at = 0
+  while (at < text.length) {
+    let end = Math.min(at + APPENDED_PIECE_CHARS, text.length)
+    // Never split a surrogate pair across chunks.
+    const code = text.charCodeAt(end - 1)
+    if (end < text.length && code >= 0xd800 && code <= 0xdbff) end--
+    buffer.append(text.slice(at, end))
+    at = end
+  }
+}
+
+/**
  * After a startup-timeout SIGKILL, how long to wait for node-pty's own exit before
  * reaping the session here — so a process whose exit is never reported cannot sit
  * in `pty.list` as live forever. The same net the hub used to run.
  */
 const STARTUP_KILL_REAP_MS = 2_000
 
+/** One direct-link client streaming a session (docs/direct-link.md). */
+interface DirectWatcher {
+  onData(chunk: { seq: number; data: string }): void
+  /** `exit`: the process ended; `replaced`: a new process took the session id. */
+  onEnd(reason: 'exit' | 'replaced' | 'disposed'): void
+}
+
+/**
+ * What a direct-link client reaches on this computer: the session's ONLY
+ * scrollback and its live output, independent of whether the hub relays it.
+ */
+export interface DirectPtyService {
+  /**
+   * Cold attach (`afterSeq` -1) or reattach; `size` null when no live process.
+   * `maxChars` pages the buffer (`more`); the first page keeps the prelude.
+   */
+  attach(
+    sessionId: string,
+    afterSeq: number,
+    maxChars?: number
+  ): {
+    exists: boolean
+    size: { cols: number; rows: number } | null
+    buffer: BufferSinceResult & { more: boolean }
+  }
+  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude), paged by `maxChars`. */
+  getBufferSince(
+    sessionId: string,
+    afterSeq: number,
+    maxChars?: number
+  ): BufferSinceResult & { more: boolean }
+  /**
+   * A client's keystrokes, written to the process. Submits and Esc presses are
+   * reported to the hub as a journaled `pty-input` event, so the hub's input
+   * effects (attention, turn tracking, running) match a write it relayed. False
+   * when there is no live session.
+   */
+  write(sessionId: string, data: string, writeId?: string): boolean
+  /** Stream a live session's output; null when there is none. Returns unsubscribe. */
+  watch(
+    sessionId: string,
+    onData: DirectWatcher['onData'],
+    onEnd: DirectWatcher['onEnd']
+  ): (() => void) | null
+}
+
+/** How many recent client write ids a session remembers (a retry follows within seconds). */
+const CLIENT_WRITE_ID_WINDOW = 1024
+
 interface PtySession {
+  /** What client writes typed since their last submit (see `analyzePtyInput`). */
+  directInput: string
+  /** Recent client write ids, oldest first (see `applyClientWrite`). */
+  clientWriteIds: Set<string>
+  /** Direct-link clients streaming this session; independent of {@link relay}. */
+  directWatchers: Set<DirectWatcher>
+  /**
+   * A stale-resume error was detected inside the session-error window: like the
+   * hub (pty-manager's `suppressOutput`), direct watchers do not see the raw
+   * error line before the exit overlay. Released when the window closes.
+   */
+  suppressDirect?: boolean
   revokeCli?: () => void
   proc: pty.IPty
   buffer: RingBuffer
@@ -158,7 +250,8 @@ interface QueuedSpawn {
   ticket: AdmissionTicket
   cols?: number
   rows?: number
-  writes: string[]
+  /** Input that arrived while this waited; a client's carries its id (see `applyClientWrite`). */
+  writes: Array<{ data: string; writeId?: string }>
   /** A queued write submitted `/status`: watch for a conversation id once started. */
   watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
@@ -169,6 +262,8 @@ interface QueuedSpawn {
 }
 
 export interface PtyHandlers {
+  /** What direct-link clients reach (docs/direct-link.md). */
+  direct: DirectPtyService
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
   /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
@@ -445,6 +540,9 @@ export function createPtyHandlers(
     let resolveExit!: () => void
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
+      directInput: '',
+      clientWriteIds: new Set(),
+      directWatchers: new Set(),
       revokeCli: capability?.revoke,
       proc,
       buffer,
@@ -505,6 +603,13 @@ export function createPtyHandlers(
       // What the chunk says goes FIRST: a stale-resume error suppresses this very
       // chunk on the hub, which must know before the bytes arrive.
       if (processed) session.signals?.report(processed.detection, seq)
+      // Direct-link clients first, whatever the hub relays: the same bytes, the same seq.
+      if (processed?.detection?.suppressOutput) session.suppressDirect = true
+      if (session.suppressDirect && Date.now() >= session.startedAt + SESSION_ERROR_WINDOW_MS)
+        session.suppressDirect = false
+      if (!session.suppressDirect) {
+        for (const watcher of session.directWatchers) watcher.onData({ seq, data: out })
+      }
       // Nobody watches it: buffered and detected, not streamed (the hub reads the
       // buffer when someone attaches, and turns relay on).
       if (!session.relay) return
@@ -579,11 +684,18 @@ export function createPtyHandlers(
   }
 
   /** Report a session's exit and remember it. Idempotent per session object. */
+  function endDirectWatchers(session: PtySession, reason: 'exit' | 'replaced' | 'disposed'): void {
+    const watchers = [...session.directWatchers]
+    session.directWatchers.clear()
+    for (const watcher of watchers) watcher.onEnd(reason)
+  }
+
   function reap(session: PtySession, exitCode: number | null, signal: string | null): void {
     // Only the CURRENTLY-active session for this id may clear the map and
     // emit exit — a superseded/disposed pty exiting must stay silent, else it
     // would tear down the replacement and confuse the hub.
     if (sessions.get(session.id) !== session) return
+    endDirectWatchers(session, session.replacing ? 'replaced' : 'exit')
     // A failed resume's cause rides a signal that lands just before the exit frame.
     if (!session.replacing && !session.warm)
       session.signals?.exited(exitCode, session.buffer.toString())
@@ -678,7 +790,7 @@ export function createPtyHandlers(
         new RingBuffer(MAX_BUFFER_SIZE)
       // No buffer left to continue: numbering continues where the hub's reached (M2).
       if (afterSeq !== undefined) carried.continueAfter(afterSeq)
-      if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
+      if (params.carryOutput.preamble) appendInPieces(carried, params.carryOutput.preamble)
     }
     // A fresh start of a task terminal begins with what it showed last time (the
     // computer restarted since). Never for a continuing spawn — the hub still shows
@@ -688,7 +800,7 @@ export function createPtyHandlers(
       const saved = options.history.load(params.taskId, params.sessionId)
       if (saved) {
         restored = new RingBuffer(MAX_BUFFER_SIZE)
-        restored.append(restoredPrefix(saved))
+        appendInPieces(restored, restoredPrefix(saved))
       }
     }
     const session = spawnSession(params.sessionId, {
@@ -855,7 +967,10 @@ export function createPtyHandlers(
       session.admissionSlot = slot
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) {
+        if (w.writeId !== undefined) applyClientWrite(session, w.data, w.writeId)
+        else session.proc.write(w.data)
+      }
       if (item.watchConversationId) session.signals?.watchConversationId()
       return reply
     })
@@ -896,7 +1011,7 @@ export function createPtyHandlers(
     return enqueueSpawn(params.warmId, 'warm', params, (slot, item) => {
       const session = startWarm(params, item.cols, item.rows)
       session.admissionSlot = slot
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) session.proc.write(w.data)
       return { pid: session.proc.pid }
     })
   }
@@ -1174,13 +1289,62 @@ export function createPtyHandlers(
     return { ok: true }
   }
 
+  /**
+   * A client's keystrokes, from the direct link or relayed by the hub with its id
+   * (docs/direct-link.md). An id already applied is dropped: a direct write that was
+   * late is also sent through the hub, and must land once. The input facts (submit,
+   * Esc, `/status`) are reported to the hub from here, once, for either path.
+   */
+  function applyClientWrite(session: PtySession, data: string, writeId?: string): void {
+    if (writeId !== undefined) {
+      if (session.clientWriteIds.has(writeId)) return
+      session.clientWriteIds.add(writeId)
+      // A bounded window: a retry follows its original within seconds.
+      if (session.clientWriteIds.size > CLIENT_WRITE_ID_WINDOW) {
+        const oldest = session.clientWriteIds.values().next().value
+        if (oldest !== undefined) session.clientWriteIds.delete(oldest)
+      }
+    }
+    const { buffer, facts } = analyzePtyInput(
+      session.directInput,
+      data,
+      session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
+    )
+    session.directInput = buffer
+    session.proc.write(data)
+    // What a relayed write tells this computer with `watchConversationId`.
+    if (facts.statusCommand) session.signals?.watchConversationId()
+    if (facts.esc || facts.submitted !== null) {
+      const payload: PtyInputPayload = {
+        sessionId: session.id,
+        ...(session.spawnId ? { spawnId: session.spawnId } : {}),
+        submitted: facts.submitted,
+        esc: facts.esc,
+        statusCommand: facts.statusCommand
+      }
+      ctx.dialer.notify(ComputerNotificationMethods.event, {
+        name: PTY_INPUT_EVENT_NAME,
+        payload
+      })
+    }
+  }
+
+  /**
+   * Input for a session still waiting for its slot: queued, not lost, and written
+   * right after the spawn (see `QueuedSpawn`). A client write arriving twice (direct,
+   * then through the hub with the same id) is queued once.
+   */
+  function queueWrite(waiting: QueuedSpawn, data: string, writeId?: string): void {
+    if (writeId !== undefined && waiting.writes.some((w) => w.writeId === writeId)) return
+    waiting.writes.push({ data, ...(writeId !== undefined ? { writeId } : {}) })
+  }
+
   function write(rawParams: unknown): { ok: true } {
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
-      // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
-      waiting.writes.push(params.data)
+      queueWrite(waiting, params.data, params.writeId)
       if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
@@ -1189,6 +1353,11 @@ export function createPtyHandlers(
       return { ok: true }
     if (!session) {
       ctx.log('pty write on unknown session', { sessionId: params.sessionId })
+      return { ok: true }
+    }
+    if (params.writeId !== undefined) {
+      // A client's write relayed by the hub: once, with its facts reported from here.
+      applyClientWrite(session, params.data, params.writeId)
       return { ok: true }
     }
     session.proc.write(params.data)
@@ -1234,6 +1403,16 @@ export function createPtyHandlers(
     const exited = tombstones.get(sessionId)
     if (exited && (spawnId === undefined || exited.spawnId === spawnId)) return exited.buffer
     return undefined
+  }
+
+  function replayOf(buffer: RingBuffer | undefined, afterSeq: number): BufferSinceResult {
+    if (!buffer) return { chunks: [], prelude: '', currentSeq: -1 }
+    const { chunks, prelude } = buffer.getReplaySince(afterSeq)
+    return {
+      chunks: chunks.map((c) => ({ seq: c.seq, data: c.data })),
+      prelude,
+      currentSeq: buffer.getCurrentSeq()
+    }
   }
 
   /** Replay for a hub client (fresh terminal or reattach): this buffer is the only one. */
@@ -1308,6 +1487,7 @@ export function createPtyHandlers(
   function disposeAll(): void {
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
+      endDirectWatchers(session, 'disposed')
       // Output still waiting for its throttled write is saved before the process goes.
       session.history?.flushSync()
       void session.history?.cancel()
@@ -1349,7 +1529,56 @@ export function createPtyHandlers(
 
   const belongsToTask = (id: string, taskId: string, recordedTask?: string) =>
     recordedTask ? recordedTask === taskId : id === taskId || id.startsWith(taskId + ':')
+  /** One page of a direct backfill (`maxChars`); the first page keeps the prelude. */
+  function directPage(buffer: RingBuffer | undefined, afterSeq: number, maxChars?: number) {
+    const all = replayOf(buffer, afterSeq)
+    const page = pageChunks(all.chunks, maxChars)
+    return { ...all, chunks: page.chunks, more: page.more }
+  }
+
+  const direct: DirectPtyService = {
+    attach(sessionId, afterSeq, maxChars) {
+      const live = sessions.get(sessionId)
+      const isLive = live !== undefined && !live.warm
+      const buffer = isLive ? live.buffer : tombstones.get(sessionId)?.buffer
+      return {
+        exists: isLive,
+        size: isLive ? { cols: live.proc.cols, rows: live.proc.rows } : null,
+        buffer: directPage(buffer, afterSeq, maxChars)
+      }
+    },
+    getBufferSince(sessionId, afterSeq, maxChars) {
+      const live = sessions.get(sessionId)
+      return directPage(
+        live && !live.warm ? live.buffer : tombstones.get(sessionId)?.buffer,
+        afterSeq,
+        maxChars
+      )
+    },
+    write(sessionId, data, writeId) {
+      const waiting = queued.get(sessionId)
+      if (waiting) {
+        queueWrite(waiting, data, writeId)
+        return true
+      }
+      const session = sessions.get(sessionId)
+      if (!session || session.warm) return false
+      applyClientWrite(session, data, writeId)
+      return true
+    },
+    watch(sessionId, onData, onEnd) {
+      const session = sessions.get(sessionId)
+      if (!session || session.warm) return null
+      const watcher: DirectWatcher = { onData, onEnd }
+      session.directWatchers.add(watcher)
+      return () => {
+        session.directWatchers.delete(watcher)
+      }
+    }
+  }
+
   return {
+    direct,
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
     hasTaskWork: (taskId: string) =>
       [...sessions.values(), ...queued.values()].some((s) =>

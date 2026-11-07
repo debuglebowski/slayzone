@@ -30,11 +30,12 @@
  * `/health`: for their home hub they start neither PostHog nor Convex, for another hub
  * they drop the events about its data (`@slayzone/telemetry`, `trackForHub`).
  *
- * Lean leaf (no imports) so the CLI and computer bundles can use it without the
- * platform barrel.
+ * Lean leaf (it imports only `hub-addr`, itself import-free) so the CLI and computer
+ * bundles can use it without the platform barrel.
  *
  * @module platform/hub-switches
  */
+import { isBareAuthority } from './hub-addr'
 
 /** Env var of each switch. */
 export const HUB_SWITCH_ENV = {
@@ -126,6 +127,44 @@ export const HUB_TRUSTED_PROXIES_ENV = 'SLAYZONE_HUB_TRUSTED_PROXIES'
 export const HUB_CONVEX_ADDRESS_ENV = 'SLAYZONE_HUB_CONVEX_ADDRESS'
 
 /**
+ * STUN servers the hub hands both peers of a WebRTC direct link (docs/direct-link.md):
+ * comma-separated authorities (`host:port`, no `stun:` scheme, env rule 5). Unset = the
+ * default below; empty = none (peers then connect only where their own addresses reach
+ * each other). Also `stunAddresses` in `hub.config.json`; env wins. A malformed value
+ * refuses boot (rule B19): a typo that fell back to the default would quietly send every
+ * client's address to a server the operator did not choose.
+ */
+export const HUB_STUN_ADDRESSES_ENV = 'SLAYZONE_HUB_STUN_ADDRESSES'
+
+/** Cloudflare's public STUN server. */
+export const DEFAULT_HUB_STUN_ADDRESSES: readonly string[] = ['stun.cloudflare.com:3478']
+
+/** At most this many STUN servers (each one adds gathering time). */
+export const MAX_HUB_STUN_ADDRESSES = 8
+
+export function readHubStunAddresses(
+  env: NodeJS.ProcessEnv = process.env
+): { ok: true; addresses: string[] } | { ok: false; message: string } {
+  const raw = env[HUB_STUN_ADDRESSES_ENV]
+  if (raw === undefined) return { ok: true, addresses: [...DEFAULT_HUB_STUN_ADDRESSES] }
+  const addresses = raw
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0)
+  const bad = addresses.find((a) => !isBareAuthority(a))
+  if (bad !== undefined || addresses.length > MAX_HUB_STUN_ADDRESSES) {
+    return {
+      ok: false,
+      message:
+        `[slayzone] ${HUB_STUN_ADDRESSES_ENV} must be at most ${MAX_HUB_STUN_ADDRESSES} ` +
+        `comma-separated host:port authorities (no 'stun:' scheme), got '${raw}'` +
+        (bad !== undefined ? ` ('${bad}' is not one).` : '.')
+    }
+  }
+  return { ok: true, addresses }
+}
+
+/**
  * Every variable that configures a hub PROCESS. A parent that spawns a hub with its
  * own values (the desktop app's sidecar) must clear all of these first: whatever it
  * inherited from wherever IT was launched (a task terminal, a shell profile, a CI
@@ -148,7 +187,8 @@ export const HUB_PROCESS_ENV: readonly string[] = [
   HUB_ALLOWED_WEB_ORIGINS_ENV,
   HUB_TRUSTED_PROXIES_ENV,
   HUB_SESSION_RETENTION_DAYS_ENV,
-  HUB_CONVEX_ADDRESS_ENV
+  HUB_CONVEX_ADDRESS_ENV,
+  HUB_STUN_ADDRESSES_ENV
 ]
 
 /** Thrown for a malformed switch value (rule B4). */

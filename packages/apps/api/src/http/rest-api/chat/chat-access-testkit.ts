@@ -7,7 +7,13 @@
  * task as claude-chat on its main tab.
  */
 import { TypedEmitter } from '@slayzone/platform/events'
-import type { AgentEvent, ChatTurnStatus, TerminalState } from '@slayzone/terminal-contracts'
+import {
+  chatSavedSummary,
+  type AgentEvent,
+  type ChatSavedSummary,
+  type ChatTurnStatus,
+  type TerminalState
+} from '@slayzone/terminal-contracts'
 import type { ChatAccess } from '../types'
 
 export interface FakeChat {
@@ -23,8 +29,13 @@ export interface FakeChat {
   chatMode: string | undefined
   /** The account opted into Claude's auto mode (`getAutoEligibility`). */
   autoOptedIn: boolean
-  /** Emit a chat event for a tab (saved: `at` set). */
+  /**
+   * A chat event saved on the computer, as the hub sees it: its summary always, the
+   * full event only while a hub client watches the tab (`watchEvents`).
+   */
   emit(tabId: string, event: AgentEvent, seq?: number): void
+  /** Hub watchers per tab ('*' = unfiltered). */
+  watchers: Map<string, number>
   /** Fire a state change on the shared bus. */
   state(sessionId: string, state: TerminalState): void
   reset(): void
@@ -34,6 +45,7 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
   const ptyTasks = new Set(opts.ptyTasks ?? [])
   const events = new TypedEmitter<{
     event: [string, AgentEvent, number, number?, number?]
+    saved: [string, ChatSavedSummary]
     exit: [string, string, number | null, string | null]
     'threads-changed': [string]
     'pinned-messages-changed': [string]
@@ -53,8 +65,15 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     queue: [],
     chatMode: undefined,
     autoOptedIn: false,
-    emit: (tabId, event, seq = 1_000) =>
-      events.emit('event', tabId, event, seq, undefined, Date.now()),
+    // As the hub does for a saved event: its summary always (`saved`), the full event
+    // to clients that watch it (docs/direct-link.md).
+    emit: (tabId, event, seq = 1_000) => {
+      fake.buffer.push({ seq, event, at: Date.now() })
+      events.emit('saved', tabId, chatSavedSummary(event, seq))
+      if (fake.watchers.has(tabId) || fake.watchers.has('*'))
+        events.emit('event', tabId, event, seq, undefined, Date.now())
+    },
+    watchers: new Map(),
     state: (sessionId, state) => {
       for (const cb of stateListeners) cb(sessionId, state)
     },
@@ -65,6 +84,7 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
       fake.queue = []
       fake.chatMode = undefined
       fake.autoOptedIn = false
+      fake.watchers.clear()
     }
   }
   fake.reset()
@@ -121,9 +141,23 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     clear: record('clear', 0)
   }
 
+  const watchEvents = (tabIds: readonly string[] | 'all') => {
+    const ids = tabIds === 'all' ? ['*'] : [...tabIds]
+    for (const id of ids) fake.watchers.set(id, (fake.watchers.get(id) ?? 0) + 1)
+    return () => {
+      for (const id of ids) {
+        const n = (fake.watchers.get(id) ?? 1) - 1
+        if (n <= 0) fake.watchers.delete(id)
+        else fake.watchers.set(id, n)
+      }
+    }
+  }
+
   fake.chat = {
     deps: () =>
-      ({ ops, queueOps, events, queueEvents }) as unknown as ReturnType<ChatAccess['deps']>,
+      ({ ops, queueOps, events, queueEvents, watchEvents }) as unknown as ReturnType<
+        ChatAccess['deps']
+      >,
     onStateChange: (cb) => {
       stateListeners.add(cb)
       return () => stateListeners.delete(cb)

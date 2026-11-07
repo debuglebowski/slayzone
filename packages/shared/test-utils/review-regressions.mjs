@@ -587,6 +587,13 @@ export const REGRESSIONS = [
       `${P}apps/hub/src/worktree-computer-state.test.ts`
     ]
   },
+  // ── direct link (feat/direct-link) ──
+  {
+    round: 16,
+    id: 'DL-canary',
+    what: "the direct-link canary: no direct-router procedure (pty, chat, over WebSocket or a WebRTC data channel) touches a file on the computer's disk",
+    files: [`${P}apps/computer/src/direct/direct-canary.test.ts`]
+  },
   // ── post-merge QA (task 964073b0, row 5b) ──
   {
     round: 16,
@@ -596,6 +603,146 @@ export const REGRESSIONS = [
       `${P}domains/ai-config/src/server/ai-config-routing.test.ts`,
       `${P}domains/file-editor/src/client/useWatchedFile.test.ts`
     ]
+  },
+  {
+    round: 17,
+    id: 'DL-M1',
+    what: "a chat's direct grants are revoked the moment its conversation moves, transitions or is deleted, so the direct stream never freezes until renewal",
+    files: [
+      `${P}domains/chat-runtime/src/server/hub-ownership.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-M4',
+    what: 'a direct grant registered while a matching revocation runs is revoked on the computer once registered, never left to live out its TTL',
+    files: [`${P}apps/hub/src/direct-link.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-M2',
+    what: 'a terminal falling back from the direct link to the hub relay reads back the output written between the two streams as soon as the relay is live',
+    files: [
+      `${P}domains/terminal/src/client/relay-subscription.test.ts`,
+      `${P}domains/terminal/src/client/PtyContext.test.tsx`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-M3',
+    what: "Electron main adds a direct-link origin to the renderer's CSP only when the renderer's hub confirms it issued that address to this client; unknown hub, refusal or an old hub fail closed; the set is bounded",
+    files: [
+      `${P}apps/app/src/main/direct-link-gate.test.ts`,
+      `${P}apps/app/src/main/direct-link-issued.test.ts`,
+      `${P}apps/api/src/http/rest-api/computers/direct-addresses.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`,
+      `${P}shared/transport/src/client/direct-link.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L1',
+    what: 'a keystroke sent direct to a session waiting for its start slot is queued once (not dropped); a direct write the computer did not take goes through the hub with the same id',
+    files: [
+      `${P}apps/computer/src/handlers/pty.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L2',
+    what: 'keystrokes reach the computer in the order typed when a direct write falls back to the hub: a later key never overtakes it on the direct socket',
+    files: [
+      `${P}shared/transport/src/client/direct-write-order.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L3',
+    what: 'a hub the computer stops serving has its direct-link grants revoked at once; its sockets close and its terminals and chats leave the listener',
+    files: [`${P}apps/computer/src/main.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L4',
+    what: 'direct terminal reads bound each call (attach and every page): a half-open socket fails the desktop attach in seconds and falls back to the hub, while a long paged read is never cut off',
+    files: [
+      `${P}shared/transport/src/client/direct-pty-read.test.ts`,
+      `${P}domains/terminal/src/client/direct-pty.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5a',
+    what: "Electron main treats localhost and [::1] listeners as loopback (probed when the document's CSP has the entry, never sent to the hub), not as invalid",
+    files: [`${P}apps/app/src/main/direct-link-gate.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5b',
+    what: 'two terminals of one session on the direct link: one ending never takes the other off it (each link removes only its own entry)',
+    files: [`${P}domains/terminal/src/client/direct-pty.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5c',
+    what: 'the hub tells each computer only the watched chat tabs it holds (unknown: all), and re-routes a tab when its ownership moves',
+    files: [`${P}apps/hub/src/chat-relay-watch.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5d',
+    what: 'every write to a computer session (client or hub-originated) is analysed on the computer in one input buffer, so a hub submit completes a line the client typed',
+    files: [
+      `${P}domains/terminal/src/server/runtime/pty-signal-mirror.test.ts`,
+      `${P}domains/terminal/src/server/runtime/pty-backend.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5e',
+    what: 'permission and tool answers never go direct: they take the hub, whose relay refuses them while the conversation runs in the terminal; the direct router has no such procedures',
+    files: [
+      `${P}domains/terminal/src/client/chat-direct.test.ts`,
+      `${P}apps/computer/src/direct/listener.test.ts`
+    ]
+  },
+  {
+    round: 17,
+    id: 'DL-L5f',
+    what: "the direct listener's message budget scales with the grants a socket holds (all a computer's terminals share one socket), under a per-socket ceiling",
+    files: [`${P}apps/computer/src/direct/listener.test.ts`]
+  },
+  {
+    round: 17,
+    id: 'DL-L5h',
+    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC from a resolve) and loads the addon on the first offer; a failed load refuses that offer',
+    files: [`${P}apps/computer/src/main.test.ts`]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-3',
+    what: 'a write carrying keys typed after its submit-Enter submits only up to the Enter; the rest starts the next line (turn tracker records the right prompt)',
+    files: [`${P}domains/terminal/src/server/pty-input.test.ts`]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-2',
+    what: "a public direct address written with its scheme's default port (box:443) is one address with box: the hub issues the normalised spelling, the desktop gate and CSP accept it",
+    files: [
+      `${P}shared/platform/src/direct-link.test.ts`,
+      `${P}apps/app/src/main/direct-link-gate.test.ts`,
+      `${P}apps/app/src/main/renderer-csp.test.ts`,
+      `${P}apps/hub/src/direct-link.test.ts`
+    ]
+  },
+  {
+    round: 18,
+    id: 'DL-R2-1',
+    what: 'a revocation that runs while an issue is still locating its target or awaiting its gates drops that grant before it is registered (no stale chat grant survives an ownership move)',
+    files: [`${P}apps/hub/src/direct-link.test.ts`]
   },
   // ── post-merge QA (task 964073b0, rows 1e/1f → task 5decc957) ──
   {
@@ -636,6 +783,18 @@ export const REGRESSIONS = [
       `${computer}handlers/chat-runtime.test.ts`,
       `${P}domains/task-terminals/src/server/task-terminals-router.test.ts`
     ]
+  },
+  {
+    round: 19,
+    id: 'DL-restore',
+    what: 'a terminal restored after a restart and attached over the direct link: restored output first and once, then live output once; every backfill page fits one direct message (restored output is buffered in bounded chunks)',
+    files: [`${P}apps/computer/src/handlers/pty-history.test.ts`]
+  },
+  {
+    round: 19,
+    id: 'DL-turns',
+    what: "a chat turn on the direct link records its snapshot: the turn's end is read from the saved-event signal the hub always gets, once per result whether or not the full event is relayed",
+    files: [`${P}domains/agent-turns/src/server/turn-recording.test.ts`]
   }
 ]
 

@@ -33,7 +33,8 @@
     "./runtime": "./src/server/chat-runtime.ts",
     "./pty-detection": "./src/server/pty-detection.ts",
     "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
-    "./claude-transcripts": "./src/server/claude-transcripts.ts"
+    "./claude-transcripts": "./src/server/claude-transcripts.ts",
+    "./chat-direct": "./src/client/chat-direct.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"

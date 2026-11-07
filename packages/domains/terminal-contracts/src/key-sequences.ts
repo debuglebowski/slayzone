@@ -33,6 +33,19 @@ export function containsSubmitEnter(data: string): boolean {
   return data.includes('\r') || data.includes('\n') || KITTY_PLAIN_ENTER_RE.test(data)
 }
 
+const SUBMIT_ENTER_GLOBAL_RE = /\r|\n|\x1b\[13(?:;1(?::\d+)?)?u/g
+
+/**
+ * Index just past the LAST submit-Enter in `data` (any encoding {@link
+ * containsSubmitEnter} accepts), or -1 when there is none. What follows it was
+ * typed after the submit and belongs to the next line.
+ */
+export function lastSubmitEnterEnd(data: string): number {
+  let end = -1
+  for (const m of data.matchAll(SUBMIT_ENTER_GLOBAL_RE)) end = m.index + m[0].length
+  return end
+}
+
 /** Escape — the interrupt key of Claude Code and Codex, and every TUI's "back". */
 export const ESCAPE = '\x1b'
 

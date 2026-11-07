@@ -1,3 +1,22 @@
+import { createChatRelayWatch } from './chat-relay-watch'
+import { createChatDirectWriteHandler } from './chat-direct-write'
+import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
+import {
+  createDirectLinkIssuer,
+  type DirectLinkIssuer,
+  type DirectRevokeOutcome
+} from './direct-link'
+
+/**
+ * A revocation a computer could not receive is already audited as a failure; say so
+ * in the hub log too. Its grants are forgotten here, the computer is reset to what
+ * the hub holds when it reconnects, and none outlives its 5-minute TTL.
+ */
+function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): void {
+  for (const f of outcome?.failed ?? []) {
+    console.warn('[direct-link] revocation not delivered', f)
+  }
+}
 import { createWorktreeComputerState } from './worktree-computer-state'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
@@ -27,7 +46,7 @@ const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
 const GH_DEFAULT_TIMEOUT_MS = 30_000
 import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
-import { readHubSessionRetentionDays } from '@slayzone/platform/hub-switches'
+import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
 import {
   createComputerChatMaintenance,
@@ -163,6 +182,7 @@ import {
   getChatDeps,
   setExecutionContextProbe,
   setTerminalCommandProbe,
+  getPtyDirectTarget,
   onPtyInputSubmit,
   type AgentLifecycleEventMap,
   type PtySessionWindow
@@ -465,6 +485,8 @@ export function composeServer(opts: {
   // Populated by the async computer init (createHubAuth is async — migrations); a
   // later unit reads these after `computersReady` to mount the gateway in server.ts.
   let computerGatewayRef: HubComputerGateway | null = null
+  // Direct client ↔ computer capabilities (direct-link.ts). Built with the gateway.
+  let directLinkIssuer: DirectLinkIssuer | null = null
   let hubAuthRef: HubAuth | null = null
   // Who a join token is for (T-20), read through the late-bound ref above.
   const joinTokenAccounts = createJoinTokenAccountLookup(() => hubAuthRef)
@@ -619,7 +641,13 @@ export function composeServer(opts: {
     worktrees: hubWorktreeExecAdapters,
     worktreePolicy: defaultWorktreePolicyAdapters,
     removeTaskProcesses,
-    killPtysByTaskId,
+    // A closed task's direct-link grants go with its agents (direct-link.ts).
+    killPtysByTaskId: (taskId: string) => {
+      killPtysByTaskId(taskId)
+      void directLinkIssuer
+        ?.revoke({ by: 'task', taskId }, 'task_closed')
+        .then(reportDirectRevokeFailures)
+    },
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
     // hooks must run here: status→terminal kills the task's PTYs (→ pty:exit
@@ -1021,11 +1049,34 @@ export function composeServer(opts: {
       request: computerChat.lifecycle.request
     })
   )
+  // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).
+  const chatRelayWatch = createChatRelayWatch({
+    log: (message, detail) => console.warn(`[chat] ${message}`, detail),
+    // Each computer hears only of the watched tabs it holds (mid-move: both ends).
+    computersOfTab: async (tabId) => {
+      const owner = await computerChat.ownership.forTab(tabId)
+      if (!owner || owner.state === 'deleted') return []
+      return [owner.computerId, owner.sourceComputerId, owner.destinationComputerId].filter(
+        (id): id is string => id !== null
+      )
+    },
+    onOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
+    computers: () => computerGatewayRef?.listUsableComputers().map((c) => c.computerId) ?? [],
+    send: (computerId, config) => {
+      const gateway = computerGatewayRef
+      if (!gateway) return Promise.resolve()
+      return gateway.request(computerId, HubToComputerMethods.chatRequest, {
+        kind: 'relay.watch',
+        ...config
+      })
+    }
+  })
   setChatDeps({
     ...computerChat.relay,
     computers: computerChat.computers,
     testing: computerChat.testing,
-    availability: computerChat.availability
+    availability: computerChat.availability,
+    watchEvents: chatRelayWatch.watch
   })
   setChatSessionSource(computerChat.relay.sessions)
   // Turn snapshots: an agent terminal's submitted prompt and a chat turn's result.
@@ -1034,8 +1085,10 @@ export function composeServer(opts: {
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
   setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
-  computerChat.relay.events.on('event', (tabId, event) => {
-    if (event.kind !== 'user-message' && event.kind !== 'user-message-delivery') return
+  // Every saved event is reported to the hub (`saved`), relayed in full or not
+  // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
+  computerChat.relay.events.on('saved', (tabId, saved) => {
+    if (saved.kind !== 'user-message' && saved.kind !== 'user-message-delivery') return
     void computerChat.ownership
       .forTab(tabId)
       .then((owner) => {
@@ -1513,7 +1566,11 @@ export function composeServer(opts: {
   const userAccess = createUserAccessRevoker({
     db,
     getGateway: () => computerGatewayRef,
-    connections: trpcConnections
+    connections: trpcConnections,
+    revokeDirectGrants: async (userId) =>
+      reportDirectRevokeFailures(
+        await directLinkIssuer?.revoke({ by: 'user', userId }, 'user_access_ended')
+      )
   })
   // Break-glass (break-glass.ts): off unless login is required; closing its account
   // revokes everything the account holds, like disabling any other (T-12).
@@ -1563,7 +1620,9 @@ export function composeServer(opts: {
       // different connection status than the app's Computers tab.
       getGateway: () => computerGatewayRef,
       // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
-      findAccount: joinTokenAccounts
+      findAccount: joinTokenAccounts,
+      // What the desktop's main process may add to its CSP (direct-link-gate.ts).
+      directAddresses: (userId) => directLinkIssuer?.issuedAddresses(userId) ?? []
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
@@ -1723,6 +1782,15 @@ export function composeServer(opts: {
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
     // only on a hub with login. The REST twin reads the same function.
     findAccount: joinTokenAccounts,
+    // Before the gateway is up there is no computer to reach: the client relays.
+    issueDirectLink: (target, caller, options) =>
+      directLinkIssuer
+        ? directLinkIssuer.issue(target, caller, options)
+        : Promise.resolve({ available: false, reason: 'no-computer' }),
+    directRtcConnect: (grantId, sdp, caller) =>
+      directLinkIssuer
+        ? directLinkIssuer.rtcConnect(grantId, sdp, caller)
+        : Promise.resolve({ ok: false, reason: 'refused' }),
     // The desktop app's own co-spawned computer (its enroll name always maps to this
     // id, see the local-computer dedup below) is never disabled or deleted on its own
     // hub. A standalone hub spawns no computer of its own, so it protects none.
@@ -1838,6 +1906,36 @@ export function composeServer(opts: {
       ...(opts.floodLimits ? {} : { floodLimits: false as const })
     })
     computerGatewayRef = computerGateway
+    directLinkIssuer = createDirectLinkIssuer({
+      gateway: computerGateway,
+      resolvePty: async (sessionId) => getPtyDirectTarget(sessionId),
+      // An ACTIVE owner only: a tab mid-migration, deleted, or whose computer lost
+      // its history is the relay's to explain.
+      resolveChat: async (tabId) => {
+        const owner = await computerChat.ownership.forTab(tabId)
+        if (!owner || owner.state !== 'active' || !owner.computerId) return null
+        if (await computerChat.ownership.unavailable(owner.id)) return null
+        return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
+      },
+      ...(placement.gate ? { gate: placement.gate } : {}),
+      onChatOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
+      // Validated at boot (rule B19), so this is the parsed value.
+      stunAddresses: () => {
+        const stun = readHubStunAddresses()
+        return stun.ok ? stun.addresses : []
+      }
+    })
+    // Every (re)connect: the computer keeps exactly the grants this hub still holds
+    // (none after a hub restart), so nothing it granted outlives what the hub knows.
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      void directLinkIssuer?.computerConnected(computer.computerId).catch((err: unknown) =>
+        console.warn('[direct-link] reset on connect failed', {
+          computerId: computer.computerId,
+          error: String(err)
+        })
+      )
+      void chatRelayWatch.computerConnected(computer.computerId)
+    })
 
     // Agent-hook relay consumer (hub/computer split): a computer-routed pty posts its
     // lifecycle hook to the computer's OWN loopback relay, which forwards the raw
@@ -1919,7 +2017,13 @@ export function composeServer(opts: {
     setProcessComputerReachability((computerId) => computerGateway.isComputerUsable(computerId))
     // A deleted or revoked computer never returns — whoever removed it (Settings,
     // REST, a departing user's cleanup): the runs it kept are forgotten.
-    setComputerRemovedListener((computerId) => processesComputerRemoved(computerId))
+    setComputerRemovedListener((computerId) => {
+      processesComputerRemoved(computerId)
+      // Its direct-link grants go with it, whoever removed it (docs/direct-link.md).
+      void directLinkIssuer
+        ?.revoke({ by: 'computer', computerId }, 'computer_removed')
+        .then(reportDirectRevokeFailures)
+    })
     // Auto-restart processes that found no computer start now; runs a previous hub
     // left on this computer show as orphaned (Stop/Start reach them there).
     computerGateway.events.on('computer-connected', ({ computer }) => {
@@ -1929,12 +2033,23 @@ export function composeServer(opts: {
       )
     })
     // Only normalized, computer-persisted chat events cross this channel.
+    // A chat command a client sent straight to the computer (docs/direct-link.md):
+    // drain metadata as after a relayed command — in the same per-computer order.
+    const chatDirectWrite = createChatDirectWriteHandler({
+      forTab: (tabId) => computerChat.ownership.forTab(tabId),
+      drainMetadata: (computerId) => computerChat.relay.drainMetadata(computerId)
+    })
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
-      if (name !== 'chat-runtime' || resettingForTest) return
+      if ((name !== 'chat-runtime' && name !== CHAT_DIRECT_WRITE_EVENT_NAME) || resettingForTest)
+        return
       const previous = chatNotificationChains.get(computerId) ?? Promise.resolve()
       const next = previous
         .then(() =>
-          asComputerOwner(computerId, () => computerChat.relay.receive(computerId, payload))
+          asComputerOwner(computerId, () =>
+            name === CHAT_DIRECT_WRITE_EVENT_NAME
+              ? chatDirectWrite(computerId, payload)
+              : computerChat.relay.receive(computerId, payload)
+          )
         )
         .catch(() => {
           console.error('[chat] rejected computer notification')

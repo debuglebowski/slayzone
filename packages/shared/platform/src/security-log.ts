@@ -96,6 +96,15 @@ export const SECURITY_EVENTS = [
   'computer.gh',
   'computer.allowed_roots.set',
   'computer.shutdown',
+  /** A direct-link capability issued to a client (hub `direct-link.ts`). `detail`: the
+   *  grant id, resource kind and id, TTL — never the token. */
+  'computer.direct_grant',
+  /** Direct-link capabilities revoked on one computer (`detail.reason`, `detail.grants`). */
+  'computer.direct_revoke',
+  'computer.direct_rtc_signal',
+  /** A computer's direct-link listener refused a client by a flood limit (`denied`);
+   *  at most one line per limit and address per minute. `detail.limit`, `detail.max`. */
+  'computer.rate_limit',
   /** `denied`: a boot rule refused to start the hub (hub `boot-rules.ts`). `success`: a
    *  hub that requires login started; `detail.methods` = how it can be signed in to (T-10). */
   'hub.boot',

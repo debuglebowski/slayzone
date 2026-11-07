@@ -10,19 +10,23 @@
     "./client/use-stable-callback": "./src/client/useStableCallback.ts",
     "./scopes": "./src/shared/scopes.ts",
     "./host-paths": "./src/shared/host-paths.ts",
-    "./testing": "./src/testing/index.tsx"
+    "./testing": "./src/testing/index.tsx",
+    "./direct": "./src/direct/index.ts",
+    "./direct-client": "./src/client/direct-link.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@slayzone/platform": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
     "@trpc/client": "^11.19.0",
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
     "superjson": "^2.2.6",
+    "zod": "^4.3.5",
     "zustand": "^5.0.16"
   },
   "peerDependencies": {

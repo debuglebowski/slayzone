@@ -45,6 +45,7 @@
         "clsx",
         "date-fns",
         "motion",
+        "node-datachannel",
         "node-pty",
         "tailwind-merge",
         "tailwindcss",

@@ -326,7 +326,12 @@ export function AgentPanel({ hubId, feed, showHub, tabId, onSelectTab, row }: Ag
         {chat ? (
           <ChatSession hubId={hubId} taskId={taskId} tabId={selected.id} mode={selected.mode} />
         ) : (
-          <TerminalView key={`${sessionId}#${restarts}`} sessionId={sessionId} live={live} />
+          <TerminalView
+            key={`${sessionId}#${restarts}`}
+            sessionId={sessionId}
+            taskId={taskId}
+            live={live}
+          />
         )}
       </View>
       <BottomSheet visible={menu} onClose={() => setMenu(false)} testID="agent-menu">

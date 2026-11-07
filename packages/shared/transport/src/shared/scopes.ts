@@ -565,6 +565,9 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.workspaceChanges.getFileDiff': 'agent',
   'computers.claim': 'never',
   'computers.delete': 'never',
+  // Reaching a session/tab directly is the same access as attaching to it.
+  'computers.directRtcConnect': 'agent',
+  'computers.issueDirectLink': 'agent',
   'computers.list': 'read',
   'computers.mintJoinToken': 'never',
   'computers.onStatusChange': 'read',

@@ -82,6 +82,10 @@ const api: ElectronAPI = {
         authRequired?: boolean
         signIn?: { sso: boolean; password: boolean }
       }>,
+    prepareDirectLink: (address: string, hubId: string) =>
+      ipcRenderer.invoke('app:direct-link-prepare', address, hubId) as Promise<
+        { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
+      >,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>

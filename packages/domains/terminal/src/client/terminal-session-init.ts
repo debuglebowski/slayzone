@@ -1,3 +1,4 @@
+import { ptyWrite, reportPtyWriteFailure } from './direct-pty'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import type { ITheme, Terminal as XTerm } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
@@ -585,7 +586,7 @@ export async function initTerminalSession(
           sendInput: async (text) => {
             cached.terminal.input(text)
           },
-          write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
+          write: (data) => ptyWrite(trpcClient, sessionId, data),
           focus: () => cached.terminal.focus(),
           clearBuffer: clearBufferWithoutRestart
         })
@@ -704,7 +705,7 @@ export async function initTerminalSession(
     // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
     // Stopping the reply from being generated leaves keystrokes untouched.
     const inputGate = createInputGate((data) => {
-      void trpcClient.pty.write.mutate({ sessionId, data })
+      void ptyWrite(trpcClient, sessionId, data).catch(reportPtyWriteFailure)
     })
     // An init abandoned mid-way (unmount) may leave this xterm cached and later
     // reattached: never leave it holding input.
@@ -883,7 +884,7 @@ export async function initTerminalSession(
     // Expose API for programmatic input and focus
     onReadyRef.current?.({
       sendInput: injectText,
-      write: (data) => trpcClient.pty.write.mutate({ sessionId, data }),
+      write: (data) => ptyWrite(trpcClient, sessionId, data),
       focus: () => terminal.focus(),
       clearBuffer: clearBufferWithoutRestart
     })

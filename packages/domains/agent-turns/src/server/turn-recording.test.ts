@@ -16,6 +16,7 @@ import * as path from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
+import { chatSavedSummary } from '@slayzone/terminal-contracts'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { wireTurnRecording, type TurnRecordingSources } from './turn-recording.js'
 import { listTurnsForWorktree } from './db.js'
@@ -69,8 +70,15 @@ function fakeSources() {
     submit: (sessionId: string, taskId: string, line: string) => {
       for (const cb of submits) cb(sessionId, taskId, line)
     },
-    chat: (tabId: string, event: AgentEvent, seq: number, live?: number) =>
+    /** A saved event relayed in full (a hub client watches the tab): the event, then
+     *  its signal, as the computer publishes them. A live fragment has no signal. */
+    chat: (tabId: string, event: AgentEvent, seq: number, live?: number) => {
       chat.emit('event', tabId, event, seq, live, Date.now())
+      if (live === undefined) chat.emit('saved', tabId, chatSavedSummary(event, seq))
+    },
+    /** A saved event of a tab on the direct link: the hub gets its signal only. */
+    signal: (tabId: string, event: AgentEvent, seq: number) =>
+      chat.emit('saved', tabId, chatSavedSummary(event, seq))
   }
 }
 
@@ -138,6 +146,30 @@ describe('wireTurnRecording', () => {
     s.chat(tabId, { kind: 'result' } as AgentEvent, 2)
     expect(await turnsSettle(repo, 1)).toBe(1)
     expect((await listTurnsForWorktree(h.slayDb, repo))[0].prompt_preview).toBe('')
+    stop()
+  })
+
+  test('chat on the direct link (the hub gets saved-event signals only): the turn still records', async () => {
+    const s = fakeSources()
+    const stop = wireTurnRecording(h.slayDb, s.sources)
+    const { tabId, repo } = freshTab('claude-chat')
+    s.signal(tabId, { kind: 'user-message', id: 'm1', text: 'p' } as AgentEvent, 1)
+    fs.writeFileSync(path.join(repo, 'direct.txt'), 'x')
+    s.signal(tabId, { kind: 'result' } as AgentEvent, 2)
+    expect(await turnsSettle(repo, 1)).toBe(1)
+    stop()
+  })
+
+  test('chat relayed in full: one turn per result, not one per copy', async () => {
+    const s = fakeSources()
+    const stop = wireTurnRecording(h.slayDb, s.sources)
+    const { tabId, repo } = freshTab('claude-chat')
+    s.chat(tabId, { kind: 'user-message', text: 'q' } as AgentEvent, 1)
+    fs.writeFileSync(path.join(repo, 'once.txt'), 'x')
+    s.chat(tabId, { kind: 'result' } as AgentEvent, 2)
+    expect(await turnsSettle(repo, 1)).toBe(1)
+    await settle()
+    expect(await listTurnsForWorktree(h.slayDb, repo)).toHaveLength(1)
     stop()
   })
 

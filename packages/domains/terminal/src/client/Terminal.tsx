@@ -4,6 +4,8 @@
 // Direct imports from `./Terminal` will land xterm back in the main renderer
 // bundle and undo the boot-time split. The package's "./client/Terminal"
 // export exists only for the lazy wrapper itself.
+import { ptyBufferSince, ptyWrite, reportPtyWriteFailure } from './direct-pty'
+import { useDirectPtyLink } from './useDirectPtyLink'
 import {
   useEffect,
   useInsertionEffect,
@@ -227,6 +229,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const trpcClient = useTRPCClient()
   const trpc = useTRPC()
+  // Output, keystrokes and backfill straight from the session's computer when it
+  // can be reached (docs/direct-link.md); the hub relay otherwise.
+  useDirectPtyLink(sessionId)
   const {
     subscribe,
     subscribeExit,
@@ -400,10 +405,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         if (e.type === 'keydown') {
-          void trpcClient.pty.write.mutate({
-            sessionId,
-            data: KITTY_SHIFT_ENTER
-          })
+          void ptyWrite(trpcClient, sessionId, KITTY_SHIFT_ENTER).catch(reportPtyWriteFailure)
         }
         return false
       }
@@ -440,11 +442,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.type === 'keydown'
       ) {
         if (e.key === 'ArrowLeft') {
-          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bb' })
+          void ptyWrite(trpcClient, sessionId, '\x1bb').catch(reportPtyWriteFailure)
           return false
         }
         if (e.key === 'ArrowRight') {
-          void trpcClient.pty.write.mutate({ sessionId, data: '\x1bf' })
+          void ptyWrite(trpcClient, sessionId, '\x1bf').catch(reportPtyWriteFailure)
           return false
         }
       }
@@ -464,8 +466,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Catch-ups from the scrollback (tab activation, a computer reconnect): one at a
   // time, live chunks held meanwhile and merged by seq — each written once, in
   // order, and never dropped (not even when the tab switches mid-catch-up).
+  // Direct-aware: the computer's scrollback over the direct link when the session
+  // has a lease, else the hub's.
   const fetchSince = useStableCallback((afterSeq: number) =>
-    trpcClient.pty.getBufferSince.query({ sessionId, afterSeq })
+    ptyBufferSince(trpcClient, sessionId, afterSeq)
   )
   const writeChunk = useStableCallback((chunk: SeqChunk) => {
     terminalRef.current?.write(chunk.data)
@@ -714,33 +718,40 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       flush()
     }
 
-    const unsubData = subscribe(sessionId, (data, seq) => {
-      const cutoff = clearedSeqRef.current
-      if (cutoff !== null && seq <= cutoff) return
-      // Skip chunks already covered by the initial archive snapshot replay.
-      // Archive writes are sync-mirrored to disk before pty:data fires, so any
-      // chunk with seq <= lastRenderedSeqRef is guaranteed to be in the tail
-      // we just wrote — re-writing here would duplicate output.
-      if (seq <= lastRenderedSeqRef.current) return
-      if (!terminalRef.current) return
-      // First live output of a resume → the boot gap is over; drop the overlay.
-      if (isResumingRef.current) {
-        isResumingRef.current = false
-        if (resumeCapTimerRef.current) {
-          clearTimeout(resumeCapTimerRef.current)
-          resumeCapTimerRef.current = null
+    // What attach and replay wrote count as delivered: a live chunk past it is
+    // backfilled first (pty-delivery.ts), whichever path — hub or direct — carries it.
+    const renderedSeq = (): number => lastRenderedSeqRef.current
+    const unsubData = subscribe(
+      sessionId,
+      (data, seq) => {
+        const cutoff = clearedSeqRef.current
+        if (cutoff !== null && seq <= cutoff) return
+        // Skip chunks already covered by the initial archive snapshot replay.
+        // Archive writes are sync-mirrored to disk before pty:data fires, so any
+        // chunk with seq <= lastRenderedSeqRef is guaranteed to be in the tail
+        // we just wrote — re-writing here would duplicate output.
+        if (seq <= lastRenderedSeqRef.current) return
+        if (!terminalRef.current) return
+        // First live output of a resume → the boot gap is over; drop the overlay.
+        if (isResumingRef.current) {
+          isResumingRef.current = false
+          if (resumeCapTimerRef.current) {
+            clearTimeout(resumeCapTimerRef.current)
+            resumeCapTimerRef.current = null
+          }
+          setIsResuming(false)
         }
-        setIsResuming(false)
-      }
-      lastActivityTimeRef.current = performance.now()
-      // A catch-up is in flight: hold it, it is merged with the scrollback by seq.
-      if (catchUp.hold({ seq, data })) return
-      pendingChunks.push(data)
-      pendingSeq = seq
-      if (rafId === null) {
-        rafId = requestAnimationFrame(flush)
-      }
-    })
+        lastActivityTimeRef.current = performance.now()
+        // A catch-up is in flight: hold it, it is merged with the scrollback by seq.
+        if (catchUp.hold({ seq, data })) return
+        pendingChunks.push(data)
+        pendingSeq = seq
+        if (rafId === null) {
+          rafId = requestAnimationFrame(flush)
+        }
+      },
+      renderedSeq
+    )
 
     const unsubExit = subscribeExit(sessionId, (exitCode, reason, exitReason, exitDetail) => {
       // Resume died before any output — stop the overlay so the dead overlay shows.
@@ -1193,7 +1204,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         e.preventDefault()
         e.stopPropagation()
         void safeClipboardReadText().then((text) => {
-          if (text) void trpcClient.pty.write.mutate({ sessionId, data: text })
+          if (text) void ptyWrite(trpcClient, sessionId, text).catch(reportPtyWriteFailure)
         })
       }
     }

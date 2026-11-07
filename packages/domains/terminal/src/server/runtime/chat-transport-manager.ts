@@ -11,6 +11,7 @@ import type {
   CommandTaskOutput,
   OutgoingUserMessage,
   ResultEvent,
+  ChatSavedSummary,
   ChatTurnState,
   ChatTurnStatus
 } from '@slayzone/terminal-contracts'
@@ -250,6 +251,12 @@ export type ChatEventMap = {
   'pinned-messages-changed': [tabId: string]
   'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
+  /**
+   * A saved event, as its computer always reports it (docs/direct-link.md) — whether
+   * or not the hub relays the full event (it does only while a hub client watches
+   * the tab). What hub-side consumers that are not clients listen to.
+   */
+  saved: [tabId: string, saved: ChatSavedSummary]
   exit: [tabId: string, sessionId: string, code: number | null, signal: string | null]
 }
 

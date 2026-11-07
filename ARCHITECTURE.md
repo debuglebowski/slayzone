@@ -132,6 +132,27 @@ placements. Hub administration still requires an explicit user login.
 `slay hub ls` shows local hubs and the task's hub target. `--json` retains the local
 discovery array; `--json-v2` adds task-hub metadata in a versioned envelope.
 
+### Direct client ↔ computer link
+
+Desktop and mobile clients exchange terminal and chat data directly with the
+computer that holds it. The hub gates once, when it issues a capability: it mints an
+opaque token, registers only its SHA-256 on the computer over the computer's
+authenticated link, and gives the client the token and the computer's advertised
+authority. The client probes over HTTP and then opens the computer's `/direct/v1`
+(tRPC over WebSocket). A computer with no listener the client can dial (a remote
+one behind NAT) is reached over WebRTC instead: the hub brokers one SDP offer and
+answer over the links it already has, and the same protocol runs on the data
+channel — no open port, no server setup. Grants last 5 minutes and renew through the hub, so the hub
+re-checks them. They are revoked when the account, the task, the computer or the
+chat ownership changes.
+
+The hub relays a session or chat tab only while a hub client watches it.
+Computers still send every state signal, every direct keystroke's effects and a
+summary of each saved chat event, so the hub's records, idle-close and attention
+are unchanged. The relay stays as the fallback: a computer neither path reaches
+(a strict firewall, offline; there is no TURN), an older hub or client, or a host
+that installs no probe (the web shell). See [direct link](docs/direct-link.md).
+
 ### Computer-owned chat
 
 Desktop/mobile requests pass through the hub's authorization and ownership gates

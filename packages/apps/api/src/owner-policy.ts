@@ -400,6 +400,8 @@ const CONNECTION =
 const COMPUTER =
   "computer management (metadata, lifecycle): decided in the handler — the computer's owner, or an admin (computer-access.ts, T-19)"
 const SELF = "the caller's own settings or client diagnostics (T-16 scopes settings per user)"
+const DIRECT_GRANT =
+  'a direct-link grant id: brokered only for a live grant the hub issued to this caller, matched in the handler (hub direct-link.ts rtcConnect)'
 const FEEDBACK = 'feedback threads to the SlayZone team: no owner column (hub-wide)'
 const TEST = 'test-only (PLAYWRIGHT=1); refused in production'
 const META = 'app or hub metadata'
@@ -817,6 +819,27 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
   'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
+  // A direct-link target is a computer target (its task, and computer when named) plus
+  // the one session or chat tab in it, by `target.kind`. The issuer refuses a resource
+  // outside the task.
+  'computers.issueDirectLink': {
+    ...checked(...TARGET, {
+      pick: (raw) => {
+        const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
+        const r =
+          t?.kind === 'pty'
+            ? res('session', t.sessionId)
+            : t?.kind === 'chat'
+              ? res('tab', t.tabId)
+              : null
+        return r ? [r] : []
+      },
+      sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
+    }),
+    // The task the resource lies in (the issuer refuses one outside it).
+    needsOne: ['target.taskId']
+  },
+  'computers.directRtcConnect': none(DIRECT_GRANT),
   'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),

@@ -16,15 +16,18 @@
  */
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import {
+  defaultDirectProbe,
   FederationProvider,
   type HubConnection,
   HubScope,
   type RuntimeLink,
   useFederation,
   useHubConnection,
+  setDirectLinkProbe,
   useSubscription
 } from '@slayzone/transport/client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { installDirectRtc } from './direct-rtc'
 import {
   createContext,
   type ReactNode,
@@ -46,6 +49,14 @@ import {
 } from './hub-board'
 import type { HubSession } from './hub-session'
 import { useTRPC } from './trpc'
+
+// Direct links to computers (docs/direct-link.md): the phone reaches a computer
+// straight when the hub offers its public address and a plain HTTP probe gets
+// through (on cellular, behind NAT, offline — it does not, and the hub relays).
+setDirectLinkProbe((address) => defaultDirectProbe(address))
+// A computer with no address the phone can dial (behind NAT) is reached over WebRTC,
+// brokered by the hub; when that fails too, the hub relays.
+installDirectRtc()
 
 /**
  * The federation's default hub id: the client's co-located hub, which this app has

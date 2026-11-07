@@ -86,6 +86,11 @@ export interface HubConfig {
   enableIntegrations?: boolean
   /** Third-party telemetry (PostHog, Convex) in the web UI and connected apps. Default on. */
   enableTelemetry?: boolean
+  /**
+   * STUN servers for WebRTC direct links, `host:port` each (env
+   * `SLAYZONE_HUB_STUN_ADDRESSES` wins). Absent = Cloudflare's; `[]` = none.
+   */
+  stunAddresses?: string[]
 }
 
 /** The boolean switch keys of {@link HubConfig}, in file order. */
@@ -133,6 +138,10 @@ export interface ComputerConfig {
   hubUrls?: string[]
   /** Filesystem roots the computer may operate under. Locally-declared, never pushed from the hub. Defaults to `[<ROOT>]` when absent. */
   allowedRoots?: string[]
+  /** Where the direct-link listener binds (`host:port`, authority only). Default `127.0.0.1:0`. */
+  directListenAddress?: string
+  /** The authority clients dial for the direct link (opt-in; a front end terminates TLS). */
+  directPublicAddress?: string
 }
 
 /**
@@ -217,6 +226,8 @@ function coerceHubConfig(raw: Record<string, unknown>): HubConfig {
     cfg.ssoTenantId = raw.ssoTenantId.trim()
   if (typeof raw.ssoClientId === 'string' && raw.ssoClientId.trim().length > 0)
     cfg.ssoClientId = raw.ssoClientId.trim()
+  if (Array.isArray(raw.stunAddresses) && raw.stunAddresses.every((a) => typeof a === 'string'))
+    cfg.stunAddresses = raw.stunAddresses as string[]
   // `mode` (the retired SLAYZONE_MODE key) is deliberately NOT read: it is ignored.
   return cfg
 }
@@ -246,6 +257,16 @@ export function diagnoseHubConfig(raw: Record<string, unknown>): HubConfigProble
       })
     }
   }
+  // Its values are checked with the env form (boot rule B19); only the shape is here.
+  if (
+    raw.stunAddresses !== undefined &&
+    !(Array.isArray(raw.stunAddresses) && raw.stunAddresses.every((a) => typeof a === 'string'))
+  ) {
+    problems.push({
+      key: 'stunAddresses',
+      message: `'stunAddresses' must be a list of "host:port" strings, got ${JSON.stringify(raw.stunAddresses)}`
+    })
+  }
   return problems
 }
 
@@ -272,6 +293,9 @@ function coerceComputerConfig(raw: Record<string, unknown>): ComputerConfig {
     const roots = raw.allowedRoots.filter((r): r is string => typeof r === 'string' && r.length > 0)
     if (roots.length > 0) cfg.allowedRoots = roots
   }
+  // Coerced as-is; the computer's schema refuses anything but a bare authority.
+  if (typeof raw.directListenAddress === 'string') cfg.directListenAddress = raw.directListenAddress
+  if (typeof raw.directPublicAddress === 'string') cfg.directPublicAddress = raw.directPublicAddress
   return cfg
 }
 

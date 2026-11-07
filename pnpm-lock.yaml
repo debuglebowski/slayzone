@@ -404,6 +404,9 @@ importers:
       express:
         specifier: ^5.3.0
         version: 5.3.0(supports-color@7.2.0)
+      node-datachannel:
+        specifier: ^0.33.4
+        version: 0.33.4
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
@@ -807,21 +810,36 @@ importers:
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../../domains/terminal
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../../domains/terminal-contracts
       '@slayzone/test-panel':
         specifier: workspace:*
         version: link:../../domains/test-panel
+      '@slayzone/transport':
+        specifier: workspace:*
+        version: link:../../shared/transport
       '@slayzone/usage-analytics':
         specifier: workspace:*
         version: link:../../domains/usage-analytics
       '@slayzone/worktrees':
         specifier: workspace:*
         version: link:../../domains/worktrees
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-beta)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
+      node-datachannel:
+        specifier: ^0.33.4
+        version: 0.33.4
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=ebcebb34d72b871cafe3c1cd596b64453dc68fcd368e7e0e2adabac7221dcee3)
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0(bufferutil@4.1.0)
       zod:
         specifier: ^4.5.4
         version: 4.6.7
@@ -835,9 +853,18 @@ importers:
       '@slayzone/test-utils':
         specifier: workspace:*
         version: link:../../shared/test-utils
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/client':
+        specifier: ^11.19.0
+        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.2
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -1094,6 +1121,9 @@ importers:
       react-native-web:
         specifier: ~0.21.4
         version: 0.21.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react-native-webrtc:
+        specifier: 155.0.1
+        version: 155.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(supports-color@7.2.0)
       react-native-webview:
         specifier: 14.0.1
         version: 14.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1)
@@ -3101,7 +3131,11 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0
 
-  packages/domains/terminal-contracts: {}
+  packages/domains/terminal-contracts:
+    dependencies:
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.7
 
   packages/domains/test-panel:
     dependencies:
@@ -3704,6 +3738,9 @@ importers:
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../platform
+      '@slayzone/terminal-contracts':
+        specifier: workspace:*
+        version: link:../../domains/terminal-contracts
       '@slayzone/trpc-server':
         specifier: workspace:*
         version: link:../trpc-server
@@ -3725,6 +3762,9 @@ importers:
       superjson:
         specifier: ^2.2.6
         version: 2.2.6
+      zod:
+        specifier: ^4.5.4
+        version: 4.6.7
       zustand:
         specifier: ^5.0.16
         version: 5.0.16(@types/react@19.3.0)(immer@11.2.7)(react@19.3.1)(use-sync-external-store@1.7.0(react@19.3.1))
@@ -6347,6 +6387,55 @@ packages:
   '@noble/hashes@2.4.0':
     resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
     engines: {node: '>= 20.19.0'}
+
+  '@node-datachannel/android-arm64@0.33.4':
+    resolution: {integrity: sha512-Kd1K+drJlxdGmZYBlzh5HHX2E7les99eTWlt7WldZgvJmcGf2z9L/bnUVn4zbhNm2q/MtNZ2tPX2bd+fGlDDpQ==}
+    cpu: [arm64]
+    os: [android]
+
+  '@node-datachannel/darwin-arm64@0.33.4':
+    resolution: {integrity: sha512-bkIA+IbModz/NUmbVYTSWj8dZvkiab+cU4zOa6rhfKsNcW3EkdD2/DDoJjUrRrw+LbEZ40V7NuAKUlMNFDXFsw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@node-datachannel/darwin-x64@0.33.4':
+    resolution: {integrity: sha512-+dLnwiwC3GdWqW0OQShZcSFYrx3hRx0+7U85swoiP3iiRqtDUARME6AIAmW3glpP0vmus1jv5KhPCy/Q+jAvqw==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
+    resolution: {integrity: sha512-rR4yjwxpI1miLSrruLGcfR9yfw0Qebw+Twt+u+lKsL9SwmXxTm5pJhUAa9RU+c35oZ98IyAxGFjRwwq85BTbog==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@node-datachannel/linux-arm64-musl@0.33.4':
+    resolution: {integrity: sha512-MR4o1F0aREj/AtbNlXL20YiNx8/pDI8L/5B4Vr9ldiEDottD0IOdCd0khB8fpr5Np2CW7WwU9QG+uto00QGVdw==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@node-datachannel/linux-x64-gnu@0.33.4':
+    resolution: {integrity: sha512-xN0x3lcQ87qwOAmf1dBLVWrYY40LQ7pM4Y9wuNjP+EtN4IwiXqrhPdgupzGAElxna+n2NgBG0gT60dZpgoYU2Q==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@node-datachannel/linux-x64-musl@0.33.4':
+    resolution: {integrity: sha512-FWqJEjL7TqOPmsqdfwmG/BUwOXQN7MfpEU8kzw6ePbglUbwgdc3976Ls9BCBUXyPgEJyLo8YE1LJyWAlbXWyvA==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
+    resolution: {integrity: sha512-TeDV2tSPm+qAnF6MIPlLFTIlobSYLwOVe3/wQl+8hD/q3cEPTQi7vByFaQQ5lRULKKdnjKRR5iDMsxMilqbtXA==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@node-datachannel/win32-x64-msvc@0.33.4':
+    resolution: {integrity: sha512-eU0w/9ykrNaA5vWs5gjVs3Qxa45jbQ8mYoMyh5OWnRCE5GzXKxHCpfhFUnO+jGqi0KxkyP0hSA6fiwXXkirk6g==}
+    cpu: [x64]
+    os: [win32]
 
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.11':
     resolution: {integrity: sha512-tqvZOVmSoiJzm7QjQ+whPxCP45J2C1zCAZnzc1HhwmJrFIWw/qyA8o9Cup0aVqnjNVAN+as9GHX+DbAmkCbGlQ==}
@@ -9720,6 +9809,15 @@ packages:
       supports-color:
         optional: true
 
+  debug@4.3.4:
+    resolution: {integrity: sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==}
+    engines: {node: '>=6.0'}
+    peerDependencies:
+      supports-color: '*'
+    peerDependenciesMeta:
+      supports-color:
+        optional: true
+
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
     engines: {node: '>=6.0'}
@@ -12153,6 +12251,9 @@ packages:
   ms@2.0.0:
     resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
 
+  ms@2.1.2:
+    resolution: {integrity: sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w==}
+
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
@@ -12216,6 +12317,10 @@ packages:
 
   node-api-version@0.2.1:
     resolution: {integrity: sha512-2xP/IGGMmmSQpI1+O/k72jF/ykvZ89JeuKX3TLJAYPDVLUalrshrLHkeVcCCZqG/eEa635cr8IBYzgnDvM2O8Q==}
+
+  node-datachannel@0.33.4:
+    resolution: {integrity: sha512-qiUrdh8vY9XhglEnx91HK0N2JEAAu8qTZl0fcR3yQd0fFrdO39NwDeJD/KpG+WKUb9/o4p2UwnP+/HftA/xMbQ==}
+    engines: {node: '>=18.20.0'}
 
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
@@ -12921,6 +13026,11 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
+
+  react-native-webrtc@155.0.1:
+    resolution: {integrity: sha512-xQ71L3l1yE9o7H0VWupktdib08OXt5hnGspQYTSW1S3sYqXQHkYx8ZY9HNjw8o1FfBZuoFJ/ypGTUzky6YHnsQ==}
+    peerDependencies:
+      react-native: '>=0.60.0'
 
   react-native-webview@14.0.1:
     resolution: {integrity: sha512-lBUuvFk459Mo+5vUNqwzGvn+I8rDJE6zvOulG2hWWudeEOJfWTsQwOfuYnRu+27djUIXrESFfC+EQE3PGu+FWA==}
@@ -17392,6 +17502,33 @@ snapshots:
 
   '@noble/hashes@2.4.0': {}
 
+  '@node-datachannel/android-arm64@0.33.4':
+    optional: true
+
+  '@node-datachannel/darwin-arm64@0.33.4':
+    optional: true
+
+  '@node-datachannel/darwin-x64@0.33.4':
+    optional: true
+
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
+    optional: true
+
+  '@node-datachannel/linux-arm64-musl@0.33.4':
+    optional: true
+
+  '@node-datachannel/linux-x64-gnu@0.33.4':
+    optional: true
+
+  '@node-datachannel/linux-x64-musl@0.33.4':
+    optional: true
+
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
+    optional: true
+
+  '@node-datachannel/win32-x64-msvc@0.33.4':
+    optional: true
+
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.11':
     optional: true
 
@@ -20656,6 +20793,12 @@ snapshots:
   debug@3.2.7(supports-color@7.2.0):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 7.2.0
+
+  debug@4.3.4(supports-color@7.2.0):
+    dependencies:
+      ms: 2.1.2
     optionalDependencies:
       supports-color: 7.2.0
 
@@ -23960,6 +24103,8 @@ snapshots:
 
   ms@2.0.0: {}
 
+  ms@2.1.2: {}
+
   ms@2.1.3: {}
 
   multitars@1.0.2: {}
@@ -24002,6 +24147,20 @@ snapshots:
   node-api-version@0.2.1:
     dependencies:
       semver: 7.8.5
+
+  node-datachannel@0.33.4:
+    dependencies:
+      detect-libc: 2.1.2
+    optionalDependencies:
+      '@node-datachannel/android-arm64': 0.33.4
+      '@node-datachannel/darwin-arm64': 0.33.4
+      '@node-datachannel/darwin-x64': 0.33.4
+      '@node-datachannel/linux-arm64-gnu': 0.33.4
+      '@node-datachannel/linux-arm64-musl': 0.33.4
+      '@node-datachannel/linux-x64-gnu': 0.33.4
+      '@node-datachannel/linux-x64-musl': 0.33.4
+      '@node-datachannel/win32-arm64-msvc': 0.33.4
+      '@node-datachannel/win32-x64-msvc': 0.33.4
 
   node-fetch-native@1.6.7: {}
 
@@ -24783,6 +24942,14 @@ snapshots:
       styleq: 0.1.3
     transitivePeerDependencies:
       - encoding
+
+  react-native-webrtc@155.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(supports-color@7.2.0):
+    dependencies:
+      base64-js: 1.5.1
+      debug: 4.3.4(supports-color@7.2.0)
+      react-native: 0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0)
+    transitivePeerDependencies:
+      - supports-color
 
   react-native-webview@14.0.1(react-native@0.88.1(@babel/core@7.29.7(supports-color@7.2.0))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(supports-color@7.2.0))(react@19.3.1):
     dependencies:

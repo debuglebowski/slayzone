@@ -278,6 +278,165 @@ describe('startComputer multi-hub', () => {
   })
 })
 
+describe('startComputer direct link (docs/direct-link.md)', () => {
+  it('binds the loopback listener, then dials, advertising the bound address', async () => {
+    const seen: Array<{ started: boolean; address: string | null }> = []
+    let identity: { directAddress?: () => string | null } | undefined
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      createDialer: (options) => {
+        identity = options.identity
+        const fake = {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => seen.push({ started: true, address: identity?.directAddress?.() ?? null }),
+          stop: async () => undefined
+        }
+        return fake as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(seen.length).toBe(1))
+      expect(seen[0]?.address).toMatch(/^127\.0\.0\.1:\d+$/)
+      const health = await fetch(`http://${seen[0]?.address}/direct/v1/health`)
+      expect(health.status).toBe(200)
+    } finally {
+      await handle.stop()
+    }
+  })
+})
+
+describe('startComputer direct link: WebRTC addon off the boot path', () => {
+  it('dials without loading node-datachannel, advertises WebRTC, and loads it on the first offer', async () => {
+    let loads = 0
+    let startedWithLoads: number | null = null
+    let identity: { directRtc?: () => boolean } | undefined
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      rtc: {
+        available: () => true,
+        load: () => {
+          loads++
+          return null
+        }
+      },
+      createDialer: (options) => {
+        identity = options.identity as typeof identity
+        onHubRequest = options.onHubRequest as typeof onHubRequest
+        return {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => {
+            startedWithLoads = loads
+          },
+          stop: async () => undefined,
+          notify: () => true
+        } as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(startedWithLoads).not.toBeNull())
+      expect(startedWithLoads).toBe(0)
+      expect(identity?.directRtc?.()).toBe(true)
+      // The first offer loads it; here it cannot load, so the offer is refused (the
+      // client falls back to the relay).
+      await expect(
+        onHubRequest?.(
+          HubToComputerMethods.directRtcOffer,
+          { grantId: 'g', sdp: 'v=0', stunAddresses: [], clientAddress: null },
+          ACTOR
+        )
+      ).rejects.toThrow(/no WebRTC/)
+      expect(loads).toBe(1)
+    } finally {
+      await handle.stop()
+    }
+  })
+})
+
+describe('startComputer direct link: a hub grant reaches that hub’s terminals', () => {
+  it('serves a real session to a client holding the grant the hub registered', async () => {
+    const { createHash } = await import('node:crypto')
+    const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+    const { wireSuperjson } = await import('@slayzone/trpc-server/wire')
+    const WebSocket = (await import('ws')).default
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    let identity: { directAddress?: () => string | null } | undefined
+    const handle = startComputer(
+      { ...testConfig, allowedRoots: [realpathSync(tmpdir()), process.cwd()] },
+      {
+        credentialStore: memoryStore(),
+        stateDir: tempState(),
+        createDialer: (options) => {
+          identity = options.identity
+          onHubRequest = options.onHubRequest as typeof onHubRequest
+          return {
+            events: { on: () => undefined },
+            computerId: null,
+            start: () => undefined,
+            stop: async () => undefined,
+            notify: () => true
+          } as never
+        }
+      }
+    )
+    try {
+      await vi.waitFor(() => expect(identity?.directAddress?.()).toBeTruthy())
+      const token = 'k'.repeat(43)
+      await onHubRequest?.(
+        HubToComputerMethods.directGrant,
+        {
+          grantId: 'g-1',
+          tokenHash: createHash('sha256').update(token).digest('hex'),
+          userId: null,
+          resource: { kind: 'pty', sessionId: 'seam-1' },
+          ttlMs: 60_000
+        },
+        ACTOR
+      )
+      await onHubRequest?.(
+        HubToComputerMethods.ptySpawn,
+        { sessionId: 'seam-1', command: 'cat', cwd: process.cwd(), relay: false },
+        ACTOR
+      )
+      await onHubRequest?.(
+        HubToComputerMethods.ptyWrite,
+        { sessionId: 'seam-1', data: 'seam\n' },
+        ACTOR
+      )
+      const ws = createWSClient({
+        url: `ws://${identity?.directAddress?.()}/direct/v1`,
+        WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+        connectionParams: { token }
+      })
+      try {
+        const trpc = createTRPCClient<import('@slayzone/transport/direct').DirectRouter>({
+          links: [wsLink({ client: ws, transformer: wireSuperjson })]
+        })
+        await vi.waitFor(
+          async () => {
+            const attach = await trpc.pty.attach.query({ sessionId: 'seam-1', afterSeq: -1 })
+            expect(attach.exists).toBe(true)
+            expect(attach.buffer.chunks.map((c) => c.data).join('')).toContain('seam')
+          },
+          { timeout: 5_000 }
+        )
+      } finally {
+        ws.close()
+      }
+    } finally {
+      await handle.stop()
+    }
+  })
+})
+
 /**
  * The desktop app's supervised computer joins further hubs while it runs: a restart
  * would kill every agent pty, so `setSecondaryHubs` reconciles the live set instead.
@@ -399,6 +558,55 @@ describe('startComputer runtime secondary hubs', () => {
       ])
       expect(of(B).length).toBe(2)
       expect(handle.dialers.length).toBe(3)
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it('removing a hub revokes the direct-link grants it registered (none outlive it)', async () => {
+    const { createHash } = await import('node:crypto')
+    const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
+    const { wireSuperjson } = await import('@slayzone/trpc-server/wire')
+    const WebSocket = (await import('ws')).default
+    const { handle, of } = harness()
+    try {
+      await handle.setSecondaryHubs!([{ url: B, name: 'b' }])
+      const b = of(B)[0]!.options
+      await vi.waitFor(() => expect(b.identity?.directAddress?.()).toBeTruthy())
+      const token = 'r'.repeat(43)
+      await b.onHubRequest?.(
+        HubToComputerMethods.directGrant,
+        {
+          grantId: 'g-b',
+          tokenHash: createHash('sha256').update(token).digest('hex'),
+          userId: null,
+          resource: { kind: 'pty', sessionId: 'b-1' },
+          ttlMs: 600_000
+        },
+        ACTOR as never
+      )
+      const authorize = async (): Promise<unknown> => {
+        const ws = createWSClient({
+          url: `ws://${b.identity?.directAddress?.()}/direct/v1`,
+          WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+          connectionParams: { token },
+          retryDelayMs: () => 60_000
+        })
+        try {
+          const trpc = createTRPCClient<import('@slayzone/transport/direct').DirectRouter>({
+            links: [wsLink({ client: ws, transformer: wireSuperjson })]
+          })
+          return await Promise.race([
+            trpc.authorize.mutate({ token }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3_000))
+          ])
+        } finally {
+          ws.close()
+        }
+      }
+      await expect(authorize()).resolves.toBeTruthy()
+      await handle.setSecondaryHubs!([])
+      await expect(authorize()).rejects.toThrow()
     } finally {
       await handle.stop()
     }

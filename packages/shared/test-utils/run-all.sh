@@ -136,6 +136,10 @@ run_harness packages/apps/hub/src/computer-disabled-gateway.test.ts
 run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
+run_harness packages/apps/hub/src/direct-link.test.ts
+run_harness packages/apps/hub/src/chat-direct-write.test.ts
+run_harness packages/apps/hub/src/chat-relay-watch.test.ts
+run_harness packages/apps/hub/src/user-access.test.ts
 # Disabling a computer: which requests start new work, and what blocks disabling one.
 run_harness packages/apps/hub/src/computer-new-work.test.ts
 # Project folders: the ordered sequence each computer goes through on connect
@@ -343,6 +347,7 @@ run_harness packages/apps/hub/src/web-assets.test.ts
 run_harness packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_harness packages/shared/platform/src/hub-discovery.test.ts
+run_harness packages/shared/platform/src/direct-link.test.ts
 # OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay computer
 # create` — generated file CONTENT only; never registers with the real supervisor (P5).
 run_harness packages/shared/platform/src/service-unit.test.ts
@@ -588,6 +593,7 @@ run_harness packages/apps/hub/src/computer-restart-survival.test.ts
 run_harness packages/apps/api/src/http/rest-api/computers/join-token.test.ts
 # T-19: the REST computer roster is the caller's own (every one for an admin).
 run_harness packages/apps/api/src/http/rest-api/computers/list.test.ts
+run_harness packages/apps/api/src/http/rest-api/computers/direct-addresses.test.ts
 # Loopback operator account routes (`slay hub users`). The routes never touch the DB
 # (the hubUsers capability is stubbed).
 run_harness packages/apps/api/src/http/rest-api/hub/users.test.ts
@@ -645,6 +651,7 @@ run_harness packages/domains/automations/src/server/engine-switch.test.ts
 # Terminal — SGR stripping + WebGL renderer lifecycle
 run_harness packages/domains/terminal/src/server/filter-buffer-data.test.ts
 run_harness packages/domains/terminal/src/server/stdin-input.test.ts
+run_harness packages/domains/terminal/src/server/pty-input.test.ts
 # Wave-3 remote-computer per-PTY env (loopback vs hub URL + scoped token).
 run_harness packages/domains/terminal/src/server/mcp-env.test.ts
 run_harness packages/domains/terminal/src/client/webgl-loader.test.ts
@@ -659,6 +666,10 @@ run_harness packages/domains/terminal/src/client/xterm-ed3-scrollback.test.ts
 # passed but were never registered here, so nothing ran them.
 run_harness packages/domains/terminal/src/client/scramble-detector.test.ts
 run_harness packages/domains/terminal/src/client/paint-throttle.test.ts
+run_harness packages/domains/terminal/src/client/direct-pty.test.ts
+run_harness packages/domains/terminal/src/client/pty-delivery.test.ts
+run_harness packages/domains/terminal/src/client/relay-subscription.test.ts
+run_harness packages/domains/terminal/src/client/chat-direct.test.ts
 run_harness packages/domains/terminal/src/client/terminal-identity.test.ts
 # Terminal — boot renderer economy: WebGL only for on-screen terminals under an MRU
 # budget, parked (no DOM-renderer stylesheet) otherwise; plus the hidden-terminal
@@ -1161,6 +1172,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/app/src/renderer/src/react-compiler-canary.test.tsx \
   packages/apps/app/src/main/boot-config.test.ts \
   packages/apps/app/src/main/renderer-csp.test.ts \
+  packages/apps/app/src/main/direct-link-gate.test.ts \
+  packages/apps/app/src/main/direct-link-issued.test.ts \
   packages/apps/app/src/main/debugger-holders.test.ts \
   packages/apps/app/src/main/hub-tokens.test.ts \
   packages/shared/transport/src/client/federation.test.tsx \
@@ -1174,6 +1187,13 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/editor/src/use-artifact-upload.test.tsx \
   packages/shared/transport/src/client/connectDeadlineLink.test.ts \
   packages/shared/transport/src/client/connectPacing.test.ts \
+  packages/shared/transport/src/client/direct-link.test.ts \
+  packages/shared/transport/src/client/direct-lease-keeper.test.ts \
+  packages/shared/transport/src/direct/rtc-channel.test.ts \
+  packages/shared/transport/src/client/direct-rtc.test.ts \
+  packages/shared/transport/src/client/direct-write-order.test.ts \
+  packages/shared/transport/src/client/direct-pty-read.test.ts \
+  packages/shared/transport/src/client/direct-connection.test.ts \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
@@ -1210,6 +1230,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/ui/src/use-stable-poll.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
+  packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
   packages/domains/projects/src/client/useProjectLockState.test.tsx \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \

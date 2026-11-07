@@ -529,6 +529,113 @@ test('T-20: users mint for themselves; only an admin mints for a named, enabled 
   expect(code).toBe('JOIN_TOKEN_OWNER_UNSUPPORTED')
 })
 
+test('computers.issueDirectLink: relays to the hub issuer with the caller; unsupported without one', async () => {
+  // No issuer wired: the client is told to use the relay, never an error.
+  expect(
+    await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1', taskId } })
+  ).toEqual({
+    available: false,
+    reason: 'unsupported'
+  })
+  const seen: unknown[] = []
+  setComputersDeps({
+    ...fakeDeps,
+    issueDirectLink: async (target, who) => {
+      seen.push({ target, who })
+      return { available: false, reason: 'no-address' }
+    }
+  })
+  try {
+    expect(
+      await caller.issueDirectLink({ target: { kind: 'chat', tabId: 'tab-1', taskId } })
+    ).toEqual({
+      available: false,
+      reason: 'no-address'
+    })
+    expect(seen).toEqual([
+      { target: { kind: 'chat', tabId: 'tab-1', taskId }, who: { userId: null, ip: null } }
+    ])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})
+
+test('computers.issueDirectLink passes the client transports; directRtcConnect relays the offer with the caller', async () => {
+  const seen: unknown[] = []
+  expect(await caller.directRtcConnect({ grantId: 'g1', sdp: 'offer' })).toEqual({
+    ok: false,
+    reason: 'refused'
+  })
+  setComputersDeps({
+    ...fakeDeps,
+    issueDirectLink: async (target, who, options) => {
+      seen.push({ target, who, options })
+      return { available: false, reason: 'no-address' }
+    },
+    directRtcConnect: async (grantId, sdp, who) => {
+      seen.push({ grantId, sdp, who })
+      return { ok: true, sdp: 'answer' }
+    }
+  })
+  try {
+    await caller.issueDirectLink({
+      target: { kind: 'pty', sessionId: 's1', taskId },
+      transports: ['ws', 'webrtc']
+    })
+    await caller.issueDirectLink({ target: { kind: 'pty', sessionId: 's1', taskId } })
+    expect(await caller.directRtcConnect({ grantId: 'g1', sdp: 'offer' })).toEqual({
+      ok: true,
+      sdp: 'answer'
+    })
+    expect(seen).toEqual([
+      {
+        target: { kind: 'pty', sessionId: 's1', taskId },
+        who: { userId: null, ip: null },
+        options: { transports: ['ws', 'webrtc'] }
+      },
+      {
+        target: { kind: 'pty', sessionId: 's1', taskId },
+        who: { userId: null, ip: null },
+        options: {}
+      },
+      { grantId: 'g1', sdp: 'offer', who: { userId: null, ip: null } }
+    ])
+  } finally {
+    setComputersDeps(fakeDeps)
+  }
+})
+
+// The hub drops a revoked computer's direct-link grants from the store's removal
+// listener (every path), and the router drops its live connection now.
+test('computers.revokeComputer: the store tells the hub, and the live connection drops', async () => {
+  const r = await registerComputer(h.slayDb, {
+    name: 'revoked-live',
+    platform: 'linux-x64',
+    version: '1'
+  })
+  const removed: string[] = []
+  const dropped: string[] = []
+  setComputerRemovedListener((id) => removed.push(id))
+  setComputersDeps({
+    ...fakeDeps,
+    getGateway: () => ({
+      ...fakeDeps.getGateway()!,
+      disconnect: (id: string) => {
+        dropped.push(id)
+        return true
+      }
+    })
+  })
+  try {
+    await caller.revokeComputer({ computerId: r.id })
+    expect(removed).toEqual([r.id])
+    expect(dropped).toEqual([r.id])
+  } finally {
+    setComputerRemovedListener(null)
+    setComputersDeps(fakeDeps)
+  }
+})
+
 /**
  * Disable (`computers.setDisabled`): a disabled computer stays enrolled and listed, but
  * gets no new work. Refused while it runs terminals or agents, and for the desktop

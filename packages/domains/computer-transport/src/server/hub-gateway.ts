@@ -58,6 +58,7 @@ import {
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
 import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import { isBareAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { auditedHubCall } from './hub-audit'
 
 export interface ComputerDescriptor {
@@ -82,6 +83,17 @@ export interface ComputerDescriptor {
    * treating absence as a match.
    */
   epoch?: string
+  /**
+   * v8: the authority clients dial for this computer's direct listener, from the
+   * enroll/hello FRAME of this connection (never persisted: a restarted local
+   * computer binds a new port). `null` = no direct listener, or an advertised
+   * value that was not a bare authority.
+   */
+  directAddress: string | null
+  /** Whether this computer's link to the hub comes from a loopback peer (same machine). */
+  peerLoopback: boolean
+  /** v8: whether it answers WebRTC offers (`direct.rtcOffer`), from this connection's frame. */
+  directRtc: boolean
   connectedAt: number
   lastSeenAt: number
 }
@@ -701,6 +713,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       protocolVersion: parsed.data.protocolVersion,
       authMode: 'enroll',
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
+      directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
+      peerLoopback: isLoopbackPeer(conn.ip),
+      directRtc: parsed.data.directRtc === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -718,6 +733,21 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       version: descriptor.version
     })
     log('computer computer enrolled', { computerId: minted.computerId, name: descriptor.name })
+  }
+
+  /**
+   * The advertised direct-listener authority, or null. Authority only (env rule 5):
+   * a scheme, path or userinfo is refused here so no client ever dials a value the
+   * scheme rule did not derive. A bad value costs the direct path, never the link.
+   */
+  function advertisedDirectAddress(
+    conn: ComputerConnection,
+    raw: string | null | undefined
+  ): string | null {
+    if (raw == null) return null
+    if (isBareAuthority(raw)) return raw
+    protocolError(conn, 'directAddress is not a bare authority; direct link disabled')
+    return null
   }
 
   async function handleHello(
@@ -846,6 +876,9 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       // the live process, and a stored one would survive the restart it exists
       // to detect.
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
+      directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
+      peerLoopback: isLoopbackPeer(conn.ip),
+      directRtc: parsed.data.directRtc === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

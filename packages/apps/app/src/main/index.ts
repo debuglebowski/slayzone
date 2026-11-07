@@ -4,6 +4,7 @@
 // in shell-env.ts still protects terminal sessions if the native addon
 // can't load.
 import { raiseFdLimit } from './raise-fd-limit'
+
 const fdLimitResult = raiseFdLimit()
 console.log('[fd-limit]', JSON.stringify(fdLimitResult))
 
@@ -80,6 +81,9 @@ import {
   type ViewBounds
 } from './browser-view-manager'
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
+import { createDirectLinkGate } from './direct-link-gate'
+import { fetchIssuedDirectAddresses } from './direct-link-issued'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 import { attachHubSocketOriginStrip } from './hub-socket-origin'
 import { applyAppBadge, parseAppBadgePayload } from './app-badge'
 import {
@@ -634,6 +638,35 @@ setDocumentShortcutKeysResolver(() => [
 setBrowserViewScreenshotKeysResolver(() =>
   resolveShortcutKeys(currentOverrides, 'terminal-screenshot')
 )
+
+/** Renderer direct links: CSP sources + main-side probe (docs/direct-link.md). */
+const directLinkGate = createDirectLinkGate({
+  // The renderer's hub, resolved here from main's own registry (never a URL the
+  // renderer names), says which addresses it issued; anything else is refused.
+  issuedByHub: async (hubId) => {
+    const config = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+    const registry = resolveHubRegistry(config)
+    const id = hubId === DIRECT_LINK_DEFAULT_HUB_ID ? resolveDefaultHubId(config, registry) : hubId
+    const hub = registry.find((h) => h.id === id)
+    if (!hub) return []
+    let origin: string | null = null
+    if (hub.kind === 'local') {
+      const port = await sidecarHandlePromise.then(
+        (h) => h.getPort(),
+        () => null
+      )
+      origin = port ? `http://127.0.0.1:${port}` : null
+    } else if (typeof hub.url === 'string') {
+      const normalized = normalizeRemoteUrl(hub.url)
+      origin = normalized ? toHubOrigin(normalized) : null
+    }
+    if (!origin) return []
+    const bearer = await createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot())
+      .get(hub.id)
+      .catch(() => null)
+    return fetchIssuedDirectAddresses(origin, bearer)
+  }
+})
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280
@@ -3186,7 +3219,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // load. Never the scheme-wide floor.
     attachRendererCsp(
       session.defaultSession,
-      async () => {
+      async (webContentsId) => {
         const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
         const remoteHubUrls = resolveHubRegistry(cfg).flatMap((h) =>
           h.kind === 'remote' && h.url ? [h.url] : []
@@ -3195,7 +3228,16 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         if (isRemoteMode && bootConfig.remote_server_url) {
           remoteHubUrls.push(bootConfig.remote_server_url)
         }
-        return hubConnectSources({ localHub: !isRemoteMode, remoteHubUrls })
+        // Direct links (docs/direct-link.md): exact wss origins of computer addresses a
+        // hub issued; recorded per document so `prepare` knows what this one allows.
+        const sources = [
+          hubConnectSources({ localHub: !isRemoteMode, remoteHubUrls }),
+          ...directLinkGate.connectSources()
+        ]
+          .filter(Boolean)
+          .join(' ')
+        if (webContentsId !== undefined) directLinkGate.recordApplied(webContentsId, sources)
+        return sources
       },
       !app.isPackaged
     )
@@ -3855,6 +3897,14 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // RemoteConfigScreen needs it before any tRPC client exists.
     ipcMain.handle('app:probe-server-health', (_event, rawUrl: string) =>
       probeRemoteHealth(typeof rawUrl === 'string' ? rawUrl : '')
+    )
+    // May this document open a direct-link socket to a computer now (CSP + main's probe)?
+    ipcMain.handle('app:direct-link-prepare', (event, address: unknown, hubId: unknown) =>
+      directLinkGate.prepare(
+        event.sender.id,
+        typeof hubId === 'string' ? hubId : '',
+        typeof address === 'string' ? address : ''
+      )
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())

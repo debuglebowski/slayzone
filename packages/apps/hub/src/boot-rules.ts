@@ -10,7 +10,8 @@
  *   Always:                 B4 every switch is 0|1 · B5 the hub never read the old
  *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
  *                           B15 trusted proxies are IPs/CIDRs ·
- *                           B16 session retention is a whole number of days
+ *                           B16 session retention is a whole number of days ·
+ *                           B19 STUN servers are host:port authorities
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
  *   (B13)                   dev endpoint · B14 auth secret in env · B17 it matches any
@@ -51,6 +52,7 @@ import {
   LEGACY_HUB_LISTEN_ENV,
   RETIRED_HUB_SSO_CLIENT_SECRET_ENV,
   readHubSessionRetentionDays,
+  readHubStunAddresses,
   resolveHubSso,
   resolveHubSwitches,
   type HubSsoSettings,
@@ -160,7 +162,7 @@ export interface HubBootInput {
   devSqlEnabled: boolean
 }
 
-/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B2 and B7, in that order. Throws on the first failure. */
+/** Run B4, B5, B8, B15, B9, B1, B3, B10, B14, B16, B19, B2 and B7, in that order. Throws on the first failure. */
 export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   const { env, host, supervised } = input
 
@@ -272,6 +274,12 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   // of days. A typo that fell back to "off" would keep what the operator meant to delete.
   const retention = readHubSessionRetentionDays(env)
   if (!retention.ok) throw new HubBootRefusal('B16', retention.message)
+
+  // B19 — the STUN servers for WebRTC direct links are host:port authorities. A typo
+  // that fell back to the default would send every client's address to a server the
+  // operator did not choose.
+  const stun = readHubStunAddresses(env)
+  if (!stun.ok) throw new HubBootRefusal('B19', stun.message)
 
   const sso = resolveHubSso(env)
   if (switches.requireLogin) {

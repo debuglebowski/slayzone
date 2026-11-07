@@ -18,9 +18,12 @@ import {
   getBufferSince,
   getState,
   killPty,
+  onPtyInputSubmit,
   setDatabase,
   writePty
 } from './pty-manager'
+import type { PtyInputFacts } from '../pty-input'
+import { hasSessionUserInput } from '../user-input-tracker'
 import { setPtyBackend, type PtyBackend, type PtySignal, type PtySpawnSpec } from './pty-backend'
 import { ptyEvents } from './pty-events'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -53,12 +56,13 @@ const signal = (over: Partial<PtySignal>): PtySignal => ({
   ...over
 })
 
-function routedBackend(detectsOutput: boolean) {
+function routedBackend(detectsOutput: boolean, computerId?: string) {
   const specs: PtySpawnSpec[] = []
   const writes: Array<[string, unknown]> = []
   const relays: boolean[] = []
   let dataCb: ((d: string) => void) | undefined
   let signalCb: ((s: PtySignal) => void) | undefined
+  let inputCb: ((f: PtyInputFacts) => void) | undefined
   let exitCb: ((e: { exitCode: number }) => void) | undefined
   setPtyBackend({
     spawn: (spec: PtySpawnSpec) => {
@@ -66,6 +70,7 @@ function routedBackend(detectsOutput: boolean) {
       return {
         pid: 4343,
         process: 'gemini',
+        ...(computerId ? { computerId } : {}),
         detectsOutput,
         onData: (cb: (d: string) => void) => {
           dataCb = cb
@@ -73,6 +78,10 @@ function routedBackend(detectsOutput: boolean) {
         },
         onSignal: (cb: (s: PtySignal) => void) => {
           signalCb = cb
+          return { dispose: () => undefined }
+        },
+        onInput: (cb: (f: PtyInputFacts) => void) => {
+          inputCb = cb
           return { dispose: () => undefined }
         },
         onExit: (cb: (e: { exitCode: number }) => void) => {
@@ -91,6 +100,7 @@ function routedBackend(detectsOutput: boolean) {
     writes,
     output: (d: string) => dataCb?.(d),
     signal: (s: PtySignal) => signalCb?.(s),
+    input: (f: PtyInputFacts) => inputCb?.(f),
     exit: (exitCode: number) => exitCb?.({ exitCode }),
     relays
   }
@@ -354,4 +364,45 @@ test("owner's computer away: scrollback reads fail fast as unavailable, and reco
     prelude: '',
     currentSeq: 3
   })
+})
+
+test('a write the client sent straight to the computer has the effects of a relayed one', async () => {
+  const b = routedBackend(true)
+  const submitted: string[] = []
+  const stop = onPtyInputSubmit((sessionId, _taskId, line) => {
+    if (sessionId === 'mirror:direct-input') submitted.push(line)
+  })
+  await open('mirror:direct-input')
+  b.input({ submitted: 'fix the bug\r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['fix the bug\r'])
+  // The attention mark a relayed submit sets (needs_attention on running → idle).
+  expect(hasSessionUserInput('mirror:direct-input')).toBe(true)
+  // Nothing was written by the hub: the computer already wrote it.
+  expect(b.writes).toEqual([])
+  // A blank submit marks nothing, as on the relayed path.
+  b.input({ submitted: '  \r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['fix the bug\r'])
+  stop()
+})
+
+test('every write to a computer session is analysed on the computer, in ONE buffer: a hub-originated submit completes a line the client typed', async () => {
+  const b = routedBackend(true, 'computer-1')
+  const submitted: string[] = []
+  const stop = onPtyInputSubmit((sessionId, _taskId, line) => {
+    if (sessionId === 'mirror:one-buffer') submitted.push(line)
+  })
+  await open('mirror:one-buffer')
+  writePty('mirror:one-buffer', 'hel', 'client-1')
+  // A write the hub makes itself (submitPty, automations, the CLI) carries an id too:
+  // the computer analyses it with what the client typed, and reports the facts.
+  writePty('mirror:one-buffer', '\r')
+  expect(b.writes).toEqual([
+    ['hel', { writeId: 'client-1' }],
+    ['\r', { writeId: expect.any(String) }]
+  ])
+  // No hub-side analysis: the line arrives once, from the computer's report.
+  expect(submitted).toEqual([])
+  b.input({ submitted: 'hel\r', esc: false, statusCommand: false })
+  expect(submitted).toEqual(['hel\r'])
+  stop()
 })

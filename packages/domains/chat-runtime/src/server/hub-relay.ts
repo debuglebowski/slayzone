@@ -7,6 +7,7 @@ import {
   type ChatTabStateScope,
   chatAgentIdForTerminal,
   type AgentEvent,
+  type ChatSavedSummary,
   type ChatSessionStateEntry
 } from '@slayzone/terminal-contracts'
 import type {
@@ -1284,6 +1285,14 @@ export function createHubChatRelay(opts: {
             p.at as number | undefined
           )
           break
+        case 'event-signal': {
+          // Every saved event, relayed in full or not (docs/direct-link.md): what
+          // hub-side consumers that are not clients rely on.
+          const saved = p.saved as ChatSavedSummary
+          history.observe(owner.id, Number(saved.seq))
+          events.emit('saved', owner.tabId, saved)
+          break
+        }
         case 'exit':
           sessionMirror.delete(`${owner.taskId}:${owner.tabId}`)
           events.emit(

@@ -133,6 +133,7 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // The Convex deployment (host[:port]) the hub starts GitHub sign-in against — never
   // a client-named one (T-99). Hub process config, set by the desktop app for its hub.
   SLAYZONE_HUB_CONVEX_ADDRESS: 'infra',
+  SLAYZONE_HUB_STUN_ADDRESSES: 'infra',
   SLAYZONE_DESKTOP_BRIDGE_ADDRESS: 'infra', // sidecar→desktop capability bridge + REST proxy
   SLAYZONE_COMPUTER_AUTO_UPGRADE: 'infra',
   SLAYZONE_COMPUTER_UPGRADE_WORKER: 'infra',
@@ -178,6 +179,11 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   // fake `claude` there — a dir merely prepended to the inherited PATH loses to the
   // login-shell PATH the computer adopts at boot. Infra: an agent must not inherit it.
   SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR: 'infra',
+  // Computer-only: where its direct-link listener binds, and the authority clients
+  // dial for it (docs/direct-link.md). Two vars because "where I listen" and "how
+  // I am reached" are two concepts (rule 4), like the hub's LISTEN/PUBLIC pair.
+  SLAYZONE_COMPUTER_LISTEN_ADDRESS: 'infra',
+  SLAYZONE_COMPUTER_PUBLIC_ADDRESS: 'infra',
   // per-provider config/hook/plugin path overrides (test/sandbox redirects)
   SLAYZONE_CLAUDE_SETTINGS_PATH: 'infra',
   SLAYZONE_GEMINI_SETTINGS_PATH: 'infra',

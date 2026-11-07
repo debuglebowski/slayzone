@@ -5,7 +5,7 @@
  * `answered` — the sent message's delivery events. Re-evaluated on every chat
  * event, state change and queue change for the tab, plus a slow safety poll.
  */
-import type { AgentEvent, ChatTurnStatus } from '@slayzone/terminal-contracts'
+import type { AgentEvent, ChatSavedSummary, ChatTurnStatus } from '@slayzone/terminal-contracts'
 import type { ChatAccess } from '../types'
 import { turnStatus, type ChatTarget } from './_chat'
 
@@ -119,10 +119,15 @@ export function waitForChat(
       )
     }
 
-    const onEvent = (tabId: string, event: AgentEvent) => {
+    // `saved` (not `event`): computers report every saved event to the hub, while the
+    // full event reaches it only when a hub client watches the tab (docs/direct-link.md).
+    const onEvent = (tabId: string, saved: ChatSavedSummary) => {
       if (tabId !== target.tabId) return
-      if (opts.messageId && event.kind === 'user-message-delivery' && event.id === opts.messageId)
-        delivery = { state: event.state, ...(event.error ? { error: event.error } : {}) }
+      if (opts.messageId && saved.kind === 'user-message-delivery' && saved.id === opts.messageId)
+        delivery = {
+          state: saved.state ?? 'unknown',
+          ...(saved.error ? { error: saved.error } : {})
+        }
       check()
     }
     const onExit = (tabId: string) => {
@@ -131,11 +136,11 @@ export function waitForChat(
     const onQueue = (tabId: string) => {
       if (tabId === target.tabId) check()
     }
-    deps.events.on('event', onEvent)
+    deps.events.on('saved', onEvent)
     deps.events.on('exit', onExit)
     deps.queueEvents.on('queue-changed', onQueue)
     cleanups.push(
-      () => deps.events.off('event', onEvent),
+      () => deps.events.off('saved', onEvent),
       () => deps.events.off('exit', onExit),
       () => deps.queueEvents.off('queue-changed', onQueue),
       chat.onStateChange((sessionId) => {

@@ -334,3 +334,86 @@ describe('transcript + control', () => {
     expect((await rest.request('POST', `/api/chat/${chatTask}/settings`, {})).status).toBe(400)
   })
 })
+
+/** Read an SSE stream until `until` matches what arrived (or time out). */
+async function readSse(
+  path: string,
+  act: () => void | Promise<void>,
+  until: (text: string) => boolean
+): Promise<string> {
+  const ac = new AbortController()
+  const res = await fetch(`${rest.url}${path}`, { signal: ac.signal })
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  const deadline = Date.now() + 3_000
+  // The headers are flushed once the route subscribed: act only then.
+  await act()
+  try {
+    // One read in flight at a time: a chunk delivered to an abandoned read is lost.
+    let pending = reader.read()
+    while (!until(text) && Date.now() < deadline) {
+      const next = await Promise.race([
+        pending,
+        new Promise<null>((r) => setTimeout(() => r(null), 100))
+      ])
+      if (!next) continue
+      if (next.done) break
+      text += decoder.decode(next.value)
+      pending = reader.read()
+    }
+  } finally {
+    ac.abort()
+  }
+  return text
+}
+
+// H1: computers send the hub full chat events only for tabs a hub client watches
+// (docs/direct-link.md). `slay chat follow` is such a client.
+describe('follow', () => {
+  test('streams a tab no other client watches: it watches the tab itself', async () => {
+    const text = await readSse(
+      `/api/chat/${chatTask}/follow`,
+      () => {
+        expect(fake.watchers.get(chatTask)).toBe(1)
+        fake.emit(chatTask, bashPrompt('req-follow'), 5)
+      },
+      (t) => t.includes('event: prompt')
+    )
+    expect(text).toContain('event: prompt')
+    expect(text).toContain('req-follow')
+    await new Promise((r) => setTimeout(r, 50))
+    // Closing the stream ends its watch.
+    expect(fake.watchers.has(chatTask)).toBe(false)
+  })
+
+  test('an event the hub only got a summary of is read back from the saved history', async () => {
+    const text = await readSse(
+      `/api/chat/${chatTask}/follow`,
+      () => {
+        // Saved before the computer applied the watch: summary only, no full event.
+        fake.watchers.clear()
+        fake.emit(chatTask, bashPrompt('req-gap'), 7)
+      },
+      (t) => t.includes('event: prompt')
+    )
+    expect(text).toContain('req-gap')
+  })
+
+  // R3: seq 7 is saved before the watch applies (summary only), then seq 8 arrives in
+  // full within the grace. 7 must still be shown, before 8.
+  test('a full event past a summary-only seq waits until that seq is read back', async () => {
+    const text = await readSse(
+      `/api/chat/${chatTask}/follow`,
+      () => {
+        fake.watchers.clear()
+        fake.emit(chatTask, bashPrompt('req-seven'), 7)
+        fake.watchers.set(chatTask, 1)
+        fake.emit(chatTask, bashPrompt('req-eight'), 8)
+      },
+      (t) => t.includes('req-seven') && t.includes('req-eight')
+    )
+    expect(text).toContain('req-seven')
+    expect(text.indexOf('req-seven')).toBeLessThan(text.indexOf('req-eight'))
+  })
+})

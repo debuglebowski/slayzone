@@ -1,3 +1,4 @@
+import { ptyBufferSince } from './direct-pty'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPCClient } from './trpc'
 import type { LoopConfig, CriteriaType, LoopStatus } from '@slayzone/terminal-contracts'
@@ -41,7 +42,7 @@ export function useLoopMode({ sessionId, onConfigChange }: UseLoopModeOptions) {
           void trpcClient.pty.submit.mutate({ sessionId, text: prompt })
         },
         readOutputSince: async (seq) => {
-          const result = await trpcClient.pty.getBufferSince.query({ sessionId, afterSeq: seq })
+          const result = await ptyBufferSince(trpcClient, sessionId, seq)
           if (!result) return null
           return result.chunks.map((c) => c.data).join('')
         },

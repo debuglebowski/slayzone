@@ -36,7 +36,14 @@
     },
     {
       "description": "Native modules are rebuilt against Electron's ABI: their own PR.",
-      "matchPackageNames": ["better-sqlite3", "node-pty", "@electron/rebuild", "node-abi"],
+      "matchPackageNames": [
+        "better-sqlite3",
+        "node-pty",
+        "node-datachannel",
+        "@node-datachannel/*",
+        "@electron/rebuild",
+        "node-abi"
+      ],
       "groupName": "native modules"
     },
     {

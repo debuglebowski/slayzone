@@ -1,5 +1,6 @@
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { ActivityState, ErrorInfo, PromptInfo } from '../adapters/types'
+import type { PtyInputFacts } from '../pty-input'
 import type { TerminalTheme } from '../sync-query-response'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
@@ -137,6 +138,11 @@ export interface PtySignal {
 export interface PtyWriteOptions {
   /** This write submits the session-id command (`/status`): watch for an id. */
   watchConversationId?: true
+  /**
+   * A client's write id (docs/direct-link.md): the computer applies it once and
+   * reports its input facts itself. Only for a routed handle (`computerId`).
+   */
+  writeId?: string
 }
 
 /** See {@link PtySpawnSpec.admission}. */
@@ -212,6 +218,11 @@ export interface PtyHandle {
    * Absent/false until acknowledged, and always on a backend that cannot.
    */
   readonly detectsOutput?: boolean
+  /**
+   * What writes a client sent straight to the owner meant (docs/direct-link.md):
+   * the caller applies them as it applies a write of its own.
+   */
+  onInput?(cb: (facts: PtyInputFacts) => void): { dispose(): void }
   /** Detections reported by the owner, for output the caller did not detect itself. */
   onSignal?(cb: (signal: PtySignal) => void): { dispose(): void }
   /**
@@ -220,6 +231,11 @@ export interface PtyHandle {
    * ({@link getReplay}). The caller keeps no copy. False/absent: the caller buffers.
    */
   readonly ownsOutput?: boolean
+  /**
+   * The connected computer that runs this session (a routed backend), for clients
+   * that reach it directly (docs/direct-link.md). Absent on a local backend.
+   */
+  readonly computerId?: string
   /** Replay from the owner's buffer (see `BufferSinceResult`). With {@link ownsOutput}. */
   getReplay?(afterSeq: number): Promise<BufferSinceResult>
   /** Clear the owner's buffer. With {@link ownsOutput}. */

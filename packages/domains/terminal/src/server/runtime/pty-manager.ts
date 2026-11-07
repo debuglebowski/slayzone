@@ -9,7 +9,6 @@ import { ptyEvents } from './pty-events'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
-  containsSubmitEnter,
   modeAgentId,
   SESSION_ID_UNAVAILABLE,
   supportsFreshPreMint
@@ -77,7 +76,7 @@ import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
 import { TerminalReplyMirror } from '../terminal-reply-mirror'
 import { filterBufferData } from '../filter-buffer-data'
-import { isInterruptKey, appendInput } from '../stdin-input'
+import { analyzePtyInput, DEFAULT_SESSION_ID_COMMAND, type PtyInputFacts } from '../pty-input'
 import {
   CONVERSATION_ID_WATCH_TIMEOUT_MS,
   DISK_SESSION_POLL_ATTEMPTS,
@@ -2703,6 +2702,15 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           }
         })
       )
+      // A client wrote to the computer directly (docs/direct-link.md): the same
+      // input effects as a write relayed through writePty.
+      ;(target as unknown as PtyHandle).onInput?.(
+        guardPtyCallback(sessionId, taskId, 'onInput', (facts: PtyInputFacts) => {
+          const session = sessions.get(sessionId)
+          if (!session || session.pty !== target) return
+          applyPtyInputFacts(sessionId, facts, facts.submitted?.length ?? 1)
+        })
+      )
       // Owner-detected output (see `PtySpawnSpec.detection`): same effects, for a
       // chunk this side delivered but did not detect.
       ;(target as unknown as PtyHandle).onSignal?.(
@@ -3239,14 +3247,64 @@ export function submitPty(sessionId: string, text: string): boolean {
   return writePty(sessionId, session.adapter.encodeSubmit(text))
 }
 
-export function writePty(sessionId: string, data: string): boolean {
+export function writePty(sessionId: string, data: string, writeId?: string): boolean {
   const session = sessions.get(sessionId)
   if (!session) return false
+
+  // A session a computer runs (docs/direct-link.md): the computer analyses EVERY
+  // write in one input buffer and reports the facts (`pty-input`), whichever path
+  // brought it — a client's (direct or relayed, applied once by its id) or one the
+  // hub makes itself (submitPty, automations, the CLI), which gets an id of its own.
+  // Analysing here too would split one typed line across two buffers, and count a
+  // retried keystroke twice.
+  const handle = session.pty as unknown as PtyHandle
+  if (handle.computerId !== undefined) {
+    handle.write(data, { writeId: writeId ?? `hub-${randomUUID()}` })
+    return true
+  }
 
   // NOTE: writePty does NOT touch the idle-close clock. PTY input is a noisy
   // mix of real typing and terminal protocol the renderer writes back (focus/
   // cursor reports). The "user engaged" signal comes from the renderer's real
   // DOM events via `pty:touch`; the "agent blocked" signal comes from hooks.
+
+  // Buffer input to detect commands. Mouse/focus reports are dropped and the
+  // result is capped: the buffer resets only on submit-Enter, so a pane the
+  // user hovers over but never submits in used to accumulate reports for the
+  // life of the session — and every consumer (submitted-line emit,
+  // `markSessionUserInput`, the `/status` scan) read that noise as typing.
+  const { buffer, facts } = analyzePtyInput(
+    session.inputBuffer,
+    data,
+    session.adapter.sessionIdCommand ?? DEFAULT_SESSION_ID_COMMAND
+  )
+  session.inputBuffer = buffer
+  const watchConversationId = applyPtyInputFacts(sessionId, facts, data.length)
+
+  ;(session.pty as unknown as PtyHandle).write(
+    data,
+    watchConversationId ? { watchConversationId: true } : undefined
+  )
+  return true
+}
+
+/**
+ * Apply what a stdin write meant (`analyzePtyInput`) to the session's hub-side
+ * state. Called for writes relayed through the hub (`writePty`) and for writes a
+ * client sent straight to the computer, which reports their facts as a `pty-input`
+ * event (docs/direct-link.md) — so attention, the turn tracker and a TUI's flip to
+ * running behave the same on either path.
+ *
+ * Returns whether the session should start watching for its conversation id (the
+ * caller tells an output-detecting owner with its write).
+ */
+export function applyPtyInputFacts(
+  sessionId: string,
+  facts: PtyInputFacts,
+  bytes: number
+): boolean {
+  const session = sessions.get(sessionId)
+  if (!session) return false
 
   // Observation only: the Esc key is the user's interrupt for claude-code (and
   // codex). Log as a precise anchor so we can correlate user keystrokes against
@@ -3258,7 +3316,7 @@ export function writePty(sessionId: string, data: string): boolean {
   // report on each pointer move over the pane, and those outnumbered real Esc
   // presses 987:1 here — 55.7% of the whole diagnostics table was this one
   // event logging mouse movement.
-  if (isInterruptKey(data)) {
+  if (facts.esc) {
     recordDiagnosticEvent({
       level: 'info',
       source: 'pty',
@@ -3269,80 +3327,58 @@ export function writePty(sessionId: string, data: string): boolean {
       payload: {
         currentState: session.state,
         mode: session.mode,
-        bytes: data.length
+        bytes
       }
     })
   }
 
-  let watchConversationId = false
-  // Buffer input to detect commands. Mouse/focus reports are dropped and the
-  // result is capped: the buffer resets only on submit-Enter, so a pane the
-  // user hovers over but never submits in used to accumulate reports for the
-  // life of the session — and every consumer below (submitted-line emit,
-  // `markSessionUserInput`, the `/status` scan) read that noise as typing.
-  session.inputBuffer = appendInput(session.inputBuffer, data)
-
   // On Enter: transition TUI to 'working' if adapter opts in. Submit-Enter
-  // detection must include the kitty CSI-u encoding — once Claude Code enables
-  // the kitty keyboard protocol, xterm sends Enter as `ESC [ 13 u` and no \r
-  // ever reaches this write (a bare CR/LF check missed every typed submit, so
-  // markSessionUserInput never ran → needs_attention never fired).
-  const hasNewline = containsSubmitEnter(data)
-  if (hasNewline) {
-    // Notify turn-tracker subscribers BEFORE we reset the buffer below.
-    // Snapshot of stdin so far = the just-submitted prompt.
-    const submittedLine = session.inputBuffer
-    if (submittedLine.trim().length > 0) {
-      emitInputSubmit(sessionId, session.taskId, submittedLine)
-      markSessionUserInput(sessionId)
-      // Counterpart to task.attention_transition: proves the user-input mark
-      // was set (and under which key) when a later running→idle checks it.
-      recordDiagnosticEvent({
-        level: 'info',
-        source: 'pty',
-        event: 'pty.user_input_marked',
-        sessionId,
-        taskId: session.taskId,
-        message: 'submit-enter',
-        payload: { mode: session.mode, bufferedChars: submittedLine.length }
-      })
-    }
-    if (
-      shouldFlipToRunningOnInput(session.adapter, session.state, session.inputBuffer.trim().length)
-    ) {
-      session.activity = 'working'
-      session.lastOutputTime = Date.now() // reset idle timer from input submission
-      session.pendingTransitionTrigger = {
-        source: 'user-input',
-        preview: submittedLine.slice(0, 200).replace(/\s+/g, ' ').trim()
-      }
-      transitionState(sessionId, 'running')
-    }
-    const cmd = session.adapter.sessionIdCommand ?? '/status'
-    if (session.inputBuffer.includes(cmd)) {
-      // An owner that detects output watches its own (told with this write).
-      watchConversationId = true
-      if (session.statusWatchTimeout) {
-        clearTimeout(session.statusWatchTimeout)
-        session.statusWatchTimeout = undefined
-      }
-      session.detector.watchConversationId()
-
-      // Stop watching after timeout
-      session.statusWatchTimeout = setTimeout(() => {
-        if (session.detector.watchingConversationId) {
-          session.detector.stopWatchingConversationId()
-          session.statusWatchTimeout = undefined
-        }
-      }, CONVERSATION_ID_WATCH_TIMEOUT_MS)
-    }
-    session.inputBuffer = '' // reset on enter
+  // detection includes the kitty CSI-u encoding (see analyzePtyInput) — a bare
+  // CR/LF check missed every typed submit once claude-code enabled the kitty
+  // keyboard protocol, so markSessionUserInput never ran → needs_attention never
+  // fired.
+  const submittedLine = facts.submitted
+  if (submittedLine === null) return false
+  if (submittedLine.trim().length > 0) {
+    // Notify turn-tracker subscribers: the just-submitted prompt.
+    emitInputSubmit(sessionId, session.taskId, submittedLine)
+    markSessionUserInput(sessionId)
+    // Counterpart to task.attention_transition: proves the user-input mark
+    // was set (and under which key) when a later running→idle checks it.
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'pty.user_input_marked',
+      sessionId,
+      taskId: session.taskId,
+      message: 'submit-enter',
+      payload: { mode: session.mode, bufferedChars: submittedLine.length }
+    })
   }
+  if (shouldFlipToRunningOnInput(session.adapter, session.state, submittedLine.trim().length)) {
+    session.activity = 'working'
+    session.lastOutputTime = Date.now() // reset idle timer from input submission
+    session.pendingTransitionTrigger = {
+      source: 'user-input',
+      preview: submittedLine.slice(0, 200).replace(/\s+/g, ' ').trim()
+    }
+    transitionState(sessionId, 'running')
+  }
+  if (!facts.statusCommand) return false
+  // An owner that detects output watches its own (told with this write).
+  if (session.statusWatchTimeout) {
+    clearTimeout(session.statusWatchTimeout)
+    session.statusWatchTimeout = undefined
+  }
+  session.detector.watchConversationId()
 
-  ;(session.pty as unknown as PtyHandle).write(
-    data,
-    watchConversationId ? { watchConversationId: true } : undefined
-  )
+  // Stop watching after timeout
+  session.statusWatchTimeout = setTimeout(() => {
+    if (session.detector.watchingConversationId) {
+      session.detector.stopWatchingConversationId()
+      session.statusWatchTimeout = undefined
+    }
+  }, CONVERSATION_ID_WATCH_TIMEOUT_MS)
   return true
 }
 
@@ -3553,6 +3589,26 @@ export function markSessionActiveFromHook(sessionId: string): boolean {
 function outputOwner(session: PtySession): PtyHandle | null {
   const handle = session.pty as unknown as PtyHandle
   return handle.ownsOutput === true && handle.getReplay ? handle : null
+}
+
+/**
+ * Where a client can reach this session directly (docs/direct-link.md): the
+ * computer running it, and whether that computer holds its only scrollback. A
+ * session whose output the hub buffers (`direct: false`) has nothing to read there.
+ * Null: no such session, or one this hub runs without a computer.
+ */
+export function getPtyDirectTarget(
+  sessionId: string
+): { computerId: string; direct: boolean; taskId: string } | null {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  const handle = session.pty as unknown as PtyHandle
+  if (!handle.computerId) return null
+  return {
+    computerId: handle.computerId,
+    direct: outputOwner(session) !== null,
+    taskId: session.taskId
+  }
 }
 
 export { PtyOutputUnavailableError }

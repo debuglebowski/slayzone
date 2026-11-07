@@ -134,7 +134,7 @@ export function buildRendererCsp(trpcConnectSrc: string, dev: boolean): string {
  */
 export function attachRendererCsp(
   sess: Electron.Session,
-  getTrpcOrigin: () => Promise<string>,
+  getTrpcOrigin: (webContentsId: number | undefined) => Promise<string>,
   dev: boolean
 ): void {
   sess.webRequest.onHeadersReceived((details, callback) => {
@@ -142,7 +142,7 @@ export function attachRendererCsp(
       callback({})
       return
     }
-    void getTrpcOrigin().then((origin) => {
+    void getTrpcOrigin(details.webContentsId).then((origin) => {
       const headers: Record<string, string[] | string> = { ...details.responseHeaders }
       // Drop any pre-existing CSP header (case-insensitive) before setting ours.
       for (const key of Object.keys(headers)) {

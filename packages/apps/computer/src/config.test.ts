@@ -54,6 +54,8 @@ describe('loadComputerConfig', () => {
       name: hostname(),
       allowedRoots: [],
       capabilities: ['pty', 'git', 'fs', 'proc'],
+      // Direct link: listen on loopback only, advertise nothing public (opt-in).
+      directListenAddress: '127.0.0.1:0',
       // Standalone: a hub may never edit its folder limits (T-27).
       hubMayEditRoots: false
     })
@@ -599,6 +601,52 @@ it('does not revive an unsaved launch override after current config adoption and
   } finally {
     vi.unstubAllEnvs()
   }
+})
+
+describe('direct-link listener address (docs/direct-link.md)', () => {
+  const base = { [ENV_VARS.hubAddress]: 'hub.example' }
+
+  it('defaults to an ephemeral loopback port and no public address', () => {
+    const config = loadComputerConfig(base)
+    expect(config.directListenAddress).toBe('127.0.0.1:0')
+    expect(config.directPublicAddress).toBeUndefined()
+  })
+
+  it('takes both from env (authority only), env over the config file', () => {
+    const config = loadComputerConfig(
+      {
+        ...base,
+        [ENV_VARS.directListenAddress]: '0.0.0.0:7443',
+        [ENV_VARS.directPublicAddress]: 'box.example.com'
+      },
+      { directListenAddress: '127.0.0.1:1', directPublicAddress: 'other.example' }
+    )
+    expect(ENV_VARS.directListenAddress).toBe('SLAYZONE_COMPUTER_LISTEN_ADDRESS')
+    expect(ENV_VARS.directPublicAddress).toBe('SLAYZONE_COMPUTER_PUBLIC_ADDRESS')
+    expect(config.directListenAddress).toBe('0.0.0.0:7443')
+    expect(config.directPublicAddress).toBe('box.example.com')
+  })
+
+  it('reads both from computer.config.json', () => {
+    const config = loadComputerConfig(base, {
+      directListenAddress: '[::1]:9000',
+      directPublicAddress: 'box.example:8443'
+    })
+    expect(config.directListenAddress).toBe('[::1]:9000')
+    expect(config.directPublicAddress).toBe('box.example:8443')
+  })
+
+  it.each(['ws://box:1', 'https://box', 'box:1/path', 'user@box:1', ''])(
+    'refuses %j — an authority, never a URL',
+    (bad) => {
+      expect(() => loadComputerConfig({ ...base, [ENV_VARS.directPublicAddress]: bad })).toThrow(
+        /directPublicAddress/
+      )
+      expect(() => loadComputerConfig({ ...base, [ENV_VARS.directListenAddress]: bad })).toThrow(
+        /directListenAddress/
+      )
+    }
+  )
 })
 
 describe('DEFAULT_CAPABILITIES', () => {

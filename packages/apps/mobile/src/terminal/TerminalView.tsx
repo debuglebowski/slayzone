@@ -18,9 +18,13 @@
  * - Presence: `pty.touch` when opened and, at most every 4s (desktop's throttle), on
  *   interaction — the idle-close timer must not put an agent the user is watching
  *   to sleep.
+ * - Direct link (docs/direct-link.md): while the session's computer is reachable
+ *   from the phone, output, catch-up and key-bar bytes go straight to it and the hub
+ *   stops relaying this session; each switch catches up gap-free (`TerminalFeed`).
+ *   Submit, interrupt and touch stay hub calls.
  */
 import { ENTER, stripOscReplies } from '@slayzone/terminal-contracts'
-import { useSubscription } from '@slayzone/transport/client'
+import { useDirectLease, useSubscription } from '@slayzone/transport/client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { type ChromeColors, useTerminalColors, useTheme } from '../theme'
@@ -34,7 +38,16 @@ import { useNativeMounted } from './use-native-mounted'
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
-export function TerminalView({ sessionId, live }: { sessionId: string; live: boolean }) {
+export function TerminalView({
+  sessionId,
+  taskId,
+  live
+}: {
+  sessionId: string
+  /** The task the session belongs to: the direct link's computer target. */
+  taskId: string
+  live: boolean
+}) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const theme = useTheme()
@@ -63,10 +76,35 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
     return () => controller.dispose()
   }, [controller])
 
+  // The direct link to the session's computer, when reachable; `live` wakes it (the
+  // hub can only issue for a running session).
+  const { lease: direct, lost: directLost } = useDirectLease(
+    client,
+    { kind: 'pty', sessionId, taskId },
+    live
+  )
+  useEffect(() => {
+    controller.setDirect(direct?.client ?? null, directLost)
+    if (!direct) return
+    const sub = direct.client.pty.onData.subscribe(
+      { sessionId },
+      {
+        onStarted: () => controller.subscriptionStarted(),
+        onData: (event) => controller.feed.data(event.seq, event.data),
+        // The grant ended or the process exited: back to the hub relay.
+        onError: directLost,
+        onComplete: directLost
+      }
+    )
+    return () => sub.unsubscribe()
+  }, [controller, direct, directLost, sessionId])
+
+  // The hub relays this session only while it is not on the direct link.
   useSubscription(
     trpc.pty.onData.subscriptionOptions(
       { sessionIds: [sessionId] },
       {
+        enabled: !direct,
         onStarted: () => controller.subscriptionStarted(),
         onData: (event) => {
           if (event.sessionId === sessionId) controller.feed.data(event.seq, event.data)
@@ -111,7 +149,7 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
     touch()
     const data = keyBytes(key, modes)
     send(async () => {
-      await client.pty.write.mutate({ sessionId, data })
+      await controller.write(data)
       if (key.interrupts) await client.pty.interrupt.mutate({ sessionId })
     })
   }
@@ -129,7 +167,7 @@ export function TerminalView({ sessionId, live }: { sessionId: string; live: boo
     const value = stripOscReplies(text)
     setText('')
     if (value.length > 0) send(() => client.pty.submit.mutate({ sessionId, text: value }), value)
-    else send(() => client.pty.write.mutate({ sessionId, data: ENTER }))
+    else send(() => controller.write(ENTER))
   }
 
   return (

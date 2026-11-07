@@ -70,3 +70,5 @@ export type {
   ChatAvailability
 } from './computer-chat'
 export { chatAvailabilityMessage } from './computer-chat'
+export * from './chat-command-schemas'
+export * from './chat-saved-summary'

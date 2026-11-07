@@ -216,7 +216,15 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'project.setPath': null,
   'project.forgetPath': null,
   'project.list': null,
-  ping: null
+  ping: null,
+  // Direct link: the hub's issuance service writes its own `computer.direct_grant_*`
+  // lines (it knows the resource and the reason); a second line here would only
+  // duplicate them. Params carry a token HASH, never the token.
+  'direct.grant': null,
+  'direct.revoke': null,
+  'direct.reset': null,
+  // The hub writes `computer.direct_rtc_signal` itself (it knows the caller).
+  'direct.rtcOffer': null
 }
 
 /** The audit event for a hub → computer call, or null when the method is not audited. */

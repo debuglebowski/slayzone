@@ -132,3 +132,24 @@ test('a deleted owner in another task never yields its provider session', async 
   await expect(store.bindProvider(route.id, 'native', 'claude-chat')).rejects.toThrow(/owner/i)
   expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({ id: 'closed' })
 })
+test('every ownership move, provider transition or deletion signals the tabs it took away, across store instances', async () => {
+  const { store } = await fixture()
+  const watcher = createChatOwnershipStore(harnesses[0]!.slayDb)
+  const moved: string[][] = []
+  const off = watcher.onChange((tabIds) => moved.push([...tabIds]))
+  await store.register(route)
+  expect(moved).toEqual([])
+  await store.beginMigration('storage', {
+    expectedComputerId: 'pc-a',
+    expectedEpoch: 1,
+    migrationId: 'move',
+    destinationComputerId: 'pc-b'
+  })
+  await store.markVerified('storage', 'move', 'a'.repeat(64))
+  await store.commitMigration('storage', 'move', 'a'.repeat(64))
+  await store.deleteConversation('storage')
+  expect(moved).toEqual([['tab'], ['tab'], ['tab']])
+  off()
+  await store.deleteForTask('task')
+  expect(moved).toHaveLength(3)
+})

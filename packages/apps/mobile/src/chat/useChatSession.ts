@@ -31,8 +31,9 @@ import {
   isTurnOpen,
   reducer
 } from '@slayzone/terminal/reducer'
-import { useSubscription } from '@slayzone/transport/client'
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { chatViaDirect } from '@slayzone/terminal/chat-direct'
+import { useDirectLease, useSubscription } from '@slayzone/transport/client'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { messageContent } from './attachments'
 import { ChatSync, type ChatWireEvent, type ChatWireExit, type LocalMessage } from './chat-sync'
 import { newMessageId } from './ids'
@@ -152,6 +153,17 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
   useEffect(() => () => sync.dispose(), [sync])
 
   const { tabId, taskId, mode, cwd, providerFlagsOverride } = target
+  // The tab's direct link to the computer holding its history (docs/direct-link.md):
+  // the event stream, the replay and permission answers go there; the hub otherwise.
+  const { lease: direct, lost: directLost } = useDirectLease(trpcClient, {
+    kind: 'chat',
+    tabId,
+    taskId
+  })
+  const chatIo = useMemo(
+    () => chatViaDirect(trpcClient, direct?.client ?? null, directLost),
+    [trpcClient, direct, directLost]
+  )
   const load = useCallback(
     async (first: 'full' | 'catch-up'): Promise<void> => {
       // A catch-up that finds the hub's log went backwards asks for a full load.
@@ -176,7 +188,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         }
         let replay: Awaited<ReturnType<typeof trpcClient.chat.getReplay.query>>
         try {
-          replay = await trpcClient.chat.getReplay.query({ tabId, afterSeq: ticket.afterSeq })
+          replay = await chatIo.getReplay({ tabId, afterSeq: ticket.afterSeq })
         } catch (err) {
           if (sync.failLoad(ticket) === 'done') {
             setLoadError(message(err))
@@ -193,7 +205,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         return
       }
     },
-    [sync, trpcClient, tabId, taskId, mode, cwd, providerFlagsOverride]
+    [sync, trpcClient, chatIo, tabId, taskId, mode, cwd, providerFlagsOverride]
   )
 
   // The subscription's handlers: fixed identities, run the latest code (they read refs).
@@ -207,9 +219,27 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
     // The log restarted elsewhere (a reset from another client): load it again.
     if (sync.receive(msg) === 'regressed') void load('full')
   })
+  // The hub relays this tab only while it is not on the direct link; each switch
+  // starts a subscription again, whose start catches up (`onStarted`).
   useSubscription(
-    trpc.chat.onEvent.subscriptionOptions({ tabIds: [tabId] }, { onStarted, onData: onEvent })
+    trpc.chat.onEvent.subscriptionOptions(
+      { tabIds: [tabId] },
+      { enabled: !direct, onStarted, onData: onEvent }
+    )
   )
+  useEffect(() => {
+    if (!direct) return
+    const sub = direct.client.chat.onEvent.subscribe(
+      { tabId },
+      {
+        onStarted,
+        onData: (msg) => onEvent(msg as ChatWireEvent),
+        onError: directLost,
+        onComplete: directLost
+      }
+    )
+    return () => sub.unsubscribe()
+  }, [direct, directLost, onStarted, onEvent, tabId])
   const onExit = useCallback((msg: ChatWireExit) => sync.exit(msg), [sync])
   useSubscription(trpc.chat.onExit.subscriptionOptions(undefined, { onData: onExit }))
 
@@ -268,7 +298,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
       }
       // The prompt flips to answered when the hub's `permission-resolved` arrives;
       // a refusal means the request is no longer pending there.
-      return trpcClient.chat.respondPermission.mutate({ tabId, args }).then(
+      return chatIo.respondPermission({ tabId, args }).then(
         (ok) => {
           settle()
           if (!ok) dispatch({ type: 'prompt-refused', requestId })
@@ -280,7 +310,7 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
         }
       )
     },
-    [trpcClient, tabId]
+    [chatIo, tabId]
   )
 
   const interrupt = useCallback(async () => {
