@@ -63,12 +63,15 @@ export default defineConfig({
     setupFiles: [local('harness-setup.ts')],
     pool: 'forks',
     isolate: true,
-    // Two forks per core, not vitest's cores-1: these workers mostly WAIT (on a hub or
-    // computer bin booting, git, a child process, a timer), not compute. Measured on a
-    // 10-core Mac, 358 files: 9 forks kept ~2 cores busy and queued the bulk behind
-    // them (median file finished at 195s, run 222s); 18 forks finished the run in 168s,
-    // bounded by its single longest file, under the same background load.
-    maxWorkers: Math.max(2, availableParallelism() * 2),
+    // One fork per core, not vitest's cores-1: these workers often WAIT (on a hub or
+    // computer bin booting, git, a child process, a timer). Not two per core either:
+    // the suites they wait on are real hub/computer processes that compute, and in the
+    // full `pnpm test:unit` (this lane next to the app lane) two per core drove the
+    // 10-core Mac to load ~230 for minutes. Multi-process suites with real wall-clock
+    // windows then missed them: historical-supervisor passes at load ~100 and fails at
+    // ~215 (reproduced with CPU burners alone). One per core: peak load ~95, the same
+    // wall time (296 s vs 307 s).
+    maxWorkers: Math.max(2, availableParallelism()),
     // Many suites boot a real hub/computer bin, git, or a fresh migrated DB.
     testTimeout: 120_000,
     hookTimeout: 120_000,
