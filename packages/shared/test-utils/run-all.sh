@@ -804,7 +804,10 @@ run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
 run_harness packages/apps/hub/src/runtime-second-pass.test.ts
 run_harness packages/apps/hub/src/artifact-api-third-pass.test.ts
 run_harness packages/apps/hub/src/remote-third-pass.test.ts
-run_harness packages/apps/hub/src/historical-supervisor.test.ts
+# Alone (run_harness_solo): the ACTUAL historical supervisor rolls a busy host through
+# an upgrade, three computer boots in a row inside 15 s windows; next to the other suites
+# it passed at load ~100 and failed at ~215 (reproduced with CPU burners alone).
+run_harness_solo packages/apps/hub/src/historical-supervisor.test.ts
 run_harness packages/apps/hub/src/historical-chat-migration.test.ts
 # Optional private snapshots are supplied explicitly; default runs never read live state.
 run_harness packages/apps/hub/src/real-corpus-stability-audit.test.ts

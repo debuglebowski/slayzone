@@ -75,9 +75,15 @@ dry_run() { [ "${SLZ_UNIT_DRY:-}" = 1 ]; }
 #   matches. The default for node suites.
 # run_harness_node: PLAIN node, same config, its own (small) invocation. Only for a file
 #   that must not run inside the Electron binary — say why next to the registration.
-# Usage: run_harness <file> / run_harness_node <file>
+# run_harness_solo: Electron's node, same config, but ALONE: after both lanes are done,
+#   one file at a time. Only for a suite whose real multi-process windows (a hub and
+#   computers booting, upgrading, reconnecting within seconds) a saturated machine
+#   misses: next to ~20 other suites it measured the CPU, not the code. Say why next to
+#   the registration. Part of the harness lane (skipped when only the app lane runs).
+# Usage: run_harness <file> / run_harness_node <file> / run_harness_solo <file>
 HARNESS_FILES=()
 HARNESS_NODE_FILES=()
+HARNESS_SOLO_FILES=()
 run_harness() {
   RAN+=("$1")
   HARNESS_FILES+=("$1")
@@ -85,6 +91,10 @@ run_harness() {
 run_harness_node() {
   RAN+=("$1")
   HARNESS_NODE_FILES+=("$1")
+}
+run_harness_solo() {
+  RAN+=("$1")
+  HARNESS_SOLO_FILES+=("$1")
 }
 
 # Suites under the app's vitest config (jsdom + react plugin with the renderer build's
@@ -354,6 +364,9 @@ apply_only() {
   for file in ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
   HARNESS_NODE_FILES=(${keep[@]+"${keep[@]}"})
   keep=()
+  for file in ${HARNESS_SOLO_FILES[@]+"${HARNESS_SOLO_FILES[@]}"}; do is_listed "$file" && keep+=("$file"); done
+  HARNESS_SOLO_FILES=(${keep[@]+"${keep[@]}"})
+  keep=()
   for i in "${!APP_VITEST_FILES[@]}"; do
     if is_listed "${APP_VITEST_FILES[$i]}"; then
       keep+=("${APP_VITEST_FILES[$i]}")
@@ -385,6 +398,7 @@ apply_only() {
   # Every listed file runs somewhere: registered file by file, or in a package run.
   for file in "${listed[@]}"; do
     if printf '%s\n' ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"} ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"} \
+      ${HARNESS_SOLO_FILES[@]+"${HARNESS_SOLO_FILES[@]}"} \
       ${APP_VITEST_FILES[@]+"${APP_VITEST_FILES[@]}"} ${INTEGRATION_FILES[@]+"${INTEGRATION_FILES[@]}"} | grep -qxF -- "$file"; then
       continue
     fi
@@ -432,6 +446,7 @@ run_suites() {
   if ! dry_run; then
     write_list "$WORK/harness.list" ${HARNESS_FILES[@]+"${HARNESS_FILES[@]}"}
     write_list "$WORK/harness-node.list" ${HARNESS_NODE_FILES[@]+"${HARNESS_NODE_FILES[@]}"}
+    write_list "$WORK/harness-solo.list" ${HARNESS_SOLO_FILES[@]+"${HARNESS_SOLO_FILES[@]}"}
     write_list "$WORK/app.list" ${APP_VITEST_FILES[@]+"${APP_VITEST_FILES[@]}"}
     write_list "$WORK/app.labels" ${APP_VITEST_LABELS[@]+"${APP_VITEST_LABELS[@]}"}
 
@@ -472,6 +487,28 @@ run_suites() {
     trap - INT TERM
     echo ""
     echo "All lanes done in $((SECONDS - started))s"
+
+    # The harness lane's solo suites (run_harness_solo): now, with nothing else running.
+    if [ "${#HARNESS_SOLO_FILES[@]}" -gt 0 ] && printf '%s\n' "${lanes[@]}" | grep -qxF lane_harness; then
+      : >"$WORK/solo.results"
+      (
+        set +e
+        LANE_RESULTS="$WORK/solo.results"
+        vitest_suite "vitest (node harness suites, Electron's node, alone)" "$WORK/harness-solo.list" "" \
+          "$WORK/harness-solo.json" \
+          env ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/vitest/vitest.mjs run \
+          --config "$TEST_UTILS/vitest.harness.config.ts" --maxWorkers=1 --no-file-parallelism
+      )
+      while IFS="	" read -r verdict label; do
+        if [ "$verdict" = PASS ]; then
+          PASS=$((PASS + 1))
+        else
+          FAIL=$((FAIL + 1))
+          FAILED+=("$label")
+        fi
+      done <"$WORK/solo.results"
+      echo "Solo suites done at $((SECONDS - started))s"
+    fi
   fi
 
   # A package whose listing failed is ONE failure, named, with the lister's output; its
