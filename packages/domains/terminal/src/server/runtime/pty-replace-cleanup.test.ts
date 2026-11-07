@@ -11,7 +11,7 @@
 import { afterEach, expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { PtySessionWindow } from '../pty-host'
-import { createPty, hasPty, killPty, setDatabase } from './pty-manager'
+import { createPty, hasLivePty, hasPty, killPty, setDatabase } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
 import { ptyEvents } from './pty-events'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -30,14 +30,26 @@ setDatabase(
   createFakeTaskSessionStore()
 )
 
-/** Every spawned handle exits the moment it is killed, as a local SIGKILL does. */
-function exitOnKillBackend(): { spawned: number; print: (data: string) => void } {
+/**
+ * Every spawned handle exits the moment it is killed, as a local SIGKILL does —
+ * or, with `exitOnKill` false, only when `exitNow` says so, as a session on a
+ * computer does once its exit frame arrives.
+ */
+function exitOnKillBackend(exitOnKill = true): {
+  spawned: number
+  print: (data: string) => void
+  exitNow: () => void
+} {
   let dataCb: ((d: string) => void) | undefined
-  const state = { spawned: 0, print: (data: string) => dataCb?.(data) }
+  let exitCb: ((e: { exitCode: number }) => void) | undefined
+  const state = {
+    spawned: 0,
+    print: (data: string) => dataCb?.(data),
+    exitNow: () => exitCb?.({ exitCode: 137 })
+  }
   setPtyBackend({
     spawn: () => {
       state.spawned++
-      let exitCb: ((e: { exitCode: number }) => void) | undefined
       return {
         pid: 5000 + state.spawned,
         process: 'zsh',
@@ -50,7 +62,9 @@ function exitOnKillBackend(): { spawned: number; print: (data: string) => void }
           return { dispose: () => undefined }
         },
         write: () => undefined,
-        kill: () => exitCb?.({ exitCode: 137 }),
+        kill: () => {
+          if (exitOnKill) exitCb?.({ exitCode: 137 })
+        },
         resize: () => undefined
       } as never
     }
@@ -80,4 +94,18 @@ test('the replacement stays registered after the outgoing exit cleans up', async
   // Past the outgoing exit's deferred cleanup.
   await new Promise((r) => setTimeout(r, 300))
   expect(hasPty('replace:switch')).toBe(true)
+})
+
+test('a session asked to die is not live while its exit is on the way', async () => {
+  // A mode switch kills the session and remounts the terminal, which asks
+  // `pty.exists` (hasLivePty): "yes" made it reattach to the dying session instead
+  // of starting the new mode, and nothing started at all once the exit arrived.
+  const backend = exitOnKillBackend(false)
+  await open('replace:dying', 'terminal')
+  backend.print('$ ')
+  expect(hasLivePty('replace:dying')).toBe(true)
+  killPty('replace:dying')
+  expect(hasLivePty('replace:dying')).toBe(false)
+  backend.exitNow()
+  expect(hasLivePty('replace:dying')).toBe(false)
 })

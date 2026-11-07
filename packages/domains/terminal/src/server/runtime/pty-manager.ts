@@ -337,6 +337,11 @@ interface PtySession {
   // ~100ms for trailing output; `state` cannot mark that window ('dead' goes
   // through the debounced state machine), so `hasLivePty` reads this.
   exited?: boolean
+  // Set when the hub asked the process to die (`killPty`), before its exit arrives
+  // (a computer's exit frame is a round trip away). Not live from then on: a mode
+  // switch's remount asked `pty.exists`, got "yes", and reattached to the dying
+  // session instead of starting the new mode.
+  killRequested?: boolean
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -3446,6 +3451,7 @@ export function killPty(sessionId: string): boolean {
     sessionId,
     taskId: session.taskId
   })
+  session.killRequested = true
   // Clear any pending timeouts to prevent orphaned callbacks
   stopSessionTimers(session)
   // Note: we intentionally do NOT eagerly delete from sessions/dataListeners
@@ -3535,12 +3541,13 @@ export function hasPty(sessionId: string): boolean {
   return sessions.has(sessionId)
 }
 
-/** Registered AND its process has not exited. During the post-exit drain window
- *  a session is still in the map but dead: a write there is lost, and treating
- *  it as alive skips the respawn that should replace it. */
+/** Registered, its process not exited and not asked to die. During the post-exit
+ *  drain window a session is still in the map but dead, and a killed one is dying:
+ *  a write there is lost, and treating it as alive skips the respawn that should
+ *  replace it. */
 export function hasLivePty(sessionId: string): boolean {
   const session = sessions.get(sessionId)
-  return !!session && !session.exited
+  return !!session && !session.exited && !session.killRequested
 }
 
 /** Find a live session by taskId + mode. Used by the agent-hook REST handler to
