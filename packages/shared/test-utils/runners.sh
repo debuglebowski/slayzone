@@ -156,9 +156,14 @@ skip_package_tests() {
 # registered file-by-file. A listing that fails is an error (non-zero exit, the lister's
 # output on stderr), never an empty list: swallowed, it read as "every file of this
 # package is UNREGISTERED", pointing at registration when the package's vitest could not
-# even load. Usage: package_test_files <workspace-name>
+# even load.
+# Listing never touches vitest's fs module cache (--fsModuleCache=false): listers run in
+# parallel with each other and with the lanes, and a cache whose _metadata.json holds an
+# old lockfile hash is cleared (rm -r) and recreated by EVERY process that opens it, with
+# no lock — two at once fail with ENOTEMPTY. Discovery transforms only the configs, so it
+# loses nothing by skipping the cache. Usage: package_test_files <workspace-name>
 package_test_files() {
-  list_test_files "$1" file vitest list --filesOnly --json
+  list_test_files "$1" file vitest list --filesOnly --json --fsModuleCache=false
 }
 
 # The same for a jest package: the files `jest --listTests` collects (absolute paths),
