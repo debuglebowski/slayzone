@@ -90,6 +90,9 @@ jest.mock('./hubs/HubDetails', () => ({ HubDetails: () => null }))
 // The board's moves write to its hub (tRPC; `board/*.test.tsx` test them).
 jest.mock('./board/use-board-moves', () => ({ useBoardMoves: () => async () => undefined }))
 jest.mock('./board/use-archive-all', () => ({ useArchiveAll: () => async () => undefined }))
+jest.mock('./board/use-scratch-task', () => ({
+  useScratchTask: () => ({ creating: false, create: () => undefined })
+}))
 
 const { hubEntryOf } = jest.requireActual('./hub-session') as typeof import('./hub-session')
 const home: HubSession = { entry: hubEntryOf('home.example'), token: 't' }
@@ -274,10 +277,10 @@ describe('routing', () => {
       expect(screen.getByText('task page home.example t0 details main')).toBeOnTheScreen()
     })
 
-    it('the floating ＋ opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
+    it('the floating ＋ long-pressed opens new-task in the Board tab for the shown project and column; created, the task replaces it', async () => {
       signedIn()
       await renderRouter(ROUTES, { initialUrl: '/' })
-      await userEvent.setup().press(await screen.findByTestId('new-task'))
+      await userEvent.setup().longPress(await screen.findByTestId('new-task'))
       expect(await screen.findByText('new task home.example p todo -')).toBeOnTheScreen()
       expect(screen).toHaveSegments(['(tabs)', '(board)', 'new-task'])
       await userEvent.setup().press(screen.getByText('stand-in create'))

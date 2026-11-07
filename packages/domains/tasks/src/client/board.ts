@@ -42,3 +42,4 @@ export {
   type BoardData,
   type BoardRows
 } from './board-patch'
+export { keepScratchTaskInput, scratchTaskInput } from './scratch-task'

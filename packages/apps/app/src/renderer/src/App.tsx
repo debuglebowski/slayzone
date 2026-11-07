@@ -22,8 +22,6 @@ import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
 import {
-  getDefaultStatus,
-  getStatusByCategory,
   isCompletedStatus,
   resolveRepoPath,
   defaultProjectRoot,
@@ -44,6 +42,7 @@ import {
   useSnoozeWakeUp,
   BulkTaskContextMenu
 } from '@slayzone/tasks/hooks'
+import { keepScratchTaskInput, scratchTaskInput } from '@slayzone/tasks/board'
 import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
 import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 // Same module TabPanes' task fallback comes from (eager either way).
@@ -955,27 +954,18 @@ function App(): React.JSX.Element {
         return
       }
       const project = projects.find((p) => p.id === projectId)
-      const existing = tasks
-        .filter((t) => t.project_id === projectId)
-        .map((t) => t.title.match(/^Terminal (\d+)$/))
-        .filter(Boolean)
-        .map((m) => parseInt(m![1], 10))
-      const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
-      const status = getDefaultStatus(project?.columns_config)
       const createStart = performance.now()
       // The project can belong to any hub (the rail is a cross-hub union), and a
       // task INSERT is FK-bound to it — so create on the hub that owns it, then
       // record the new id's hub before openTask scopes its tab.
       const projectHubId = getHubIdForProject(projectId)
       const task = await getClientForHub(projectHubId, trpcClient)
-        .task.create.mutate({
-          projectId,
-          title: `Terminal ${next}`,
-          status,
-          isTemporary: true,
-          // Opened right below — lets the hub hand it the project's warm agent.
-          openAfterCreate: true
-        })
+        .task.create.mutate(
+          scratchTaskInput(
+            { id: projectId, columns_config: project?.columns_config ?? null },
+            tasks
+          )
+        )
         .catch((err: unknown) => {
           earlyInput?.cancel()
           throw err
@@ -1093,14 +1083,9 @@ function App(): React.JSX.Element {
       const project = useTabStore
         .getState()
         ._taskLookup.projects.find((item) => item.id === task.project_id)
-      const converted = await trpcClient.task.update.mutate({
-        id: task.id,
-        title: 'Untitled task',
-        status:
-          getStatusByCategory('started', project?.columns_config) ??
-          getDefaultStatus(project?.columns_config),
-        isTemporary: false
-      })
+      const converted = await trpcClient.task.update.mutate(
+        keepScratchTaskInput(task.id, project?.columns_config)
+      )
       updateTask(converted)
       return converted
     },
