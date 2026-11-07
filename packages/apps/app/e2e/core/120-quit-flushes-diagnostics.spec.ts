@@ -107,12 +107,12 @@ base.describe('quit flushes diagnostics', () => {
         .catch(() => {
           // The evaluate can lose its channel as the process goes down.
         })
-      // Well inside the 15s watchdog: a quit that waited for it failed.
-      const code = await Promise.race([
-        exitCode,
-        new Promise<'hung'>((r) => setTimeout(() => r('hung'), 10_000))
-      ])
-      exited = code !== 'hung'
+      // The quit watchdog (vetoed quit) ends the app with exit code 1 and skips
+      // will-quit, which writes the clean-shutdown sentinel: code 0 plus the sentinel
+      // prove the quit went through. (A 10 s race stood in for that, and a loaded
+      // machine's clean quit outran it.)
+      const code = await exitCode
+      exited = true
       expect(code).toBe(0)
       expect(fs.existsSync(sentinel)).toBe(true)
     } finally {
