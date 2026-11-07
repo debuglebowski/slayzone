@@ -160,7 +160,10 @@ describe('files-changed row', () => {
     const summary = screen.getByTestId('chat-files-changed')
     fireEvent.click(within(summary).getByTestId('chat-files-changed-toggle'))
     fireEvent.click(within(summary).getByTestId('chat-files-changed-file'))
-    expect(reveal).toHaveBeenCalledWith(stableAnchorKey(e1), { align: 'center' })
+    expect(reveal).toHaveBeenCalledWith(stableAnchorKey(e1), {
+      align: 'center',
+      inner: '[data-tool-use-id="e1"]'
+    })
     expect(request).toHaveBeenCalledWith('e1')
   })
 
@@ -183,7 +186,10 @@ describe('files-changed row', () => {
     const summary = screen.getByTestId('chat-files-changed')
     fireEvent.click(within(summary).getByTestId('chat-files-changed-toggle'))
     fireEvent.click(within(summary).getByTestId('chat-files-changed-file'))
-    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', { align: 'center' })
+    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', {
+      align: 'center',
+      inner: '[data-tool-use-id="n1"]'
+    })
     expect(request.mock.calls).toEqual([['task1'], ['n1']])
     expect(openPanel).not.toHaveBeenCalled()
     // The row opened: the edit's card shows inside it.
@@ -200,7 +206,10 @@ describe('files-changed row', () => {
     const summary = screen.getByTestId('chat-files-changed')
     fireEvent.click(within(summary).getByTestId('chat-files-changed-toggle'))
     fireEvent.click(within(summary).getByTestId('chat-files-changed-file'))
-    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', { align: 'center' })
+    expect(reveal).toHaveBeenCalledWith('sub-agent:task1', {
+      align: 'center',
+      inner: '[data-tool-use-id="n2"]'
+    })
     expect(request.mock.calls).toEqual([['task1'], ['task2'], ['n2']])
   })
 

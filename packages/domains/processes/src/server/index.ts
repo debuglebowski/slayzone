@@ -18,7 +18,13 @@ export {
   killAllProcesses,
   shutdownAllProcesses,
   setProcessComputerResolver,
-  processesComputerConnected
+  processesComputerConnected,
+  isAdoptedOnComputer,
+  restartProcessForUi,
+  OldRunSurvivesError,
+  OldRunUnreachableError,
+  processesComputerRemoved,
+  setProcessComputerReachability
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {

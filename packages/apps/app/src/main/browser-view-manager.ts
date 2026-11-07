@@ -47,6 +47,7 @@ import {
 } from './browser-link-context-menu'
 import { classifyBrowserViewKey } from './browser-view-keys'
 import { NavFocusGuard } from './browser-view-nav-focus-guard'
+import { isOutsideWindow, planNativeBounds, type Size } from './browser-view-park'
 import {
   BROWSER_CREATE_TASK_FROM_LINK_BRIDGE_KEY,
   BROWSER_CREATE_TASK_FROM_LINK_INSTALLED_KEY,
@@ -106,6 +107,11 @@ interface ViewEntry {
   hasLoadedRealPage: boolean
   favicon: string | null
   lastError: { code: number; description: string; url: string } | null
+  /** Size the native host last took (attach, or setBounds while overlapping
+   * the window). null = unknown. See `browser-view-park`. */
+  nativeSize: Size | null
+  /** Background throttling is off because the view is parked yet visible. */
+  parkedLive: boolean
 }
 
 interface BrowserViewEvent {
@@ -232,7 +238,9 @@ export class BrowserViewManager {
       domReady: false,
       hasLoadedRealPage: false,
       favicon: null,
-      lastError: null
+      lastError: null,
+      nativeSize: null,
+      parkedLive: false
     }
 
     this.views.set(viewId, entry)
@@ -240,7 +248,7 @@ export class BrowserViewManager {
 
     // Always add to window first so the view is properly initialized
     this.addToWindow(entry)
-    view.setBounds(this.normalizeViewBounds(opts.bounds))
+    this.applyNativeBounds(entry, opts.bounds)
 
     if (this.allHidden) {
       // Dialog overlay is active — hide immediately, will restore via showAll
@@ -325,7 +333,7 @@ export class BrowserViewManager {
 
     entry.bounds = bounds
     if (entry.visible && !this.allHidden) {
-      entry.view.setBounds(this.normalizeViewBounds(bounds))
+      this.applyNativeBounds(entry, bounds)
     } else {
       entry.lastBounds = bounds
     }
@@ -344,6 +352,8 @@ export class BrowserViewManager {
       }
     }
 
+    if (!visible) this.setParkedLive(entry, false)
+
     if (this.allHidden) {
       // Store bounds for restoration when overlay closes
       if (visible) entry.lastBounds = entry.bounds
@@ -353,8 +363,10 @@ export class BrowserViewManager {
     }
 
     if (visible) {
+      // Bounds BEFORE attach: the attach is what applies the size to the page
+      // when the bounds are parked off-window (see browser-view-park).
+      this.applyNativeBounds(entry, entry.bounds)
       this.addToWindow(entry)
-      entry.view.setBounds(this.normalizeViewBounds(entry.bounds))
     } else {
       this.removeFromWindow(entry)
     }
@@ -551,8 +563,8 @@ export class BrowserViewManager {
 
     for (const entry of this.views.values()) {
       if (entry.visible && entry.lastBounds) {
+        this.applyNativeBounds(entry, entry.lastBounds)
         this.addToWindow(entry)
-        entry.view.setBounds(this.normalizeViewBounds(entry.lastBounds))
         entry.lastBounds = null
       }
     }
@@ -1189,6 +1201,8 @@ export class BrowserViewManager {
     try {
       // addChildView is a no-op if already a child (just reorders to top)
       win.contentView.addChildView(entry.view)
+      // Attaching applies the current bounds to the native host.
+      entry.nativeSize = this.currentSize(entry)
     } catch {
       /* view may be destroyed */
     }
@@ -1224,18 +1238,68 @@ export class BrowserViewManager {
     // WCV (e.g. background-task panel under display:none) on every window-focus
     // event surfaces it on top of the active task's UI.
     if (entry.visible && !this.allHidden) {
+      // Detached here, so bounds first — the attach applies them (see browser-view-park).
       try {
-        newWindow.contentView.addChildView(entry.view)
-      } catch {
-        return false
-      }
-      try {
-        entry.view.setBounds(this.normalizeViewBounds(entry.bounds))
+        this.applyNativeBounds(entry, entry.bounds)
       } catch {
         /* ignore */
       }
+      try {
+        newWindow.contentView.addChildView(entry.view)
+        entry.nativeSize = this.currentSize(entry)
+      } catch {
+        return false
+      }
     }
     return true
+  }
+
+  /**
+   * The single path that pushes bounds to a view's native host. Parked views
+   * (fully off-window) need special handling, measured in `browser-view-park`:
+   * a size change only reaches the page via an attach, and only while the page
+   * is not hidden — so visible parked views run unthrottled.
+   */
+  private applyNativeBounds(entry: ViewEntry, bounds: ViewBounds): void {
+    const rect = this.normalizeViewBounds(bounds)
+    const win = this.windowFor(entry)
+    const content = win && !win.isDestroyed() ? win.getContentBounds() : null
+    const outside = content ? isOutsideWindow(rect, content) : false
+    // Before any attach below: the page must be un-hidden to take the size.
+    this.setParkedLive(entry, outside && entry.visible)
+
+    const attached = this.isAttached(entry)
+    if (
+      planNativeBounds(rect, { attached, outside, nativeSize: entry.nativeSize }) === 'reattach'
+    ) {
+      this.removeFromWindow(entry)
+      entry.view.setBounds(rect)
+      this.addToWindow(entry)
+      return
+    }
+    entry.view.setBounds(rect)
+    if (attached && !outside) entry.nativeSize = { width: rect.width, height: rect.height }
+  }
+
+  /** Background throttling off while parked-but-visible, so the page stays
+   * live (takes resizes, runs rAF, keeps painting) like an on-screen one. */
+  private setParkedLive(entry: ViewEntry, live: boolean): void {
+    if (entry.parkedLive === live) return
+    const wc = entry.view.webContents
+    if (wc.isDestroyed()) return
+    entry.parkedLive = live
+    wc.setBackgroundThrottling(!live)
+  }
+
+  private isAttached(entry: ViewEntry): boolean {
+    const win = this.windowFor(entry)
+    if (!win || win.isDestroyed()) return false
+    return win.contentView.children.includes(entry.view)
+  }
+
+  private currentSize(entry: ViewEntry): Size {
+    const { width, height } = entry.view.getBounds()
+    return { width, height }
   }
 
   private normalizeViewBounds(bounds: ViewBounds): Electron.Rectangle {
@@ -1544,7 +1608,13 @@ export class BrowserViewManager {
       entry.domReady = true
       const currentUrl = wc.getURL()
       if (currentUrl && currentUrl !== 'about:blank') entry.hasLoadedRealPage = true
-      send({ viewId, type: 'dom-ready' })
+      // Self-sufficient: the renderer must not depend on having seen did-navigate.
+      send({
+        viewId,
+        type: 'dom-ready',
+        url: slzFileUrlToFileUrl(currentUrl),
+        hasLoadedRealPage: entry.hasLoadedRealPage
+      })
       // Reinstall the page-side capture listener on each new document. This stays
       // separate from the before-input-event fallback above on purpose.
       wc.mainFrame.executeJavaScript(MODIFIED_LINK_CAPTURE_SCRIPT).catch(() => {

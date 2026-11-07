@@ -75,13 +75,15 @@ describe('pty signals (computer-side detection)', () => {
     expect(sent).toEqual([])
   })
 
-  test('terminal queries are answered at once and taken out before detection', () => {
+  test('terminal queries are answered, in stream order, and taken out before detection', async () => {
     // DA1 is `ESC [ c`; as text it would be output. Answered/stripped, it says nothing.
+    // Behind output still in the screen mirror, its answer waits its turn (as on the
+    // hub): replies reach the program in the order it asked.
     const { sent, signals, answers, cleaned } = harness('claude-code')
     signals.onOutput('before\x1b[cafter', 1)
     expect(sent).toEqual([])
-    expect(answers).toEqual(['\x1b[?62;4;22c'])
     expect(cleaned).toEqual(['beforeafter'])
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[?62;4;22c']))
   })
 
   test('what is buffered + streamed is the replay-filtered chunk (OSC title out, detected)', () => {
@@ -283,5 +285,48 @@ describe('pty signals (computer-side detection)', () => {
     vi.advanceTimersByTime(5_000)
     signals.onOutput(`session: ${id}`, 3)
     expect(found()).toEqual([2])
+  })
+})
+
+// Main moved the answers that depend on terminal STATE (CPR, DECRQM, DECRQSS) to a
+// headless screen mirror on whoever runs the output pipeline — the renderer no
+// longer answers them. The computer runs it for its sessions, so it keeps a mirror
+// too: else those queries go unanswered and the program waits (gh/termenv, agents).
+describe('state queries are answered from a screen mirror', () => {
+  function mirrored(cols = 80, rows = 24) {
+    const answers: string[] = []
+    const pipeline = createPtySessionSignals({
+      params: { mode: 'terminal', resuming: false },
+      ids,
+      emit: () => undefined,
+      respond: (a) => answers.push(a),
+      size: { cols, rows }
+    })
+    return { pipeline, answers }
+  }
+
+  test('CPR answers where the cursor really is', async () => {
+    const { pipeline, answers } = mirrored()
+    pipeline.process('abc\x1b[6n')
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[1;4R']))
+    pipeline.dispose()
+  })
+
+  test('a resize moves the answer with the screen', async () => {
+    const { pipeline, answers } = mirrored(10, 5)
+    pipeline.resize(4, 5)
+    pipeline.process('abcdef\x1b[6n') // wraps at 4 columns
+    await vi.waitFor(() => expect(answers).toEqual(['\x1b[2;3R']))
+    pipeline.dispose()
+  })
+
+  test('DECRQM is answered (the renderer no longer does)', async () => {
+    const { pipeline, answers } = mirrored()
+    pipeline.process('\x1b[?2004$p')
+    await vi.waitFor(() => expect(answers.length).toBe(1))
+    const [answer] = answers
+    expect(answer?.startsWith('\x1b[?2004;')).toBe(true)
+    expect(answer?.slice('\x1b[?2004;'.length)).toMatch(/^[0-4]\$y$/)
+    pipeline.dispose()
   })
 })

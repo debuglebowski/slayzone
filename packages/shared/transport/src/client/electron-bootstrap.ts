@@ -7,7 +7,10 @@ import type {
   SaveFilesRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
-import type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
+import type {
+  LocalComputerHubs,
+  LocalComputerStatus
+} from '@slayzone/platform/local-computer-status'
 
 // The app-wide `ElectronAPI` type extends `ElectronBootstrapAPI` with no
 // members of its own, so this and its own `Window.api` declaration are the
@@ -53,6 +56,11 @@ export const electronBootstrap = {
     api().app.getHubRegistry?.() ?? Promise.resolve({ hubs: [] as HubEntry[], defaultHubId: '' }),
   // Per-hub bearer tokens (safeStorage-decrypted in main) for authed remote hubs.
   getHubTokens: () => api().app.getHubTokens?.() ?? Promise.resolve({}),
+  // A host without the check (a main/preload from before it) cannot say whether a
+  // bearer is stored, so `unreachable` (unknown), never `none` (no bearer). Hosts with
+  // no bearer store at all (web shell, fork shim) implement it and answer `none`.
+  checkHubSession: (payload: { hubId: string; url: string }) =>
+    api().app.checkHubSession?.(payload) ?? Promise.resolve({ state: 'unreachable' as const }),
   setHubToken: (payload: { hubId: string; token: string }) =>
     api().app.setHubToken?.(payload) ?? Promise.resolve({ ok: true as const }),
   hubLogin: (payload: { hubId: string; url: string; email: string; password: string }) =>
@@ -68,6 +76,9 @@ export const electronBootstrap = {
   hubDeviceLoginCancel: (payload: { flowId: string }) =>
     api().app.hubDeviceLoginCancel?.(payload) ?? Promise.resolve({ ok: true as const }),
   getWindowId: () => api().app.getWindowId?.() ?? Promise.resolve(null),
+  // No app icon outside Electron — a no-op elsewhere.
+  setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) =>
+    api().app.setAppBadge?.(badge) ?? Promise.resolve(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string
@@ -78,9 +89,9 @@ export const electronBootstrap = {
   probeServerHealth: (url: string) =>
     api().app.probeServerHealth?.(url) ??
     Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),
-  /** Direct link: may this document open a socket to `address` now (CSP + main's probe)? */
-  prepareDirectLink: (address: string) =>
-    api().app.prepareDirectLink?.(address) ??
+  /** Direct link: may this document open a socket to `address` from hub `hubId` now? */
+  prepareDirectLink: (address: string, hubId: string) =>
+    api().app.prepareDirectLink?.(address, hubId) ??
     Promise.resolve({ ok: false as const, reason: 'unsupported' as const }),
   /** Render + save an artifact export on this device (desktop: Electron, web: browser). */
   exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
@@ -103,6 +114,8 @@ export const electronBootstrap = {
   // No supervised computer outside Electron — nothing to report.
   getLocalComputerStatus: () =>
     api().app.getLocalComputerStatus?.() ?? Promise.resolve<LocalComputerStatus | null>(null),
+  getLocalComputerHubs: () =>
+    api().app.getLocalComputerHubs?.() ?? Promise.resolve<LocalComputerHubs>({}),
   // Boot instrumentation is pure timing telemetry — optional outside Electron
   // (e.g. the Chromium-fork window.api shim need not implement it). Optional-
   // chain so a missing host method is a no-op, not a TypeError that aborts the

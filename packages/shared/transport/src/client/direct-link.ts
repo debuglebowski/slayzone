@@ -28,7 +28,37 @@
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
-import type { DirectRouter, DirectTarget } from '../direct/router'
+import type { DirectIssueTarget, DirectRouter } from '../direct/router'
+import {
+  type DirectRtcConnectAnswer,
+  type DirectRtcConnectOptions,
+  type DirectRtcPeerFactory,
+  openDirectRtcConnection
+} from './direct-rtc'
+
+export {
+  attachDirectPty,
+  DIRECT_BUFFER_PAGE_CHARS,
+  readDirectPtyBuffer
+} from './direct-pty-read'
+export {
+  DIRECT_RTC_CONNECT_MS,
+  openDirectRtcConnection,
+  type DirectRtcConnectAnswer,
+  type DirectRtcPeerFactory
+} from './direct-rtc'
+export {
+  createOrderedPtyWriter,
+  type OrderedPtyWriter,
+  type PtyWritePath
+} from './direct-write-order'
+export {
+  DIRECT_CALL_DEADLINE_MS,
+  DirectDeadlineError,
+  directCallFailure,
+  newDirectWriteId,
+  withDirectDeadline
+} from './direct-call'
 
 export const DIRECT_LINK_PATH = '/direct/v1'
 export const DIRECT_LINK_HEALTH_PATH = '/direct/v1/health'
@@ -37,6 +67,8 @@ export const DIRECT_LINK_HEALTH_PATH = '/direct/v1/health'
 export type DirectIssueResult =
   | {
       available: true
+      /** Absent from an older hub: `ws`. */
+      transport?: 'ws'
       computerId: string
       address: string
       token: string
@@ -44,11 +76,31 @@ export type DirectIssueResult =
       expiresInMs: number
       protocol: number
     }
+  | {
+      available: true
+      /** No listener this client can dial: a data channel the hub brokers. */
+      transport: 'webrtc'
+      computerId: string
+      token: string
+      grantId: string
+      expiresInMs: number
+      protocol: number
+      stunAddresses: string[]
+    }
   | { available: false; reason: string }
+
+type Issued = Extract<DirectIssueResult, { available: true }>
+
+/** Which transport an answer asks for, and what a socket for it is keyed by. */
+function socketAddressOf(issued: Issued): string {
+  return issued.transport === 'webrtc' ? 'webrtc' : issued.address
+}
 
 /** One socket to one computer. */
 export interface DirectConnection {
   client: TRPCClient<DirectRouter>
+  /** WebRTC only: the network path the channel took (Diagnostics). */
+  route?: 'local' | 'stun'
   /** Called once when the socket is gone for good (the manager never reconnects it). */
   onClose(cb: () => void): void
   close(): void
@@ -69,7 +121,7 @@ export type DirectLeaseLostReason =
   | 'disposed'
 
 export interface DirectLinkManagerOptions {
-  issue(target: DirectTarget): Promise<DirectIssueResult>
+  issue(target: DirectIssueTarget): Promise<DirectIssueResult>
   /**
    * Is the computer's listener at `address` worth a socket now? Default: a plain
    * HTTP `fetch` of its health path with a deadline (mobile, node). The desktop asks
@@ -82,6 +134,16 @@ export interface DirectLinkManagerOptions {
     token: string
     probe: () => Promise<boolean>
   }) => DirectConnection
+  /**
+   * WebRTC (docs/direct-link.md): the peer factory and the hub's broker. Absent: this
+   * client asks for WebSocket only, and an answer naming WebRTC is not used.
+   */
+  rtc?: {
+    createPeer: DirectRtcPeerFactory
+    connect(grantId: string, sdp: string): Promise<DirectRtcConnectAnswer>
+  }
+  /** Default: {@link openDirectRtcConnection}. */
+  openRtcConnection?: (opts: DirectRtcConnectOptions) => Promise<DirectConnection>
   connectDeadlineMs?: number
   backoffInitialMs?: number
   backoffMaxMs?: number
@@ -92,17 +154,27 @@ export interface DirectLinkManagerOptions {
 
 /** One computer's direct-link state, for Diagnostics. */
 export type DirectLinkComputerStatus =
-  | { computerId: string; path: 'direct'; address: string; leases: number }
+  | {
+      computerId: string
+      path: 'direct'
+      transport: 'ws' | 'webrtc'
+      /** The listener's authority; null over WebRTC. */
+      address: string | null
+      /** WebRTC: on the local network, or through a NAT (STUN). */
+      route?: 'local' | 'stun'
+      leases: number
+    }
   | {
       computerId: string
       path: 'relay'
       /** Why the last attempt failed: no HTTP answer, no socket in time, refused. */
-      reason: 'probe' | 'deadline' | 'refused'
+      /** `rtc`: the WebRTC connect failed (no answer, ICE or DTLS). */
+      reason: 'probe' | 'deadline' | 'refused' | 'rtc'
       retryInMs: number
     }
 
 export interface DirectLinkManager {
-  acquire(target: DirectTarget): Promise<DirectLease | null>
+  acquire(target: DirectIssueTarget): Promise<DirectLease | null>
   /** Computers on the direct link, and those backing off to the relay. */
   status(): DirectLinkComputerStatus[]
   /** The computer (re)connected to the hub: its address may have moved. */
@@ -141,10 +213,20 @@ export async function defaultDirectProbe(address: string, deadlineMs = 3_000): P
 }
 
 /** Never reconnects on its own; every open is probed first. */
+/**
+ * Client pings on the direct socket. A half-open socket (a NAT dropped the flow, the
+ * network changed) brings no FIN; without pings the client would wait on it forever
+ * while its sessions are kept off the relay. A missed pong closes the socket, which
+ * ends its leases (back to the relay at once).
+ */
+export const DIRECT_KEEPALIVE = { intervalMs: 10_000, pongTimeoutMs: 5_000 }
+
 export function openDirectConnection(opts: {
   url: string
   token: string
   probe: () => Promise<boolean>
+  /** Default {@link DIRECT_KEEPALIVE}. */
+  keepAlive?: { intervalMs: number; pongTimeoutMs: number }
 }): DirectConnection {
   const closeListeners: Array<() => void> = []
   let closed = false
@@ -162,6 +244,7 @@ export function openDirectConnection(opts: {
     connectionParams: { token: opts.token },
     // The manager decides when to try again (after a probe and a fresh grant).
     retryDelayMs: () => 2_147_483_647,
+    keepAlive: { enabled: true, ...(opts.keepAlive ?? DIRECT_KEEPALIVE) },
     onClose: () => queueMicrotask(close)
   })
   return {
@@ -179,6 +262,8 @@ export function openDirectConnection(opts: {
 interface Socket {
   key: string
   computerId: string
+  transport: 'ws' | 'webrtc'
+  /** The listener's authority, or `webrtc`. */
   address: string
   connection: DirectConnection
   leases: Set<LeaseState>
@@ -186,7 +271,9 @@ interface Socket {
 }
 
 interface LeaseState {
-  target: DirectTarget
+  target: DirectIssueTarget
+  /** The grant this lease holds now (a renewal replaces it). */
+  grantId: string
   socket: Socket
   renew: ReturnType<typeof setTimeout> | null
   lostListeners: Set<(reason: DirectLeaseLostReason) => void>
@@ -197,15 +284,18 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   const cfg = { ...DEFAULTS, ...options }
   const probe = options.probe ?? ((url: string) => defaultDirectProbe(url, cfg.connectDeadlineMs))
   const open = options.openConnection ?? openDirectConnection
+  const openRtc_ = options.openRtcConnection ?? openDirectRtcConnection
   const log = options.log ?? (() => undefined)
   const sockets = new Map<string, Socket>()
   const backoff = new Map<
     string,
-    { until: number; delay: number; why: 'probe' | 'deadline' | 'refused' }
+    { until: number; delay: number; why: 'probe' | 'deadline' | 'refused' | 'rtc' }
   >()
   /** The computer each target was last found on: a blocked one is not asked again. */
   const lastComputer = new Map<string, string>()
-  const targetKey = (t: DirectTarget): string =>
+  /** Acquires in flight per target: a release must not take the grant they get. */
+  const acquiring = new Map<string, number>()
+  const targetKey = (t: DirectIssueTarget): string =>
     t.kind === 'pty' ? `pty:${t.sessionId}` : `chat:${t.tabId}`
   let hubUnsupported = false
   let disposed = false
@@ -216,7 +306,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     return b !== undefined && Date.now() < b.until
   }
 
-  function fail(computerId: string, why: 'probe' | 'deadline' | 'refused'): null {
+  function fail(computerId: string, why: 'probe' | 'deadline' | 'refused' | 'rtc'): null {
     const prev = backoff.get(computerId)
     const delay = prev ? Math.min(prev.delay * 2, cfg.backoffMaxMs) : cfg.backoffInitialMs
     backoff.set(computerId, { until: Date.now() + delay, delay, why })
@@ -224,11 +314,32 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     return null
   }
 
-  function lose(lease: LeaseState, reason: DirectLeaseLostReason): void {
+  /**
+   * The lease leaves its socket. When it was the last holder of its target — no other
+   * lease on the socket and no acquire for it still in flight, whose fresh grant
+   * would otherwise go — the computer is told to drop the grant it held. By id: a
+   * newer grant another holder just authorised is left alone.
+   */
+  function detach(lease: LeaseState, socketOpen: boolean): void {
+    const { socket } = lease
+    socket.leases.delete(lease)
+    if (!socketOpen) return
+    const key = targetKey(lease.target)
+    if ([...socket.leases].some((l) => targetKey(l.target) === key)) return
+    if ((acquiring.get(key) ?? 0) > 0) return
+    const grantId = lease.grantId
+    // Best-effort: a grant the computer keeps meanwhile is superseded by the next one
+    // on the same target, and ends with its TTL.
+    void Promise.resolve()
+      .then(() => socket.connection.client.release.mutate({ grantId }))
+      .catch(() => undefined)
+  }
+
+  function lose(lease: LeaseState, reason: DirectLeaseLostReason, socketOpen = true): void {
     if (lease.done) return
     lease.done = true
     if (lease.renew) clearTimeout(lease.renew)
-    lease.socket.leases.delete(lease)
+    detach(lease, socketOpen)
     for (const cb of [...lease.lostListeners]) cb(reason)
     lease.lostListeners.clear()
   }
@@ -236,7 +347,7 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
   function dropSocket(socket: Socket, reason: DirectLeaseLostReason): void {
     if (sockets.get(socket.key) === socket) sockets.delete(socket.key)
     if (socket.linger) clearTimeout(socket.linger)
-    for (const lease of [...socket.leases]) lose(lease, reason)
+    for (const lease of [...socket.leases]) lose(lease, reason, false)
     socket.connection.close()
   }
 
@@ -258,13 +369,14 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
       !next ||
       !next.available ||
       next.computerId !== lease.socket.computerId ||
-      next.address !== lease.socket.address
+      socketAddressOf(next) !== lease.socket.address
     ) {
       lose(lease, 'renewal-refused')
       return
     }
     try {
       await lease.socket.connection.client.authorize.mutate({ token: next.token })
+      lease.grantId = next.grantId
       scheduleRenewal(lease, next.expiresInMs)
     } catch {
       lose(lease, 'renewal-refused')
@@ -287,18 +399,65 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     })
   }
 
-  async function socketFor(
-    issued: Extract<DirectIssueResult, { available: true }>
-  ): Promise<{ socket: Socket; fresh: boolean } | null> {
-    const key = `${issued.computerId}|${issued.address}`
+  /**
+   * Sockets being opened, per computer and address. Every acquire that arrives while
+   * one opens waits for it (one probe, one socket): at boot every open tab acquires
+   * at once, and a socket each would exceed the listener's per-address limit — a
+   * refused upgrade is a failed WebSocket connect, which slows the hub's socket too.
+   */
+  const opening = new Map<string, Promise<Socket | null>>()
+
+  async function socketFor(issued: Issued): Promise<{ socket: Socket; fresh: boolean } | null> {
+    const key = `${issued.computerId}|${socketAddressOf(issued)}`
     const existing = sockets.get(key)
     if (existing) return { socket: existing, fresh: false }
-    if (!(await probe(issued.address))) return fail(issued.computerId, 'probe')
-    const connection = open({
-      url: hubUrlFromAddr(issued.address, 'ws', DIRECT_LINK_PATH),
-      token: issued.token,
-      probe: () => probe(issued.address)
+    const pending = opening.get(key)
+    if (pending) {
+      // Opened with the opener's token: this caller authorizes its own on it.
+      const socket = await pending
+      return socket ? { socket, fresh: false } : null
+    }
+    const opened = openSocket(key, issued)
+    opening.set(key, opened)
+    try {
+      const socket = await opened
+      return socket ? { socket, fresh: true } : null
+    } finally {
+      opening.delete(key)
+    }
+  }
+
+  /** A WebRTC connection, or null (failed: backing off, the holder relays). */
+  async function openRtc(issued: Extract<Issued, { transport: 'webrtc' }>) {
+    const rtc = options.rtc
+    if (!rtc) return null
+    return openRtc_({
+      createPeer: rtc.createPeer,
+      connect: rtc.connect,
+      stunAddresses: issued.stunAddresses,
+      grantId: issued.grantId,
+      token: issued.token
+    }).catch((err: unknown) => {
+      log('direct link over WebRTC failed', { computerId: issued.computerId, error: String(err) })
+      return null
     })
+  }
+
+  async function openSocket(key: string, issued: Issued): Promise<Socket | null> {
+    let connection: DirectConnection
+    if (issued.transport === 'webrtc') {
+      const rtc = await openRtc(issued)
+      if (!rtc) return fail(issued.computerId, 'rtc')
+      connection = rtc
+    } else {
+      if (!(await probe(issued.address))) return fail(issued.computerId, 'probe')
+      const address = issued.address
+      connection = open({
+        url: hubUrlFromAddr(address, 'ws', DIRECT_LINK_PATH),
+        token: issued.token,
+        probe: () => probe(address)
+      })
+    }
     const ready = await withDeadline(connection.client.ping.query()).catch(() => 'failed' as const)
     if (ready === 'timeout' || ready === 'failed') {
       connection.close()
@@ -307,7 +466,8 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     const socket: Socket = {
       key,
       computerId: issued.computerId,
-      address: issued.address,
+      transport: issued.transport === 'webrtc' ? 'webrtc' : 'ws',
+      address: socketAddressOf(issued),
       connection,
       leases: new Set(),
       linger: null
@@ -315,72 +475,90 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
     connection.onClose(() => dropSocket(socket, 'closed'))
     sockets.set(key, socket)
     backoff.delete(issued.computerId)
-    return { socket, fresh: true }
+    return socket
+  }
+
+  /** One acquire: issue, reach the socket, authorize, lease (see `acquire`). */
+  async function acquireOnce(target: DirectIssueTarget): Promise<DirectLease | null> {
+    const known = lastComputer.get(targetKey(target))
+    if (known && blocked(known)) return null
+    let issued: DirectIssueResult
+    try {
+      issued = await options.issue(target)
+    } catch (err) {
+      if (isUnsupportedHub(err)) hubUnsupported = true
+      return null
+    }
+    if (!issued.available || disposed) return null
+    lastComputer.set(targetKey(target), issued.computerId)
+    if (issued.transport === 'webrtc' && !options.rtc) return null
+    if (
+      blocked(issued.computerId) &&
+      !sockets.has(`${issued.computerId}|${socketAddressOf(issued)}`)
+    ) {
+      return null
+    }
+    const got = await socketFor(issued)
+    if (!got) return null
+    const { socket } = got
+    if (!got.fresh) {
+      const ok = await withDeadline(
+        socket.connection.client.authorize.mutate({ token: issued.token })
+      ).catch(() => 'failed' as const)
+      if (ok === 'timeout' || ok === 'failed') return null
+    }
+    if (socket.linger) {
+      clearTimeout(socket.linger)
+      socket.linger = null
+    }
+    const lease: LeaseState = {
+      target,
+      grantId: issued.grantId,
+      socket,
+      renew: null,
+      lostListeners: new Set(),
+      done: false
+    }
+    socket.leases.add(lease)
+    scheduleRenewal(lease, issued.expiresInMs)
+    return {
+      computerId: socket.computerId,
+      client: socket.connection.client,
+      onLost(cb) {
+        if (lease.done) {
+          cb('closed')
+          return () => undefined
+        }
+        lease.lostListeners.add(cb)
+        return () => lease.lostListeners.delete(cb)
+      },
+      release() {
+        if (lease.done) return
+        lease.done = true
+        if (lease.renew) clearTimeout(lease.renew)
+        detach(lease, true)
+        lease.lostListeners.clear()
+        if (socket.leases.size === 0 && !socket.linger) {
+          socket.linger = setTimeout(() => {
+            socket.linger = null
+            if (socket.leases.size === 0) dropSocket(socket, 'closed')
+          }, cfg.lingerMs)
+        }
+      }
+    }
   }
 
   return {
     async acquire(target) {
       if (disposed || hubUnsupported) return null
-      const known = lastComputer.get(targetKey(target))
-      if (known && blocked(known)) return null
-      let issued: DirectIssueResult
+      const key = targetKey(target)
+      acquiring.set(key, (acquiring.get(key) ?? 0) + 1)
       try {
-        issued = await options.issue(target)
-      } catch (err) {
-        if (isUnsupportedHub(err)) hubUnsupported = true
-        return null
-      }
-      if (!issued.available || disposed) return null
-      lastComputer.set(targetKey(target), issued.computerId)
-      if (blocked(issued.computerId) && !sockets.has(`${issued.computerId}|${issued.address}`)) {
-        return null
-      }
-      const got = await socketFor(issued)
-      if (!got) return null
-      const { socket } = got
-      if (!got.fresh) {
-        const ok = await withDeadline(
-          socket.connection.client.authorize.mutate({ token: issued.token })
-        ).catch(() => 'failed' as const)
-        if (ok === 'timeout' || ok === 'failed') return null
-      }
-      if (socket.linger) {
-        clearTimeout(socket.linger)
-        socket.linger = null
-      }
-      const lease: LeaseState = {
-        target,
-        socket,
-        renew: null,
-        lostListeners: new Set(),
-        done: false
-      }
-      socket.leases.add(lease)
-      scheduleRenewal(lease, issued.expiresInMs)
-      return {
-        computerId: socket.computerId,
-        client: socket.connection.client,
-        onLost(cb) {
-          if (lease.done) {
-            cb('closed')
-            return () => undefined
-          }
-          lease.lostListeners.add(cb)
-          return () => lease.lostListeners.delete(cb)
-        },
-        release() {
-          if (lease.done) return
-          lease.done = true
-          if (lease.renew) clearTimeout(lease.renew)
-          socket.leases.delete(lease)
-          lease.lostListeners.clear()
-          if (socket.leases.size === 0 && !socket.linger) {
-            socket.linger = setTimeout(() => {
-              socket.linger = null
-              if (socket.leases.size === 0) dropSocket(socket, 'closed')
-            }, cfg.lingerMs)
-          }
-        }
+        return await acquireOnce(target)
+      } finally {
+        const n = (acquiring.get(key) ?? 1) - 1
+        if (n <= 0) acquiring.delete(key)
+        else acquiring.set(key, n)
       }
     },
 
@@ -390,7 +568,9 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
         out.push({
           computerId: socket.computerId,
           path: 'direct',
-          address: socket.address,
+          transport: socket.transport,
+          address: socket.transport === 'webrtc' ? null : socket.address,
+          ...(socket.connection.route ? { route: socket.connection.route } : {}),
           leases: socket.leases.size
         })
       }
@@ -430,7 +610,14 @@ export function createDirectLinkManager(options: DirectLinkManagerOptions): Dire
 export interface DirectLinkHubClient {
   computers: {
     issueDirectLink: {
-      mutate(input: { target: DirectTarget }): Promise<DirectIssueResult>
+      mutate(input: {
+        target: DirectIssueTarget
+        transports?: Array<'ws' | 'webrtc'>
+      }): Promise<DirectIssueResult>
+    }
+    /** Absent on an older hub: no WebRTC. */
+    directRtcConnect?: {
+      mutate(input: { grantId: string; sdp: string }): Promise<DirectRtcConnectAnswer>
     }
     onStatusChange: {
       subscribe(
@@ -441,7 +628,21 @@ export interface DirectLinkHubClient {
   }
 }
 
-let installedProbe: ((address: string) => Promise<boolean>) | null = null
+/** Probe an address one hub issued (`hubId`: the manager's hub key). */
+export type DirectLinkProbe = (address: string, hubId: string) => Promise<boolean>
+
+let installedProbe: DirectLinkProbe | null = null
+let installedRtcFactory: DirectRtcPeerFactory | null = null
+
+/**
+ * Install (or clear) the process-wide WebRTC peer factory: with one, this client
+ * asks hubs for WebRTC direct links to computers it cannot dial (docs/direct-link.md).
+ * The desktop renderer installs its RTCPeerConnection, mobile react-native-webrtc's.
+ * Takes effect for managers created afterwards.
+ */
+export function setDirectRtcPeerFactory(factory: DirectRtcPeerFactory | null): void {
+  installedRtcFactory = factory
+}
 
 /**
  * Install (or clear) the process-wide direct-link probe — which also ENABLES the
@@ -450,7 +651,7 @@ let installedProbe: ((address: string) => Promise<boolean>) | null = null
  * main process (CSP check + an HTTP probe that never touches the renderer's
  * WebSocket stack); mobile installs `defaultDirectProbe` (a plain fetch).
  */
-export function setDirectLinkProbe(probe: ((address: string) => Promise<boolean>) | null): void {
+export function setDirectLinkProbe(probe: DirectLinkProbe | null): void {
   installedProbe = probe
 }
 
@@ -468,9 +669,26 @@ export function directLinkManagerFor(
 ): DirectLinkManager {
   const existing = managers.get(hubId)
   if (existing) return existing.manager
+  const createPeer = installedRtcFactory
+  const rtcConnect = client.computers.directRtcConnect
+  const rtc =
+    createPeer && rtcConnect
+      ? {
+          createPeer,
+          connect: (grantId: string, sdp: string) => rtcConnect.mutate({ grantId, sdp })
+        }
+      : null
   const manager = createDirectLinkManager({
-    issue: (target) => client.computers.issueDirectLink.mutate({ target }),
-    probe: (address) => (installedProbe ? installedProbe(address) : Promise.resolve(false))
+    // Tell the hub what this client can use; it answers WebRTC only to one that can.
+    issue: (target) =>
+      client.computers.issueDirectLink.mutate({
+        target,
+        transports: rtc ? ['ws', 'webrtc'] : ['ws']
+      }),
+    // The hub id lets the desktop's main process ask THIS hub whether it issued the
+    // address before the renderer's CSP may name it (direct-link-gate.ts).
+    probe: (address) => (installedProbe ? installedProbe(address, hubId) : Promise.resolve(false)),
+    ...(rtc ? { rtc } : {})
   })
   // A computer that (re)connects may have moved its port: drop sockets to the old
   // address and clear its backoff, so holders re-acquire at once.
@@ -507,6 +725,12 @@ export function directLinkStatus(): Array<{
   computers: DirectLinkComputerStatus[]
 }> {
   return [...managers].map(([hubId, { manager }]) => ({ hubId, computers: manager.status() }))
+}
+
+if (typeof window !== 'undefined') {
+  // Diagnostics and e2e: which computers are direct, over which transport.
+  ;(window as unknown as { __slayzone_directLinks?: () => unknown }).__slayzone_directLinks =
+    directLinkStatus
 }
 
 /** Test seam / hub removal. */

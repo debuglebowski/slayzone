@@ -152,7 +152,16 @@ export interface ProcessesAccess {
  *  `StartProcessResult` (this package does not import the domain's server). */
 export type ProcessStartResult =
   | { ok: true; pid: number | null; status: string }
-  | { ok: false; reason: 'not-found' | 'already-running' | 'shutting-down' | 'no-computer' }
+  | {
+      ok: false
+      reason:
+        | 'not-found'
+        | 'already-running'
+        | 'shutting-down'
+        | 'no-computer'
+        | 'old-run-survives'
+        | 'old-run-unreachable'
+    }
 
 /** The minimal WebContents surface the browser routes drive. Structural (NOT
  *  Electron's type — this package must stay electron-free); the Electron host's
@@ -244,6 +253,9 @@ export interface RestApiDeps {
     /** Who a join token is for, by account id or email (T-20) — the same lookup
      *  `computers.mintJoinToken` uses (`ComputersDeps.findAccount`). */
     findAccount?: FindJoinTokenAccount
+    /** Listener addresses of the caller's live direct-link grants
+     *  (`GET /api/computers/direct-addresses`). Absent: this hub issues none. */
+    directAddresses?: (userId: string | null) => string[]
   }
   /**
    * Operator account management, powering the `/api/hub/users` routes behind

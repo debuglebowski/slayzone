@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -42,6 +43,8 @@ import {
   LiveBlockStoreContext,
   selectUsageSummary,
   selectBackgroundJobs,
+  selectBackgroundSubAgents,
+  type BackgroundSubAgent,
   selectCodexPlanReview,
   useChatSession
 } from '@slayzone/terminal/client'
@@ -52,7 +55,8 @@ import { useChatAttachments } from './attachments/useChatAttachments'
 import { useChatScrollMemory } from './composer-state/useChatScrollMemory'
 import { ChatViewContext } from './ChatViewContext'
 import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-state'
-import { TimelineRevealContext } from './timeline-reveal'
+import { ComposerSubAgents } from './ComposerSubAgents'
+import { flashRow, TimelineRevealContext, useRevealTimelineItem } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
 import { useChatDefaults } from './useChatDefaults'
 import { useChatModel } from './useChatModel'
@@ -68,13 +72,16 @@ import { useChatLifecycle } from './useChatLifecycle'
 import { useChatPanelKeyboard } from './useChatPanelKeyboard'
 import { useTurnOutline } from './useTurnOutline'
 import { turnOutlinePaletteCommands } from './turn-outline-palette'
+import { pinnedMessagePaletteCommands } from './pinned-palette'
+import { usePinnedMessages } from './usePinnedMessages'
+import { PinnedMessagesPopover } from './PinnedMessagesPopover'
 import { useCliCommandSnapshot } from './useCliCommandSnapshot'
 import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CodexPlanPrompt } from './CodexPlanPrompt'
 import { CommandTaskContext } from './tool-cards'
-import { useCommandTaskActions } from './tool-cards/command-task-hooks'
+import { useCommandTaskActions, useStopSubAgent } from './tool-cards/command-task-hooks'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
 import { RewindPicker, type RewindPickerKind } from './RewindPicker'
@@ -233,6 +240,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       cwd
     })
     const backgroundJobs = selectBackgroundJobs(state)
+    const backgroundSubAgents = selectBackgroundSubAgents(state)
     const codexPlanReview = useMemo(
       () => (mode === 'codex-chat' ? selectCodexPlanReview(timeline, chatCollaboration) : null),
       [mode, timeline, chatCollaboration]
@@ -390,6 +398,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       folded: display.folded,
       rowOf: display.rowOf,
       reveal: display.revealItem
+    })
+    // Pinned messages of the conversation on screen: the rows' pin buttons, the
+    // footer list, Cmd+K "Go to pinned message…" and previous / next pin.
+    const pinned = usePinnedMessages({
+      target: { tabId, taskId, mode, cwd, providerFlagsOverride },
+      conversationId: state.sessionId || null,
+      timeline: display
     })
 
     // Files changed (chat E, plan 4.3): the panel beside the chat, opened at a file
@@ -609,11 +624,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       ...(inFlight ? { stop: () => void composer.handleStop() } : {}),
       reset: () => void handleReset(),
       // The turn outline: go to a turn, previous / next turn.
-      extra: turnOutlinePaletteCommands({
-        turns: turnOutline.turns,
-        reveal: display.revealItem,
-        jump: turnOutline.jump
-      })
+      extra: [
+        ...turnOutlinePaletteCommands({
+          turns: turnOutline.turns,
+          reveal: display.revealItem,
+          jump: turnOutline.jump
+        }),
+        ...pinnedMessagePaletteCommands({
+          pins: pinned.pins,
+          go: pinned.go,
+          jump: pinned.jump
+        })
+      ]
     })
     const palette = usePaletteContribution(
       taskId,
@@ -715,12 +737,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         },
         quoteReply,
         threads: threadApi.view,
+        pinnedMessages: pinned.view,
         sendToolResult,
         promptCards,
         prompts,
         submittingPrompts,
         respondPermission,
         autoModeAvailable: autoCapability.optedIn,
+        permissionMode: chatMode,
         cwd,
         timeline,
         childIndex: state.childIndex,
@@ -750,12 +774,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         takeOver,
         quoteReply,
         threadApi.view,
+        pinned.view,
         sendToolResult,
         promptCards,
         prompts,
         submittingPrompts,
         respondPermission,
         autoCapability.optedIn,
+        chatMode,
         cwd,
         timeline,
         state.childIndex,
@@ -846,7 +872,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           e.preventDefault()
                           const id = href.slice('#chat-thread:'.length)
                           const thread = threadApi.threads.find((thread) => thread.id === id)
-                          if (thread) threadApi.view?.open(thread)
+                          if (thread) void threadApi.view?.open(thread)
                           return
                         }
                         if (!/^https?:\/\//i.test(href)) return
@@ -1043,9 +1069,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               )}
                             </>
                           }
+                          footerTools={
+                            <PinnedMessagesPopover
+                              pins={pinned.pins}
+                              go={pinned.go}
+                              unpin={pinned.unpin}
+                              inBranchOf={pinned.inBranchOf}
+                            />
+                          }
                           backgroundJobs={
-                            backgroundJobs.length > 0 ? (
-                              <ComposerBackgroundJobs jobs={backgroundJobs} />
+                            backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (
+                              // Collapsed, side by side; an opened one takes the row.
+                              <div className="flex flex-wrap items-start gap-x-2">
+                                <ComposerBackgroundSubAgents
+                                  agents={backgroundSubAgents}
+                                  canStop={chatCapabilitiesForMode(mode).stopSubAgent}
+                                />
+                                <ComposerBackgroundJobs jobs={backgroundJobs} />
+                              </div>
                             ) : null
                           }
                           compact={props.isThread}
@@ -1124,6 +1165,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         onSelect={threadApi.select}
                         onCreate={threadApi.create}
                         onClose={threadApi.close}
+                        onCloseThread={(thread) => void threadApi.closeThread(thread)}
+                        onReopenThread={(thread) => void threadApi.reopen(thread)}
                         renderThread={(thread, active) => (
                           <ChatPanel
                             tabId={thread.id}
@@ -1206,6 +1249,34 @@ function ComposerBackgroundJobs(props: React.ComponentProps<typeof BackgroundJob
       onStop={(shell) => {
         if (shell.shellId) commandTasks.stop(shell.shellId)
       }}
+    />
+  )
+}
+
+/**
+ * Sub-agents still running after their turn: one opens its own row in its turn
+ * (scrolled to, its Sub-agents disclosure opened); Stop stops it alone.
+ */
+function ComposerBackgroundSubAgents({
+  agents,
+  canStop
+}: {
+  agents: readonly BackgroundSubAgent[]
+  canStop: boolean
+}) {
+  const stopSubAgent = useStopSubAgent()
+  const reveal = useRevealTimelineItem()
+  const focus = useContext(ToolFocusContext)
+  return (
+    <ComposerSubAgents
+      agents={agents}
+      onOpen={(agent) => {
+        const key = `sub-agent:${agent.toolUseId}`
+        focus?.request(agent.toolUseId)
+        reveal(key, { align: 'center', row: agent.row })
+        flashRow(key)
+      }}
+      onStop={canStop ? (agent) => stopSubAgent(agent.toolUseId) : undefined}
     />
   )
 }

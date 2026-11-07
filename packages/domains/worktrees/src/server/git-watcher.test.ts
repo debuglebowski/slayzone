@@ -10,7 +10,16 @@
  *   packages/domains/worktrees/src/server/git-watcher.test.ts
  */
 import { execSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -42,12 +51,13 @@ function git(cmd: string, cwd = repo): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** Start watching, then wait out the backend's startup noise. */
+/** Start watching, then wait out its startup: live, and past the settle rescan. */
 async function watch(): Promise<void> {
   watcher = createGitWatcher()
   watcher.on('git:diff-changed', (e: Event) => events.push(e))
   watcher.subscribe(repo)
-  await sleep(600)
+  await watcher.ready(repo)
+  await sleep(2_000)
   events = []
 }
 
@@ -128,4 +138,81 @@ describe('GitWatcher', () => {
     expect(await eventsAfter(read)).toEqual([])
     expect(await eventsAfter(read)).toEqual([])
   }, 15_000)
+})
+
+/** A fresh repo with one commit, under `root`. */
+function freshRepo(name: string): string {
+  const dir = join(root, name)
+  git(`init -q -b main ${dir}`, root)
+  writeFileSync(join(dir, 'a.txt'), 'a')
+  git('add a.txt', dir)
+  git('-c commit.gpgsign=false commit -qm init', dir)
+  return dir
+}
+
+// Round-10 R10-3: `ready()` touches its marker in the gitdir. A `.git` that is a
+// SYMLINK was watched only through the worktree's watch, which does not follow it, so
+// the marker was never seen: every open waited out the cap (3 s). The real gitdir is
+// resolved and watched itself — which also brings ref moves in it back.
+describe('a repo whose .git is a symlink', () => {
+  it('starts watching at once, and reports a ref move', async () => {
+    const dir = freshRepo('symlinked-git')
+    const real = join(root, 'symlinked-git.gitdir')
+    renameSync(join(dir, '.git'), real)
+    symlinkSync(real, join(dir, '.git'))
+    const w = createGitWatcher()
+    const seen: Event[] = []
+    w.on('git:diff-changed', (e: Event) => seen.push(e))
+    try {
+      const started = Date.now()
+      w.subscribe(dir)
+      await w.ready(dir)
+      expect(Date.now() - started, 'ms to start watching').toBeLessThan(1_500)
+      seen.length = 0
+      git('branch moved', dir)
+      await sleep(1_500)
+      expect(
+        seen.some((e) => e.refsChanged),
+        'a ref move in the symlinked gitdir'
+      ).toBe(true)
+    } finally {
+      w.closeAll()
+    }
+  })
+})
+
+// Round-10 R10-2: when the readiness wait hit its cap (a loaded machine), the watch
+// was reported ready while it was not live, and a change in that window was lost.
+// After the cap the watch keeps confirming in the background and, once it is live,
+// sends one more change (a rescan), so nothing made in between is lost. Forced here
+// with a cap of 0: every watch is reported ready before it is live.
+describe('readiness past its cap', () => {
+  it('a change made right after a capped start is still reported (25 side by side)', async () => {
+    const dirs = Array.from({ length: 25 }, (_, i) => freshRepo(`capped-${i}`))
+    const w = createGitWatcher({ readyTimeoutMs: 0 })
+    const after = new Map<string, number>()
+    const seen = new Set<string>()
+    let n = 0
+    w.on('git:diff-changed', (e: Event) => {
+      n++
+      if (n > (after.get(e.worktreePath) ?? Number.POSITIVE_INFINITY)) seen.add(e.worktreePath)
+    })
+    try {
+      await Promise.all(
+        dirs.map(async (dir) => {
+          w.subscribe(dir)
+          await w.ready(dir)
+          after.set(dir, n)
+          writeFileSync(join(dir, 'b.txt'), 'x')
+        })
+      )
+      // Each change is reported once its watch goes live, however late that is (a
+      // loaded machine): wait on that, by a deadline.
+      const deadline = Date.now() + 15_000
+      while (dirs.some((d) => !seen.has(d)) && Date.now() < deadline) await sleep(100)
+      expect(dirs.filter((d) => !seen.has(d)).map((d) => d.slice(root.length + 1))).toEqual([])
+    } finally {
+      w.closeAll()
+    }
+  }, 60_000)
 })

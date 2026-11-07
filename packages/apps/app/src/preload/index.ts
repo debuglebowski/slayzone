@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { ElectronAPI, HubEntry, LocalComputerStatus } from '@slayzone/types'
+import type { ElectronAPI, HubEntry, LocalComputerHubs, LocalComputerStatus } from '@slayzone/types'
 import type {
   ArtifactExportRequest,
   ArtifactExportResult,
@@ -54,6 +54,13 @@ const api: ElectronAPI = {
         defaultHubId: string
       }>,
     getHubTokens: () => ipcRenderer.invoke('app:get-hub-tokens') as Promise<Record<string, string>>,
+    checkHubSession: (payload: { hubId: string; url: string }) =>
+      ipcRenderer.invoke('app:check-hub-session', payload) as Promise<
+        | { state: 'valid'; email: string | null }
+        | { state: 'expired' }
+        | { state: 'unreachable' }
+        | { state: 'none' }
+      >,
     setHubToken: (payload) =>
       ipcRenderer.invoke('app:set-hub-token', payload) as Promise<{ ok: true }>,
     hubLogin: (payload) =>
@@ -71,6 +78,7 @@ const api: ElectronAPI = {
     hubDeviceLoginCancel: (payload) =>
       ipcRenderer.invoke('app:hub-device-login-cancel', payload) as Promise<{ ok: true }>,
     getWindowId: () => ipcRenderer.invoke('app:get-window-id') as Promise<number | null>,
+    setAppBadge: (badge) => ipcRenderer.invoke('app:set-badge', badge) as Promise<void>,
     relaunch: () => ipcRenderer.invoke('app:relaunch') as Promise<void>,
     setBootSettings: (payload) =>
       ipcRenderer.invoke('app:set-boot-settings', payload) as Promise<{ ok: true }>,
@@ -82,9 +90,9 @@ const api: ElectronAPI = {
         authRequired?: boolean
         signIn?: { sso: boolean; password: boolean }
       }>,
-    prepareDirectLink: (address: string) =>
-      ipcRenderer.invoke('app:direct-link-prepare', address) as Promise<
-        { ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }
+    prepareDirectLink: (address: string, hubId: string) =>
+      ipcRenderer.invoke('app:direct-link-prepare', address, hubId) as Promise<
+        { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
       >,
     // Client-local host capability, not a domain API: the export renders on THIS device.
     exportArtifact: (request: ArtifactExportRequest) =>
@@ -99,6 +107,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:restart-local-computer') as Promise<{ ok: boolean; error?: string }>,
     getLocalComputerStatus: () =>
       ipcRenderer.invoke('app:get-local-computer-status') as Promise<LocalComputerStatus | null>,
+    getLocalComputerHubs: () =>
+      ipcRenderer.invoke('app:get-local-computer-hubs') as Promise<LocalComputerHubs>,
     isPlaywright,
     dataReady: () => ipcRenderer.send('app:data-ready'),
     bootMark:

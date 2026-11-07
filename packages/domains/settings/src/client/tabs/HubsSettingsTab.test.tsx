@@ -58,6 +58,10 @@ let deviceStart = vi.fn(async (_p: { hubId: string; url: string }) => ({
   verificationUri: 'https://hub.example.com/device?user_code=ABCDEFGH',
   opened: true
 }))
+/** The live connection's health per hub (`useHubHealth`), swapped per test. */
+let liveHealth: Map<string, Record<string, unknown>> = new Map()
+/** What the hub says about a stored bearer (`checkHubSession`), swapped per test. */
+let sessionReply: { state: string; email?: string | null } = { state: 'valid', email: null }
 let deviceWait = vi.fn(async (_p: { flowId: string }) => ({ ok: true as const }))
 
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
@@ -66,6 +70,7 @@ vi.mock('@slayzone/transport/client', () => ({
   electronBootstrap: {
     getHubRegistry: () => Promise.resolve({ hubs: registryHubs, defaultHubId: 'local' }),
     getHubTokens: () => Promise.resolve(hubTokens),
+    checkHubSession: () => Promise.resolve(sessionReply),
     probeServerHealth: (url: string) =>
       Promise.resolve(probeReplies[url] ?? { ok: false, error: 'Unreachable' }),
     hubLogin: () => Promise.resolve({ ok: true as const, token: 't' }),
@@ -78,6 +83,8 @@ vi.mock('@slayzone/transport/client', () => ({
   },
   useHubRegistryStore: { getState: () => ({ setTokens: vi.fn() }) },
   useFederationOrNull: () => federation,
+  useHubHealth: () => liveHealth,
+  issueOf: (h: { kind: string } | undefined) => (h && h.kind !== 'ok' ? h : null),
   HubScope: ({ hubId, children }: { hubId: string } & Kids) => {
     renderingHubId = hubId
     return <>{children}</>
@@ -235,6 +242,7 @@ vi.mock('lucide-react', () => {
 vi.mock('./SettingsTabIntro', () => ({ SettingsTabIntro: () => <div /> }))
 
 const { HubsSettingsTab } = await import('./HubsSettingsTab')
+const { useHubIssueBannerStore } = await import('../hub-issue-banner-store')
 
 const REMOTE_URL = 'ws://hub.example.com:7800/trpc'
 
@@ -297,6 +305,77 @@ describe('HubsSettingsTab — Sign in visibility', () => {
     await waitFor(() => expect(screen.getByTestId('hub-signed-in')).toBeTruthy())
     expect(screen.queryByTestId('hub-signin-open')).toBeNull()
   })
+
+  it('a stored token the hub refuses is an expired session, with Sign in offered again', async () => {
+    sessionReply = { state: 'expired' }
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Session expired')).toBeTruthy())
+      expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+    }
+  })
+
+  it('a sign-in that could not be checked never reads "Signed in"', async () => {
+    sessionReply = { state: 'unreachable' }
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Sign-in unverified')).toBeTruthy())
+      expect(screen.queryByText('Signed in')).toBeNull()
+      // An unconfirmed sign-in must stay fixable: signing in again is the way out.
+      expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+    }
+  })
+
+  it('the live connection outranks the stored-token check: open and signed in = Signed in', async () => {
+    sessionReply = { state: 'unreachable' }
+    liveHealth = new Map([['hub:remote', { kind: 'ok', authRequired: true }]])
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Signed in')).toBeTruthy())
+      expect(screen.queryByText('Sign-in unverified')).toBeNull()
+      expect(screen.queryByTestId('hub-signin-open')).toBeNull()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+      liveHealth = new Map()
+    }
+  })
+
+  it('a live connection the hub holds no sign-in for = Session expired, with Sign in', async () => {
+    liveHealth = new Map([['hub:remote', { kind: 'signin', since: 0, detail: 'x' }]])
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByText('Session expired')).toBeTruthy())
+      expect(screen.getByTestId('hub-signin-open')).toBeTruthy()
+    } finally {
+      liveHealth = new Map()
+    }
+  })
+
+  it('a token main no longer holds ("none") is signed out with Sign in, never stuck checking', async () => {
+    sessionReply = { state: 'none' }
+    try {
+      seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+      render(<HubsSettingsTab />)
+      await rowSettled()
+      await waitFor(() => expect(screen.getByTestId('hub-signin-open')).toBeTruthy())
+      expect(screen.queryByText('Checking sign-in…')).toBeNull()
+      expect(screen.queryByText('Signed in')).toBeNull()
+    } finally {
+      sessionReply = { state: 'valid', email: null }
+    }
+  })
 })
 
 /**
@@ -306,6 +385,52 @@ describe('HubsSettingsTab — Sign in visibility', () => {
  * the second must say so — an empty list there would be a false claim about that
  * hub's configuration rather than a description of a hub we haven't connected to.
  */
+/**
+ * The app-wide hub-issue banner hands off to this tab: its Sign in opens the sign-in
+ * for that hub, and the hub's ⋯ menu turns its banner back on after Don't show again.
+ */
+describe('HubsSettingsTab — hub-issue banner hand-off', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useHubIssueBannerStore.setState({ muted: [], dismissed: {}, pendingSignIn: null })
+  })
+  afterEach(() => {
+    cleanup()
+    registryHubs = []
+    hubTokens = {}
+    probeReplies = {}
+  })
+
+  it("the banner's Sign in request opens the sign-in for that hub, once", async () => {
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+    useHubIssueBannerStore.getState().requestSignIn('hub:remote')
+    render(<HubsSettingsTab />)
+    await waitFor(() => expect(screen.getByTestId('hub-signin-dialog')).toBeTruthy())
+    expect(useHubIssueBannerStore.getState().pendingSignIn).toBeNull()
+  })
+
+  it("a muted hub's banner is turned back on from its menu", async () => {
+    seed({ ok: true, normalizedUrl: REMOTE_URL, authRequired: true }, { 'hub:remote': 'tok' })
+    useHubIssueBannerStore.getState().setMuted('hub:remote', true)
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    const toggle = screen.getByTestId('hub-banner-toggle-remote') as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+    fireEvent.click(toggle)
+    expect(useHubIssueBannerStore.getState().muted).toEqual([])
+  })
+
+  it('the local hub has the same toggle', async () => {
+    seed({ ok: true, normalizedUrl: REMOTE_URL })
+    render(<HubsSettingsTab />)
+    await rowSettled()
+    const toggle = screen.getByTestId('hub-banner-toggle-local') as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(toggle)
+    expect(useHubIssueBannerStore.getState().muted).toEqual(['local'])
+  })
+})
+
 describe('HubsSettingsTab — nested computers', () => {
   beforeEach(() => {
     registryHubs = []

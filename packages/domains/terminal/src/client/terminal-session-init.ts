@@ -1,4 +1,4 @@
-import { ptyWrite } from './direct-pty'
+import { ptyWrite, reportPtyWriteFailure } from './direct-pty'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import type { ITheme, Terminal as XTerm } from '@xterm/xterm'
 import type { FitAddon } from '@xterm/addon-fit'
@@ -37,7 +37,11 @@ import {
   registerActiveTerminal,
   getLiveTerminals
 } from './terminal-cache'
-import { suppressDeviceStatusReplies, suppressXtVersionReply } from './suppress-device-status'
+import {
+  suppressDeviceStatusReplies,
+  suppressStateReportReplies,
+  suppressXtVersionReply
+} from './suppress-device-status'
 import { isParked, parkBeforeOpen, parkRenderer, unparkToDom, wakeRenderer } from './renderer-park'
 import { isLiveWebglAddon, scheduleWebglBudget, trackWebglAddon } from './webgl-budget'
 import { acquireInitSlot } from './terminal-init-scheduler'
@@ -628,6 +632,9 @@ export async function initTerminalSession(
     // asker left. Answering it injects an unsolicited DCS into the live
     // program's stdin, which wedges Claude Code's key handling.
     suppressXtVersionReply(terminal)
+    // DECRQM / DECRQSS: the server answers them from its own copy of the screen
+    // (TerminalReplyMirror), so the renderer must not answer a replayed one.
+    suppressStateReportReplies(terminal)
 
     // Open with the parked renderer whenever WebGL is going to be (or may later
     // be) this terminal's renderer: no DOM renderer — and no ~790-rule theme
@@ -698,7 +705,7 @@ export async function initTerminalSession(
     // report, so a pattern that removes the reply also eats Shift/Ctrl/Alt+F3.
     // Stopping the reply from being generated leaves keystrokes untouched.
     const inputGate = createInputGate((data) => {
-      void ptyWrite(trpcClient, sessionId, data)
+      void ptyWrite(trpcClient, sessionId, data).catch(reportPtyWriteFailure)
     })
     // An init abandoned mid-way (unmount) may leave this xterm cached and later
     // reattached: never leave it holding input.

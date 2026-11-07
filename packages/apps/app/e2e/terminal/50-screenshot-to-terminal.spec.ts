@@ -15,8 +15,6 @@ import {
   testInvoke
 } from '../fixtures/browser-view'
 import { getTestUrl, TEST_HOST_MATCH } from '../fixtures/test-server'
-import path from 'path'
-import fs from 'fs'
 
 test.describe('Screenshot browser to terminal', () => {
   const projectName = 'ScreenshotTest'
@@ -76,8 +74,11 @@ test.describe('Screenshot browser to terminal', () => {
     // Post-cutover the camera button uses tRPC `app.screenshot.captureView`
     // (renderer→sidecar→capability-bridge→host), NOT the legacy IPC handler. Spy
     // on the HOST AppDeps method through the bridge with a deterministic path.
-    const fakeScreenshotPath = path.join(TEST_PROJECT_PATH, 'browser-screenshot.png')
-    fs.writeFileSync(fakeScreenshotPath, 'fake-png-data')
+    // Short and fixed on purpose: the shell echoes the injected path, and one longer
+    // than the terminal row (a path under the checkout — ~125 chars from a worktree)
+    // is soft-wrapped by the line editor, so the raw buffer never holds the name
+    // contiguously. The stub returns it as an opaque string; nothing reads the file.
+    const fakeScreenshotPath = '/tmp/browser-screenshot.png'
 
     await mainWindow.evaluate(
       (fakePath) =>

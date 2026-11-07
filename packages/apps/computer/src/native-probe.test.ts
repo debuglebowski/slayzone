@@ -7,7 +7,7 @@ const terminal = vi.hoisted(() => ({
   data: (_data: string) => {},
   exit: (_event: { exitCode: number }) => {}
 }))
-vi.mock('node-pty', () => ({ spawn: terminal.spawn }))
+vi.mock('./node-pty', () => ({ spawnNodePty: terminal.spawn }))
 import { probeNativeTerminal } from './native-probe'
 
 beforeEach(() => {

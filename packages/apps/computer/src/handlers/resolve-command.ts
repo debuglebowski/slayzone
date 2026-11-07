@@ -13,38 +13,42 @@
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
 
-function isExecutableFile(file: string): boolean {
+function isExecutableFile(file: string, platform: NodeJS.Platform): boolean {
   try {
     if (!statSync(file).isFile()) return false
-    if (process.platform !== 'win32') accessSync(file, constants.X_OK)
+    if (platform !== 'win32') accessSync(file, constants.X_OK)
     return true
   } catch {
     return false
   }
 }
 
-/** Absolute path the command resolves to, or null when it is not there. */
+/**
+ * Absolute path the command resolves to, or null when it is not there. On Windows
+ * the PATHEXT suffixes are tried BEFORE the bare name, as cmd.exe resolves: npm puts
+ * an extensionless sh shim (`claude`) next to `claude.cmd`, and only the latter runs.
+ */
 export function resolveCommand(
   command: string,
   env: Record<string, string>,
-  cwd: string | undefined
+  cwd: string | undefined,
+  platform: NodeJS.Platform = process.platform
 ): string | null {
-  // Windows looks a bare name up with each PATHEXT suffix; POSIX takes it verbatim.
-  const suffixes =
-    process.platform === 'win32'
-      ? ['', ...(env.PATHEXT ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';')]
-      : ['']
-  const hasDir = command.includes('/') || (process.platform === 'win32' && command.includes('\\'))
-  if (hasDir) {
-    const base = isAbsolute(command) ? command : join(cwd ?? process.cwd(), command)
-    return suffixes.map((s) => base + s).find(isExecutableFile) ?? null
-  }
-  for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter)) {
+  const win = platform === 'win32'
+  const suffixes = win
+    ? [
+        ...(env.PATHEXT ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean),
+        ''
+      ]
+    : ['']
+  const hasDir = command.includes('/') || (win && command.includes('\\'))
+  const found = (base: string) =>
+    suffixes.map((s) => base + s).find((p) => isExecutableFile(p, platform)) ?? null
+  if (hasDir) return found(isAbsolute(command) ? command : join(cwd ?? process.cwd(), command))
+  for (const dir of (env.PATH ?? env.Path ?? '').split(win ? ';' : delimiter)) {
     if (!dir) continue
-    for (const suffix of suffixes) {
-      const candidate = join(dir, command + suffix)
-      if (isExecutableFile(candidate)) return candidate
-    }
+    const hit = found(join(dir, command))
+    if (hit) return hit
   }
   return null
 }

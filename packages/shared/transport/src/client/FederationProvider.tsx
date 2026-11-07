@@ -1,8 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { QueryClient } from '@tanstack/react-query'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
+import { hostRouteLink } from './hostRouteLink'
+import { localHubIdOf } from './hostHub'
 import {
   closeHubClient,
+  getHubClient,
   getOrCreateHubClient,
   getOrCreateInProcessHubClient,
   type RuntimeHubWsClient,
@@ -78,9 +81,20 @@ export function FederationProvider({
   const queryClients = useRef(new Map<string, QueryClient>())
 
   const value = useMemo<FederationContextValue>(() => {
+    // Desktop-host procedures (native menu, windows, shell, browser views…) only
+    // reach the Electron host through the local hub's bridge, so every OTHER hub's
+    // client forwards them there (`hostRouteLink`). No local hub (mobile, legacy
+    // remote mode) → nothing to forward to; clients stay as they were.
+    const localHubId = localHubIdOf(hubs)
+    const hostLinks = (hubId: string) =>
+      localHubId && hubId !== localHubId
+        ? [hostRouteLink(() => getHubClient(localHubId)?.client ?? null)]
+        : undefined
     const resolve = (hubId: string): ResolvedHub | null => {
       const entry = hubs.find((h) => h.id === hubId)
       if (!entry || !entry.url) return null
+      // Create the local hub's client first so a forwarded op finds it.
+      if (localHubId && hubId !== localHubId) resolve(localHubId)
       const url = decorateUrl ? decorateUrl(entry.url) : entry.url
       const link = inProcessLinks?.[entry.id]
       const ws = link
@@ -89,6 +103,7 @@ export function FederationProvider({
             id: entry.id,
             url,
             isDefault: entry.id === defaultHubId,
+            links: hostLinks(entry.id),
             token: entry.id === defaultHubId ? undefined : tokens?.[entry.id]
           })
       let queryClient = queryClients.current.get(entry.id)

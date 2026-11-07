@@ -79,7 +79,9 @@ export function useShowFileChange(captureId?: string) {
     }
     for (const agent of around) focus?.request(agent.toolUseId)
     focus?.request(id)
-    reveal(key, { align: 'center' })
+    // Aim at the card itself: the row it is in (a folded turn, a sub-agent) can be
+    // taller than the view.
+    reveal(key, { align: 'center', inner: `[data-tool-use-id="${id.replace(/["\\]/g, '\\$&')}"]` })
     flashRow(key)
   }
 }

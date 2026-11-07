@@ -5,8 +5,17 @@
  * Import-free on purpose: this barrel reaches the renderer and mobile.
  */
 
-/** What a client wants to reach directly on the computer that holds it. */
-export type DirectLinkTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
+/** One session or one chat tab on the computer that holds it. */
+export type DirectLinkResource =
+  | { kind: 'pty'; sessionId: string }
+  | { kind: 'chat'; tabId: string }
+
+/**
+ * What a client wants to reach directly: a computer target like every other
+ * computer-routed call (owner-checked by its task, and its computer when named; G2),
+ * plus the session or tab inside it. The hub refuses a resource outside it.
+ */
+export type DirectLinkTarget = DirectLinkResource & { taskId: string; computerId?: string }
 
 /**
  * Why the hub offers no direct link; the client uses the hub relay. None of these is
@@ -18,6 +27,9 @@ export type DirectLinkTarget = { kind: 'pty'; sessionId: string } | { kind: 'cha
  *    machine (or the computer is).
  *  - `not-direct`: the hub, not the computer, holds this session's output.
  *  - `unsupported`: this hub cannot issue direct links.
+ *  - `wrong-target`: the session/tab is not in the task (or on the computer) the
+ *    target names.
+ *  - `revoked`: access was revoked while the link was being issued.
  */
 export type DirectLinkUnavailableReason =
   | 'no-computer'
@@ -25,10 +37,27 @@ export type DirectLinkUnavailableReason =
   | 'unreachable'
   | 'not-direct'
   | 'unsupported'
+  | 'wrong-target'
+  | 'revoked'
+
+/**
+ * How the client reaches the computer: its WebSocket listener, or a WebRTC data
+ * channel the hub brokers (`computers.directRtcConnect`) when no listener is reachable.
+ */
+export type DirectLinkTransport = 'ws' | 'webrtc'
+
+/**
+ * Largest SDP a client may send. Equal to `@slayzone/computer-transport`'s
+ * `DIRECT_RTC_MAX_SDP`, which this barrel cannot import (it reaches the renderer);
+ * the hub's direct-link test pins the two together.
+ */
+export const DIRECT_RTC_MAX_SDP = 64 * 1024
 
 export type DirectLinkIssueResult =
   | {
       available: true
+      /** Absent from an older hub: `ws`. */
+      transport?: 'ws'
       computerId: string
       /** The computer's direct-listener authority; scheme from the host (`hubUrlFromAddr`). */
       address: string
@@ -40,4 +69,28 @@ export type DirectLinkIssueResult =
       /** Direct-link wire version (`DIRECT_LINK_PROTOCOL`). */
       protocol: number
     }
+  | {
+      available: true
+      transport: 'webrtc'
+      computerId: string
+      /** Bearer capability. Present it in the data channel's first frame only. */
+      token: string
+      grantId: string
+      expiresInMs: number
+      protocol: number
+      /** STUN servers for both peers, `host:port` (no `stun:` scheme). */
+      stunAddresses: string[]
+    }
   | { available: false; reason: DirectLinkUnavailableReason }
+
+/** `computers.directRtcConnect`: the computer's SDP answer, or why there is none. */
+export type DirectRtcConnectResult =
+  | { ok: true; sdp: string }
+  | {
+      ok: false
+      /**
+       * `no-grant`: the caller holds no live grant by that id. `rate-limited`: too many
+       * offers. `refused`: the computer did not answer it. All mean "use the relay".
+       */
+      reason: 'no-grant' | 'rate-limited' | 'refused'
+    }

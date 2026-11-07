@@ -464,15 +464,15 @@ export function computerCommand(): Command {
   // (`--hub`, `SLAYZONE_HUB_ADDRESS`, `cli-hub-target.json`), so `slay --hub staging computer
   // mint` reads the same as every other hub-targeted command.
   //
-  // On a hub with login only an admin mints, and always FOR a named user (`--for`), who
-  // owns the computer that redeems the token (T-20); the hub refuses a mint without
-  // one. On a hub without login (the desktop app's) nobody is named, as before.
+  // On a hub with login the token is for the signed-in caller, who owns the computer
+  // that redeems it; only an admin may name someone else (`--for`, T-20). On a hub
+  // without login (the desktop app's) nobody is named, as before.
   cmd
     .command('mint [label]')
     .description('Mint a computer enrollment token on a hub (see `slay hub current`)')
     .option(
       '--for <user>',
-      'Who the computer is for: their email or account id. Required on a hub with login'
+      'Who the computer is for: their email or account id. Defaults to you; naming someone else needs a hub admin'
     )
     .option('--ttl <minutes>', `Token lifetime in minutes (at most ${MAX_TTL_MINUTES})`, '15')
     .option('--json', 'Output as JSON')
@@ -499,23 +499,23 @@ export function computerCommand(): Command {
         unwrap: 'raw',
         hints: {
           // The hub's 400s here are all about who the token is for (the lifetime is
-          // checked above): unnamed on a hub with login, unknown or disabled, or named
-          // on a hub without login.
-          400: forUser
-            ? `\`slay hub users ls\` lists this hub's accounts.`
-            : `Name the user the computer is for:\n` +
-              `  slay computer mint ${label ?? '<name>'} --for <email>\n` +
-              `(\`slay hub users ls\` lists this hub's accounts.)`,
+          // checked above): an unknown or disabled user, or one named on a hub without
+          // login.
+          ...(forUser ? { 400: `\`slay hub users ls\` lists this hub's accounts.` } : {}),
           // The hub cannot know which command the operator should run to get a
           // credential, so name it here rather than leaving a bare 401.
           401:
             `Sign in to this hub first:\n` +
             `  slay hub login ${target.baseUrl} --email <email>\n` +
             `No account yet? Create one ON the hub machine: slay hub users add <email>`,
-          403:
-            `This hub only mints join tokens for callers on its own machine.\n` +
-            `Run \`slay computer mint\` there, or turn login on for the hub ` +
-            `(\`slay hub create --public-address <host:port> --bind <host[:port]>\`) so it can authenticate you.`
+          // With `--for` a 403 is the hub refusing a non-admin's mint for someone else;
+          // without it, a hub without login refusing an off-box caller.
+          403: forUser
+            ? `Only a hub admin can enroll a computer for someone else.\n` +
+              `Enroll your own: slay computer mint ${label ?? '<name>'}`
+            : `This hub only mints join tokens for callers on its own machine.\n` +
+              `Run \`slay computer mint\` there, or turn login on for the hub ` +
+              `(\`slay hub create --public-address <host:port> --bind <host[:port]>\`) so it can authenticate you.`
         }
       })
 

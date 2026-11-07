@@ -26,6 +26,16 @@ Child events, drafts, queue entries, and processes use the ordinary chat runtime
 Returned conclusions bind queue entries to their source conversation (migration
 181); draining rechecks this scope after popping and preserves a mismatched entry.
 
+### Chat pinned messages
+
+`chat.pinnedMessages` (`list` / `pin` / `unpin` / `onChanged`) keeps the rows a user
+pinned, as `pinned-message` records of the tab's computer-side conversation, keyed by
+provider conversation + row key. Content, not hub metadata: no migration, no
+`task_state_versions` bump (local-only kinds; the record triggers are recreated on every
+open), moved with the conversation, purged by retention. `pinMessage` refuses a pin for a
+conversation other than the one hydrated (the view is behind a Reset / switch). Agent
+tokens may list them, never change them.
+
 ### Chat side questions (`/btw`)
 
 `chat.sideQuestion.ask` answers a question from the tab's conversation without

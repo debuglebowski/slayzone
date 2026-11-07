@@ -578,12 +578,12 @@ describe('slay computer — end-to-end against a real hub', () => {
       expect(res.stderr, `names the bad flag: ${res.stderr}`).toMatch(/Invalid --ttl/)
     })
 
-    test('mint on a hub with login refuses without --for and says how (T-20)', async () => {
+    test('mint on a hub with login without --for mints for the signed-in caller', async () => {
       const res = slay(['--hub', String(hub.port), 'computer', 'mint', '--json'], {
         root: rejectRoot
       })
-      expect(res.status, 'exited non-zero').not.toBe(0)
-      expect(res.stderr, `names --for: ${res.stderr}`).toMatch(/--for <email>/)
+      expect(res.status, `exited 0 (stderr: ${res.stderr})`).toBe(0)
+      expect((JSON.parse(res.stdout) as { token?: string }).token).toMatch(/^szjt1\./)
     })
 
     // The token the happy path uses comes from the CLI, closing the loop: if

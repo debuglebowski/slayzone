@@ -4692,8 +4692,9 @@ export const migrations: Migration[] = [
     // Unindexed, each lookup walked every session: a large history blocked the hub
     // past the desktop's 10s health deadline.
     up: (db) => {
-      // Guarded like v187/v189: chat-runtime fixtures replay the chat migrations on a
-      // skeleton DB without this table. Every real store has it.
+      // Guarded like v187/v189. The guard was added for chat-runtime fixtures that
+      // replayed a migration slice on a skeleton DB; they now use the full schema.
+      // Every real store has the table, so the guard is a no-op there; kept as shipped.
       if (
         db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions'").get()
       )
@@ -4702,6 +4703,16 @@ export const migrations: Migration[] = [
   },
   {
     version: 194,
+    // Disabling a computer (`computers.setDisabled`): it stays enrolled and connected,
+    // and gets no new work. Distinct from `revoked_at`, which ends its credential.
+    // NULL = enabled. Kept across re-enrollment: a computer an operator turned off
+    // stays off until they turn it on.
+    up: (db) => {
+      db.exec('ALTER TABLE computers ADD COLUMN disabled_at INTEGER')
+    }
+  },
+  {
+    version: 195,
     up(db) {
       // Usage logs are parsed on each computer: a parse cursor belongs to (computer,
       // file) — two computers' `~/.claude/projects/x.jsonl` are different files.
@@ -4726,7 +4737,7 @@ export const migrations: Migration[] = [
     }
   },
   {
-    version: 195,
+    version: 196,
     up(db) {
       // Which computer a legacy (hub-era) chat tab's agent ran on — where its provider
       // session lives, so the migration copies it from there. It was read from the

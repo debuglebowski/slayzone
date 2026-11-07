@@ -5,11 +5,14 @@
  */
 import { createHash } from 'node:crypto'
 import { createTRPCClient, createWSClient, wsLink, type TRPCClient } from '@trpc/client'
-import type { DirectRouter } from '@slayzone/transport/direct'
+import { createDirectRouter, type DirectRouter } from '@slayzone/transport/direct'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
+import { channelWebSocket } from '../../../../shared/transport/src/direct/rtc-channel'
+import { fakeChannelPair } from '../../../../shared/transport/src/direct/rtc-channel-fake'
 import { createDirectGrantStore, type DirectGrantStore } from './grants'
+import { RtcServerSocket } from './rtc-socket'
 import { advertisedDirectAddress, createDirectListener, type DirectListener } from './listener'
 
 const cleanups: Array<() => unknown> = []
@@ -251,7 +254,7 @@ describe('direct listener: flood limits', () => {
   })
 
   it('closes a socket that floods messages', async () => {
-    const { store, listener } = await setup({ messagesPerSocketPer10s: 5 })
+    const { store, listener } = await setup({ messagesPerGrantPer10s: 5 })
     const { token } = grant(store)
     // Raw frames: counted before tRPC parses anything (the tRPC client batches).
     // `?connectionParams=1` is how a tRPC client says its first frame carries them.
@@ -262,6 +265,48 @@ describe('direct listener: flood limits', () => {
     for (let i = 0; i < 20; i++)
       raw.send(JSON.stringify({ id: i + 1, method: 'query', params: { path: 'ping' } }))
     expect(await code).toBe(1008)
+  })
+})
+
+describe('direct listener: message budget scales with what the socket carries', () => {
+  // All of a computer's terminals share one socket: heavy mouse reporting in several
+  // TUIs must not trip a limit sized for one.
+  it('a socket holding more grants may send more, up to the per-socket ceiling', async () => {
+    const { store, listener } = await setup({
+      messagesPerGrantPer10s: 5,
+      messagesPerSocketPer10s: 100
+    })
+    // Three distinct targets (a newer grant on the same target supersedes the older).
+    const tokens = [
+      grant(store),
+      grant(store, { sessionId: 's2' }),
+      grant(store, { chat: { tabId: 't1', epoch: 1 } })
+    ].map((g) => g.token)
+    const raw = new WebSocket(`ws://${listener.boundAddress}/direct/v1?connectionParams=1`)
+    await new Promise<void>((resolve) => raw.once('open', () => resolve()))
+    let closed: number | null = null
+    raw.once('close', (c) => {
+      closed = c
+    })
+    raw.send(JSON.stringify({ method: 'connectionParams', data: { token: tokens[0] } }))
+    for (const [i, token] of tokens.slice(1).entries())
+      raw.send(
+        JSON.stringify({
+          id: 100 + i,
+          method: 'mutation',
+          params: { path: 'authorize', input: { json: { token } } }
+        })
+      )
+    await new Promise((r) => setTimeout(r, 200))
+    // 3 grants: 15 messages per window; 3 sent so far, 10 more stay inside it.
+    for (let i = 0; i < 10; i++)
+      raw.send(JSON.stringify({ id: i + 1, method: 'query', params: { path: 'ping' } }))
+    await new Promise((r) => setTimeout(r, 200))
+    expect(closed).toBeNull()
+    for (let i = 0; i < 10; i++)
+      raw.send(JSON.stringify({ id: i + 50, method: 'query', params: { path: 'ping' } }))
+    await new Promise((r) => setTimeout(r, 200))
+    expect(closed).toBe(1008)
   })
 })
 
@@ -401,7 +446,7 @@ describe('client manager against the real listener (computer restart)', () => {
         backoffInitialMs: 50
       })
       cleanups.push(() => manager.dispose())
-      const lease = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      const lease = await manager.acquire({ kind: 'pty', sessionId: 's1', taskId: 't' })
       expect(lease).not.toBeNull()
       const lost: string[] = []
       lease?.onLost((r) => lost.push(r))
@@ -414,7 +459,7 @@ describe('client manager against the real listener (computer restart)', () => {
       // No blind reconnect to the dead port.
       expect(constructed).toBe(1)
       current = await setup()
-      const again = await manager.acquire({ kind: 'pty', sessionId: 's1' })
+      const again = await manager.acquire({ kind: 'pty', sessionId: 's1', taskId: 't' })
       expect(again).not.toBeNull()
       expect(constructed).toBe(2)
       expect(await again?.client.ping.query()).toEqual({ protocol: 1 })
@@ -467,17 +512,86 @@ describe('direct listener: chat', () => {
   })
 })
 
+// M4: a tab's epoch moves while its computer stays the same. The client authorizes a
+// new-epoch grant on the same socket; it must win over the old one at once, and a
+// renewal must replace (not pile up on) what the socket holds.
+describe('direct listener: grant replacement and release', () => {
+  it('the newest grant for a target wins; the one it supersedes leaves the socket', async () => {
+    const { store, listener, chat } = await setup()
+    const old = grant(store, { chat: { tabId: 't1', epoch: 1 } })
+    const { trpc } = client(listener, old.token)
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    const fresh = grant(store, { chat: { tabId: 't1', epoch: 2 } })
+    const view = await trpc.authorize.mutate({ token: fresh.token })
+    expect(view.grantId).toBe(fresh.grantId)
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    expect(chat.reads.map((r) => (r as { epoch: number }).epoch)).toEqual([1, 2])
+    // The superseded grant is gone from the socket: revoking it ends nothing.
+    store.revoke('hub', { by: 'grant', grantIds: [old.grantId] })
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: -1 })
+    expect(chat.reads.length).toBe(3)
+  })
+
+  it('renewals never fill the per-socket cap', async () => {
+    const { store, listener } = await setup({ grantsPerSocket: 3 })
+    const first = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, first.token)
+    for (let i = 0; i < 10; i++) {
+      const next = grant(store, { sessionId: 's1' })
+      expect((await trpc.authorize.mutate({ token: next.token })).grantId).toBe(next.grantId)
+    }
+    const other = grant(store, { sessionId: 's2' })
+    expect((await trpc.authorize.mutate({ token: other.token })).grantId).toBe(other.grantId)
+  })
+
+  // R4: a release names the grant it held; a newer grant on the same target, which
+  // another holder just authorised, survives it.
+  it('releasing a superseded grant leaves the newer one on the target', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, a.token)
+    const b = grant(store, { sessionId: 's1' })
+    await trpc.authorize.mutate({ token: b.token })
+    expect(await trpc.release.mutate({ grantId: a.grantId })).toEqual({ released: false })
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+  })
+
+  it('a released grant leaves the socket (the lease is gone)', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store, { sessionId: 's1' })
+    const { trpc } = client(listener, a.token)
+    const b = grant(store, { sessionId: 's2' })
+    await trpc.authorize.mutate({ token: b.token })
+    expect(await trpc.release.mutate({ grantId: b.grantId })).toEqual({ released: true })
+    await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+  })
+})
+
 describe('direct listener: chat commands', () => {
   it('runs the simple commands under the granted epoch, with an operation id', async () => {
     const { store, listener, chat } = await setup()
     const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
     const { trpc } = client(listener, token)
-    await trpc.chat.respondPermission.mutate({
+    // Permission and tool answers are no direct commands: the hub's relay refuses
+    // them while the conversation runs in the terminal.
+    const procedures = Object.keys(
+      (
+        createDirectRouter({ pty: () => null, chat: () => null }) as unknown as {
+          _def: { procedures: Record<string, unknown> }
+        }
+      )._def.procedures
+    )
+    expect(procedures).not.toContain('chat.respondPermission')
+    expect(procedures).not.toContain('chat.sendToolResult')
+    expect(procedures).toContain('chat.saveScroll')
+    await trpc.chat.saveScroll.mutate({
       tabId: 't1',
-      args: { requestId: 'r', decision: { behavior: 'allow' } },
+      anchor: { atBottom: true },
       operationId: 'op-1'
     })
-    await trpc.chat.saveScroll.mutate({ tabId: 't1', anchor: { atBottom: true } })
     await trpc.chat.saveDraft.mutate({
       tabId: 't1',
       draft: { text: 'hi', attachments: [] },
@@ -487,16 +601,9 @@ describe('direct listener: chat commands', () => {
       {
         tabId: 't1',
         epoch: 3,
-        method: 'respondPermission',
-        args: ['t1', { requestId: 'r', decision: { behavior: 'allow' } }],
-        operationId: 'op-1'
-      },
-      {
-        tabId: 't1',
-        epoch: 3,
         method: 'saveTabScroll',
         args: ['t1', { atBottom: true }],
-        operationId: expect.any(String)
+        operationId: 'op-1'
       },
       {
         tabId: 't1',
@@ -523,8 +630,76 @@ describe('direct listener: chat commands', () => {
       })
     ).rejects.toThrow()
     await expect(
-      trpc.chat.sendToolResult.mutate({ tabId: 't2', args: { toolUseId: 'u', content: 'c' } })
+      trpc.chat.saveScroll.mutate({ tabId: 't2', anchor: { atBottom: true } })
     ).rejects.toThrow(/no capability/)
     expect(chat.commands).toEqual([])
+  })
+})
+
+// M5: a WebRTC data channel is served exactly like a WebSocket — same capability
+// auth, grants, flood limits and per-address caps (docs/direct-link.md).
+describe('direct listener: data channels', () => {
+  function rtcClient(listener: DirectListener, token: string | null, ip = '198.51.100.7') {
+    const [mine, theirs] = fakeChannelPair()
+    const socket = new RtcServerSocket(theirs, { maxMessageChars: 1 << 20 })
+    const served = listener.serveChannel(socket, { ip })
+    mine.open()
+    theirs.open()
+    const closes: number[] = []
+    const ws = createWSClient({
+      url: 'rtc://direct',
+      WebSocket: channelWebSocket(mine, { maxMessageChars: 1 << 20 }) as never,
+      connectionParams: token === null ? null : { token },
+      retryDelayMs: () => 60_000,
+      onClose: (cause) => closes.push(cause?.code ?? 0)
+    })
+    cleanups.push(() => ws.close())
+    const trpc: TRPCClient<DirectRouter> = createTRPCClient<DirectRouter>({
+      links: [wsLink({ client: ws, transformer: wireSuperjson })]
+    })
+    return { trpc, served, socket, closes }
+  }
+
+  it('serves a channel whose first frame carries a live capability: same router, same grants', async () => {
+    const { store, listener } = await setup()
+    const { token } = grant(store, { sessionId: 's1' })
+    const { trpc, served } = rtcClient(listener, token)
+    expect(served).toBe(true)
+    expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+    expect((await trpc.pty.attach.query({ sessionId: 's1', afterSeq: -1 })).exists).toBe(true)
+    await expect(trpc.pty.attach.query({ sessionId: 's2', afterSeq: -1 })).rejects.toThrow(
+      /no capability/
+    )
+  })
+
+  it('closes a channel with no capability, or an unknown one', async () => {
+    const { listener } = await setup()
+    for (const token of [null, 'nope'.repeat(12)]) {
+      const { trpc, socket } = rtcClient(listener, token)
+      await expect(trpc.ping.query()).rejects.toThrow()
+      await waitFor(() => socket.readyState === 3)
+    }
+  })
+
+  it('counts channels against the per-address caps, and refuses past them', async () => {
+    const { store, listener, audit } = await setup({ socketsPerAddress: 2 })
+    const { token } = grant(store)
+    expect(rtcClient(listener, token).served).toBe(true)
+    expect(rtcClient(listener, token).served).toBe(true)
+    const third = rtcClient(listener, token)
+    expect(third.served).toBe(false)
+    expect(third.socket.readyState).toBe(3)
+    expect(audit.some((a) => a.limit === 'computer.direct.sockets_per_address')).toBe(true)
+    // Another address is not affected.
+    expect(rtcClient(listener, token, '203.0.113.5').served).toBe(true)
+  })
+
+  it('ends the channel when its last capability is revoked', async () => {
+    const { store, listener } = await setup()
+    const a = grant(store)
+    const { trpc, socket } = rtcClient(listener, a.token)
+    expect(await trpc.ping.query()).toEqual({ protocol: 1 })
+    store.revoke('hub', { by: 'grant', grantIds: [a.grantId] })
+    await waitFor(() => socket.readyState === 3)
   })
 })

@@ -138,6 +138,11 @@ export interface PtySignal {
 export interface PtyWriteOptions {
   /** This write submits the session-id command (`/status`): watch for an id. */
   watchConversationId?: true
+  /**
+   * A client's write id (docs/direct-link.md): the computer applies it once and
+   * reports its input facts itself. Only for a routed handle (`computerId`).
+   */
+  writeId?: string
 }
 
 /** See {@link PtySpawnSpec.admission}. */
@@ -235,8 +240,11 @@ export interface PtyHandle {
   getReplay?(afterSeq: number): Promise<BufferSinceResult>
   /** Clear the owner's buffer. With {@link ownsOutput}. */
   clearOutput?(): Promise<{ clearedSeq: number }>
-  /** Start/stop streaming output to this side (see `PtySpawnSpec.relay`). */
-  setRelay?(on: boolean): void
+  /**
+   * Start/stop streaming output to this side (see `PtySpawnSpec.relay`). Rejects when
+   * the owner did not apply it (unreachable, refused).
+   */
+  setRelay?(on: boolean): Promise<void> | void
   /**
    * The owner went unreachable (false; the process may well still run) or came
    * back (true). While away, an owner-held scrollback cannot be read.
@@ -319,6 +327,16 @@ export interface PtyBackend {
     computerId: string,
     ask: { shell: string; binaries: string[] }
   ): Promise<ComputerDoctorFacts | null>
+  /**
+   * The version of agent CLI `binary` on `computerId` — the binary an agent started
+   * there would run — e.g. `'0.167.0'`. Gates launch flags a CLI only knows from
+   * some release on (see `TerminalAdapter.cliVersioned`). Resolves `null` when
+   * nothing can tell (not on PATH, no version output, a computer that predates the
+   * request); rejects when it can't be reached.
+   *
+   * Optional: only the routing backend can answer; agents never run hub-local.
+   */
+  cliVersion?(computerId: string, binary: string): Promise<string | null>
 }
 
 /** What a computer reports about itself for Doctor — see {@link PtyBackend.doctor}. */

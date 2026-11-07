@@ -297,7 +297,7 @@ describe('the browser cookie (T-13)', () => {
       webSessionCookie(https.token, { secure: true, maxAgeSec: WEB_SESSION_IDLE_MS / 1000 })
     )
     const verified = await verifyWebSessionToken(h.slayDb, https.token)
-    expect(verified.ok && verified.scopes).toEqual(['read', 'tasks', 'agent'])
+    expect(verified.ok && verified.scopes).toEqual(['read', 'tasks', 'agent', 'files'])
     const loopback = await mintBrowserWebSession(null, h.slayDb, 'u-cookie', { secure: false })
     expect(loopback.setCookie.includes('Secure')).toBe(false)
     expect(loopback.setCookie).toContain('HttpOnly')

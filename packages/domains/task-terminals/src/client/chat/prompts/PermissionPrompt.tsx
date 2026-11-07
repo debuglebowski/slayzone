@@ -151,6 +151,8 @@ function ToolPreview({ prompt }: { prompt: ChatPrompt }) {
 interface PermissionPromptProps {
   prompt: ChatPrompt
   autoModeAvailable: boolean
+  /** The session's permission mode; bypass hides "switch to auto mode". */
+  permissionMode?: string | null
   cwd: string
   agentName: string | null
   submitting: boolean
@@ -166,6 +168,7 @@ interface PermissionPromptProps {
 export function PermissionPrompt({
   prompt,
   autoModeAvailable,
+  permissionMode = null,
   cwd,
   agentName,
   submitting,
@@ -175,6 +178,7 @@ export function PermissionPrompt({
   const provider = useChatProvider()
   const view: PermissionView = buildPermissionView(prompt.request, {
     autoModeAvailable,
+    permissionMode,
     cwd,
     agentName,
     agent: provider.agent

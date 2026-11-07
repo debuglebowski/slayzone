@@ -246,33 +246,39 @@ export function HomeView({
   // Scratch terminal — create a temporary `Terminal N` task and open it (mirrors
   // the Electron App.tsx handleCreateScratchTerminal). Temp tasks auto-delete on
   // close via closeTab above. No project-duration lock in the fork.
-  const handleCreateScratchTerminal = useCallback(async (): Promise<void> => {
-    if (!selectedProjectId) return
-    const project = projects.find((p) => p.id === selectedProjectId)
-    const existing = data.tasks
-      .filter((t) => t.project_id === selectedProjectId)
-      .map((t) => t.title.match(/^Terminal (\d+)$/))
-      .filter(Boolean)
-      .map((m) => parseInt(m![1], 10))
-    const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
-    // Create on the hub that owns the project (a task INSERT is FK-bound to it),
-    // and record the new id's hub before its tab opens. Single-hub → the ambient
-    // client, unchanged.
-    const projectHubId = getHubIdForProject(selectedProjectId)
-    const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
-      projectId: selectedProjectId,
-      title: `Terminal ${next}`,
-      status: getDefaultStatus(project?.columns_config),
-      isTemporary: true,
-      // Opened right below — lets the hub hand it the project's warm agent.
-      openAfterCreate: true
-    })
-    if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
-    data.setTasks((prev) => [task, ...prev])
-    const lookup = useTabStore.getState()._taskLookup
-    useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
-    openTask(task.id)
-  }, [selectedProjectId, projects, data, trpcClient, openTask])
+  const handleCreateScratchTerminal = useCallback(
+    async (projectIdArg?: string): Promise<void> => {
+      // The tree sidebar's per-project "+" passes its project; the header button
+      // creates in the selected one.
+      const projectId = projectIdArg ?? selectedProjectId
+      if (!projectId) return
+      const project = projects.find((p) => p.id === projectId)
+      const existing = data.tasks
+        .filter((t) => t.project_id === projectId)
+        .map((t) => t.title.match(/^Terminal (\d+)$/))
+        .filter(Boolean)
+        .map((m) => parseInt(m![1], 10))
+      const next = existing.length > 0 ? Math.max(...existing) + 1 : 1
+      // Create on the hub that owns the project (a task INSERT is FK-bound to it),
+      // and record the new id's hub before its tab opens. Single-hub → the ambient
+      // client, unchanged.
+      const projectHubId = getHubIdForProject(projectId)
+      const task = await getClientForHub(projectHubId, trpcClient).task.create.mutate({
+        projectId,
+        title: `Terminal ${next}`,
+        status: getDefaultStatus(project?.columns_config),
+        isTemporary: true,
+        // Opened right below — lets the hub hand it the project's warm agent.
+        openAfterCreate: true
+      })
+      if (projectHubId) useHubOwnershipStore.getState().noteTaskHub(task.id, projectHubId)
+      data.setTasks((prev) => [task, ...prev])
+      const lookup = useTabStore.getState()._taskLookup
+      useTabStore.setState({ _taskLookup: { ...lookup, tasks: [task, ...lookup.tasks] } })
+      openTask(task.id)
+    },
+    [selectedProjectId, projects, data, trpcClient, openTask]
+  )
 
   // ── Command palette (Cmd+K) ───────────────────────────────────────────────
   // Imperative handle into the Home file-editor panel so palette file results
@@ -707,6 +713,10 @@ export function HomeView({
         onSettings={() => useDialogStore.getState().openSettings()}
         onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
         onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
+        onTaskClick={openTask}
+        onCloseTab={closeTabByTaskId}
+        onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)}
+        onCreateTemporaryTask={(projectId) => void handleCreateScratchTerminal(projectId)}
         onboardingChecklist={onboardingChecklist}
         zenMode={zenMode}
         onSetWindowButtonVisibility={NOOP}
@@ -738,6 +748,7 @@ export function HomeView({
         onPinnedReorder={data.reorderPinnedTasks}
         tags={data.tags}
         taskTags={data.taskTags}
+        blockedTaskIds={data.blockedTaskIds}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {sidebarView !== 'tree' && (

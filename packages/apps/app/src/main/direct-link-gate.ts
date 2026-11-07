@@ -10,25 +10,40 @@
  *    CSP would block is never attempted. A newly issued public address joins the
  *    header from the next document load, and until then the terminal uses the
  *    relay. Only exact `wss://` origins of addresses a hub issued are ever added
- *    (`directLinkConnectSources`). Loopback adds nothing: the local hub's
- *    `ws://127.0.0.1:*` already covers the local computer.
+ *    (`directLinkConnectSources`), and main never takes the renderer's word for
+ *    that: it asks the renderer's hub (`GET /api/computers/direct-addresses`, the
+ *    caller's live grants) and refuses an address the hub does not name, or a hub it
+ *    cannot ask. At most {@link MAX_ISSUED_ORIGINS} are kept, newest last. Loopback
+ *    adds nothing: the local hub's `ws://127.0.0.1:*` already covers the local
+ *    computer.
  */
-import { directLinkConnectSources } from './renderer-csp'
+import { normalizeDirectAddress } from '@slayzone/platform/direct-link'
 
 const HEALTH_PATH = '/direct/v1/health'
-const LOOPBACK_ENTRY = 'ws://127.0.0.1:*'
+/**
+ * The `connect-src` entry that lets a document reach a loopback listener, per
+ * spelling of the loopback host. `[::1]` has none: a CSP host-source cannot name an
+ * IPv6 literal, so a listener only reachable there is relayed.
+ */
+const LOOPBACK_ENTRY: Record<string, string | null> = {
+  '127.0.0.1': 'ws://127.0.0.1:*',
+  localhost: 'ws://localhost:*',
+  '[::1]': null
+}
+/** Issued origins kept for the next document's CSP (oldest dropped first). */
+export const MAX_ISSUED_ORIGINS = 32
 
 export type DirectLinkPrepareResult =
   | { ok: true }
-  | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }
+  | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
 
 export interface DirectLinkGate {
   /** `connect-src` entries for the next document load. */
   connectSources(): string[]
   /** What `connect-src` a webContents' document was given. */
   recordApplied(webContentsId: number, connectSrc: string): void
-  /** May this webContents open a socket to `address` now? */
-  prepare(webContentsId: number, address: string): Promise<DirectLinkPrepareResult>
+  /** May this webContents open a socket to `address`, issued by hub `hubId`, now? */
+  prepare(webContentsId: number, hubId: string, address: string): Promise<DirectLinkPrepareResult>
 }
 
 export async function probeDirectHealth(url: string, deadlineMs = 3_000): Promise<boolean> {
@@ -44,9 +59,16 @@ export async function probeDirectHealth(url: string, deadlineMs = 3_000): Promis
   }
 }
 
-export function createDirectLinkGate(
-  deps: { probe?: (url: string) => Promise<boolean> } = {}
-): DirectLinkGate {
+export interface DirectLinkGateDeps {
+  probe?: (url: string) => Promise<boolean>
+  /**
+   * The addresses hub `hubId` issued to this client (its live grants). Throws, or
+   * names nothing, when the hub cannot be asked: the gate then refuses.
+   */
+  issuedByHub: (hubId: string) => Promise<readonly string[]>
+}
+
+export function createDirectLinkGate(deps: DirectLinkGateDeps): DirectLinkGate {
   const probe = deps.probe ?? ((url: string) => probeDirectHealth(url))
   const issued = new Set<string>()
   const applied = new Map<number, Set<string>>()
@@ -56,32 +78,34 @@ export function createDirectLinkGate(
     recordApplied(webContentsId, connectSrc) {
       applied.set(webContentsId, new Set(connectSrc.split(/\s+/).filter(Boolean)))
     },
-    async prepare(webContentsId, address) {
-      if (
-        typeof address !== 'string' ||
-        address === '' ||
-        /[\s/*]/.test(address) ||
-        address.includes('://')
-      )
-        return { ok: false, reason: 'invalid' }
-      let host: string
-      try {
-        const u = new URL(`http://${address}`)
-        if (u.host !== address || u.username !== '' || u.password !== '')
-          return { ok: false, reason: 'invalid' }
-        host = u.hostname
-      } catch {
-        return { ok: false, reason: 'invalid' }
-      }
+    async prepare(webContentsId, hubId, raw) {
+      // One spelling everywhere (`box:443` is `box`): what the hub issues, what is
+      // compared, named in the CSP and probed.
+      const address = normalizeDirectAddress(raw)
+      if (address === null) return { ok: false, reason: 'invalid' }
+      const host = new URL(`http://${address}`).hostname
       const sources = applied.get(webContentsId) ?? new Set<string>()
-      const loopback = host === '127.0.0.1'
+      const loopback = Object.hasOwn(LOOPBACK_ENTRY, host)
       if (loopback) {
-        if (!sources.has(LOOPBACK_ENTRY)) return { ok: false, reason: 'csp' }
+        const entry = LOOPBACK_ENTRY[host]
+        if (!entry || !sources.has(entry)) return { ok: false, reason: 'csp' }
       } else {
         const [origin] = directLinkConnectSources([address])
         if (!origin) return { ok: false, reason: 'invalid' }
         if (!sources.has(origin)) {
-          issued.add(address)
+          if (!issued.has(address)) {
+            const named =
+              typeof hubId === 'string' && hubId !== ''
+                ? await deps.issuedByHub(hubId).catch(() => [] as readonly string[])
+                : []
+            if (!named.some((a) => normalizeDirectAddress(a) === address))
+              return { ok: false, reason: 'not-issued' }
+            issued.add(address)
+            for (const old of issued) {
+              if (issued.size <= MAX_ISSUED_ORIGINS) break
+              issued.delete(old)
+            }
+          }
           return { ok: false, reason: 'csp' }
         }
       }
@@ -89,4 +113,32 @@ export function createDirectLinkGate(
       return (await probe(url)) ? { ok: true } : { ok: false, reason: 'unreachable' }
     }
   }
+}
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
+/**
+ * The `connect-src` entries for computers' direct-link listeners the hub has issued
+ * to this renderer (docs/direct-link.md), as exact `wss://host[:port]` origins.
+ *
+ *   - Loopback adds nothing: the hub offers a loopback listener only when hub,
+ *     client and computer share this machine, and then the local hub's
+ *     `ws://127.0.0.1:*` already covers it. No new loopback entry, no widening.
+ *   - A public address gets its exact `wss:` origin — the scheme the hub scheme
+ *     rule derives for a non-loopback host. Never `http(s)`: the reachability
+ *     probe runs in the main process, not the renderer.
+ *   - Anything that is not a bare `host[:port]` authority is dropped, wildcards
+ *     included, so a bad value can never widen the policy.
+ */
+export function directLinkConnectSources(addresses: readonly string[]): string[] {
+  const out = new Set<string>()
+  for (const addr of addresses) {
+    // `box:443` and `box` are one address (`normalizeDirectAddress`).
+    const normalized = normalizeDirectAddress(addr)
+    if (normalized === null) continue
+    const url = new URL(`wss://${normalized}`)
+    if (LOOPBACK_HOSTS.has(url.hostname)) continue
+    out.add(url.origin)
+  }
+  return [...out]
 }

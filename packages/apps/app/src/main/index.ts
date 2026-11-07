@@ -21,11 +21,12 @@ import {
   protocol,
   screen,
   powerMonitor,
-  crashReporter
+  crashReporter,
+  nativeImage
 } from 'electron'
 import { join, extname, normalize, sep, resolve } from 'path'
 import { pathToFileURL } from 'url'
-import { homedir } from 'os'
+import { homedir, hostname } from 'os'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readFileSync, promises as fsp, mkdirSync, appendFileSync } from 'fs'
@@ -81,7 +82,10 @@ import {
 } from './browser-view-manager'
 import { attachRendererCsp, hubConnectSources } from './renderer-csp'
 import { createDirectLinkGate } from './direct-link-gate'
+import { fetchIssuedDirectAddresses } from './direct-link-issued'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 import { attachHubSocketOriginStrip } from './hub-socket-origin'
+import { applyAppBadge, parseAppBadgePayload } from './app-badge'
 import {
   probeRemoteHealth,
   hubLogin,
@@ -92,8 +96,12 @@ import {
   writeBootSettings,
   resolveHubRegistry,
   resolveDefaultHubId,
+  normalizeRemoteUrl,
+  toHubOrigin,
   LOCAL_HUB_ID
 } from './boot-config'
+import { checkHubSession } from '@slayzone/hub-auth/client'
+import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
 import {
@@ -259,7 +267,7 @@ import {
   fileUrlToSlzFileUrl,
   injectForcedHtmlTheme
 } from '@slayzone/platform'
-import { initStorageDir, getStorageDir } from './data-paths'
+import { initStorageDir, getStorageDir, resolveLegacyStateDir } from './data-paths'
 import { StorageImportError } from './copy-utils'
 if (process.platform === 'linux') {
   const result = migrateXdgIfNeeded()
@@ -297,8 +305,13 @@ function fileDialog() {
 }
 
 // The legacy state location = userData BEFORE any dev/e2e profile swap below.
-// This is the migration source (our DB/artifacts historically lived here).
-const legacyStateDir = app.getPath('userData')
+// This is the migration source (our DB/artifacts historically lived here). A
+// Playwright worker reads its own sandbox instead — never the developer's real
+// userData (see resolveLegacyStateDir).
+const legacyStateDir = resolveLegacyStateDir(app.getPath('userData'), {
+  isPlaywright,
+  sandboxDir: process.env.SLAYZONE_USER_DATA_DIR
+})
 
 if (isPlaywright && process.env.SLAYZONE_USER_DATA_DIR) {
   // Playwright runs alongside the user's dev app, so isolate the entire
@@ -430,8 +443,13 @@ function packagedNativeModuleEnv(): { NODE_PATH?: string } {
     : {}
 }
 
-import icon from '../../resources/icon.png?asset'
+import packagedIcon from '../../resources/icon.png?asset'
+import devIcon from '../../resources/icon-dev.png?asset'
 import logoSolid from '../../resources/logo-solid.svg?asset'
+
+/** Unpackaged runs (`pnpm dev`, e2e) get a DEV-badged icon so they're distinguishable from the installed app. */
+const icon = app.isPackaged ? packagedIcon : devIcon
+
 // The standalone mermaid browser bundle the offscreen artifact exporter injects
 // (`./artifact-export`). An asset import copies just this file into out/main, so the
 // packaged app need not ship the mermaid package (the renderer bundles its own mermaid).
@@ -616,7 +634,33 @@ setBrowserViewScreenshotKeysResolver(() =>
 )
 
 /** Renderer direct links: CSP sources + main-side probe (docs/direct-link.md). */
-const directLinkGate = createDirectLinkGate()
+const directLinkGate = createDirectLinkGate({
+  // The renderer's hub, resolved here from main's own registry (never a URL the
+  // renderer names), says which addresses it issued; anything else is refused.
+  issuedByHub: async (hubId) => {
+    const config = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+    const registry = resolveHubRegistry(config)
+    const id = hubId === DIRECT_LINK_DEFAULT_HUB_ID ? resolveDefaultHubId(config, registry) : hubId
+    const hub = registry.find((h) => h.id === id)
+    if (!hub) return []
+    let origin: string | null = null
+    if (hub.kind === 'local') {
+      const port = await sidecarHandlePromise.then(
+        (h) => h.getPort(),
+        () => null
+      )
+      origin = port ? `http://127.0.0.1:${port}` : null
+    } else if (typeof hub.url === 'string') {
+      const normalized = normalizeRemoteUrl(hub.url)
+      origin = normalized ? toHubOrigin(normalized) : null
+    }
+    if (!origin) return []
+    const bearer = await createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot())
+      .get(hub.id)
+      .catch(() => null)
+    return fetchIssuedDirectAddresses(origin, bearer)
+  }
+})
 
 const DEFAULT_WINDOW_WIDTH = 1760
 const DEFAULT_WINDOW_HEIGHT = 1280
@@ -757,6 +801,13 @@ let sidecarServerHandle: import('./sidecar-server-supervisor').SidecarServerHand
 // in remote mode (no local hub to dial) or before the async spawn runs. Cycled by
 // `app:restart-local-computer`; reaped by the quit (see reapSupervisedChildrenForQuit).
 let localComputerHandle: import('./local-computer-supervisor').LocalComputerHandle | null = null
+/** The local computer on every remote hub the client lists (`local-computer-hubs.ts`);
+ *  null until the local computer is started. */
+let localComputerHubs: import('./local-computer-hubs').LocalComputerHubs | null = null
+/** Re-check which remote hubs the local computer serves (hub list or a sign-in changed). */
+function syncLocalComputerHubs(): void {
+  void localComputerHubs?.sync()
+}
 // Why the local computer was never spawned (join-token mint failed). Shown in
 // Settings → Computers next to "Not running"; cleared once a supervisor exists.
 let localComputerUnspawnedReason: string | null = null
@@ -1011,6 +1062,10 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
       const fresh = await mintLocalComputerJoinToken(port)
       return fresh?.token ?? null
     },
+    // Its OTHER hubs — every remote hub the client lists (`local-computer-hubs.ts`).
+    // Late-bound: the manager is created right after this handle, which it drives.
+    onSecondaryHubEvent: (event) => localComputerHubs?.onEvent(event),
+    mintSecondaryJoinToken: async (hubUrl) => (await localComputerHubs?.mintFor(hubUrl)) ?? null,
     onNeedsReEnrollment: () => {
       // The hub no longer recognizes this computer, so restarting cannot help. Say so
       // where the user will see it: nothing can execute until it is enrolled again.
@@ -1054,6 +1109,32 @@ async function startLocalComputerWithAutoEnroll(): Promise<void> {
   localComputerHandle = handleComputer
   localComputerUnspawnedReason = null
   logBoot('local-computer supervisor started (auto-enrolled)')
+
+  // The same computer on every REMOTE hub the client lists: joined at runtime, with
+  // a join token minted there under the user's session, never by restarting it.
+  const { createLocalComputerHubs } = await import('./local-computer-hubs')
+  const { mintRemoteJoinToken } = await import('./remote-join-token')
+  localComputerHubs = createLocalComputerHubs({
+    stateFile: join(getSupervisedRoot('computer'), 'hub-memberships.json'),
+    listRemoteHubs: () =>
+      resolveHubRegistry(readBootConfig(getClientStateRoot(), getLegacyClientStateRoot()))
+        .filter((h) => h.kind === 'remote' && typeof h.url === 'string')
+        .map((h) => ({ id: h.id, label: h.label, url: h.url as string })),
+    mint: async (hub, label) =>
+      mintRemoteJoinToken(
+        hub.url,
+        (await createHubTokenStore(getClientStateRoot(), getLegacyClientStateRoot()).get(hub.id)) ??
+          null,
+        label
+      ),
+    // Named after the machine: on a shared hub "local-computer" says nothing, and
+    // the hub would take that name for its OWN co-spawned computer.
+    computerName: () => hostname().replace(/\.local$/i, '') || 'computer',
+    primaryHubUrl: () => minted.hubUrl,
+    apply: (hubs) => handleComputer.setSecondaryHubs(hubs),
+    log: (line) => logBoot(line)
+  })
+  syncLocalComputerHubs()
 }
 
 /**
@@ -2165,7 +2246,7 @@ app
       Menu.setApplicationMenu(Menu.buildFromTemplate(template))
     }
 
-    // Set dock icon on macOS (needed for dev mode)
+    // Set dock icon on macOS (unpackaged runs otherwise show Electron's icon)
     if (process.platform === 'darwin') {
       app.dock?.setIcon(icon)
     }
@@ -2435,7 +2516,7 @@ app
               appGetZoomFactor: () => mainWindow?.webContents.zoomFactor ?? 1,
               appGetProtocolClientStatus: () => protocolClientStatus,
               appGetRendererZoomFactor: () => mainWindow?.webContents.zoomFactor ?? null,
-              appCheckCliInstalled: () => checkCliInstalled(),
+              appCheckCliInstalled: () => checkCliInstalled({ expectedVersion: app.getVersion() }),
               appInstallCli: () => installCli(getCliSrc()),
               appAdjustZoom: (command) => applyAppZoom(command),
               appRestartForUpdate: () => restartForUpdate(),
@@ -2697,8 +2778,10 @@ app
               // .test exists for a single-app run; paths.ts's "e2e is one worker" note
               // predates the group computer and is true only within one group.) E2E
               // keeps the OS-assigned port and the `settings.server_port` channel.
+              // A spec that restarts the app pins it (SLAYZONE_E2E_HUB_PORT), so both
+              // launches are the same hub to the computer.
               fixedPort: isPlaywright
-                ? undefined
+                ? e2eHubPort()
                 : SIDECAR_FIXED_PORT[app.isPackaged ? 'prod' : 'dev'],
               // Diagnostics only — the SAME derivation the sidecar performs from the
               // SLAYZONE_ROOT handed over below + the SLAYZONE_DEV bit, computed here
@@ -3479,6 +3562,27 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
     }
     ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+    // App icon badge. Only the main window's renderer drives it (it holds the
+    // full task list); secondary task windows never send, but guard anyway.
+    ipcMain.handle('app:set-badge', (event, raw: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+      const badge = parseAppBadgePayload(raw)
+      if (!badge) return
+      applyAppBadge(
+        {
+          platform: process.platform,
+          setDockBadge: (text) => app.dock?.setBadge(text),
+          setBadgeCount: (count) => {
+            app.setBadgeCount(count)
+          },
+          setOverlayIcon: (png, description) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return
+            mainWindow.setOverlayIcon(png ? nativeImage.createFromDataURL(png) : null, description)
+          }
+        },
+        badge
+      )
+    })
     // Bootstrap IPCs for the server-mode toggle (slice 7) — the last new IPC
     // before slice 8 drops the legacy bridge. These three CANNOT be tRPC: they
     // decide which server the tRPC client connects to in the first place.
@@ -3605,6 +3709,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // is injected here from the live sidecar handle (the config can't know the
     // sticky port). With multi_hub off this returns exactly today's single
     // effective hub, so the renderer's HubScope('local') stays byte-identical.
+    // Where the local computer stands on each remote hub (joined, failed and why, its
+    // computer id there) — Settings marks that row as this machine's own.
+    ipcMain.handle('app:get-local-computer-hubs', () => localComputerHubs?.status() ?? {})
     ipcMain.handle('app:get-hub-registry', async () => {
       const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
       const hubs = resolveHubRegistry(cfg)
@@ -3631,11 +3738,26 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     ipcMain.handle('app:get-hub-tokens', () =>
       getAllHubTokens(getClientStateRoot(), getLegacyClientStateRoot())
     )
+    // Whether a stored bearer still signs in (Settings' "Signed in" vs "Session
+    // expired"). A stored token alone said "Signed in" for a session the hub had long
+    // dropped, while every call to that hub failed.
+    ipcMain.handle(
+      'app:check-hub-session',
+      async (_event, payload: { hubId: string; url: string }) => {
+        const token = await hubTokens().get(payload.hubId)
+        if (!token) return { state: 'none' as const }
+        const normalized = normalizeRemoteUrl(payload.url)
+        if (!normalized) return { state: 'unreachable' as const }
+        return checkHubSession(nodeHubTransport, toHubOrigin(normalized), token)
+      }
+    )
     ipcMain.handle(
       'app:set-hub-token',
       async (_event, payload: { hubId: string; token: string }) => {
         // An empty token clears the hub's entry (`createHubTokenStore`).
         await hubTokens().set(payload.hubId, payload.token)
+        // A new sign-in may be what lets the local computer join that hub.
+        syncLocalComputerHubs()
         return { ok: true as const }
       }
     )
@@ -3651,6 +3773,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           } catch (err) {
             return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
           }
+          syncLocalComputerHubs()
           return { ok: true as const }
         }
         return { ok: false as const, error: result.error }
@@ -3702,6 +3825,7 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         })
         if (!result.ok) return result
         await hubTokens().set(flow.hubId, result.token)
+        syncLocalComputerHubs()
         return { ok: true as const }
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
@@ -3739,6 +3863,8 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
           },
           getLegacyClientStateRoot()
         )
+        // A hub added or removed: the local computer joins or leaves it.
+        syncLocalComputerHubs()
         return { ok: true as const }
       }
     )
@@ -3749,8 +3875,12 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       probeRemoteHealth(typeof rawUrl === 'string' ? rawUrl : '')
     )
     // May this document open a direct-link socket to a computer now (CSP + main's probe)?
-    ipcMain.handle('app:direct-link-prepare', (event, address: unknown) =>
-      directLinkGate.prepare(event.sender.id, typeof address === 'string' ? address : '')
+    ipcMain.handle('app:direct-link-prepare', (event, address: unknown, hubId: unknown) =>
+      directLinkGate.prepare(
+        event.sender.id,
+        typeof hubId === 'string' ? hubId : '',
+        typeof address === 'string' ? address : ''
+      )
     )
     // Artifact export renders HERE, on the device the person is using — never on the
     // hub, so it works the same against a local or a remote hub.
@@ -3788,7 +3918,9 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
       ipcMain.handle('app:restart-for-update', () => restartForUpdate())
       ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-      ipcMain.handle('app:cli-status', () => checkCliInstalled())
+      ipcMain.handle('app:cli-status', () =>
+        checkCliInstalled({ expectedVersion: app.getVersion() })
+      )
       ipcMain.handle('app:install-cli', () => installCli(getCliSrc()))
 
       ipcMain.handle('window:close', (event) => {
@@ -4886,3 +5018,9 @@ app.on('will-quit', (event) => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
+
+/** `SLAYZONE_E2E_HUB_PORT` (Playwright only): a valid port, else none (OS-assigned). */
+function e2eHubPort(): number | undefined {
+  const port = Number(process.env.SLAYZONE_E2E_HUB_PORT)
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : undefined
+}

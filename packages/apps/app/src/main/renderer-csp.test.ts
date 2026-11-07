@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildCspFloor,
-  buildRendererCsp,
-  directLinkConnectSources,
-  hubConnectSources
-} from './renderer-csp'
+import { buildCspFloor, buildRendererCsp, hubConnectSources } from './renderer-csp'
+import { directLinkConnectSources } from './direct-link-gate'
 
 describe('buildRendererCsp', () => {
   it('names the tRPC WS origin exactly when one is known', () => {
@@ -165,6 +161,13 @@ describe('directLinkConnectSources (docs/direct-link.md)', () => {
     expect(directLinkConnectSources(['box.example:7443', 'other.example'])).toEqual([
       'wss://box.example:7443',
       'wss://other.example'
+    ])
+  })
+
+  it('names an address with an explicit default port as the same origin', () => {
+    expect(directLinkConnectSources(['box.example:443'])).toEqual(['wss://box.example'])
+    expect(directLinkConnectSources(['box.example:443', 'box.example'])).toEqual([
+      'wss://box.example'
     ])
   })
 

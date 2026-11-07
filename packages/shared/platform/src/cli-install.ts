@@ -4,6 +4,7 @@ import os from 'os'
 // eslint-disable-next-line no-restricted-imports -- Windows-only `reg` PATH edit during CLI install, never on a request path.
 import { execSync, execFile } from 'child_process'
 import { promisify } from 'util'
+import { findOnPath, mergePathLists, probeLoginShellPath } from './login-shell-path'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,9 +42,109 @@ export function getCliBinTarget(): string {
   return p.join(getCliBinDir(), name)
 }
 
-export function checkCliInstalled(): { installed: boolean; path?: string } {
+/**
+ * The `slay` a user's terminal runs, and whether it matches this app.
+ *
+ * - `installed: false` — no `slay` on the login-shell PATH, none at the app's own
+ *   install target either: offer to install.
+ * - `outdated: true` — a `slay` resolves, but `slay --version` differs from
+ *   `expectedVersion` (e.g. a stale npm global copy shadowing the app's).
+ * - otherwise current, or its version could not be read (`version: null`, never
+ *   counted as outdated — a slow box must not nag).
+ */
+export interface CliStatus {
+  installed: boolean
+  /** Where `slay` resolves: the login-shell PATH hit, else the app's install target. */
+  path?: string
+  /** `slay --version`, or null when it could not be run / parsed. */
+  version?: string | null
+  /** The version this app ships; null = unknown (no outdated verdict). */
+  expectedVersion?: string | null
+  outdated?: boolean
+  /** `path` is the app's own install target, so reinstalling updates it. */
+  appManaged?: boolean
+  /** `path` is the install target but its dir is not on the login-shell PATH. */
+  pathNotInPATH?: boolean
+}
+
+export interface CheckCliOptions {
+  /** The version this app's bundled CLI reports; null/omitted = skip the version verdict. */
+  expectedVersion?: string | null
+  /** The PATH to resolve `slay` on. Default: the login shell's (cached), merged with ours. */
+  resolvePath?: () => Promise<string | null>
+}
+
+const CLI_VERSION_TIMEOUT_MS = 5000
+
+let loginPathProbe: Promise<string> | undefined
+/** Login-shell PATH merged with the inherited one; probed once per process. */
+function defaultResolvePath(): Promise<string> {
+  loginPathProbe ??= probeLoginShellPath().then((probed) =>
+    probed ? mergePathLists(probed, process.env.PATH) : (process.env.PATH ?? '')
+  )
+  return loginPathProbe
+}
+
+/** `slay --version` → `0.37.2`, or null. `.cmd` shims need a shell on Windows. */
+export function readCliVersion(cliPath: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      cliPath,
+      ['--version'],
+      {
+        timeout: CLI_VERSION_TIMEOUT_MS,
+        env,
+        encoding: 'utf-8',
+        shell: process.platform === 'win32'
+      },
+      (err, stdout) => {
+        if (err) return resolve(null)
+        resolve(parseCliVersion(String(stdout)))
+      }
+    )
+  })
+}
+
+/** The first semver-looking token in `slay --version` output. */
+export function parseCliVersion(stdout: string): string | null {
+  return stdout.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/)?.[0] ?? null
+}
+
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string) => {
+    const r = path.resolve(p)
+    return process.platform === 'win32' ? r.toLowerCase() : r
+  }
+  return norm(a) === norm(b)
+}
+
+export async function checkCliInstalled(opts: CheckCliOptions = {}): Promise<CliStatus> {
+  const expectedVersion = opts.expectedVersion ?? null
   const target = getCliBinTarget()
-  if (fs.existsSync(target)) return { installed: true, path: target }
+  const searchPath = (await (opts.resolvePath ?? defaultResolvePath)()) ?? process.env.PATH ?? ''
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: searchPath }
+
+  const onPath = await findOnPath('slay', env)
+  const resolved = onPath ?? (fs.existsSync(target) ? target : null)
+  if (!resolved) return { installed: false, expectedVersion }
+
+  const version = await readCliVersion(resolved, env)
+  const appManaged = samePath(resolved, target)
+  return {
+    installed: true,
+    path: resolved,
+    version,
+    expectedVersion,
+    outdated: !!expectedVersion && !!version && version !== expectedVersion,
+    appManaged,
+    pathNotInPATH: onPath ? undefined : true
+  }
+}
+
+/** Filesystem-only probe of the app's install target — for hosts that must not exec. */
+export function checkCliInstalledAtTarget(): CliStatus {
+  const target = getCliBinTarget()
+  if (fs.existsSync(target)) return { installed: true, path: target, appManaged: true }
   return { installed: false }
 }
 

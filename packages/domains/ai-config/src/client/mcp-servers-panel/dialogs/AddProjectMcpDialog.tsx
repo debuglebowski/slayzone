@@ -13,6 +13,7 @@ import {
 import type { McpTarget } from '../../../shared'
 import { buildConfig, loadCustomServers, PROVIDER_LABELS, saveCustomServers } from '../mcp-helpers'
 import type { CustomMcpServer, EditTarget } from '../types'
+import { toastAiConfigError } from '../../toast-error'
 import { McpServerFormFields } from './McpServerFormFields'
 
 interface AddProjectMcpDialogProps {
@@ -117,6 +118,8 @@ export function AddProjectMcpDialog({
       reset()
       onAdded()
       onOpenChange(false)
+    } catch (err) {
+      toastAiConfigError('Could not save MCP server', err)
     } finally {
       setSaving(false)
     }

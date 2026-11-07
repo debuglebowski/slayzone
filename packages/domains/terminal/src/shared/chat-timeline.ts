@@ -33,6 +33,11 @@ import {
   type ChatPrompt
 } from './chat-prompts'
 import { turnFilesChangedRow, type TurnFileChange } from './turn-file-changes'
+import {
+  endedSubAgentPhase,
+  isAsyncAgentLaunch,
+  normalizeSubAgentPhase
+} from './sub-agent-lifecycle'
 import { firstUnloaded, rowAt, rowAtIfAny, RowsNotLoaded, type TimelineRows } from './timeline-rows'
 
 export { RowsNotLoaded, firstUnloaded, type TimelineRows } from './timeline-rows'
@@ -250,6 +255,11 @@ export type TimelineItem =
       phase: 'in-flight' | 'completed' | 'failed'
       /** Runs in the background: it outlives its turn, not its process. */
       backgrounded?: true
+      /**
+       * The turn that started it (`turnsClosed` while that turn ran); absent
+       * when none ran (a Codex child's own child, spawned between turns).
+       */
+      spawnedInTurn?: number
       description?: string
       status?: string
       summary?: string
@@ -2091,7 +2101,7 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
             phase: isTerminal
               ? target.phase
               : backgrounded
-                ? (endedPhase(event.status) ?? incomingPhase)
+                ? (endedSubAgentPhase(event.status) ?? incomingPhase)
                 : incomingPhase,
             description: event.description ?? target.description,
             status: event.status ?? target.status,
@@ -2127,11 +2137,13 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       }
       // No row yet: a notification of a task that already ended (an orphan of a
       // previous process) is a row that ended, never one left running.
-      const phase = endedPhase(event.status) ?? incomingPhase
+      const phase = endedSubAgentPhase(event.status) ?? incomingPhase
+      const spawnedInTurn = openTurn(state)
       const item: TimelineItem = {
         kind: 'sub-agent',
         toolUseId: id,
         phase,
+        ...(spawnedInTurn !== null ? { spawnedInTurn } : {}),
         description: event.description,
         status: event.status,
         summary: event.summary,
@@ -3120,7 +3132,7 @@ function closeSubAgentForToolResult(
   if (idx === undefined) return state
   const row = rowAtIfAny(state.timeline, idx)
   if (row?.kind !== 'sub-agent' || row.phase !== 'in-flight') return state
-  if (isAsyncLaunch(event)) {
+  if (isAsyncAgentLaunch(event)) {
     // Launched in the background: still running. Its notification (or its
     // process ending) closes it.
     if (row.backgrounded) return state
@@ -3136,17 +3148,6 @@ function closeSubAgentForToolResult(
   const t = writable(state.timeline)
   t[idx] = closed
   return { ...state, timeline: t, inFlightSubAgents: withoutRowIn(state.inFlightSubAgents, idx) }
-}
-
-/**
- * Back-compat normalizer for stored `SubAgentEvent.phase`. Persisted events
- * from before the semantic rename carry legacy CLI subtype strings
- * (`'started'|'updated'|'notification'`). All map to `'in-flight'` on intake;
- * the canonical close signal is the outer Task tool's `tool-result`.
- */
-function normalizeSubAgentPhase(phase: string): 'in-flight' | 'completed' | 'failed' {
-  if (phase === 'completed' || phase === 'failed') return phase
-  return 'in-flight'
 }
 
 /**
@@ -3179,19 +3180,6 @@ function failInFlightSubAgents(
   }
   if (stillRunning.length === state.inFlightSubAgents.length) return state
   return { ...state, timeline: nextTimeline, inFlightSubAgents: stillRunning }
-}
-
-/** The Agent tool's answer for a background run: it launched (`isAsync`), it did not end. */
-function isAsyncLaunch(event: ToolResultEvent): boolean {
-  const structured = event.structured as { isAsync?: unknown } | null | undefined
-  return !event.isError && structured?.isAsync === true
-}
-
-/** The phase a `task_notification` status ends a sub-agent in; null = still running. */
-function endedPhase(status: string | undefined): 'completed' | 'failed' | null {
-  if (status === 'completed') return 'completed'
-  if (status === 'failed' || status === 'killed' || status === 'stopped') return 'failed'
-  return null
 }
 
 /** The status a `task_notification` ends a command task in; null = still running. */

@@ -59,6 +59,9 @@ export const SECURITY_EVENTS = [
   'auth.web_session.revoke',
   /** A gate refused a request: REST bearer gate, tRPC auth/scope gates, /trpc origin. */
   'authz.denied',
+  /** A path two users both registered, asked for with no computer that tells them
+   *  apart: refused to both (api access.ts, N4). Never carries the path. */
+  'authz.path_tie',
   // Accounts (hub-auth `users.ts`). Accounts are disabled, never deleted.
   'user.create',
   'user.disable',
@@ -73,6 +76,9 @@ export const SECURITY_EVENTS = [
   'computer.revoke',
   'computer.unrevoke',
   'computer.delete',
+  'computer.disable',
+  'computer.enable',
+  'computer.rename',
   'computer.claim',
   'computer.visibility.set',
   /** T-16: at boot, projects with no owner (and the settings from before login) went
@@ -95,6 +101,7 @@ export const SECURITY_EVENTS = [
   'computer.direct_grant',
   /** Direct-link capabilities revoked on one computer (`detail.reason`, `detail.grants`). */
   'computer.direct_revoke',
+  'computer.direct_rtc_signal',
   /** A computer's direct-link listener refused a client by a flood limit (`denied`);
    *  at most one line per limit and address per minute. `detail.limit`, `detail.max`. */
   'computer.rate_limit',
@@ -184,6 +191,8 @@ export type SecurityTargetKind =
   | 'join_token'
   | 'procedure'
   | 'hub'
+  /** A filesystem path. Its id is never logged (it can carry a user's directory names). */
+  | 'path'
 
 export interface SecurityEventInput {
   event: SecurityEventName

@@ -102,6 +102,10 @@ const tab = ref('tab')
 const session = ref('session')
 const path = ref('path')
 const tree = ref('pathTree')
+/** A path the hub opens on its OWN disk for the caller: inside one of their roots, or
+ *  refused — never hub-wide (N1). `path` stays for a folder about to become a root (a
+ *  new project, a new worktree) and for what the handler bounds itself. */
+const owned = ref('ownedPath')
 const artifact = ref('artifact')
 const folder = ref('artifactFolder')
 const proc = ref('process')
@@ -113,6 +117,16 @@ const automation = ref('automation')
 const computer = ref('computer')
 
 const checked = (...ids: Ref[]): OwnerRule => ({ mark: 'id-checked', ids })
+/**
+ * A computer target (`{ taskId, projectId, computerId }`) picks where an op runs:
+ * each of its ids is the caller's to name, or user B could aim A's task and the op
+ * would run on A's computer, inside A's folders. Its path is checked as well.
+ */
+const TARGET: Ref[] = [
+  ref('task')('target.taskId'),
+  ref('project')('target.projectId'),
+  ref('computer')('target.computerId')
+]
 const listed = (output: OutputFilter): OwnerRule => ({ mark: 'list-filtered', output })
 const streamed = (events: EventFilter): OwnerRule => ({ mark: 'list-filtered', events })
 const none = (why: string): OwnerRule => ({ mark: 'no-owned-input', why })
@@ -386,6 +400,8 @@ const CONNECTION =
 const COMPUTER =
   "computer management (metadata, lifecycle): decided in the handler — the computer's owner, or an admin (computer-access.ts, T-19)"
 const SELF = "the caller's own settings or client diagnostics (T-16 scopes settings per user)"
+const DIRECT_GRANT =
+  'a direct-link grant id: brokered only for a live grant the hub issued to this caller, matched in the handler (hub direct-link.ts rtcConnect)'
 const FEEDBACK = 'feedback threads to the SlayZone team: no owner column (hub-wide)'
 const TEST = 'test-only (PLAYWRIGHT=1); refused in production'
 const META = 'app or hub metadata'
@@ -505,15 +521,15 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // O-22: the caller's own projects only (export-import.ts scopes the query); the
   // whole hub is backed up at server level, never through the app.
   'app.exportImport.exportAll': listed(SCOPED_IN_HANDLER),
-  'app.exportImport.testExportAllToPath': then(checked(path('filePath')), SCOPED_IN_HANDLER),
-  'app.exportImport.testExportProjectToPath': checked(project('projectId'), path('filePath')),
+  'app.exportImport.testExportAllToPath': then(checked(owned('filePath')), SCOPED_IN_HANDLER),
+  'app.exportImport.testExportProjectToPath': checked(project('projectId'), owned('filePath')),
   'app.exportImport.testSetTaskParent': checked(task('taskId'), task('parentId')),
   'app.usage.fetch': none(HOST),
   'app.usage.test': none(HOST),
-  'app.files.pathExists': checked(path('filePath')),
+  'app.files.pathExists': checked(owned('filePath')),
   'app.files.saveTempImage': none(HOST),
   'app.shell.openExternal': none('a URL to open'),
-  'app.shell.openPath': checked(path('absPath')),
+  'app.shell.openPath': checked(owned('absPath')),
   'app.feedback.listThreads': none(FEEDBACK),
   'app.feedback.createThread': none(FEEDBACK),
   'app.feedback.getMessages': none(FEEDBACK),
@@ -664,13 +680,13 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.readContent': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
-  'artifacts.upload': checked(task('taskId'), path('sourcePath')),
+  'artifacts.upload': checked(task('taskId'), owned('sourcePath')),
   'artifacts.uploadBlob': checked(task('taskId'), folder('folderId')),
   'artifacts.copy': checked(artifact('artifactIds[]'), task('destTaskId'), folder('destFolderId')),
   'artifacts.pasteFiles': checked(
     task('destTaskId'),
     folder('destFolderId'),
-    path('sourcePaths[]')
+    owned('sourcePaths[]')
   ),
   // A directory upload walks the whole tree: every root under it must be the caller's.
   'artifacts.uploadDir': checked(task('taskId'), tree('dirPath'), folder('parentFolderId')),
@@ -723,8 +739,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.rewindPreview': chatOpts,
   'chat.rewind': chatOpts,
   'chat.fork': chatOpts,
+  'chat.pinnedMessages.list': chatOpts,
+  'chat.pinnedMessages.pin': chatOpts,
+  'chat.pinnedMessages.unpin': chatOpts,
   'chat.threads.list': chatOpts,
   'chat.threads.create': chatOpts,
+  'chat.threads.setClosed': chatOpts,
   'chat.sideQuestion.ask': chatOpts,
   'chat.sideQuestion.cancel': checked(tab('tabId')),
   'chat.switchConversation': chatOpts,
@@ -742,6 +762,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.commandTaskOutput': checked(tab('tabId')),
   'chat.stopCommandTask': checked(tab('tabId')),
   'chat.backgroundCommandTask': checked(tab('tabId')),
+  'chat.stopSubAgent': checked(tab('tabId')),
   'chat.getInfo': checked(tab('tabId')),
   'chat.inspectPermissions': checked(task('taskId')),
   'chat.getMode': checked(task('taskId')),
@@ -783,6 +804,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   // A bare signal (no payload to filter): the tab named in the input is checked instead.
   'chat.threads.onChanged': checked(tab('tabId')),
+  'chat.pinnedMessages.onChanged': checked(tab('tabId')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
   // ── computers (T-19): binding work needs the task/project AND the computer to be
@@ -792,25 +814,34 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.setTaskComputer': checked(task('taskId'), computer('computerId')),
   'computers.setProjectDefaultComputer': checked(project('projectId'), computer('computerId')),
   'computers.resolveTaskComputer': checked(task('taskId')),
-  // A direct-link capability names one session or one chat tab, by `target.kind`.
-  'computers.issueDirectLink': checked({
-    pick: (raw) => {
-      const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
-      const r =
-        t?.kind === 'pty'
-          ? res('session', t.sessionId)
-          : t?.kind === 'chat'
-            ? res('tab', t.tabId)
-            : null
-      return r ? [r] : []
-    },
-    sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
-  }),
+  // A direct-link target is a computer target (its task, and computer when named) plus
+  // the one session or chat tab in it, by `target.kind`. The issuer refuses a resource
+  // outside the task.
+  'computers.issueDirectLink': {
+    ...checked(...TARGET, {
+      pick: (raw) => {
+        const t = isRecord(raw) && isRecord(raw.target) ? raw.target : null
+        const r =
+          t?.kind === 'pty'
+            ? res('session', t.sessionId)
+            : t?.kind === 'chat'
+              ? res('tab', t.tabId)
+              : null
+        return r ? [r] : []
+      },
+      sample: { kind: 'session', input: (id) => ({ target: { kind: 'pty', sessionId: id } }) }
+    }),
+    // The task the resource lies in (the issuer refuses one outside it).
+    needsOne: ['target.taskId']
+  },
+  'computers.directRtcConnect': none(DIRECT_GRANT),
+  'computers.rename': none(COMPUTER),
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
   'computers.delete': none(COMPUTER),
   'computers.onStatusChange': none(COMPUTER),
   'computers.revokeComputer': none(COMPUTER),
+  'computers.setDisabled': none(COMPUTER),
 
   // ── diagnostics, feedback ──
   'diagnostics.recordClientError': none(SELF),
@@ -896,7 +927,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
     computer('computerId'),
     path('rootPath')
   ),
-  'fileEditor.showInFinder': checked(path('rootPath')),
+  'fileEditor.showInFinder': checked(owned('rootPath')),
   'fileEditor.watch': checked(
     task('taskId'),
     project('projectId'),
@@ -1065,7 +1096,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'projects.create': checked(path('path'), computer('computerId')),
   'projects.update': checked(project('id'), path('path')),
   'projects.delete': checked(project('id')),
-  'projects.uploadIcon': checked(project('projectId'), path('sourcePath')),
+  'projects.uploadIcon': checked(project('projectId'), owned('sourcePath')),
   'projects.reorder': checked(project('projectIds[]')),
   'projectGroups.list': listed(groups),
   'projectGroups.create': listed(groups),
@@ -1268,7 +1299,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // ── worktrees / git (a path names the repo) ──
   'worktrees.watchStart': checked(path('worktreePath')),
   'worktrees.watchStop': checked(path('worktreePath')),
-  'worktrees.isGitRepo': checked(path('path')),
+  'worktrees.isGitRepo': checked(...TARGET, path('path')),
   'worktrees.listProjectRepos': checked(path('projectPath'), project('projectId'), task('taskId')),
   'worktrees.detectChildRepos': checked(path('projectPath'), project('projectId'), task('taskId')),
   'worktrees.detectWorktrees': checked(path('repoPath')),
@@ -1276,77 +1307,77 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.onCreateWorktreePhase': none(
     "phase names for the caller's own request id; no content"
   ),
-  'worktrees.removeWorktree': checked(path('repoPath'), path('worktreePath')),
-  'worktrees.init': checked(path('path')),
-  'worktrees.getCurrentBranch': checked(path('path')),
-  'worktrees.listBranches': checked(path('path')),
-  'worktrees.checkoutBranch': checked(path('path')),
-  'worktrees.createBranch': checked(path('path')),
-  'worktrees.hasUncommittedChanges': checked(path('path')),
-  'worktrees.mergeIntoParent': checked(path('projectPath')),
-  'worktrees.abortMerge': checked(path('path')),
+  'worktrees.removeWorktree': checked(...TARGET, path('repoPath'), path('worktreePath')),
+  'worktrees.init': checked(...TARGET, path('path')),
+  'worktrees.getCurrentBranch': checked(...TARGET, path('path')),
+  'worktrees.listBranches': checked(...TARGET, path('path')),
+  'worktrees.checkoutBranch': checked(...TARGET, path('path')),
+  'worktrees.createBranch': checked(...TARGET, path('path')),
+  'worktrees.hasUncommittedChanges': checked(...TARGET, path('path')),
+  'worktrees.mergeIntoParent': checked(...TARGET, path('projectPath')),
+  'worktrees.abortMerge': checked(...TARGET, path('path')),
   'worktrees.mergeWithAI': checked(path('projectPath'), path('worktreePath')),
-  'worktrees.isMergeInProgress': checked(path('path')),
-  'worktrees.getConflictedFiles': checked(path('path')),
-  'worktrees.getWorkingDiff': checked(path('path')),
-  'worktrees.stageFile': checked(path('path')),
-  'worktrees.unstageFile': checked(path('path')),
-  'worktrees.discardFile': checked(path('path')),
-  'worktrees.stageAll': checked(path('path')),
-  'worktrees.unstageAll': checked(path('path')),
-  'worktrees.getFileDiff': checked(path('repoPath')),
-  'worktrees.getUntrackedFileDiff': checked(path('repoPath')),
-  'worktrees.getUntrackedFileDiffs': checked(path('repoPath')),
-  'worktrees.getConflictContent': checked(path('repoPath')),
-  'worktrees.writeResolvedFile': checked(path('repoPath')),
-  'worktrees.commitFiles': checked(path('repoPath')),
+  'worktrees.isMergeInProgress': checked(...TARGET, path('path')),
+  'worktrees.getConflictedFiles': checked(...TARGET, path('path')),
+  'worktrees.getWorkingDiff': checked(...TARGET, path('path')),
+  'worktrees.stageFile': checked(...TARGET, path('path')),
+  'worktrees.unstageFile': checked(...TARGET, path('path')),
+  'worktrees.discardFile': checked(...TARGET, path('path')),
+  'worktrees.stageAll': checked(...TARGET, path('path')),
+  'worktrees.unstageAll': checked(...TARGET, path('path')),
+  'worktrees.getFileDiff': checked(...TARGET, path('repoPath')),
+  'worktrees.getUntrackedFileDiff': checked(...TARGET, path('repoPath')),
+  'worktrees.getUntrackedFileDiffs': checked(...TARGET, path('repoPath')),
+  'worktrees.getConflictContent': checked(...TARGET, path('repoPath')),
+  'worktrees.writeResolvedFile': checked(...TARGET, path('repoPath')),
+  'worktrees.commitFiles': checked(...TARGET, path('repoPath')),
   'worktrees.analyzeConflict': none('the conflict text the caller sends; names no stored repo'),
-  'worktrees.isRebaseInProgress': checked(path('path')),
-  'worktrees.getRebaseProgress': checked(path('repoPath')),
-  'worktrees.abortRebase': checked(path('path')),
-  'worktrees.continueRebase': checked(path('path')),
-  'worktrees.skipRebaseCommit': checked(path('path')),
-  'worktrees.getMergeContext': checked(path('repoPath')),
-  'worktrees.getRecentCommits': checked(path('repoPath')),
-  'worktrees.getAheadBehind': checked(path('repoPath')),
-  'worktrees.getStatusSummary': checked(path('repoPath')),
-  'worktrees.revealInFinder': checked(path('path')),
-  'worktrees.isDirty': checked(path('path')),
-  'worktrees.getRemoteUrl': checked(path('path')),
-  'worktrees.getAheadBehindUpstream': checked(path('path')),
-  'worktrees.fetch': checked(path('path')),
-  'worktrees.push': checked(path('path')),
-  'worktrees.pull': checked(path('path')),
-  'worktrees.getDefaultBranch': checked(path('path')),
-  'worktrees.listBranchesDetailed': checked(path('path')),
-  'worktrees.listRemoteBranches': checked(path('path')),
-  'worktrees.getMergeBase': checked(path('path')),
-  'worktrees.getCommitsSince': checked(path('path')),
-  'worktrees.getCommitsBeforeRef': checked(path('path')),
-  'worktrees.deleteBranch': checked(path('path')),
-  'worktrees.pruneRemote': checked(path('path')),
-  'worktrees.rebaseOnto': checked(path('path')),
-  'worktrees.mergeFrom': checked(path('path')),
-  'worktrees.getDiffStats': checked(path('path')),
-  'worktrees.getWorktreeMetadata': checked(path('path')),
-  'worktrees.getCommitDag': checked(path('path')),
-  'worktrees.resolveChildBranches': checked(path('path')),
+  'worktrees.isRebaseInProgress': checked(...TARGET, path('path')),
+  'worktrees.getRebaseProgress': checked(...TARGET, path('repoPath')),
+  'worktrees.abortRebase': checked(...TARGET, path('path')),
+  'worktrees.continueRebase': checked(...TARGET, path('path')),
+  'worktrees.skipRebaseCommit': checked(...TARGET, path('path')),
+  'worktrees.getMergeContext': checked(...TARGET, path('repoPath')),
+  'worktrees.getRecentCommits': checked(...TARGET, path('repoPath')),
+  'worktrees.getAheadBehind': checked(...TARGET, path('repoPath')),
+  'worktrees.getStatusSummary': checked(...TARGET, path('repoPath')),
+  'worktrees.revealInFinder': checked(owned('path')),
+  'worktrees.isDirty': checked(...TARGET, path('path')),
+  'worktrees.getRemoteUrl': checked(...TARGET, path('path')),
+  'worktrees.getAheadBehindUpstream': checked(...TARGET, path('path')),
+  'worktrees.fetch': checked(...TARGET, path('path')),
+  'worktrees.push': checked(...TARGET, path('path')),
+  'worktrees.pull': checked(...TARGET, path('path')),
+  'worktrees.getDefaultBranch': checked(...TARGET, path('path')),
+  'worktrees.listBranchesDetailed': checked(...TARGET, path('path')),
+  'worktrees.listRemoteBranches': checked(...TARGET, path('path')),
+  'worktrees.getMergeBase': checked(...TARGET, path('path')),
+  'worktrees.getCommitsSince': checked(...TARGET, path('path')),
+  'worktrees.getCommitsBeforeRef': checked(...TARGET, path('path')),
+  'worktrees.deleteBranch': checked(...TARGET, path('path')),
+  'worktrees.pruneRemote': checked(...TARGET, path('path')),
+  'worktrees.rebaseOnto': checked(...TARGET, path('path')),
+  'worktrees.mergeFrom': checked(...TARGET, path('path')),
+  'worktrees.getDiffStats': checked(...TARGET, path('path')),
+  'worktrees.getWorktreeMetadata': checked(...TARGET, path('path')),
+  'worktrees.getCommitDag': checked(...TARGET, path('path')),
+  'worktrees.resolveChildBranches': checked(...TARGET, path('path')),
   'worktrees.resolveCopyBehavior': checked(project('projectId')),
-  'worktrees.getIgnoredFileTree': checked(path('repoPath')),
-  'worktrees.copyIgnoredFiles': checked(path('repoPath'), path('worktreePath')),
-  'worktrees.getResolvedCommitDag': checked(path('path')),
-  'worktrees.getResolvedForkGraph': checked(path('targetPath'), path('repoPath')),
-  'worktrees.getResolvedUpstreamGraph': checked(path('repoPath')),
-  'worktrees.getResolvedRecentCommits': checked(path('path')),
-  'worktrees.listStashes': checked(path('repoPath')),
-  'worktrees.createStash': checked(path('repoPath')),
-  'worktrees.applyStash': checked(path('repoPath')),
-  'worktrees.popStash': checked(path('repoPath')),
-  'worktrees.dropStash': checked(path('repoPath')),
-  'worktrees.branchFromStash': checked(path('repoPath')),
-  'worktrees.getStashDiff': checked(path('repoPath')),
+  'worktrees.getIgnoredFileTree': checked(...TARGET, path('repoPath')),
+  'worktrees.copyIgnoredFiles': checked(...TARGET, path('repoPath'), path('worktreePath')),
+  'worktrees.getResolvedCommitDag': checked(...TARGET, path('path')),
+  'worktrees.getResolvedForkGraph': checked(...TARGET, path('targetPath'), path('repoPath')),
+  'worktrees.getResolvedUpstreamGraph': checked(...TARGET, path('repoPath')),
+  'worktrees.getResolvedRecentCommits': checked(...TARGET, path('path')),
+  'worktrees.listStashes': checked(...TARGET, path('repoPath')),
+  'worktrees.createStash': checked(...TARGET, path('repoPath')),
+  'worktrees.applyStash': checked(...TARGET, path('repoPath')),
+  'worktrees.popStash': checked(...TARGET, path('repoPath')),
+  'worktrees.dropStash': checked(...TARGET, path('repoPath')),
+  'worktrees.branchFromStash': checked(...TARGET, path('repoPath')),
+  'worktrees.getStashDiff': checked(...TARGET, path('repoPath')),
   'worktrees.checkGhInstalled': checked(path('repoPath')),
-  'worktrees.hasGithubRemote': checked(path('repoPath')),
+  'worktrees.hasGithubRemote': checked(...TARGET, path('repoPath')),
   'worktrees.listOpenPrs': checked(path('repoPath')),
   'worktrees.getPrByUrl': checked(path('repoPath')),
   'worktrees.getPrForCheckout': checked(path('repoPath')),
@@ -1373,8 +1404,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'app.backup.revealInFinder': none(BACKUP),
   'app.backup.setSettings': none(BACKUP),
   'app.exportImport.import': none(IMPORT),
-  // Reads a file on the hub host: not one inside someone else's project or the hub's state.
-  'app.exportImport.testImportFromPath': checked(path('filePath')),
+  // Reads a file on the hub host: only inside one of the caller's roots (N1).
+  'app.exportImport.testImportFromPath': checked(owned('filePath')),
   // Automations are their project's: an admin manages only those in its own projects.
   'automations.getByProject': checked(project('projectId')),
   'automations.get': checked(automation('id')),

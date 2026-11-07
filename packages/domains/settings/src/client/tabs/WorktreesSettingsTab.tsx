@@ -13,10 +13,12 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Button
+  Button,
+  toast
 } from '@slayzone/ui'
 import type { WorktreeCopyBehavior, WorktreeSubmoduleInit } from '@slayzone/projects-contracts'
 import { SettingsTabIntro } from './SettingsTabIntro'
+import { HubWideSection } from '../settings-hub'
 
 interface CopyPreset {
   id: string
@@ -27,7 +29,11 @@ interface CopyPreset {
 const FALLBACK_PRESETS: CopyPreset[] = [
   { id: 'all-ignored', name: 'All ignored files', pathGlobs: [] },
   { id: 'env-only', name: 'Env files only', pathGlobs: ['.env*', '*.local'] },
-  { id: 'docs-and-env', name: 'Docs + env', pathGlobs: ['docs/**', '*.md', '.env*', '*.local'] }
+  {
+    id: 'docs-and-env',
+    name: 'Docs + env',
+    pathGlobs: ['docs/**', '*.md', '.env*', '*.local']
+  }
 ]
 
 /** The stored presets, or the built-in ones when unset, empty or unparseable. */
@@ -41,16 +47,33 @@ function presetsFromSetting(value: string | null): CopyPreset[] {
 }
 
 export function WorktreesSettingsTab() {
+  return (
+    <>
+      <SettingsTabIntro
+        title="Worktrees"
+        description="Configure how git worktrees are created and what files are carried over."
+      />
+      <HubWideSection>
+        <WorktreeHubSettings />
+        <WorktreeCopyPresets />
+      </HubWideSection>
+    </>
+  )
+}
+
+/** Read by the hub's own task-create and worktree-create code (`scope.ts` `hub` keys). */
+function WorktreeHubSettings() {
   const trpc = useTRPC()
   const [worktreeBasePath, setWorktreeBasePath] = useState('')
   const [autoCreateWorktreeOnTaskCreate, setAutoCreateWorktreeOnTaskCreate] = useState(false)
   const [copyBehavior, setCopyBehavior] = useState<WorktreeCopyBehavior>('ask')
   const [submoduleInit, setSubmoduleInit] = useState<WorktreeSubmoduleInit>('auto')
-  const [presets, setPresets] = useState<CopyPreset[]>([])
 
   const basePathQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_base_path' }))
   const autoCreateQuery = useQuery(
-    trpc.settings.get.queryOptions({ key: 'auto_create_worktree_on_task_create' })
+    trpc.settings.get.queryOptions({
+      key: 'auto_create_worktree_on_task_create'
+    })
   )
   const copyBehaviorQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'worktree_copy_behavior' })
@@ -58,8 +81,11 @@ export function WorktreesSettingsTab() {
   const submoduleInitQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'worktree_submodule_init' })
   )
-  const presetsQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }))
-  const { mutate: setSetting } = useMutation(trpc.settings.set.mutationOptions())
+  const { mutate: setSetting } = useMutation(
+    trpc.settings.set.mutationOptions({
+      onError: (err) => toast.error(`Could not save: ${err.message}`)
+    })
+  )
 
   // Each new stored value re-seeds its control (which local edits override in
   // between) — adjusted while rendering, one block per setting.
@@ -93,58 +119,8 @@ export function WorktreesSettingsTab() {
     }
   }
 
-  const [seenPresets, setSeenPresets] = useState<{
-    data: typeof presetsQuery.data
-    isError: boolean
-  }>()
-  if (
-    !seenPresets ||
-    seenPresets.data !== presetsQuery.data ||
-    seenPresets.isError !== presetsQuery.isError
-  ) {
-    setSeenPresets({ data: presetsQuery.data, isError: presetsQuery.isError })
-    if (presetsQuery.isError) setPresets(FALLBACK_PRESETS)
-    else if (presetsQuery.data !== undefined) setPresets(presetsFromSetting(presetsQuery.data))
-  }
-
-  const savePresets = useCallback(
-    (updated: CopyPreset[]) => {
-      setPresets(updated)
-      setSetting({
-        key: 'worktree_copy_presets',
-        value: JSON.stringify(updated)
-      })
-    },
-    [setSetting]
-  )
-
-  const addPreset = () => {
-    const id = `preset-${Date.now()}`
-    savePresets([
-      ...presets,
-      {
-        id,
-        name: 'New preset',
-        pathGlobs: []
-      }
-    ])
-  }
-
-  const removePreset = (id: string) => {
-    savePresets(presets.filter((p) => p.id !== id))
-  }
-
-  const updatePreset = (id: string, patch: Partial<CopyPreset>) => {
-    savePresets(presets.map((p) => (p.id === id ? { ...p, ...patch } : p)))
-  }
-
   return (
     <>
-      <SettingsTabIntro
-        title="Worktrees"
-        description="Configure how git worktrees are created and what files are carried over."
-      />
-
       <div className="space-y-3">
         <Label className="text-base font-semibold">Creation</Label>
         <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
@@ -247,37 +223,99 @@ export function WorktreesSettingsTab() {
           </Select>
         </div>
       </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-base font-semibold">Copy presets</Label>
-          <Button variant="outline" size="sm" onClick={addPreset} className="gap-1.5 h-7">
-            <Plus className="h-3 w-3" />
-            Add preset
-          </Button>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Presets define which files to copy into new worktrees. They appear in the copy dialog when
-          creating a worktree.
-        </p>
-
-        <div className="space-y-2">
-          {presets.map((preset) => (
-            <PresetCard
-              key={preset.id}
-              preset={preset}
-              onUpdate={(patch) => updatePreset(preset.id, patch)}
-              onRemove={() => removePreset(preset.id)}
-            />
-          ))}
-          {presets.length === 0 && (
-            <p className="text-xs text-muted-foreground py-4 text-center">
-              No presets. Click "Add preset" to create one.
-            </p>
-          )}
-        </div>
-      </div>
     </>
+  )
+}
+
+/**
+ * A `user` key, but read through the TASK's hub (`CopyFilesDialog` runs inside that
+ * hub's scope), so it lives with the worktree settings of the picked hub.
+ */
+function WorktreeCopyPresets() {
+  const trpc = useTRPC()
+  const [presets, setPresets] = useState<CopyPreset[]>([])
+  const presetsQuery = useQuery(trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }))
+  const { mutate: setSetting } = useMutation(
+    trpc.settings.set.mutationOptions({
+      onError: (err) => toast.error(`Could not save: ${err.message}`)
+    })
+  )
+
+  const [seenPresets, setSeenPresets] = useState<{
+    data: typeof presetsQuery.data
+    isError: boolean
+  }>()
+  if (
+    !seenPresets ||
+    seenPresets.data !== presetsQuery.data ||
+    seenPresets.isError !== presetsQuery.isError
+  ) {
+    setSeenPresets({ data: presetsQuery.data, isError: presetsQuery.isError })
+    if (presetsQuery.isError) setPresets(FALLBACK_PRESETS)
+    else if (presetsQuery.data !== undefined) setPresets(presetsFromSetting(presetsQuery.data))
+  }
+
+  const savePresets = useCallback(
+    (updated: CopyPreset[]) => {
+      setPresets(updated)
+      setSetting({
+        key: 'worktree_copy_presets',
+        value: JSON.stringify(updated)
+      })
+    },
+    [setSetting]
+  )
+
+  const addPreset = () => {
+    const id = `preset-${Date.now()}`
+    savePresets([
+      ...presets,
+      {
+        id,
+        name: 'New preset',
+        pathGlobs: []
+      }
+    ])
+  }
+
+  const removePreset = (id: string) => {
+    savePresets(presets.filter((p) => p.id !== id))
+  }
+
+  const updatePreset = (id: string, patch: Partial<CopyPreset>) => {
+    savePresets(presets.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-base font-semibold">Copy presets</Label>
+        <Button variant="outline" size="sm" onClick={addPreset} className="gap-1.5 h-7">
+          <Plus className="h-3 w-3" />
+          Add preset
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Presets define which files to copy into new worktrees. They appear in the copy dialog when
+        creating a worktree.
+      </p>
+
+      <div className="space-y-2">
+        {presets.map((preset) => (
+          <PresetCard
+            key={preset.id}
+            preset={preset}
+            onUpdate={(patch) => updatePreset(preset.id, patch)}
+            onRemove={() => removePreset(preset.id)}
+          />
+        ))}
+        {presets.length === 0 && (
+          <p className="text-xs text-muted-foreground py-4 text-center">
+            No presets. Click "Add preset" to create one.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }
 

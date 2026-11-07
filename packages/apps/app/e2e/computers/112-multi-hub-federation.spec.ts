@@ -942,6 +942,53 @@ base.describe('Multi-hub federation (2 hubs)', () => {
           { timeout: 20_000, intervals: [500, 1_000] }
         )
         .toBe(true)
+
+      // (5) NATIVE MENU → REMOTE TASK TAB — Cmd+W ("Close Tab") is raised by the
+      // Electron host and reaches only the LOCAL hub (the capability bridge). The
+      // remote task's page sits in the remote hub's HubScope, so it must still
+      // hear the host event. Emit it the way the menu does (on the local hub, via
+      // the window's default client) and require the remote task's tab to close.
+      const remoteTabOpen = () =>
+        page.evaluate(
+          (tid) =>
+            (
+              window as unknown as {
+                __slayzone_tabStore: {
+                  getState: () => { tabs: Array<{ type: string; taskId?: string }> }
+                }
+              }
+            ).__slayzone_tabStore
+              .getState()
+              .tabs.some((tab) => tab.type === 'task' && tab.taskId === tid),
+          remoteTaskId
+        )
+      expect(await remoteTabOpen()).toBe(true)
+      await page.evaluate(() =>
+        window.getTrpcVanillaClient().menu.testEmit.mutate({ event: 'close-current-focus' })
+      )
+      await expect.poll(remoteTabOpen, { timeout: 10_000, intervals: [250, 500] }).toBe(false)
+
+      // (6) DESKTOP-ONLY CALLS FROM THE REMOTE HUB'S CLIENT — what a remote task pane
+      // sends for `app.*` host features (shell, windows, screenshot…). The remote hub
+      // can only stub them; its client must forward them to the local hub. Hub data
+      // on the same client must still come from the remote hub.
+      const viaRemote = await page.evaluate(async (tid) => {
+        type C = {
+          task: { loadBoardData: { query: () => Promise<{ tasks: Array<{ id: string }> }> } }
+          app: { meta: { getVersion: { query: () => Promise<string> } } }
+        }
+        const c = (
+          window as unknown as { __slayzone_hubClientForTest: (id: string) => C | null }
+        ).__slayzone_hubClientForTest('remote-b')
+        if (!c) return { error: 'no remote-b client' }
+        const board = await c.task.loadBoardData.query()
+        const version = await c.app.meta.getVersion
+          .query()
+          .catch((e: Error) => `error:${e.message}`)
+        return { hasRemoteTask: board.tasks.some((t) => t.id === tid), version }
+      }, remoteTaskId)
+      expect(viaRemote).toMatchObject({ hasRemoteTask: true })
+      expect((viaRemote as { version: string }).version).toMatch(/^\d+\.\d+\.\d+/)
     } finally {
       if (launched) await launched.close()
       // Computer before hub: it re-dials on disconnect, so killing the hub first
@@ -1460,6 +1507,20 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(page.locator('[data-testid="hub-row-local"]')).toBeVisible({ timeout: 10_000 })
       await expect(page.locator('[data-testid="hub-row-remote"]')).toBeVisible({ timeout: 10_000 })
 
+      // The app's own computer joins every hub it lists, so Hub B ends up with two
+      // usable computers: its own and this desktop's. Wait for both — with more than
+      // one, the dialog asks which computer the project runs on.
+      await expect
+        .poll(
+          () =>
+            withHubClient(remoteHubUrl, async (c) => {
+              const rows = (await c.computers.list.query()) as Array<{ usable: boolean }>
+              return rows.filter((r) => r.usable).length
+            }),
+          { timeout: 60_000, intervals: [500, 1_000, 2_000] }
+        )
+        .toBe(2)
+
       // Close settings, then create a project targeting the REMOTE hub via the
       // dialog's hub picker, and assert it lands on the remote hub's DB.
       await page.keyboard.press('Escape')
@@ -1472,6 +1533,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       // Pick the remote hub in the picker (radix Select).
       await page.locator('[data-testid="create-project-hub"]').click()
       await page.getByRole('option', { name: /Hub B/ }).click()
+      await page.locator('[data-testid="create-project-computer"]').click()
+      await page.getByRole('option', { name: /e2e-remote-hub-computer/ }).click()
       await page.getByRole('button', { name: 'Create', exact: true }).click()
 
       await expect
@@ -1496,6 +1559,93 @@ base.describe('Multi-hub federation (2 hubs)', () => {
             ) as Promise<boolean>
       )
       expect(onLocal).toBe(false)
+    } finally {
+      if (launched) await launched.close()
+      if (hubComputer) await hubComputer.stop()
+      if (hub) await hub.stop()
+      fs.rmSync(secondStore, { recursive: true, force: true })
+    }
+  })
+
+  base("Settings hub picker edits the picked hub's hub-wide settings only", async () => {
+    base.setTimeout(180_000)
+
+    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-settings-hub-'))
+    let hub: SecondHub | null = null
+    let hubComputer: HubComputer | null = null
+    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+    try {
+      hub = await spawnSecondHub(secondStore)
+      await waitForHubHealth(hub.port)
+      const remoteHubUrl = hub.url
+      hubComputer = await attachDefaultComputer(hub, secondStore)
+
+      launched = await launchIsolatedElectron({
+        name: 'multi-hub-settings-picker',
+        seedUserData: (userDataDir) => {
+          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+          fs.writeFileSync(
+            bootConfigPath(userDataDir),
+            JSON.stringify({
+              server_mode: 'local',
+              multi_hub: true,
+              hubs: [{ id: 'remote-b', kind: 'remote', label: 'Hub B', url: remoteHubUrl }],
+              default_hub_id: 'local'
+            })
+          )
+        },
+        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      })
+      const page = launched.page
+      await page.waitForSelector('#root', { timeout: 20_000 })
+      await authorizeHubInApp(page, 'remote-b', hub.token)
+
+      const remoteSetting = (key: string) =>
+        withHubClient(remoteHubUrl, (c) => c.settings.get.query({ key }) as Promise<string | null>)
+      const localSetting = (key: string) =>
+        page.evaluate(
+          (k) =>
+            window.getTrpcVanillaClient().settings.get.query({ key: k }) as Promise<string | null>,
+          key
+        )
+
+      await clickSettings(page)
+      const dialog = page.locator('[role="dialog"][aria-label="Settings"]').first()
+      await expect(dialog).toBeVisible({ timeout: 10_000 })
+
+      // Worktrees: pick Hub B, edit the base path → lands on Hub B only.
+      await dialog.locator('aside button').filter({ hasText: 'Worktrees' }).first().click()
+      await dialog.getByTestId('settings-hub-picker').click()
+      await page.getByRole('option', { name: /Hub B/ }).click()
+      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
+      const basePath = dialog.getByPlaceholder('../{project-folder-name}-workspaces')
+      await basePath.fill('../remote-wt')
+      await basePath.blur()
+      await expect
+        .poll(() => remoteSetting('worktree_base_path'), { timeout: 15_000 })
+        .toBe('../remote-wt')
+      expect(await localSetting('worktree_base_path')).not.toBe('../remote-wt')
+
+      // Agent panel: the pick carries across tabs. Startup mode (hub-wide) → Hub B;
+      // scrollback (this client's own UI) → the default hub.
+      await dialog.locator('aside button').filter({ hasText: 'Panels' }).first().click()
+      await dialog.locator('aside button').filter({ hasText: 'Agent' }).first().click()
+      await expect(dialog.getByTestId('hub-wide-note')).toContainText('Hub B')
+      await dialog.getByTestId('agent-startup-mode').click()
+      await page.getByRole('option', { name: 'Manual', exact: true }).click()
+      await expect
+        .poll(() => remoteSetting('terminal_agent_startup'), { timeout: 15_000 })
+        .toBe('manual')
+      expect(await localSetting('terminal_agent_startup')).not.toBe('manual')
+
+      const scrollback = dialog
+        .getByText('Scrollback', { exact: true })
+        .locator('xpath=..')
+        .locator('input')
+      await scrollback.fill('4321')
+      await scrollback.blur()
+      await expect.poll(() => localSetting('terminal_scrollback'), { timeout: 15_000 }).toBe('4321')
+      expect(await remoteSetting('terminal_scrollback')).not.toBe('4321')
     } finally {
       if (launched) await launched.close()
       if (hubComputer) await hubComputer.stop()
@@ -1805,7 +1955,8 @@ base.describe('Multi-hub federation (2 hubs)', () => {
       await expect(remoteGroup).toBeVisible({ timeout: 10_000 })
       await remoteGroup.locator('[data-testid="computer-add-open"]').click()
       await expect(page.locator('[data-testid="computer-add-hub"]')).toHaveCount(0)
-      // Hub B requires sign-in, so it mints only for a named user (T-20).
+      // Hub B requires sign-in: a named user owns the computer (blank = the signed-in
+      // caller; naming someone else is an admin's, T-20).
       await remoteGroup.locator('[data-testid="computer-enroll-for"]').fill(hub.email)
       await remoteGroup.locator('[data-testid="computer-add"]').click()
 

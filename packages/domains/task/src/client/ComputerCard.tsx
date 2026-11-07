@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // The words every client shows for a computer choice (the mobile app too).
 import {
   computerName,
+  DISABLED_MARK,
   inheritComputerLabel,
   NO_COMPUTERS_NOTE,
   OFFLINE_MARK,
@@ -99,13 +100,21 @@ export function ComputerCard({
             {inheritComputerLabel(nameFor(projectDefaultComputerId))}
           </SelectItem>
           {computers.map((computer) => (
-            <SelectItem key={computer.id} value={computer.id}>
+            <SelectItem
+              key={computer.id}
+              value={computer.id}
+              // A DISABLED computer (Settings → Connections) takes no new work, so
+              // nothing new may be bound to it; the hub refuses.
+              disabled={computer.disabledAt != null}
+            >
               {/* Offline is WARNED, never disabled: work aimed at an offline
                   computer queues until it returns, and binding a project to a
                   sleeping laptop is the normal case — disabling the option would
                   contradict the semantics. */}
               {computer.name}
-              {computer.usable === false ? (
+              {computer.disabledAt != null ? (
+                <span className="text-muted-foreground ml-1.5 text-xs">{DISABLED_MARK}</span>
+              ) : computer.usable === false ? (
                 <span className="text-muted-foreground ml-1.5 text-xs">{OFFLINE_MARK}</span>
               ) : null}
             </SelectItem>

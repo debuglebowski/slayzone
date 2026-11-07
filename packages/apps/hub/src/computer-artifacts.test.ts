@@ -130,6 +130,20 @@ test('new chat files and versions stay on owner; general artifacts stay on hub',
       [folder!.id, 0],
       [uploads.id, 1]
     ])
+    // P1: a create takes no path; only the hub's own staged file (the REST create
+    // route's request body) gives initial bytes, through its own entry.
+    const staged = await store.createArtifactFromStagedFile(
+      h.slayDb,
+      { taskId: 't', title: 'staged.bin', folderId: folder!.id },
+      path
+    )
+    expect(Buffer.from(await store.readArtifactBytes(h.slayDb, staged!.id))).toEqual(binary)
+    const noPath = await store.createArtifact(h.slayDb, {
+      taskId: 't',
+      title: 'no-path.txt',
+      sourcePath: path
+    } as never)
+    expect(await store.readArtifactContent(h.slayDb, noPath!.id)).toBe('')
   } finally {
     await pc.close()
     h.cleanup()

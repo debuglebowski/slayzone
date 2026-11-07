@@ -261,7 +261,11 @@ export type {
   BrowserShortcutPayload
 } from '@slayzone/task-browser/shared'
 
-export type { LocalComputerStatus } from '@slayzone/platform/local-computer-status'
+export type {
+  LocalComputerHubs,
+  LocalComputerHubStatus,
+  LocalComputerStatus
+} from '@slayzone/platform/local-computer-status'
 
 import type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'
 export type { BackupInfo, BackupSettings } from '@slayzone/settings/shared'

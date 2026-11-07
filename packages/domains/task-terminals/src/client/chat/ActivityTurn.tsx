@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useState } from 'react'
-import { Bot, Brain, ChevronRight, Loader2, MessageSquare, Wrench } from 'lucide-react'
+import { Brain, ChevronRight, MessageSquare, Wrench } from 'lucide-react'
 import { cn, useNow, type AppearanceSettings } from '@slayzone/ui'
 import { GhMarkdown } from '@slayzone/markdown/client'
 import { streamKeyOf, useLiveBlock } from '@slayzone/terminal/client'
@@ -13,6 +13,7 @@ import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
 import { formatSeconds } from './tool-cards/command-live'
 import { TurnFooter, TurnFooterPanel } from './turn-footer'
+import { SubAgentsPill } from './SubAgentsPill'
 
 function ActivityNarrative({
   item,
@@ -179,28 +180,14 @@ function SubAgentsDisclosure({
   const running = subAgents.filter((item) => item.phase === 'in-flight').length
   return (
     <>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={id}
-        onClick={() => setExpanded(!expanded)}
-        data-testid="chat-sub-agents-toggle"
-        className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-left text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
-      >
-        {running > 0 ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-agent" />
-        ) : (
-          <Bot className="size-3 shrink-0" />
-        )}
-        <span className="font-medium text-foreground">Sub-agents</span>
-        <span>{running > 0 ? `${running} of ${subAgents.length} running` : subAgents.length}</span>
-        <ChevronRight
-          className={cn(
-            'size-3 transition-transform motion-reduce:transition-none',
-            expanded && 'rotate-90'
-          )}
-        />
-      </button>
+      <SubAgentsPill
+        running={running > 0}
+        count={running > 0 ? `${running} of ${subAgents.length} running` : String(subAgents.length)}
+        expanded={expanded}
+        onToggle={() => setExpanded(!expanded)}
+        controls={id}
+        testId="chat-sub-agents-toggle"
+      />
       <TurnFooterPanel>
         <div
           id={id}

@@ -520,18 +520,23 @@ export async function launchIsolatedElectron(opts: {
    *  spec can pin store/hub paths into it (e.g. the computer-loopback spec sets
    *  SLAYZONE_ROOT + opt-in flags). */
   extraEnv?: (userDataDir: string) => Record<string, string>
+  /** Relaunch on a previous launch's userdata (an app restart): same hub, same
+   *  computer state. `seedUserData` is skipped. */
+  userDataDir?: string
 }): Promise<{
   app: ElectronApplication
   page: Page
   userDataDir: string
   close: () => Promise<void>
 }> {
-  const root = path.join(RUNTIME_ROOT_DIR, `isolated-${opts.name}-${process.pid}-${Date.now()}`)
-  const userDataDir = path.join(root, 'userdata')
-  const artifactsDir = path.join(root, 'artifacts')
+  const root = opts.userDataDir
+    ? path.dirname(opts.userDataDir)
+    : path.join(RUNTIME_ROOT_DIR, `isolated-${opts.name}-${process.pid}-${Date.now()}`)
+  const userDataDir = opts.userDataDir ?? path.join(root, 'userdata')
+  const artifactsDir = path.join(root, opts.userDataDir ? `artifacts-${Date.now()}` : 'artifacts')
   ensureDir(userDataDir)
   ensureDir(artifactsDir)
-  opts.seedUserData?.(userDataDir)
+  if (!opts.userDataDir) opts.seedUserData?.(userDataDir)
 
   const executablePath = require('electron') as unknown as string
   const launched = await launchElectronWithRetry({

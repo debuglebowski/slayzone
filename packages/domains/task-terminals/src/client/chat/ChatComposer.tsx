@@ -49,6 +49,8 @@ type FastModeApi = ReturnType<typeof useChatFastMode>
 
 export interface ChatComposerProps {
   backgroundJobs?: ReactNode
+  /** Footer controls of the conversation (pinned messages), before the context meter. */
+  footerTools?: ReactNode
   /** Banners above the input (draft recovery); rendered inside the composer column. */
   notices?: ReactNode
   compact?: boolean
@@ -127,6 +129,7 @@ export interface ChatComposerProps {
  */
 export function ChatComposer({
   backgroundJobs,
+  footerTools,
   notices,
   compact = false,
   hasPlanReview = false,
@@ -422,6 +425,7 @@ export function ChatComposer({
             </>
           )}
           <div className="flex-1" />
+          {footerTools}
           <ContextMeter summary={usage} />
           <Popover>
             <FooterTip label="Display options">

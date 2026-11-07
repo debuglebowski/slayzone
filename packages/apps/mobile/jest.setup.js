@@ -11,3 +11,18 @@ jest.mock(
 // a host view that keeps every prop (src/artifacts/webview-mock.tsx).
 // biome-ignore lint/correctness/noUndeclaredVariables: jest's global, in its setup file
 jest.mock('react-native-webview', () => require('./src/artifacts/webview-mock'))
+
+// react-native-webrtc needs its native half as soon as it is imported. Suites get a
+// stand-in peer that never connects (the direct link then uses the relay); the
+// WebRTC path itself is tested in the transport and computer packages.
+// biome-ignore lint/correctness/noUndeclaredVariables: jest's global, in its setup file
+jest.mock('react-native-webrtc', () => ({
+  RTCPeerConnection: class {
+    constructor(config) {
+      this.config = config
+    }
+    close() {
+      this.closed = true
+    }
+  }
+}))

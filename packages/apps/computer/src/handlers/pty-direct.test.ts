@@ -83,7 +83,7 @@ describe('direct pty service', () => {
     expect(pty.direct.attach('nope', -1)).toEqual({
       exists: false,
       size: null,
-      buffer: { chunks: [], prelude: '', currentSeq: -1 }
+      buffer: { chunks: [], prelude: '', currentSeq: -1, more: false }
     })
     expect(
       pty.direct.watch(
@@ -177,6 +177,90 @@ describe('direct pty input', () => {
       { sessionId, submitted: '/status\r', esc: false, statusCommand: true }
     ])
     await pty.handlers['pty.kill']({ sessionId })
+    pty.disposeAll()
+  })
+})
+
+// R1: a client write carries an id. When a direct write is merely late, the client
+// also sends it through the hub with the same id: the computer applies it once, and
+// reports its input facts (submit, Esc) once.
+describe('client write ids', () => {
+  it('a write that arrives direct and through the hub is applied once, either order', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'w-1'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    const got: string[] = []
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => undefined
+    )
+
+    expect(pty.direct.write(sessionId, 'one\r', 'w-a')).toBe(true)
+    await pty.handlers['pty.write']({ sessionId, data: 'one\r', writeId: 'w-a' })
+    await pty.handlers['pty.write']({ sessionId, data: 'two\r', writeId: 'w-b' })
+    expect(pty.direct.write(sessionId, 'two\r', 'w-b')).toBe(true)
+    // Both echoes of each line (the tty's and cat's), then a quiet spell in which a
+    // duplicate would have shown up.
+    const count = (word: string) => got.join('').split(word).length - 1
+    await waitFor(() => count('one') >= 2 && count('two') >= 2)
+    await new Promise((r) => setTimeout(r, 500))
+    const out = got.join('')
+    expect(out.split('one').length - 1).toBe(2) // typed echo + cat's echo, once each
+    expect(out.split('two').length - 1).toBe(2)
+    // Each submit is reported to the hub once, whichever path delivered it.
+    const inputs = notifies.filter((n) => n.params.name === 'pty-input')
+    expect(inputs.map((n) => (n.params.payload as { submitted: string }).submitted)).toEqual([
+      'one\r',
+      'two\r'
+    ])
+    pty.disposeAll()
+  })
+
+  it('a write without an id (an older client) is applied as before', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'w-2'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    const got: string[] = []
+    pty.direct.watch(
+      sessionId,
+      (c) => got.push(c.data),
+      () => undefined
+    )
+    await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
+    await pty.handlers['pty.write']({ sessionId, data: 'x\n' })
+    await waitFor(() => got.join('').split('x').length - 1 >= 4)
+    pty.disposeAll()
+  })
+})
+
+// R2: a direct read can be paged by its serialised size; the pages joined are the
+// whole read, the prelude only on the first.
+describe('paged direct backfill', () => {
+  it('pages by size and the pages join to the whole buffer', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'p-1'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    for (let i = 0; i < 40; i++)
+      await pty.handlers['pty.write']({ sessionId, data: `line-${i}-${'x'.repeat(200)}\n` })
+    await waitFor(() => pty.direct.getBufferSince(sessionId, -1).chunks.length >= 10)
+    await new Promise((r) => setTimeout(r, 200))
+    const whole = pty.direct.getBufferSince(sessionId, -1)
+    expect(whole.more).toBe(false)
+    const joined: Array<{ seq: number; data: string }> = []
+    let page = pty.direct.getBufferSince(sessionId, -1, 4096)
+    let pages = 1
+    joined.push(...page.chunks)
+    while (page.more) {
+      page = pty.direct.getBufferSince(sessionId, joined.at(-1)!.seq, 4096)
+      joined.push(...page.chunks)
+      pages++
+    }
+    expect(pages).toBeGreaterThan(1)
+    expect(joined).toEqual(whole.chunks)
     pty.disposeAll()
   })
 })

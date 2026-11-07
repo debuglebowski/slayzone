@@ -42,12 +42,15 @@ export function setTaskSessionPromptReader(reader: SessionPromptReader | null): 
  * encoded in SQL. Scoped to (task, mode, conversation): one provider conversation
  * id can legitimately appear under two modes for a task.
  */
-const NOT_DELETED_SQL = `NOT EXISTS (
+function notDeletedSql(alias: string): string {
+  return `NOT EXISTS (
        SELECT 1 FROM session_deletions d
-        WHERE d.task_id = s.task_id
-          AND d.mode = s.mode
-          AND d.conversation_id = s.conversation_id
+        WHERE d.task_id = ${alias}.task_id
+          AND d.mode = ${alias}.mode
+          AND d.conversation_id = ${alias}.conversation_id
      )`
+}
+const NOT_DELETED_SQL = notDeletedSql('s')
 
 /**
  * When a session became THIS task's. For a direct task spawn that is the spawn
@@ -62,6 +65,61 @@ const NOT_DELETED_SQL = `NOT EXISTS (
  * orphaned a 1.8 MB transcript for the rest of the task's life.
  */
 export const OWNED_AT_SQL = `coalesce(s.bound_at, s.created_at)`
+
+/**
+ * A task's CLAIM on a provider session: an honored, undeleted `agent_sessions` row
+ * naming it, under any mode. For a query whose row is aliased `alias`.
+ */
+function claimSql(alias: string): string {
+  return `${alias}.task_id IS NOT NULL
+         AND ${alias}.conversation_id IS NOT NULL
+         AND ${alias}.origin IN (${HONORED_ORIGINS_SQL})
+         AND ${notDeletedSql(alias)}`
+}
+
+/**
+ * When task `taskExpr` first claimed provider session `convExpr` (min owned-at over
+ * its claims, every mode), or NULL if it holds none. Scalar subquery.
+ */
+function firstClaimSql(taskExpr: string, convExpr: string): string {
+  return `(SELECT min(coalesce(m.bound_at, m.created_at)) FROM agent_sessions m
+          WHERE m.task_id = ${taskExpr} AND m.conversation_id = ${convExpr}
+            AND ${claimSql('m')})`
+}
+
+/**
+ * One task per provider session. A provider session (one transcript on disk) is
+ * the task's that claimed it FIRST; ties go to the lower task id so every reader
+ * agrees. Any other task's claim on it is not its session: not current, not a
+ * resume or heal candidate, not in its sidebar, not honored for a switch.
+ *
+ * Why it exists: pre-ledger builds (before ed8ca45af, 2026-06-06) attributed a
+ * session to whichever task's SessionStart hook saw it — Claude's `/resume`
+ * picker lists every session of a shared cwd — and the v-ledger backfill made
+ * those `legacy-migration` claims honored in BOTH tasks. Both then resumed one
+ * transcript, and once one bound it to a chat owner the hub fenced the other
+ * forever ("Provider session ownership is unavailable", #172 follow-up #4). No
+ * current writer records one id for two tasks (the provenance gate files an
+ * outsider's id as `foreign-observed`), so this only ever arbitrates old data.
+ *
+ * Earliest, not latest: a session id is minted by one spawn, so the first task
+ * to record it is the one that ran it; a later claim by another task is the
+ * misattribution. It is also stable: a loser can never add turns to the session
+ * (it no longer sees it), so the decision never flips. Independent of resets — a
+ * reset ends the winner's use, it does not hand the transcript to another task.
+ * A tombstone (`session_deletions`, `relinquishSession`) withdraws a claim.
+ *
+ * Correlated NOT EXISTS for a query whose row is aliased `s` (and is a claim).
+ * Rides the `agent_sessions_conversation` index (v193).
+ */
+const NOT_CLAIMED_ELSEWHERE_SQL = `NOT EXISTS (
+       SELECT 1 FROM agent_sessions o
+        WHERE o.conversation_id = s.conversation_id
+          AND o.task_id <> s.task_id
+          AND ${claimSql('o')}
+          AND (coalesce(o.bound_at, o.created_at), o.task_id)
+              < (${firstClaimSql('s.task_id', 's.conversation_id')}, s.task_id)
+     )`
 
 /**
  * THE definition of "a session this task can resume", for embedding in a query
@@ -106,7 +164,7 @@ const HAS_TURN_SQL = `EXISTS (
 
 /**
  * Ownership without the resumability proof: sessions this task legitimately has,
- * after the last reset, deletions excluded.
+ * after the last reset, deletions and other tasks' sessions excluded.
  *
  * Split out for the healer, whose entire job is to look at ids that may NOT be
  * proven and ask the disk. Keeping it as the shared base means "which sessions
@@ -117,7 +175,8 @@ export function ownedSessionSql(resetAtExpr: string): string {
   return `s.conversation_id IS NOT NULL
          AND s.origin IN (${HONORED_ORIGINS_SQL})
          AND ${OWNED_AT_SQL} > coalesce(${resetAtExpr}, 0)
-         AND ${NOT_DELETED_SQL}`
+         AND ${NOT_DELETED_SQL}
+         AND ${NOT_CLAIMED_ELSEWHERE_SQL}`
 }
 
 /**
@@ -250,7 +309,9 @@ export async function getConversationFirstSeenAt(
  * "did slay record an honored session with this id, for THIS task and mode, that
  * has not been deleted?" — so a caller cannot launder a `foreign-observed` id, a
  * pending-spawn phantom, another task's conversation, or a tombstoned one into
- * the honored set by naming it in a `user-selected` write.
+ * the honored set by naming it in a `user-selected` write. "Another task's"
+ * includes a session this task also claims but another task claimed first
+ * (`NOT_CLAIMED_ELSEWHERE_SQL`).
  */
 export async function isHonoredConversation(
   db: SlayzoneDb,
@@ -264,6 +325,7 @@ export async function isHonoredConversation(
        WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id = ?
          AND s.origin IN (${HONORED_ORIGINS_SQL})
          AND ${NOT_DELETED_SQL}
+         AND ${NOT_CLAIMED_ELSEWHERE_SQL}
        LIMIT 1`,
     [taskId, mode, conversationId]
   )
@@ -298,6 +360,105 @@ export async function deleteSession(
   )
   agentSessionsEvents.emit('agent-sessions:changed', { taskId })
   return true
+}
+
+/**
+ * Withdraw this task's claim on a provider session it must not drive: a tombstone
+ * in `session_deletions`, exactly like `deleteSession`, but without its "not the
+ * current session" guard — the current session is precisely the one that goes.
+ * The next spawn resumes the task's next own session, or starts fresh. Reversible
+ * (drop the tombstone); the transcript on disk is never touched.
+ *
+ * For the shared-session repair (one task per provider session), never a UI path.
+ */
+export async function relinquishSession(
+  db: SlayzoneDb,
+  taskId: string,
+  mode: string,
+  conversationId: string
+): Promise<void> {
+  await db.run(
+    `INSERT INTO session_deletions (id, task_id, mode, conversation_id, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [randomUUID(), taskId, mode, conversationId, Date.now()]
+  )
+  agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+}
+
+/**
+ * Of `conversationIds`, the ones that are ANOTHER task's session for `taskId`: an
+ * other task holds a claim on it that is earlier than this task's first claim, or
+ * this task holds none at all. The same rule as `NOT_CLAIMED_ELSEWHERE_SQL`, asked
+ * for ids that need not be in this task's ledger — the healer's pre-ledger
+ * `provider_config.conversationHistory`, which can list a sibling's or a parent's
+ * session (`/resume` in a shared cwd) that this task must never repoint to.
+ */
+export async function claimedByOtherTasks(
+  db: SlayzoneDb,
+  taskId: string,
+  conversationIds: string[]
+): Promise<Set<string>> {
+  if (!conversationIds.length) return new Set()
+  const placeholders = conversationIds.map(() => '?').join(',')
+  const rows = await db.all<{ conversation_id: string }>(
+    `SELECT DISTINCT o.conversation_id AS conversation_id
+       FROM agent_sessions o
+      WHERE o.conversation_id IN (${placeholders})
+        AND o.task_id <> ?
+        AND ${claimSql('o')}
+        AND (coalesce(o.bound_at, o.created_at), o.task_id)
+            < (coalesce(${firstClaimSql('?', 'o.conversation_id')}, 9223372036854775807), ?)`,
+    [...conversationIds, taskId, taskId, taskId]
+  )
+  return new Set(rows.map((r) => r.conversation_id))
+}
+
+/** One task's claim on a shared provider session, per mode. */
+export interface SharedSessionClaim {
+  taskId: string
+  mode: string
+  /** Earliest owned-at of this task's claims under this mode. */
+  firstClaimAt: number
+}
+
+/**
+ * Every provider session claimed by more than one task, with each (task, mode)
+ * claim, earliest first (ties by task id, then mode). The input of the hub's
+ * one-task-per-session repair; empty on any store written after the provenance
+ * gate. One indexed pass — run off the boot critical path.
+ */
+export async function listSharedSessionClaims(
+  db: SlayzoneDb
+): Promise<Array<{ conversationId: string; claims: SharedSessionClaim[] }>> {
+  const rows = await db.all<{
+    conversation_id: string
+    task_id: string
+    mode: string
+    first_at: number
+  }>(
+    `WITH claims AS (
+       SELECT s.conversation_id, s.task_id, s.mode, min(${OWNED_AT_SQL}) AS first_at
+         FROM agent_sessions s
+        WHERE ${claimSql('s')}
+        GROUP BY s.conversation_id, s.task_id, s.mode
+     ),
+     shared AS (
+       SELECT conversation_id FROM claims GROUP BY conversation_id HAVING count(DISTINCT task_id) > 1
+     )
+     SELECT c.conversation_id, c.task_id, c.mode, c.first_at
+       FROM claims c JOIN shared USING (conversation_id)
+      ORDER BY c.conversation_id, c.first_at, c.task_id, c.mode`
+  )
+  const out: Array<{ conversationId: string; claims: SharedSessionClaim[] }> = []
+  for (const r of rows) {
+    let entry = out[out.length - 1]
+    if (!entry || entry.conversationId !== r.conversation_id) {
+      entry = { conversationId: r.conversation_id, claims: [] }
+      out.push(entry)
+    }
+    entry.claims.push({ taskId: r.task_id, mode: r.mode, firstClaimAt: r.first_at })
+  }
+  return out
 }
 
 /**
@@ -438,14 +599,11 @@ export async function listTaskSessions(
   mode: string
 ): Promise<TaskSessionSummary[]> {
   const current = await getCurrentConversationId(db, taskId, mode)
-  const reader = sessionPromptReader
   const rows = await db.all<{
     conversation_id: string
     origin: ConversationOrigin
     started_at: number
     last_active_at: number
-    message_count: number
-    first_prompt: string | null
   }>(
     `SELECT
        s.conversation_id                         AS conversation_id,
@@ -455,54 +613,75 @@ export async function listTaskSessions(
             AND o.origin IN (${HONORED_ORIGINS_SQL})
           ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
        min(s.created_at)                         AS started_at,
-       max(s.created_at)                         AS last_active_at,
-       ${
-         reader
-           ? '0 AS message_count, NULL AS first_prompt'
-           : `(SELECT count(*) FROM agent_prompts p
-          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id) AS message_count,
-       (SELECT p.text FROM agent_prompts p
-          WHERE p.task_id = s.task_id AND p.cli_session_id = s.conversation_id
-          ORDER BY p.created_at ASC, p.rowid ASC LIMIT 1) AS first_prompt`
-       }
+       max(s.created_at)                         AS last_active_at
      FROM agent_sessions s
      WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
        AND s.origin IN (${HONORED_ORIGINS_SQL})
        AND ${NOT_DELETED_SQL}
+       AND ${NOT_CLAIMED_ELSEWHERE_SQL}
      GROUP BY s.conversation_id
      ORDER BY started_at DESC`,
     [taskId, mode]
   )
-  const savedChatPrompts =
-    !reader && mode === 'codex-chat' ? await codexChatEventPrompts(db, taskId) : null
+  const ids = rows.map((r) => r.conversation_id)
   const summaries = new Map(
-    reader
-      ? (
-          await reader(
-            db,
-            taskId,
-            rows.map((r) => r.conversation_id)
-          )
-        ).map((s) => [s.conversationId, s])
-      : []
+    (sessionPromptReader
+      ? await sessionPromptReader(db, taskId, ids)
+      : await legacySessionPromptSummaries(db, taskId, ids, {
+          codexChatEvents: mode === 'codex-chat'
+        })
+    ).map((s) => [s.conversationId, s])
   )
   return rows.map((r) => {
-    const saved = summaries.get(r.conversation_id) ?? savedChatPrompts?.get(r.conversation_id)
+    const saved = summaries.get(r.conversation_id)
     return {
       conversationId: r.conversation_id,
       origin: r.origin,
       startedAt: r.started_at,
       lastActiveAt: r.last_active_at,
-      messageCount:
-        r.message_count > 0 || saved?.count
-          ? Math.max(r.message_count, saved?.count ?? 0)
-          : mode === 'codex-chat'
-            ? null
-            : 0,
-      firstPrompt: saved && saved.count > r.message_count ? saved.firstPrompt : r.first_prompt,
+      messageCount: saved?.count ? saved.count : mode === 'codex-chat' ? null : 0,
+      firstPrompt: saved?.count ? saved.firstPrompt : null,
       isCurrent: r.conversation_id === current
     }
   })
+}
+
+/**
+ * Per-conversation prompt summaries from the hub's own legacy rows: captured
+ * `agent_prompts` (joined on `cli_session_id = conversation_id`) and, with
+ * `codexChatEvents`, Codex chat prompts recovered from the task's saved tab
+ * events. Read-only. The source before a task's history moves to its computer
+ * (`setTaskSessionPromptReader`), and while that move waits.
+ */
+export async function legacySessionPromptSummaries(
+  db: SlayzoneDb,
+  taskId: string,
+  conversationIds: string[],
+  opts: { codexChatEvents: boolean }
+): Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>> {
+  if (!conversationIds.length) return []
+  const captured = await db.all<{ conversation_id: string; count: number; first_prompt: string }>(
+    `SELECT p.cli_session_id AS conversation_id, count(*) AS count,
+       (SELECT f.text FROM agent_prompts f
+          WHERE f.task_id = p.task_id AND f.cli_session_id = p.cli_session_id
+          ORDER BY f.created_at ASC, f.rowid ASC LIMIT 1) AS first_prompt
+     FROM agent_prompts p
+     WHERE p.task_id = ? AND p.cli_session_id IN (SELECT value FROM json_each(?))
+     GROUP BY p.cli_session_id`,
+    [taskId, JSON.stringify(conversationIds)]
+  )
+  const events = opts.codexChatEvents ? await codexChatEventPrompts(db, taskId) : null
+  const prompts = new Map(captured.map((r) => [r.conversation_id, r]))
+  const result: Array<{ conversationId: string; count: number; firstPrompt: string }> = []
+  for (const id of new Set(conversationIds)) {
+    const a = prompts.get(id),
+      b = events?.get(id)
+    if (!a && !b) continue
+    const count = Math.max(a?.count ?? 0, b?.count ?? 0)
+    const firstPrompt = b && b.count > (a?.count ?? 0) ? b.firstPrompt : a?.first_prompt
+    result.push({ conversationId: id, count, firstPrompt: firstPrompt ?? '' })
+  }
+  return result
 }
 
 /**

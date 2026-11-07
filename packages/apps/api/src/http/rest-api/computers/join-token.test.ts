@@ -41,7 +41,8 @@ const h = await createTestHarness()
 const ACCOUNTS: Record<string, { userId: string; disabled: boolean }> = {
   'u-bob': { userId: 'u-bob', disabled: false },
   'bob@example.com': { userId: 'u-bob', disabled: false },
-  'u-dave': { userId: 'u-dave', disabled: true }
+  'u-dave': { userId: 'u-dave', disabled: true },
+  u3: { userId: 'u3', disabled: false }
 }
 
 /** A bound computer listener (computer ON, url present). */
@@ -192,20 +193,17 @@ describe('POST /api/computers/join-token', () => {
     }
   })
 
-  // T-15 (O-5): only an admin mints. A valid full session of a `user` account is 403.
-  test('a valid full bearer of a NON-admin account is 403 ADMIN_ONLY', async () => {
+  // Self-enroll: a valid full session of a `user` account mints a computer it OWNS.
+  test('a valid full bearer of a NON-admin account mints for itself', async () => {
     const rest = await mount(boundComputers, {
       required: () => true,
       verifyBearer: async () => ({ userId: 'u3', role: 'user', scopes: ['full'] })
     })
     try {
-      const res = await rest.request<{ error: string; code?: string }>(
-        'POST',
-        '/api/computers/join-token',
-        {}
-      )
-      expect(res.status).toBe(403)
-      expect(res.body.code).toBe('ADMIN_ONLY')
+      const res = await rest.request<{ token: string }>('POST', '/api/computers/join-token', {})
+      expect(res.status).toBe(200)
+      const row = lastRow()
+      expect([row.minted_by_user_id, row.owner_user_id]).toEqual(['u3', 'u3'])
     } finally {
       await rest.close()
     }
@@ -228,8 +226,9 @@ describe('POST /api/computers/join-token', () => {
   })
 })
 
-// T-20 (O-5): on a hub with login an admin mints FOR a named, enabled user, for at most
-// 1 hour. Each refusal is a 400 with a stable code, and nothing is minted.
+// T-20 (O-5) + self-enroll: on a hub with login everyone mints for themselves; only an
+// admin mints FOR another named, enabled user. At most 1 hour. Each refusal has a stable
+// code, and nothing is minted.
 describe('who the token is for, and for how long (T-20)', () => {
   const admin = loginHub({ userId: 'u-admin', role: 'admin', scopes: ['full'] })
   const refused = async (
@@ -247,12 +246,11 @@ describe('who the token is for, and for how long (T-20)', () => {
     }
   }
 
-  test('an admin naming nobody is refused: JOIN_TOKEN_OWNER_REQUIRED', async () => {
-    expect(await refused(admin, {})).toEqual({ status: 400, code: 'JOIN_TOKEN_OWNER_REQUIRED' })
-    expect(await refused(admin, { forUser: '  ' })).toEqual({
-      status: 400,
-      code: 'JOIN_TOKEN_OWNER_REQUIRED'
-    })
+  test('an admin naming nobody mints for themselves', async () => {
+    expect((await refused(admin, {})).status).toBe(200)
+    expect(lastRow().owner_user_id).toBe('u-admin')
+    expect((await refused(admin, { forUser: '  ' })).status).toBe(200)
+    expect(lastRow().owner_user_id).toBe('u-admin')
   })
 
   test('an unknown or disabled user is refused', async () => {
@@ -285,9 +283,21 @@ describe('who the token is for, and for how long (T-20)', () => {
     expect(lastRow().ttl).toBe(15 * 60_000)
   })
 
-  test('a non-admin is still 403 ADMIN_ONLY, naming a user or not', async () => {
+  test('a non-admin mints only for themselves: naming anyone else is 403', async () => {
     const user = loginHub({ userId: 'u-bob', role: 'user', scopes: ['full'] })
-    expect(await refused(user, { forUser: 'u-bob' })).toEqual({ status: 403, code: 'ADMIN_ONLY' })
+    expect((await refused(user, { forUser: 'u-bob' })).status).toBe(200)
+    expect((await refused(user, { forUser: 'bob@example.com' })).status).toBe(200)
+    expect(lastRow().owner_user_id).toBe('u-bob')
+    // Someone else, or someone who does not exist: the same answer, so a user cannot
+    // probe which accounts the hub has.
+    expect(await refused(user, { forUser: 'u3' })).toEqual({
+      status: 403,
+      code: 'JOIN_TOKEN_OWNER_FORBIDDEN'
+    })
+    expect(await refused(user, { forUser: 'nobody@example.com' })).toEqual({
+      status: 403,
+      code: 'JOIN_TOKEN_OWNER_FORBIDDEN'
+    })
   })
 
   // Login off (the desktop app's own hub, no restAuth slot): unchanged — anyone on the
@@ -321,9 +331,10 @@ describe('audit (T-03)', () => {
       principal = { userId: 'u-scoped', role: 'user', scopes: ['read', 'tasks'] }
       expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(401)
       principal = { userId: 'u-user', role: 'user', scopes: ['full'] }
-      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(403)
+      expect(
+        (await rest.request('POST', '/api/computers/join-token', { forUser: 'u-bob' })).status
+      ).toBe(403)
       principal = { userId: 'u-full', role: 'admin', scopes: ['full'] }
-      expect((await rest.request('POST', '/api/computers/join-token', {})).status).toBe(400)
       expect(
         (await rest.request('POST', '/api/computers/join-token', { forUser: 'u-dave' })).status
       ).toBe(400)
@@ -334,27 +345,25 @@ describe('audit (T-03)', () => {
       expect(audit.map((l) => `${l.event}:${l.outcome}:${l.actor}`)).toEqual([
         'authz.denied:denied:null',
         'authz.denied:denied:u-scoped',
-        'authz.denied:denied:u-user',
-        'computer.join_token.mint:denied:u-full',
+        'computer.join_token.mint:denied:u-user',
         'computer.join_token.mint:denied:u-full',
         'computer.join_token.mint:success:u-full'
       ])
       expect(audit.map((l) => (l.detail as { reason?: string }).reason)).toEqual([
         'unauthenticated',
         'scoped_session',
-        'not_admin',
-        'JOIN_TOKEN_OWNER_REQUIRED',
+        'JOIN_TOKEN_OWNER_FORBIDDEN',
         'JOIN_TOKEN_OWNER_DISABLED',
         undefined
       ])
       // Minter (actor), owner and lifetime; the disabled owner's id, never the typed email.
-      expect(audit[4]!.detail).toEqual({
+      expect(audit[3]!.detail).toEqual({
         reason: 'JOIN_TOKEN_OWNER_DISABLED',
         ttlMs: 15 * 60_000,
         owner: 'u-dave'
       })
-      expect(audit[5]!.targetKind).toBe('join_token')
-      expect(audit[5]!.detail).toEqual({
+      expect(audit[4]!.targetKind).toBe('join_token')
+      expect(audit[4]!.detail).toEqual({
         label: 'local-computer',
         ttlMs: 15 * 60_000,
         owner: 'u-bob'
@@ -385,12 +394,12 @@ describe('audit (T-03)', () => {
  */
 describe('joinTokenAuthDecision', () => {
   test('auth NOT required (supervised): loopback mints, off-box is forbidden', () => {
-    expect(
-      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: true })
-    ).toBe('mint')
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
-    ).toBe('forbid')
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false })).toBe(
+      'mint'
+    )
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
+      'forbid'
+    )
   })
 
   test('auth REQUIRED: loopback is NOT special — a bearer is required either way', () => {
@@ -398,47 +407,35 @@ describe('joinTokenAuthDecision', () => {
     // same answer an off-box peer would: verified bearer mints, missing/invalid
     // is 401. This is the fix — the old function returned 'mint' unconditionally
     // for loopback regardless of `authRequired`.
-    expect(
-      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true, admin: true })
-    ).toBe('mint')
-    expect(
-      joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false, admin: true })
-    ).toBe('unauthorized')
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: true })).toBe(
+      'mint'
+    )
+    expect(joinTokenAuthDecision({ loopback: true, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
+    )
   })
 
   test('off-box on a hub that does NOT enforce auth: 403, unchanged', () => {
     // A local-mode hub has no sessions to verify, so a bearer would be
     // unverifiable — accepting one would be security theater. Being on the box
     // stays the only authority here.
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false, admin: true })
-    ).toBe('forbid')
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true, admin: true })
-    ).toBe('forbid')
-  })
-
-  test('auth REQUIRED: a valid bearer of a non-admin account is not-admin (T-15)', () => {
-    for (const loopback of [true, false]) {
-      expect(
-        joinTokenAuthDecision({ loopback, authRequired: true, bearerOk: true, admin: false })
-      ).toBe('not-admin')
-    }
-    // No login on this hub: no account, no role — loopback stays the authority.
-    expect(
-      joinTokenAuthDecision({ loopback: true, authRequired: false, bearerOk: false, admin: false })
-    ).toBe('mint')
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: false })).toBe(
+      'forbid'
+    )
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: false, bearerOk: true })).toBe(
+      'forbid'
+    )
   })
 
   test('off-box on an enforcing hub: valid bearer mints, missing/invalid is 401', () => {
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: true, admin: true })
-    ).toBe('mint')
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: true })).toBe(
+      'mint'
+    )
     // 401, not 403: the caller has a credential problem (fixable by signing in),
     // not a policy one (fixable only by moving to the hub's machine).
-    expect(
-      joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false, admin: true })
-    ).toBe('unauthorized')
+    expect(joinTokenAuthDecision({ loopback: false, authRequired: true, bearerOk: false })).toBe(
+      'unauthorized'
+    )
   })
 })
 

@@ -29,6 +29,8 @@ concurrency:
 
 permissions:
   contents: write
+  # release-foundation.yml's typecheck job cancels the run on failure (gh run cancel).
+  actions: write
 
 jobs:
   detect-channel:

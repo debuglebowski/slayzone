@@ -88,6 +88,7 @@ type RowItem =
     }
 
 const EMPTY_SESSION_TASK_IDS = new Set<string>()
+const EMPTY_BLOCKED_IDS: ReadonlySet<string> = new Set<string>()
 
 export function TreeView({
   projects,
@@ -107,6 +108,7 @@ export function TreeView({
   columnsByProjectId,
   tags,
   taskTags,
+  blockedTaskIds,
   onTaskReorder,
   onTaskMove,
   onTaskReparent,
@@ -147,6 +149,7 @@ export function TreeView({
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
   const treeShowTags = useTabStore((s) => s.treeShowTags)
+  const treeShowBlockedBadge = useTabStore((s) => s.treeShowBlockedBadge)
   const hubBadges = useHubBadges()
   const hubIdByProject = useHubOwnershipStore((s) => s.hubIdByProject)
   // Task id → resolved tags in tag sort order. Empty when the toggle is off so
@@ -1243,6 +1246,7 @@ export function TreeView({
       treeShowPriority,
       treeShowWorktree,
       tagsByTaskId,
+      blockedBadgeTaskIds: (treeShowBlockedBadge && blockedTaskIds) || EMPTY_BLOCKED_IDS,
       treeCrossOutDone,
       treeGroupBy,
       treeGroupPinned,

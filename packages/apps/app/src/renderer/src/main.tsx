@@ -13,9 +13,10 @@ import {
   electronBootstrap,
   setHubConnectProbe,
   setDirectLinkProbe,
+  setDirectRtcPeerFactory,
   useHubRegistryStore
 } from '@slayzone/transport/client'
-import { getTrpcClient, initTrpcClient } from './trpc'
+import { getHubClient, getTrpcClient, initTrpcClient } from './trpc'
 import type { HubEntry } from '@slayzone/types'
 import { setShortcutBackend, TooltipProvider, UndoProvider } from '@slayzone/ui'
 import { taskDetailCache } from '@slayzone/task/client/taskDetailCache'
@@ -87,7 +88,13 @@ setHubConnectProbe(async (url) => (await electronBootstrap.probeServerHealth(url
 // Direct links to computers (docs/direct-link.md): main checks this document's CSP
 // and probes the computer over HTTP, so a socket that would fail is never opened —
 // a failed WebSocket here would also slow the hub's (see above).
-setDirectLinkProbe(async (address) => (await electronBootstrap.prepareDirectLink(address)).ok)
+setDirectLinkProbe(
+  async (address, hubId) => (await electronBootstrap.prepareDirectLink(address, hubId)).ok
+)
+// A computer with no listener this window can dial (a remote one, behind NAT) is
+// reached over WebRTC, brokered by the hub. A failed WebRTC connect is not a failed
+// WebSocket, so it cannot slow the hub's socket either.
+setDirectRtcPeerFactory((config) => new RTCPeerConnection(config))
 
 window.addEventListener('error', (event) => {
   recordClientError({
@@ -239,6 +246,15 @@ if (isFloatingGlobalAgentPanel) {
       ;(
         window as typeof window & { __slayzone_stopViewStatePersistence?: () => Promise<void> }
       ).__slayzone_stopViewStatePersistence = stopViewStatePersistence
+      // A federated hub's OWN client (null until something resolved it), so specs can
+      // drive what a pane scoped to that hub sends — incl. host-path forwarding.
+      ;(
+        window as typeof window & {
+          __slayzone_hubClientForTest?: (
+            hubId: string
+          ) => ReturnType<typeof initTrpcClient>['client'] | null
+        }
+      ).__slayzone_hubClientForTest = (hubId) => getHubClient(hubId)?.client ?? null
     }
     // Multi-hub federation registry. The DEFAULT hub is pinned to `server.url` —
     // the exact url boot's initTrpcClient() used — so its HubScope reuses that

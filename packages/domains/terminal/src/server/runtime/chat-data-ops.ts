@@ -23,7 +23,7 @@ import {
 } from '../chat-timeline-store'
 import { buildMcpEnv, resolveRemoteMcpEnv } from '../mcp-env'
 import { getRemoteMcpEnvProvider } from './pty-manager'
-import type { AgentId } from '@slayzone/terminal-contracts'
+import type { AgentId, ChatPinnedMessage } from '@slayzone/terminal-contracts'
 import { defaultChatModeSettingKey, resolveDefaultChatMode } from '@slayzone/terminal-contracts'
 import {
   bumpAutocompleteUsage,
@@ -89,8 +89,20 @@ export type { RecordConversationInput }
  * inline; a future hub/computer split swaps in a remote implementation with
  * zero handler changes.
  */
+/** The rows a user pinned in a tab's conversations (`ChatPinnedMessage`). */
+export interface ChatPinnedMessageStore {
+  /** The pins of provider conversation `conversationId` in tab `tabId`, oldest first. */
+  list(tabId: string, conversationId: string): Promise<ChatPinnedMessage[]>
+  /** Pin a row; pinning it again replaces its pin. */
+  pin(tabId: string, pin: ChatPinnedMessage): Promise<void>
+  /** Unpin a row (no-op when it is not pinned). */
+  unpin(tabId: string, conversationId: string, key: string): Promise<void>
+}
+
 export interface ChatDataOps {
   threads?: ChatThreadStore
+  /** Absent: the storage has no pins (the legacy SQLite implementation). */
+  pinnedMessages?: ChatPinnedMessageStore
   /** Read `provider_config.{mode}` off the task row. `{}` on missing/corrupt. */
   readProviderConfig(taskId: string, mode: string): Promise<ProviderConfigEntry>
   writeChatMode(taskId: string, mode: string, chatMode: string): Promise<void>

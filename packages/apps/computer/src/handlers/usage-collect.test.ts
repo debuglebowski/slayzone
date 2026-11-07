@@ -76,4 +76,64 @@ describe('usage.collect', () => {
     expect(again[0]?.records).toHaveLength(1)
     expect(statSync(file).size).toBeGreaterThan(0)
   })
+
+  // A first collect after the update (or of a fresh computer) is the whole backlog:
+  // 81 MiB measured on a real machine, and over the WebSocket's 100 MiB message limit
+  // for a heavier one — the computer's socket closes and every terminal detaches.
+  // The reply is paged: no message exceeds the byte budget, nothing is lost, and a
+  // file split across pages keeps its old cursor until its last page.
+  it('a large backlog comes back in pages under the byte budget', async () => {
+    const PAGE = 64 * 1024
+    const config: ComputerConfig = {
+      hubUrl: 'ws://localhost:0/computers',
+      name: 'test',
+      allowedRoots: [home],
+      capabilities: []
+    }
+    const handlers = createUsageCollectHandlers(
+      { dialer: { notify: () => true }, config, log: () => {} },
+      { pageBytes: PAGE }
+    )
+    const call = (p: unknown) =>
+      Promise.resolve((handlers[HubToComputerMethods.usageCollect] as (q: unknown) => unknown)(p))
+    const big = join(home, '.claude', 'projects', 'p', 'big.jsonl')
+    const small = join(home, '.claude', 'projects', 'p', 'small.jsonl')
+    const LINES = 4000
+    writeFileSync(big, Array.from({ length: LINES }, (_, i) => line(`big-${i}`)).join(''))
+    writeFileSync(small, line('small-1'))
+
+    type Page = {
+      results: Array<{
+        sourceFile: string
+        endOffset: number
+        complete?: boolean
+        records: Array<{ id: string }>
+      }>
+      next?: unknown
+    }
+    const pages: Page[] = []
+    let reply = (await call({ cursors: {} })) as Page
+    pages.push(reply)
+    while (reply.next) {
+      reply = (await call({ cursors: {}, page: reply.next })) as Page
+      pages.push(reply)
+      expect(pages.length, 'pages end').toBeLessThan(200)
+    }
+    expect(pages.length, 'more than one page').toBeGreaterThan(2)
+    for (const p of pages) {
+      expect(JSON.stringify(p).length, 'each reply within the budget').toBeLessThan(PAGE * 1.25)
+    }
+    const bigEntries = pages.flatMap((p) => p.results.filter((r) => r.sourceFile === big))
+    expect(bigEntries.flatMap((r) => r.records.map((x) => x.id))).toHaveLength(LINES)
+    expect(
+      bigEntries.filter((r) => r.complete !== false),
+      'only its last chunk completes'
+    ).toHaveLength(1)
+    expect(bigEntries.at(-1)?.complete).not.toBe(false)
+    for (const partial of bigEntries.slice(0, -1)) {
+      expect(partial.endOffset, "a partial chunk keeps the file's old cursor").toBe(0)
+    }
+    expect(bigEntries.at(-1)?.endOffset).toBe(statSync(big).size)
+    expect(pages.flatMap((p) => p.results).some((r) => r.sourceFile === small)).toBe(true)
+  })
 })

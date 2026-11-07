@@ -228,6 +228,20 @@ test('commandTaskOutput asks the tab’s live process; no live process → gone'
   })
 })
 
+test('stopping a sub-agent sends stop_task for its task; without a live process it fails', async () => {
+  const h = harness()
+  await expect(mgr.stopSubAgent(OPTS.tabId, 'toolu_a')).rejects.toThrow()
+  await start()
+  line(h.fakes[0], taskStarted('a1', 'toolu_a', 'local_agent'))
+  await wait(20)
+  const stopped = mgr.stopSubAgent(OPTS.tabId, 'toolu_a')
+  await wait(10)
+  const stop = lastControl(h.fakes[0])
+  expect(stop.request).toEqual({ subtype: 'stop_task', task_id: 'a1' })
+  stop.reply({})
+  await stopped
+})
+
 test('after a respawn the old process’s task is gone', async () => {
   const h = harness()
   await start()

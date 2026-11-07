@@ -39,7 +39,7 @@ import {
   workspaceCaptureResultSchema,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed, spawnCwd } from '../config'
+import { judgePath, spawnCwd } from '../path-jail'
 import { createProcHandlers } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
@@ -58,15 +58,11 @@ export type DirectChatRead = typeof DIRECT_CHAT_READS extends Set<infer M> ? M :
 
 /**
  * Commands a direct-link client may send: they need only the computer's ownership
- * check. Everything that needs the hub's coordination (send, queue, rewind, …) and
- * drafts with attachments (the hub seals their bytes) stay hub calls.
+ * check. Everything that needs the hub's coordination (send, queue, rewind, …),
+ * drafts with attachments (the hub seals their bytes) and permission / tool answers
+ * (the hub refuses them while the conversation runs in the terminal) stay hub calls.
  */
-export const DIRECT_CHAT_COMMANDS = new Set([
-  'respondPermission',
-  'sendToolResult',
-  'saveTabDraft',
-  'saveTabScroll'
-] as const)
+export const DIRECT_CHAT_COMMANDS = new Set(['saveTabDraft', 'saveTabScroll'] as const)
 export type DirectChatCommand = typeof DIRECT_CHAT_COMMANDS extends Set<infer M> ? M : never
 
 /** One hub's chat, as direct-link clients reach it on this computer. */
@@ -290,7 +286,7 @@ export function createChatRuntimeHandlers(opts: {
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
   hasTaskWork?(taskId: string): boolean
-  stopTask?(taskId: string): Promise<void>
+  stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
 }) {
   let closed = false,
     resetting = false
@@ -413,6 +409,8 @@ export function createChatRuntimeHandlers(opts: {
             oldState,
             hasUserInput: instance?.transport.hasSessionUserInput(sessionId) ?? false
           }),
+        onBackgroundJobsChange: (sessionId, count) =>
+          publish('background-jobs', { sessionId, count }),
         workspaceCapture: {
           begin: async (ctx) =>
             workspaceCaptureBeginSchema.parse(
@@ -441,6 +439,9 @@ export function createChatRuntimeHandlers(opts: {
       publish('exit', { tabId, sessionId, code, signal })
     )
     instance.events.on('threads-changed', (tabId) => publish('threads-changed', { tabId }))
+    instance.events.on('pinned-messages-changed', (tabId) =>
+      publish('pinned-messages-changed', { tabId })
+    )
     instance.queueEvents.on('queue-changed', (tabId) => publish('queue-changed', { tabId }))
     instance.queueEvents.on('queue-drained', (tabId, original) =>
       publish('queue-drained', { tabId, original })
@@ -558,7 +559,7 @@ export function createChatRuntimeHandlers(opts: {
 
       case 'task.lifecycle': {
         const applied = await r.applyTaskLifecycle(req.taskId, req.state, req.revision)
-        if (applied.state !== 'active') await opts.stopTask?.(req.taskId)
+        if (applied.state !== 'active') await opts.stopTask?.(req.taskId, applied.state)
         return applied
       }
       case 'migration.checkpoint':
@@ -607,7 +608,7 @@ export function createChatRuntimeHandlers(opts: {
             bootstrap = owner
               ? r.local.get<ChatBootstrap>(owner.identity.tabId, 'settings', 'bootstrap')
               : null
-          call.args[0] = assertPathAllowed(
+          call.args[0] = judgePath(
             String(call.args[0] || bootstrap?.cwd || ''),
             opts.ctx.config.allowedRoots
           )
@@ -718,7 +719,7 @@ export function createChatRuntimeHandlers(opts: {
         const first = call.args[0]
         if (first && typeof first === 'object' && 'cwd' in first) {
           const o = first as { cwd: string }
-          if (o.cwd) o.cwd = assertPathAllowed(o.cwd, opts.ctx.config.allowedRoots)
+          if (o.cwd) o.cwd = judgePath(o.cwd, opts.ctx.config.allowedRoots)
           else {
             const i = r.storage.conversation(call.route.id)?.identity
             const b = i ? r.local.get<ChatBootstrap>(i.tabId, 'settings', 'bootstrap') : null
@@ -726,7 +727,7 @@ export function createChatRuntimeHandlers(opts: {
           }
         }
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(call.method))
-          call.args[0] = assertPathAllowed(String(first), opts.ctx.config.allowedRoots)
+          call.args[0] = judgePath(String(first), opts.ctx.config.allowedRoots)
         return r.invoke(call)
       }
       case 'inspect':
@@ -820,7 +821,7 @@ export function createChatRuntimeHandlers(opts: {
       Boolean(
         instance?.transport
           .listChatSessions()
-          .some((s) => s.state === 'running' || s.state === 'starting')
+          .some((s) => s.state === 'running' || s.state === 'starting' || s.state === 'background')
       )
   }
 }

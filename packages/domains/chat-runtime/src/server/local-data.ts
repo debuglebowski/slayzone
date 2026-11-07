@@ -7,13 +7,15 @@ import type {
   QueueAdmission,
   ProviderConfigEntry,
   TimelineWrite,
-  ChatThreadStore
+  ChatThreadStore,
+  ChatPinnedMessageStore
 } from '@slayzone/terminal/runtime'
 import type {
   ChatDraft,
   ChatScrollAnchor,
   ChatTabState,
   ChatThread,
+  ChatPinnedMessage,
   QueuedChatMessage,
   UserContentBlock,
   ChatAttachment,
@@ -32,7 +34,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
-import { chatStorageMode, terminalStorageAgentId } from './storage-mode'
+import { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
 
 export const sessionRecordKey = (mode: string, conversationId: string | null): string =>
   `session:${JSON.stringify([mode, conversationId])}`
@@ -303,10 +305,7 @@ export function createLocalChatData(
           store.removeRecord(previous.identity.id, previous.identity.epoch, 'draft', inherited.id)
         }
       }
-      if (
-        value.identity.tabId.startsWith('artifact-store:') ||
-        value.identity.tabId === `task-content:${value.identity.taskId}`
-      )
+      if (isStorageOnlyChatOwner(value.identity))
         set(value.identity.tabId, 'settings', 'inbox', true)
       store.transaction(() => {
         const previous =
@@ -880,16 +879,26 @@ export function createLocalChatData(
     clear: atomic(queueSync.clear),
     getTabIdForItem: atomic(queueSync.getTabIdForItem)
   }
+  // A thread stored before closing existed has no `closedAt`: it is open.
+  type StoredThread = Omit<ChatThread, 'closedAt'> & { closedAt?: number | null }
+  const readThread = (value: StoredThread): ChatThread => ({
+    ...value,
+    closedAt: value.closedAt ?? null
+  })
+  const maybeThread = (value: StoredThread | undefined): ChatThread | undefined =>
+    value && readThread(value)
   const threads: ChatThreadStore = {
     get: async (id) =>
-      store.findRecords('thread', undefined, { id }).find((r) => {
-        const parent = store.conversation(r.conversationId)
-        return parent?.state === 'active' && !store.isTabDeleted(parent.identity.taskId, id)
-      })?.value as ChatThread | undefined,
+      maybeThread(
+        store.findRecords('thread', undefined, { id }).find((r) => {
+          const parent = store.conversation(r.conversationId)
+          return parent?.state === 'active' && !store.isTabDeleted(parent.identity.taskId, id)
+        })?.value as StoredThread | undefined
+      ),
     listForParent: async (tabId) =>
       store
         .records(owner(tabId).id, 'thread')
-        .map((r) => r.value as ChatThread)
+        .map((r) => readThread(r.value as StoredThread))
         .filter((thread) => !store.isTabDeleted(owner(tabId).taskId, thread.id))
         .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)),
     list: async (tabId, conversationId) =>
@@ -916,7 +925,26 @@ export function createLocalChatData(
     setConversation: async (id, conversationId) => {
       const thread = await threads.get(id)
       if (thread) set(thread.parentTabId, 'thread', id, { ...thread, conversationId })
+    },
+    setClosed: async (id, closedAt) => {
+      const thread = await threads.get(id)
+      if (thread) set(thread.parentTabId, 'thread', id, { ...thread, closedAt })
     }
+  }
+  // A pin's record: one per row of one provider conversation of the tab.
+  const pinRecordId = (conversationId: string, key: string): string =>
+    JSON.stringify([conversationId, key])
+  const pinnedMessages: ChatPinnedMessageStore = {
+    list: async (tabId, conversationId) =>
+      store
+        .records(owner(tabId).id, 'pinned-message')
+        .map((r) => r.value as ChatPinnedMessage)
+        .filter((pin) => pin.conversationId === conversationId)
+        .sort((a, b) => a.pinnedAt - b.pinnedAt || a.key.localeCompare(b.key)),
+    pin: async (tabId, pin) =>
+      set(tabId, 'pinned-message', pinRecordId(pin.conversationId, pin.key), pin),
+    unpin: async (tabId, conversationId, key) =>
+      remove(tabId, 'pinned-message', pinRecordId(conversationId, key))
   }
   function allAttachments(taskId?: string) {
     return store.findRecords('attachment', taskId).map(
@@ -934,6 +962,7 @@ export function createLocalChatData(
   }
   const data: ChatDataOps = {
     threads,
+    pinnedMessages,
     readProviderConfig: async (taskId, mode) => provider(taskId, mode),
     writeChatMode: (t, m, v) => patch(t, m, 'chatMode', v),
     writeChatModel: (t, m, v) => patch(t, m, 'chatModel', v),
@@ -1288,7 +1317,7 @@ export function createLocalChatData(
             })
         }
         if (
-          i.tabId !== `task-content:${i.taskId}` &&
+          !isStorageOnlyChatOwner(i) &&
           r.kind === 'settings' &&
           (r.id === 'provider' || r.id.startsWith('provider:'))
         ) {

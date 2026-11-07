@@ -22,6 +22,11 @@
 //     ends with "[killed]".
 //   - `get_task_output {task_id}`: `{output (last 8 KiB), total_bytes, truncated}`;
 //     an unknown id is an error reply.
+//   - `stop_task {task_id}` on a running SUB-AGENT (`task_type: local_agent`,
+//     2.1.318): `task_updated {status:'killed'}` + `task_notification stopped`
+//     (its tool_use_id), ack `{}`. Sub-agents are scripted (raw `task_*`
+//     frames): the fake learns them from what it emits ({@link noteEmitted}),
+//     and a stopped one's scripted end never plays.
 // NOT verified on the real CLI: `stop_task` on a FOREGROUND command (played as a
 // killed command whose tool_result is an error).
 
@@ -43,6 +48,8 @@ const OUTPUT_WINDOW_BYTES = 8192
 export function createTaskSim(io) {
   /** taskId → task state. */
   const tasks = new Map()
+  /** Scripted sub-agents: taskId → { toolUseId, description, state }. */
+  const agents = new Map()
 
   const runId = () => `run-${randomUUID().slice(0, 8)}`
   const outputFile = (t) => `/tmp/fake-claude/{{sessionId}}/tasks/${t.spec.taskId}.output`
@@ -229,6 +236,28 @@ export function createTaskSim(io) {
     })
   }
 
+  /**
+   * A line about to be written: a scripted sub-agent's `task_*` frame is noted.
+   * False drops it (a stopped sub-agent's scripted end: the CLI sends none).
+   */
+  function noteEmitted(event) {
+    if (event?.type !== 'system' || typeof event.task_id !== 'string') return true
+    if (event.subtype === 'task_started' && event.task_type === 'local_agent') {
+      agents.set(event.task_id, {
+        toolUseId: event.tool_use_id,
+        description: event.description ?? '',
+        state: 'running'
+      })
+      return true
+    }
+    const agent = agents.get(event.task_id)
+    if (!agent) return true
+    if (agent.state === 'stopped') return event.subtype !== 'task_notification'
+    if (agent.state === 'stopping') return true
+    if (event.subtype === 'task_notification' && event.status !== 'running') agent.state = 'ended'
+    return true
+  }
+
   /** Answer a task control request; false when `msg` is not one. */
   async function onControl(msg) {
     const req = msg.request ?? {}
@@ -251,6 +280,30 @@ export function createTaskSim(io) {
       return true
     }
     if (req.subtype === 'stop_task') {
+      const agent = agents.get(req.task_id)
+      if (agent?.state === 'running') {
+        // Its own stop frames play; once written, its scripted end never does.
+        agent.state = 'stopping'
+        io.log('task-stop', { taskId: req.task_id })
+        await io.emit(
+          system('task_updated', {
+            task_id: req.task_id,
+            patch: { status: 'killed', end_time: Date.now() }
+          })
+        )
+        await io.emit(
+          system('task_notification', {
+            task_id: req.task_id,
+            tool_use_id: agent.toolUseId,
+            status: 'stopped',
+            output_file: `/tmp/fake-claude/{{sessionId}}/tasks/${req.task_id}.output`,
+            summary: agent.description
+          })
+        )
+        agent.state = 'stopped'
+        await reply(msg, {})
+        return true
+      }
       const t = tasks.get(req.task_id)
       if (!t || t.status !== 'running') {
         await refuse(msg, `stop_task: no running task with id ${req.task_id}`)
@@ -286,5 +339,5 @@ export function createTaskSim(io) {
     return false
   }
 
-  return { run, onControl }
+  return { run, onControl, noteEmitted }
 }

@@ -31,7 +31,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterAll, assert, expect, test } from 'vitest'
+import { afterAll, assert, describe, expect, test } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   currentSecurityContext,
@@ -46,7 +46,8 @@ import {
   restAuthAction,
   verifyRestBearer,
   withRestAuth,
-  parseCookieHeader
+  parseCookieHeader,
+  passwordRouteRefusal
 } from './rest-auth.js'
 import { mintWebSession, WEB_SESSION_COOKIE_NAME } from './web-sessions.js'
 
@@ -852,4 +853,38 @@ test('audit: an admitted request writes nothing and runs as its user', async () 
   } finally {
     await h.close()
   }
+})
+
+// Final review M9 (on main): the gate compared the raw path, case and all, while
+// express 5 routes case-insensitively (and ignores a trailing slash, repeated slashes
+// and percent-encoded letters): `/API/panels` reached the panels route with no
+// principal. The path is normalised ONCE, as express matches it, and an unparseable
+// one fails closed.
+describe('M9: the gate decides on the path express routes', () => {
+  for (const url of [
+    '/API/panels',
+    '/Api/notify',
+    '/api/PANELS',
+    '//api/panels',
+    '/api//panels',
+    '/%61pi/panels',
+    '/%41PI/notify',
+    '/api/panels/',
+    '/MCP',
+    '/mcp/',
+    '/api/%zz'
+  ]) {
+    test(`${url}: verify`, () => {
+      expect(remoteWan(url)).toBe('verify')
+    })
+  }
+  test('an exempt route stays exempt in any spelling express accepts', () => {
+    expect(remoteWan('/api/auth/get-session')).toBe('allow')
+    expect(remoteWan('/API/Auth/Get-Session')).toBe('allow')
+  })
+  test('a password route is refused when passwords are off, in any spelling', () => {
+    expect(passwordRouteRefusal('/API/auth/sign-in/EMAIL', false)?.route).toBe(
+      '/api/auth/sign-in/email'
+    )
+  })
 })

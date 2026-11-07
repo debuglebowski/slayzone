@@ -327,6 +327,7 @@ export function AppDialogs({
             }}
             initialTab={settingsInitialTab}
             onTabChange={setSettingsInitialTab}
+            appBadgeProjects={projects}
           />
         </Suspense>
       )}

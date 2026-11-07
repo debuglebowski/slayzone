@@ -42,8 +42,8 @@ import type { OwnerMark } from './owner-policy'
  *               matches; the route's own resolver then only ever sees the caller's
  *               rows (`resolve.ts`), so a prefix shared with someone else's row is
  *               neither ambiguous nor theirs.
- *   projectRef  a project's id OR a case-insensitive name substring
- *               (`resolveProjectRef`); same rule.
+ *   projectRef  a project's id OR a case-insensitive name substring, else a unique
+ *               id prefix (`resolveProjectRef`); same rule.
  */
 export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
 
@@ -197,6 +197,8 @@ const DEEP_LINK =
   "the desktop app's own OAuth deep-link callback (app.auth.onCallback, a desktop-host event): names nothing a user owns"
 const COMPUTER =
   "the computer roster: cut in the handler to the caller's own, or every one for an admin (management metadata; computer-access.ts, T-19)"
+const DIRECT_ADDRESSES =
+  "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
 
@@ -235,8 +237,6 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'PUT /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
-  // `outputPath` is a hub-host path the render is WRITTEN to: someone else's worktree
-  // or artifact directory, or the hub's own state directory, is refused (access.ts `path`).
   'GET /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
@@ -273,6 +273,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/open-task/:id': checked(taskPrefix('params.id')),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),
+  'GET /api/computers/direct-addresses': none(DIRECT_ADDRESSES),
 
   // ── panels ──
   'GET /api/panels': none(SELF),

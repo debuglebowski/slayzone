@@ -46,6 +46,7 @@ export function PromptDock({
     submittingPrompts,
     respondPermission,
     autoModeAvailable,
+    permissionMode,
     cwd,
     timeline,
     sendMessage
@@ -125,6 +126,7 @@ export function PromptDock({
         key={current.requestId}
         prompt={current}
         autoModeAvailable={autoModeAvailable ?? false}
+        permissionMode={permissionMode ?? null}
         cwd={cwd ?? ''}
         agentName={agentNameFor(current, timeline)}
         submitting={submitting}

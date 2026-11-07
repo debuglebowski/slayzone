@@ -17,11 +17,9 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import { observable } from '@trpc/server/observable'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import {
-  chatPermissionArgsSchema,
   chatScrollAnchorSchema,
   chatTabStateExpectationsSchema,
-  chatTextDraftSchema,
-  chatToolResultArgsSchema
+  chatTextDraftSchema
 } from '@slayzone/terminal-contracts'
 import { z } from 'zod'
 
@@ -35,6 +33,13 @@ export type DirectGrantResource =
 
 /** A resource as a procedure names it (a chat tab without its epoch). */
 export type DirectTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
+
+/**
+ * What a client asks the hub to issue for: a computer target (its task, and its
+ * computer when known), owner-checked like every computer target, plus the session
+ * or tab in it (`@slayzone/computers` `DirectLinkTarget`, structurally).
+ */
+export type DirectIssueTarget = DirectTarget & { taskId: string; computerId?: string }
 
 export interface DirectGrantView {
   grantId: string
@@ -52,8 +57,18 @@ export interface DirectHeldGrant {
 
 /** One authenticated client connection, as the computer's listener holds it. */
 export interface DirectSocket {
-  /** Add (or renew with) a capability. Null: unknown or expired token. */
+  /**
+   * Add (or renew with) a capability. It supersedes whatever this socket held on the
+   * same session or tab (a renewal, or a new chat epoch): the newest grant wins and
+   * the socket never piles them up. Null: unknown or expired token.
+   */
   authorize(token: string): DirectGrantView | null
+  /**
+   * The client holds no lease on that grant's target any more: drop this grant if the
+   * socket still holds it (streams on its target end). A newer grant on the same
+   * target — another holder just authorised it — is left alone.
+   */
+  release(grantId: string): boolean
   /** A live grant this socket holds on `target`, or null. */
   grantFor(target: DirectTarget): DirectHeldGrant | null
   /** Called once when this socket no longer holds any grant on `target`. */
@@ -69,17 +84,61 @@ export interface DirectBuffer {
   chunks: Array<{ seq: number; data: string }>
   currentSeq: number
   prelude: string
+  /**
+   * The read stopped at `maxChars`: more chunks follow. Read on from the last chunk's
+   * seq (`readDirectPtyBuffer` does). Absent/false: this is everything.
+   */
+  more?: boolean
+}
+
+/**
+ * Bounds of one backfill page, in estimated serialised characters (see
+ * {@link directChunkCost}). Every direct-protocol message must fit a WebRTC data
+ * channel's message cap, and a full scrollback serialises past it (JSON writes each
+ * ESC as `\u001b`).
+ */
+export const DIRECT_BUFFER_PAGE_MIN_CHARS = 4_096
+export const DIRECT_BUFFER_PAGE_MAX_CHARS = 8 * 1024 * 1024
+
+/** A chunk's estimated cost in a serialised page: its JSON string and the envelope. */
+export function directChunkCost(data: string): number {
+  return JSON.stringify(data).length + 32
+}
+
+/**
+ * The first page of `chunks` within `maxChars` (always at least one chunk, so a page
+ * makes progress), and whether more follow. Absent `maxChars`: everything.
+ */
+export function pageChunks<C extends { data: string }>(
+  chunks: C[],
+  maxChars: number | undefined
+): { chunks: C[]; more: boolean } {
+  if (maxChars === undefined) return { chunks, more: false }
+  let size = 0
+  let n = 0
+  for (const c of chunks) {
+    const cost = directChunkCost(c.data)
+    if (n > 0 && size + cost > maxChars) break
+    size += cost
+    n++
+  }
+  return { chunks: n === chunks.length ? chunks : chunks.slice(0, n), more: n < chunks.length }
 }
 
 /** One hub's terminals on this computer (the computer's `DirectPtyService`). */
 export interface DirectPtyService {
+  /** `maxChars`: page the buffer (see {@link DirectBuffer.more}). */
   attach(
     sessionId: string,
-    afterSeq: number
+    afterSeq: number,
+    maxChars?: number
   ): { exists: boolean; size: { cols: number; rows: number } | null; buffer: DirectBuffer }
-  getBufferSince(sessionId: string, afterSeq: number): DirectBuffer
-  /** False when the session has no live process. */
-  write(sessionId: string, data: string): boolean
+  getBufferSince(sessionId: string, afterSeq: number, maxChars?: number): DirectBuffer
+  /**
+   * False when the session has no live process. `writeId`: the client's id, applied
+   * once on any path (a repeat answers true and writes nothing).
+   */
+  write(sessionId: string, data: string, writeId?: string): boolean
   watch(
     sessionId: string,
     onData: (chunk: { seq: number; data: string }) => void,
@@ -98,7 +157,7 @@ export interface DirectChatService {
   command(
     tabId: string,
     epoch: number,
-    method: 'respondPermission' | 'sendToolResult' | 'saveTabDraft' | 'saveTabScroll',
+    method: 'saveTabDraft' | 'saveTabScroll',
     args: unknown[],
     operationId: string
   ): Promise<unknown>
@@ -135,6 +194,13 @@ export interface DirectPtyData {
 const t = initTRPC.context<DirectContext>().create({ transformer: wireSuperjson })
 
 const sessionId = z.string().min(1).max(200)
+/** A backfill page bound (see `DirectBuffer.more`). Absent: the whole buffer. */
+const maxChars = z
+  .number()
+  .int()
+  .min(DIRECT_BUFFER_PAGE_MIN_CHARS)
+  .max(DIRECT_BUFFER_PAGE_MAX_CHARS)
+  .optional()
 
 function noCapability(): TRPCError {
   return new TRPCError({ code: 'FORBIDDEN', message: 'no capability for this session' })
@@ -188,17 +254,26 @@ export function createDirectRouter(services: DirectRouterServices) {
         return grant
       }),
 
+    /** The client's last lease on this grant's session or tab ended. */
+    release: t.procedure
+      .input(z.object({ grantId: z.string().min(1).max(200) }))
+      .mutation(({ ctx, input }) => ({ released: ctx.socket.release(input.grantId) })),
+
     pty: t.router({
       /** Like the hub's `pty.attach` minus `state` (the client reads that from the hub). */
       attach: t.procedure
-        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1), maxChars }))
         .query(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq)
+          ptyFor(ctx, input.sessionId).attach(input.sessionId, input.afterSeq, input.maxChars)
         ),
       getBufferSince: t.procedure
-        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1) }))
+        .input(z.object({ sessionId, afterSeq: z.number().int().min(-1), maxChars }))
         .query(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).getBufferSince(input.sessionId, input.afterSeq)
+          ptyFor(ctx, input.sessionId).getBufferSince(
+            input.sessionId,
+            input.afterSeq,
+            input.maxChars
+          )
         ),
       /**
        * Keystrokes and pastes. The computer writes them and reports submits and Esc
@@ -206,9 +281,15 @@ export function createDirectRouter(services: DirectRouterServices) {
        * write. Resize, interrupt and touch stay hub calls (it owns those records).
        */
       write: t.procedure
-        .input(z.object({ sessionId, data: z.string().max(1_000_000) }))
+        .input(
+          z.object({
+            sessionId,
+            data: z.string().max(1_000_000),
+            writeId: z.string().min(1).max(100).optional()
+          })
+        )
         .mutation(({ ctx, input }) =>
-          ptyFor(ctx, input.sessionId).write(input.sessionId, input.data)
+          ptyFor(ctx, input.sessionId).write(input.sessionId, input.data, input.writeId)
         ),
       /**
        * Live output. Completes when the process ends; errors FORBIDDEN when the
@@ -286,31 +367,9 @@ export function createDirectRouter(services: DirectRouterServices) {
       /**
        * Commands that need only the computer's ownership check (the hub's shapes).
        * The computer tells the hub after each, so its records stay current.
+       * Permission and tool answers are not here: they go through the hub, whose
+       * relay refuses them while the conversation runs in the terminal.
        */
-      respondPermission: t.procedure
-        .input(z.object({ tabId, args: chatPermissionArgsSchema, operationId }))
-        .mutation(({ ctx, input }) => {
-          const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.command(
-            input.tabId,
-            epoch,
-            'respondPermission',
-            [input.tabId, input.args],
-            input.operationId ?? newOperationId()
-          )
-        }),
-      sendToolResult: t.procedure
-        .input(z.object({ tabId, args: chatToolResultArgsSchema, operationId }))
-        .mutation(({ ctx, input }) => {
-          const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.command(
-            input.tabId,
-            epoch,
-            'sendToolResult',
-            [input.tabId, input.args],
-            input.operationId ?? newOperationId()
-          )
-        }),
       /** A draft with no attachments (the hub seals attached files). */
       saveDraft: t.procedure
         .input(

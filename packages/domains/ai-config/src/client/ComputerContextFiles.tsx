@@ -12,6 +12,7 @@ import { useTRPCClient } from './trpc'
 import { Button, Input, Textarea, cn, useDepsChanged } from '@slayzone/ui'
 import type { CliProvider, ComputerFileEntry } from '../shared'
 import { COMPUTER_PROVIDER_PATHS, isConfigurableCliProvider } from '../shared/provider-registry'
+import { toastAiConfigError } from './toast-error'
 
 interface ComputerContextFilesProps {
   filter: 'instructions' | 'skill'
@@ -63,11 +64,16 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
   const openFile = async (entry: ComputerFileEntry) => {
     // Create file if it doesn't exist
     if (!entry.exists) {
-      await trpcClient.aiConfig.writeContextFile.mutate({
-        filePath: entry.path,
-        content: '',
-        projectPath: ''
-      })
+      try {
+        await trpcClient.aiConfig.writeContextFile.mutate({
+          filePath: entry.path,
+          content: '',
+          projectPath: ''
+        })
+      } catch (err) {
+        toastAiConfigError('Could not create file', err)
+        return
+      }
       await loadFiles()
     }
     try {
@@ -78,8 +84,8 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
       setContent(text)
 
       setSelectedPath(entry.path)
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not open file', err)
     }
   }
 
@@ -91,8 +97,8 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
           content: text,
           projectPath: ''
         })
-      } catch {
-        // silent
+      } catch (err) {
+        toastAiConfigError('Not saved', err)
       }
     },
     [trpcClient]
@@ -122,8 +128,8 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
         setContent('')
       }
       await loadFiles()
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not delete file', err)
     }
   }
 
@@ -147,8 +153,8 @@ export function ComputerContextFiles({ filter }: ComputerContextFilesProps) {
       await loadFiles()
       setCreatingFile(null)
       setNewFileName('')
-    } catch {
-      // silent
+    } catch (err) {
+      toastAiConfigError('Could not create file', err)
     }
   }
 

@@ -74,6 +74,7 @@ import {
 } from './tool-cards'
 import { UserMessageStatus } from './UserMessageStatus'
 import { UserMessageActions } from './UserMessageActions'
+import { PinToggleButton } from './PinnedMessageControls'
 import { ConversationBranchRow } from './ConversationBranchRow'
 import { UserMessageContent } from './UserMessageAttachments'
 import { AgentProblemCard } from './AgentProblemCard'
@@ -97,6 +98,7 @@ export function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'use
       )}
     >
       <UserMessageActions item={item} />
+      <PinToggleButton item={item} reveal />
       <span className="shrink-0 text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
         {appearance.chatShowMessageMeta && formatTime(item.timestamp)}
       </span>
@@ -145,6 +147,7 @@ export function AssistantText({ item }: { item: Extract<TimelineItem, { kind: 't
     <div className={cn('px-0', appearance.chatCompactSpacing ? 'mb-4 py-0.5' : 'mb-8 py-2')}>
       <div className="group flex gap-3 items-start">
         <AssistantMessageBody item={item} />
+        <PinToggleButton item={item} reveal className="self-center" />
         {appearance.chatShowMessageMeta && (
           <span className="shrink-0 self-center text-[11px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity tabular-nums">
             {formatTime(item.timestamp)}

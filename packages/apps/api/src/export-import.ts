@@ -2,7 +2,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { getProjectFolderHost, parseProject, projectFolders } from '@slayzone/projects/server'
-import { SettingsService, settingProjectId } from '@slayzone/settings-core/server'
+import {
+  isMachineLocalSetting,
+  SettingsService,
+  settingProjectId
+} from '@slayzone/settings-core/server'
 import type { AccessScope } from './access'
 import type {
   ImportTxnParams,
@@ -109,7 +113,10 @@ async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
       'SELECT * FROM ai_config_project_selections'
     )) as Row[],
     ai_config_sources: (await db.all('SELECT * FROM ai_config_sources')) as Row[],
-    settings: (await db.all('SELECT * FROM settings')) as Row[]
+    // Never a key that describes this machine only (R3-2).
+    settings: ((await db.all('SELECT * FROM settings')) as Row[]).filter(
+      (s) => !isMachineLocalSetting(String(s.key))
+    )
   }
 }
 
@@ -249,7 +256,11 @@ async function importBundle(
   caller: ExportImportCaller
 ): Promise<ImportResult> {
   const result = await db.namedTxn('export-import:import', {
-    data: bundle.data,
+    // A bundle from an older build may carry a key that describes ITS machine (R3-2).
+    data: {
+      ...bundle.data,
+      settings: (bundle.data.settings ?? []).filter((s) => !isMachineLocalSetting(String(s.key)))
+    },
     ownerUserId: caller.userId,
     projectIds: await caller.scope.accessibleProjectIds()
   } satisfies ImportTxnParams)

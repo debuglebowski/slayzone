@@ -492,6 +492,7 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
         usable: true,
         connectedAt: now - 3 * 3_600_000,
         revokedAt: null,
+        disabledAt: null,
         machine: { hostId: 'demo-host', name: 'MacBook Pro (M4)' }
       }
     ],

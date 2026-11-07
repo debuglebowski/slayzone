@@ -168,3 +168,51 @@ test("a computer holds only its owner's project paths", async () => {
   expect(await p.servesProject('cA', 'pB'), "someone else's").toBe(false)
   expect(await p.servesProject('cU', 'pA'), 'unowned computer').toBe(false)
 })
+
+test('a disabled computer is left out of every default pick, with or without login', async () => {
+  sql(`UPDATE computers SET disabled_at = 1 WHERE id = 'cU'`)
+  try {
+    // Without login: the sole usable ENABLED computer, not the disabled one.
+    const open = placementFor(false)
+    usable = [{ computerId: 'cU' }, { computerId: 'cA' }]
+    expect(await open.forTask('tB')).toBe('cA')
+    expect(await open.forProject('pB')).toBe('cA')
+    expect(await open.forCaller()).toBe('cA')
+    // Only a disabled one connected: nothing to pick.
+    usable = [{ computerId: 'cU' }]
+    expect(await open.forTask('tB')).toBeNull()
+    // An explicit binding is returned as is — the spawn guard refuses the work itself,
+    // with a message that names the computer, rather than placement silently rerouting.
+    expect(await open.forTask('tA-boundU')).toBe('cU')
+
+    // With login: the owner's disabled computer is not theirs to auto-pick either.
+    sql(`UPDATE computers SET disabled_at = 1 WHERE id = 'cA'`)
+    usable = [{ computerId: 'cA' }]
+    expect((await rejection(as(A, () => placementFor(true).forTask('tA'))))?.name).toBe(
+      'BindComputerError'
+    )
+  } finally {
+    sql(`UPDATE computers SET disabled_at = NULL`)
+    usable = []
+  }
+})
+
+test("a desktop's joined computer is the default only where it is the user's only one", async () => {
+  const p = placementFor(false)
+  const desktop = { computerId: 'cA', name: 'kalles-mac', capabilities: ['pty', 'desktop'] }
+  const vps = { computerId: 'cB', name: 'vps-1', capabilities: ['pty'] }
+  try {
+    // Alone, the desktop is the default — work on this hub runs on the user's machine.
+    usable = [desktop]
+    expect(await p.forTask('tB')).toBe('cA')
+    // Beside a computer the user already had there, that one stays the default.
+    usable = [desktop, vps]
+    expect(await p.forTask('tB')).toBe('cB')
+    expect(await p.forCaller()).toBe('cB')
+    // Two of each kind: still ambiguous, as before.
+    usable = [desktop, vps, { computerId: 'cU', name: 'other', capabilities: ['pty'] }]
+    expect(await p.forTask('tB')).toBeNull()
+  } finally {
+    usable = []
+  }
+})

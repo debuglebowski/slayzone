@@ -420,6 +420,37 @@ describe('T-18 owner checks: REST, MCP and hooks for two users on a real hub wit
     expect(JSON.stringify(ownPrefix.body ?? null)).toContain(B.task)
   })
 
+  test('REST: a project id prefix (`slay projects update <8 chars>`) only ever reaches the caller’s project', async () => {
+    const aId = '7e57aaaa-0000-4000-8000-00000000000a'
+    const bId = '7e57bbbb-0000-4000-8000-00000000000b'
+    const insert = raw.prepare(
+      'INSERT INTO projects (id, name, color, owner_user_id) VALUES (?, ?, ?, ?)'
+    )
+    insert.run(aId, 'A_SECRET_PREFIXED', '#000000', a.userId)
+    insert.run(bId, 'B_OWN_PREFIXED', '#000000', b.userId)
+    const patch = (token: string, ref: string) =>
+      rest(hub, token, {
+        method: 'PATCH',
+        path: '/api/projects/:id',
+        params: { id: ref },
+        query: {},
+        body: { color: '#123456' }
+      })
+    // A's own 8-char prefix resolves to A's project.
+    const own = await patch(a.token, aId.slice(0, 8))
+    expect(own.status, `own: ${own.text}`).toBe(200)
+    expect(JSON.stringify(own.body ?? null)).toContain(aId)
+    // B naming A's prefix: 404, nothing of A's said.
+    const theirs = await patch(b.token, aId.slice(0, 8))
+    expect(theirs.status, `theirs: ${theirs.text}`).toBe(404)
+    expect(theirs.text).not.toContain(A.mark)
+    // A prefix both share resolves among the caller's only — never "ambiguous" with A's.
+    const shared = await patch(b.token, '7e57')
+    expect(shared.status, `shared: ${shared.text}`).toBe(200)
+    expect(JSON.stringify(shared.body ?? null)).toContain(bId)
+    expect(shared.text).not.toContain(A.mark)
+  })
+
   // ── REST: lists ──
   test('REST: B’s and the admin’s lists hold none of A’s rows; A’s hold them', async () => {
     const lists: Req[] = [

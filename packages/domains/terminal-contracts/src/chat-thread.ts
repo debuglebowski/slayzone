@@ -10,5 +10,8 @@ export interface ChatThread {
   sourceUuid: string
   title: string
   conversationId: string | null
+  /** When it was closed (resolved): hidden from the thread tabs, its agent stopped,
+   * reopenable with its history. null = open. */
+  closedAt: number | null
   createdAt: number
 }

@@ -45,7 +45,12 @@
 
 import { existsSync } from 'node:fs'
 import { ownerFilePath } from '@slayzone/platform/hub-owner-file'
-import { HUB_ADDRESS_ENV, HUB_SSO_ENV, HUB_SWITCH_ENV } from '@slayzone/platform/hub-switches'
+import {
+  HUB_ADDRESS_ENV,
+  HUB_SSO_ENV,
+  HUB_STUN_ADDRESSES_ENV,
+  HUB_SWITCH_ENV
+} from '@slayzone/platform/hub-switches'
 import {
   HUB_CONFIG_SWITCH_KEYS,
   ensureHubAuthSecret,
@@ -127,6 +132,8 @@ export function applyStandaloneHubConfig(): void {
   // The non-secret SSO settings. The client secret has NO file key, on purpose.
   setIfUnset(HUB_SSO_ENV.tenantId, cfg.ssoTenantId)
   setIfUnset(HUB_SSO_ENV.clientId, cfg.ssoClientId)
+  // STUN servers for WebRTC direct links: the env form is a comma-separated list.
+  setIfUnset(HUB_STUN_ADDRESSES_ENV, cfg.stunAddresses?.join(','))
 
   // Operator-facing hub name, reported over /health so `slay hub ls` can label +
   // address this hub. resolveHubName applies env > config > basename(ROOT); seed

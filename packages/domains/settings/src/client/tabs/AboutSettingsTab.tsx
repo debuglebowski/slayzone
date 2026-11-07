@@ -31,6 +31,16 @@ export function AboutSettingsTab() {
     }
   }
 
+  // Version verdict from the last probe; an install in between doesn't re-probe, so
+  // it is shown only while the path is still the probed one.
+  const probed = cliStatusQuery.data
+  const cliVersionNote =
+    probed?.installed && probed.path === cliPath && probed.version
+      ? probed.outdated
+        ? `v${probed.version} — out of date (app ships v${probed.expectedVersion})`
+        : `v${probed.version}`
+      : null
+
   const handleInstallCli = async () => {
     setCliInstalling(true)
     setCliMessage('')
@@ -80,6 +90,7 @@ export function AboutSettingsTab() {
           <span className="text-sm text-muted-foreground flex items-center gap-1.5">
             <span className={cliInstalled ? 'text-green-500' : 'text-muted-foreground'}>●</span>
             {cliInstalled ? `Installed at ${cliPath || 'unknown path'}` : 'Not installed'}
+            {cliInstalled && cliVersionNote && <span>· {cliVersionNote}</span>}
           </span>
           <Button size="sm" variant="outline" disabled={cliInstalling} onClick={handleInstallCli}>
             {cliInstalling ? 'Installing…' : cliInstalled ? 'Reinstall' : 'Install'}

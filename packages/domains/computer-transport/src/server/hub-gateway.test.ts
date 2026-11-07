@@ -11,8 +11,14 @@ import {
 } from '@slayzone/platform/security-log'
 import { createMemoryCredentialStore } from '../client/credential-store'
 import { HubDialer, type HubDialerOptions } from '../client/hub-dialer'
-import { ComputerTransportErrorCodes } from '../shared/frames'
-import { JSON_RPC_INTERNAL_ERROR, RpcError, RpcTimeoutError } from '../shared/rpc'
+import { ComputerTransportErrorCodes, HubToComputerMethods } from '../shared/frames'
+import {
+  JSON_RPC_INTERNAL_ERROR,
+  JSON_RPC_METHOD_NOT_FOUND,
+  RpcError,
+  RpcTimeoutError
+} from '../shared/rpc'
+import { ComputerUpdatePendingError } from './hub-gateway'
 import { startLoopbackHub, type LoopbackHub } from '../testing/loopback'
 
 const IDENTITY = {
@@ -266,6 +272,78 @@ describe('hub → computer requests', () => {
     expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
   })
 
+  // A standalone computer whose old session host survived its update (it is only
+  // replaced once idle) answers the newer methods — git.op, exec.run, usage.collect …
+  // — with JSON-RPC "method not found". Shown as is, the git panel and processes
+  // fail with a raw protocol error; it is an update still pending.
+  it("a method the computer's host predates: a clear update-pending error", async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: (method) => {
+        throw new RpcError(JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`)
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'git.op', { op: 'getStatusSummary' }).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as RpcError).code, 'still detectable as method-not-found').toBe(
+      JSON_RPC_METHOD_NOT_FOUND
+    )
+    expect((err as Error).message).toMatch(/update/i)
+    expect((err as Error).message).toMatch(/git\.op/)
+    expect((err as Error).message).not.toMatch(/^Method not found/)
+  })
+
+  // Round-3 F4: what a real computer (this release and v0.37.2) answers for a method
+  // it does not have is NOT -32601 — its dispatcher throws `-32001 unimplemented:
+  // <method>` (pinned by the computer's own main.test). That is the case to map; the
+  // code is kept, since the "older computer" fallbacks match on it.
+  it('the real computer answer (-32001 "unimplemented: <method>"): update pending, naming its version', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: (method) => {
+        throw new RpcError(ComputerTransportErrorCodes.unimplemented, `unimplemented: ${method}`)
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'usage.collect', { cursors: {} }).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as RpcError).code, 'the fallbacks still match it').toBe(
+      ComputerTransportErrorCodes.unimplemented
+    )
+    expect((err as Error).message).toMatch(/usage\.collect/)
+    expect((err as Error).message, "names the computer's version").toMatch(/0\.0\.0/)
+    expect((err as Error).message).not.toMatch(/^unimplemented/)
+  })
+
+  it('another -32001 (not an unknown method) is left as is', async () => {
+    const hub = await startHub()
+    const dialer = makeDialer(hub.url, {
+      onHubRequest: () => {
+        throw new RpcError(
+          ComputerTransportErrorCodes.unimplemented,
+          'pty.doctor: not supported here'
+        )
+      }
+    })
+    dialer.start()
+    await dialer.events.once('connected')
+    const err = await hub.gateway.request('computer-1', 'pty.doctor', {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).not.toBeInstanceOf(ComputerUpdatePendingError)
+    expect((err as Error).message).toBe('pty.doctor: not supported here')
+  })
+
   it('requests time out when the computer never answers', async () => {
     const hub = await startHub()
     const dialer = makeDialer(hub.url, {
@@ -306,6 +384,47 @@ describe('hub → computer requests', () => {
       (e: unknown) => e
     )
     expect((err as RpcError).code).toBe(ComputerTransportErrorCodes.unimplemented)
+  })
+})
+
+// G2: ONE owner check for every hub→computer request — the gateway's request door,
+// which every routed procedure (git, gh, AI config, test scan, turn git, fs, exec,
+// processes, terminals) goes through. Enumerated from the method table itself, so a
+// new method cannot slip past it.
+describe('the request authorizer: the one door', () => {
+  it('every method: refused before it is sent when the authorizer refuses', async () => {
+    const authorizeRequest = vi.fn(async (_computerId: string, _method: string) => {
+      throw new Error('not your computer')
+    })
+    const hub = await startHub({ authorizeRequest })
+    const commands = vi.fn(async () => ({ ok: true }))
+    const dialer = makeDialer(hub.url, { onHubRequest: commands })
+    dialer.start()
+    await dialer.events.once('connected')
+    const methods = Object.values(HubToComputerMethods)
+    expect(methods.length).toBeGreaterThan(40)
+    for (const method of methods) {
+      await expect(hub.gateway.request('computer-1', method, {}), method).rejects.toThrow(
+        'not your computer'
+      )
+    }
+    expect(commands).not.toHaveBeenCalled()
+    expect(authorizeRequest).toHaveBeenCalledTimes(methods.length)
+    expect(authorizeRequest).toHaveBeenCalledWith('computer-1', HubToComputerMethods.gitOp)
+  })
+
+  it('an admitted request is sent, asked once', async () => {
+    const authorizeRequest = vi.fn(async () => undefined)
+    const hub = await startHub({ authorizeRequest })
+    const commands = vi.fn(async () => ({ ok: true }))
+    const dialer = makeDialer(hub.url, { onHubRequest: commands })
+    dialer.start()
+    await dialer.events.once('connected')
+    await expect(hub.gateway.request('computer-1', 'fs.writeFile', {})).resolves.toEqual({
+      ok: true
+    })
+    expect(authorizeRequest).toHaveBeenCalledTimes(1)
+    expect(commands).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -75,7 +75,8 @@ export function MachineLabel({
       )}
       data-testid="machine-label"
     >
-      {machine.name ?? 'Unnamed machine'}
+      {/* Unnamed: an offer to name it, not a placeholder claim about the box. */}
+      {machine.name ?? 'Name machine'}
     </button>
   )
 }

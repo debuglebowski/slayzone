@@ -106,6 +106,33 @@ describe('useBrowserViewEvents state-snapshot replay', () => {
     expect(result.current.hasLoadedRealPage).toBe(true)
   })
 
+  it('dom-ready carrying main state completes the load when did-navigate was never seen', () => {
+    // Seen live: did-navigate lost, no healing snapshot, then dom-ready —
+    // url stayed '' so hasLoadedRealPage stuck false, the panel kept the view
+    // hidden behind its loading cover and never sized it (page stuck at 1x1).
+    const { result } = renderHook(() => useBrowserViewEvents('bv-1'))
+
+    feed({
+      viewId: 'bv-1',
+      type: 'dom-ready',
+      url: 'http://localhost:5100/settings/profile',
+      hasLoadedRealPage: true
+    })
+
+    expect(result.current.domReady).toBe(true)
+    expect(result.current.url).toBe('http://localhost:5100/settings/profile')
+    expect(result.current.hasLoadedRealPage).toBe(true)
+  })
+
+  it('dom-ready for about:blank does not mark a real page loaded', () => {
+    const { result } = renderHook(() => useBrowserViewEvents('bv-1'))
+
+    feed({ viewId: 'bv-1', type: 'dom-ready', url: 'about:blank', hasLoadedRealPage: false })
+
+    expect(result.current.domReady).toBe(true)
+    expect(result.current.hasLoadedRealPage).toBe(false)
+  })
+
   it('surfaces a load error carried by the snapshot', () => {
     const { result } = renderHook(() => useBrowserViewEvents('bv-1'))
 

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from 'react'
-import { useTRPCClient } from '../trpc'
+import { getClientForHub, useTRPCClient } from '../trpc'
+import { getHubIdForTask } from '@slayzone/transport/client'
 import type { Task } from '@slayzone/task-contracts'
 import { useTabStore, type ActiveView, type Tab } from '@slayzone/tabs-state'
 import { useDiagnosticsSync } from '@/hooks/useDiagnosticsSync'
@@ -82,7 +83,10 @@ export const ActiveTabSync = memo(function ActiveTabSync({
     if (!task) return // data not loaded yet — wait for the next tasksMap update
     readConsumedRef.current = activeTaskId
     if (task.needs_attention) {
-      void trpcClient.task.update.mutate({ id: activeTaskId, needsAttention: false }).catch(() => {
+      // The flag lives on the hub that OWNS the task — a federated task's clear sent
+      // to the default hub no-ops there and the dot never goes away.
+      const client = getClientForHub(getHubIdForTask(activeTaskId), trpcClient)
+      void client.task.update.mutate({ id: activeTaskId, needsAttention: false }).catch(() => {
         // Clearing the unread dot is cosmetic — a failed write just means the
         // dot survives until the next activation, which retries.
       })

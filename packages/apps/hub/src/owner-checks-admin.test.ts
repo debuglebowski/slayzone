@@ -39,7 +39,8 @@ import {
   seedOwned,
   seedShared,
   signedInUser,
-  type InProcessHub
+  type InProcessHub,
+  type Owned
 } from './owner-checks-harness.js'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -186,6 +187,7 @@ const cb = hubClient(hub, b.token)
 const cadmin = hubClient(hub, adminToken)
 // The path-taking export/import forms are test-build only (`PLAYWRIGHT=1`, read per call).
 process.env.PLAYWRIGHT = '1'
+// A directory in nobody's project root: nobody's to write to (N1).
 const out = realpathSync(mkdtempSync(join(tmpdir(), 'slz-t101-out-')))
 
 afterAll(async () => {
@@ -197,8 +199,9 @@ afterAll(async () => {
 })
 
 // ── T-101: export ──
-const exportOf = async (client: Client, who: string): Promise<Record<string, unknown[]>> => {
-  const file = join(out, `${who}.slay`)
+// Into the caller's own worktree: a hub-local path needs a root of theirs (N1).
+const exportOf = async (client: Client, who: Owned): Promise<Record<string, unknown[]>> => {
+  const file = join(who.path, 'export.slay')
   const r = await call(client, 'app.exportImport.testExportAllToPath', { filePath: file })
   expect(
     (r.data as { success?: boolean })?.success,
@@ -207,8 +210,17 @@ const exportOf = async (client: Client, who: string): Promise<Record<string, unk
   return (JSON.parse(readFileSync(file, 'utf8')) as { data: Record<string, unknown[]> }).data
 }
 
+test("an export into a directory in nobody's project root: refused (N1)", async () => {
+  for (const client of [ca.client, cadmin.client]) {
+    const r = await call(client, 'app.exportImport.testExportAllToPath', {
+      filePath: join(out, 'x.slay')
+    })
+    expect(r.code, JSON.stringify(r)).toBe('NOT_FOUND')
+  }
+})
+
 test("A's export holds A's content and none of B's or the admin's", async () => {
-  const data = await exportOf(ca.client, 'a')
+  const data = await exportOf(ca.client, A)
   expect(shows(data.projects, A.project), 'A’s rows').toBeTruthy()
   expect(shows(data.tasks, A.task), 'A’s rows').toBeTruthy()
   expect(shows(data.tags, `${A.mark}_TAG`), 'A’s tags, tabs').toBeTruthy()
@@ -228,7 +240,7 @@ test("A's export holds A's content and none of B's or the admin's", async () => 
 })
 
 test("the admin's export holds only the admin's own content", async () => {
-  const data = await exportOf(cadmin.client, 'admin')
+  const data = await exportOf(cadmin.client, ADM)
   expect(shows(data.projects, ADM.project), 'admin’s project').toBeTruthy()
   expect(shows(data, A.mark), `others: ${JSON.stringify(data).slice(0, 300)}`).toBeFalsy()
   expect(shows(data, B.mark), `others: ${JSON.stringify(data).slice(0, 300)}`).toBeFalsy()
@@ -236,7 +248,7 @@ test("the admin's export holds only the admin's own content", async () => {
 })
 
 test("B's export holds none of A's", async () => {
-  const data = await exportOf(cb.client, 'b')
+  const data = await exportOf(cb.client, B)
   expect(shows(data.tasks, B.task), 'B’s rows').toBeTruthy()
   expect(shows(data, A.mark), JSON.stringify(data).slice(0, 300)).toBeFalsy()
   expect(shows(data, ADM.mark), JSON.stringify(data).slice(0, 300)).toBeFalsy()
@@ -447,7 +459,7 @@ test("the admin's diagnostics bundle holds no event about A's task or session", 
 // Last: the import gives the admin a project named like A's, which a name lookup
 // above (`?project=A_SECRET`) would then rightly match.
 test("an admin import neither reuses A's tag nor reveals A's project name", async () => {
-  const bundle = join(out, 'import.slay')
+  const bundle = join(ADM.path, 'import.slay')
   writeFileSync(
     bundle,
     JSON.stringify({

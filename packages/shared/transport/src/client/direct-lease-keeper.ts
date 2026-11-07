@@ -11,11 +11,11 @@
  *
  * @module transport/client/direct-lease-keeper
  */
-import type { DirectTarget } from '../direct/router'
+import type { DirectIssueTarget } from '../direct/router'
 import type { DirectLease, DirectLinkManager } from './direct-link'
 
 export interface DirectLeaseKeeperOptions {
-  target: DirectTarget
+  target: DirectIssueTarget
   manager: Pick<DirectLinkManager, 'acquire' | 'onComputerConnected'>
   onChange(lease: DirectLease | null): void
   wake?: (cb: () => void) => () => void

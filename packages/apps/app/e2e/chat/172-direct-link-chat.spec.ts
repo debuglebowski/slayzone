@@ -1,7 +1,8 @@
 /**
  * Direct client ↔ computer link for chat (docs/direct-link.md): a desktop chat tab on
- * the local computer streams its events straight from the computer and answers a
- * permission prompt there; sending stays a hub call.
+ * the local computer streams its events straight from the computer; sending and the
+ * permission answer stay hub calls (the hub refuses an answer while the conversation
+ * runs in the terminal), and the answer still reaches the agent.
  */
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, test } from '../fixtures/chat'
@@ -9,7 +10,6 @@ import { ev, expect, step, test } from '../fixtures/chat'
 interface DirectChatStatus {
   tabIds: string[]
   reads: number
-  writes: number
   events: number
 }
 
@@ -20,7 +20,9 @@ test.describe('Direct link: desktop chat', () => {
     await resetApp(mainWindow)
   })
 
-  test('events and the permission answer travel the direct link', async ({ chat }) => {
+  test('events travel the direct link; the permission answer reaches the agent through the hub', async ({
+    chat
+  }) => {
     const t = await chat.openTask({
       title: 'Direct chat',
       scenario: {
@@ -71,6 +73,5 @@ test.describe('Direct link: desktop chat', () => {
 
     const after = (await status()) as DirectChatStatus
     expect(after.events).toBeGreaterThan(before.events)
-    expect(after.writes).toBeGreaterThan(before.writes)
   })
 })

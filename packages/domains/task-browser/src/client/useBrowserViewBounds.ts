@@ -81,13 +81,27 @@ export function useBrowserViewBounds(
 
   // Park bounds off-screen when shouldPaint && offScreen. One-shot per transition:
   // the rAF loop is gated on effectivelyVisible (= !offScreen), so it won't fight
-  // this placement. Reuse the last on-screen w/h so the page's layout (and thus
-  // any video player sizing) doesn't reflow on park — only x/y move.
+  // this placement. Size = the placeholder's own layout box (a hidden task tab is
+  // `visibility:hidden`, so it still has real geometry), so the parked page lays
+  // out exactly as it would on screen — also for a view that was never on screen.
+  // Then the last on-screen w/h, then a fixed fallback.
   useEffect(() => {
     if (!viewId || !shouldPaint || !offScreen) return
+    const rect = elementRef.current?.getBoundingClientRect()
+    const zoom = appZoomFactorRef.current
     const last = lastBoundsRef.current
-    const width = last?.width && last.width > 0 ? last.width : FALLBACK_PARK_WIDTH
-    const height = last?.height && last.height > 0 ? last.height : FALLBACK_PARK_HEIGHT
+    const width =
+      rect && rect.width > 0
+        ? Math.round(rect.width * zoom)
+        : last?.width && last.width > 0
+          ? last.width
+          : FALLBACK_PARK_WIDTH
+    const height =
+      rect && rect.height > 0
+        ? Math.round(rect.height * zoom)
+        : last?.height && last.height > 0
+          ? last.height
+          : FALLBACK_PARK_HEIGHT
     void trpcClient.app.browser.setBounds.mutate({
       viewId,
       bounds: {

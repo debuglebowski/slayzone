@@ -567,7 +567,9 @@ async function spawnWarm(projectId: string): Promise<void> {
         conversationId: conversationId || undefined,
         flags: parseShellArgs(modeRow.default_flags ?? undefined)
       })
-      postSpawnCommand = `exec ${buildExecCommand(binary.name, binary.args)}`
+      // `buildExecCommand` already prefixes `exec` (POSIX) — never add another:
+      // bash runs `exec exec claude` as a binary named `exec` (GitHub #173).
+      postSpawnCommand = buildExecCommand(binary.name, binary.args)
     }
 
     const warmId = `warm:${sessionId}`

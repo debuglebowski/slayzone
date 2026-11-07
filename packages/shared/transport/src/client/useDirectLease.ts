@@ -7,7 +7,7 @@
  * Off — always null — in a client that installed no probe (`setDirectLinkProbe`).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DirectTarget } from '../direct/router'
+import type { DirectIssueTarget } from '../direct/router'
 import { keepDirectLease, type DirectLeaseKeeper } from './direct-lease-keeper'
 import {
   directLinkManagerFor,
@@ -16,26 +16,25 @@ import {
   type DirectLinkHubClient
 } from './direct-link'
 import { useHubId } from './HubScope'
-
-/** Ambient hub id outside a HubScope (single hub, tests). */
-const DEFAULT_HUB_KEY = 'default'
+import { DIRECT_LINK_DEFAULT_HUB_ID } from '@slayzone/platform/direct-link'
 
 export function useDirectLease(
   client: unknown,
-  target: DirectTarget | null,
+  target: DirectIssueTarget | null,
   wakeKey?: unknown
 ): { lease: DirectLease | null; lost: () => void } {
-  const hubId = useHubId() ?? DEFAULT_HUB_KEY
+  const hubId = useHubId() ?? DIRECT_LINK_DEFAULT_HUB_ID
   const [lease, setLease] = useState<DirectLease | null>(null)
   const keeperRef = useRef<DirectLeaseKeeper | null>(null)
   const wakeRef = useRef(new Set<() => void>())
   const kind = target?.kind
   const id = target ? (target.kind === 'pty' ? target.sessionId : target.tabId) : null
+  const taskId = target?.taskId ?? null
 
   useEffect(() => {
-    if (!kind || !id || !isDirectLinkEnabled()) return
+    if (!kind || !id || !taskId || !isDirectLinkEnabled()) return
     const keeper = keepDirectLease({
-      target: kind === 'pty' ? { kind, sessionId: id } : { kind, tabId: id },
+      target: kind === 'pty' ? { kind, sessionId: id, taskId } : { kind, tabId: id, taskId },
       manager: directLinkManagerFor(hubId, client as DirectLinkHubClient),
       wake: (cb) => {
         wakeRef.current.add(cb)
@@ -48,7 +47,7 @@ export function useDirectLease(
       keeperRef.current = null
       keeper.stop()
     }
-  }, [client, hubId, kind, id])
+  }, [client, hubId, kind, id, taskId])
 
   useEffect(() => {
     for (const cb of wakeRef.current) cb()

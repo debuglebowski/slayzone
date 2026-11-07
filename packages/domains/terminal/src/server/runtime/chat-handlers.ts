@@ -41,6 +41,8 @@ import type {
 } from '@slayzone/terminal-contracts'
 import type {
   AgentEvent,
+  ChatPinnedMessage,
+  ChatPinnedMessageInput,
   OutgoingUserMessage,
   PermissionDecision,
   SideAnswer,
@@ -653,6 +655,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     getCommandTaskOutput,
     stopCommandTask,
     backgroundCommandTask,
+    stopSubAgent,
     sendToolResult,
     sendControlRequest,
     respondToPermissionRequest,
@@ -929,6 +932,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
     /** Move a running foreground command to the background (`background_tasks`). */
     backgroundCommandTask: (tabId: string, toolUseId: string) =>
       backgroundCommandTask(tabId, toolUseId),
+    /** Stop one running sub-agent, by its row's tool_use_id (`stop_task` / Codex `turn/interrupt`). */
+    stopSubAgent: (tabId: string, toolUseId: string) => stopSubAgent(tabId, toolUseId),
 
     /**
      * Eager spawn entrypoint. Used by the renderer's "Restart" button after a
@@ -1143,6 +1148,34 @@ export function createChatOps(opts: ChatHandlerOpts) {
       return data.threads ? data.threads.list(o.tabId, parent.sessionId) : []
     },
 
+    /** The pins of the tab's conversation on screen (none before it has one). */
+    listPinnedMessages: async (o: ChatCreateOpts): Promise<ChatPinnedMessage[]> => {
+      if (!data.pinnedMessages) return []
+      const session = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      return session.sessionId ? data.pinnedMessages.list(o.tabId, session.sessionId) : []
+    },
+
+    /**
+     * Pin a row of the conversation on screen. A pin naming another conversation
+     * (the view is behind a Reset / session switch) is refused, never filed there.
+     */
+    pinMessage: async (o: ChatCreateOpts & { pin: ChatPinnedMessageInput }): Promise<void> => {
+      if (!data.pinnedMessages) throw new Error('Pinned messages are unavailable')
+      const session = await hydrateSession(await buildHydrateOpts(data, o, { fresh: false }))
+      if (!session.sessionId || session.sessionId !== o.pin.conversationId)
+        throw new Error('The conversation changed; pin the message again')
+      await data.pinnedMessages.pin(o.tabId, { ...o.pin, pinnedAt: Date.now() })
+      chatEvents.emit('pinned-messages-changed', o.tabId)
+    },
+
+    unpinMessage: async (
+      o: ChatCreateOpts & { conversationId: string; key: string }
+    ): Promise<void> => {
+      if (!data.pinnedMessages) throw new Error('Pinned messages are unavailable')
+      await data.pinnedMessages.unpin(o.tabId, o.conversationId, o.key)
+      chatEvents.emit('pinned-messages-changed', o.tabId)
+    },
+
     createThread: async (
       o: ChatCreateOpts & { messageId: string; answerId: string; title: string; text: string }
     ) => {
@@ -1166,6 +1199,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
         sourceUuid: source.atMessageUuid,
         title: o.title,
         conversationId: null,
+        closedAt: null,
         createdAt: Date.now()
       }
       await data.threads.create(thread)
@@ -1178,6 +1212,24 @@ export function createChatOps(opts: ChatHandlerOpts) {
         content: [{ type: 'text', text: o.text }]
       })
       return thread
+    },
+
+    /**
+     * Close (resolve) or reopen a thread of this tab. Closing stops its session
+     * (its history stays; a reopened thread resumes its conversation on the next
+     * message) and hides it from the thread tabs.
+     */
+    setThreadClosed: async (
+      o: ChatCreateOpts & { threadId: string; closed: boolean }
+    ): Promise<void> => {
+      if (!data.threads?.setClosed) throw new Error('Closing threads is unavailable')
+      const thread = await data.threads.get(o.threadId)
+      if (!thread || thread.parentTabId !== o.tabId || thread.taskId !== o.taskId)
+        throw new Error('Thread not found')
+      // Awaited: its last events are written before it reads closed.
+      if (o.closed) await removeSession(thread.id)
+      await data.threads.setClosed(thread.id, o.closed ? Date.now() : null)
+      chatEvents.emit('threads-changed', o.tabId)
     },
 
     /**

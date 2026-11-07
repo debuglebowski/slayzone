@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { Project } from '@slayzone/projects-contracts'
 import { placementOn } from '@slayzone/projects-contracts'
+import { DISABLED_MARK } from '@slayzone/computers/labels'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/dialogs'
 import { SettingsTabIntro } from './project-settings-shared'
@@ -203,12 +204,22 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
                 <SelectContent>
                   <SelectItem value={LOCAL_COMPUTER_VALUE}>Local</SelectItem>
                   {computers.map((computer) => (
-                    <SelectItem key={computer.id} value={computer.id}>
-                      {/* Warned, never disabled: work queues until the computer
-                          returns, and a project's machine is often a laptop that
-                          is simply asleep. */}
+                    <SelectItem
+                      key={computer.id}
+                      value={computer.id}
+                      // A DISABLED computer (Settings → Connections) takes no new
+                      // work, so nothing new may be bound to it; the hub refuses.
+                      disabled={computer.disabledAt != null}
+                    >
+                      {/* Offline is warned, never disabled: work queues until the
+                          computer returns, and a project's machine is often a
+                          laptop that is simply asleep. */}
                       {computer.name}
-                      {computer.usable === false ? (
+                      {computer.disabledAt != null ? (
+                        <span className="text-muted-foreground ml-1.5 text-xs">
+                          {DISABLED_MARK}
+                        </span>
+                      ) : computer.usable === false ? (
                         <span className="text-muted-foreground ml-1.5 text-xs">offline</span>
                       ) : null}
                     </SelectItem>
