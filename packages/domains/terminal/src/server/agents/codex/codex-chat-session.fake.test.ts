@@ -198,10 +198,14 @@ describe('CodexChatSession ⇄ fake codex app-server', () => {
     const l = await live({ processes: [{ turns: [codexReply('Hello from the fake')] }] })
     l.driver.sendUserMessage('hi')
     await l.waitFor(isResult)
+    await l.waitFor((e) => e.kind === 'cli-models')
     const kinds = l.events.map((e) => e.kind)
-    expect(kinds).toEqual([
+    // `model/list` never blocks a turn (loadModels): its answer lands before, inside or
+    // after the turn's stream, as the two requests race. Once, after turn-init.
+    expect(kinds.filter((k) => k === 'cli-models')).toHaveLength(1)
+    expect(kinds.indexOf('cli-models')).toBeGreaterThan(kinds.indexOf('turn-init'))
+    expect(kinds.filter((k) => k !== 'cli-models')).toEqual([
       'turn-init',
-      'cli-models',
       'stream-message-start',
       'stream-block-start',
       'stream-block-delta',
