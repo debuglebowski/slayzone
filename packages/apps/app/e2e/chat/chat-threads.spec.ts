@@ -1,9 +1,104 @@
-import { resetApp } from '../fixtures/electron'
-import { echoTurn, expect, test } from '../fixtures/chat'
+import type { Locator, Page } from '@playwright/test'
+import { openTaskById, resetApp } from '../fixtures/electron'
+import { type ChatTask, echoTurn, expect, test } from '../fixtures/chat'
+
+/**
+ * The answer-threads panel this tab has open, as `answer-threads-panel.ts` keeps it
+ * in localStorage (key `slayzone:chat-threads-panel:[hubId, tabId]`); null = closed.
+ * A reload restores what is stored, so a test awaits the write before reloading.
+ */
+async function storedPanel(t: ChatTask): Promise<{ activeId: string | null } | null> {
+  return t.page.evaluate((tabId) => {
+    const prefix = 'slayzone:chat-threads-panel:'
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key?.startsWith(prefix)) continue
+      const [, tab] = JSON.parse(key.slice(prefix.length)) as [string, string]
+      if (tab === tabId) return JSON.parse(localStorage.getItem(key) ?? 'null')
+    }
+    return null
+  }, t.tabId)
+}
+
+/**
+ * `t.reload()`, minus its strict single-panel check: an open threads panel renders
+ * each thread's chat as a nested `[data-chat-panel]`, so once the panel restores
+ * that check sees two and fails (a race against the restore). Waits for the main
+ * (outermost) panel instead.
+ */
+async function reload(t: ChatTask): Promise<void> {
+  await t.page.reload({ waitUntil: 'domcontentloaded' })
+  await openTaskById(t.page, t.taskId)
+  await expect(t.page.locator('[data-chat-panel]:visible').first()).toBeVisible({
+    timeout: 10_000
+  })
+}
+
+/** This main conversation's threads, as the server stores them. */
+async function listThreads(t: ChatTask, conversationId: string) {
+  return t.page.evaluate((input) => window.getTrpcVanillaClient().chat.threads.list.query(input), {
+    ...t.opts(),
+    conversationId
+  })
+}
+
+/** No turn running anywhere in `scope` (main panel and its thread panels). */
+async function expectIdle(scope: Locator): Promise<void> {
+  await expect(scope.getByRole('button', { name: 'Stop generation' })).toHaveCount(0)
+}
+
+/** Ask a new thread's first question and wait for its turn to finish. */
+async function startThread(page: Page, side: Locator, question: string): Promise<void> {
+  await side.getByRole('textbox', { name: 'First thread question' }).fill(question)
+  await side.getByRole('button', { name: 'Start thread', exact: true }).click()
+  await expect(side.getByText(`echo: ${question}`, { exact: true })).toBeVisible()
+  await expectIdle(page.getByRole('complementary', { name: 'Answer threads' }))
+}
 
 test.describe('Answer threads', () => {
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
+  })
+
+  test('a finished answer shows its hover toolbar on the top-right edge', async ({ chat }) => {
+    const t = await chat.openTask({
+      title: 'Answer toolbar',
+      scenario: { processes: [{ defaultTurn: echoTurn() }] }
+    })
+    await t.send('main question')
+    const main = t.page.locator('[data-chat-panel]:visible').first()
+    const answer = main
+      .getByTestId('chat-assistant-answer')
+      .filter({ hasText: 'echo: main question' })
+    await expect(answer).toBeVisible()
+    // A completed answer: its layout no longer grows.
+    await expectIdle(main)
+    await expect(answer).toHaveCSS('padding-top', '20px')
+    await expect(answer).toHaveCSS('padding-bottom', '20px')
+    const toolbar = answer.getByRole('toolbar', { name: 'Answer actions' })
+    await expect(toolbar).toHaveCSS('opacity', '0')
+    await answer.hover()
+    await expect(toolbar).toHaveCSS('opacity', '1')
+    await expect(toolbar.getByRole('button', { name: 'Copy response', exact: true })).toBeVisible()
+    // Both rects from ONE layout snapshot: 10px above the row, 20px in from its right edge.
+    const offsets = () =>
+      answer.evaluate((row) => {
+        const bar = row.querySelector('[role="toolbar"][aria-label="Answer actions"]')
+        const r = row.getBoundingClientRect()
+        const b = bar!.getBoundingClientRect()
+        return {
+          top: Math.abs(b.y - (r.y - 10)),
+          right: Math.abs(b.x + b.width - (r.x + r.width - 20))
+        }
+      })
+    await expect.poll(async () => Math.max(...Object.values(await offsets()))).toBeLessThan(1)
+    const settled = await offsets()
+    expect(settled.top).toBeLessThan(1)
+    expect(settled.right).toBeLessThan(1)
+    await test.info().attach('answer-toolbar', {
+      body: await t.page.screenshot(),
+      contentType: 'image/png'
+    })
   })
 
   test('side threads preserve main, support tabs, reopen, and return an edited conclusion', async ({
@@ -25,34 +120,18 @@ test.describe('Answer threads', () => {
       .getByTestId('chat-assistant-answer')
       .filter({ hasText: 'echo: main question' })
     await expect(answer).toBeVisible()
-    await expect(answer).toHaveCSS('padding-top', '20px')
-    await expect(answer).toHaveCSS('padding-bottom', '20px')
-    await expect(answer.getByRole('toolbar', { name: 'Answer actions' })).toHaveCSS('opacity', '0')
+    await expectIdle(main)
     const original = (await t.run(0)).sessionId!
     await answer.hover()
-    await expect(answer.getByRole('toolbar', { name: 'Answer actions' })).toHaveCSS('opacity', '1')
-    const toolbar = answer.getByRole('toolbar', { name: 'Answer actions' })
-    await expect(toolbar.getByRole('button', { name: 'Copy response', exact: true })).toBeVisible()
-    const rowBounds = (await answer.boundingBox())!
-    const toolbarBounds = (await toolbar.boundingBox())!
-    expect(Math.abs(toolbarBounds.y - (rowBounds.y - 10))).toBeLessThan(1)
-    expect(
-      Math.abs(toolbarBounds.x + toolbarBounds.width - (rowBounds.x + rowBounds.width - 20))
-    ).toBeLessThan(1)
-    await t.page.screenshot({ path: '/tmp/slayzone-option-d-native.png' })
     await answer.getByRole('button', { name: 'Start thread', exact: true }).click()
     const side = t.page.getByRole('complementary', { name: 'Answer threads' })
-    await side.getByRole('textbox', { name: 'First thread question' }).fill('first side question')
-    await side.getByRole('button', { name: 'Start thread', exact: true }).click()
-    await expect(side.getByText('echo: first side question', { exact: true })).toBeVisible()
+    await startThread(t.page, side, 'first side question')
     const fork = await t.run(1)
     expect(fork.flag('--resume')).toBe(original)
     expect(fork.peersAliveAtStart).toContain(0)
     expect(fork.forked).toBe(true)
     await side.getByRole('button', { name: 'New thread', exact: true }).click()
-    await side.getByRole('textbox', { name: 'First thread question' }).fill('second side question')
-    await side.getByRole('button', { name: 'Start thread', exact: true }).click()
-    await expect(side.getByText('echo: second side question', { exact: true })).toBeVisible()
+    await startThread(t.page, side, 'second side question')
     await expect(side.getByRole('tab')).toHaveCount(2)
     await side.getByRole('tab', { name: 'first side question', exact: true }).click()
     await expect(side.getByText('echo: first side question', { exact: true })).toBeVisible()
@@ -70,7 +149,11 @@ test.describe('Answer threads', () => {
       .click()
     await expect(side.getByRole('tab')).toHaveCount(2)
     await side.getByRole('button', { name: 'Close threads', exact: true }).click()
-    await t.reload()
+    // Reload only once the conclusion's main turn finished and the closed panel is stored.
+    await expect(main.getByText(/^echo: Answer from thread “first side question”/)).toBeVisible()
+    await expectIdle(main)
+    await expect.poll(() => storedPanel(t)).toBeNull()
+    await reload(t)
     const reopened = t.page.locator('[data-chat-panel]:visible').first()
     await expect(reopened.getByRole('button', { name: /Threads 2 items/ })).toHaveCount(1)
     await reopened.getByRole('button', { name: /Threads 2 items/ }).click()
@@ -84,14 +167,18 @@ test.describe('Answer threads', () => {
       .getByRole('complementary', { name: 'Answer threads' })
       .getByRole('tab', { name: 'second side question', exact: true })
       .click()
-    await t.reload()
+    const second = (await listThreads(t, original)).find((x) => x.title === 'second side question')
+    expect(second).toBeTruthy()
+    await expect.poll(async () => (await storedPanel(t))?.activeId).toBe(second!.id)
+    await reload(t)
     const restored = t.page.getByRole('complementary', { name: 'Answer threads' })
     await expect(
       restored.getByRole('tab', { name: 'second side question', exact: true })
     ).toHaveAttribute('aria-selected', 'true')
     await expect(restored.getByText('echo: second side question', { exact: true })).toBeVisible()
     await restored.getByRole('button', { name: 'Close threads', exact: true }).click()
-    await t.reload()
+    await expect.poll(() => storedPanel(t)).toBeNull()
+    await reload(t)
     await expect(
       t.page
         .locator('[data-chat-panel]:visible')
@@ -120,24 +207,23 @@ test.describe('Answer threads', () => {
     const answer = main
       .getByTestId('chat-assistant-answer')
       .filter({ hasText: 'echo: main question' })
+    await expect(answer).toBeVisible()
+    await expectIdle(main)
     await answer.hover()
     await answer.getByRole('button', { name: 'Start thread', exact: true }).click()
     const side = t.page.getByRole('complementary', { name: 'Answer threads' })
     for (const question of ['first side question', 'second side question']) {
       if (question !== 'first side question')
         await side.getByRole('button', { name: 'New thread', exact: true }).click()
-      await side.getByRole('textbox', { name: 'First thread question' }).fill(question)
-      await side.getByRole('button', { name: 'Start thread', exact: true }).click()
-      await expect(side.getByText(`echo: ${question}`, { exact: true })).toBeVisible()
+      await startThread(t.page, side, question)
     }
     // The first thread's own (forked) conversation, which a reopen must resume.
     const mainConversation = (await t.run(0)).sessionId!
-    const listed = await t.page.evaluate(
-      (input) => window.getTrpcVanillaClient().chat.threads.list.query(input),
-      { ...t.opts(), conversationId: mainConversation }
-    )
+    const listed = await listThreads(t, mainConversation)
     const firstConversation = listed.find((x) => x.title === 'first side question')?.conversationId
     expect(firstConversation).toBeTruthy()
+    const second = listed.find((x) => x.title === 'second side question')
+    expect(second).toBeTruthy()
 
     // Closing the selected thread stops its agent and selects the next open one.
     await side.getByRole('tab', { name: 'first side question', exact: true }).click()
@@ -151,8 +237,14 @@ test.describe('Answer threads', () => {
     await expect.poll(async () => (await t.run(1)).exit()).toBeTruthy()
     await expect(answer.getByRole('button', { name: /Threads 1 open · 1 closed/ })).toBeVisible()
 
-    // Closed survives a reload.
-    await t.reload()
+    // Closed survives a reload (stored server-side; the selection is stored locally).
+    await expect
+      .poll(async () =>
+        (await listThreads(t, mainConversation)).map((x) => [x.title, x.closedAt != null])
+      )
+      .toContainEqual(['first side question', true])
+    await expect.poll(async () => (await storedPanel(t))?.activeId).toBe(second!.id)
+    await reload(t)
     const restored = t.page.getByRole('complementary', { name: 'Answer threads' })
     await expect(restored.getByRole('tab')).toHaveCount(1)
 
@@ -172,6 +264,7 @@ test.describe('Answer threads', () => {
     const resumed = await t.run(3)
     expect(resumed.flag('--resume')).toBe(firstConversation)
     expect(resumed.forked).toBe(false)
+    await expectIdle(restored)
 
     // Closing every thread leaves the "New thread" state with the closed list.
     await restored
