@@ -285,7 +285,9 @@ function federationHealthOf(fed: Federation): FederationHealth {
 }
 
 const NO_HEALTH: ReadonlyMap<string, HubHealth> = new Map()
-const noSubscribe = (): (() => void) => () => {}
+const noSubscribe = (): (() => void) => () => {
+  // Nothing was subscribed outside a federation, so there is nothing to undo.
+}
 const noHealth = (): ReadonlyMap<string, HubHealth> => NO_HEALTH
 
 /**
