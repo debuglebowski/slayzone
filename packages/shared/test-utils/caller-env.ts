@@ -33,9 +33,9 @@
  *
  * Lean: node builtins only, no workspace imports — every config imports it relatively.
  */
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, delimiter, dirname, join } from 'node:path'
 
 /**
  * Caller-supplied test knobs that survive the strip. Each is a developer's opt-in for
@@ -130,6 +130,31 @@ function toolCachePins(env: NodeJS.ProcessEnv): Record<string, string> {
   return pins
 }
 
+/**
+ * `path` without the entries no spawn can find a binary in (empty, missing, not a
+ * directory) or that repeat an earlier one, order kept — so the same binaries
+ * resolve. Why: a spawn by bare name tries EVERY entry before the one holding the
+ * binary (libuv on macOS retries posix_spawn per entry: ~6 ms each, many times that
+ * on a loaded machine), and pnpm prepends a `node_modules/.bin` for every ancestor
+ * directory, most of which do not exist. Measured in a computer suite: `git` by bare
+ * name took 119 ms per spawn, by absolute path 7 ms — enough to push git-heavy tests
+ * past their budget once the run loaded the machine.
+ */
+export function normalizeTestPath(path: string): string {
+  const seen = new Set<string>()
+  const kept: string[] = []
+  for (const dir of path.split(delimiter)) {
+    if (!dir || seen.has(dir)) continue
+    seen.add(dir)
+    try {
+      if (statSync(dir).isDirectory()) kept.push(dir)
+    } catch {
+      /* missing: nothing to find there */
+    }
+  }
+  return kept.join(delimiter)
+}
+
 /** The block start `raw` names, or null when it names none. */
 function parseBlockStart(raw: string | undefined): number | null {
   return raw && /^\d+$/.test(raw) ? Number(raw) : null
@@ -157,7 +182,8 @@ export interface CallerIsolation {
  *      they derive from it — every path SlayZone (CLI hub target, `~/.slayzone`, the
  *      app state dir, agent settings) derives from `HOME`/`os.homedir()`/XDG;
  *   3. its own hub port block ({@link TEST_HUB_PORT_BLOCK_ENV}), off the shipped one,
- *      so a fallback probe or sweep cannot reach the developer's running app.
+ *      so a fallback probe or sweep cannot reach the developer's running app;
+ *   4. its `PATH` trimmed by {@link normalizeTestPath} (same binaries, fewer misses).
  * The caller's values are REPLACED, never trusted: whatever the caller set is the
  * thing being isolated from. A test that needs its own home or block sets it on the
  * child it spawns, as before.
@@ -224,6 +250,7 @@ export function isolateFromCaller(
     } while (runBlock !== null && runBlock < start + span && start < runBlock + BLOCK_SIZE)
   }
   set[TEST_HUB_PORT_BLOCK_ENV] = String(start)
+  if (env.PATH) set.PATH = normalizeTestPath(env.PATH)
 
   for (const key of unset) delete env[key]
   Object.assign(env, set)

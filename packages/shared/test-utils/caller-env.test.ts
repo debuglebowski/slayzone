@@ -11,7 +11,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import {
   DEFAULT_HUB_PORT_BLOCK,
   HUB_PORT_BLOCK,
@@ -262,6 +262,27 @@ describe('isolateFromCaller', () => {
       cleanup()
     }
     expect(existsSync(home), 'cleanup removes the throwaway home').toBe(false)
+  })
+
+  test('PATH keeps its order but loses missing dirs and repeats', () => {
+    // A spawn by bare name tries every PATH entry before the one holding the binary
+    // (~6 ms each on macOS, many times that on a loaded machine). pnpm prepends a
+    // node_modules/.bin for every ancestor dir, most of which do not exist.
+    const real = mkdtempSync(join(tmpdir(), 'caller-env-path-'))
+    const file = join(real, 'not-a-dir')
+    writeFileSync(file, '')
+    const env: NodeJS.ProcessEnv = {
+      PATH: [real, '/nonexistent/caller-env-path', real, '', file, '/usr/bin', '/usr/bin'].join(
+        delimiter
+      )
+    }
+    const { cleanup } = isolateFromCaller(env)
+    try {
+      expect(env.PATH).toBe([real, '/usr/bin'].join(delimiter))
+    } finally {
+      cleanup()
+      rmSync(real, { recursive: true, force: true })
+    }
   })
 })
 
