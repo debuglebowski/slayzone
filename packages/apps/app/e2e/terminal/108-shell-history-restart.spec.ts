@@ -82,7 +82,9 @@ test('a shell tab keeps its output across an app restart', async () => {
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(first.page, sessionId)
     await runCommand(first.page, sessionId, `echo ${MARKER}; seq 1 250`)
-    await waitForBufferContains(first.page, sessionId, '250', 15_000)
+    // The OUTPUT's last line, not '250': the echoed command line `seq 1 250` holds
+    // that already, so the app could quit before the shell had printed anything.
+    await waitForBufferContains(first.page, sessionId, '\r\n250\r\n', 15_000)
   } finally {
     await first.close()
   }
