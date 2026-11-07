@@ -1,7 +1,9 @@
+import { spawn } from 'node:child_process'
+import Database from 'better-sqlite3'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { expect, test, vi } from 'vitest'
+import { basename, join } from 'node:path'
+import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from '@slayzone/task/server'
@@ -11,7 +13,7 @@ import { openChatStorage } from '../../../domains/chat-runtime/src/server/storag
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
 
-async function fixture() {
+async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-stability-integration-'))
   // Any provider spawn resolves `claude` to the scripted fake, never to a real
@@ -27,6 +29,7 @@ async function fixture() {
       hubScope: 'hub',
       computerId: () => 'pc',
       getProjectPaths: () => null,
+      ...(opts.spawnProcess ? { spawnProcess: opts.spawnProcess } : {}),
       ctx: {
         config: {
           hubUrl: 'ws://hub/computers',
@@ -82,6 +85,7 @@ async function fixture() {
   }
 }
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit: normal reopen recovers a hub commit whose computer activation was interrupted', async () => {
   const f = await fixture()
   try {
@@ -116,6 +120,7 @@ test('audit: normal reopen recovers a hub commit whose computer activation was i
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit: native-only prompt history must not add a visible chat terminal on reconnect', async () => {
   const f = await fixture()
   try {
@@ -145,6 +150,7 @@ test('audit: native-only prompt history must not add a visible chat terminal on 
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit: interrupted activation also blocks native stop through global command barrier', async () => {
   const f = await fixture()
   try {
@@ -172,6 +178,7 @@ test('audit: interrupted activation also blocks native stop through global comma
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit: local hook inbox preserves prompts from multiple native provider modes', async () => {
   const f = await fixture()
   try {
@@ -209,6 +216,7 @@ test('audit: local hook inbox preserves prompts from multiple native provider mo
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit: interrupted activation must not disable a different healthy task on same computer', async () => {
   const f = await fixture()
   try {
@@ -248,6 +256,7 @@ test('audit: interrupted activation must not disable a different healthy task on
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit control: resuming committed migration before metadata recovery preserves content', async () => {
   const f = await fixture()
   try {
@@ -284,6 +293,7 @@ test('audit control: resuming committed migration before metadata recovery prese
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
 test('audit control: re-enrollment with a new computer identity cannot appropriate old ownership', async () => {
   const f = await fixture()
   try {
@@ -310,6 +320,59 @@ test('audit control: re-enrollment with a new computer identity cannot appropria
   }
 })
 
+/**
+ * Every statement on chat storage that reads `records`, as it runs during `run`: its
+ * SQL, its parameters, the database it ran on and how many rows reached JavaScript.
+ * The computer runtime runs in this process, so its better-sqlite3 handle is seen here.
+ */
+async function recordsReads(run: () => Promise<unknown>) {
+  const proto = Database.prototype as unknown as {
+    prepare(this: Database.Database, sql: string): Database.Statement
+  }
+  const realPrepare = proto.prepare
+  const realParse = JSON.parse
+  const reads: Array<{ sql: string; params: unknown[]; db: Database.Database; rows: number }> = []
+  const parsed: number[] = []
+  proto.prepare = function (sql) {
+    const stmt = realPrepare.call(this, sql)
+    if (/\bFROM records\b/.test(sql)) {
+      const all = stmt.all.bind(stmt)
+      const db = this
+      stmt.all = ((...params: unknown[]) => {
+        const rows = all(...params) as unknown[]
+        reads.push({ sql, params, db, rows: rows.length })
+        return rows
+      }) as typeof stmt.all
+    }
+    return stmt
+  }
+  JSON.parse = ((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
+    parsed.push(typeof text === 'string' ? text.length : 0)
+    return realParse(text, reviver)
+  }) as typeof JSON.parse
+  let result: unknown
+  try {
+    result = await run()
+  } finally {
+    proto.prepare = realPrepare
+    JSON.parse = realParse
+  }
+  return {
+    result,
+    reads: reads.map((read) => ({
+      ...read,
+      /** How SQLite visits `records` for it (EXPLAIN QUERY PLAN, same parameters). */
+      plan: (
+        realPrepare.call(read.db, `EXPLAIN QUERY PLAN ${read.sql}`).all(...read.params) as Array<{
+          detail: string
+        }>
+      ).map((row) => row.detail)
+    })),
+    /** Lengths of every string JSON.parse was handed. */
+    parsed
+  }
+}
+
 test('audit measurement: pending metadata reads scale with retained diagnostic payload', async () => {
   const f = await fixture()
   let raw: ReturnType<typeof openChatStorage> | undefined
@@ -322,14 +385,22 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
     const hub = f.services()
     await hub.relay.ops.saveTabDraft('tab', { text: 'draft', attachments: [] })
     const owner = (await hub.ownership.forTab('tab'))!
-    const measure = async () => {
-      const start = performance.now()
-      expect(await f.request({ kind: 'pendingMetadata' })).toEqual([])
-      return performance.now() - start
-    }
-    const baseline = []
-    for (let n = 0; n < 3; n++) baseline.push(await measure())
     raw = openChatStorage({ stateDir: f.dir, hubScope: 'hub' })
+    const pending = [0, 1, 2].map((n) => ({ sequence: n, audit: `pending-${n}` }))
+    raw.transaction(() => {
+      for (const value of pending)
+        raw!.putRecord(owner.id, owner.epoch, {
+          kind: 'settings',
+          id: `metadata:audit-${value.sequence}`,
+          value,
+          at: value.sequence
+        })
+    })
+    const pendingMetadata = () => f.request({ kind: 'pendingMetadata' })
+    const baseline = await recordsReads(pendingMetadata)
+    expect(baseline.result, 'the pending metadata').toEqual(pending)
+
+    // 32 MiB of retained diagnostics beside it.
     const payload = 'x'.repeat(128 * 1024)
     raw.transaction(() => {
       for (let n = 0; n < 256; n++)
@@ -340,19 +411,41 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
           at: n
         })
     })
-    const retained = []
-    for (let n = 0; n < 3; n++) retained.push(await measure())
-    process.stdout.write(
-      JSON.stringify({
-        metadataAudit: { retainedMiB: 32, baselineMs: baseline, withDiagnosticsMs: retained }
-      }) + '\n'
-    )
+    const retained = await recordsReads(pendingMetadata)
+    expect(retained.result, 'the same pending metadata').toEqual(pending)
+
+    expect(retained.reads.length, 'the read goes through chat storage').toBeGreaterThan(0)
+    // The same statements, the same rows reaching JavaScript: none of the diagnostics.
+    expect(
+      retained.reads.map((read) => [read.sql, read.rows]),
+      'what is read does not grow with retained diagnostics'
+    ).toEqual(baseline.reads.map((read) => [read.sql, read.rows]))
+    expect(
+      retained.reads.reduce((sum, read) => sum + read.rows, 0),
+      'only the pending metadata rows are read'
+    ).toEqual(pending.length)
+    // SQLite never walks the records table: it seeks the metadata id range, so a
+    // diagnostic row (payload included) is never visited.
+    for (const read of retained.reads) {
+      const visits = read.plan.filter((detail) => /\b(records|r)\b/.test(detail))
+      expect(visits.length, `records visited in: ${read.plan.join(' | ')}`).toBeGreaterThan(0)
+      for (const detail of visits)
+        expect(detail, 'an indexed id-range seek, never a scan').toMatch(
+          /^SEARCH .*\bid>\? AND id<\?/
+        )
+    }
+    expect(
+      retained.parsed.filter((length) => length >= payload.length),
+      'no diagnostic payload is deserialized'
+    ).toEqual([])
   } finally {
     raw?.close()
     await f.close()
   }
 })
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
+// (Applies to both cases: content=false and content=true.)
 test.each([false, true])(
   'recovery repairs only empty generated prompt tabs, later chat content=%s',
   async (hasActivity) => {
@@ -409,6 +502,8 @@ test.each([false, true])(
   }
 )
 
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
+// (Applies to both cases: later chat=false and later chat=true.)
 test.each([false, true])(
   'recovery preserves genuine pre-fix prompt ownership while repairing phantom row, later chat=%s',
   async (hasActivity) => {
@@ -474,7 +569,23 @@ test.each([false, true])(
 )
 
 test('a delayed bootstrap cannot mint a newer revision for configuration captured before an edit', async () => {
-  const f = await fixture()
+  // Every provider start, as the computer launches it (the real spawn: the fake CLI
+  // still runs). Awaiting the first one is the event, not a poll of the fake's log.
+  const providerStarts: Array<{ model: string | undefined; pid: number | undefined }> = []
+  let providerStarted!: () => void
+  const firstProviderStart = new Promise<void>((resolve) => {
+    providerStarted = resolve
+  })
+  const recordingSpawn = ((file: string, args: readonly string[], options: object) => {
+    const child = spawn(file, args, options)
+    if (basename(file) === 'claude') {
+      const at = args.indexOf('--model')
+      providerStarts.push({ model: at >= 0 ? args[at + 1] : undefined, pid: child.pid })
+      providerStarted()
+    }
+    return child
+  }) as typeof spawn
+  const f = await fixture({ spawnProcess: recordingSpawn })
   try {
     f.db
       .prepare(
@@ -486,7 +597,7 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
       .run(JSON.stringify({ 'claude-chat': { chatModel: 'sonnet' } }))
     // The tab has no hydrated session, so the edit takes setModel's
     // kill+respawn path: the provider is started with the edited model.
-    const provider = f.fakeClaude.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+    f.fakeClaude.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
     const before = f.services()
     await before.relay.ops.getTabState('tab')
     let release!: () => void, entered!: () => void
@@ -502,8 +613,14 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
       return {}
     })
     const opening = delayed.relay.ops.getTabState('tab')
-    await ready
     try {
+      // Released in `finally` whatever fails here, so the blocked opening never hangs.
+      await Promise.race([
+        ready,
+        opening.then(() => {
+          throw new Error('the delayed bootstrap opened without reaching buildMcpEnv')
+        })
+      ])
       await before.relay.ops.setModel({
         tabId: 'tab',
         taskId: 'task',
@@ -527,9 +644,9 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
         }
       })
     ).toBe('opus')
-    await vi.waitFor(() =>
-      expect(provider.runs().map((run) => run.flag('--model'))).toEqual(['opus'])
-    )
+    await firstProviderStart
+    expect(providerStarts.map((start) => start.model)).toEqual(['opus'])
+    expect(providerStarts[0]?.pid, 'the provider really launched').toBeTypeOf('number')
     expect(
       JSON.parse(
         (
