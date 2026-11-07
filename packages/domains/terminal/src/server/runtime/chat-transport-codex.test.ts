@@ -638,8 +638,13 @@ test('a switch to another Codex conversation shows its past (thread/turns/list),
       providerFlags: []
     }
   })
-  await until(() => h.children.length === 2 && mgr.getSessionTerminalState('tab-switch') === 'idle')
-  await wait(30)
+  // The switched-to thread's turn-init comes after its past (asserted below): wait for
+  // it, not for idle plus a fixed pause, which a loaded machine outran.
+  await until(() =>
+    h.events.some(
+      (e) => e.kind === 'turn-init' && (e as { sessionId?: string }).sessionId === 'thr-other'
+    )
+  )
 
   const next = h.children[1]
   expect(next.requests('thread/resume')).toEqual([
