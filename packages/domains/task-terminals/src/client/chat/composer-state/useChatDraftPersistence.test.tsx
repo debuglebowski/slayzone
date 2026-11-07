@@ -88,21 +88,26 @@ const empty: ChatDraft = { text: '', attachments: [] }
 
 function setup(
   initial: { draft: ChatDraft; enabled?: boolean; paused?: boolean; mode?: string },
-  client = new QueryClient()
+  client = new QueryClient(),
+  /** Every render's result, in order (a passing glimpse `vi.waitFor` may miss). */
+  renders?: Array<ReturnType<typeof useChatDraftPersistence>>
 ) {
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
   return renderHook(
-    (p: { draft: ChatDraft; enabled?: boolean; paused?: boolean; mode?: string }) =>
-      useChatDraftPersistence({
+    (p: { draft: ChatDraft; enabled?: boolean; paused?: boolean; mode?: string }) => {
+      const result = useChatDraftPersistence({
         tabId: 'tab-1',
         mode: p.mode,
         enabled: p.enabled ?? true,
         text: p.draft.text,
         attachments: p.draft.attachments,
         paused: p.paused ?? false
-      }),
+      })
+      renders?.push(result)
+      return result
+    },
     { wrapper, initialProps: initial }
   )
 }
@@ -735,8 +740,13 @@ describe('useChatDraftPersistence', () => {
       scroll: null,
       ownership: { id: 'codex', epoch: 1 }
     }
-    const h = setup({ draft: empty, mode: 'codex-chat' })
+    const renders: Array<ReturnType<typeof useChatDraftPersistence>> = []
+    const h = setup({ draft: empty, mode: 'codex-chat' }, new QueryClient(), renders)
     await vi.waitFor(() => expect(h.result.current.loaded).toBe(true))
+    // From the render that loads it on (not an effect a frame later): `vi.waitFor` can
+    // land between that render and its effects, and a frame showing "loaded, no older
+    // draft" is a wrong answer, however brief.
+    expect(renders.filter((r) => r.loaded).map((r) => r.legacyAvailable)).not.toContain(false)
     expect(h.result.current.saved).toBeNull()
     expect(h.result.current.legacyAvailable).toBe(true)
     expect(localStorage.getItem(oldKey)).not.toBeNull()
