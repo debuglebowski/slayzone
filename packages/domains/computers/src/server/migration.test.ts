@@ -53,7 +53,9 @@ describe('computer schema migration (v149 + v163)', () => {
         // v164 — which physical box, for grouping. Mutable; nothing references it.
         'host_id',
         // v165 — private by default, but only once the computer has an owner.
-        'visibility'
+        'visibility',
+        // v194 — disabled: enrolled and connected, given no new work. NULL = enabled.
+        'disabled_at'
       ])
       expect(columnNames(t.raw, 'join_tokens')).toEqual([
         'id',

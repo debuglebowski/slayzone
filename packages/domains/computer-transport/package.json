@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/computer-transport",
-  "version": "0.36.4",
+  "version": "0.38.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -16,20 +16,20 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@slayzone/terminal-contracts": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/processes": "workspace:*",
     "@slayzone/task": "workspace:*",
     "@slayzone/terminal": "workspace:*",
+    "@slayzone/terminal-contracts": "workspace:*",
     "ws": "^8.22.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
     "@slayzone/test-utils": "workspace:*",
-    "@types/node": "^24.19.0",
-    "@types/ws": "^8.5.13",
-    "vitest": "^5.0.2"
+    "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
+    "vitest": "^5.0.5"
   }
 }

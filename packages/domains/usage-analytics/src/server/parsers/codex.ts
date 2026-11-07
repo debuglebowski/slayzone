@@ -39,6 +39,32 @@ function getCodexSessionsDir(): string {
   return join(homedir(), '.codex', 'sessions')
 }
 
+/** The `session_meta` line a rollout starts with; null when the head is not one. */
+async function readSessionMeta(
+  filePath: string
+): Promise<{ sessionId: string | null; cwd: string | null } | null> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  try {
+    for await (const line of rl) {
+      try {
+        const entry = JSON.parse(line) as CodexEntry
+        if (entry.type === 'session_meta' && entry.payload)
+          return { sessionId: entry.payload.id ?? null, cwd: entry.payload.cwd ?? null }
+      } catch {
+        // Not JSON: not a session head.
+      }
+      return null
+    }
+    return null
+  } catch {
+    return null
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+}
+
 export async function parseCodexFiles(
   getLastOffset: (filePath: string) => { offset: number; modifiedMs: number } | undefined
 ): Promise<ParseResult[]> {
@@ -75,12 +101,16 @@ export async function parseCodexFiles(
     const lastState = getLastOffset(filePath)
     if (lastState && fileStat.mtimeMs <= lastState.modifiedMs) continue
 
-    let sessionId: string | null = null
-    let cwd: string | null = null
-    let currentModel: string = 'unknown'
-
     const records: UsageRecord[] = []
     const startOffset = lastState?.offset ?? 0
+
+    // A resumed parse starts past the file's `session_meta` (its first line): read
+    // it from the head, or every later turn's records carry no session id and no
+    // cwd and can never be attributed to their task.
+    const head = startOffset > 0 ? await readSessionMeta(filePath) : null
+    let sessionId: string | null = head?.sessionId ?? null
+    let cwd: string | null = head?.cwd ?? null
+    let currentModel: string = 'unknown'
 
     const endOffset = await new Promise<number>((resolve, reject) => {
       const stream = createReadStream(filePath, { start: startOffset, encoding: 'utf-8' })

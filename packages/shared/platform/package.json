@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/platform",
-  "version": "0.36.4",
+  "version": "0.38.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -20,6 +20,7 @@
     "./env-manifest": "./src/env-manifest.ts",
     "./device-status-queries": "./src/device-status-queries.ts",
     "./hub-addr": "./src/hub-addr.ts",
+    "./computer-path": "./src/computer-path.ts",
     "./hub-discovery": "./src/hub-discovery.ts",
     "./hub-switches": "./src/hub-switches.ts",
     "./hub-switch-refusal": "./src/hub-switch-refusal.ts",
@@ -28,6 +29,7 @@
     "./hub-registry": "./src/hub-registry.ts",
     "./local-computer-status": "./src/local-computer-status.ts",
     "./electron-bootstrap-contract": "./src/electron-bootstrap-contract.ts",
+    "./direct-link": "./src/direct-link.ts",
     "./paths": "./src/paths.ts",
     "./sqlite-worker": "./src/sqlite-worker.ts",
     "./sqlite-worker-host": "./src/sqlite-worker-host.ts",
@@ -55,6 +57,6 @@
     "@slayzone/hooks": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "better-sqlite3": "^13.0.3",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.5"
   }
 }

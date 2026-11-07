@@ -210,6 +210,33 @@ async function createProject(hub: Hub, token: string | null): Promise<string> {
   return body.data.id
 }
 
+/** A task of `projectId` whose worktree is `dir`: a hub-local root of the caller's. */
+async function taskWithWorktree(
+  hub: Hub,
+  token: string | null,
+  projectId: string,
+  dir: string
+): Promise<void> {
+  const headers = {
+    'content-type': 'application/json',
+    ...(token ? { authorization: `Bearer ${token}` } : {})
+  }
+  const base = `http://127.0.0.1:${hub.port}/api/tasks`
+  const created = await fetch(base, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ projectId, title: 'w' })
+  })
+  const body = (await created.json()) as { data?: { id: string } }
+  assert(body.data?.id, `create task: ${created.status} ${JSON.stringify(body)}`)
+  const patched = await fetch(`${base}/${body.data.id}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ worktreePath: dir })
+  })
+  expect(patched.ok, `set worktree: ${patched.status} ${await patched.text()}`).toBe(true)
+}
+
 type Proc = {
   mutate: (input?: unknown) => Promise<unknown>
   query: (input?: unknown) => Promise<unknown>
@@ -282,6 +309,8 @@ function describeHub(
     let hub: Hub
     let close = (): void => undefined
     let client: Client
+    let token: string | null = null
+    let projectId = ''
     let valid: {
       projectId: string
       taskId: null
@@ -292,8 +321,8 @@ function describeHub(
     }
     beforeAll(async () => {
       hub = await bootHub(env)
-      const token = opts.login ? await signedInUser(hub) : null
-      const projectId = await createProject(hub, token)
+      token = opts.login ? await signedInUser(hub) : null
+      projectId = await createProject(hub, token)
       const c = hubClient(hub, token)
       close = c.close
       client = c.client
@@ -492,6 +521,9 @@ function describeHub(
     // the stream, and the hub must stay up.
     test(`${name}: fileEditor.watch refusal reaches the stream, hub stays up`, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'slz-t102-watch-'))
+      // With login, a hub-local watch needs a root of the caller's (N1): the folder is
+      // their task's worktree (a hub without computers gives a project no folder).
+      if (opts.login) await taskWithWorktree(hub, token, projectId, dir)
       const changed: string[] = []
       let error: unknown = null
       const sub = client.fileEditor.watch.subscribe(

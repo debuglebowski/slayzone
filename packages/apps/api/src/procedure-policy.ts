@@ -15,12 +15,23 @@ import { setProcedurePolicy } from '@slayzone/trpc-server'
 import { isPathAllowed } from '@slayzone/transport/scopes'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
 import { checkOwnership, ownedResult } from './owner-gate'
+import { confineTaskFileCall } from './task-file-confinement'
+import { getAuthGate } from '@slayzone/trpc-server'
 
 setProcedurePolicy({
   scopeAllows: isPathAllowed,
   adminClassOf: (path) => TRPC_ADMIN_POLICY[path],
   ownerCheck: async (req) => {
     const check = await checkOwnership(req)
+    // After the owner gate: the `files` scope's task confinement (inert without login).
+    if (getAuthGate()) {
+      await confineTaskFileCall({
+        db: req.ctx.db,
+        scopes: req.ctx.principal?.scopes ?? [],
+        path: req.path,
+        getRawInput: req.getRawInput
+      })
+    }
     return check ? (data) => ownedResult(check, data) : null
   }
 })

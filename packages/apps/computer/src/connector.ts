@@ -97,9 +97,15 @@ export async function startConnector(
       dialer?.notify(event.method, event.params)
     }
   })
-  const identity = await host.rpc.request<ComputerIdentity & { contract: number; epoch: string }>(
-    'identity'
-  )
+  const identity = await host.rpc.request<
+    Omit<ComputerIdentity, 'directAddress' | 'directRtc'> & {
+      contract: number
+      epoch: string
+      /** The host's direct link, as values (an older host sends neither). */
+      directAddress?: string | null
+      directRtc?: boolean
+    }
+  >('identity')
   if (identity.contract !== grant.health.contract || identity.epoch !== grant.health.epoch) {
     host.close()
     throw new Error('session host protocol incompatible; maintenance required')
@@ -114,7 +120,14 @@ export async function startConnector(
     // The wire belongs to this connector. The separately checked local contract
     // proves that the host implements its dispatch methods; compatible connector
     // releases can still replace one another without stopping native sessions.
-    identity: { ...identity, version: COMPUTER_VERSION, chatRuntimeReady: !maintenance },
+    identity: {
+      ...identity,
+      version: COMPUTER_VERSION,
+      chatRuntimeReady: !maintenance,
+      // The host serves the direct link; this connector only advertises it.
+      directAddress: () => identity.directAddress ?? null,
+      directRtc: () => identity.directRtc === true
+    },
     epoch: grant.health.epoch,
     connectorGeneration: grant.generation,
     credentialStore: createFileCredentialStore(hubHostFromUrl(config.hubUrl)),

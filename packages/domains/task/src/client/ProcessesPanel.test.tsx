@@ -9,6 +9,7 @@ import type React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ProcessEntry } from './ProcessesPanel.types'
+import { OLD_RUN_UNREACHABLE_MESSAGE } from '@slayzone/processes/shared'
 
 type Children = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', async (importOriginal) => ({
@@ -16,9 +17,15 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   TooltipTrigger: ({ children }: Children) => <>{children}</>,
   TooltipContent: () => null,
   useDepsChanged: (await importOriginal<typeof import('@slayzone/ui')>()).useDepsChanged,
-  toast: { error: (message: string) => toastErrors.push(message) }
+  toast: {
+    error: (message: string, opts?: { action?: { label: string; onClick: () => void } }) => {
+      toastErrors.push(message)
+      toastActions.push(opts?.action ?? null)
+    }
+  }
 }))
 let toastErrors: string[] = []
+let toastActions: Array<{ label: string; onClick: () => void } | null> = []
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: Error) => void }
 function deferred<T>(): Deferred<T> {
@@ -591,6 +598,22 @@ describe('ProcessesPanel row actions', () => {
     await settle()
     expect(labels()).toEqual(['Watcher'])
     expect(toastErrors).toEqual([])
+  })
+
+  // G3: the previous run's computer is offline — not a survivor; the toast says so.
+  // K5: it offers no "Start anyway" — a start parked for that computer is the R5 port
+  // collision; it starts by itself once that computer reconnects.
+  it("a restart refused because the old run's computer is offline says so, no override", async () => {
+    mutations.restart = async () => {
+      throw new Error(OLD_RUN_UNREACHABLE_MESSAGE)
+    }
+    toastActions = []
+    await loaded([proc('a', 't1', 'Dev server')])
+    click('restart-a')
+    await settle()
+    expect(toastErrors).toEqual([`Couldn't restart Dev server: ${OLD_RUN_UNREACHABLE_MESSAGE}`])
+    expect(toastActions).toEqual([null])
+    expect(unhandled).toEqual([])
   })
 
   for (const action of ['remove', 'stop', 'restart'] as const) {

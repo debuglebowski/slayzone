@@ -14,7 +14,10 @@ import {
   setTaskComputer,
   touchComputerLastSeen,
   unrevokeComputer,
-  deleteComputer
+  deleteComputer,
+  setComputerDisabled,
+  listDisabledComputerIds,
+  setComputerRemovedListener
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { listPlacements, setPlacement } from './project-paths'
@@ -480,5 +483,61 @@ describe('unrevokeComputer', () => {
     expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(false)
     await unrevokeComputer(t.db, c.id)
     expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(true)
+  })
+})
+
+describe('setComputerDisabled', () => {
+  it('sets and clears disabled_at; a disabled computer stays listed', async () => {
+    const c = await mkComputer()
+    expect((await getComputer(t.db, c.id))?.disabled_at ?? null).toBeNull()
+    await setComputerDisabled(t.db, c.id, true, 5000)
+    expect((await getComputer(t.db, c.id))?.disabled_at).toBe(5000)
+    expect((await listComputers(t.db)).some((r) => r.id === c.id)).toBe(true)
+    expect([...(await listDisabledComputerIds(t.db))]).toEqual([c.id])
+    await setComputerDisabled(t.db, c.id, false)
+    expect((await getComputer(t.db, c.id))?.disabled_at ?? null).toBeNull()
+    expect((await listDisabledComputerIds(t.db)).size).toBe(0)
+  })
+
+  it('keeps the first disable time when disabled again', async () => {
+    const c = await mkComputer()
+    await setComputerDisabled(t.db, c.id, true, 5000)
+    await setComputerDisabled(t.db, c.id, true, 9000)
+    expect((await getComputer(t.db, c.id))?.disabled_at).toBe(5000)
+  })
+
+  it('survives a re-enroll of the local computer (only revoked_at is cleared)', async () => {
+    const id = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+    const input = {
+      id,
+      name: DEFAULT_LOCAL_COMPUTER_NAME,
+      platform: 'darwin-arm64',
+      version: '0.37.0'
+    }
+    await registerOrReplaceComputer(t.db, input)
+    await setComputerDisabled(t.db, id, true, 5000)
+    await registerOrReplaceComputer(t.db, { ...input, version: '0.38.0' })
+    expect((await getComputer(t.db, id))?.disabled_at).toBe(5000)
+  })
+})
+
+// Round-5 K9: a revoke from REST, or from a departing user's cleanup, never told the
+// hub the computer was gone (only the tRPC router did), so a process run it kept
+// stayed "waiting for its computer" forever. The store itself tells — every path.
+describe('onComputerRemoved: every delete and revoke is heard', () => {
+  it('fires for revokeComputer and deleteComputer, from any caller', async () => {
+    const heard: string[] = []
+    setComputerRemovedListener((id) => heard.push(id))
+    try {
+      const a = await mkComputer({ name: 'one' })
+      const b = await mkComputer({ name: 'two' })
+      await revokeComputer(t.db, a.id)
+      await deleteComputer(t.db, b.id)
+      expect(heard).toEqual([a.id, b.id])
+    } finally {
+      setComputerRemovedListener(null)
+    }
+    await revokeComputer(t.db, (await mkComputer({ name: 'three' })).id)
+    expect(heard, 'cleared').toHaveLength(2)
   })
 })

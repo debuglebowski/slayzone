@@ -230,13 +230,15 @@ test('lifecycle fences native starts before awaiting their stop acknowledgement'
       acknowledged = true
     })
   expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
-  await vi.waitFor(() => expect(stopTask).toHaveBeenCalledWith('task'))
+  await vi.waitFor(() => expect(stopTask).toHaveBeenCalledWith('task', 'paused'))
   expect(acknowledged).toBe(false)
   release()
   await pause
   await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'active', revision: 2 })
   expect(() => h.assertTaskActive('task')).not.toThrow()
   await h.request({ kind: 'task.lifecycle', taskId: 'task', state: 'deleted', revision: 3 })
+  // A purge says so: the task's terminals' saved output goes with it (pty-history).
+  expect(stopTask).toHaveBeenLastCalledWith('task', 'deleted')
   expect(() => h.assertTaskActive('task')).toThrow(/paused|deleted/i)
   expect(() => h.assertTaskActive('other')).not.toThrow()
 })

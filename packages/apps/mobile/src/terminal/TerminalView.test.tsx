@@ -1,4 +1,5 @@
-import { act, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
+import { Keyboard } from 'react-native'
 import { trpcTest } from '../testing'
 import { TerminalView } from './TerminalView'
 
@@ -8,6 +9,7 @@ const mockDom = {
   props: null as null | {
     onModes: (applicationCursorKeys: boolean) => Promise<void>
     onInteract: () => Promise<void>
+    onInput: (data: string) => Promise<void>
   }
 }
 
@@ -19,6 +21,7 @@ jest.mock('./TerminalDom', () => {
     onReady: () => Promise<void>
     onModes: (applicationCursorKeys: boolean) => Promise<void>
     onInteract: () => Promise<void>
+    onInput: (data: string) => Promise<void>
   }) {
     mockDom.props = props
     useImperativeHandle(
@@ -58,6 +61,13 @@ beforeEach(() => {
 })
 
 const SID = 't:t'
+
+/** A recorded input without its random write id. */
+function withoutWriteId(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || !('writeId' in input)) return input
+  const { writeId: _id, ...rest } = input as Record<string, unknown>
+  return rest
+}
 
 function hub(opts: { offline?: () => boolean } = {}) {
   const calls: Array<[string, unknown]> = []
@@ -114,7 +124,9 @@ function hub(opts: { offline?: () => boolean } = {}) {
     emitData: (d: unknown) => act(async () => emitData(d)),
     emitResize: (d: unknown) => act(async () => emitResize(d)),
     emitAvailability: (d: unknown) => act(async () => emitAvailability(d)),
-    of: (path: string) => calls.filter(([p]) => p === path).map(([, input]) => input)
+    // Without the per-write `writeId` (a random id; terminal-controller.test pins it).
+    of: (path: string) =>
+      calls.filter(([p]) => p === path).map(([, input]) => withoutWriteId(input))
   }
 }
 
@@ -128,7 +140,7 @@ const written = () =>
 describe('TerminalView', () => {
   it("shows the session's output at the session's size, then live output", async () => {
     const h = hub()
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     await waitFor(() => expect(written()).toContain('hello '))
     expect(mockDom.ops).toContain('resize 100x30')
     // Only this session's bytes are streamed to the phone.
@@ -144,7 +156,7 @@ describe('TerminalView', () => {
 
   it('sends the key bar’s keys; Esc and ^C also interrupt, as on desktop', async () => {
     const h = hub()
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     const user = userEvent.setup()
     await user.press(screen.getByLabelText('Escape'))
     await user.press(screen.getByLabelText('Arrow up'))
@@ -164,9 +176,18 @@ describe('TerminalView', () => {
     )
   })
 
+  it('sends what a touch scroll gives the program (a full-screen agent scrolls)', async () => {
+    const h = hub()
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+    await act(async () => mockDom.props?.onInput('\x1b[<64;3;2M'))
+    await waitFor(() =>
+      expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\x1b[<64;3;2M' }])
+    )
+  })
+
   it('submits typed text (the agent’s own Enter); an empty send presses Enter', async () => {
     const h = hub()
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('Message to the agent'), 'fix the bug')
     await user.press(screen.getByLabelText('Send'))
@@ -179,12 +200,34 @@ describe('TerminalView', () => {
     await waitFor(() => expect(h.of('pty.write')).toEqual([{ sessionId: SID, data: '\r' }]))
   })
 
+  it('closes the keyboard: its own button while typing, or touching the terminal', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss')
+    try {
+      const h = hub()
+      await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
+      const input = screen.getByLabelText('Message to the agent')
+      // Return sends (and keeps the keyboard up), so the field needs its own close.
+      expect(screen.queryByLabelText('Hide keyboard')).toBeNull()
+      await act(async () => fireEvent(input, 'focus'))
+      await userEvent.setup().press(screen.getByLabelText('Hide keyboard'))
+      expect(dismiss).toHaveBeenCalledTimes(1)
+      await act(async () => fireEvent(input, 'blur'))
+      expect(screen.queryByLabelText('Hide keyboard')).toBeNull()
+
+      // The terminal is a web view: a touch there does not blur the field by itself.
+      await act(async () => mockDom.props?.onInteract())
+      expect(dismiss).toHaveBeenCalledTimes(2)
+    } finally {
+      dismiss.mockRestore()
+    }
+  })
+
   it('reports the user’s presence at most every 4 seconds (it keeps the agent from idle-closing)', async () => {
     let now = 1_000_000
     const clock = jest.spyOn(Date, 'now').mockImplementation(() => now)
     try {
       const h = hub()
-      await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+      await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
       await waitFor(() => expect(h.of('pty.touch')).toHaveLength(1)) // opened
       const user = userEvent.setup()
       await user.press(screen.getByLabelText('Tab'))
@@ -201,7 +244,7 @@ describe('TerminalView', () => {
   it("says the session's computer is offline, then shows its output once it is back", async () => {
     let offline = true
     const h = hub({ offline: () => offline })
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     await waitFor(() => expect(screen.getByText('Computer offline')).toBeTruthy())
     expect(written()).toBe('')
     offline = false
@@ -212,8 +255,9 @@ describe('TerminalView', () => {
 
   it('sends nothing while no agent runs', async () => {
     const h = hub()
-    await render(<TerminalView sessionId={SID} live={false} />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live={false} />, { wrapper: h.wrapper })
     await userEvent.setup().press(screen.getByLabelText('Escape'))
+    await act(async () => mockDom.props?.onInput('\x1b[A'))
     await act(async () => undefined)
     expect(h.of('pty.write')).toEqual([])
     expect(h.of('pty.interrupt')).toEqual([])
@@ -249,7 +293,7 @@ describe('TerminalView: direct link', () => {
         getBufferSince: { query: async () => ({ chunks: [], currentSeq: 0, prelude: '' }) },
         write: {
           mutate: async (input: unknown) => {
-            writes.push(input)
+            writes.push(withoutWriteId(input))
             return true
           }
         }
@@ -268,7 +312,7 @@ describe('TerminalView: direct link', () => {
     const d = directLease()
     mockDirect.lease = d.lease
     const h = hub()
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     await d.start()
     await waitFor(() => expect(written()).toContain('direct '))
     // The hub was never asked to relay this session.
@@ -286,7 +330,7 @@ describe('TerminalView: direct link', () => {
     const d = directLease()
     mockDirect.lease = d.lease
     const h = hub()
-    await render(<TerminalView sessionId={SID} live />, { wrapper: h.wrapper })
+    await render(<TerminalView sessionId={SID} taskId="t1" live />, { wrapper: h.wrapper })
     await d.end()
     expect(mockDirect.lost).toHaveBeenCalled()
   })

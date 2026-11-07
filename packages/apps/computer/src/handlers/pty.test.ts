@@ -514,6 +514,27 @@ describe('createPtyHandlers', () => {
     pty.disposeAll()
   })
 
+  // Final review M2: a recovery shell whose agent's tombstone was gone (computer
+  // restarted, carry window over) got a fresh buffer at seq 0 — below what the
+  // terminal had already shown, so it dropped everything the shell printed. The hub
+  // says where the session's seqs reached; a fresh carried buffer continues there.
+  it('a continuing spawn with no tombstone continues after the seq the hub names', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const reply = (await pty.handlers['pty.spawn']({
+      sessionId: 'carry-fresh',
+      spawnId: 'spawn-2',
+      carryOutput: { fromSpawnId: 'spawn-gone', preamble: '[recovered]\r\n', afterSeq: 41 },
+      command: 'sh',
+      args: ['-c', 'printf shell'],
+      cwd: process.cwd()
+    })) as { seq?: number }
+    expect(reply.seq).toBe(42)
+    await waitFor(() => dataParams(notifies).some((d) => d.data.includes('shell')))
+    expect(Math.min(...dataParams(notifies).map((d) => d.seq))).toBeGreaterThan(41)
+    pty.disposeAll()
+  })
+
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
@@ -1105,6 +1126,62 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
+  it('a keystroke sent DIRECT to a session still waiting for its slot is queued, once, not dropped', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    const first = settled(pty.handlers['pty.spawn'](holder('first')) as Promise<unknown>)
+    const second = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'second',
+        admission: 'foreground',
+        command: 'cat',
+        cwd
+      }) as Promise<unknown>
+    )
+    await waitFor(() => first.done)
+    expect(pty.direct.write('second', 'direct-while-queued\n', 'w1')).toBe(true)
+    // The same write retried through the hub is not queued twice.
+    await pty.handlers['pty.write']({
+      sessionId: 'second',
+      data: 'direct-while-queued\n',
+      writeId: 'w1'
+    })
+    await waitFor(() => second.done)
+    // cat echoes once per line written: typed echo + cat's output, for ONE write.
+    const count = () => outputOf(notifies, 'second').split('direct-while-queued').length - 1
+    await waitFor(() => count() >= 2)
+    // A second copy would echo twice more.
+    await new Promise((r) => setTimeout(r, 500))
+    expect(count()).toBe(2)
+    pty.disposeAll()
+  })
+
+  // The hub turns relaying on (someone opened the tab) while the spawn still waits
+  // for its slot. Lost, the session never streamed: the hub already counts it on
+  // and never asks again (mobile / web tabs whose start was queued).
+  it('relay turned on while queued: the session streams once it starts', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
+    void pty.handlers['pty.spawn'](holder('holder', 0.4))
+    const queued = settled(
+      pty.handlers['pty.spawn']({
+        sessionId: 'quiet',
+        spawnId: 'attempt-1',
+        admission: 'foreground',
+        relay: false,
+        command: 'sh',
+        args: ['-c', 'printf hello-relay; exec cat'],
+        cwd
+      }) as Promise<unknown>
+    )
+    await new Promise((r) => setTimeout(r, 50))
+    expect(queued.done, 'still waiting for the slot').toBe(false)
+    await pty.handlers['pty.relay']({ sessionId: 'quiet', spawnId: 'attempt-1', on: true })
+    await waitFor(() => queued.done)
+    await waitFor(() => outputOf(notifies, 'quiet').includes('hello-relay'), 3000)
+    pty.disposeAll()
+  })
+
   it('the startup deadline counts from the start, not from the queue', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
@@ -1506,6 +1583,83 @@ describe('pty.doctor', () => {
       problems: unknown[]
     }
     expect(res.problems).toEqual([])
+  })
+})
+
+describe('pty.cliVersion', () => {
+  // The hub gates version-dependent agent launch flags (codex --no-daemon) on the
+  // CLI version of the machine the agent starts on — this one.
+  const fakeCli = (dir: string, name: string, out: string): string => {
+    const file = join(dir, name)
+    writeFileSync(file, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${out}'; fi\n`)
+    chmodSync(file, 0o755)
+    return file
+  }
+  const withBinDir = async (fn: (dir: string) => Promise<void>): Promise<void> => {
+    const dir = mkdtempSync(join(tmpdir(), 'slz-cli-version-'))
+    try {
+      await fn(dir)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('reports the version of the binary a spawn here would run', async () => {
+    await withBinDir(async (dir) => {
+      fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.167.0')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      ).resolves.toEqual({ ok: true, version: '0.167.0' })
+    })
+  })
+
+  it('re-reads after the binary is replaced (an upgrade in place)', async () => {
+    await withBinDir(async (dir) => {
+      const file = fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.150.0')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      const ask = () => Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      await expect(ask()).resolves.toEqual({ ok: true, version: '0.150.0' })
+      rmSync(file)
+      fakeCli(dir, 'slz-fake-cli', 'codex-cli 0.167.1')
+      await expect(ask()).resolves.toEqual({ ok: true, version: '0.167.1' })
+    })
+  })
+
+  it('not on PATH, or no version in its output → null', async () => {
+    await withBinDir(async (dir) => {
+      fakeCli(dir, 'slz-fake-cli', 'no version here')
+      const { ctx } = makeCtx()
+      const pty = createPtyHandlers(
+        { ...ctx, config: { ...ctx.config, binOverrideDir: dir } },
+        undefined,
+        { nodePtyInstallProblems: () => [] }
+      )
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-fake-cli' }))
+      ).resolves.toEqual({ ok: true, version: null })
+      await expect(
+        Promise.resolve(pty.handlers['pty.cliVersion']({ binary: 'slz-no-such-binary' }))
+      ).resolves.toEqual({ ok: true, version: null })
+    })
+  })
+
+  it('refuses a binary name that is not a plain name', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx, undefined, { nodePtyInstallProblems: () => [] })
+    await expect(
+      Promise.resolve().then(() => pty.handlers['pty.cliVersion']({ binary: '../bin/sh' }))
+    ).rejects.toThrow()
   })
 })
 

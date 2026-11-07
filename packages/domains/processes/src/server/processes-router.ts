@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { router, publicProcedure } from '@slayzone/trpc-server'
+import { TRPCError } from '@trpc/server'
 import { getProcessesDeps } from './processes-deps'
+import { OldRunSurvivesError, OldRunUnreachableError } from './process-manager'
 
 /** Far past any real value (a label is a tab title, a command one shell line, a cwd a
  *  path, Windows long paths included): only a client sending junk reaches them. */
@@ -58,7 +60,18 @@ export const processesRouter = router({
     .mutation(({ input }) => getProcessesDeps().remove(input.processId)),
   restart: publicProcedure
     .input(z.object({ processId: z.string() }))
-    .mutation(({ input }) => getProcessesDeps().restart(input.processId)),
+    .mutation(async ({ input }) => {
+      try {
+        return await getProcessesDeps().restart(input.processId)
+      } catch (err) {
+        // A survivor (Stop it) or an offline computer (it starts when that computer
+        // reconnects) refuses the restart: a precondition the user can see.
+        if (err instanceof OldRunSurvivesError || err instanceof OldRunUnreachableError) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message })
+        }
+        throw err
+      }
+    }),
   listForTask: publicProcedure
     .input(z.object({ taskId: z.string().nullable(), projectId: z.string().nullable() }))
     .query(({ input }) => getProcessesDeps().listForTask(input.taskId, input.projectId)),

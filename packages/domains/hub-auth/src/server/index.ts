@@ -86,7 +86,7 @@ export {
   type DevicePageOptions
 } from './device-page'
 export { AUTH_RATE_LIMIT_DEFAULT, AUTH_RATE_LIMIT_RULES } from './rate-limit'
-export { cookieOnlyHeaders } from './sso-page'
+export { cookieOnlyHeaders, isHubPageResponse, sendHubPage } from './sso-page'
 export {
   APP_CODE_TTL_MS,
   APP_FLOW_COOKIE,

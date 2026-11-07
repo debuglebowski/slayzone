@@ -20,7 +20,11 @@
  *     worker. A worker's CSP comes from its own script's response, so assets get
  *     the shell policy too. Caching stays as `web-assets.ts` sets it.
  *
- * The security headers win over a route's own value (no route sets one today).
+ * The security headers win over a route's own value, with one exception: the hub's
+ * Entra pages (hub-auth `sendHubPage`, {@link isHubPageResponse}) keep their own CSP.
+ * It is at least as strict as either profile's, and names the one thing only the page
+ * knows: where its forms post (`form-action`). The API policy's `form-action 'none'`
+ * would block the app sign-in confirm page (`/api/auth/app-sso`) from submitting.
  * Everything else a route sets on purpose is kept: `Cache-Control` is only a
  * default outside the API. No CORS headers here.
  *
@@ -35,6 +39,7 @@
  * @module server/security-headers
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { isHubPageResponse } from '@slayzone/hub-auth/server'
 import { hubUrlFromAddr, isLoopbackAuthority } from '@slayzone/platform/hub-addr'
 import { isReservedUrl } from './web-assets.js'
 
@@ -132,6 +137,8 @@ interface Profile {
   defaults: ReadonlyArray<readonly [string, string]>
   /** Lower-case names taken out of a `writeHead` header argument (forced ones + removed ones). */
   strip: ReadonlySet<string>
+  /** {@link strip} for a hub page with its own CSP: the CSP stays. */
+  stripKeepingCsp: ReadonlySet<string>
 }
 
 /** Express adds it; it names the stack and serves nothing. */
@@ -149,14 +156,15 @@ function buildProfiles(opts: SecurityHeadersOptions): { api: Profile; shell: Pro
   ]
   const hsts = strictTransportSecurity(opts.publicAddress)
   if (hsts) common.push(['strict-transport-security', hsts])
-  const profile = (
-    forced: Array<[string, string]>,
-    defaults: Array<[string, string]>
-  ): Profile => ({
-    forced,
-    defaults,
-    strip: new Set([...forced.map(([name]) => name), ...REMOVED])
-  })
+  const profile = (forced: Array<[string, string]>, defaults: Array<[string, string]>): Profile => {
+    const strip = new Set([...forced.map(([name]) => name), ...REMOVED])
+    return {
+      forced,
+      defaults,
+      strip,
+      stripKeepingCsp: new Set([...strip].filter((name) => name !== CSP))
+    }
+  }
   return {
     api: profile(
       [...common, ['content-security-policy', API_CSP], ['cache-control', 'no-store']],
@@ -200,15 +208,22 @@ function withoutHeaders(headers: HeaderArg, drop: ReadonlySet<string>): HeaderAr
   return out
 }
 
+const CSP = 'content-security-policy'
+
 function applyProfile(res: ServerResponse, profile: Profile, args: unknown[]): void {
   // writeHead(status, [message], [headers]). Node merges a headers argument OVER
   // values set with setHeader, so a forced header is taken out of it and set here.
   const last = args.length > 1 ? args[args.length - 1] : undefined
   const headerArg = typeof last === 'object' && last !== null ? (last as HeaderArg) : null
   const passed = headerArg ? headerNames(headerArg) : new Set<string>()
-  if (headerArg) args[args.length - 1] = withoutHeaders(headerArg, profile.strip)
+  // A hub page's own CSP stands (module comment); without one it gets the profile's.
+  const ownCsp = isHubPageResponse(res) && (passed.has(CSP) || res.hasHeader(CSP))
+  const strip = ownCsp ? profile.stripKeepingCsp : profile.strip
+  if (headerArg) args[args.length - 1] = withoutHeaders(headerArg, strip)
   for (const name of REMOVED) res.removeHeader(name)
-  for (const [name, value] of profile.forced) res.setHeader(name, value)
+  for (const [name, value] of profile.forced) {
+    if (!(ownCsp && name === CSP)) res.setHeader(name, value)
+  }
   for (const [name, value] of profile.defaults) {
     if (!res.hasHeader(name) && !passed.has(name)) res.setHeader(name, value)
   }

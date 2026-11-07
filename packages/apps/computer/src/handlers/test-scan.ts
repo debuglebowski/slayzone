@@ -9,13 +9,13 @@ import {
   testPanelScanParamsSchema
 } from '@slayzone/computer-transport/shared'
 import { scanTestFiles } from '@slayzone/test-panel/scanner'
-import { assertPathAllowed } from '../config'
+import { judgePath } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
 export function createTestScanHandlers(ctx: HandlerContext): HubMethodTable {
   async function scan(raw: unknown): Promise<unknown> {
     const { projectPath, categories } = testPanelScanParamsSchema.parse(raw)
-    assertPathAllowed(projectPath, ctx.config.allowedRoots)
+    judgePath(projectPath, ctx.config.allowedRoots)
     return scanTestFiles(projectPath, categories)
   }
   return { [HubToComputerMethods.testPanelScan]: scan }

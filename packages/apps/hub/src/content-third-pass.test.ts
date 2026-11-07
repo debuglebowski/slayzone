@@ -921,6 +921,7 @@ async function threadFixture() {
     sourceUuid: 'source',
     title: 'private child topic',
     conversationId: null,
+    closedAt: null,
     createdAt: clock
   })
   h.db

@@ -125,13 +125,16 @@ export async function createArtifactFromStream(
           folderId,
           bytes
         })
-      : await storage.createArtifact(db, {
-          taskId: task.row.id,
-          title: title.trim(),
-          folderId,
-          renderMode: queryString(req.query.renderMode) as RenderMode | undefined,
-          sourcePath: tmpPath!
-        })
+      : await storage.createArtifactFromStagedFile(
+          db,
+          {
+            taskId: task.row.id,
+            title: title.trim(),
+            folderId,
+            renderMode: queryString(req.query.renderMode) as RenderMode | undefined
+          },
+          tmpPath!
+        )
     if (bytes && artifact && queryString(req.query.renderMode))
       artifact = await storage.updateArtifact(db, {
         id: artifact.id,

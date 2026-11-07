@@ -5,6 +5,12 @@ import { CURATED_MCP_SERVERS } from '../../shared/mcp-registry'
 import { ALL_PROVIDERS, loadCustomServers, matchesSearch } from './mcp-helpers'
 import type { CustomMcpServer, EditTarget, MergedServer } from './types'
 import { useDepsChanged } from '@slayzone/ui'
+import { toastAiConfigError } from '../toast-error'
+
+/** One write per provider, in order; stops at (and rejects with) the first failure. */
+async function writeEach<T>(items: T[], write: (item: T) => Promise<unknown>): Promise<void> {
+  for (const item of items) await write(item)
+}
 
 export function useProjectMcpServers(projectPath: string, projectId: string) {
   const trpcClient = useTRPCClient()
@@ -135,27 +141,27 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
         ? { ...server.custom.config }
         : server.config
     if (!config) return
-    for (const provider of enabledMcpTargets) {
-      if (server.providers.includes(provider)) continue
-      await trpcClient.aiConfig.writeMcpServer.mutate({
+    const targets = enabledMcpTargets.filter((p) => !server.providers.includes(p))
+    await writeEach(targets, (provider) =>
+      trpcClient.aiConfig.writeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key,
         config
       })
-    }
+    ).catch((err: unknown) => toastAiConfigError('Could not enable MCP server', err))
     await loadConfigs()
   }
 
   const disableServer = async (server: MergedServer) => {
-    for (const provider of server.providers) {
-      if (!writableProviders.has(provider)) continue
-      await trpcClient.aiConfig.removeMcpServer.mutate({
+    const targets = server.providers.filter((p) => writableProviders.has(p))
+    await writeEach(targets, (provider) =>
+      trpcClient.aiConfig.removeMcpServer.mutate({
         projectPath,
         provider,
         serverKey: server.key
       })
-    }
+    ).catch((err: unknown) => toastAiConfigError('Could not disable MCP server', err))
     await loadConfigs()
   }
 

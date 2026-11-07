@@ -3,7 +3,7 @@
  * desktop's Settings → Connections lists them with). Their words — status, names,
  * choice labels — are desktop's, from `@slayzone/computers/labels`.
  */
-import { OFFLINE_MARK } from '@slayzone/computers/labels'
+import { DISABLED_MARK, OFFLINE_MARK } from '@slayzone/computers/labels'
 import type { RouterOutputs } from '../trpc'
 
 /** One computer of a hub: `usable` = it can take work right now. */
@@ -14,5 +14,6 @@ export type HubComputer = RouterOutputs['computers']['list'][number]
  * can't take work now.
  */
 export function choiceLabel(computer: HubComputer): string {
+  if (computer.disabledAt != null) return `${computer.name} · ${DISABLED_MARK}`
   return computer.usable === false ? `${computer.name} · ${OFFLINE_MARK}` : computer.name
 }

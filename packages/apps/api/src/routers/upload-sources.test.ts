@@ -14,8 +14,10 @@
  *   packages/apps/api/src/routers/upload-sources.test.ts
  */
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -77,6 +79,13 @@ symlinkSync(join(hubRoot, 'sub'), join(aRoot, 'sub-link')) // `sub-link/..` IS t
 symlinkSync(ssoKey, join(aRoot, 'key-link.pem'))
 symlinkSync(ssoKey, join(aRoot, 'key.png'))
 symlinkSync(hubDb, join(aRoot, 'db.png'))
+writeFileSync(join(loose, 'loose.png'), 'NOBODYS')
+// N1: a descriptor of the hub's open database. `/dev/fd/<n>` reads it, and realpath of
+// it names no real file — so it fell into no root and was hub-wide.
+const dbFd = openSync(hubDb, 'r')
+symlinkSync(`/dev/fd/${dbFd}`, join(aRoot, 'fd-link'))
+symlinkSync(`/dev/fd/${dbFd}`, join(aRoot, 'fd.png'))
+symlinkSync(join(loose, 'loose.txt'), join(aRoot, 'loose-link.txt'))
 
 process.env.SLAYZONE_ROOT = hubRoot
 process.env.SLAYZONE_HUB_SSO_CERT_PATH = ssoCert
@@ -147,7 +156,15 @@ const FORBIDDEN_SOURCES: [string, string][] = [
   ],
   ['the SSO private key (outside the root)', ssoKey],
   ['the SSO certificate (outside the root)', ssoCert],
-  ['a link to the SSO key inside A’s project', join(aRoot, 'key-link.pem')]
+  ['a link to the SSO key inside A’s project', join(aRoot, 'key-link.pem')],
+  // N1: hub-local reads need a root the caller may access, never "nobody's".
+  ["a file in nobody's project", join(loose, 'loose.txt')],
+  ["a link inside A's project to a file in nobody's", join(aRoot, 'loose-link.txt')],
+  ["/dev/fd/<the hub database's descriptor>", `/dev/fd/${dbFd}`],
+  ["a link inside A's project to /dev/fd/<n>", join(aRoot, 'fd-link')],
+  ...(existsSync('/proc/self/environ')
+    ? [["the hub's environment (/proc/self/environ)", '/proc/self/environ'] as [string, string]]
+    : [])
 ]
 
 describe('T-107 artifacts.upload (login on)', () => {
@@ -200,7 +217,10 @@ describe('T-107 artifacts.uploadDir (login on): the whole tree is checked', () =
     ['`..` after a link (the hub root)', `${aRoot}/sub-link/..`],
     ["A's project, which holds B's nested project", aRoot],
     ["a directory in nobody's project that holds the hub root", base],
-    ['the directory holding the SSO key and certificate', secrets]
+    ['the directory holding the SSO key and certificate', secrets],
+    // N1: a walk needs a root the caller may access.
+    ["a directory in nobody's project", loose],
+    ['/dev/fd', '/dev/fd']
   ]
   for (const [what, dir] of trees) {
     test(`${what}: refused`, async () => {
@@ -219,7 +239,9 @@ describe('T-107 projects.uploadIcon (login on)', () => {
   const icons: [string, string][] = [
     ["B's image", join(bRoot, 'icon.png')],
     ["a `.png` link to the hub's database", join(aRoot, 'db.png')],
-    ['a `.png` link to the SSO key', join(aRoot, 'key.png')]
+    ['a `.png` link to the SSO key', join(aRoot, 'key.png')],
+    ["an image in nobody's project (N1)", join(loose, 'loose.png')],
+    ['a `.png` link to /dev/fd/<the hub database> (N1)', join(aRoot, 'fd.png')]
   ]
   for (const [what, src] of icons) {
     test(`${what}: refused`, async () => {
@@ -240,13 +262,18 @@ describe('T-107 a project rooted at <ROOT> or at / (its owner sets the path)', (
     ).toBe('NOT_FOUND')
   })
   test('a project at / still gives no hub state, SSO file or other user', async () => {
-    const slash = await a.projects.create({
-      name: 'slash',
-      color: '#000000',
-      path: join(base, 'x')
-    })
+    // A login hub no longer lets a user record a project path at all (R10-1): the
+    // row is one left from before, as an upgraded database may hold.
+    expect(
+      await outcome(a.projects.create({ name: 'slash', color: '#000000', path: '/' }))
+    ).not.toBe('ok')
+    const slash = { id: 'p-slash' }
+    sql(
+      `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES (?, 'slash', '#000', ?, '/')`,
+      slash.id,
+      A
+    )
     try {
-      await a.projects.update({ id: slash.id, path: '/' } as never)
       for (const src of [hubDb, authDb, ssoKey, ssoCert, join(bRoot, 'secret.txt')]) {
         expect(await outcome(a.artifacts.upload({ taskId: 'tA', sourcePath: src }))).toBe(
           'NOT_FOUND'
@@ -302,11 +329,12 @@ describe('T-107 processes off (Normain): nothing off the hub disk but its artifa
         )
       ).toBe(REFUSED)
     }))
+  // The owner gate answers first: a path in no root is nobody's to open (N1).
   test("a file in nobody's project: refused", () =>
     off(async () => {
       expect(
         await outcome(a.artifacts.upload({ taskId: 'tA', sourcePath: join(loose, 'loose.txt') }))
-      ).toBe(REFUSED)
+      ).toBe('NOT_FOUND')
       expect(
         await outcome(
           a.artifacts.pasteFiles({
@@ -315,7 +343,7 @@ describe('T-107 processes off (Normain): nothing off the hub disk but its artifa
             destFolderId: null
           })
         )
-      ).toBe(REFUSED)
+      ).toBe('NOT_FOUND')
     }))
   test("pasting or duplicating A's own artifact (hub storage): still works", async () => {
     const art = await a.artifacts.create({ taskId: 'tA', title: 'dup.md', content: 'DUP' } as never)
@@ -348,6 +376,12 @@ describe('T-107 login off (the desktop app): as before', () => {
         destFolderId: null
       })
       expect(pasted).toHaveLength(1)
+      const dir = await desk.artifacts.uploadDir({
+        taskId: 'tA',
+        dirPath: loose,
+        parentFolderId: null
+      })
+      expect(dir.artifacts.map((x) => x.title).sort()).toEqual(['loose.png', 'loose.txt'])
     } finally {
       setAuthGate(() => true)
     }

@@ -37,7 +37,7 @@ import { ComputerRootsDialog, type RootsTarget } from './ComputerRootsDialog'
  * Computers are listed inside their hub (a computer belongs to exactly one hub, fixed
  * at mint time), so the list itself is per-hub — see `HubCard`. But three
  * things are not: the minted-token modal, the restart-local-computer confirm, and
- * the revoke confirm. Each is a single dialog instance driven by whichever hub's
+ * the delete confirm. Each is a single dialog instance driven by whichever hub's
  * block asked for it.
  *
  * A context rather than props because the blocks are nested two layers down inside
@@ -45,7 +45,7 @@ import { ComputerRootsDialog, type RootsTarget } from './ComputerRootsDialog'
  * Computers table used to do) puts dialog state in a component that has no business
  * holding it.
  *
- * WHAT IS *NOT* HERE: mint and revoke themselves. Those are hub-scoped mutations
+ * WHAT IS *NOT* HERE: mint and delete themselves. Those are hub-scoped mutations
  * that live inside the block, inside that hub's `<HubScope>`, so they are bound to
  * the right hub by construction. This provider only paints their confirmations and
  * results.
@@ -58,18 +58,18 @@ export type MintedToken = {
   hubUrl: string | undefined
 }
 
-/** A revoke awaiting confirmation — `revoke` is the block's hub-bound thunk. */
-export type RevokeTarget = {
+/** A delete awaiting confirmation — `remove` is the block's hub-bound thunk. */
+export type DeleteTarget = {
   id: string
   name: string
-  revoke: () => Promise<void>
+  remove: () => Promise<void>
 }
 
 export interface ComputerActionsValue {
   /** Show the one-time enrollment token a block just minted. */
   showMintedToken: (minted: MintedToken) => void
-  /** Ask for confirmation before revoking; the target carries its own thunk. */
-  requestRevoke: (target: RevokeTarget) => void
+  /** Ask for confirmation before deleting; the target carries its own thunk. */
+  requestDelete: (target: DeleteTarget) => void
   /** Edit a computer's filesystem path-jail; the target carries hub-bound thunks. */
   requestEditRoots: (target: RootsTarget) => void
   /** Confirm-gated restart of the app's own supervised computer. */
@@ -102,7 +102,7 @@ const RECONNECT_SETTLE_MS = 2000
 
 export function ComputerActionsProvider({ children }: { children: ReactNode }) {
   const [minted, setMinted] = useState<MintedToken | null>(null)
-  const [revokeTarget, setRevokeTarget] = useState<RevokeTarget | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [rootsTarget, setRootsTarget] = useState<RootsTarget | null>(null)
   const [restartOpen, setRestartOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -142,21 +142,21 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const showMintedToken = useCallback((next: MintedToken) => setMinted(next), [])
-  const requestRevoke = useCallback((target: RevokeTarget) => setRevokeTarget(target), [])
+  const requestDelete = useCallback((target: DeleteTarget) => setDeleteTarget(target), [])
   const requestEditRoots = useCallback((target: RootsTarget) => setRootsTarget(target), [])
   const requestRestart = useCallback(() => setRestartOpen(true), [])
   const requestStart = useCallback(() => void runRestart(), [runRestart])
 
-  const revoke = async (): Promise<void> => {
-    if (!revokeTarget) return
-    const { name, revoke: run } = revokeTarget
+  const remove = async (): Promise<void> => {
+    if (!deleteTarget) return
+    const { name, remove: run } = deleteTarget
     try {
       await run()
-      toast.success(`Revoked ${name}`)
+      toast.success(`Deleted ${name}`)
     } catch (err) {
-      toast.error(`Revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`)
     }
-    setRevokeTarget(null)
+    setDeleteTarget(null)
   }
 
   const copyToken = async (token: string): Promise<void> => {
@@ -178,7 +178,7 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
     <ComputerActionsContext.Provider
       value={{
         showMintedToken,
-        requestRevoke,
+        requestDelete,
         requestEditRoots,
         requestRestart,
         requestStart,
@@ -278,24 +278,26 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
-        <AlertDialogContent>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent data-testid="computer-delete-dialog">
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke Computer</AlertDialogTitle>
+            <AlertDialogTitle>Delete Computer</AlertDialogTitle>
             <AlertDialogDescription>
-              Revoke <strong>{revokeTarget?.name}</strong>? It will no longer be able to connect to
-              its hub, and any task pinned to it falls back to the project default. This cannot be
-              undone.
+              Delete <strong>{deleteTarget?.name}</strong>? It is disconnected and removed from its
+              hub, and tasks and projects bound to it fall back to the default computer. To use it
+              again it must be enrolled again. To keep it but stop sending it work, disable it
+              instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                void revoke()
+                void remove()
               }}
+              data-testid="computer-delete-confirm"
             >
-              Revoke
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

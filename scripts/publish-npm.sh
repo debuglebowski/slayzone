@@ -110,13 +110,14 @@ echo "==> Rewriting publish manifests"
 # spawn (never with SLAYZONE_HUB_ENABLE_PROCESSES=0) and ws loads bufferutil in a
 # try/catch, so those two are optional (T-30). ws's other accelerator, utf-8-validate,
 # is never loaded on Node >= 18.14 (buffer.isUtf8), so it is not shipped at all. The
-# computer keeps node-pty required: spawning ptys is its job.
+# computer keeps node-pty required: spawning ptys is its job. Its WebRTC runtime,
+# node-datachannel, is optional: without it the computer offers no WebRTC direct link.
 publish_manifest packages/apps/hub "@slayzone/hub" slayzone-hub ./dist/bin.cjs \
   "SlayZone hub — headless server (DB, routers, auth, computer gateway)" \
   better-sqlite3 --optional node-pty bufferutil
 publish_manifest packages/apps/computer "@slayzone/computer" slayzone-computer ./dist/bin.cjs \
   "SlayZone computer — remote execution node (pty, git, fs, processes)" \
-  better-sqlite3 node-pty bufferutil
+  better-sqlite3 node-pty bufferutil --optional node-datachannel
 # The CLI has NO native deps: build.mjs inlines every workspace dep and leaves only
 # the `node:sqlite` builtin external, so there is nothing to rebuild at install
 # time (unlike hub/computer). Zero dependencies is therefore correct, not an omission.

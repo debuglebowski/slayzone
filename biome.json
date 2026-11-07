@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": false,
@@ -141,6 +141,8 @@
       "!packages/apps/cli/test/automations.test.ts"
     ]
   },
+  "markdown": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
+  "yaml": { "formatter": { "enabled": false }, "linter": { "enabled": false } },
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

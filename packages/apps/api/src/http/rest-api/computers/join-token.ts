@@ -3,8 +3,7 @@ import { mintJoinToken as storeMintJoinToken } from '@slayzone/computers/server'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { auditRouteRefusal } from '../route-audit'
-import { ADMIN_ONLY } from '../../../admin-policy'
-import { decideJoinTokenMint } from '@slayzone/computers/server'
+import { decideJoinTokenMint, isJoinTokenForbidden } from '@slayzone/computers/server'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -58,11 +57,12 @@ import type { RestApiDeps } from '../types'
  * make the outer gate 401 an off-box request before this handler runs, hiding
  * both the 503 (listener not yet bound) and the 401/403 distinction below.
  *
- * WHO THE TOKEN IS FOR, and for how long (T-20): `join-token-policy.ts`, shared with
- * `computers.mintJoinToken`. On a hub with login the body names the owner
- * (`forUser`: account id or email, an enabled account) — refused with 400 and a
- * stable `code` otherwise; without login, no owner, as before. `ttlMs` over 1 hour is
- * a 400 everywhere. The admin is only the minter.
+ * WHO THE TOKEN IS FOR, and for how long (T-20 + self-enroll): `join-token-policy.ts`,
+ * shared with `computers.mintJoinToken`. On a hub with login every signed-in user mints
+ * for themselves (no `forUser`, or their own); only an admin names someone else
+ * (`forUser`: account id or email, an enabled account). A non-admin naming anyone
+ * else is a 403, a bad name a 400, each with a stable `code`; without login, no owner,
+ * as before. `ttlMs` over 1 hour is a 400 everywhere. The minter is only the actor.
  */
 
 /**
@@ -78,7 +78,7 @@ import type { RestApiDeps } from '../types'
 export const isLoopbackAddress = isLoopbackPeer
 
 /** What to do with a mint request, once its peer + credential are known. */
-export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized' | 'not-admin'
+export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized'
 
 /**
  * Decide whether a caller may mint. Pure, so the off-box AND proxied-loopback
@@ -95,19 +95,16 @@ export type JoinTokenAuthOutcome = 'mint' | 'forbid' | 'unauthorized' | 'not-adm
  *   credential problem (fixable by signing in / reading the owner file), not a
  *   policy one (fixable only by moving machines) — conflating the two sends
  *   operators to the wrong fix.
- * - a valid full bearer whose account is not admin → `not-admin` (403, code
- *   `ADMIN_ONLY`): only an admin mints (T-15, O-5), as on `computers.mintJoinToken`.
+ * - any valid full bearer mints, admin or not: who the token may be FOR is the
+ *   policy's (`decideJoinTokenMint`), as on `computers.mintJoinToken`.
  */
 export function joinTokenAuthDecision(opts: {
   loopback: boolean
   authRequired: boolean
   bearerOk: boolean
-  /** That session's account has `role: 'admin'`. */
-  admin: boolean
 }): JoinTokenAuthOutcome {
   if (!opts.authRequired) return opts.loopback ? 'mint' : 'forbid'
-  if (!opts.bearerOk) return 'unauthorized'
-  return opts.admin ? 'mint' : 'not-admin'
+  return opts.bearerOk ? 'mint' : 'unauthorized'
 }
 
 export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps): void {
@@ -127,8 +124,7 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     // cookies passed here, only the header, and only a `full` principal counts.
     const principal = authRequired ? await deps.restAuth!.verifyBearer(req.headers, {}) : null
     const bearerOk = principal?.scopes.includes('full') === true
-    const admin = principal?.role === 'admin'
-    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk, admin })
+    const decision = joinTokenAuthDecision({ loopback, authRequired, bearerOk })
     if (decision !== 'mint') auditRouteRefusal(req, decision, principal)
     if (decision === 'forbid') {
       res.status(403).json({
@@ -142,13 +138,6 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
     if (decision === 'unauthorized') {
       res.status(401).json({
         error: 'Unauthorized — sign in to this hub with `slay hub login <url>` first'
-      })
-      return
-    }
-    if (decision === 'not-admin') {
-      res.status(403).json({
-        error: 'minting a computer join token needs a hub admin account',
-        code: ADMIN_ONLY
       })
       return
     }
@@ -181,6 +170,9 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
           loginRequired: authRequired,
           forUser,
           ttlMs,
+          caller: principal?.userId
+            ? { userId: principal.userId, isAdmin: principal.role === 'admin' }
+            : null,
           findAccount: deps.computers?.findAccount
         })
         if (!decision.ok) return decision
@@ -195,7 +187,9 @@ export function registerComputersJoinTokenRoute(app: Express, deps: RestApiDeps)
         return { ok: true as const, token: minted.token }
       })
       if (!outcome.ok) {
-        res.status(400).json({ error: outcome.error.message, code: outcome.error.code })
+        res
+          .status(isJoinTokenForbidden(outcome.error.code) ? 403 : 400)
+          .json({ error: outcome.error.message, code: outcome.error.code })
         return
       }
       // Return the token + the computer URL the computer should dial.

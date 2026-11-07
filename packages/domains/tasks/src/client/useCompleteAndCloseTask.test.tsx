@@ -118,6 +118,18 @@ describe('useCompleteAndCloseTask (⌘⇧D)', () => {
     expect(toast).toHaveBeenCalledWith('Completed "T"', expect.anything())
   })
 
+  it("the toast's Undo button runs the same undo as ⌘Z", async () => {
+    mutate.mockResolvedValue(task({ status: DONE }))
+    const { complete, undo } = setup()
+
+    await act(() => complete('t1'))
+
+    const opts = toast.mock.calls[0][1] as { action: { label: string; onClick: () => void } }
+    expect(opts.action.label).toBe('Undo')
+    opts.action.onClick()
+    expect(undo.undo).toHaveBeenCalledOnce()
+  })
+
   it('rolls back status and reopens the tab when the write fails', async () => {
     const prev = task()
     mutate.mockRejectedValue(new Error('hub down'))

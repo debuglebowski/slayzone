@@ -44,6 +44,7 @@ import type {
 } from '@slayzone/file-editor/shared'
 import { useFileEditor, isImageFile, isPdfFile } from './useFileEditor'
 import { EditorFileTree, type EditorFileTreeHandle } from './EditorFileTree'
+import type { FileTreeRootStatus } from './useFileTreeData'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeEditor } from './CodeEditor'
 import { MarkdownSplitView } from './MarkdownSplitView'
@@ -208,7 +209,23 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
       [activeFilePath]
     )
     const { isFileDragOver, dropHandlers } = useFileDropZone(projectPath, openFile)
-    const showLoading = isRestoring || (treeVisible && !treeReady)
+    // Why the tree's root last failed to load, until a load succeeds. Shown in
+    // place of the loading overlay: the tree never becomes ready on its own while
+    // the hub/computer refuses the directory, so without it the panel spins forever.
+    const [treeError, setTreeError] = useState<string | null>(null)
+    const handleTreeRootStatus = useCallback(
+      (status: FileTreeRootStatus) => {
+        if (status.kind === 'ready') {
+          setTreeReady(true)
+          setTreeError(null)
+        } else {
+          setTreeError(status.message)
+        }
+      },
+      [setTreeReady]
+    )
+    const treeFailed = treeVisible && !treeReady && treeError !== null
+    const showLoading = !treeFailed && (isRestoring || (treeVisible && !treeReady))
 
     // --- Emit state changes to parent for persistence ---
     // Parent (TaskDetailPage) debounces at 500ms, so frequent calls here are fine.
@@ -431,7 +448,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
                   refreshKey={treeRefreshKey}
                   expandedFolders={expandedFolders}
                   onExpandedFoldersChange={setExpandedFolders}
-                  onReady={() => setTreeReady(true)}
+                  onRootStatus={handleTreeRootStatus}
                 />
               )}
             </div>
@@ -605,6 +622,23 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
         {showLoading && (
           <div className="absolute inset-0 z-40 bg-surface-0">
             <PulseGrid />
+          </div>
+        )}
+
+        {treeFailed && (
+          <div
+            data-testid="editor-tree-error"
+            className="absolute inset-0 z-40 flex items-center justify-center bg-surface-0 p-6"
+          >
+            <div className="max-w-md text-center space-y-3">
+              <p className="text-sm font-medium text-foreground">Couldn't load files</p>
+              <p className="text-xs text-muted-foreground break-words font-mono">{treeError}</p>
+              <p className="text-xs text-muted-foreground break-all">{projectPath}</p>
+              <Button variant="outline" size="sm" onClick={() => treeRef.current?.reload()}>
+                <RefreshCw className="size-3.5" />
+                Retry
+              </Button>
+            </div>
           </div>
         )}
 

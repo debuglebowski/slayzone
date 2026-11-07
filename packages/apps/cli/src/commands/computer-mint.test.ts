@@ -1,12 +1,14 @@
 /**
- * `slay computer mint` at the command level (T-20): `--for <user>` names who the
- * computer is for, `--ttl` is capped at the hub's 60 minutes before anything is sent,
- * and a hub with login refusing a mint that names nobody comes back with how to fix it.
+ * `slay computer mint` at the command level (T-20 + self-enroll): no `--for` mints for
+ * the signed-in caller, `--for <user>` names someone else, `--ttl` is capped at the
+ * hub's 60 minutes before anything is sent, and a hub refusing a non-admin's mint for
+ * someone else comes back with how to fix it.
  *
  * The hub is a fake HTTP server on loopback, addressed through `SLAYZONE_HUB_ADDRESS`,
- * that answers `POST /api/computers/join-token` the way a hub with login does (400
- * `JOIN_TOKEN_OWNER_REQUIRED` without `forUser`). The real route's rules are covered
- * by transport's `rest-api/computers/join-token.test.ts`. Pure Node.
+ * that answers `POST /api/computers/join-token` the way a hub with login does for a
+ * NON-admin caller: mints without `forUser` (or naming `u-me`), 403
+ * `JOIN_TOKEN_OWNER_FORBIDDEN` naming `u-other`. The real route's rules are covered by
+ * transport's `rest-api/computers/join-token.test.ts`. Pure Node.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import http from 'node:http'
@@ -33,12 +35,12 @@ async function startHub(): Promise<{ port: number; seen: Seen[]; close: () => Pr
       if (req.method !== 'POST' || req.url !== '/api/computers/join-token') {
         res.statusCode = 404
         res.end('{}')
-      } else if (typeof body.forUser !== 'string') {
-        res.statusCode = 400
+      } else if (body.forUser === 'u-other') {
+        res.statusCode = 403
         res.end(
           JSON.stringify({
-            error: 'name the user this computer is for',
-            code: 'JOIN_TOKEN_OWNER_REQUIRED'
+            error: 'you can enroll computers only for yourself',
+            code: 'JOIN_TOKEN_OWNER_FORBIDDEN'
           })
         )
       } else {
@@ -101,27 +103,40 @@ describe('slay computer mint (T-20)', () => {
     expect(out.stdout).toContain('For:   u-bob')
   })
 
-  describe('no --for on a hub with login', () => {
+  describe('no --for: a token for your own computer', () => {
     let out: MintOut
-    let err: string
     let sent: Seen | undefined
     beforeAll(async () => {
       out = await mint(['lab-box', '--json'])
-      err = out.stderr.join('\n')
       sent = hub.seen.at(-1)
     })
-    test('no --for on a hub with login: exits 1', () => {
-      expect(out.exitCode).toBe(1)
-    })
-    test('…says what the hub said', () => {
-      expect(err).toContain('name the user this computer is for')
-    })
-    test('…and how to fix it', () => {
-      expect(err).toContain('slay computer mint lab-box --for <email>')
-      expect(err).toContain('slay hub users ls')
+    test('no --for: exits 0', () => {
+      expect(out.exitCode, out.stderr.join('\n')).toBeNull()
     })
     test('…having sent no forUser', () => {
       expect(sent?.body ?? {}).not.toHaveProperty('forUser')
+    })
+    test('…and prints the token', () => {
+      expect((JSON.parse(out.stdout.join('\n')) as { token?: string }).token).toBe(TOKEN)
+    })
+  })
+
+  describe('--for someone else, as a non-admin', () => {
+    let out: MintOut
+    let err: string
+    beforeAll(async () => {
+      out = await mint(['lab-box', '--for', 'u-other'])
+      err = out.stderr.join('\n')
+    })
+    test('exits 1', () => {
+      expect(out.exitCode).toBe(1)
+    })
+    test('…says what the hub said', () => {
+      expect(err).toContain('you can enroll computers only for yourself')
+    })
+    test('…and how to fix it', () => {
+      expect(err).toContain('slay computer mint lab-box')
+      expect(err).toContain('hub admin')
     })
   })
 

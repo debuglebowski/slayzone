@@ -30,11 +30,11 @@ import {
 } from '@slayzone/platform/slayzone-config'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
-import { COMPUTER_EXIT_NEEDS_RE_ENROLLMENT } from '@slayzone/computer-transport/shared'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { ENV_VARS, effectiveHubUrls, ignoredCertPinNotices, loadBootComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
-import { COMPUTER_VERSION, startComputer } from './main'
+import { COMPUTER_VERSION, startComputer, watchPrimaryHubExitCode } from './main'
+import { createSupervisorIpc } from './supervisor-ipc'
 import { isUpgradeWorker, receiveUpgradeBoot, superviseUpgrades } from './upgrade-runtime'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -362,6 +362,23 @@ async function main(): Promise<void> {
     return
   }
 
+  // The desktop app's local-computer supervisor (SUPERVISED, which opens an IPC
+  // channel on spawn) talks to this computer over supervisor-ipc.ts: hub reports up,
+  // and the set of hubs it serves besides its primary, down. Created before the
+  // computer starts so every connection — the primary's too — is reported from its
+  // first event.
+  const reportsToSupervisor = !workerBoot && supervised && !!process.send
+  const supervisorIpc = reportsToSupervisor
+    ? createSupervisorIpc({
+        send: (message) => {
+          if (!process.connected) return false
+          process.send?.(message, () => undefined)
+          return true
+        },
+        log
+      })
+    : undefined
+
   const handle = workerBoot?.grant
     ? await startConnector(
         dirname(getComputerConfigFilePath()),
@@ -373,6 +390,12 @@ async function main(): Promise<void> {
         initiallyPaused: workerBoot?.probation,
         log,
         pathReady,
+        ...(supervisorIpc
+          ? {
+              onConnection: supervisorIpc.reportConnection,
+              refreshJoinTokenFor: supervisorIpc.requestJoinToken
+            }
+          : {}),
         onShutdown: () => {
           process.exitCode = 0
           if (workerBoot) {
@@ -383,31 +406,27 @@ async function main(): Promise<void> {
         }
       })
 
-  // The dialer gives up on fatal auth errors (bad join token, missing creds);
-  // exit non-zero so supervisors notice instead of idling forever.
-  //
-  // Exit code 78 (EX_CONFIG, sysexits.h) is reserved for "the hub no longer
-  // recognizes this computer". A supervisor cannot fix that by restarting — only an
-  // operator re-enrolling can — so it needs to distinguish that from a crash, and
-  // an exit code is a far sturdier channel for that than matching a log line.
-  handle.dialer.events.on('error', ({ fatal, reason }) => {
-    if (reason === 'needs-re-enrollment') {
-      process.exitCode = COMPUTER_EXIT_NEEDS_RE_ENROLLMENT
-      return
-    }
-    if (fatal) process.exitCode = 1
+  // Only the PRIMARY hub decides the exit code (bad join token / missing creds → 1,
+  // no longer recognized → 78); see watchPrimaryHubExitCode. A secondary hub's fatal
+  // reaches the desktop parent as a `hub-error` message instead.
+  watchPrimaryHubExitCode(handle.dialer, (code) => {
+    process.exitCode = code
   })
 
   // Hub connection reports for the parent. Two parents listen: the upgrade
   // supervisor (worker boot) and the desktop app's local-computer supervisor
-  // (SUPERVISED, which opens an IPC channel on spawn) — the app's boot splash waits
-  // for `connected` so the app never opens onto a computer that cannot run anything
-  // yet. The desktop parent only listens: unref its channel so it never keeps a
-  // stopping computer's loop alive (a clean supervised stop ends by the loop
-  // draining).
-  const reportsToSupervisor = !workerBoot && supervised && !!process.send
-  if (reportsToSupervisor) process.channel?.unref()
-  if (workerBoot || reportsToSupervisor) {
+  // (SUPERVISED) — the app's boot splash waits for `connected` so the app never
+  // opens onto a computer that cannot run anything yet. The desktop parent's
+  // channel must never keep a stopping computer's loop alive: a clean supervised
+  // stop ends by the loop draining. A 'message' listener REFS the channel (measured
+  // under Electron's Node 24), so it is unref'd again once the listener is in.
+  if (supervisorIpc) {
+    process.channel?.unref()
+    process.on('message', (message: unknown) => supervisorIpc.handleMessage(message, handle))
+    process.channel?.unref()
+    supervisorIpc.ready()
+  }
+  if (workerBoot) {
     for (const dialer of handle.dialers) {
       const hubUrl = effectiveHubUrls(config)[handle.dialers.indexOf(dialer)]
       dialer.events.on('connected', () =>
@@ -458,6 +477,8 @@ async function main(): Promise<void> {
         process.exit(1)
       }, SUPERVISED_STOP_DEADLINE_MS).unref()
     }
+    // A token request still waiting on the parent must not hold the stop open.
+    supervisorIpc?.dispose()
     void handle.stop().then(() => {
       process.exitCode ??= 0
       if (workerBoot && process.connected) process.disconnect()

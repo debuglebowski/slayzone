@@ -88,7 +88,7 @@ describe('useChatSession', () => {
     expect(result.current.inFlight).toBe(true)
   })
 
-  it('on the direct link: replays, streams and answers prompts through the computer; the hub relays nothing', async () => {
+  it('on the direct link: replays and streams from the computer; the permission answer goes through the hub (its running-in-terminal guard)', async () => {
     const calls: string[] = []
     let emit: ((e: unknown) => void) | undefined
     let started: (() => void) | undefined
@@ -104,12 +104,6 @@ describe('useChatSession', () => {
                 ],
                 live: { afterSeq: 0, liveSeq: 0, events: [] }
               }
-            }
-          },
-          respondPermission: {
-            mutate: async () => {
-              calls.push('respondPermission')
-              return true
             }
           },
           onEvent: {
@@ -145,7 +139,7 @@ describe('useChatSession', () => {
     await act(async () => {
       await result.current.respondPermission({ requestId: 'r', decision: { behavior: 'allow' } })
     })
-    expect(calls).toEqual(['replay -1', 'respondPermission'])
-    expect(hub.callsTo('chat.respondPermission')).toHaveLength(0)
+    expect(calls).toEqual(['replay -1'])
+    expect(hub.callsTo('chat.respondPermission')).toHaveLength(1)
   })
 })

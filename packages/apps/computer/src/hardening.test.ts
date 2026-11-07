@@ -26,7 +26,8 @@ import {
   HubToComputerMethods,
   RpcError
 } from '@slayzone/computer-transport/shared'
-import { type ComputerConfig, loadComputerConfig, setProtectedPaths } from './config'
+import { type ComputerConfig, loadComputerConfig } from './config'
+import { setProtectedPaths } from './path-jail'
 import { reloadLocalRoots } from './handlers/computer-config'
 import type { ComputerDialer } from './handlers/types'
 import { createHubRequestHandler, startComputer } from './main'

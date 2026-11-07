@@ -1,8 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
-index b3f6113..1593cf3 100644
+index 16093978940f31b3c2e0947caf971b764f0ca454..635bf97f0878a72eaaed61a6f5337ccee274278e 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -114,27 +114,40 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
+@@ -118,27 +118,40 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
  var useRovingFocusGroupScope = (0, import_react_roving_focus.createRovingFocusGroupScope)();
  var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
  var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
@@ -59,10 +59,10 @@ index b3f6113..1593cf3 100644
      if (!open) {
        return;
 diff --git a/dist/index.mjs b/dist/index.mjs
-index cd4303a..0e04f9f 100644
+index 10ac48bd44116ba4ce0f131020b7d13a3a65cb0e..87daa0fa990c4ff878681dc7df805501e72b60d7 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -48,27 +48,40 @@ var usePopperScope = createPopperScope();
+@@ -57,27 +57,40 @@ var usePopperScope = createPopperScope();
  var useRovingFocusGroupScope = createRovingFocusGroupScope();
  var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
  var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);

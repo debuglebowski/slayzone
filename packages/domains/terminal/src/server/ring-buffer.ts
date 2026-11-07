@@ -161,6 +161,14 @@ export class RingBuffer {
   }
 
   /**
+   * Continue numbering after `seq` — for a fresh buffer that continues a session whose
+   * earlier output went elsewhere. No-op once anything is past it.
+   */
+  continueAfter(seq: number): void {
+    if (seq >= this.nextSeq) this.nextSeq = seq + 1
+  }
+
+  /**
    * Get the current (latest) sequence number.
    * Returns -1 if buffer is empty.
    */

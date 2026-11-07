@@ -185,7 +185,12 @@ export function pendingPrompts(
 export async function promptContext(
   chat: ChatAccess,
   target: ChatTarget
-): Promise<{ autoModeAvailable: boolean; cwd: string; agent: string }> {
+): Promise<{
+  autoModeAvailable: boolean
+  permissionMode: string | null
+  cwd: string
+  agent: string
+}> {
   const deps = chat.deps()
   const [info, auto] = await Promise.all([
     Promise.resolve(deps.ops.getInfo(target.tabId)).catch(() => null),
@@ -197,6 +202,7 @@ export async function promptContext(
   ])
   return {
     autoModeAvailable: target.mode === 'claude-chat' && auto?.optedIn === true,
+    permissionMode: info?.chatMode ?? null,
     cwd: info?.cwd ?? '',
     agent: target.mode === 'codex-chat' ? 'Codex' : 'Claude'
   }

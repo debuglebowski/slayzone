@@ -1,10 +1,21 @@
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  unlinkSync
+} from 'node:fs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/platform/slayzone-config'
+import { STANDARD_COMPUTER_CAPABILITIES } from '@slayzone/computers/labels'
 import {
-  assertPathAllowed,
+  DEFAULT_CAPABILITIES,
   effectiveHubUrls,
   ENV_VARS,
   ignoredCertPinNotices,
@@ -436,47 +447,6 @@ describe('loadComputerConfig — binOverrideDir', () => {
   })
 })
 
-describe('assertPathAllowed', () => {
-  it('accepts a path inside an allowed root and returns its canonical path', () => {
-    const root = realpathSync(dir)
-    const nested = join(root, 'a', 'b')
-    expect(assertPathAllowed(nested, [root])).toBe(nested)
-    // The root itself is allowed.
-    expect(assertPathAllowed(root, [root])).toBe(root)
-  })
-
-  it('rejects ../ traversal that escapes every allowed root', () => {
-    const root = realpathSync(dir)
-    expect(() => assertPathAllowed(join(root, '..', 'outside'), [root])).toThrow(/allowedRoots/)
-    expect(() => assertPathAllowed(join(root, 'sub', '..', '..', 'escape'), [root])).toThrow(
-      /allowedRoots/
-    )
-  })
-
-  it('rejects a sibling directory sharing a name prefix with the root', () => {
-    const root = realpathSync(dir)
-    // `${root}-evil` textually starts with `${root}` but is NOT contained.
-    expect(() => assertPathAllowed(`${root}-evil/x`, [root])).toThrow(/allowedRoots/)
-  })
-
-  it('resolves symlinked ancestors so they cannot smuggle a path out of a root', () => {
-    const root = realpathSync(dir)
-    const outside = mkdtempSync(join(tmpdir(), 'computer-outside-'))
-    try {
-      // A symlink INSIDE the root pointing OUT of it must not grant access.
-      const link = join(root, 'escape-link')
-      symlinkSync(realpathSync(outside), link)
-      expect(() => assertPathAllowed(join(link, 'secret'), [root])).toThrow(/allowedRoots/)
-    } finally {
-      rmSync(outside, { recursive: true, force: true })
-    }
-  })
-
-  it('throws when no roots are configured', () => {
-    expect(() => assertPathAllowed('/anything', [])).toThrow(/no allowedRoots/)
-  })
-})
-
 describe('effectiveHubUrls', () => {
   it('is the single hubUrl when no list is configured', () => {
     const config = loadComputerConfig(
@@ -677,4 +647,12 @@ describe('direct-link listener address (docs/direct-link.md)', () => {
       )
     }
   )
+})
+
+describe('DEFAULT_CAPABILITIES', () => {
+  // The hub UI hides the capability list when it is the standard set, so a default
+  // computer must report exactly that set or every row would show a spurious diff.
+  it('is the standard set the hub UI treats as unremarkable', () => {
+    expect([...DEFAULT_CAPABILITIES]).toEqual([...STANDARD_COMPUTER_CAPABILITIES])
+  })
 })

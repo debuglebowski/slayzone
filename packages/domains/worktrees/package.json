@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/worktrees",
-  "version": "0.36.4",
+  "version": "0.38.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -21,10 +21,10 @@
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",
-    "@codemirror/language": "^6.12.4",
+    "@codemirror/language": "^6.13.1",
     "@codemirror/state": "^6.7.6",
-    "@codemirror/view": "^6.43.13",
-    "@lezer/highlight": "^1.2.4",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
@@ -43,11 +43,11 @@
     "@slayzone/transport": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@slayzone/ui": "workspace:*",
-    "@tanstack/react-query": "^5.104.0",
-    "@tanstack/react-virtual": "^3.14.13",
+    "@tanstack/react-query": "^5.104.5",
+    "@tanstack/react-virtual": "^3.14.21",
     "@trpc/server": "^11.19.0",
-    "codemirror": "^6.0.1",
-    "lucide-react": "^1.48.0",
+    "codemirror": "^6.0.2",
+    "lucide-react": "^1.61.0",
     "zod": "^4.3.5"
   },
   "peerDependencies": {

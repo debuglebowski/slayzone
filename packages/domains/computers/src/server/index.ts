@@ -13,6 +13,11 @@ export {
   revokeComputer,
   unrevokeComputer,
   deleteComputer,
+  setComputerRemovedListener,
+  setComputerDisabled,
+  renameComputer,
+  listDisabledComputerIds,
+  isComputerDisabled,
   setTaskComputer,
   setProjectDefaultComputer,
   setComputerOwner,
@@ -101,7 +106,9 @@ export {
   decideJoinTokenMint,
   isJoinTokenRefusedError,
   JoinTokenRefusedError,
+  isJoinTokenForbidden,
   JOIN_TOKEN_OWNER_REQUIRED,
+  JOIN_TOKEN_OWNER_FORBIDDEN,
   JOIN_TOKEN_OWNER_UNKNOWN,
   JOIN_TOKEN_OWNER_DISABLED,
   JOIN_TOKEN_OWNER_UNSUPPORTED,
@@ -110,3 +117,16 @@ export {
   type FindJoinTokenAccount,
   type JoinTokenMintDecision
 } from './join-token-policy'
+export {
+  ComputerStateError,
+  isComputerStateError,
+  computerDisabledError,
+  computerHasRunningWorkError,
+  computerIsLocalError,
+  computerNameReservedError,
+  COMPUTER_NAME_RESERVED,
+  COMPUTER_DISABLED,
+  COMPUTER_HAS_RUNNING_WORK,
+  COMPUTER_IS_LOCAL,
+  type ComputerStateCode
+} from './computer-state-errors'

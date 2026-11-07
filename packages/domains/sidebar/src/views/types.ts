@@ -58,6 +58,8 @@ export interface SidebarViewContext {
   tags?: Tag[]
   /** Task id → assigned tag ids. */
   taskTags?: Map<string, string[]>
+  /** Task ids that are blocked — flagged `is_blocked` or the target of a dependency. */
+  blockedTaskIds?: Set<string>
   /** Reorder a flat list of task ids (writes "order" col). */
   onTaskReorder?: (taskIds: string[]) => void
   /**

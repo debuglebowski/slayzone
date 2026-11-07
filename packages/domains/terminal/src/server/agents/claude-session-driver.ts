@@ -471,6 +471,10 @@ export class ClaudeSessionDriver implements ChatSessionDriver {
     return this.tasks.background(toolUseId)
   }
 
+  stopSubAgent(toolUseId: string): Promise<void> {
+    return this.tasks.stopSubAgent(toolUseId)
+  }
+
   dispose(): void {
     this.tasks.dispose()
     this.notifications?.dispose()

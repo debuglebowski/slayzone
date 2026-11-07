@@ -8,5 +8,19 @@ export { readThemeCache, resolveThemeCache } from './theme-cache'
 export { AppearanceProvider } from './AppearanceContext'
 export { requestSettingsReopen } from './settings-reopen'
 export { useSettingsReopenTab } from './useSettingsReopenTab'
+export { HubIssueBanners } from './HubIssueBanners'
 export { useAppearance, type AppearanceSettings } from '@slayzone/ui'
 export type { CreateTaskDraft } from '@slayzone/task-contracts'
+export {
+  APP_BADGE_KEYS,
+  APP_BADGE_SOURCES,
+  appBadgeProjectKey,
+  computeAppBadge,
+  parseAppBadgeSettings,
+  type AppBadge,
+  type AppBadgeScope,
+  type AppBadgeSettings,
+  type AppBadgeSource,
+  type AppBadgeStyle,
+  type AppBadgeTask
+} from '../shared/app-badge'

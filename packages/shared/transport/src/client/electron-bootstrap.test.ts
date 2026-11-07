@@ -54,6 +54,14 @@ describe('electronBootstrap degrades when window.api is missing a method', () =>
     expect(await electronBootstrap.getHubTokens()).toEqual({})
   })
 
+  it('checkHubSession() → unreachable, never "no bearer" (a host that cannot check knows nothing)', async () => {
+    // @ts-expect-error deliberately partial host — a main/preload from before the check
+    window.api = { app: {}, files: {} }
+    expect(await electronBootstrap.checkHubSession({ hubId: 'x', url: 'https://h' })).toEqual({
+      state: 'unreachable'
+    })
+  })
+
   it('getWindowId() → null instead of throwing', async () => {
     // @ts-expect-error deliberately partial host
     window.api = { app: {}, files: {} }

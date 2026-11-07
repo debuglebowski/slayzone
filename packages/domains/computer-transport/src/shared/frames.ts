@@ -202,7 +202,9 @@ export const enrollParamsSchema = z.object({
   epoch: epochField,
   hostId: hostIdField,
   /** v8: the direct listener's advertised authority; absent/null = none. */
-  directAddress: directAddressSchema.optional()
+  directAddress: directAddressSchema.optional(),
+  /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
+  directRtc: z.boolean().optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -230,7 +232,9 @@ export const helloParamsSchema = z.object({
    */
   protocolVersion: z.number().int().positive().optional(),
   /** v8: the direct listener's advertised authority; absent/null = none. */
-  directAddress: directAddressSchema.optional()
+  directAddress: directAddressSchema.optional(),
+  /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
+  directRtc: z.boolean().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -275,11 +279,32 @@ export const ptyDataParamsSchema = z.object({
 })
 export type PtyDataParams = z.infer<typeof ptyDataParamsSchema>
 
+/**
+ * A string a computer reports about its sessions (titles, prompt text, ids, URLs,
+ * error text, exit signals) — kept in the hub's state and DB, so bounded. Cut, not
+ * rejected: an oversized title must not drop the state signal carrying it.
+ */
+const bounded = (max: number) => z.string().transform((v) => (v.length > max ? v.slice(0, max) : v))
+const boundedNonEmpty = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .transform((v) => (v.length > max ? v.slice(0, max) : v))
+const SIGNAL_TEXT_MAX = 16 * 1024
+const SIGNAL_TITLE_MAX = 1024
+const SIGNAL_ID_MAX = 256
+const SIGNAL_URL_MAX = 2048
+const SIGNAL_URLS_MAX = 32
+const EXIT_SIGNAL_MAX = 64
+const devServerUrlsSchema = z
+  .array(boundedNonEmpty(SIGNAL_URL_MAX))
+  .transform((urls) => urls.slice(0, SIGNAL_URLS_MAX))
+
 export const ptyExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   /**
    * A lifecycle cause the code cannot carry — today `startup-timeout`: the
    * computer killed a session that produced no output within the spawn's
@@ -393,14 +418,14 @@ export const ptyDetectionParamsSchema = z.object({
 export type PtyDetectionParams = z.infer<typeof ptyDetectionParamsSchema>
 
 const ptySignalErrorSchema = z.object({
-  code: z.string().min(1),
-  message: z.string(),
+  code: boundedNonEmpty(SIGNAL_ID_MAX),
+  message: bounded(SIGNAL_TEXT_MAX),
   recoverable: z.boolean()
 })
 
 const ptySignalPromptSchema = z.object({
   type: z.enum(['permission', 'question', 'input']),
-  text: z.string(),
+  text: bounded(SIGNAL_TEXT_MAX),
   position: z.number()
 })
 
@@ -412,10 +437,10 @@ const ptySignalPromptSchema = z.object({
  */
 export const ptyDetectedSnapshotSchema = z.object({
   activity: z.enum(['working', 'idle', 'unknown']).nullable(),
-  title: z.string().nullable(),
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
   prompt: ptySignalPromptSchema.nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable(),
   error: ptySignalErrorSchema.nullable()
 })
 export type PtyDetectedSnapshot = z.infer<typeof ptyDetectedSnapshotSchema>
@@ -446,9 +471,9 @@ export const ptySignalPayloadSchema = z.object({
   firstOutput: z.literal(true).optional(),
   suppressOutput: z.boolean(),
   prompt: ptySignalPromptSchema.nullable(),
-  title: z.string().nullable(),
-  devServerUrls: z.array(z.string().min(1)),
-  conversationId: z.string().min(1).nullable()
+  title: bounded(SIGNAL_TITLE_MAX).nullable(),
+  devServerUrls: devServerUrlsSchema,
+  conversationId: boundedNonEmpty(SIGNAL_ID_MAX).nullable()
 })
 export type PtySignalPayload = z.infer<typeof ptySignalPayloadSchema>
 
@@ -479,7 +504,7 @@ export type ProcDataParams = z.infer<typeof procDataParamsSchema>
 export const procExitParamsSchema = z.object({
   sessionId: z.string().min(1),
   exitCode: z.number().int().nullable(),
-  signal: z.string().nullable().optional(),
+  signal: bounded(EXIT_SIGNAL_MAX).nullable().optional(),
   reason: z.string().min(1).optional(),
   /** The spawn attempt that exited. */
   spawnId: z.string().min(1).optional(),
@@ -545,6 +570,10 @@ export const HubToComputerMethods = {
   ptyBackgroundJobs: 'pty.backgroundJobs',
   /** Doctor's facts about this computer: node-pty install, the shell, agent binaries. */
   ptyDoctor: 'pty.doctor',
+  /** Version of one agent CLI as a spawn here would run it — gates version-dependent launch flags. */
+  ptyCliVersion: 'pty.cliVersion',
+  /** A tab was deleted: forget its terminal's saved output (see computer pty-history). */
+  ptyForget: 'pty.forget',
   // warm pool (pre-warmed agents live ON the computer — see server/warm-*)
   ptyWarmSpawn: 'pty.warmSpawn',
   ptyWarmAdopt: 'pty.warmAdopt',
@@ -643,7 +672,9 @@ export const HubToComputerMethods = {
   /** Drop capabilities now (user disabled, computer revoked, task gone, epoch moved). */
   directRevoke: 'direct.revoke',
   /** After every (re)connect: keep only the grants the hub still holds. */
-  directReset: 'direct.reset'
+  directReset: 'direct.reset',
+  /** Answer a client's WebRTC offer for a registered grant (remote computers). */
+  directRtcOffer: 'direct.rtcOffer'
 } as const
 
 /** Reserved method namespaces for future hub → computer exec commands. */
@@ -734,8 +765,15 @@ export const ptySpawnParamsSchema = z
     relay: z.boolean().optional(),
     carryOutput: z
       .object({
-        fromSpawnId: z.string().min(1),
-        preamble: z.string().max(4096)
+        /** The exited attempt whose buffer continues; absent = it is long gone. */
+        fromSpawnId: z.string().min(1).optional(),
+        preamble: z.string().max(4096),
+        /**
+         * The highest seq the hub saw for this session. With no buffer to continue (the
+         * tombstone is gone), the new one starts after it: a fresh buffer at 0 was
+         * below what the terminal had shown, and its output was dropped (M2).
+         */
+        afterSeq: z.number().int().min(-1).optional()
       })
       .optional(),
     command: z.string().min(1),
@@ -891,6 +929,45 @@ export const ptyDoctorResultSchema = z.object({
 })
 export type PtyDoctorResult = z.infer<typeof ptyDoctorResultSchema>
 
+/**
+ * `pty.cliVersion` — the version of one agent CLI on this computer, as the binary a
+ * spawn here would run (spawn PATH, bin override dir first) reports it via
+ * `--version`. The hub gates launch flags a CLI only knows from some release on
+ * (codex `--no-daemon`): an older CLI rejects an unknown flag and exits.
+ *  - `version`: the first `major.minor[.patch]` in that output; null when the binary
+ *    isn't on PATH, fails, or prints no version.
+ */
+export const ptyCliVersionParamsSchema = z
+  .object({
+    /** Plain command name only (`codex`), never a path or syntax. */
+    binary: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/)
+  })
+  .strict()
+export type PtyCliVersionParams = z.infer<typeof ptyCliVersionParamsSchema>
+
+export const ptyCliVersionResultSchema = z.object({
+  ok: z.literal(true),
+  version: z.string().nullable()
+})
+export type PtyCliVersionResult = z.infer<typeof ptyCliVersionResultSchema>
+
+/**
+ * `pty.forget` — the hub deleted the tab `sessionId` runs in: the computer deletes
+ * the output it saved for it (live or not — a tab deleted after a restart has no
+ * process). Best-effort; a computer offline then sweeps it by age.
+ */
+export const ptyForgetParamsSchema = z
+  .object({
+    sessionId: z.string().min(1).max(512),
+    taskId: z.string().min(1).max(128)
+  })
+  .strict()
+export type PtyForgetParams = z.infer<typeof ptyForgetParamsSchema>
+
 export const ptyResizeParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: spawnIdField,
@@ -903,6 +980,13 @@ export const ptyWriteParamsSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: spawnIdField,
   data: z.string(),
+  /**
+   * A client's id for this write (docs/direct-link.md). The computer applies an id
+   * once, whichever path brought it (a direct write that was late is also sent
+   * through the hub), and reports its input facts itself (`pty-input`), as for a
+   * direct write. Absent (an older client, or the hub's own writes): written as is.
+   */
+  writeId: z.string().min(1).max(100).optional(),
   /** This write submits the mode's session-id command (`/status`): watch the output
    *  for a conversation id. Ignored for a session without detection. */
   watchConversationId: z.literal(true).optional()
@@ -1368,12 +1452,32 @@ export type GitTurnOpParams = z.infer<typeof gitTurnOpParamsSchema>
  * its output. `cwd` (absolute, jailed) wins; else `projectId`'s folder on that
  * computer; else its first allowed root. `timeoutMs` ends the whole process tree.
  */
-export const execRunParamsSchema = z.object({
-  command: z.string().min(1),
-  cwd: z.string().min(1).optional(),
-  projectId: z.string().min(1).optional(),
-  timeoutMs: z.number().int().positive()
-})
+export const execRunParamsSchema = z
+  .object({
+    /** A shell command line (`/bin/sh -c`, `cmd /c` on Windows). */
+    command: z.string().min(1).optional(),
+    /**
+     * Or a program and its args, run with NO shell: the computer resolves `file` on
+     * its PATH, else under its home (`homeFallbacks`, home-relative) — so the hub
+     * builds no shell line (its quoting and `$HOME` are POSIX; the computer's may
+     * not be).
+     */
+    argv: z
+      .object({
+        file: z.string().min(1),
+        args: z.array(z.string()),
+        /** Written to the program's stdin (a multi-line prompt: never on a cmd line). */
+        stdin: z.string().optional(),
+        homeFallbacks: z.array(z.string().min(1)).max(8).optional()
+      })
+      .optional(),
+    cwd: z.string().min(1).optional(),
+    projectId: z.string().min(1).optional(),
+    timeoutMs: z.number().int().positive()
+  })
+  .refine((p) => (p.command === undefined) !== (p.argv === undefined), {
+    message: 'exec.run takes exactly one of command or argv'
+  })
 export type ExecRunParams = z.infer<typeof execRunParamsSchema>
 export const execRunResultSchema = z.object({
   stdout: z.string(),
@@ -1410,11 +1514,23 @@ export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
  * file: the offset and mtime the last parse ended at — the hub keeps them per
  * computer). Answers each changed file's new records and its new cursor.
  */
+/**
+ * A collect is paged: the first reply carries `next` when more follows, and the hub
+ * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
+ * a whole backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
+ * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ */
+const usageCollectPageSchema = z.object({
+  token: z.string().min(1).max(64),
+  index: z.number().int().nonnegative()
+})
 export const usageCollectParamsSchema = z.object({
   cursors: z.record(
     z.string(),
     z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
-  )
+  ),
+  page: usageCollectPageSchema.optional()
 })
 export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
 export const usageCollectResultSchema = z.object({
@@ -1423,10 +1539,13 @@ export const usageCollectResultSchema = z.object({
       sourceFile: z.string(),
       fileMtimeMs: z.number(),
       endOffset: z.number().int().nonnegative(),
+      /** false: more of this file's records follow on a later page; keep its cursor. */
+      complete: z.boolean().optional(),
       // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
       records: z.array(z.record(z.string(), z.unknown()))
     })
-  )
+  ),
+  next: usageCollectPageSchema.optional()
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 

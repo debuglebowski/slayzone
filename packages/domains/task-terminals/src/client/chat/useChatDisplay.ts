@@ -12,6 +12,7 @@ import type { HistoryGap } from './HistoryGapRow'
 import { historySummary } from './history-summary'
 import type { RevealTimelineItem } from './timeline-reveal'
 import { useChatSearch } from './useChatSearch'
+import { itemKeyOf } from './timeline-item-key'
 import { isRenderable } from './renderers'
 import { useVirtualTimeline } from './useVirtualTimeline'
 import type { TimelineFollow } from './virtual-timeline'
@@ -51,29 +52,6 @@ const MAX_LOADED_PAGES = 24
 
 /** Typing settles this long before a search asks the hub for pages. */
 const SEARCH_PAGES_DELAY_MS = 150
-
-/**
- * A displayed row's key: from ids it carries, else by its index in the
- * timeline (`row`) — never its display position, which shifts as rows load.
- */
-function itemKeyOf(item: TimelineItem, row: number): Key {
-  const streamKey = streamKeyOf(item)
-  if (streamKey) return streamKey
-  if (item.kind === 'text' || item.kind === 'thinking') return `${item.kind}:${item.messageId}`
-  if (item.kind === 'session-start') return `session:${item.sessionId}`
-  if (item.kind === 'codex-plan') return `codex-plan:${item.planId}`
-  if (item.kind === 'conversation-branch') return item.id
-  if (item.kind === 'user-text' && item.id) return `user-text:${item.id}`
-  if (item.kind === 'result') return `result:${item.timestamp}:${row}`
-  if (item.kind === 'hook' && item.hookId) return `hook:${item.hookId}`
-  // By its Task call: the files-changed panel reveals a sub-agent's edits.
-  if (item.kind === 'sub-agent') return `sub-agent:${item.toolUseId}`
-  if (item.kind === 'notice' && item.id) return `notice:${item.id}`
-  if (item.kind === 'files-changed' || item.kind === 'workspace-changes') return item.id
-  // Its range: loading part of it makes it another placeholder.
-  if (item.kind === 'history-gap') return `gap:${item.from}-${item.to}`
-  return `${item.kind}:${row}`
-}
 
 /** Pages a row run `from`..`to` touches. */
 function pagesOf(from: number, to: number, pageRows: number): number[] {
@@ -581,22 +559,27 @@ export function useChatDisplay({
 
   // Reveal a row by its key — not here (paged history): its page (`row`) loads,
   // then it is revealed.
-  const pendingRevealRef = useRef<{ key: Key; align: 'start' | 'center' } | null>(null)
+  const pendingRevealRef = useRef<{
+    key: Key
+    align: 'start' | 'center'
+    inner?: string
+  } | null>(null)
   const revealItem = useStableCallback<Parameters<RevealTimelineItem>, void>((key, opts) => {
     const align = opts?.align ?? 'start'
+    const inner = opts?.inner
     const target = baseTimeline.find((it, i) => itemKey(it, i) === key)
     const host = target && activity?.hosts.get(target)
     if (host) {
       const at = displayedTimeline.indexOf(host)
-      if (at >= 0) virtual.revealIndex(at, { align })
+      if (at >= 0) virtual.revealIndex(at, { align, inner })
       return
     }
     if (displayedTimeline.some((it, i) => itemKey(it, i) === key)) {
-      virtual.revealKey(key, { align })
+      virtual.revealKey(key, { align, inner })
       return
     }
     if (opts?.row === undefined || !paging || !loadPages) return
-    pendingRevealRef.current = { key, align }
+    pendingRevealRef.current = { key, align, inner }
     loadPages([Math.floor(opts.row / paging.pageRows)])
   })
   // Memory holds what is near the view: past the budget, the loaded pages
@@ -628,13 +611,13 @@ export function useChatDisplay({
       const at = displayedTimeline.indexOf(host)
       if (at >= 0) {
         pendingRevealRef.current = null
-        virtual.revealIndex(at, { align: pending.align })
+        virtual.revealIndex(at, { align: pending.align, inner: pending.inner })
       }
       return
     }
     if (!displayedTimeline.some((it, i) => itemKey(it, i) === pending.key)) return
     pendingRevealRef.current = null
-    virtual.revealKey(pending.key, { align: pending.align })
+    virtual.revealKey(pending.key, { align: pending.align, inner: pending.inner })
   }, [displayedTimeline, baseTimeline, activity, itemKey, virtual])
 
   return {

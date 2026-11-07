@@ -5,35 +5,13 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 /**
- * Pins how the settings dialog seeds the shared default agent it hands to
- * the Providers / Panels tabs, and which tab it shows when (re)opened.
+ * Pins which tab the settings dialog shows when (re)opened. (The default agent the
+ * Providers / Panels tabs share is hub-scoped now: `tabs/use-default-agent.test.tsx`.)
  */
 
-let storedMode: string | null = 'codex'
-let mutations: Array<{ path: string; input: unknown }> = []
-
-// The domain's typed view (`./trpc`) re-exports the runtime; point it at this mock.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
-  useTRPC: () => ({
-    settings: {
-      get: {
-        queryOptions: (input: unknown, opts?: Record<string, unknown>) => ({
-          queryKey: ['settings.get', input],
-          queryFn: async () => storedMode,
-          ...opts
-        })
-      },
-      set: {
-        mutationOptions: () => ({
-          mutationFn: async (input: unknown) => {
-            mutations.push({ path: 'settings.set', input })
-            return null
-          }
-        })
-      }
-    }
-  })
+  useFederationOrNull: () => null,
+  HubScope: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 
 type Kids = { children?: React.ReactNode }
@@ -48,17 +26,6 @@ vi.mock('@slayzone/ui', async () => ({
       {children}
     </div>
   )
-}))
-vi.mock('@slayzone/terminal', () => ({
-  useAgents: () => ({
-    modes: [],
-    createMode: vi.fn(),
-    updateMode: vi.fn(),
-    deleteMode: vi.fn(),
-    testMode: vi.fn(),
-    restoreDefaults: vi.fn(),
-    resetToDefaultState: vi.fn()
-  })
 }))
 vi.mock('@slayzone/telemetry/client', () => ({
   useTelemetry: () => ({ tier: 'off', setTier: vi.fn() }),
@@ -88,27 +55,8 @@ vi.mock('./tabs/BackupSettingsTab', () => ({ BackupSettingsTab: tab('backup') })
 vi.mock('./tabs/LabsSettingsTab', () => ({ LabsSettingsTab: tab('labs') }))
 vi.mock('./tabs/ConnectionsSettingsTab', () => ({ ConnectionsSettingsTab: tab('connections') }))
 vi.mock('./tabs/SettingsTabIntro', () => ({ SettingsTabIntro: () => null }))
-vi.mock('./tabs/PanelsSettingsTab', () => ({
-  PanelsSettingsTab: ({ defaultAgentId }: { defaultAgentId: string }) => (
-    <div data-testid="tab-panels" data-mode={defaultAgentId} />
-  )
-}))
-vi.mock('./tabs/AiProvidersSettingsTab', () => ({
-  AiProvidersSettingsTab: function MockAiProvidersTab({
-    defaultAgentId,
-    onDefaultAgentIdChange
-  }: {
-    defaultAgentId: string
-    onDefaultAgentIdChange: (m: string) => void
-  }) {
-    useMountLog('ai-providers')
-    return (
-      <div data-testid="tab-ai-providers" data-mode={defaultAgentId}>
-        <button onClick={() => onDefaultAgentIdChange('gemini')}>pick-gemini</button>
-      </div>
-    )
-  }
-}))
+vi.mock('./tabs/PanelsSettingsTab', () => ({ PanelsSettingsTab: tab('panels') }))
+vi.mock('./tabs/AiProvidersSettingsTab', () => ({ AiProvidersSettingsTab: tab('ai-providers') }))
 
 const { UserSettingsDialog } = await import('./UserSettingsDialog')
 
@@ -128,49 +76,14 @@ function renderDialog(props: { open: boolean; initialTab?: string }) {
   const r = render(ui(props))
   return { ...r, rerender: (p: typeof props) => r.rerender(ui(p)) }
 }
-const mode = () => screen.getByTestId('tab-ai-providers').getAttribute('data-mode')
 
 beforeEach(() => {
   mounted = []
-  storedMode = 'codex'
-  mutations = []
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 })
 afterEach(() => {
   cleanup()
   queryClient.clear()
-})
-
-describe('UserSettingsDialog default agent', () => {
-  it('seeds from the stored setting once open, keeps a local pick until new data', async () => {
-    const { rerender } = renderDialog({ open: true, initialTab: 'ai-providers' })
-    expect(mode()).toBe('claude-code')
-    await flush()
-    expect(mode()).toBe('codex')
-
-    fireEvent.click(screen.getByText('pick-gemini'))
-    expect(mode()).toBe('gemini')
-    await flush()
-    expect(mode()).toBe('gemini')
-    expect(mutations).toEqual([
-      { path: 'settings.set', input: { key: 'default_agent_id', value: 'gemini' } }
-    ])
-
-    // Close + reopen: stored value (still 'codex' in this fake) re-seeds on open.
-    rerender({ open: false, initialTab: 'ai-providers' })
-    rerender({ open: true, initialTab: 'ai-providers' })
-    await flush()
-    expect(mode()).toBe('codex')
-  })
-
-  it('does not seed while closed', async () => {
-    const { rerender } = renderDialog({ open: false, initialTab: 'ai-providers' })
-    await flush()
-    rerender({ open: true, initialTab: 'ai-providers' })
-    expect(mode()).toBe('claude-code')
-    await flush()
-    expect(mode()).toBe('codex')
-  })
 })
 
 describe('UserSettingsDialog active tab', () => {

@@ -12,6 +12,12 @@ export type RevealTimelineItem = (
     align?: 'start' | 'center'
     /** The row's index in the timeline: a paged history loads it first when it isn't here. */
     row?: number
+    /**
+     * A CSS selector for an element INSIDE the row (a tool card in a folded turn):
+     * the view aims at it instead of the row. A row can be far taller than the
+     * view, so centring the row can leave the element out of sight.
+     */
+    inner?: string
   }
 ) => void
 
@@ -22,7 +28,8 @@ export type RevealTimelineItem = (
 const revealRenderedRow: RevealTimelineItem = (key, opts) => {
   if (typeof document === 'undefined') return
   const row = document.querySelector<HTMLElement>(`[data-item-key="${CSS.escape(String(key))}"]`)
-  row?.scrollIntoView({ block: opts?.align ?? 'start' })
+  const inner = opts?.inner ? row?.querySelector<HTMLElement>(opts.inner) : null
+  ;(inner ?? row)?.scrollIntoView({ block: opts?.align ?? 'start' })
 }
 
 /** Provided by the chat panel for its timeline (`useVirtualTimeline`). */

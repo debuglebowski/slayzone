@@ -4,12 +4,19 @@
  * (`event-signal`) regardless, so hub-side records never depend on this; a client on
  * the direct link watches its computer instead, and the hub carries none of it.
  *
- * An unfiltered `chat.onEvent` (an older client) means "all". The config is pushed to
- * every connected computer when it changes (once per tick) and to a computer when it
- * (re)connects. A computer the hub never configured relays everything.
+ * An unfiltered `chat.onEvent` (an older client) means "all". Each computer is told
+ * only the watched tabs it holds (a tab whose computer is not known yet goes to
+ * every computer), re-routed when a chat's ownership moves. The config is pushed to
+ * a computer when its part changes (once per tick) and when it (re)connects. A
+ * computer the hub never configured relays everything.
+ *
+ * Pushes are the hub's own act, sent as the hub (G2: a watch registered inside a
+ * user's request must still reach computers that user does not own). A push that
+ * fails is not counted as delivered and is retried.
  *
  * @module hub/chat-relay-watch
  */
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 
 export interface ChatRelayConfig {
   all: boolean
@@ -25,25 +32,86 @@ export interface ChatRelayWatch {
 export function createChatRelayWatch(deps: {
   computers(): readonly string[]
   send(computerId: string, config: ChatRelayConfig): Promise<unknown>
+  /**
+   * The computers holding a tab's conversation (a move: source and destination).
+   * Empty: not known, so every computer is told. Absent: every computer, always.
+   */
+  computersOfTab?: (tabId: string) => Promise<readonly string[]>
+  /** Tabs whose conversation changed owner: their computers are looked up again. */
+  onOwnershipChange?: (listener: (tabIds: readonly string[]) => void) => () => void
+  /** After a failed push. Default 2 s. */
+  retryMs?: number
+  log?: (message: string, detail: Record<string, unknown>) => void
 }): ChatRelayWatch {
+  const retryMs = deps.retryMs ?? 2_000
   let allWatchers = 0
   const tabs = new Map<string, number>()
-  let lastKey = ''
+  /** Where each watched tab lives, once looked up (absent: unknown, so everywhere). */
+  const placement = new Map<string, readonly string[]>()
+  /** Lookups per tab, so only the latest one's answer is kept. */
+  const lookups = new Map<string, number>()
+  /** The config each computer last acknowledged. */
+  const delivered = new Map<string, string>()
   let scheduled = false
+  let retry: ReturnType<typeof setTimeout> | null = null
 
-  const config = (): ChatRelayConfig => ({
+  const config = (computerId: string): ChatRelayConfig => ({
     all: allWatchers > 0,
-    tabIds: [...tabs.keys()].sort()
+    tabIds: [...tabs.keys()]
+      .filter((id) => {
+        const at = placement.get(id)
+        return !at || at.length === 0 || at.includes(computerId)
+      })
+      .sort()
   })
+
+  function locate(tabId: string): void {
+    const lookup = deps.computersOfTab
+    if (!lookup) return
+    const n = (lookups.get(tabId) ?? 0) + 1
+    lookups.set(tabId, n)
+    lookup(tabId).then(
+      (at) => {
+        if (lookups.get(tabId) !== n || !tabs.has(tabId)) return
+        placement.set(tabId, [...at])
+        changed()
+      },
+      () => {
+        // Unknown: it stays with every computer.
+      }
+    )
+  }
+
+  deps.onOwnershipChange?.((tabIds) => {
+    for (const id of tabIds) if (tabs.has(id)) locate(id)
+  })
+
+  function send(computerId: string, next: ChatRelayConfig, key: string): Promise<void> {
+    return runAsSecurityActor(null, () => deps.send(computerId, next)).then(
+      () => {
+        delivered.set(computerId, key)
+      },
+      (err: unknown) => {
+        delivered.delete(computerId)
+        deps.log?.('chat relay watch push failed; retrying', { computerId, error: String(err) })
+        if (!retry) {
+          retry = setTimeout(() => {
+            retry = null
+            changed()
+          }, retryMs)
+          retry.unref?.()
+        }
+      }
+    )
+  }
 
   function push(): void {
     scheduled = false
-    const next = config()
-    const key = JSON.stringify(next)
-    if (key === lastKey) return
-    lastKey = key
     for (const computerId of deps.computers()) {
-      void deps.send(computerId, next).catch(() => undefined)
+      const next = config(computerId)
+      const key = JSON.stringify(next)
+      if (delivered.get(computerId) === key) continue
+      void send(computerId, next, key)
     }
   }
 
@@ -67,7 +135,11 @@ export function createChatRelayWatch(deps: {
         }
       }
       const ids = [...new Set(tabIds)]
-      for (const id of ids) tabs.set(id, (tabs.get(id) ?? 0) + 1)
+      for (const id of ids) {
+        const n = tabs.get(id) ?? 0
+        tabs.set(id, n + 1)
+        if (n === 0) locate(id)
+      }
       changed()
       let done = false
       return () => {
@@ -75,14 +147,21 @@ export function createChatRelayWatch(deps: {
         done = true
         for (const id of ids) {
           const n = (tabs.get(id) ?? 1) - 1
-          if (n <= 0) tabs.delete(id)
-          else tabs.set(id, n)
+          if (n <= 0) {
+            tabs.delete(id)
+            placement.delete(id)
+            lookups.delete(id)
+          } else tabs.set(id, n)
         }
         changed()
       }
     },
     async computerConnected(computerId) {
-      await deps.send(computerId, config()).catch(() => undefined)
+      // A reconnected computer starts from nothing: whatever it acknowledged before
+      // is gone with its old process or link.
+      delivered.delete(computerId)
+      const next = config(computerId)
+      await send(computerId, next, JSON.stringify(next))
     }
   }
 }

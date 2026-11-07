@@ -40,3 +40,11 @@ export type ProcessEventMap = {
   title: [id: string, title: string | null]
   stats: [stats: Record<string, ProcessStats>]
 }
+
+/**
+ * Why a Start / Restart did not happen when the previous run's computer is offline
+ * (not a survivor of SIGKILL): the run starts when that computer reconnects, or now
+ * with "Start anyway". Shared so the panel recognises it and offers that.
+ */
+export const OLD_RUN_UNREACHABLE_MESSAGE =
+  "The previous run's computer is offline — it starts when that computer reconnects"

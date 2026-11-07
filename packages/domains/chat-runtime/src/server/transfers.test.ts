@@ -52,6 +52,31 @@ test('transfer resumes after restart and duplicate chunks do not duplicate histo
   expect(b.s.read('c', -1)).toHaveLength(1)
   expect(b.s.read('c', -1)[0]).toMatchObject({ seq: 8, at: 123 })
 })
+test('a moved conversation keeps its pinned messages', () => {
+  const { s, t } = open()
+  const pinned = {
+    conversationId: 'session',
+    key: 'user-text:u1',
+    target: 'user',
+    messageId: 'u1',
+    excerpt: 'keep me',
+    pinnedAt: 5
+  }
+  const p = encodeTransfer({
+    version: 1,
+    migrationId: 'move',
+    identity,
+    events: [],
+    records: [{ kind: 'pinned-message', id: '["session","user-text:u1"]', value: pinned, at: 5 }],
+    receipts: [],
+    hash: 'unused'
+  })
+  const start = t.begin(p.manifest)
+  t.chunk(start.id, 0, p.bytes)
+  t.finish(start.id)
+  s.activate('c', 'move', 2, p.manifest.hash)
+  expect(s.getRecord('c', 'pinned-message', '["session","user-text:u1"]')).toEqual(pinned)
+})
 test('corrupt transfer never creates a usable conversation', () => {
   const { s, t } = open(),
     p = payload(),

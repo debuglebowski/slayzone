@@ -120,6 +120,53 @@ describe('/api/projects CRUD', () => {
     expect(res.status).toBe(400)
   })
 
+  test('PATCH: addresses a project by unique id prefix (the 8 chars `slay projects list` prints)', async () => {
+    const res = await rest.request<OneResponse>(
+      'PATCH',
+      `/api/projects/${existingId.slice(0, 8)}`,
+      {
+        color: '#00ff00'
+      }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(existingId)
+    expect(res.body.data.color).toBe('#00ff00')
+  })
+
+  test('PATCH: a name substring still wins over an id prefix', async () => {
+    // A project whose NAME contains another project's id prefix: names resolved first,
+    // as they always have, so the prefix fallback never changes an existing answer.
+    const prefix = existingId.slice(0, 8)
+    const namedId = crypto.randomUUID()
+    h.db
+      .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+      .run(namedId, `named-${prefix}`, '#000000')
+    const res = await rest.request<OneResponse>('PATCH', `/api/projects/${prefix}`, {
+      color: '#0000ff'
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(namedId)
+    h.db.prepare('DELETE FROM projects WHERE id = ?').run(namedId)
+  })
+
+  test('PATCH 400: ambiguous id prefix', async () => {
+    const a = `abcabc01-${crypto.randomUUID().slice(9)}`
+    const b = `abcabc02-${crypto.randomUUID().slice(9)}`
+    for (const [id, name] of [
+      [a, 'PrefixOne'],
+      [b, 'PrefixTwo']
+    ])
+      h.db
+        .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+        .run(id, name, '#000000')
+    const res = await rest.request<OneResponse>('PATCH', '/api/projects/abcabc0', {
+      color: '#111111'
+    })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toContain('Ambiguous project "abcabc0"')
+    h.db.prepare('DELETE FROM projects WHERE id IN (?, ?)').run(a, b)
+  })
+
   test('PATCH 404: unknown project', async () => {
     const res = await rest.request<OneResponse>('PATCH', '/api/projects/definitely-not-a-project', {
       name: 'x'

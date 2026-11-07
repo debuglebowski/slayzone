@@ -9,6 +9,7 @@ import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { taskTerminalsRouter } from './task-terminals-router.js'
+import { tabsEvents } from './events.js'
 
 const h = await createTestHarness()
 const ctx = { db: h.slayDb, dataRoot: '' }
@@ -65,6 +66,22 @@ test('task-terminals router: update label set/clear, mode, null for missing', as
   expect((await caller.update({ id: nonMain.id, label: null }))!.label).toBeNull()
   expect((await caller.update({ id: nonMain.id, mode: 'codex' }))!.mode).toBe('codex')
   expect(await caller.update({ id: 'nope' })).toBeNull()
+})
+
+test('task-terminals router: a deleted tab is announced, so its computer forgets its output', async () => {
+  // QA 2026-11-06 → task 5decc957: a terminal's saved output must go with its tab,
+  // including a tab deleted after a restart (no live process to kill).
+  const tab = await caller.create({ taskId, mode: 'terminal' })
+  const seen: Array<{ taskId: string; tabId: string }> = []
+  const on = (p: { taskId: string; tabId: string }) => seen.push(p)
+  tabsEvents.on('tab:deleted', on)
+  try {
+    expect(await caller.delete({ tabId: tab.id })).toBe(true)
+    expect(await caller.delete({ tabId: taskId })).toBe(false)
+  } finally {
+    tabsEvents.off('tab:deleted', on)
+  }
+  expect(seen).toEqual([{ taskId, tabId: tab.id }])
 })
 
 test('task-terminals router: delete non-main true, main false, missing false', async () => {

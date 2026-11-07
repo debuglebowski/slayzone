@@ -20,7 +20,7 @@ import {
 } from '@slayzone/ui'
 import type { DirEntry } from '../shared'
 import { compactChildren } from './EditorFileTree.utils'
-import { useFileTreeData } from './useFileTreeData'
+import { useFileTreeData, type FileTreeRootStatus } from './useFileTreeData'
 import { useFileTreeSelection } from './useFileTreeSelection'
 import { useFileTreeClipboard } from './useFileTreeClipboard'
 import { useFileTreeCrud } from './useFileTreeCrud'
@@ -38,12 +38,14 @@ interface EditorFileTreeProps {
   /** Controlled expanded folders (optional — uses internal state if not provided) */
   expandedFolders?: Set<string>
   onExpandedFoldersChange?: (folders: Set<string>) => void
-  /** Called once root directory finishes initial load */
-  onReady?: () => void
+  /** Every root-directory load reports its outcome here (see `FileTreeRootStatus`). */
+  onRootStatus?: (status: FileTreeRootStatus) => void
 }
 
 export interface EditorFileTreeHandle {
   scrollToPath: (path: string) => void
+  /** Reload the root and expanded folders (e.g. retry after a failed load). */
+  reload: () => void
 }
 
 export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreeProps>(
@@ -56,7 +58,7 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       refreshKey,
       expandedFolders: controlledExpanded,
       onExpandedFoldersChange,
-      onReady
+      onRootStatus
     },
     ref
   ) {
@@ -67,13 +69,14 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
       loadDir,
       gitStatus,
       dirGitStatus,
-      visibleEntries
+      visibleEntries,
+      reload
     } = useFileTreeData({
       projectPath,
       refreshKey,
       controlledExpanded,
       onExpandedFoldersChange,
-      onReady
+      onRootStatus
     })
 
     const handleToggleFolder = useCallback(
@@ -230,9 +233,10 @@ export const EditorFileTree = forwardRef<EditorFileTreeHandle, EditorFileTreePro
             `[data-path="${CSS.escape(filePath)}"]`
           )
           el?.scrollIntoView({ block: 'nearest' })
-        }
+        },
+        reload
       }),
-      [treeContainerRef]
+      [treeContainerRef, reload]
     )
 
     const ctx: FileTreeRenderCtx = {

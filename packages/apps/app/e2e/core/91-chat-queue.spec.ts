@@ -166,7 +166,7 @@ test.describe('Chat queue persistence', () => {
     )
   })
 
-  test('FK cascade clears queue when tab deleted', async ({ mainWindow }) => {
+  test('deleting the tab deletes its queue', async ({ mainWindow }) => {
     // Make a fresh tab so we can delete it without affecting other tests.
     const ephemeralTabId = await mainWindow.evaluate(async (id) => {
       const tab = await window
@@ -193,10 +193,20 @@ test.describe('Chat queue persistence', () => {
       ephemeralTabId
     )
 
+    // Since chat history moved to computers (6bd86bfd0), deleting the tab marks its
+    // conversation deleted and the computer drops its data — queue included. The
+    // deleted conversation is no longer readable at all, so the queue cannot leak.
     const after = await mainWindow.evaluate(
-      async (id) => window.getTrpcVanillaClient().chat.queue.list.query({ tabId: id }),
+      async (id) =>
+        window
+          .getTrpcVanillaClient()
+          .chat.queue.list.query({ tabId: id })
+          .then(
+            (rows) => ({ rows, error: null }),
+            (err: unknown) => ({ rows: null, error: (err as Error).message })
+          ),
       ephemeralTabId
     )
-    expect(after).toEqual([])
+    expect(after).toEqual({ rows: null, error: 'Chat conversation deleted' })
   })
 })

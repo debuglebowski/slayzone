@@ -38,11 +38,11 @@ import type { Scope } from '@slayzone/api'
 /**
  * The scope bundle a web login mints today. Phase 1 has no UI for choosing a
  * narrower set, so every scoped session gets the full product bundle this
- * plan's `scopes.ts` defines — `read` + `tasks` + `agent`, deliberately never
+ * plan's `scopes.ts` defines — `read` + `tasks` + `agent` + `files`, deliberately never
  * `full`. Revisit once there is a reason to mint anything narrower (e.g. a
  * read-only share link).
  */
-export const DEFAULT_WEB_LOGIN_SCOPES: readonly Scope[] = ['read', 'tasks', 'agent']
+export const DEFAULT_WEB_LOGIN_SCOPES: readonly Scope[] = ['read', 'tasks', 'agent', 'files']
 
 export const WEB_SESSION_TOKEN_PREFIX = 'szw_'
 

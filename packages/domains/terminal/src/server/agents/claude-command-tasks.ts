@@ -17,7 +17,8 @@
  *     share one request, a poll within {@link OUTPUT_CACHE_MS} reuses it);
  *   - once a BACKGROUND command ended, its output is read once and saved as
  *     `command-task-output` (a foreground command's output is its tool result);
- *   - `stop_task {task_id}` and `background_tasks {tool_use_id}`.
+ *   - `stop_task {task_id}` (a command, or a sub-agent by its tool call) and
+ *     `background_tasks {tool_use_id}`.
  *
  * Lives and dies with its process (owned by the session driver), so a replaced
  * process's tasks are simply unknown to the next one.
@@ -31,6 +32,7 @@ import type {
   CommandTaskOutput,
   CommandTaskStatus
 } from '@slayzone/terminal-contracts'
+import { endedSubAgentPhase } from '../../shared/sub-agent-lifecycle'
 
 /** The CLI answers `get_task_output` in 1–19 ms; anything near this is a stuck process. */
 const TASK_REQUEST_TIMEOUT_MS = 5_000
@@ -59,6 +61,8 @@ export class ClaudeCommandTasks {
   private readonly callStarts = new Map<string, number>()
   private readonly inflight = new Map<string, Promise<CommandTaskOutput>>()
   private readonly lastOutput = new Map<string, { at: number; value: Output }>()
+  /** Running sub-agents: tool_use_id of the call that started it → its task id. */
+  private readonly subAgents = new Map<string, string>()
   private disposed = false
 
   constructor(private readonly io: CommandTaskIo) {}
@@ -77,10 +81,14 @@ export class ClaudeCommandTasks {
   route(ev: CliTaskEvent): AgentEvent | null {
     if (ev.subtype === 'started') {
       if (ev.taskType === 'local_bash' && ev.toolUseId) return this.startCommand(ev, ev.toolUseId)
+      if (ev.toolUseId) this.subAgents.set(ev.toolUseId, ev.taskId)
       return subAgent(ev)
     }
     const command = this.commands.get(ev.taskId)
     if (!command) {
+      if (ev.subtype === 'notification' && ev.toolUseId && endedSubAgentPhase(ev.status)) {
+        this.subAgents.delete(ev.toolUseId)
+      }
       // A sub-agent (or a task of another process): its notification carries the
       // stats the sub-agent row shows; its update carries nothing it uses.
       return ev.subtype === 'notification' && ev.toolUseId ? subAgent(ev) : null
@@ -145,6 +153,13 @@ export class ClaudeCommandTasks {
     await this.io.request({ subtype: 'stop_task', task_id: taskId }, TASK_REQUEST_TIMEOUT_MS)
   }
 
+  /** `stop_task`: stop a running sub-agent, named by the tool call that started it. */
+  async stopSubAgent(toolUseId: string): Promise<void> {
+    const taskId = this.disposed ? undefined : this.subAgents.get(toolUseId)
+    if (!taskId) throw new Error(`sub-agent ${toolUseId} is not running`)
+    await this.io.request({ subtype: 'stop_task', task_id: taskId }, TASK_REQUEST_TIMEOUT_MS)
+  }
+
   /** `background_tasks`: move a running foreground command to the background (Ctrl+B). */
   async background(toolUseId: string): Promise<boolean> {
     if (this.disposed) return false
@@ -165,6 +180,7 @@ export class ClaudeCommandTasks {
   dispose(): void {
     this.disposed = true
     this.commands.clear()
+    this.subAgents.clear()
     this.inflight.clear()
     this.lastOutput.clear()
   }

@@ -6,7 +6,9 @@
  * The jail: a project file must lie inside `allowedRoots` (as every fs./git. path);
  * a computer-level one only inside this computer's own provider dirs under its home
  * (`COMPUTER_PROVIDER_PATHS`: `~/.claude`, `~/.codex`, …) — never elsewhere in home
- * (`~/.ssh`, shell rc files). Both ends of a rename are checked.
+ * (`~/.ssh`, shell rc files). Both ends of a rename are checked. Every path is
+ * judged by the computer's one path jail (`../path-jail`), reads go to the judged
+ * path, and every write is done by the jail.
  *
  * @module computer/handlers/agent-config
  */
@@ -18,7 +20,7 @@ import {
   HubToComputerMethods,
   agentConfigFsParamsSchema
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { jailedFs, judgePath, type JailAccess } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
 export function createAgentConfigHandlers(
@@ -26,12 +28,12 @@ export function createAgentConfigHandlers(
   homedir: () => string = osHomedir
 ): HubMethodTable {
   /** Allowed roots (live — `computer.setAllowedRoots` edits them) + provider dirs. */
-  const allow = (candidate: string): void => {
-    const providerDirs = Object.values(COMPUTER_PROVIDER_PATHS).map((p) =>
-      join(homedir(), p.baseDir)
-    )
-    assertPathAllowed(candidate, [...ctx.config.allowedRoots, ...providerDirs])
-  }
+  const roots = (): string[] => [
+    ...ctx.config.allowedRoots,
+    ...Object.values(COMPUTER_PROVIDER_PATHS).map((p) => join(homedir(), p.baseDir))
+  ]
+  const allow = (candidate: string, access: JailAccess = 'read'): string =>
+    judgePath(candidate, roots(), { access, subtree: access === 'entry' })
 
   async function agentConfigFs(raw: unknown): Promise<{ result: unknown }> {
     const p = agentConfigFsParamsSchema.parse(raw)
@@ -40,38 +42,29 @@ export function createAgentConfigHandlers(
       case 'homedir':
         return { result: homedir() }
       case 'exists':
-        allow(p.path)
-        return { result: await fs.exists(p.path) }
+        return { result: await fs.exists(allow(p.path)) }
       case 'readFile':
-        allow(p.path)
-        return { result: await fs.readFile(p.path) }
+        return { result: await fs.readFile(allow(p.path)) }
       case 'writeFile':
-        allow(p.path)
-        await fs.writeFile(p.path, p.content)
+        jailedFs.writeFile(allow(p.path, 'write'), p.content)
         return { result: null }
       case 'mkdir':
-        allow(p.path)
-        await fs.mkdir(p.path)
+        jailedFs.mkdir(allow(p.path, 'write'))
         return { result: null }
       case 'unlink':
-        allow(p.path)
-        await fs.unlink(p.path)
+        jailedFs.unlink(allow(p.path, 'entry'))
         return { result: null }
       case 'rmdir':
-        allow(p.path)
-        await fs.rmdir(p.path)
+        jailedFs.rmdir(allow(p.path, 'entry'))
         return { result: null }
       case 'rename':
-        allow(p.path)
-        allow(p.to)
-        await fs.rename(p.path, p.to)
+        // As `rename(2)`: an existing file at `to` is replaced.
+        jailedFs.rename(allow(p.path, 'entry'), allow(p.to, 'entry'), { replace: true })
         return { result: null }
       case 'stat':
-        allow(p.path)
-        return { result: await fs.stat(p.path) }
+        return { result: await fs.stat(allow(p.path)) }
       case 'readdir':
-        allow(p.path)
-        return { result: await fs.readdir(p.path) }
+        return { result: await fs.readdir(allow(p.path)) }
     }
   }
 

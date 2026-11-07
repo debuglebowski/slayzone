@@ -37,6 +37,9 @@ import {
   type PtyWarmSpawnParams,
   ptyResizeParamsSchema,
   ptyDoctorParamsSchema,
+  ptyCliVersionParamsSchema,
+  ptyForgetParamsSchema,
+  type PtyCliVersionResult,
   type PtyDoctorResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
@@ -63,7 +66,8 @@ import {
 import { writeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
-import * as pty from 'node-pty'
+import type * as pty from 'node-pty'
+import { spawnNodePty } from '../node-pty'
 import { findOnPath, getShellStartupArgs, resolveUserShell, shellExists } from '@slayzone/platform'
 import {
   nodePtyInstallProblems as readNodePtyInstallProblems,
@@ -71,7 +75,9 @@ import {
 } from '@slayzone/platform/node-pty-install'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
 import { probeBackgroundJobs } from '../background-jobs'
-import { spawnCwd } from '../config'
+import { createCliVersionProbe } from '../cli-version'
+import { restoredPrefix, type PtyHistory, type PtyHistoryTracker } from '../pty-history'
+import { spawnCwd } from '../path-jail'
 import { CARRY_WINDOW_MS, ExitTombstones } from '../exit-tombstones'
 import {
   analyzePtyInput,
@@ -81,6 +87,7 @@ import {
   SESSION_ERROR_WINDOW_MS
 } from '@slayzone/terminal/pty-detection'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
+import { pageChunks } from '@slayzone/transport/direct'
 import {
   createSpawnAdmission,
   type AdmissionLane,
@@ -94,6 +101,27 @@ import type { HandlerContext, HubMethodTable } from './types'
 
 /** Matches the terminal domain's per-session buffer cap (750 KiB). */
 const MAX_BUFFER_SIZE = 750 * 1024
+
+/**
+ * Largest chunk this computer adds to a buffer itself (restored output, a carried
+ * preamble). A backfill page holds whole chunks, and one direct-link message is
+ * capped at 1 MiB (docs/direct-link.md): a 750 KiB scrollback in one chunk can
+ * serialise past it. Process output already arrives in chunks this small.
+ */
+const APPENDED_PIECE_CHARS = 16 * 1024
+
+/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
+function appendInPieces(buffer: RingBuffer, text: string): void {
+  let at = 0
+  while (at < text.length) {
+    let end = Math.min(at + APPENDED_PIECE_CHARS, text.length)
+    // Never split a surrogate pair across chunks.
+    const code = text.charCodeAt(end - 1)
+    if (end < text.length && code >= 0xd800 && code <= 0xdbff) end--
+    buffer.append(text.slice(at, end))
+    at = end
+  }
+}
 
 /**
  * After a startup-timeout SIGKILL, how long to wait for node-pty's own exit before
@@ -114,24 +142,32 @@ interface DirectWatcher {
  * scrollback and its live output, independent of whether the hub relays it.
  */
 export interface DirectPtyService {
-  /** Cold attach (`afterSeq` -1) or reattach; `size` null when no live process. */
+  /**
+   * Cold attach (`afterSeq` -1) or reattach; `size` null when no live process.
+   * `maxChars` pages the buffer (`more`); the first page keeps the prelude.
+   */
   attach(
     sessionId: string,
-    afterSeq: number
+    afterSeq: number,
+    maxChars?: number
   ): {
     exists: boolean
     size: { cols: number; rows: number } | null
-    buffer: BufferSinceResult
+    buffer: BufferSinceResult & { more: boolean }
   }
-  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude). */
-  getBufferSince(sessionId: string, afterSeq: number): BufferSinceResult
+  /** Replay after `afterSeq` (a cold `-1` includes the eviction prelude), paged by `maxChars`. */
+  getBufferSince(
+    sessionId: string,
+    afterSeq: number,
+    maxChars?: number
+  ): BufferSinceResult & { more: boolean }
   /**
    * A client's keystrokes, written to the process. Submits and Esc presses are
    * reported to the hub as a journaled `pty-input` event, so the hub's input
    * effects (attention, turn tracking, running) match a write it relayed. False
    * when there is no live session.
    */
-  write(sessionId: string, data: string): boolean
+  write(sessionId: string, data: string, writeId?: string): boolean
   /** Stream a live session's output; null when there is none. Returns unsubscribe. */
   watch(
     sessionId: string,
@@ -140,9 +176,14 @@ export interface DirectPtyService {
   ): (() => void) | null
 }
 
+/** How many recent client write ids a session remembers (a retry follows within seconds). */
+const CLIENT_WRITE_ID_WINDOW = 1024
+
 interface PtySession {
-  /** What direct writes typed since their last submit (see `analyzePtyInput`). */
+  /** What client writes typed since their last submit (see `analyzePtyInput`). */
   directInput: string
+  /** Recent client write ids, oldest first (see `applyClientWrite`). */
+  clientWriteIds: Set<string>
   /** Direct-link clients streaming this session; independent of {@link relay}. */
   directWatchers: Set<DirectWatcher>
   /**
@@ -189,6 +230,8 @@ interface PtySession {
   resolveExit: () => void
   replacing?: boolean
   stopping?: Promise<void>
+  /** Keeps a task terminal's output on disk (see pty-history.ts). */
+  history?: PtyHistoryTracker
 }
 
 /**
@@ -207,7 +250,8 @@ interface QueuedSpawn {
   ticket: AdmissionTicket
   cols?: number
   rows?: number
-  writes: string[]
+  /** Input that arrived while this waited; a client's carries its id (see `applyClientWrite`). */
+  writes: Array<{ data: string; writeId?: string }>
   /** A queued write submitted `/status`: watch for a conversation id once started. */
   watchConversationId?: boolean
   /** Starts the process once admitted; returns the reply. */
@@ -222,7 +266,8 @@ export interface PtyHandlers {
   direct: DirectPtyService
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
-  stopTask(taskId: string): Promise<void>
+  /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
+  stopTask(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
   handlers: HubMethodTable
   /** Kill every live pty (called on computer shutdown). */
   disposeAll(): void
@@ -254,6 +299,8 @@ export interface PtyHandlerOptions {
    * but Doctor's binary lookups read `process.env.PATH`, so they do.
    */
   pathReady?: Promise<unknown>
+  /** Where task terminals' output outlives this process. Absent: memory only. */
+  history?: PtyHistory
 }
 
 /**
@@ -291,11 +338,14 @@ export function createPtyHandlers(
   options: PtyHandlerOptions = {}
 ): PtyHandlers {
   const sessions = new Map<string, PtySession>()
+  /** Which task each session id belonged to, for a kill that arrives after its exit. */
+  const taskOfSession = new Map<string, string>()
   /** The hub's terminal theme, as last pushed (`pty.setTheme`); new pipelines start with it. */
   let theme: PtyTheme | undefined
   const tombstones = new ExitTombstones()
   const admission = options.admission ?? createSpawnAdmission()
-  const spawnPty = options.spawnPty ?? pty.spawn
+  // node-pty loads at the first spawn: a missing one fails terminals, not the computer.
+  const spawnPty = options.spawnPty ?? spawnNodePty
   const installProblems = options.nodePtyInstallProblems ?? installProblemsOnDisk
   /** Spawns waiting for an agent-start slot, keyed like `sessions`. */
   const queued = new Map<string, QueuedSpawn>()
@@ -303,6 +353,16 @@ export function createPtyHandlers(
     string,
     { spawnId?: string; taskId?: string; promise: Promise<unknown>; cancelled: boolean }
   >()
+  /**
+   * `pty.relay` for an attempt that has no session yet (queued for a slot, or
+   * waiting out a replacement): applied when it starts, so a change made while it
+   * waited is not lost — the hub never sends it again.
+   */
+  const relayBeforeStart = new Map<string, { spawnId?: string; on: boolean }>()
+  // History a tab deleted while this computer was offline left behind.
+  void options.history?.sweep().catch(() => {
+    // Best-effort: a file it could not remove is swept next start.
+  })
 
   function serializeStart<T>(
     id: string,
@@ -418,6 +478,24 @@ export function createPtyHandlers(
    * same buffering, same seq assignment, same exit handling — differing only in
    * the key it is filed under and (until adopted) the `warm` marker.
    */
+  /** A task terminal's output goes to disk too (never a warm one: no task yet). */
+  function trackHistory(session: PtySession): void {
+    if (!options.history || session.warm || !session.taskId || session.history) return
+    const buffer = session.buffer
+    session.history =
+      options.history.track(session.taskId, session.id, () => buffer.toString()) ?? undefined
+  }
+
+  /** Stop saving a session's output and delete what was saved. */
+  async function forgetHistory(sessionId: string, taskId: string | undefined): Promise<void> {
+    if (!options.history) return
+    const live = sessions.get(sessionId)
+    await live?.history?.cancel()
+    if (live) live.history = undefined
+    const owner = taskId ?? live?.taskId ?? taskOfSession.get(sessionId)
+    if (owner) await options.history.forget(owner, sessionId)
+  }
+
   function spawnSession(
     id: string,
     opts: {
@@ -439,6 +517,7 @@ export function createPtyHandlers(
     }
   ): PtySession {
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
+    if (opts.taskId && !opts.warm) taskOfSession.set(id, opts.taskId)
     const cwd = resolveCwd(opts)
     if (sessions.has(id)) throw new Error(`pty ${id}: old process still live`)
 
@@ -462,12 +541,13 @@ export function createPtyHandlers(
     const exited = new Promise<void>((resolve) => (resolveExit = resolve))
     const session: PtySession = {
       directInput: '',
+      clientWriteIds: new Set(),
       directWatchers: new Set(),
       revokeCli: capability?.revoke,
       proc,
       buffer,
       id,
-      relay: opts.relay !== false,
+      relay: relayAtStart(id, opts.spawnId, opts.relay),
       cwd,
       startedAt: Date.now(),
       ...(opts.taskId ? { taskId: opts.taskId } : {}),
@@ -477,6 +557,7 @@ export function createPtyHandlers(
       ...(opts.spawnId !== undefined ? { spawnId: opts.spawnId } : {})
     }
     sessions.set(id, session)
+    trackHistory(session)
     if (opts.detection && !opts.warm) attachSignals(session, opts.detection)
     if (opts.startupTimeoutMs !== undefined) {
       // Armed at the REAL spawn, on the machine that sees the output — see the
@@ -513,6 +594,7 @@ export function createPtyHandlers(
       const processed = session.signals?.process(data)
       const out = processed ? processed.clean : data
       const seq = buffer.append(out)
+      session.history?.changed()
       // A WARM session buffers but does not stream: the hub has no session to
       // route it to yet, and `pty.warmAdopt` hands the whole buffer over at
       // adopt. Emitting under a `warmId` the hub never registered would be
@@ -577,7 +659,8 @@ export function createPtyHandlers(
           session.proc.write(answer)
         }
       },
-      disk: { cwd: session.cwd, startedAt: session.startedAt }
+      disk: { cwd: session.cwd, startedAt: session.startedAt },
+      size: { cols: session.proc.cols, rows: session.proc.rows }
     })
   }
 
@@ -620,6 +703,8 @@ export function createPtyHandlers(
     session.signals?.dispose()
     session.deadline?.cancel()
     releaseAdmission(session)
+    // The last of its output, kept for the session's next start.
+    void session.history?.close()
     if (session.replacing) {
       tombstones.add(session.id, {
         spawnId: session.spawnId,
@@ -699,16 +784,30 @@ export function createPtyHandlers(
     // buffer (seq continues), then the hub's preamble, then the new process.
     let carried: RingBuffer | undefined
     if (params.carryOutput) {
+      const { fromSpawnId, afterSeq } = params.carryOutput
       carried =
-        tombstones.takeBuffer(params.sessionId, params.carryOutput.fromSpawnId) ??
+        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ??
         new RingBuffer(MAX_BUFFER_SIZE)
-      if (params.carryOutput.preamble) carried.append(params.carryOutput.preamble)
+      // No buffer left to continue: numbering continues where the hub's reached (M2).
+      if (afterSeq !== undefined) carried.continueAfter(afterSeq)
+      if (params.carryOutput.preamble) appendInPieces(carried, params.carryOutput.preamble)
+    }
+    // A fresh start of a task terminal begins with what it showed last time (the
+    // computer restarted since). Never for a continuing spawn — the hub still shows
+    // that output — nor an agent resume, which reprints its own conversation.
+    let restored: RingBuffer | undefined
+    if (!carried && params.taskId && options.history && !params.detection?.resuming) {
+      const saved = options.history.load(params.taskId, params.sessionId)
+      if (saved) {
+        restored = new RingBuffer(MAX_BUFFER_SIZE)
+        appendInPieces(restored, restoredPrefix(saved))
+      }
     }
     const session = spawnSession(params.sessionId, {
       ...params,
       command: shell,
       args,
-      ...(carried ? { buffer: carried } : {})
+      ...(carried ? { buffer: carried } : restored ? { buffer: restored } : {})
     })
     ctx.log('pty spawned', {
       sessionId: params.sessionId,
@@ -868,7 +967,10 @@ export function createPtyHandlers(
       session.admissionSlot = slot
       // Input the hub sent while this waited, in order — where it would have
       // landed had the spawn been immediate.
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) {
+        if (w.writeId !== undefined) applyClientWrite(session, w.data, w.writeId)
+        else session.proc.write(w.data)
+      }
       if (item.watchConversationId) session.signals?.watchConversationId()
       return reply
     })
@@ -909,7 +1011,7 @@ export function createPtyHandlers(
     return enqueueSpawn(params.warmId, 'warm', params, (slot, item) => {
       const session = startWarm(params, item.cols, item.rows)
       session.admissionSlot = slot
-      for (const data of item.writes) session.proc.write(data)
+      for (const w of item.writes) session.proc.write(w.data)
       return { pid: session.proc.pid }
     })
   }
@@ -974,6 +1076,23 @@ export function createPtyHandlers(
     }
   }
 
+  /** The hub deleted a tab: its terminal's saved output goes (live or not). */
+  async function forget(rawParams: unknown): Promise<{ ok: true }> {
+    const params = ptyForgetParamsSchema.parse(rawParams)
+    await forgetHistory(params.sessionId, params.taskId)
+    return { ok: true }
+  }
+
+  const cliVersions = createCliVersionProbe()
+  /** One agent CLI's version here (see `ptyCliVersionResultSchema`). */
+  async function cliVersion(rawParams: unknown): Promise<PtyCliVersionResult> {
+    const params = ptyCliVersionParamsSchema.parse(rawParams)
+    await options.pathReady
+    // The env a spawn gets (bin override dir first): the version of the binary an
+    // agent started here would run.
+    return { ok: true, version: await cliVersions.versionOf(params.binary, buildPtySpawnEnv(ctx)) }
+  }
+
   function dropQueued(reason: string): void {
     for (const id of [...queued.keys()]) cancelQueued(id, reason)
   }
@@ -1023,6 +1142,8 @@ export function createPtyHandlers(
     delete session.warm
     session.spawnId = params.warmId
     sessions.set(params.sessionId, session)
+    if (params.taskId) taskOfSession.set(params.sessionId, params.taskId)
+    trackHistory(session)
     releaseAdmission(session)
     if (params.relay !== undefined) session.relay = params.relay
     if (params.detection) {
@@ -1096,6 +1217,7 @@ export function createPtyHandlers(
     const live = sessions.get(params.sessionId)
     const pending = queued.get(params.sessionId)
     if (pending && (params.spawnId === undefined || pending.spawnId === params.spawnId)) {
+      relayBeforeStart.delete(params.sessionId)
       // Killed while waiting for its slot: it never runs, and ends exactly as a
       // killed process would — with an exit the hub's session settles on. The
       // exit goes out BEFORE the spawn's (error) reply, so the hub has already
@@ -1120,14 +1242,21 @@ export function createPtyHandlers(
       cancelQueued(params.sessionId, 'killed')
       // A generation-scoped kill cancels only that queued start. Legacy
       // session-wide kills also stop any older process still running.
-      if (live && params.spawnId === undefined) await stopPty(live, params.signal)
+      if (live && params.spawnId === undefined) {
+        await forgetHistory(params.sessionId, live.taskId)
+        await stopPty(live, params.signal)
+      }
       return { ok: true }
     }
     if (!live || (params.spawnId !== undefined && live.spawnId !== params.spawnId)) {
-      // Idempotent: the session may already have exited (network race).
+      // Idempotent: the session may already have exited (network race). Its saved
+      // output goes all the same: the hub ended the session (closed, restarted).
+      if (!live) await forgetHistory(params.sessionId, undefined)
       ctx.log('pty kill on unknown session', { sessionId: params.sessionId })
       return { ok: true }
     }
+    // The hub ended it (a closed tab, a restart): its output goes, as in memory.
+    await forgetHistory(params.sessionId, live.taskId)
     await stopPty(live, params.signal)
     return { ok: true }
   }
@@ -1150,6 +1279,7 @@ export function createPtyHandlers(
       return { ok: true }
     }
     session.proc.resize(params.cols, params.rows)
+    session.signals?.resize(params.cols, params.rows)
     return { ok: true }
   }
 
@@ -1159,13 +1289,62 @@ export function createPtyHandlers(
     return { ok: true }
   }
 
+  /**
+   * A client's keystrokes, from the direct link or relayed by the hub with its id
+   * (docs/direct-link.md). An id already applied is dropped: a direct write that was
+   * late is also sent through the hub, and must land once. The input facts (submit,
+   * Esc, `/status`) are reported to the hub from here, once, for either path.
+   */
+  function applyClientWrite(session: PtySession, data: string, writeId?: string): void {
+    if (writeId !== undefined) {
+      if (session.clientWriteIds.has(writeId)) return
+      session.clientWriteIds.add(writeId)
+      // A bounded window: a retry follows its original within seconds.
+      if (session.clientWriteIds.size > CLIENT_WRITE_ID_WINDOW) {
+        const oldest = session.clientWriteIds.values().next().value
+        if (oldest !== undefined) session.clientWriteIds.delete(oldest)
+      }
+    }
+    const { buffer, facts } = analyzePtyInput(
+      session.directInput,
+      data,
+      session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
+    )
+    session.directInput = buffer
+    session.proc.write(data)
+    // What a relayed write tells this computer with `watchConversationId`.
+    if (facts.statusCommand) session.signals?.watchConversationId()
+    if (facts.esc || facts.submitted !== null) {
+      const payload: PtyInputPayload = {
+        sessionId: session.id,
+        ...(session.spawnId ? { spawnId: session.spawnId } : {}),
+        submitted: facts.submitted,
+        esc: facts.esc,
+        statusCommand: facts.statusCommand
+      }
+      ctx.dialer.notify(ComputerNotificationMethods.event, {
+        name: PTY_INPUT_EVENT_NAME,
+        payload
+      })
+    }
+  }
+
+  /**
+   * Input for a session still waiting for its slot: queued, not lost, and written
+   * right after the spawn (see `QueuedSpawn`). A client write arriving twice (direct,
+   * then through the hub with the same id) is queued once.
+   */
+  function queueWrite(waiting: QueuedSpawn, data: string, writeId?: string): void {
+    if (writeId !== undefined && waiting.writes.some((w) => w.writeId === writeId)) return
+    waiting.writes.push({ data, ...(writeId !== undefined ? { writeId } : {}) })
+  }
+
   function write(rawParams: unknown): { ok: true } {
     const params = ptyWriteParamsSchema.parse(rawParams)
     const waiting = queued.get(params.sessionId)
     if (waiting) {
       if (params.spawnId !== undefined && waiting.spawnId !== params.spawnId) return { ok: true }
-      // Queued, not lost: written right after the spawn (see `QueuedSpawn`).
-      waiting.writes.push(params.data)
+      queueWrite(waiting, params.data, params.writeId)
       if (params.watchConversationId) waiting.watchConversationId = true
       return { ok: true }
     }
@@ -1174,6 +1353,11 @@ export function createPtyHandlers(
       return { ok: true }
     if (!session) {
       ctx.log('pty write on unknown session', { sessionId: params.sessionId })
+      return { ok: true }
+    }
+    if (params.writeId !== undefined) {
+      // A client's write relayed by the hub: once, with its facts reported from here.
+      applyClientWrite(session, params.data, params.writeId)
       return { ok: true }
     }
     session.proc.write(params.data)
@@ -1244,11 +1428,29 @@ export function createPtyHandlers(
     }
   }
 
+  /** The relay a new session starts with: a change made while it waited wins. */
+  function relayAtStart(id: string, spawnId: string | undefined, requested?: boolean): boolean {
+    const early = relayBeforeStart.get(id)
+    relayBeforeStart.delete(id)
+    if (early && (early.spawnId === undefined || early.spawnId === spawnId)) return early.on
+    return requested !== false
+  }
+
   function relay(rawParams: unknown): PtyRelayResult {
     const params = ptyRelayParamsSchema.parse(rawParams)
-    const session = sessions.get(params.sessionId)
-    if (!session || (params.spawnId !== undefined && session.spawnId !== params.spawnId))
-      return { seq: -1 }
+    const id = params.sessionId
+    const matches = (spawnId: string | undefined) =>
+      params.spawnId === undefined || spawnId === params.spawnId
+    // Not started yet (queued for a slot, or replacing a session): remembered.
+    const waiting = queued.get(id) ?? starts.get(id)
+    if (waiting && matches(waiting.spawnId)) {
+      relayBeforeStart.set(id, {
+        ...(waiting.spawnId !== undefined ? { spawnId: waiting.spawnId } : {}),
+        on: params.on
+      })
+    }
+    const session = sessions.get(id)
+    if (!session || !matches(session.spawnId)) return { seq: -1 }
     session.relay = params.on
     return { seq: session.buffer.getCurrentSeq() }
   }
@@ -1259,6 +1461,7 @@ export function createPtyHandlers(
     if (!buffer) return { clearedSeq: -1 }
     const clearedSeq = buffer.getCurrentSeq()
     buffer.clear()
+    sessions.get(params.sessionId)?.history?.changed()
     return { clearedSeq }
   }
 
@@ -1285,6 +1488,9 @@ export function createPtyHandlers(
     dropQueued('computer shutting down')
     for (const [sessionId, session] of sessions) {
       endDirectWatchers(session, 'disposed')
+      // Output still waiting for its throttled write is saved before the process goes.
+      session.history?.flushSync()
+      void session.history?.cancel()
       session.revokeCli?.()
       session.signals?.dispose()
       session.deadline?.cancel()
@@ -1313,6 +1519,8 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyPrioritize]: prioritize,
     [HubToComputerMethods.ptyBackgroundJobs]: backgroundJobs,
     [HubToComputerMethods.ptyDoctor]: doctor,
+    [HubToComputerMethods.ptyCliVersion]: cliVersion,
+    [HubToComputerMethods.ptyForget]: forget,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,
@@ -1321,49 +1529,41 @@ export function createPtyHandlers(
 
   const belongsToTask = (id: string, taskId: string, recordedTask?: string) =>
     recordedTask ? recordedTask === taskId : id === taskId || id.startsWith(taskId + ':')
+  /** One page of a direct backfill (`maxChars`); the first page keeps the prelude. */
+  function directPage(buffer: RingBuffer | undefined, afterSeq: number, maxChars?: number) {
+    const all = replayOf(buffer, afterSeq)
+    const page = pageChunks(all.chunks, maxChars)
+    return { ...all, chunks: page.chunks, more: page.more }
+  }
+
   const direct: DirectPtyService = {
-    attach(sessionId, afterSeq) {
+    attach(sessionId, afterSeq, maxChars) {
       const live = sessions.get(sessionId)
       const isLive = live !== undefined && !live.warm
       const buffer = isLive ? live.buffer : tombstones.get(sessionId)?.buffer
       return {
         exists: isLive,
         size: isLive ? { cols: live.proc.cols, rows: live.proc.rows } : null,
-        buffer: replayOf(buffer, afterSeq)
+        buffer: directPage(buffer, afterSeq, maxChars)
       }
     },
-    getBufferSince(sessionId, afterSeq) {
+    getBufferSince(sessionId, afterSeq, maxChars) {
       const live = sessions.get(sessionId)
-      return replayOf(
+      return directPage(
         live && !live.warm ? live.buffer : tombstones.get(sessionId)?.buffer,
-        afterSeq
+        afterSeq,
+        maxChars
       )
     },
-    write(sessionId, data) {
+    write(sessionId, data, writeId) {
+      const waiting = queued.get(sessionId)
+      if (waiting) {
+        queueWrite(waiting, data, writeId)
+        return true
+      }
       const session = sessions.get(sessionId)
       if (!session || session.warm) return false
-      const { buffer, facts } = analyzePtyInput(
-        session.directInput,
-        data,
-        session.signals?.sessionIdCommand() ?? DEFAULT_SESSION_ID_COMMAND
-      )
-      session.directInput = buffer
-      session.proc.write(data)
-      // What a relayed write tells this computer with `watchConversationId`.
-      if (facts.statusCommand) session.signals?.watchConversationId()
-      if (facts.esc || facts.submitted !== null) {
-        const payload: PtyInputPayload = {
-          sessionId: session.id,
-          ...(session.spawnId ? { spawnId: session.spawnId } : {}),
-          submitted: facts.submitted,
-          esc: facts.esc,
-          statusCommand: facts.statusCommand
-        }
-        ctx.dialer.notify(ComputerNotificationMethods.event, {
-          name: PTY_INPUT_EVENT_NAME,
-          payload
-        })
-      }
+      applyClientWrite(session, data, writeId)
       return true
     },
     watch(sessionId, onData, onEnd) {
@@ -1384,17 +1584,27 @@ export function createPtyHandlers(
       [...sessions.values(), ...queued.values()].some((s) =>
         belongsToTask(s.id, taskId, s.taskId)
       ) || [...starts.entries()].some(([id, s]) => belongsToTask(id, taskId, s.taskId)),
-    async stopTask(taskId) {
+    async stopTask(taskId, state) {
       const waiting = [...starts.entries()].filter(([id, s]) => belongsToTask(id, taskId, s.taskId))
       for (const [, s] of waiting) s.cancelled = true
       for (const s of [...queued.values()])
         if (belongsToTask(s.id, taskId, s.taskId)) cancelQueued(s.id, 'task-paused')
+      // Purged (not trashed): its terminals' saved output goes with it — stopped
+      // first, so their exits write nothing back.
+      const purge = state === 'deleted' && options.history
+      if (purge)
+        for (const s of sessions.values())
+          if (belongsToTask(s.id, taskId, s.taskId)) {
+            await s.history?.cancel()
+            s.history = undefined
+          }
       await Promise.all(
         [...sessions.values()]
           .filter((s) => belongsToTask(s.id, taskId, s.taskId))
           .map((s) => stopPty(s))
       )
       await Promise.allSettled(waiting.map(([, s]) => s.promise))
+      if (purge) await options.history?.forgetTask(taskId)
     },
     handlers,
     disposeAll,

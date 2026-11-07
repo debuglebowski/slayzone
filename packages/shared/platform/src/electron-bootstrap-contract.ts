@@ -17,7 +17,7 @@
  * from renderer bundles.
  */
 import type { HubEntry } from './hub-registry'
-import type { LocalComputerStatus } from './local-computer-status'
+import type { LocalComputerHubs, LocalComputerStatus } from './local-computer-status'
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
@@ -32,6 +32,11 @@ export interface ElectronBootstrapApp {
   /** Per-hub bearer tokens (hubId → token), safeStorage-decrypted in main.
    *  Threaded into the tRPC client's connectionParams for authed remote hubs. */
   getHubTokens: () => Promise<Record<string, string>>
+  /**
+   * Whether the bearer stored for a remote hub still signs in there: `expired` = the
+   * hub refused it (sign in again), `unreachable` = no answer, `none` = no bearer.
+   */
+  checkHubSession: (payload: { hubId: string; url: string }) => Promise<HubSessionState>
   /** Persist (or clear, empty token) a hub's bearer token, safeStorage-encrypted. */
   setHubToken: (payload: { hubId: string; token: string }) => Promise<{ ok: true }>
   /** Sign in to a remote hub (email+password) main-side; stores the bearer token. */
@@ -57,6 +62,9 @@ export interface ElectronBootstrapApp {
   /** Stop waiting (the dialog was closed). */
   hubDeviceLoginCancel: (payload: { flowId: string }) => Promise<{ ok: true }>
   getWindowId: () => Promise<number | null>
+  /** App icon badge (dock / taskbar overlay / launcher count). text '' = clear.
+   *  overlayPng: PNG data URL drawn by the renderer for the Windows overlay. */
+  setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) => Promise<void>
   relaunch: () => Promise<void>
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
@@ -77,22 +85,37 @@ export interface ElectronBootstrapApp {
   }>
   /**
    * Direct link (docs/direct-link.md): may this document open a socket to a
-   * computer's listener at `address` now — allowed by its CSP, and reached by the
-   * main process's HTTP probe? Optional: an older or non-Electron host has none.
+   * computer's listener at `address`, issued by hub `hubId`, now — confirmed by
+   * that hub, allowed by the document's CSP, and reached by the main process's HTTP
+   * probe? `hubId` is a registry id, or `DIRECT_LINK_DEFAULT_HUB_ID`
+   * (`@slayzone/platform/direct-link`) outside a hub scope. Optional: an older or
+   * non-Electron host has none.
    */
   prepareDirectLink?: (
-    address: string
-  ) => Promise<{ ok: true } | { ok: false; reason: 'invalid' | 'csp' | 'unreachable' }>
+    address: string,
+    hubId: string
+  ) => Promise<
+    { ok: true } | { ok: false; reason: 'invalid' | 'not-issued' | 'csp' | 'unreachable' }
+  >
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */
   restartLocalComputer: () => Promise<{ ok: boolean; error?: string }>
   /** Null when this host supervises no local computer (remote mode). */
   getLocalComputerStatus: () => Promise<LocalComputerStatus | null>
+  /** Where this app's own computer stands on each remote hub (it joins all of them). */
+  getLocalComputerHubs: () => Promise<LocalComputerHubs>
   isPlaywright: boolean
   dataReady: () => void
   bootMark: (label: string) => void
 }
+
+/** {@link ElectronBootstrapAPI.checkHubSession}'s answer. */
+export type HubSessionState =
+  | { state: 'valid'; email: string | null }
+  | { state: 'expired' }
+  | { state: 'unreachable' }
+  | { state: 'none' }
 
 export interface ElectronBootstrapFiles {
   getDropPaths: () => string[]

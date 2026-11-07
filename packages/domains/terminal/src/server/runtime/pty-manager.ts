@@ -7,6 +7,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { sanitizeSpawnEnv } from '@slayzone/platform'
 import { ptyEvents } from './pty-events'
 import { armStartupDeadline, type StartupDeadline } from '@slayzone/platform/startup-deadline'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
   modeAgentId,
   SESSION_ID_UNAVAILABLE,
@@ -48,6 +49,7 @@ import {
   type ExecutionContext
 } from '../adapters'
 import { interpolateTemplate } from '../adapters/template-interpolation'
+import { cliVersionedLaunchArgs } from './cli-versioned-launch'
 import { parseShellArgs } from '../adapters/flag-parser'
 import {
   StateMachine,
@@ -72,6 +74,7 @@ import {
 } from '../pty-exit-strategy'
 import { claudeTranscriptExists } from '../claude-transcripts'
 import { computeSyncQueryResponse, type TerminalTheme } from '../sync-query-response'
+import { TerminalReplyMirror } from '../terminal-reply-mirror'
 import { filterBufferData } from '../filter-buffer-data'
 import { analyzePtyInput, DEFAULT_SESSION_ID_COMMAND, type PtyInputFacts } from '../pty-input'
 import {
@@ -345,6 +348,9 @@ interface PtySession {
   sessionIdAutoDetectTimer?: NodeJS.Timeout
   // Pending partial escape sequence from previous onData chunk
   syncQueryPending: string
+  // Headless copy of this session's screen: answers state-dependent queries
+  // (CPR, DECRQM, DECRQSS) in stream order. See terminal-reply-mirror.ts.
+  replyMirror: TerminalReplyMirror
   // Last emitted process title (to deduplicate pty:title-change events)
   lastEmittedTitle: string
   // The current pty's owner (a computer) is unreachable: its scrollback can't be read.
@@ -466,11 +472,34 @@ function syncRelays(): void {
   for (const session of sessions.values()) syncRelay(session)
 }
 
+/**
+ * Relaying is hub-shared state — one stream per session for every watcher, whoever
+ * they are — so its request runs as the hub, never as the caller whose watch changed
+ * it: a watch of every session by user A used to ask user B's computer AS A, which
+ * the owner check refused, and B's output stayed dead (L2). A request that fails is
+ * not applied: the session reads unrelayed again, so the next change (a watcher, the
+ * computer coming back) asks again.
+ */
 function syncRelay(session: PtySession): void {
   const want = isWatched(session.sessionId)
   if (session.relayed === want) return
   session.relayed = want
-  ;(session.pty as unknown as PtyHandle).setRelay?.(want)
+  const handle = session.pty as unknown as PtyHandle
+  let sent: Promise<void> | void
+  try {
+    sent = runAsSecurityActor(null, () => handle.setRelay?.(want))
+  } catch (err) {
+    sent = Promise.reject(err)
+  }
+  void Promise.resolve(sent).catch(() => {
+    if (
+      sessions.get(session.sessionId) === session &&
+      (session.pty as unknown as PtyHandle) === handle &&
+      session.relayed === want
+    ) {
+      session.relayed = !want
+    }
+  })
 }
 
 /**
@@ -771,23 +800,29 @@ export function setTerminalTheme(theme: TerminalTheme): void {
 // rather than pty.write() (which is async) so they reach the program in the same
 // read loop iteration — an async response would land after the program had moved
 // on and show up as garbage bytes in stdin.
+//
+// Stateless replies are computed here; state-dependent queries go to the
+// session's reply mirror. Every part passes through the mirror in stream order,
+// so replies reach the program in the order it asked — a real terminal's
+// guarantee, which termenv (gh) depends on.
 function interceptSyncQueries(session: PtySession, data: string): string {
   const input = session.syncQueryPending + data
-  const { response, forwarded, pendingPartial } = computeSyncQueryResponse(
-    input,
-    currentTerminalTheme
-  )
+  const { parts, forwarded, pendingPartial } = computeSyncQueryResponse(input, currentTerminalTheme)
   session.syncQueryPending = pendingPartial
+  session.replyMirror.apply(parts)
+  return forwarded
+}
 
-  if (response) {
+function writeQueryReply(session: PtySession, reply: string): void {
+  try {
+    writeSync((session.pty as unknown as { fd: number }).fd, reply)
+  } catch {
     try {
-      writeSync((session.pty as unknown as { fd: number }).fd, response)
+      session.pty.write(reply)
     } catch {
-      session.pty.write(response)
+      // Process already gone — nobody left to answer.
     }
   }
-
-  return forwarded
 }
 
 /** Send a PTY event to every live renderer window (excludes the splash `data:`
@@ -1661,7 +1696,18 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           providerArgs && providerArgs.length > 0 ? providerArgs : parseShellArgs(defaultFlags),
         initialPrompt: initialPrompt || undefined
       })
-      const allArgs = [...binary.args]
+      // Flags the computer's own CLI version decides (codex `--no-daemon`), ahead
+      // of every other arg so they also precede a subcommand (`resume`).
+      const versionedArgs = await cliVersionedLaunchArgs({
+        adapter,
+        backend: getPtyBackend(),
+        computerId,
+        binary: binary.name,
+        args: binary.args,
+        sessionId,
+        taskId
+      })
+      const allArgs = [...versionedArgs, ...binary.args]
       if (binary.initialPrompt) allArgs.push(binary.initialPrompt)
       postSpawnCommand = buildExecCommand(binary.name, allArgs)
     }
@@ -2059,6 +2105,10 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // /status monitoring
       inputBuffer: '',
       syncQueryPending: '',
+      replyMirror: new TerminalReplyMirror(spawnOptions.cols, spawnOptions.rows, (reply) => {
+        const live = sessions.get(sessionId)
+        if (live) writeQueryReply(live, reply)
+      }),
       lastEmittedTitle: '',
       relayed: spawnRelay
     })
@@ -2231,6 +2281,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
         dataListeners.delete(sessionId)
+        sessions.get(sessionId)?.replyMirror.dispose()
         sessions.delete(sessionId)
         sessionTaskMap.delete(sessionId)
         sessionTabMap.delete(sessionId)
@@ -2643,6 +2694,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           if (!session || session.pty !== target) return
           session.outputUnavailable = !available
           ptyEvents.emit('output-availability', sessionId, available)
+          // Back: the relay it holds may not be the one asked for (a request that
+          // failed while it was away) — ask again.
+          if (available) {
+            session.relayed = !isWatched(sessionId)
+            syncRelay(session)
+          }
         })
       )
       // A client wrote to the computer directly (docs/direct-link.md): the same
@@ -3190,9 +3247,21 @@ export function submitPty(sessionId: string, text: string): boolean {
   return writePty(sessionId, session.adapter.encodeSubmit(text))
 }
 
-export function writePty(sessionId: string, data: string): boolean {
+export function writePty(sessionId: string, data: string, writeId?: string): boolean {
   const session = sessions.get(sessionId)
   if (!session) return false
+
+  // A session a computer runs (docs/direct-link.md): the computer analyses EVERY
+  // write in one input buffer and reports the facts (`pty-input`), whichever path
+  // brought it — a client's (direct or relayed, applied once by its id) or one the
+  // hub makes itself (submitPty, automations, the CLI), which gets an id of its own.
+  // Analysing here too would split one typed line across two buffers, and count a
+  // retried keystroke twice.
+  const handle = session.pty as unknown as PtyHandle
+  if (handle.computerId !== undefined) {
+    handle.write(data, { writeId: writeId ?? `hub-${randomUUID()}` })
+    return true
+  }
 
   // NOTE: writePty does NOT touch the idle-close clock. PTY input is a noisy
   // mix of real typing and terminal protocol the renderer writes back (focus/
@@ -3336,6 +3405,7 @@ export function resizePty(sessionId: string, cols: number, rows: number): boolea
   if (session.cols !== safeCols || session.rows !== safeRows) {
     session.cols = safeCols
     session.rows = safeRows
+    session.replyMirror.resize(safeCols, safeRows)
     ptyEvents.emit('resize', sessionId, safeCols, safeRows)
   }
   return true

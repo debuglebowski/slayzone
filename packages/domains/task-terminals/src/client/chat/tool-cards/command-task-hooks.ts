@@ -49,6 +49,22 @@ export function useCommandTaskOutput(
   return query.data
 }
 
+/** Stop one running sub-agent (the composer's background strip), by its row's tool_use_id. */
+export function useStopSubAgent(): (toolUseId: string) => Promise<void> {
+  const scope = useContext(CommandTaskContext)
+  const trpc = useTRPC()
+  const mutation = useMutation(
+    trpc.chat.stopSubAgent.mutationOptions({
+      onError: (err) => toast(`Could not stop the sub-agent: ${err.message}`)
+    })
+  )
+  // Rejects when it failed (the toast says why): the caller lets Stop be pressed again.
+  return (toolUseId) =>
+    scope
+      ? mutation.mutateAsync({ tabId: scope.tabId, toolUseId })
+      : Promise.reject(new Error('no chat session'))
+}
+
 /** Stop a running command; move a running foreground command to the background. */
 export function useCommandTaskActions(): {
   stop: (taskId: string) => void

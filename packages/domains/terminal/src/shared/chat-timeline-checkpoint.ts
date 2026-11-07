@@ -16,7 +16,7 @@ import { PersistentIndex } from './persistent-index'
 import { beginReducerCall, endReducerCall } from './replay-batch'
 
 /** Bump on ANY change to the reducer or what it calls (the test says when). */
-export const CHAT_TIMELINE_VERSION = '15'
+export const CHAT_TIMELINE_VERSION = '16'
 
 /**
  * Bump when what the hub persists or serves next to the state changes shape
@@ -38,6 +38,7 @@ export const REDUCER_SOURCES = [
   './timeline-rows.ts',
   './chat-timeline-checkpoint.ts',
   './timeline-summary.ts',
+  './sub-agent-lifecycle.ts',
   '../../../terminal-contracts/src/agent-events.ts',
   '../../../terminal-contracts/src/bg-shell-helpers.ts',
   '../../../terminal-contracts/src/chat-attachments.ts',

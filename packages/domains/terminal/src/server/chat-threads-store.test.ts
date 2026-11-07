@@ -35,6 +35,7 @@ test('threads persist separately, can share an answer, and never replace main pr
     sourceUuid: 'assistant-record',
     title: 'Question',
     conversationId: null,
+    closedAt: null,
     createdAt: 1
   }
   await store.create({ ...base, id: 'thread-one' })

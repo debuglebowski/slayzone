@@ -1,4 +1,4 @@
-import * as pty from 'node-pty'
+import { spawnNodePty } from './node-pty'
 
 /** Exercise the native terminal's input, output and exit paths before promotion. */
 export async function probeNativeTerminal(
@@ -10,7 +10,7 @@ export async function probeNativeTerminal(
     // silent child can finish before the exit listener is attached to that pipe.
     // Keep it alive until data delivery proves the pipe is connected.
     trace('spawning terminal')
-    const child = pty.spawn(
+    const child = spawnNodePty(
       process.execPath,
       [
         '-e',

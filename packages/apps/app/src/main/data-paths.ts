@@ -38,6 +38,24 @@ import { migrateLegacyDatabaseIfNeeded } from './db/legacy-migration'
  */
 
 /**
+ * The userData-migration SOURCE (`initStorageDir`'s `legacyStateDir`): the Electron
+ * userData as it was BEFORE the dev/e2e profile swap.
+ *
+ * A Playwright worker with a sandbox (`SLAYZONE_USER_DATA_DIR`) reads its sandbox
+ * instead. Its hub root is fresh on every launch, so no sentinel ever stops the copy:
+ * reading the real userData copied the developer's whole legacy state (their real
+ * artifacts, blobs and DB, ~360 MB here) into every e2e app at boot, fsync'd file by
+ * file. That stalled the hub ~40 s under load (every launch failed) and put real user
+ * data inside tests.
+ */
+export function resolveLegacyStateDir(
+  userData: string,
+  e2e: { isPlaywright: boolean; sandboxDir: string | undefined }
+): string {
+  return e2e.isPlaywright && e2e.sandboxDir ? e2e.sandboxDir : userData
+}
+
+/**
  * Run both one-time COPY migrations of legacy state into the channel-scoped hub
  * root, then return that dir. Call once at boot before the DB opens.
  *

@@ -18,6 +18,7 @@ import {
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
 import { useComputerConnectRefetch } from './app-shell/computer-connect-refetch'
+import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
@@ -58,7 +59,7 @@ import {
   useProjectLockState,
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
-import { AppearanceProvider, useSettingsReopenTab } from '@slayzone/settings'
+import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
@@ -565,6 +566,14 @@ function App(): React.JSX.Element {
       }),
     [rawIdleTasks, dismissedIdle]
   )
+  useAppBadge({
+    tasks,
+    idleTasks: allIdleTasks,
+    hubIdByProject,
+    defaultHubId,
+    columnsByProjectId,
+    openTaskIds
+  })
   const idleTasks = useMemo(
     () =>
       agentStatusState.filterCurrentProject
@@ -1488,6 +1497,7 @@ function App(): React.JSX.Element {
             columnsByProjectId={columnsByProjectId}
             tags={tags}
             taskTags={taskTags}
+            blockedTaskIds={blockedTaskIds}
             compactFooter={headerHidden ? compactFooterContent : undefined}
             statusSlot={<StartupProgressStatus />}
             updateState={
@@ -1645,6 +1655,9 @@ function App(): React.JSX.Element {
                     explodeMode ? 'p-4' : ''
                   )}
                 >
+                  {/* One banner per hub whose connection has a problem. Same 16px
+                    frame rule as the integrations banner below. */}
+                  <HubIssueBanners className={cn(!explodeMode && 'mx-4 mt-4')} />
                   {visibleAuthFailures.length > 0 ? (
                     <div
                       data-testid="integrations-auth-failure-banner"

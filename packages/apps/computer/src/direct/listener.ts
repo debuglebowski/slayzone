@@ -22,7 +22,8 @@
  *   - open sockets;
  *   - failed authentications per minute (past it, upgrades are refused);
  *   - health probes per minute;
- *   - messages per socket;
+ *   - messages per socket: a budget per grant the socket holds (every terminal and
+ *     chat of a computer shares one socket), up to a ceiling per socket;
  *   - message size;
  *   - grants per socket.
  *
@@ -56,6 +57,10 @@ import {
   type DirectTarget
 } from '@slayzone/transport/direct'
 import { WebSocketServer, type WebSocket } from 'ws'
+import type { RtcServerSocket } from './rtc-socket'
+
+/** A WebSocket, or a WebRTC data channel made to look like one (rtc-socket.ts). */
+type ServedSocket = WebSocket | RtcServerSocket
 import type { DirectGrantStore, GrantRecord } from './grants'
 
 export const DIRECT_PATH = '/direct/v1'
@@ -69,6 +74,9 @@ export interface DirectListenerLimits {
   socketsPerAddress: number
   failedAuthsPerMinute: number
   healthPerMinute: number
+  /** Message budget per grant the socket holds (at least one), per 10 s. */
+  messagesPerGrantPer10s: number
+  /** Ceiling on a socket's message budget, however many grants it holds. */
   messagesPerSocketPer10s: number
   maxMessageBytes: number
   grantsPerSocket: number
@@ -82,8 +90,10 @@ export const DEFAULT_DIRECT_LIMITS: DirectListenerLimits = {
   failedAuthsPerMinute: 20,
   healthPerMinute: 240,
   // Keystrokes are one message each; a paste is one message. Generous for a person,
-  // bounded for a loop.
-  messagesPerSocketPer10s: 2_000,
+  // bounded for a loop. Per grant: mouse reporting in several TUIs at once shares
+  // the computer's one socket.
+  messagesPerGrantPer10s: 2_000,
+  messagesPerSocketPer10s: 20_000,
   maxMessageBytes: 1024 * 1024,
   grantsPerSocket: 256,
   authDeadlineMs: 10_000
@@ -108,6 +118,13 @@ export interface DirectListener {
   readonly boundAddress: string
   /** What hubs are told to offer clients; null = nothing dialable. */
   readonly advertisedAddress: string | null
+  /**
+   * Serve a WebRTC data channel exactly like an upgraded WebSocket: the same
+   * capability auth, grants, flood limits and per-address caps. `ip` is the
+   * client's address as the hub saw it while brokering. False (and the channel is
+   * closed) when a per-address cap refuses it.
+   */
+  serveChannel(socket: RtcServerSocket, meta: { ip: string | null }): boolean
   close(): Promise<void>
 }
 
@@ -149,6 +166,22 @@ function covers(resource: GrantRecord['resource'], target: DirectTarget): boolea
     : target.kind === 'chat' && resource.tabId === target.tabId
 }
 
+/** Same session, or same tab (any epoch). */
+function sameResource(a: GrantRecord['resource'], b: GrantRecord['resource']): boolean {
+  return a.kind === 'pty'
+    ? b.kind === 'pty' && a.sessionId === b.sessionId
+    : b.kind === 'chat' && a.tabId === b.tabId
+}
+
+/** End the streams whose target this socket no longer holds any grant on. */
+function endUncovered(state: SocketState): void {
+  for (const watcher of [...state.targetWatchers]) {
+    if ([...state.grants.values()].some((g) => covers(g.resource, watcher.target))) continue
+    state.targetWatchers.delete(watcher)
+    watcher.ended()
+  }
+}
+
 function view(record: GrantRecord, now: number): DirectGrantView {
   return {
     grantId: record.grantId,
@@ -164,7 +197,7 @@ export async function createDirectListener(
   const minute = (max: number): RateRule => ({ max, windowMs: 60_000 })
   const limiter = createFixedWindowLimiter()
   const auditLimiter = createFixedWindowLimiter()
-  const sockets = new Map<WebSocket, SocketState>()
+  const sockets = new Map<ServedSocket, SocketState>()
   const openPerBucket = new Map<string, number>()
 
   const refuse = (refusal: RateLimitRefusal): void => {
@@ -180,13 +213,13 @@ export async function createDirectListener(
   const router = createDirectRouter(options.services)
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes })
 
-  function closeUnauthorized(ws: WebSocket, reason: string): void {
-    if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+  function closeUnauthorized(ws: ServedSocket, reason: string): void {
+    if (ws.readyState === 1 || ws.readyState === 0) {
       ws.close(DIRECT_CLOSE_UNAUTHORIZED, reason)
     }
   }
 
-  function socketFor(ws: WebSocket, state: SocketState): DirectSocket {
+  function socketFor(ws: ServedSocket, state: SocketState): DirectSocket {
     return {
       authorize(token) {
         const record = options.grants.authenticate(token)
@@ -194,12 +227,24 @@ export async function createDirectListener(
           limiter.hit(`auth|${state.bucket}`, minute(limits.failedAuthsPerMinute))
           return null
         }
+        // Newest wins: drop what this socket held on the same session or tab (a renewal,
+        // or a chat grant from an older epoch that would shadow this one).
+        for (const [id, held] of state.grants) {
+          if (id !== record.grantId && sameResource(held.resource, record.resource)) {
+            state.grants.delete(id)
+          }
+        }
         if (!state.grants.has(record.grantId) && state.grants.size >= limits.grantsPerSocket) {
           return null
         }
         state.grants.set(record.grantId, record)
         state.authenticated = true
         return view(record, performance.now())
+      },
+      release(grantId) {
+        if (!state.grants.delete(grantId)) return false
+        endUncovered(state)
+        return true
       },
       grantFor(target) {
         for (const record of state.grants.values()) {
@@ -226,7 +271,7 @@ export async function createDirectListener(
     router,
     keepAlive: { enabled: true, pingMs: 30_000, pongWaitMs: 10_000 },
     createContext: ({ res, info }): DirectContext => {
-      const ws = res
+      const ws = res as unknown as ServedSocket
       const state = sockets.get(ws)
       if (!state) throw new TRPCError({ code: 'UNAUTHORIZED' })
       const socket = socketFor(ws, state)
@@ -239,8 +284,46 @@ export async function createDirectListener(
     }
   })
 
-  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-    const ip = req.socket.remoteAddress ?? null
+  /**
+   * The per-address admission checks, before a socket is served (WebSocket upgrade
+   * or data channel). False = refused, audited.
+   */
+  function admit(ip: string | null, route: string): { ok: true } | { ok: false; status: number } {
+    const bucket = addressBucket(ip)
+    if (!limiter.check(`auth|${bucket}`, minute(limits.failedAuthsPerMinute)).allowed) {
+      refuse({
+        limit: 'computer.direct.failed_auth_per_address',
+        address: ip,
+        route,
+        max: limits.failedAuthsPerMinute,
+        windowSec: 60
+      })
+      return { ok: false, status: 429 }
+    }
+    if ((openPerBucket.get(bucket) ?? 0) >= limits.socketsPerAddress) {
+      refuse({
+        limit: 'computer.direct.sockets_per_address',
+        address: ip,
+        route,
+        max: limits.socketsPerAddress
+      })
+      return { ok: false, status: 429 }
+    }
+    if (!limiter.consume(`upgrade|${bucket}`, minute(limits.upgradesPerMinute)).allowed) {
+      refuse({
+        limit: 'computer.direct.upgrades_per_address',
+        address: ip,
+        route,
+        max: limits.upgradesPerMinute,
+        windowSec: 60
+      })
+      return { ok: false, status: 429 }
+    }
+    return { ok: true }
+  }
+
+  /** Serve one admitted socket, whichever transport brought it. */
+  function serve(ws: ServedSocket, req: IncomingMessage, ip: string | null, route: string): void {
     const bucket = addressBucket(ip)
     const state: SocketState = {
       bucket,
@@ -264,12 +347,16 @@ export async function createDirectListener(
         messages = 0
         windowEnds = t + 10_000
       }
-      if (++messages > limits.messagesPerSocketPer10s) {
+      const budget = Math.min(
+        limits.messagesPerSocketPer10s,
+        limits.messagesPerGrantPer10s * Math.max(1, state.grants.size)
+      )
+      if (++messages > budget) {
         refuse({
           limit: 'computer.direct.messages_per_socket',
           address: ip,
-          route: `WS ${DIRECT_PATH}`,
-          max: limits.messagesPerSocketPer10s,
+          route,
+          max: budget,
           windowSec: 10
         })
         ws.close(1008, 'message rate')
@@ -282,7 +369,11 @@ export async function createDirectListener(
       if (open <= 0) openPerBucket.delete(bucket)
       else openPerBucket.set(bucket, open)
     })
-    handle(ws, req)
+    handle(ws as WebSocket, req)
+  }
+
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    serve(ws, req, req.socket.remoteAddress ?? null, `WS ${DIRECT_PATH}`)
   })
 
   const stopDrops = options.grants.onDropped((dropped) => {
@@ -291,11 +382,7 @@ export async function createDirectListener(
       let hit = false
       for (const id of ids) hit = state.grants.delete(id) || hit
       if (!hit) continue
-      for (const watcher of [...state.targetWatchers]) {
-        if ([...state.grants.values()].some((g) => covers(g.resource, watcher.target))) continue
-        state.targetWatchers.delete(watcher)
-        watcher.ended()
-      }
+      endUncovered(state)
       if (state.grants.size === 0) closeUnauthorized(ws, 'capability ended')
     }
   })
@@ -330,38 +417,8 @@ export async function createDirectListener(
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = (req.url ?? '/').split('?')[0]
     if (path !== DIRECT_PATH) return refuseUpgrade(socket, 404, 'Not Found')
-    const ip = req.socket.remoteAddress ?? null
-    const bucket = addressBucket(ip)
-    const route = `WS ${DIRECT_PATH}`
-    if (!limiter.check(`auth|${bucket}`, minute(limits.failedAuthsPerMinute)).allowed) {
-      refuse({
-        limit: 'computer.direct.failed_auth_per_address',
-        address: ip,
-        route,
-        max: limits.failedAuthsPerMinute,
-        windowSec: 60
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
-    if ((openPerBucket.get(bucket) ?? 0) >= limits.socketsPerAddress) {
-      refuse({
-        limit: 'computer.direct.sockets_per_address',
-        address: ip,
-        route,
-        max: limits.socketsPerAddress
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
-    if (!limiter.consume(`upgrade|${bucket}`, minute(limits.upgradesPerMinute)).allowed) {
-      refuse({
-        limit: 'computer.direct.upgrades_per_address',
-        address: ip,
-        route,
-        max: limits.upgradesPerMinute,
-        windowSec: 60
-      })
-      return refuseUpgrade(socket, 429, 'Too Many Requests')
-    }
+    const admitted = admit(req.socket.remoteAddress ?? null, `WS ${DIRECT_PATH}`)
+    if (!admitted.ok) return refuseUpgrade(socket, admitted.status, 'Too Many Requests')
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
   })
 
@@ -380,6 +437,22 @@ export async function createDirectListener(
   return {
     boundAddress,
     advertisedAddress,
+    serveChannel(socket, meta) {
+      const route = `RTC ${DIRECT_PATH}`
+      if (!admit(meta.ip, route).ok) {
+        socket.close(1008, 'refused')
+        return false
+      }
+      // tRPC's handler reads the request only for `connectionParams=1` (the first
+      // frame carries the capability) — the same as a WebSocket client sends.
+      const req = {
+        url: `${DIRECT_PATH}?connectionParams=1`,
+        headers: { host: 'direct.rtc' },
+        socket: { remoteAddress: meta.ip ?? undefined }
+      } as unknown as IncomingMessage
+      serve(socket, req, meta.ip, route)
+      return true
+    },
     async close() {
       stopDrops()
       for (const ws of sockets.keys()) ws.terminate()

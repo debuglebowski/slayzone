@@ -27,6 +27,7 @@ const tabOperations = new Set([
   'commandTaskOutput',
   'stopCommandTask',
   'backgroundCommandTask',
+  'stopSubAgent',
   'getWorkspaceChanges',
   'getWorkspaceFileDiff',
   'getTabState',

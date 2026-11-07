@@ -9,6 +9,7 @@ import {
   directLinkManagerFor,
   disposeDirectLinkManagers,
   setDirectLinkProbe,
+  setDirectRtcPeerFactory,
   type DirectConnection,
   type DirectIssueResult,
   type DirectLinkManagerOptions
@@ -18,7 +19,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const available = (over: Partial<Extract<DirectIssueResult, { available: true }>> = {}) =>
+const available = (over: Partial<Extract<DirectIssueResult, { address: string }>> = {}) =>
   ({
     available: true,
     computerId: 'c1',
@@ -32,10 +33,12 @@ const available = (over: Partial<Extract<DirectIssueResult, { available: true }>
 
 function fakeConnection(opts: { ready?: boolean } = {}) {
   const authorized: string[] = []
+  const released: unknown[] = []
   const closeListeners: Array<() => void> = []
   let closed = false
   const conn: DirectConnection & {
     authorized: string[]
+    released: unknown[]
     drop: () => void
     closed: () => boolean
   } = {
@@ -49,6 +52,12 @@ function fakeConnection(opts: { ready?: boolean } = {}) {
           authorized.push(token)
           return { grantId: 'x', resource: { kind: 'pty', sessionId: 's' }, expiresInMs: 1 }
         }
+      },
+      release: {
+        mutate: async (target: unknown) => {
+          released.push(target)
+          return { released: true }
+        }
       }
     } as never,
     onClose: (cb) => closeListeners.push(cb),
@@ -56,6 +65,7 @@ function fakeConnection(opts: { ready?: boolean } = {}) {
       closed = true
     },
     authorized,
+    released,
     drop: () => {
       for (const cb of closeListeners) cb()
     },
@@ -103,7 +113,7 @@ function setup(over: Partial<DirectLinkManagerOptions> = {}) {
   }
 }
 
-const pty = (sessionId = 's1') => ({ kind: 'pty' as const, sessionId })
+const pty = (sessionId = 's1') => ({ kind: 'pty' as const, sessionId, taskId: 't1' })
 
 describe('acquire', () => {
   it('issues, probes the health path over HTTP, opens one socket and leases it', async () => {
@@ -129,6 +139,79 @@ describe('acquire', () => {
     expect(opened.length).toBe(1)
     expect(a?.client).toBe(b?.client)
     expect(connections[0]?.authorized.length).toBe(1)
+  })
+
+  // M3: at boot every open tab's terminal and chat acquires at once. One computer must
+  // still get ONE probe and ONE socket (the listener allows 64 per address; a refused
+  // upgrade is a failed WebSocket connect, which slows the renderer's hub socket too).
+  it('70 concurrent acquires for one computer share one probe and one socket', async () => {
+    const { manager, opened, connections, probes } = setup()
+    const leases = await Promise.all(
+      Array.from({ length: 70 }, (_, i) => manager.acquire(pty(`s${i}`)))
+    )
+    expect(probes.length).toBe(1)
+    expect(opened.length).toBe(1)
+    expect(leases.every((l) => l !== null && l.client === leases[0]?.client)).toBe(true)
+    // The opener's token rode the connection params; every other lease authorized on it.
+    expect(connections[0]?.authorized.length).toBe(69)
+    expect(manager.status()).toEqual([
+      { computerId: 'c1', path: 'direct', transport: 'ws', address: '127.0.0.1:5001', leases: 70 }
+    ])
+  })
+
+  it('concurrent acquires that fail to open all fall back, with one probe', async () => {
+    const { manager, opened, probes, setProbe } = setup()
+    setProbe(false)
+    const leases = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => manager.acquire(pty(`s${i}`)))
+    )
+    expect(leases.every((l) => l === null)).toBe(true)
+    expect(probes.length).toBe(1)
+    expect(opened.length).toBe(0)
+  })
+
+  // M4: grants the client no longer uses must leave the computer's socket, or they
+  // pile up to its per-socket cap. Only the LAST lease on a target releases it.
+  it('releases its own grant on the computer when its last lease on the target ends', async () => {
+    const { manager, connections, setIssue } = setup()
+    let n = 0
+    setIssue(() => available({ grantId: `g${++n}` }))
+    const a = await manager.acquire(pty('s1'))
+    const b = await manager.acquire(pty('s1'))
+    const c = await manager.acquire(pty('s2'))
+    a?.release()
+    await Promise.resolve()
+    expect(connections[0]?.released).toEqual([])
+    b?.release()
+    c?.release()
+    await Promise.resolve()
+    expect(connections[0]?.released).toEqual([{ grantId: 'g2' }, { grantId: 'g3' }])
+  })
+
+  // R4: a holder that is still acquiring the same target (its authorize in flight)
+  // must not lose the grant it is about to get to another holder's release.
+  it('never releases a target while another acquire for it is in flight', async () => {
+    const authorizing: Array<() => void> = []
+    const { manager, connections, setIssue } = setup()
+    let n = 0
+    setIssue(() => available({ grantId: `g${++n}` }))
+    const a = await manager.acquire(pty('s1'))
+    const conn = connections[0]!
+    const realAuthorize = (
+      conn.client as { authorize: { mutate: (i: unknown) => Promise<unknown> } }
+    ).authorize.mutate
+    ;(conn.client as { authorize: { mutate: (i: unknown) => Promise<unknown> } }).authorize.mutate =
+      (input) => new Promise((resolve) => authorizing.push(() => resolve(realAuthorize(input))))
+    const pendingB = manager.acquire(pty('s1'))
+    await vi.waitFor(() => expect(authorizing.length).toBe(1))
+    a?.release()
+    await Promise.resolve()
+    expect(conn.released).toEqual([])
+    authorizing[0]!()
+    const b = await pendingB
+    b?.release()
+    await Promise.resolve()
+    expect(conn.released).toEqual([{ grantId: 'g2' }])
   })
 
   it('returns null (use the relay) when the hub offers nothing', async () => {
@@ -321,10 +404,10 @@ describe('per-hub registry', () => {
     expect(told).toEqual(['c1'])
   })
 
-  it('probes through the installed probe (the desktop asks its main process)', async () => {
-    const asked: string[] = []
-    setDirectLinkProbe(async (address) => {
-      asked.push(address)
+  it('probes through the installed probe, naming the hub that issued the address (the desktop asks its main process, which asks that hub)', async () => {
+    const asked: Array<[string, string]> = []
+    setDirectLinkProbe(async (address, hubId) => {
+      asked.push([address, hubId])
       return false
     })
     const client = {
@@ -334,7 +417,7 @@ describe('per-hub registry', () => {
       }
     }
     expect(await directLinkManagerFor('hub-p', client).acquire(pty())).toBeNull()
-    expect(asked).toEqual(['127.0.0.1:5001'])
+    expect(asked).toEqual([['127.0.0.1:5001', 'hub-p']])
   })
 })
 
@@ -345,7 +428,7 @@ describe('status (Diagnostics)', () => {
     await manager.acquire(pty('s1'))
     await manager.acquire(pty('s2'))
     expect(manager.status()).toEqual([
-      { computerId: 'c1', path: 'direct', address: '127.0.0.1:5001', leases: 2 }
+      { computerId: 'c1', path: 'direct', transport: 'ws', address: '127.0.0.1:5001', leases: 2 }
     ])
     setIssue(() => available({ computerId: 'c2', address: '127.0.0.1:6000' }))
     setProbe(false)
@@ -356,5 +439,126 @@ describe('status (Diagnostics)', () => {
       reason: 'probe',
       retryInMs: 60_000
     })
+  })
+})
+
+// M5: WebRTC for computers without a reachable listener (docs/direct-link.md).
+describe('acquire over WebRTC', () => {
+  const rtcIssued = (): DirectIssueResult => ({
+    available: true,
+    transport: 'webrtc',
+    computerId: 'c9',
+    token: `tok-${Math.random()}`,
+    grantId: `g-${Math.random()}`,
+    expiresInMs: 300_000,
+    protocol: 1,
+    stunAddresses: ['stun.cloudflare.com:3478']
+  })
+
+  function rtcSetup(opts: { fail?: boolean } = {}) {
+    const rtcOpened: Array<{ grantId: string; token: string; stunAddresses: string[] }> = []
+    const connections: Array<ReturnType<typeof fakeConnection>> = []
+    const ctx = setup({
+      issue: async () => rtcIssued(),
+      rtc: {
+        createPeer: () => {
+          throw new Error('not used: openRtcConnection is injected')
+        },
+        connect: async () => ({ ok: false, reason: 'refused' })
+      },
+      openRtcConnection: async (o) => {
+        rtcOpened.push({ grantId: o.grantId, token: o.token, stunAddresses: [...o.stunAddresses] })
+        await new Promise((r) => setTimeout(r, 5))
+        if (opts.fail) throw new Error('direct link did not connect')
+        const c = fakeConnection()
+        connections.push(c)
+        return c
+      }
+    })
+    return { ...ctx, rtcOpened, rtcConnections: connections }
+  }
+
+  it('connects over WebRTC (no HTTP probe), and reports the transport', async () => {
+    const { manager, probes, opened, rtcOpened } = rtcSetup()
+    const lease = await manager.acquire(pty('s1'))
+    expect(lease?.computerId).toBe('c9')
+    expect(probes).toEqual([])
+    expect(opened).toEqual([])
+    expect(rtcOpened).toEqual([
+      {
+        grantId: expect.any(String),
+        token: expect.any(String),
+        stunAddresses: ['stun.cloudflare.com:3478']
+      }
+    ])
+    expect(manager.status()).toEqual([
+      { computerId: 'c9', path: 'direct', transport: 'webrtc', address: null, leases: 1 }
+    ])
+  })
+
+  it('70 concurrent acquires share one peer connection', async () => {
+    const { manager, rtcOpened, rtcConnections } = rtcSetup()
+    const leases = await Promise.all(
+      Array.from({ length: 70 }, (_, i) => manager.acquire(pty(`s${i}`)))
+    )
+    expect(rtcOpened.length).toBe(1)
+    expect(leases.every((l) => l !== null && l.client === leases[0]?.client)).toBe(true)
+    expect(rtcConnections[0]?.authorized.length).toBe(69)
+  })
+
+  it('a failed connect falls back to the relay and backs off', async () => {
+    const { manager, rtcOpened } = rtcSetup({ fail: true })
+    expect(await manager.acquire(pty('s1'))).toBeNull()
+    expect(await manager.acquire(pty('s2'))).toBeNull()
+    expect(rtcOpened.length).toBe(1)
+    expect(manager.status()).toEqual([
+      { computerId: 'c9', path: 'relay', reason: 'rtc', retryInMs: expect.any(Number) }
+    ])
+  })
+
+  it('a renewal over WebRTC keeps the lease on the same peer', async () => {
+    vi.useFakeTimers()
+    const { manager, rtcConnections } = rtcSetup()
+    const lease = await vi.waitFor(() => manager.acquire(pty('s1')))
+    const lost: string[] = []
+    lease?.onLost((r) => lost.push(r))
+    await vi.advanceTimersByTimeAsync(150_001)
+    expect(lost).toEqual([])
+    expect(rtcConnections[0]?.authorized.length).toBe(1)
+  })
+})
+
+describe('the registry advertises WebRTC only with a peer factory installed', () => {
+  it('asks for webrtc once a factory is installed', async () => {
+    const inputs: unknown[] = []
+    const client = {
+      computers: {
+        issueDirectLink: {
+          mutate: async (input: unknown) => {
+            inputs.push(input)
+            return { available: false as const, reason: 'no-address' }
+          }
+        },
+        directRtcConnect: {
+          mutate: async () => ({ ok: false as const, reason: 'refused' as const })
+        },
+        onStatusChange: { subscribe: () => ({ unsubscribe: () => undefined }) }
+      }
+    }
+    setDirectLinkProbe(async () => true)
+    try {
+      await directLinkManagerFor('hub-a', client).acquire(pty('s1'))
+      setDirectRtcPeerFactory(() => ({}) as RTCPeerConnection)
+      disposeDirectLinkManagers()
+      await directLinkManagerFor('hub-b', client).acquire(pty('s2'))
+      expect(inputs).toEqual([
+        { target: pty('s1'), transports: ['ws'] },
+        { target: pty('s2'), transports: ['ws', 'webrtc'] }
+      ])
+    } finally {
+      setDirectRtcPeerFactory(null)
+      setDirectLinkProbe(null)
+      disposeDirectLinkManagers()
+    }
   })
 })

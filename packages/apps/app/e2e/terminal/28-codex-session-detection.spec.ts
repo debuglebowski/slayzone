@@ -15,6 +15,9 @@ test.describe('Session ID banners', () => {
   let opencodeTaskId: string
 
   const detectedId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  // Its own id: a provider session belongs to ONE task (the first to claim it), so
+  // reusing the codex task's id here would leave the gemini claim unhonored.
+  const geminiDetectedId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
   const sessionBanner = (page: import('@playwright/test').Page) =>
     page.getByText('Session not saved').last()
 
@@ -234,7 +237,7 @@ test.describe('Session ID banners', () => {
           sessionId: `${id}:${id}`,
           conversationId: cid
         }),
-      { id: geminiTaskId, cid: detectedId }
+      { id: geminiTaskId, cid: geminiDetectedId }
     )
 
     await expect
@@ -245,7 +248,7 @@ test.describe('Session ID banners', () => {
         )
         return task?.gemini_conversation_id ?? null
       })
-      .toBe(detectedId)
+      .toBe(geminiDetectedId)
 
     await expect(sessionBanner(mainWindow)).not.toBeVisible()
   })

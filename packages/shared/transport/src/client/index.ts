@@ -22,6 +22,14 @@ export {
 } from './inProcessLink'
 export { setHubConnectProbe, type HubConnectProbe } from './connectPacing'
 export {
+  attachDirectPty,
+  readDirectPtyBuffer,
+  DIRECT_CALL_DEADLINE_MS,
+  directCallFailure,
+  newDirectWriteId,
+  withDirectDeadline,
+  createOrderedPtyWriter,
+  type OrderedPtyWriter,
   createDirectLinkManager,
   directLinkManagerFor,
   defaultDirectProbe,
@@ -32,12 +40,14 @@ export {
   type DirectLinkComputerStatus,
   isDirectLinkEnabled,
   setDirectLinkProbe,
+  setDirectRtcPeerFactory,
   type DirectLinkHubClient,
   type DirectIssueResult,
   type DirectLease,
   type DirectLeaseLostReason,
   type DirectLinkManager,
-  type DirectLinkManagerOptions
+  type DirectLinkManagerOptions,
+  type DirectRtcPeerFactory
 } from './direct-link'
 export {
   keepDirectLease,
@@ -69,6 +79,18 @@ export {
   HUB_UNREACHABLE_GRACE_MS,
   type HubBadge
 } from './hubBadge'
+export {
+  HUB_ISSUE_GRACE_MS,
+  isSignedOutDescribe,
+  issueOf,
+  useHubHealth,
+  useHubIssues,
+  watchHubHealth,
+  watchHubIssue,
+  type HubHealth,
+  type HubIssue,
+  type HubIssueEntry
+} from './hubIssues'
 export { electronBootstrap } from './electron-bootstrap'
 export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'
@@ -82,6 +104,11 @@ export {
 // Subscription hook for the tanstack integration — single import point so
 // renderer code gets it from the transport barrel (not @trpc/* directly).
 export { useSubscription } from '@trpc/tanstack-react-query'
+export {
+  noteComputerConnected,
+  useComputerConnectGeneration,
+  useResubscribeOnComputerConnect
+} from './computerConnect'
 export { useStableCallback } from './useStableCallback'
 // Re-export useQuery so consumers (e.g. the Chromium fork) share the exact
 // react-query instance the provider uses — avoids a duplicate module with its

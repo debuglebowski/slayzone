@@ -11,7 +11,7 @@
 // the existing `__testEmit(channel, data)` hook (dispatches a CustomEvent).
 // Production menu accelerator dispatch is unchanged (still deferred).
 
-import type { LocalComputerStatus } from '@slayzone/types'
+import type { LocalComputerHubs, LocalComputerStatus } from '@slayzone/types'
 import { resolveServerUrl, CHROMIUM_WINDOW_ID } from '../server-url'
 
 const noopUnsub = (): void => undefined
@@ -82,6 +82,7 @@ export const appShim = {
   }),
   // Fork is single-hub → no remote bearer tokens / login.
   getHubTokens: async (): Promise<Record<string, string>> => ({}),
+  checkHubSession: async () => ({ state: 'none' as const }),
   setHubToken: async (): Promise<{ ok: true }> => ({ ok: true }),
   hubLogin: async (): Promise<{ ok: false; error: string }> => ({
     ok: false,
@@ -107,7 +108,10 @@ export const appShim = {
     error: 'Not supported in the Chromium shell'
   }),
   getLocalComputerStatus: async (): Promise<LocalComputerStatus | null> => null,
+  getLocalComputerHubs: async (): Promise<LocalComputerHubs> => ({}),
   getWindowId: async (): Promise<number | null> => CHROMIUM_WINDOW_ID,
+  // No app icon of its own in the Chromium shell.
+  setAppBadge: async (): Promise<void> => undefined,
   bootMark: (_label: string): void => undefined,
   dataReady: (): Promise<void> => Promise.resolve(),
   cliStatus: async (): Promise<{ installed: boolean; path: string | null }> => ({

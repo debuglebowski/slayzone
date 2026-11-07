@@ -123,6 +123,15 @@ if (have('computer/bin.cjs')) {
   r.status === 0 && r.out.includes('loaded')
     ? pass('computer: node-pty loads')
     : fail(`computer: node-pty cannot load — ${r.out.split('\n')[0]}`)
+  // The WebRTC direct link (docs/direct-link.md): node-datachannel's per-platform
+  // binary must be unpacked next to it, or the computer silently offers no WebRTC.
+  const rtc = run(
+    `const R=require('module').createRequire(${JSON.stringify(computer)})('node-datachannel');` +
+      `const p=new R.PeerConnection('smoke',{iceServers:[]});p.close();R.cleanup();console.log('rtc')`
+  )
+  rtc.status === 0 && rtc.out.includes('rtc')
+    ? pass('computer: node-datachannel loads (WebRTC direct link)')
+    : fail(`computer: node-datachannel cannot load — ${rtc.out.split('\n')[0]}`)
   // Loading is not spawning: on posix node-pty execs a separate `spawn-helper` binary
   // whose path it derives itself (rewriting `app.asar` → `app.asar.unpacked`), and a
   // wrong or non-executable helper fails only at `spawn` ("posix_spawnp failed.") —
@@ -134,6 +143,24 @@ if (have('computer/bin.cjs')) {
         `p.onData((d)=>{o+=d});p.onExit(()=>{console.log(o.trim());process.exit(0)})`
     )
     s.status === 0 && s.out.includes('pty-ok')
+      ? pass('computer: node-pty spawns a process')
+      : fail(`computer: node-pty cannot spawn — ${s.out.split('\n')[0]}`)
+  } else {
+    // Windows spawns through ConPTY (conpty.node + its bundled OpenConsole.exe), which the
+    // release loads from node-pty's prebuild instead of a local compile — load alone would
+    // not catch a prebuild that cannot start a console. ConPTY may report exit before the
+    // last output is read, so pass on the output itself. The marker is a sum only running
+    // cmd produces: ConPTY can echo the command line itself (OSC window title) before cmd
+    // runs, so an `echo` marker would pass even if nothing executed. Escape sequences are
+    // stripped before matching, and the outer check wants the snippet's own verdict line.
+    const s = run(
+      `const pty=require('module').createRequire(${JSON.stringify(computer)})('node-pty');` +
+        `const p=pty.spawn(process.env.ComSpec||'cmd.exe',['/d','/c','set /a 12000+34567'],{env:process.env});let o='';` +
+        `const strip=(t)=>t.replace(/\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)/g,'').replace(/\\x1b\\[[0-?]*[ -\\/]*[@-~]/g,'').replace(/\\x1b./g,'');` +
+        `p.onData((d)=>{o+=d;if(/(^|\\D)46567(\\D|$)/.test(strip(o))){console.log('PTY_RESULT=46567');process.exit(0)}});` +
+        `p.onExit(()=>setTimeout(()=>{console.log(JSON.stringify(strip(o).trim()));process.exit(0)},2000))`
+    )
+    s.status === 0 && s.out.includes('PTY_RESULT=46567')
       ? pass('computer: node-pty spawns a process')
       : fail(`computer: node-pty cannot spawn — ${s.out.split('\n')[0]}`)
   }

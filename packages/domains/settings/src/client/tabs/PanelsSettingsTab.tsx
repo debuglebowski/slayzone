@@ -12,13 +12,7 @@ import {
 } from './panels-settings'
 import type { PanelsSettingsTabProps } from './panels-settings'
 
-export function PanelsSettingsTab({
-  activeTab,
-  navigateTo,
-  modes,
-  defaultAgentId,
-  onDefaultAgentIdChange
-}: PanelsSettingsTabProps) {
+export function PanelsSettingsTab({ activeTab, navigateTo }: PanelsSettingsTabProps) {
   const s = usePanelSettings(activeTab, navigateTo)
   const { panelDetailId } = s
 
@@ -35,14 +29,7 @@ export function PanelsSettingsTab({
 
       {activeTab === 'panels' && <PanelList state={s} />}
 
-      {activeTab === 'panels/terminal' && (
-        <TerminalPanelSettings
-          state={s}
-          modes={modes}
-          defaultAgentId={defaultAgentId}
-          onDefaultAgentIdChange={onDefaultAgentIdChange}
-        />
-      )}
+      {activeTab === 'panels/terminal' && <TerminalPanelSettings state={s} />}
 
       {activeTab === 'panels/browser' && <BrowserPanelSettings state={s} />}
 

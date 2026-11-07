@@ -180,9 +180,20 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     sweepExpired(at)
     const key = graceKey(params.joinToken, params.name)
 
-    // Socket-drop reconnect: hand back the same credential, don't re-consume.
+    // Socket-drop reconnect: hand back the same credential, don't re-consume — but
+    // only while that computer still stands. Deleted or revoked since (an operator
+    // removed it right after it enrolled), the cached pair would authenticate a
+    // computer that no longer exists: connected, on no list, with no way back. Fall
+    // through instead: the token is spent, so the computer is refused and fetches a
+    // fresh one (`refreshJoinToken`) to enroll as a new computer.
     const cached = grace.get(key)
-    if (cached) return { computerId: cached.computerId, apiKey: cached.apiKey }
+    if (cached) {
+      const still = await getComputer(db, cached.computerId)
+      if (still && still.revoked_at === null) {
+        return { computerId: cached.computerId, apiKey: cached.apiKey }
+      }
+      grace.delete(key)
+    }
 
     const verified = await verifyJoinToken(db, params.joinToken, at)
     if (!verified.ok) {

@@ -201,6 +201,11 @@ test('warm spawn pre-boots the agent + records a pooled session (B3b)', async ()
   // authority on mode templates + conversation ids.
   const post = lastSpawn()?.postSpawnCommand ?? ''
   expect(post.includes('exec ') && post.includes('claude')).toBeTruthy()
+  // Exactly the command a normal spawn sends (`buildExecCommand`), no extra `exec`:
+  // bash runs `exec exec claude` as a binary named `exec` → "exec: exec: not found"
+  // (zsh tolerates it, which hid this on macOS). GitHub #173.
+  expect(post.startsWith("exec 'claude' ")).toBeTruthy()
+  expect(post.match(/\bexec\b/g)?.length).toBe(1)
   // A pooled agent_sessions row was recorded (via the task store, on the pool's db).
   const pooledInsert = sessionCalls('recordSessionSpawn')[0]
   expect(!!pooledInsert).toBeTruthy()

@@ -6,7 +6,7 @@
 // (`api/src/domain-router-deps.ts`) to read its `AppDeps` registry live on every call.
 
 import type { EventEmitter } from 'node:events'
-import type { CliInstallResult } from '@slayzone/platform'
+import type { CliInstallResult, CliStatus } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
 
 export type ClipboardHost = {
@@ -59,7 +59,7 @@ export type MetaHost = {
     reason: 'registered' | 'dev-skipped' | 'registration-failed'
   }
   appGetRendererZoomFactor: () => number | null
-  appCheckCliInstalled: () => { installed: boolean; path?: string }
+  appCheckCliInstalled: () => Promise<CliStatus>
   appInstallCli: () => Promise<CliInstallResult>
   appAdjustZoom: (command: 'in' | 'out' | 'reset') => number
   appRestartForUpdate: () => Promise<void>

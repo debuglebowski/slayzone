@@ -42,8 +42,8 @@ import type { OwnerMark } from './owner-policy'
  *               matches; the route's own resolver then only ever sees the caller's
  *               rows (`resolve.ts`), so a prefix shared with someone else's row is
  *               neither ambiguous nor theirs.
- *   projectRef  a project's id OR a case-insensitive name substring
- *               (`resolveProjectRef`); same rule.
+ *   projectRef  a project's id OR a case-insensitive name substring, else a unique
+ *               id prefix (`resolveProjectRef`); same rule.
  */
 export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
 
@@ -103,6 +103,8 @@ const session = ref('session', 'exact')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
+/** A path the hub opens on its OWN disk for the caller: one of their roots (N1). */
+const owned = ref('ownedPath', 'exact')
 const computer = ref('computer', 'exact')
 const automation = ref('automation', 'exact')
 const automationPrefix = ref('automation', 'prefix')
@@ -197,6 +199,8 @@ const DEEP_LINK =
   "the desktop app's own OAuth deep-link callback (app.auth.onCallback, a desktop-host event): names nothing a user owns"
 const COMPUTER =
   "the computer roster: cut in the handler to the caller's own, or every one for an admin (management metadata; computer-access.ts, T-19)"
+const DIRECT_ADDRESSES =
+  "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
 
@@ -235,11 +239,12 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'GET /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
   'PUT /api/artifacts/:id/content': checked(artifactPrefix('params.id')),
-  // `outputPath` is a hub-host path the render is WRITTEN to: someone else's worktree
-  // or artifact directory, or the hub's own state directory, is refused (access.ts `path`).
-  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), path('body.outputPath')),
-  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), path('body.outputPath')),
+  // `outputPath` is a hub-host path the render is WRITTEN to: only inside one of the
+  // caller's roots (access.ts `ownedPath`, N1) — never the hub's own state, someone
+  // else's worktree, or a file in nobody's project (`~/.bashrc`).
+  'POST /api/artifacts/:id/export/html': checked(artifact('params.id'), owned('body.outputPath')),
+  'POST /api/artifacts/:id/export/pdf': checked(artifact('params.id'), owned('body.outputPath')),
+  'POST /api/artifacts/:id/export/png': checked(artifact('params.id'), owned('body.outputPath')),
   'GET /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
   'POST /api/artifacts/:id/versions': checked(artifactPrefix('params.id')),
@@ -276,6 +281,7 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/open-task/:id': checked(taskPrefix('params.id')),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),
+  'GET /api/computers/direct-addresses': none(DIRECT_ADDRESSES),
 
   // ── panels ──
   'GET /api/panels': none(SELF),

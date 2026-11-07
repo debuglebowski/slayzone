@@ -30,6 +30,10 @@ async function revealFixture(page: Page): Promise<void> {
     const toggle = panel.locator(`[data-tool-use-id=${JSON.stringify(id)}] > div > button`).first()
     if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
   }
+  // A turn's sub-agents sit behind their own collapsed "Sub-agents" toggle.
+  for (const toggle of await panel.getByTestId('chat-sub-agents-toggle').all()) {
+    if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
+  }
   const diagnostics = panel.getByRole('button', { name: 'Agent diagnostics' })
   if (await diagnostics.count()) await diagnostics.click()
   const jobs = page

@@ -1,5 +1,13 @@
 import { useContext, useRef, useState } from 'react'
-import { Copy, GitBranch, MessageSquare, MoreHorizontal, Quote, ChevronRight } from 'lucide-react'
+import {
+  Copy,
+  GitBranch,
+  MessageSquare,
+  MoreHorizontal,
+  Pin,
+  Quote,
+  ChevronRight
+} from 'lucide-react'
 import {
   cn,
   useAppearance,
@@ -20,6 +28,7 @@ import { MessageDetails } from './MessageDetails'
 import { TurnFooter } from './turn-footer'
 import { turnBlockClass } from './chat-layout'
 import { useChatView } from './ChatViewContext'
+import { PinnedMark, PinToggleButton, usePinnedRow } from './PinnedMessageControls'
 
 export function AssistantAnswer({
   item,
@@ -74,6 +83,8 @@ export function AssistantAnswer({
       ? turn.userMessageId
       : null
   const [menuOpen, setMenuOpen] = useState(false)
+  // Only a finished answer pins (`pinnableRow`); an interrupted turn has none.
+  const pin = usePinnedRow(item)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const actionClass =
     'flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring'
@@ -82,6 +93,15 @@ export function AssistantAnswer({
       className={cn(turnBlockClass(compact), menuOpen && 'bg-muted/50')}
       data-testid="chat-assistant-answer"
     >
+      {/* The pin's mark where the toolbar shows on hover (the toolbar has its toggle). */}
+      <PinnedMark
+        item={item}
+        className={cn(
+          'absolute -top-2.5 z-10 bg-card transition-opacity group-hover/turn:opacity-0 group-focus-within/turn:opacity-0',
+          compact ? 'right-0.5' : 'right-5',
+          menuOpen && 'opacity-0'
+        )}
+      />
       <div
         className={cn(
           'absolute -top-2.5 z-10 flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover/turn:opacity-100 group-hover/turn:pointer-events-auto group-focus-within/turn:opacity-100 group-focus-within/turn:pointer-events-auto',
@@ -104,6 +124,7 @@ export function AssistantAnswer({
             <Copy className="size-3.5" />
           </button>
         )}
+        <PinToggleButton item={item} className="size-7" />
         {threads && answerId && turn?.userMessageId && answer?.stream !== 'open' && (
           <button
             type="button"
@@ -158,6 +179,12 @@ export function AssistantAnswer({
                 <Copy className="size-3.5" />
                 Copy as Markdown
               </DropdownMenuItem>
+              {pin && (
+                <DropdownMenuItem onSelect={pin.toggle}>
+                  <Pin className="size-3.5" />
+                  {pin.pinned ? 'Unpin message' : 'Pin message'}
+                </DropdownMenuItem>
+              )}
               {quoteReply && (
                 <DropdownMenuItem onSelect={() => quoteReply(answerMarkdown())}>
                   <Quote className="size-3.5" />
@@ -193,14 +220,18 @@ export function AssistantAnswer({
               {discussions.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => threads?.open(discussions[0])}
+                  onClick={() => {
+                    // The first open thread; all closed → the panel's "New thread"
+                    // view, where the closed list reopens them.
+                    const first = discussions.find((thread) => thread.closedAt == null)
+                    if (first) void threads?.open(first)
+                    else threads?.start(discussions[0].answerId, discussions[0].sourceMessageId)
+                  }}
                   className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:bg-muted/50"
                 >
                   <MessageSquare className="size-3" />
                   <span className="font-medium text-foreground">Threads</span>
-                  <span>
-                    {discussions.length} {discussions.length === 1 ? 'item' : 'items'}
-                  </span>
+                  <span>{threadCountLabel(discussions)}</span>
                   <ChevronRight className="size-3" />
                 </button>
               )}
@@ -211,4 +242,12 @@ export function AssistantAnswer({
       </div>
     </div>
   )
+}
+
+/** "2 items", "1 open · 1 closed", or "2 closed". */
+function threadCountLabel(discussions: { closedAt: number | null }[]): string {
+  const closed = discussions.filter((thread) => thread.closedAt != null).length
+  const open = discussions.length - closed
+  if (!closed) return `${open} ${open === 1 ? 'item' : 'items'}`
+  return open ? `${open} open · ${closed} closed` : `${closed} closed`
 }

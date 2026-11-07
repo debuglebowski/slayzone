@@ -6,6 +6,7 @@ import { getProcessBackend } from './process-backend'
 import type { ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal-contracts'
 import { TypedEmitter } from '@slayzone/platform/events'
+import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import {
   assertHubProcessesEnabled,
   hubProcessesEnabled,
@@ -25,6 +26,9 @@ export interface PidStats {
   rss: number
 }
 import type { ProcessEventMap, ProcessInfo, ProcessStatus } from '../shared'
+import { OLD_RUN_UNREACHABLE_MESSAGE } from '../shared'
+
+const noop = (): void => undefined
 
 /** Structural slice of Electron's BrowserWindow — the legacy dual-emit target.
  *  Kept structural so this module stays electron-free (src/server guard); the
@@ -54,6 +58,33 @@ export function setProcessComputerResolver(resolver: ProcessComputerResolver | n
     void loadRows(p)
   }
 }
+
+/**
+ * Whether a computer is reachable now (connected and heard from). A kept run whose
+ * computer is NOT reachable cannot be ended, yet it is no survivor either (G3): that
+ * difference decides between "stop it first" and "it is ended when its computer
+ * returns". Unset: every computer reads reachable (a failed kill is a survivor).
+ */
+let computerReachable: ((computerId: string) => boolean) | null = null
+export function setProcessComputerReachability(fn: ((computerId: string) => boolean) | null): void {
+  computerReachable = fn
+}
+const isReachable = (computerId: string | null): boolean =>
+  computerId == null || !computerReachable || computerReachable(computerId)
+
+/**
+ * Runs left on a computer that was unreachable when its row moved on (started
+ * elsewhere, or removed): session ids per computer, ended when it reconnects.
+ */
+const endOnReconnect = new Map<string, Set<string>>()
+function strand(computerId: string, sessionId: string): void {
+  const ids = endOnReconnect.get(computerId) ?? new Set<string>()
+  ids.add(sessionId)
+  endOnReconnect.set(computerId, ids)
+}
+
+/** How a previous run's termination ended. */
+type Termination = 'gone' | 'survives' | 'unreachable'
 
 /**
  * Refuse a process op only when it would run on THIS machine: with routing wired,
@@ -94,7 +125,13 @@ interface ManagedProcess extends ProcessInfo {
   /** The in-flight termination of the previous run's tree, if a stop/restart
    *  is still sweeping it. A start awaits it, so the new run never races the
    *  old one onto the same port. Resolves true when nothing of it is left. */
-  termination: Promise<boolean> | null
+  termination: Promise<Termination> | null
+  /**
+   * What to do with the run kept on `computerId` once that (now unreachable)
+   * computer reconnects: end it (a Stop asked meanwhile), or end it and start anew
+   * (a Start asked meanwhile). Null: nothing pending.
+   */
+  onReconnect: 'stop' | 'start' | null
 }
 
 const LOG_BUFFER_MAX = 500
@@ -180,6 +217,7 @@ async function loadRows(p: ProcessPersistence): Promise<void> {
       computerId: null,
       computerPid: null,
       awaitingComputer: false,
+      onReconnect: null,
       startedAt: new Date().toISOString(),
       restartCount: 0,
       spawnedAt: null,
@@ -359,10 +397,29 @@ export async function processesComputerConnected(computerId: string): Promise<vo
   const live = await backend.listSessions(computerId).catch(() => null)
   if (!live) return
   const held = new Map(live.map((l) => [l.sessionId, l.pid]))
+  // Runs left here while this computer was unreachable, whose rows moved on: end them.
+  const stranded = endOnReconnect.get(computerId)
+  if (stranded) {
+    endOnReconnect.delete(computerId)
+    for (const sessionId of stranded) {
+      if (held.has(sessionId)) void backend.killSession?.(computerId, sessionId).catch(noop)
+    }
+  }
+  // A Stop or Start asked while this computer was unreachable: done now.
+  for (const proc of processes.values()) {
+    if (proc.computerId !== computerId || !proc.onReconnect || proc.handle) continue
+    const pending = proc.onReconnect
+    proc.onReconnect = null
+    if (!held.has(proc.id)) proc.computerPid = null
+    else proc.computerPid = held.get(proc.id) ?? proc.computerPid
+    if (pending === 'stop') void stopProcess(proc.id)
+    else void startProcess(proc.id)
+  }
   for (const proc of processes.values()) {
     if (proc.handle || proc.termination) continue
     const pid = held.get(proc.id)
-    if (held.has(proc.id) && proc.status !== 'running') {
+    // A run just ended above (its row moved on) is not adopted back as orphaned.
+    if (held.has(proc.id) && proc.status !== 'running' && !stranded?.has(proc.id)) {
       proc.computerId = computerId
       proc.computerPid = pid ?? null
       pushLog(
@@ -380,6 +437,31 @@ export async function processesComputerConnected(computerId: string): Promise<vo
       setStatus(proc, 'stopped')
     }
   }
+}
+
+/**
+ * A computer was removed (deleted or revoked): the runs it kept can never be reached
+ * again. Forget them — the rows read stopped and start freely elsewhere (G3).
+ */
+export function processesComputerRemoved(computerId: string): void {
+  endOnReconnect.delete(computerId)
+  for (const proc of processes.values()) {
+    if (proc.handle || proc.computerId !== computerId || proc.computerPid == null) continue
+    proc.computerPid = null
+    proc.onReconnect = null
+    pushLog(proc, '[its computer was removed — the run it kept there is forgotten]')
+    setStatus(proc, 'stopped')
+  }
+}
+
+/**
+ * Whether `sessionId` on `computerId` is a run this manager adopted (a previous
+ * hub's run the computer kept: orphaned, no handle, reached by session). The
+ * routing backend does not track it, so its reconnect sweep must not end it.
+ */
+export function isAdoptedOnComputer(computerId: string, sessionId: string): boolean {
+  const proc = processes.get(sessionId)
+  return !!proc && !proc.handle && proc.computerId === computerId && proc.computerPid != null
 }
 
 /** How long a routed spawn waits for its computer's "it runs" before answering anyway. */
@@ -402,6 +484,7 @@ function newManagedProcess(
     computerId: null,
     computerPid: null,
     awaitingComputer: false,
+    onReconnect: null,
     startedAt: new Date().toISOString(),
     restartCount: 0,
     spawnedAt: null,
@@ -511,23 +594,32 @@ export async function updateProcess(
  */
 function detachAndTerminate(proc: ManagedProcess): {
   generation: number
-  done: Promise<boolean>
+  done: Promise<Termination>
 } {
   const generation = ++proc.generation
   const handle = proc.handle
   const keptOnComputer =
     handle == null && proc.computerId != null && proc.computerPid != null ? proc.computerId : null
-  const keptPid = proc.computerPid
+  const keptPid = proc.computerPid ?? handle?.pid ?? null
+  const runsOn = proc.computerId
+  /** A kill that did not end it: its computer unreachable, or a survivor. */
+  const failed = (): Termination => (isReachable(runsOn) ? 'survives' : 'unreachable')
   proc.awaitingComputer = false
+  proc.onReconnect = null
   proc.handle = null
   proc.pid = null
   proc.computerPid = null
   proc.spawnedAt = null
   const previous = proc.termination
-  const done = (async (): Promise<boolean> => {
+  const done = (async (): Promise<Termination> => {
     if (handle) {
-      handle.kill()
-      return true
+      // Awaited: the computer replies once the whole tree is gone, so a following
+      // start never collides with the old run's port.
+      const ended = (await Promise.resolve(handle.kill()).catch(() => false)) !== false
+      // Not confirmed gone: keep it addressable (by session) for the next stop —
+      // unless a new run has taken the row meanwhile.
+      if (!ended && !proc.handle && keptPid != null) proc.computerPid = keptPid
+      return ended ? 'gone' : failed()
     }
     if (keptOnComputer) {
       const backend = getProcessBackend()
@@ -539,11 +631,11 @@ function detachAndTerminate(proc: ManagedProcess): {
         : false
       // Still there: keep it addressable for the next stop.
       if (!ended && proc.generation === generation) proc.computerPid = keptPid
-      return ended
+      return ended ? 'gone' : failed()
     }
     // A stop still in flight from an earlier call already owns that run.
     if (previous) return previous
-    return true
+    return 'gone'
   })()
   proc.termination = done
   void done.finally(() => {
@@ -552,13 +644,22 @@ function detachAndTerminate(proc: ManagedProcess): {
   return { generation, done }
 }
 
-/** Status after a stop: 'stopped', or still 'orphaned' when its computer could not end it. */
-function settleStopped(proc: ManagedProcess, clean: boolean): void {
-  if (clean) {
+/** Status after a stop: 'stopped', or still 'orphaned' when the run is not gone. */
+function settleStopped(proc: ManagedProcess, result: Termination): void {
+  if (result === 'gone') {
     setStatus(proc, 'stopped')
     return
   }
-  pushLog(proc, '[stop: its computer could not end the run — still orphaned]')
+  if (result === 'unreachable') {
+    // Not a survivor: its computer is offline. The stop is kept and done there.
+    proc.onReconnect = 'stop'
+    pushLog(
+      proc,
+      "[stop: the run's computer is offline — it is ended when that computer reconnects]"
+    )
+  } else {
+    pushLog(proc, '[stop: its computer could not end the run — still orphaned]')
+  }
   setStatus(proc, 'orphaned')
 }
 
@@ -570,9 +671,9 @@ export async function stopProcess(id: string): Promise<boolean> {
   const proc = processes.get(id)
   if (!proc) return false
   const { generation, done } = detachAndTerminate(proc)
-  const clean = await done
+  const result = await done
   // A start issued meanwhile owns the row now.
-  if (proc.generation === generation && processes.has(id)) settleStopped(proc, clean)
+  if (proc.generation === generation && processes.has(id)) settleStopped(proc, result)
   return true
 }
 
@@ -582,14 +683,27 @@ export function removeProcess(id: string): boolean {
   const proc = processes.get(id)
   if (!proc) return false
   proc.autoRestart = false
-  void detachAndTerminate(proc).done
+  const keptOn = proc.computerId
+  void detachAndTerminate(proc).done.then((result) => {
+    if (result === 'unreachable' && keptOn) strand(keptOn, id)
+  })
   processes.delete(id)
   void persistence?.remove(id)
   return true
 }
 
 /** Why a start did not happen. */
-export type StartProcessRefusal = 'not-found' | 'already-running' | 'shutting-down' | 'no-computer'
+export type StartProcessRefusal =
+  | 'not-found'
+  | 'already-running'
+  | 'shutting-down'
+  | 'no-computer'
+  /** Part of the previous run outlived SIGKILL on its computer: a new one would
+   *  collide with its port, and the survivor could no longer be stopped. */
+  | 'old-run-survives'
+  /** The previous run's computer is offline (not a survivor): it cannot be ended now,
+   *  and this row can run only there. Starts when that computer reconnects. */
+  | 'old-run-unreachable'
 export type StartProcessResult =
   | { ok: true; pid: number | null; status: ProcessStatus }
   | { ok: false; reason: StartProcessRefusal }
@@ -600,7 +714,47 @@ export type StartProcessResult =
  * left on the computer under the same id is replaced there by the new spawn.)
  */
 async function respawn(proc: ManagedProcess, generation: number): Promise<StartProcessResult> {
-  if (proc.termination) await proc.termination
+  if (proc.termination) {
+    const result = await proc.termination
+    if (result === 'survives' && proc.generation === generation) {
+      pushLog(
+        proc,
+        '[not started: the previous run is still alive on its computer — stop it first]'
+      )
+      setStatus(proc, 'orphaned')
+      return { ok: false, reason: 'old-run-survives' }
+    }
+    if (result === 'unreachable' && proc.generation === generation) {
+      const keptOn = proc.computerId
+      // Where would the new run go? Elsewhere (the task moved, another computer
+      // serves it, and it is up): no port to collide with — start there, and end the
+      // old run when its computer returns. Only there: wait for it. There is no
+      // override (K5): a start parked for that computer is replaced IN PLACE when it
+      // reconnects (SIGTERM, no wait) — the very port collision R5 refuses.
+      const target = processComputerResolver
+        ? await processComputerResolver({ taskId: proc.taskId, projectId: proc.projectId }).catch(
+            () => null
+          )
+        : null
+      if (proc.generation !== generation) return { ok: false, reason: 'already-running' }
+      const elsewhere = target != null && target !== keptOn && isReachable(target)
+      if (!elsewhere) {
+        proc.onReconnect = 'start'
+        pushLog(
+          proc,
+          "[not started: the previous run's computer is offline — it starts when that computer reconnects]"
+        )
+        setStatus(proc, 'orphaned')
+        return { ok: false, reason: 'old-run-unreachable' }
+      }
+      if (keptOn) strand(keptOn, proc.id)
+      proc.computerPid = null
+      pushLog(
+        proc,
+        "[the previous run's computer is offline — starting anew; that run is ended when its computer reconnects]"
+      )
+    }
+  }
   if (proc.generation === generation) {
     try {
       await doSpawn(proc, generation)
@@ -628,7 +782,12 @@ export async function startProcess(id: string): Promise<StartProcessResult> {
   if (proc.handle || (proc.status === 'running' && !proc.termination)) {
     return { ok: false, reason: 'already-running' }
   }
-  const generation = ++proc.generation
+  // A run its computer still holds (orphaned: adopted after a hub restart, or one
+  // that outlived a stop) is ended there first and awaited, as Restart does — the
+  // computer's own replace-spawn would not wait for it to free its port. Refused
+  // (old-run-survives) while it lives.
+  const generation =
+    proc.computerPid != null ? detachAndTerminate(proc).generation : ++proc.generation
   pushLog(proc, '[starting...]')
   setStatus(proc, 'running')
   return respawn(proc, generation)
@@ -644,8 +803,12 @@ export async function restartProcessDetailed(id: string): Promise<StartProcessRe
   if (isShuttingDown) return { ok: false, reason: 'shutting-down' }
   const proc = processes.get(id)
   if (!proc) return { ok: false, reason: 'not-found' }
-  // A live run is ended on its computer first (awaited by respawn).
-  const generation = proc.handle ? detachAndTerminate(proc).generation : ++proc.generation
+  // A live run is ended on its computer first (awaited by respawn), as is a run
+  // still kept there (orphaned).
+  const generation =
+    proc.handle || proc.computerPid != null
+      ? detachAndTerminate(proc).generation
+      : ++proc.generation
   pushLog(proc, '[restarting...]')
   setStatus(proc, 'running')
   return respawn(proc, generation)
@@ -653,6 +816,37 @@ export async function restartProcessDetailed(id: string): Promise<StartProcessRe
 
 export async function restartProcess(id: string): Promise<boolean> {
   return (await restartProcessDetailed(id)).ok
+}
+
+/** A restart refused because the previous run still lives on its computer. */
+export class OldRunSurvivesError extends Error {
+  constructor() {
+    super('The previous run is still alive on its computer (it outlived SIGKILL) — stop it first')
+    this.name = 'OldRunSurvivesError'
+  }
+}
+
+/**
+ * Restart for the UI: `false` for the plain refusals, as before — but a survivor is
+ * an error with its reason, so the panel says why nothing restarted (it only
+ * reached the process log before).
+ */
+export async function restartProcessForUi(id: string): Promise<boolean> {
+  const result = await restartProcessDetailed(id)
+  if (!result.ok && result.reason === 'old-run-survives') throw new OldRunSurvivesError()
+  if (!result.ok && result.reason === 'old-run-unreachable') throw new OldRunUnreachableError()
+  return result.ok
+}
+
+/**
+ * A restart refused because the previous run's computer is offline (G3) — not a
+ * survivor. The UI says so: it starts when that computer reconnects.
+ */
+export class OldRunUnreachableError extends Error {
+  constructor() {
+    super(OLD_RUN_UNREACHABLE_MESSAGE)
+    this.name = 'OldRunUnreachableError'
+  }
 }
 
 /** Kill all processes belonging to a specific task. Project-scoped processes are unaffected. */
@@ -725,7 +919,12 @@ async function pollRoutedStats(): Promise<void> {
 
 function startStatsPolling(): void {
   if (routedStatsTimer) return
-  routedStatsTimer = setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  // Started inside whichever request spawned first, a timer's ticks would run as THAT
+  // caller — and the gateway's owner check then refused every other user's computer,
+  // silently (K6). The poll is the hub's own work: created, so run, as nobody.
+  routedStatsTimer = runAsSecurityActor(null, () =>
+    setInterval(() => void pollRoutedStats(), ROUTED_STATS_INTERVAL_MS)
+  )
   routedStatsTimer.unref?.()
 }
 

@@ -1,4 +1,9 @@
-import type { DirectLinkIssueResult, DirectLinkTarget } from '../shared/direct-link'
+import type {
+  DirectLinkIssueResult,
+  DirectLinkTarget,
+  DirectLinkTransport,
+  DirectRtcConnectResult
+} from '../shared/direct-link'
 import type { FindJoinTokenAccount } from './join-token-policy'
 
 // Computers / computer deps — the hub/computer-split surface the `computersRouter`
@@ -38,6 +43,9 @@ export type ComputerGateway = {
     connectedAt: number
     lastSeenAt: number
   }>
+  /** Drop a computer's connection now (false when it is not connected): a deleted or
+   *  revoked computer would otherwise keep its open socket until it next dialed. */
+  disconnect?: (computerId: string, reason: string) => boolean
 }
 
 export type ComputersDeps = {
@@ -67,15 +75,32 @@ export type ComputersDeps = {
    * already run the owner gate. `ip` = the client's address as the hub saw it. Absent:
    * this host issues none, and clients use the relay.
    */
-  /**
-   * After a computer is revoked: drop its direct-link grants and its live connection
-   * (until now a revoked computer kept working until it next reconnected).
-   */
-  onComputerRevoked?: (computerId: string) => Promise<void>
   issueDirectLink?: (
     target: DirectLinkTarget,
-    caller: { userId: string | null; ip: string | null }
+    caller: { userId: string | null; ip: string | null },
+    options: { transports?: readonly DirectLinkTransport[] }
   ) => Promise<DirectLinkIssueResult>
+  /**
+   * Broker a client's WebRTC offer for a direct-link grant it holds (hub
+   * `direct-link.ts` rtcConnect). Absent: this host brokers none.
+   */
+  directRtcConnect?: (
+    grantId: string,
+    sdp: string,
+    caller: { userId: string | null; ip: string | null }
+  ) => Promise<DirectRtcConnectResult>
+  /**
+   * The desktop app's own co-spawned computer on its own hub — never disabled, never
+   * deleted (nothing on the machine could run without it). Null/absent on a hub that
+   * spawns no computer of its own (standalone).
+   */
+  localComputerId?: string | null
+  /**
+   * How many terminals, agents and background processes run on a computer right now (0 when it is not
+   * connected: nothing can run there). Disabling waits for 0. Absent = unknown, which
+   * refuses to disable rather than guess.
+   */
+  runningWorkOn?: (computerId: string) => Promise<number>
 }
 
 let computersDeps: ComputersDeps | null = null

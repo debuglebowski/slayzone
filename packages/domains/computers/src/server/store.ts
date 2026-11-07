@@ -38,7 +38,8 @@ export async function registerComputer(
     auth_key_id: input.authKeyId ?? null,
     last_seen_at: now,
     created_at: now,
-    revoked_at: null
+    revoked_at: null,
+    disabled_at: null
   }
   await db.run(
     `INSERT INTO computers
@@ -233,6 +234,24 @@ export async function unrevokeComputer(db: SlayzoneDb, id: string): Promise<void
  * repointed (there is no survivor to repoint to), and placements and grants go
  * too — they describe a machine that no longer exists.
  */
+/**
+ * Told when a computer is deleted or revoked — by ANY caller (the tRPC router, REST,
+ * a departing user's cleanup): it never reconnects, so whatever waited for it (a
+ * process run it kept) can let go. One listener (the hub's), replaced on each set,
+ * as `setComputerBindingChangedListener`; null clears it.
+ */
+export function setComputerRemovedListener(listener: ((computerId: string) => void) | null): void {
+  removedListener = listener
+}
+let removedListener: ((computerId: string) => void) | null = null
+function computerRemoved(id: string): void {
+  try {
+    removedListener?.(id)
+  } catch {
+    // The listener's failure is its own; the delete or revoke already happened.
+  }
+}
+
 export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> {
   await db.batchTxn([
     { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
@@ -245,6 +264,7 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
     { type: 'run', sql: `DELETE FROM computer_grants WHERE computer_id = ?`, params: [id] },
     { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
   ])
+  computerRemoved(id)
 }
 
 export async function getComputer(db: SlayzoneDb, id: string): Promise<ComputerRecord | null> {
@@ -292,6 +312,51 @@ export async function revokeComputer(
   at: number = Date.now()
 ): Promise<void> {
   await db.run(`UPDATE computers SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, [at, id])
+  computerRemoved(id)
+}
+
+/**
+ * Disable (`true`) or enable (`false`) a computer. A disabled computer stays enrolled
+ * and connected but gets no new work (`computers.setDisabled`). Disabling an already
+ * disabled computer keeps its first time, like {@link revokeComputer}.
+ */
+export async function setComputerDisabled(
+  db: SlayzoneDb,
+  id: string,
+  disabled: boolean,
+  at: number = Date.now()
+): Promise<void> {
+  if (disabled) {
+    await db.run(`UPDATE computers SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL`, [
+      at,
+      id
+    ])
+  } else {
+    await db.run(`UPDATE computers SET disabled_at = NULL WHERE id = ?`, [id])
+  }
+}
+
+/** Rename a computer. Its enroll name until now; a re-enroll of a remote computer
+ *  makes a new row, so this name stays with this row. */
+export async function renameComputer(db: SlayzoneDb, id: string, name: string): Promise<void> {
+  await db.run(`UPDATE computers SET name = ? WHERE id = ?`, [name, id])
+}
+
+/** Ids of every disabled computer — what placement leaves out of its default picks. */
+export async function listDisabledComputerIds(db: SlayzoneDb): Promise<Set<string>> {
+  const rows = await db.all<{ id: string }>(
+    `SELECT id FROM computers WHERE disabled_at IS NOT NULL`
+  )
+  return new Set(rows.map((r) => r.id))
+}
+
+/** Whether a computer is disabled. False for one that does not exist. */
+export async function isComputerDisabled(db: SlayzoneDb, id: string): Promise<boolean> {
+  const row = await db.get<{ disabled_at: number | null }>(
+    `SELECT disabled_at FROM computers WHERE id = ?`,
+    [id]
+  )
+  return row?.disabled_at != null
 }
 
 // --- task/project computer binding ----------------------------------------------

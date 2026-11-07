@@ -23,7 +23,7 @@ import {
   HubToComputerMethods,
   type GhExecResult
 } from '@slayzone/computer-transport/shared'
-import { assertPathAllowed } from '../config'
+import { judgePath } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -37,7 +37,7 @@ export function createGhHandlers(ctx: HandlerContext): HubMethodTable {
   // is a footgun for every one of them.
   async function ghExec(rawParams: unknown): Promise<GhExecResult> {
     const params = ghExecParamsSchema.parse(rawParams)
-    const cwd = assertPathAllowed(params.cwd, ctx.config.allowedRoots)
+    const cwd = judgePath(params.cwd, ctx.config.allowedRoots)
 
     return new Promise((resolve) => {
       const child = execFile(

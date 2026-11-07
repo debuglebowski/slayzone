@@ -433,6 +433,15 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
                     </Button>
                   </div>
                 )}
+                {watched.saveError && (
+                  <div
+                    role="alert"
+                    data-testid="instructions-save-error"
+                    className="border-b border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive"
+                  >
+                    Not saved: {watched.saveError}
+                  </div>
+                )}
                 <Textarea
                   className="min-h-0 max-h-none flex-1 resize-none rounded-none border-0 shadow-none focus-visible:ring-0 bg-transparent dark:bg-transparent [padding-top:1rem] [padding-bottom:1rem] [field-sizing:fixed] font-mono text-sm"
                   placeholder="Write instructions..."

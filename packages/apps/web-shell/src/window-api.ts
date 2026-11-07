@@ -61,6 +61,7 @@ const webApiTarget: ElectronAPI = {
     // Always empty: the web shell holds no token a script can read (T-13). Its session
     // is the hub's HttpOnly cookie, which rides the `/trpc` upgrade on its own.
     getHubTokens: async (): Promise<Record<string, string>> => ({}),
+    checkHubSession: async () => ({ state: 'none' as const }),
     // No-op, for the same reason. Accepted rather than rejected — its return type has
     // no error variant (`Promise<{ok:true}>`), and desktop's own multi-hub UI calling
     // this against a browser session should degrade silently, not throw.
@@ -72,6 +73,8 @@ const webApiTarget: ElectronAPI = {
     hubDeviceLoginWait: async () => ({ ok: false, error: NOT_SUPPORTED }),
     hubDeviceLoginCancel: async () => ({ ok: true }),
     getWindowId: async () => resolveWindowId(),
+    // A browser tab has no app icon to badge.
+    setAppBadge: async () => undefined,
     relaunch: async () => {
       window.location.reload()
     },
@@ -81,6 +84,7 @@ const webApiTarget: ElectronAPI = {
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // A browser tab supervises no computer.
     getLocalComputerStatus: async () => null,
+    getLocalComputerHubs: async () => ({}),
     // A plain boolean, NOT a function — `electron-bootstrap.ts` wraps it as
     // `() => api().app.isPlaywright`, and a function reference here would make
     // every truthiness check on it (`if (api().app.isPlaywright)`) pass, which

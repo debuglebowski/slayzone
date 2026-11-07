@@ -32,7 +32,7 @@ import {
   type ClaudeSessionReadResult
 } from '@slayzone/computer-transport/shared'
 import { locateClaudeTranscript } from '@slayzone/terminal/claude-transcripts'
-import { assertPathAllowed } from '../config'
+import { judgePath } from '../path-jail'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** A record bigger than this has its tool-result text shortened. */
@@ -112,7 +112,7 @@ export function createClaudeSessionHandlers(
     params.cwd ?? (params.projectId ? getProjectPaths()?.get(params.projectId)?.path : undefined)
   const isAllowedDir = (dir: string): boolean => {
     try {
-      assertPathAllowed(dir, ctx.config.allowedRoots)
+      judgePath(dir, ctx.config.allowedRoots)
       return true
     } catch {
       return false
@@ -123,7 +123,7 @@ export function createClaudeSessionHandlers(
     const params = claudeSessionLocateParamsSchema.parse(rawParams)
     const resolved = hintFolder(params)
     // No folder known is fine: ids are unique, so they are still found.
-    const cwd = resolved ? assertPathAllowed(resolved, ctx.config.allowedRoots) : ''
+    const cwd = resolved ? judgePath(resolved, ctx.config.allowedRoots) : ''
     const sessions: ClaudeSessionLocateResult['sessions'] = []
     for (const sessionId of params.sessionIds) {
       const found = await locateClaudeTranscript(sessionId, cwd, { isAllowedDir })
@@ -136,7 +136,7 @@ export function createClaudeSessionHandlers(
     const params = claudeSessionReadParamsSchema.parse(rawParams)
     const resolved = hintFolder(params)
     if (!resolved) throw new Error('claudeSession.read: no cwd for this session')
-    const cwd = assertPathAllowed(resolved, ctx.config.allowedRoots)
+    const cwd = judgePath(resolved, ctx.config.allowedRoots)
     const file = (await locateClaudeTranscript(params.sessionId, cwd))?.path
     if (!file) return { found: false, records: [], omitted: 0 }
 

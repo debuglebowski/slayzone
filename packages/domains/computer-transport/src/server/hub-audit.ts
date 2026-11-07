@@ -94,6 +94,11 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.prioritize': null,
   'pty.backgroundJobs': null,
   'pty.doctor': null,
+  // Runs `<binary> --version` on the computer; starts no session, changes nothing.
+  'pty.cliVersion': null,
+  // Deletes a deleted tab's saved scrollback on the computer — housekeeping the
+  // hub does for the user's own delete, which is audited where it happened.
+  'pty.forget': null,
   'pty.warmAdopt': null,
   'pty.warmList': null,
   // AI-config files: its writes (instructions, skills, MCP config) are audited, its
@@ -217,7 +222,9 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   // duplicate them. Params carry a token HASH, never the token.
   'direct.grant': null,
   'direct.revoke': null,
-  'direct.reset': null
+  'direct.reset': null,
+  // The hub writes `computer.direct_rtc_signal` itself (it knows the caller).
+  'direct.rtcOffer': null
 }
 
 /** The audit event for a hub → computer call, or null when the method is not audited. */

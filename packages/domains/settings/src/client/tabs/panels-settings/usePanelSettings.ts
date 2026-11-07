@@ -3,12 +3,6 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { hubAllows, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../../trpc'
 import { parseTerminalOptionAsMeta, safeRandomUUID, type TerminalOptionAsMeta } from '@slayzone/ui'
-import {
-  AGENT_STARTUP_SETTING,
-  DEFAULT_AGENT_STARTUP_MODE,
-  parseAgentStartupMode,
-  type AgentStartupMode
-} from '@slayzone/terminal-contracts'
 import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import type {
@@ -55,12 +49,6 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     'Menlo, Monaco, "Courier New", monospace'
   )
   const [terminalScrollback, setTerminalScrollback] = useState('2000')
-  const [agentStartupMode, setAgentStartupMode] = useState<AgentStartupMode>(
-    DEFAULT_AGENT_STARTUP_MODE
-  )
-  const [terminalAutoCloseIdle, setTerminalAutoCloseIdle] = useState(false)
-  const [terminalIdleCloseValue, setTerminalIdleCloseValue] = useState('30')
-  const [terminalIdleCloseUnit, setTerminalIdleCloseUnit] = useState('minutes')
   const [terminalForceCompatibilityRenderer, setTerminalForceCompatibilityRenderer] =
     useState(false)
   const [terminalOptionAsMeta, setTerminalOptionAsMeta] = useState<TerminalOptionAsMeta>('auto')
@@ -150,23 +138,15 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
       const emvm = all['editor_markdown_view_mode']
       const gto = all['git_tab_order']
       const gtv = all['git_tab_visibility']
-      const tasm = all[AGENT_STARTUP_SETTING]
       const tfcr = all['terminal_force_compatibility_renderer']
       const toam = all['terminal_option_as_meta']
-      const taci = all['terminal_auto_close_idle']
-      const ticv = all['terminal_idle_close_value']
-      const ticu = all['terminal_idle_close_unit']
 
       if (pc)
         setPanelConfig(mergePanelOrder(mergePredefinedWebPanels(JSON.parse(pc) as PanelConfig)))
       if (tff) setTerminalFontFamily(tff)
       if (ts) setTerminalScrollback(ts)
-      setAgentStartupMode(parseAgentStartupMode(tasm))
       if (tfcr === '1') setTerminalForceCompatibilityRenderer(true)
       setTerminalOptionAsMeta(parseTerminalOptionAsMeta(toam))
-      if (taci === '1') setTerminalAutoCloseIdle(true)
-      if (ticv) setTerminalIdleCloseValue(ticv)
-      if (ticu) setTerminalIdleCloseUnit(ticu)
       if (eww === 'on') setEditorWordWrap('on')
       if (erw === 'all') setEditorRenderWhitespace('all')
       if (ets === '4') setEditorTabSize('4')
@@ -457,14 +437,6 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     setTerminalFontFamily,
     terminalScrollback,
     setTerminalScrollback,
-    agentStartupMode,
-    setAgentStartupMode,
-    terminalAutoCloseIdle,
-    setTerminalAutoCloseIdle,
-    terminalIdleCloseValue,
-    setTerminalIdleCloseValue,
-    terminalIdleCloseUnit,
-    setTerminalIdleCloseUnit,
     terminalForceCompatibilityRenderer,
     setTerminalForceCompatibilityRenderer,
     terminalOptionAsMeta,

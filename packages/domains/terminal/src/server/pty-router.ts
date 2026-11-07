@@ -86,8 +86,15 @@ export const ptyRouter = router({
     return ops().ptyTestExecutionContext(input as never)
   }),
   write: publicProcedure
-    .input(z.object({ sessionId: z.string(), data: z.string() }))
-    .mutation(({ input }) => ops().ptyWrite(input.sessionId, input.data)),
+    .input(
+      z.object({
+        sessionId: z.string(),
+        data: z.string(),
+        // A client's id for this write: applied once on any path (docs/direct-link.md).
+        writeId: z.string().min(1).max(100).optional()
+      })
+    )
+    .mutation(({ input }) => ops().ptyWrite(input.sessionId, input.data, input.writeId)),
   submit: publicProcedure
     .input(z.object({ sessionId: z.string(), text: z.string() }))
     .mutation(({ input }) => ops().ptySubmit(input.sessionId, input.text)),

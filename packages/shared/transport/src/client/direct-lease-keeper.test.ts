@@ -38,7 +38,7 @@ function setup(answers: Array<ReturnType<typeof lease> | null>) {
   let wakeCb: (() => void) | undefined
   let acquires = 0
   const keeper = keepDirectLease({
-    target: { kind: 'pty', sessionId: 's' },
+    target: { kind: 'pty', sessionId: 's', taskId: 't' },
     manager: {
       acquire: async () => {
         acquires++

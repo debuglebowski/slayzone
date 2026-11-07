@@ -11,6 +11,22 @@
  * `@slayzone/platform/local-computer-status` subpath, safe to import from
  * renderer bundles.
  */
+/**
+ * Where the desktop app's own computer stands on one REMOTE hub (it joins every hub
+ * the client lists). Keyed by hub id in {@link LocalComputerHubs}.
+ */
+export interface LocalComputerHubStatus {
+  /** `joining`: told to connect, not yet in. `joined`: connected now. `offline`: joined
+   *  before, not connected now. `failed`: see `error` (e.g. not signed in there). */
+  state: 'joining' | 'joined' | 'offline' | 'failed'
+  /** Its computer id on that hub, once it has enrolled there. */
+  computerId: string | null
+  error: string | null
+}
+
+/** Per remote hub id. Empty when the app supervises no computer (remote mode). */
+export type LocalComputerHubs = Record<string, LocalComputerHubStatus>
+
 export interface LocalComputerStatus {
   /** A computer process is alive right now. */
   running: boolean

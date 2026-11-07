@@ -33,7 +33,7 @@ test("a name with shell characters is quoted, so it can't run anything else", as
   const probes = createComputerProbes({
     computerFor: async () => 'c1',
     run: async (_id, params) => {
-      commands.push(params.command)
+      commands.push(params.command ?? '')
       return ok('')
     }
   })

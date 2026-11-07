@@ -39,6 +39,7 @@ export function PromptDock({
   submitting,
   answer,
   autoModeAvailable,
+  permissionMode,
   cwd,
   timeline,
   sendMessage
@@ -47,6 +48,8 @@ export function PromptDock({
   submitting: ReadonlySet<string>
   answer: (requestId: string, optionId: string, decision: PermissionDecision) => Promise<boolean>
   autoModeAvailable: boolean
+  /** The session's permission mode; bypass hides "switch to auto mode". */
+  permissionMode: string | null
   cwd: string
   timeline: Readonly<TimelineRows>
   /** Sends feedback after "approve with this feedback". */
@@ -81,6 +84,7 @@ export function PromptDock({
         key={current.requestId}
         prompt={current}
         autoModeAvailable={autoModeAvailable}
+        permissionMode={permissionMode}
         cwd={cwd}
         agentName={agentNameFor(current, timeline)}
         busy={busy}
@@ -260,6 +264,7 @@ function ToolPreview({ prompt, s }: { prompt: ChatPrompt; s: Styles }) {
 function PermissionPrompt({
   prompt,
   autoModeAvailable,
+  permissionMode,
   cwd,
   agentName,
   busy,
@@ -268,13 +273,19 @@ function PermissionPrompt({
 }: {
   prompt: ChatPrompt
   autoModeAvailable: boolean
+  permissionMode: string | null
   cwd: string
   agentName: string | null
   busy: boolean
   answer: PromptAnswer
   s: Styles
 }) {
-  const view = buildPermissionView(prompt.request, { autoModeAvailable, cwd, agentName })
+  const view = buildPermissionView(prompt.request, {
+    autoModeAvailable,
+    permissionMode,
+    cwd,
+    agentName
+  })
   // The row whose typed feedback is being written (amend / WebFetch's No).
   const [amendFor, setAmendFor] = useState<string | null>(null)
   const choose = (index: number): void => {

@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initStorageDir } from './data-paths'
+import { initStorageDir, resolveLegacyStateDir } from './data-paths'
 
 /** Content, or a marker when the file is absent — so a missing file is a reported
  *  failure with a readable name, not an uncaught exception that hides the rest. */
@@ -201,5 +201,37 @@ describe('idempotent', () => {
     writeFileSync(join(hub, 'slayzone.data.sqlite'), 'NEW-WORK') // the user has since used the app
     initStorageDir(userData, true, true)
     expect(read(join(hub, 'slayzone.data.sqlite'))).toBe('NEW-WORK')
+  })
+})
+
+// --- e2e sandbox -----------------------------------------------------------------------
+// Under Playwright the migration SOURCE must be the worker's sandbox, never the real
+// Electron userData: a fresh e2e root has no sentinel, so every boot copied the
+// developer's whole legacy userData (their real artifacts/blobs/DB) into the test root.
+describe('resolveLegacyStateDir', () => {
+  test('a Playwright run with a sandbox reads the sandbox, not the real userData', () => {
+    expect(
+      resolveLegacyStateDir('/real/userData', { isPlaywright: true, sandboxDir: '/w/ud' })
+    ).toBe('/w/ud')
+  })
+  test('dev and packaged runs read the real userData', () => {
+    expect(
+      resolveLegacyStateDir('/real/userData', { isPlaywright: false, sandboxDir: '/w/ud' })
+    ).toBe('/real/userData')
+    expect(
+      resolveLegacyStateDir('/real/userData', { isPlaywright: true, sandboxDir: undefined })
+    ).toBe('/real/userData')
+  })
+  test('a sandboxed boot copies nothing of the real userData', () => {
+    const { userData, hub } = setup('dev')
+    mkdirSync(join(userData, 'artifacts', 'task-1'), { recursive: true })
+    writeFileSync(join(userData, 'artifacts', 'task-1', 'a.md'), 'REAL-USER-ARTIFACT')
+    const sandbox = mkdtempSync(join(tmpdir(), 'slz-e2e-sandbox-'))
+    initStorageDir(
+      resolveLegacyStateDir(userData, { isPlaywright: true, sandboxDir: sandbox }),
+      false,
+      true
+    )
+    expect(existsSync(join(hub, 'artifacts', 'task-1'))).toBe(false)
   })
 })

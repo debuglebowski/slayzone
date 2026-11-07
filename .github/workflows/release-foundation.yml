@@ -132,11 +132,52 @@ jobs:
         env:
           CI_SKIP_POSTINSTALL: '1'
 
+  # Runs beside the builds instead of in front of them. A failure cancels the whole run at
+  # once; everything that deploys or publishes (deploy-convex, bundle, publish-channel,
+  # draft-upload) also `needs:` this job, so nothing ships even if that cancel races.
+  typecheck:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # `gh run cancel`. The caller must grant it too: a called workflow's jobs get at most
+      # what the calling job allows (release.yml, release-pr-dry-run.yml).
+      actions: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v6.1.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
       - name: Typecheck
         run: pnpm typecheck
 
+      # Stops the builds now rather than letting them run to completion for nothing. Best
+      # effort: a token without actions:write (a fork PR) cannot cancel, and the needs:
+      # gates above still hold everything back.
+      - name: Cancel run on typecheck failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "$GITHUB_REPOSITORY" || echo "::warning::could not cancel run ${{ github.run_id }}"
+
+  # Beside the builds too (they bake in VITE_CONVEX_URL, not the deployment itself), but
+  # only once typecheck passed, and bundle waits for it so no release ships before its
+  # Convex functions are live.
   deploy-convex:
-    needs: [resolve, preflight]
+    needs: [resolve, preflight, typecheck]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -165,9 +206,73 @@ jobs:
         if: needs.resolve.outputs.mode == 'dry-run'
         run: echo "Skipping Convex deploy for dry-run mode."
 
+  # The app's JS, built once for every platform build. Measured on v0.37.1: the macOS and
+  # linux outputs were identical apart from build ids, timestamps and absolute paths in
+  # esbuild comments; Windows differed only in CRLF its checkout put into inlined text
+  # (notify.sh, index.html, svgs), so it now ships the repo's LF bytes like the others.
+  # Platform-specific packaging (natives, posix strip, electron-builder) stays per build.
+  # Runs on the host, not the linux build's container, whose git cannot read the checkout
+  # (the hub reported commit "unknown" there).
+  build-js:
+    name: Build JS
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.source_ref }}
+
+      - uses: pnpm/action-setup@v6.1.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          CI_SKIP_POSTINSTALL: '1'
+
+      - name: Build CLI
+        run: pnpm --filter @slayzone/cli build
+
+      - name: Build
+        run: pnpm build
+        env:
+          # The renderer bundle passes Node's default ~2 GB heap while Vite renders chunks.
+          NODE_OPTIONS: --max-old-space-size=6144
+          POSTHOG_API_KEY: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_API_KEY || 'dry-run' }}
+          POSTHOG_HOST: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_HOST || 'https://app.posthog.com' }}
+          VITE_CONVEX_URL: ${{ needs.resolve.outputs.mode == 'publish' && secrets.VITE_CONVEX_URL || 'https://example.invalid' }}
+
+      # Everything electron-builder and the smoke step read from the build (app `files`,
+      # `extraResources`). A tar, because upload-artifact drops file modes (bin.cjs is 755).
+      - name: Pack the JS build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/build-js"
+          tar -cf "$RUNNER_TEMP/build-js/build-js.tar" \
+            packages/apps/app/out \
+            packages/apps/cli/dist \
+            packages/apps/hub/dist \
+            packages/apps/computer/dist
+
+      - name: Upload the JS build
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: build-js
+          path: ${{ runner.temp }}/build-js/build-js.tar
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build (${{ matrix.name }})
-    needs: [resolve, preflight, deploy-convex]
+    # Not preflight: each build runs the same frozen install itself, so waiting on it only
+    # delayed the long poles. Every ship/deploy gate (deploy-convex, bundle, publish-channel,
+    # draft-upload) still needs preflight.
+    needs: [resolve]
     strategy:
       fail-fast: false
       matrix:
@@ -192,10 +297,25 @@ jobs:
             build_args: --linux --x64
             smoke_dir: linux-unpacked
             glibc_gate: true
-          - name: windows
+          # One job per arch, in parallel (one job building both ran them back to back,
+          # the release's long pole). The combined x64+arm64 SlayZone-setup.exe is no
+          # longer built: electron-updater picks the latest.yml entry whose name holds
+          # process.arch, and the website links the per-arch installers. arm64 is
+          # cross-built on x64, so only x64 runs the smoke step.
+          # native_rebuild: prebuilt = natives are rebuilt by scripts/release/rebuild-natives.mjs
+          # (node-pty stays on its shipped Node-API prebuild) and electron-builder's own
+          # rebuild is off.
+          - name: windows-x64
             os: windows-latest
-            build_args: --win --x64 --arm64
+            build_args: --win --x64
+            arch: x64
+            native_rebuild: prebuilt
             smoke_dir: win-unpacked
+          - name: windows-arm64
+            os: windows-latest
+            build_args: --win --arm64
+            arch: arm64
+            native_rebuild: prebuilt
 
     runs-on: ${{ matrix.os }}
     # Empty for every entry but linux-x64, which then runs on the runner directly.
@@ -203,6 +323,8 @@ jobs:
 
     permissions:
       contents: write
+      # wait-for-artifact.mjs reads this run's jobs and artifacts.
+      actions: read
 
     steps:
       # A bare image has no git, so checkout would fall back to a tarball with no .git.
@@ -220,10 +342,17 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
+      # No pnpm-store cache in the build jobs: it does not pay off on any of them. Measured
+      # (runs 41841001022 hit / 41852010523 miss): macOS restores its ~850 MB store in 85-97 s
+      # and then installs in 18 s, vs 114 s with no cache, and a miss (any lockfile change)
+      # costs 3-4.5 min in the post-job save; Windows installs in ~110 s either way; the
+      # linux-x64 container never hits (its cache version differs from ubuntu's) and spends
+      # ~1 min saving. The ubuntu jobs above keep theirs (14 s restore, 12 s install).
+      # Dropping these also keeps ~1.8 GB per lockfile out of the repo's 10 GB cache budget
+      # (10.7 GB on 2026-11-04, so GitHub evicts least-recently-used entries).
       - uses: actions/setup-node@v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
 
       - name: Install Python setuptools (needed by node-gyp on macOS)
         if: runner.os == 'macOS'
@@ -257,18 +386,26 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
-      - name: Build CLI
-        run: pnpm --filter @slayzone/cli build
-
-      - name: Build
-        run: pnpm build
+      # The JS is built once, by build-js. This job did its own setup meanwhile and only now
+      # needs that output, so it waits for the artifact instead of `needs:` (which would hold
+      # the whole job, setup included, until build-js finished).
+      - name: Wait for the JS build
+        shell: bash
         env:
-          # The renderer bundle passes Node's default ~2 GB heap while Vite renders chunks
-          # (OOM on macOS runners). Runners have 7+ GB.
-          NODE_OPTIONS: --max-old-space-size=6144
-          POSTHOG_API_KEY: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_API_KEY || 'dry-run' }}
-          POSTHOG_HOST: ${{ needs.resolve.outputs.mode == 'publish' && secrets.POSTHOG_HOST || 'https://app.posthog.com' }}
-          VITE_CONVEX_URL: ${{ needs.resolve.outputs.mode == 'publish' && secrets.VITE_CONVEX_URL || 'https://example.invalid' }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/wait-for-artifact.mjs --artifact build-js --job "Build JS" --timeout-minutes 30
+
+      - name: Download the JS build
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: build-js
+          path: ${{ runner.temp }}/build-js
+
+      - name: Unpack the JS build
+        shell: bash
+        # Archive on stdin, not `-f <path>`: Git-for-Windows GNU tar reads `D:\...` as a
+        # remote `host:path` ("Cannot connect to D: resolve failed"). stdin works for every tar.
+        run: tar -xf - < "$RUNNER_TEMP/build-js/build-js.tar"
 
       - name: Get electron version
         shell: bash
@@ -281,6 +418,21 @@ jobs:
           node -e "const fs=require('fs'),p='packages/apps/app/package.json',pkg=JSON.parse(fs.readFileSync(p));if(pkg.optionalDependencies)delete pkg.optionalDependencies.posix;if(pkg.dependencies)delete pkg.dependencies.posix;fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n')"
           find node_modules -name posix -prune -exec rm -rf {} + 2>/dev/null || true
           find packages/apps/app/node_modules -name posix -prune -exec rm -rf {} + 2>/dev/null || true
+
+      # node-pty ships Node-API prebuilds for win32-x64/arm64, but @electron/rebuild does not
+      # recognise them and compiled winpty + conpty from source (~83 s per arch). Same
+      # rebuild electron-builder runs, minus node-pty; the script fails if the prebuild is
+      # incomplete or a build/Release would shadow it. Smoke spawns a pty from the result.
+      - name: Rebuild natives (node-pty on its prebuild)
+        if: matrix.native_rebuild == 'prebuilt'
+        shell: bash
+        run: |
+          node scripts/release/rebuild-natives.mjs \
+            --app-dir packages/apps/app \
+            --workspace-root . \
+            --electron-version "$ELECTRON_VERSION" \
+            --platform win32 \
+            --arch ${{ matrix.arch }}
 
       - name: Package
         shell: bash
@@ -295,7 +447,7 @@ jobs:
           # workspace root. Without it: npm, app-dir-only rebuild, node-pty can't spawn.
           export npm_config_user_agent="pnpm"
           cd packages/apps/app
-          node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} --publish never
+          node "$(node -p "require.resolve('electron-builder/cli.js')")" ${{ matrix.build_args }} -c.electronVersion=${{ env.ELECTRON_VERSION }} ${{ matrix.native_rebuild == 'prebuilt' && '-c.npmRebuild=false' || '' }} --publish never
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
@@ -348,23 +500,40 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload to draft release for quick download
-        if: needs.resolve.outputs.mode == 'dry-run'
+  # Dry-run only: the builds' assets on a draft release for quick download. Its own job,
+  # not a build step, so it too waits for typecheck (a build step cannot `needs:` it).
+  draft-upload:
+    runs-on: ubuntu-latest
+    needs: [resolve, preflight, build, typecheck]
+    if: needs.resolve.outputs.mode == 'dry-run'
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform build assets
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: release-build-*
+          path: ${{ runner.temp }}/release-builds
+
+      - name: Upload to draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: dry-run-${{ needs.resolve.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
         run: |
           set -euo pipefail
-          TAG="dry-run-${{ needs.resolve.outputs.release_tag }}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Dry Run ${{ needs.resolve.outputs.release_tag }}" --notes "Test build — not a real release" --draft
-          for file in "$RUNNER_TEMP/release-assets/${{ matrix.name }}"/*; do
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Dry Run $RELEASE_TAG" --notes "Test build — not a real release" --draft
+          # Per-build dirs, as the build steps uploaded them: same-named update manifests
+          # (latest.yml from both Windows arches) clobber each other here, as before.
+          for file in "$RUNNER_TEMP"/release-builds/*/*; do
             [ -f "$file" ] && gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --clobber
           done
 
   bundle:
     runs-on: ubuntu-latest
-    needs: [resolve, build]
+    needs: [resolve, preflight, build, typecheck, deploy-convex]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -428,7 +597,7 @@ jobs:
   publish-channel:
     name: Publish (${{ matrix.channel }})
     runs-on: ubuntu-latest
-    needs: [resolve, bundle]
+    needs: [resolve, preflight, bundle, typecheck]
     permissions:
       contents: write
     strategy:
