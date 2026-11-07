@@ -864,6 +864,65 @@ test('chat:send triggers lazy spawn on a hydrated session', async () => {
   expect(await eventually(async () => (spawnCount.n === 1 ? true : null))).toBe(true)
 })
 
+// The computer runs requests in the order they arrive, but a hydrate first builds its
+// options (reads the task's stored config) before the session exists: a send that
+// arrived right after it ran first and was refused ("No chat session for tab"), so
+// the first message of a chat never reached the agent.
+test('chat:send right behind a hydrate still in flight waits for it, then starts the agent', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const taskId = 'task-lazy-race'
+  const tabId = 'tab-lazy-race'
+  seedTask(db, taskId, null, tabId)
+  const spawnCount = { n: 0 }
+  mgr.setTransportDepsForTests({
+    whichBinary: async () => '/fake/claude',
+    spawn: () => {
+      spawnCount.n++
+      return makeFakeChild()
+    },
+    broadcastEvent: () => {},
+    broadcastExit: () => {},
+    broadcastStateChange: () => {}
+  })
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  const hydrated = ipc.invoke('chat:hydrate', {
+    tabId,
+    taskId,
+    mode: 'claude-chat',
+    cwd: '/tmp',
+    providerFlagsOverride: null
+  })
+  const sent = ipc.invoke('chat:send', tabId, {
+    id: 'msg-race',
+    content: [{ type: 'text', text: 'hello' }]
+  })
+  await hydrated
+  expect(await sent).toEqual({ id: 'msg-race', state: 'queued' })
+  expect(await eventually(async () => (spawnCount.n === 1 ? true : null))).toBe(true)
+})
+
+test('chat:send for a tab nobody hydrates is still refused (no session to wait for)', async () => {
+  mgr.__resetForTests()
+  mgr.resetTransportDeps()
+  const db = await setupDb()
+  const ipc = createMockIpcMain()
+  registerChatHandlers(
+    ipc as unknown as Parameters<typeof registerChatHandlers>[0],
+    createSlayzoneDbAdapter(db),
+    localChatOpts(db)
+  )
+  await expect(
+    ipc.invoke('chat:send', 'tab-nobody', { id: 'm', content: [{ type: 'text', text: 'x' }] })
+  ).rejects.toThrow('No chat session for tab tab-nobody')
+})
+
 test('chat:hydrate twice is idempotent — only one skeleton, zero spawns', async () => {
   mgr.__resetForTests()
   mgr.resetTransportDeps()
