@@ -5,20 +5,35 @@ type ProjectSection = 'providers' | 'instructions' | 'skills' | 'mcp'
 
 export async function closeTopDialog(mainWindow: Page): Promise<void> {
   const openDialogs = mainWindow.locator('[role="dialog"][data-state="open"]')
+  const tried: string[] = []
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if ((await openDialogs.count()) === 0) return
 
     const top = openDialogs.last()
     const closeButton = top.getByRole('button', { name: /close|cancel|done|skip/i }).first()
     if (await closeButton.count()) {
-      await closeButton.click({ force: true }).catch(() => {})
+      // Bounded: an unbounded click on a button that never settles waited out the
+      // whole test here (git/62 under load) instead of trying again.
+      const label = await closeButton.innerText({ timeout: 1_000 }).catch(() => '?')
+      const clicked = await closeButton
+        .click({ force: true, timeout: 5_000 })
+        .then(() => 'clicked')
+        .catch((e: Error) => e.message.split('\n')[0])
+      tried.push(`button "${label}": ${clicked}`)
     } else {
       await top.press('Escape').catch(() => {})
       await mainWindow.keyboard.press('Escape').catch(() => {})
+      tried.push('Escape')
     }
     await mainWindow.waitForTimeout(150)
   }
-  await expect(openDialogs).toHaveCount(0, { timeout: 5_000 })
+  const left = await openDialogs.evaluateAll((els) =>
+    els.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120))
+  )
+  await expect(
+    openDialogs,
+    `dialogs still open: ${JSON.stringify(left)}; tried: ${JSON.stringify(tried)}`
+  ).toHaveCount(0, { timeout: 5_000 })
 }
 
 export async function openUserContextManager(
