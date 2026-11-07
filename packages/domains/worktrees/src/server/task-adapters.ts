@@ -41,8 +41,13 @@ const onHubDisk =
 export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   // The in-process impls run on the hub, so they IGNORE `taskId` — it exists only
   // so a routing impl can resolve which computer the work belongs to.
-  createWorktree: onHubDisk('create', (_taskId, repoPath, worktreePath, branch, sourceBranch) =>
-    createWorktree(repoPath, worktreePath, branch, sourceBranch)
+  // This host's own disk: no computer to record.
+  createWorktree: onHubDisk(
+    'create',
+    async (_taskId, repoPath, worktreePath, branch, sourceBranch) => {
+      await createWorktree(repoPath, worktreePath, branch, sourceBranch)
+      return { computerId: null }
+    }
   ),
   removeWorktree: onHubDisk('remove', (_taskId, projectPath, worktreePath) =>
     removeWorktree(projectPath, worktreePath)

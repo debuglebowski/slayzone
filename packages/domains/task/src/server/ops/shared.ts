@@ -98,15 +98,19 @@ export interface WorktreeExecAdapters {
    * given one: they are hub-local UI state, never routed (and the former is sync,
    * so it could not be a network call).
    */
-  /** `createWorktree` from `worktrees/server`. */
+  /** `createWorktree` from `worktrees/server`. Answers the computer that made it
+   *  (null: this host's own disk) — recorded on the task, so the worktree is removed
+   *  there later even when the task's default computer has changed. */
   createWorktree: (
     taskId: string,
     repoPath: string,
     worktreePath: string,
     branch: string,
     sourceBranch?: string
-  ) => Promise<void>
-  /** `removeWorktree` from `worktrees/server` (no branch deletion). */
+  ) => Promise<{ computerId: string | null }>
+  /** `removeWorktree` from `worktrees/server` (no branch deletion). Runs on the
+   *  computer that holds the task's worktree (`tasks.worktree_computer_id`, else the
+   *  task's computer). */
   removeWorktree: (
     taskId: string,
     projectPath: string,
@@ -217,6 +221,13 @@ export interface TaskRuntimeAdapters {
    */
   projectRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
   /**
+   * The project's folder on the computer that HOLDS this task's worktree — where it is
+   * removed. Differs from {@link projectRootForTask} when the worktree was made on
+   * another computer than the task's current one (`tasks.worktree_computer_id`).
+   * Unwired: the legacy `projects.path`.
+   */
+  worktreeRootForTask: (db: SlayzoneDb, taskId: string, projectId: string) => Promise<string | null>
+  /**
    * The state of the computer that holds this task's worktree (R5-1). Unwired (no
    * computers: tests, the fork sidecar): always `ready` — the worktree is local.
    */
@@ -312,6 +323,7 @@ const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   worktrees: unconfiguredWorktreeExecAdapters,
   worktreePolicy: unconfiguredWorktreePolicyAdapters,
   projectRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId),
+  worktreeRootForTask: (db, _taskId, projectId) => legacyProjectPath(db, projectId),
   worktreeComputerState: async () => 'ready'
 }
 
@@ -606,8 +618,8 @@ export async function cleanupTaskFull(
   )
   if ((sharedRow?.n ?? 0) > 0) return 'none'
 
-  // The worktree lives on the task's computer, next to the project's folder there.
-  const projectRoot = await runtimeAdapters.projectRootForTask(db, taskId, task.project_id)
+  // The worktree lives on the computer it was made on, next to the project's folder there.
+  const projectRoot = await runtimeAdapters.worktreeRootForTask(db, taskId, task.project_id)
 
   if (!projectRoot) return 'none'
   try {
@@ -779,8 +791,9 @@ async function createWorktreeForTask(
   const sourceBranch = projectRow.worktree_source_branch ?? undefined
 
   // Block A: Create worktree and link to task immediately
+  let made: { computerId: string | null }
   try {
-    await runtimeAdapters.worktrees.createWorktree(
+    made = await runtimeAdapters.worktrees.createWorktree(
       taskId,
       repoPath,
       worktreePath,
@@ -794,7 +807,8 @@ async function createWorktreeForTask(
       await db.run(
         `
         UPDATE tasks
-        SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
+        SET worktree_path = ?, worktree_parent_branch = ?, worktree_computer_id = NULL,
+            updated_at = datetime('now')
         WHERE id = ?
       `,
         [worktreePath, parentBranch, taskId]
@@ -822,14 +836,16 @@ async function createWorktreeForTask(
     return
   }
 
-  // Worktree created — link to task before any post-creation steps
+  // Worktree created — link to task before any post-creation steps, with the computer
+  // that holds it: it is removed there, whichever computer is the task's later.
   await db.run(
     `
     UPDATE tasks
-    SET worktree_path = ?, worktree_parent_branch = ?, updated_at = datetime('now')
+    SET worktree_path = ?, worktree_parent_branch = ?, worktree_computer_id = ?,
+        updated_at = datetime('now')
     WHERE id = ?
   `,
-    [worktreePath, parentBranch, taskId]
+    [worktreePath, parentBranch, made.computerId, taskId]
   )
   runtimeAdapters.recordDiagnosticEvent({
     level: 'info',
@@ -1005,6 +1021,8 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   const fields: string[] = []
   const values: unknown[] = []
+  /** The `worktree_path` this update writes, if any (see `worktree_computer_id` below). */
+  let worktreePathWrite: { value: string | null } | null = null
   /**
    * Conversation-id mutations the merge produced. Recorded into the
    * append-only `task_conversations` ledger after the UPDATE commits so the
@@ -1056,6 +1074,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       if (data.worktreePath === undefined) {
         fields.push('worktree_path = ?')
         values.push(null)
+        worktreePathWrite = { value: null }
       }
       if (data.worktreeParentBranch === undefined) {
         fields.push('worktree_parent_branch = ?')
@@ -1264,6 +1283,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.worktreePath !== undefined) {
     fields.push('worktree_path = ?')
     values.push(data.worktreePath)
+    worktreePathWrite = { value: data.worktreePath }
   }
   if (data.worktreeParentBranch !== undefined) {
     fields.push('worktree_parent_branch = ?')
@@ -1414,6 +1434,15 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     return parseTask(row)
   }
 
+  // A worktree path set by hand (or cleared) is not the one recorded as made on a
+  // computer: forget that computer, unless the path is unchanged. Unrecorded = the
+  // task's computer, as before (SQLite reads OLD column values in every SET term).
+  if (worktreePathWrite) {
+    fields.push(
+      'worktree_computer_id = CASE WHEN worktree_path IS ? THEN worktree_computer_id ELSE NULL END'
+    )
+    values.push(worktreePathWrite.value)
+  }
   fields.push("updated_at = datetime('now')")
   values.push(data.id)
 

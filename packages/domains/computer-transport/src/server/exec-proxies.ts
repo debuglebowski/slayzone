@@ -2554,6 +2554,13 @@ export interface RemoteWorktreeAdaptersOptions {
    * local — so a task whose agent ran on a computer got its worktree on the hub.
    */
   resolveComputerId: (taskId: string) => string | null | Promise<string | null>
+  /**
+   * The computer that HOLDS a task's worktree — where `removeWorktree` goes. It can
+   * differ from {@link resolveComputerId}: an unbound task's computer is whichever is
+   * the default NOW, the worktree stays on the one that made it. Omitted: the task's
+   * computer.
+   */
+  resolveWorktreeComputerId?: (taskId: string) => string | null | Promise<string | null>
   /** Asked before every routed op, for its task. */
   gate?: ComputerWorkGate
 }
@@ -2580,11 +2587,17 @@ export function createRemoteWorktreeAdapters(
 ): WorktreeExecAdapters {
   const { gateway, local, gate } = options
   /** The task's computer, admitted by the gate before any op reaches it. */
-  const resolveComputerId = async (taskId: string): Promise<string | null> => {
-    const computerId = await options.resolveComputerId(taskId)
+  const admitted = async (
+    taskId: string,
+    resolve: (taskId: string) => string | null | Promise<string | null>
+  ): Promise<string | null> => {
+    const computerId = await resolve(taskId)
     if (computerId != null && gate) await gate(computerId, { kind: 'task', id: taskId })
     return computerId
   }
+  const resolveComputerId = (taskId: string) => admitted(taskId, options.resolveComputerId)
+  const resolveWorktreeComputerId = (taskId: string) =>
+    admitted(taskId, options.resolveWorktreeComputerId ?? options.resolveComputerId)
 
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
@@ -2597,10 +2610,11 @@ export function createRemoteWorktreeAdapters(
         { repoPath, worktreePath, branch, sourceBranch },
         WORKTREE_LONG_STEP_TIMEOUT_MS
       )
+      return { computerId }
     },
 
     async removeWorktree(taskId, projectPath, worktreePath) {
-      const computerId = await resolveComputerId(taskId)
+      const computerId = await resolveWorktreeComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
       const res = await gateway.request(

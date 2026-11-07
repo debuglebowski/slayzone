@@ -181,6 +181,12 @@ export async function retireStaleLocalComputers(
       sql: `UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`,
       params: [opts.keepComputerId, ...staleIds]
     },
+    // The same machine re-enrolled: the worktrees it made are the survivor's.
+    {
+      type: 'run',
+      sql: `UPDATE tasks SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
+      params: [opts.keepComputerId, ...staleIds]
+    },
     {
       type: 'run',
       sql: `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
@@ -253,6 +259,9 @@ function computerRemoved(id: string): void {
 }
 
 export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> {
+  // `tasks.worktree_computer_id` is deliberately KEPT: it records where a worktree
+  // is, and a computer with no row tells the Trash purge it is gone for good — NULL
+  // would send the removal to whichever computer is the default instead.
   await db.batchTxn([
     { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
     {

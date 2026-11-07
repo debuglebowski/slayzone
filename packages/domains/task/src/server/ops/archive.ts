@@ -34,7 +34,7 @@ export async function archiveTaskOp(
   }
   await db.namedTxn('task:archive', {
     sql: `
-      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, base_dir = NULL, updated_at = datetime('now')
+      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, worktree_computer_id = NULL, base_dir = NULL, updated_at = datetime('now')
       WHERE id = ? OR parent_id = ?
     `,
     params: [id, id],

@@ -143,15 +143,17 @@ export async function createTaskOp(
       repo_name: string | null
       worktree_path: string | null
       worktree_parent_branch: string | null
+      worktree_computer_id: string | null
       base_dir: string | null
     }>(
-      'SELECT repo_name, worktree_path, worktree_parent_branch, base_dir FROM tasks WHERE id = ?',
+      'SELECT repo_name, worktree_path, worktree_parent_branch, worktree_computer_id, base_dir FROM tasks WHERE id = ?',
       [data.parentId]
     )) as
       | {
           repo_name: string | null
           worktree_path: string | null
           worktree_parent_branch: string | null
+          worktree_computer_id: string | null
           base_dir: string | null
         }
       | undefined
@@ -160,10 +162,18 @@ export async function createTaskOp(
       await db.run(
         `
         UPDATE tasks
-        SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, base_dir = ?, updated_at = datetime('now')
+        SET repo_name = ?, worktree_path = ?, worktree_parent_branch = ?, worktree_computer_id = ?,
+            base_dir = ?, updated_at = datetime('now')
         WHERE id = ?
       `,
-        [parent.repo_name, parent.worktree_path, parent.worktree_parent_branch, parent.base_dir, id]
+        [
+          parent.repo_name,
+          parent.worktree_path,
+          parent.worktree_parent_branch,
+          parent.worktree_computer_id,
+          parent.base_dir,
+          id
+        ]
       )
     }
   } else {

@@ -2171,7 +2171,7 @@ describe('createRoutingProcessBackend', () => {
 
 function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeExecAdapters {
   return {
-    createWorktree: vi.fn(async () => {}),
+    createWorktree: vi.fn(async () => ({ computerId: null })),
     removeWorktree: vi.fn(async () => ({})),
     runWorktreeSetupScript: vi.fn(async () => ({ ran: false })),
     copyIgnoredFiles: vi.fn(async () => {}),
@@ -2225,6 +2225,25 @@ describe('createRemoteWorktreeAdapters', () => {
     ]) {
       expect(requireCall(gateway, method).timeoutMs, method).toBeGreaterThan(5 * 60_000)
     }
+  })
+
+  // Trash purge, no-login multi-computer hub: an unbound task's computer is the
+  // default NOW; its worktree stays on the computer that made it. Create answers
+  // that computer (the hub records it), removal goes to the worktree's computer.
+  it('create answers its computer; remove goes to the computer holding the worktree', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.removeWorktree', () => ({}))
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'default-now',
+      resolveWorktreeComputerId: () => 'made-it'
+    })
+    expect(await adapters.createWorktree(TASK, '/repo', '/wt', 'b')).toEqual({
+      computerId: 'default-now'
+    })
+    await adapters.removeWorktree(TASK, '/proj', '/wt')
+    expect(requireCall(gateway, 'git.removeWorktree').computerId).toBe('made-it')
   })
 
   it('forwards git/fs ops to the right frames and parses the computer replies', async () => {

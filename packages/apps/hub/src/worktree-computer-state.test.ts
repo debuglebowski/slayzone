@@ -60,3 +60,13 @@ test('R5-1: unbound — the default pick when connected, else wait while a compu
   expect(await make({ requireLogin: true })('t-unbound-b')).toBe('gone')
   expect(await make({ requireLogin: true })('t-unbound-a')).toBe('wait')
 })
+
+test('the computer a worktree was made on wins over the task binding and the default pick', async () => {
+  sql(`INSERT INTO tasks (id, project_id, title, computer_id, worktree_computer_id) VALUES
+    ('t-made-off', 'pa', 't', 'c-on', 'c-off'),
+    ('t-made-gone', 'pa', 't', NULL, 'c-deleted')`)
+  const state = make({ usable: ['c-on'], pick: 'c-on' })
+  expect(await state('t-made-off')).toBe('wait')
+  expect(await state('t-made-gone')).toBe('gone')
+  expect(await make({ usable: ['c-on', 'c-off'] })('t-made-off')).toBe('ready')
+})

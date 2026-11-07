@@ -17,7 +17,7 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
     console.warn('[direct-link] revocation not delivered', f)
   }
 }
-import { createWorktreeComputerState } from './worktree-computer-state'
+import { createTaskWorktreeRouting } from './task-worktree-routing'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import {
@@ -119,7 +119,8 @@ import {
   setTaskDeps,
   getTaskOp,
   resolveMainAgentLaunch,
-  startMainAgent
+  startMainAgent,
+  type TaskRuntimeAdapters
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
 import {
@@ -285,7 +286,6 @@ import {
   createRoutingPtyBackend,
   createRoutingProcessBackend,
   createRemoteFsAdapters,
-  createRemoteWorktreeAdapters,
   type HubComputerGateway
 } from '@slayzone/computer-transport/server'
 import {
@@ -636,6 +636,12 @@ export function composeServer(opts: {
   // @slayzone/worktrees/server). Extracted so the computer-routing path can re-supply a
   // COMPLETE object (configureTaskRuntimeAdapters shallow-merges over DEFAULTS,
   // not over the prior call — a partial second call would drop these fields).
+  const taskWorktreeRouting = createTaskWorktreeRouting({
+    db,
+    requireLogin: opts.requireLogin,
+    usable: () => execGateway?.listUsableComputers() ?? [],
+    forTask: (taskId) => resolveComputerForTask(taskId)
+  })
   const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
     worktrees: hubWorktreeExecAdapters,
@@ -654,25 +660,16 @@ export function composeServer(opts: {
     // streams to the renderer), status→in_progress suggests a respawn.
     onReachedTerminal: onTaskReachedTerminal,
     requestPtyRespawn: broadcastRespawnRequest,
-    // A project's folder is per computer: a task's worktrees go next to the folder
-    // on the computer its work runs on. Read at call time (`placement` is built
-    // below, before any request can reach a task op). A computer that cannot be
-    // resolved (none connected; on a hub with login, none of the caller's) means no
-    // folder — never a failed read: REST/board reads go through here too.
-    projectRootForTask: async (_db: SlayzoneDb, taskId: string, projectId: string) => {
-      const computerId = await resolveComputerForTask(taskId).catch(() => null)
-      return computerId ? recordedProjectRoot(db, projectId, computerId) : null
-    },
-    // The Trash purge removes a worktree before its task, so it asks whether the
-    // computer holding it can (R5-1). At boot none is connected: the task waits, and
-    // the purge runs again on `computer-connected` (below).
-    worktreeComputerState: createWorktreeComputerState({
-      db,
-      requireLogin: opts.requireLogin,
-      usable: () => execGateway?.listUsableComputers() ?? [],
-      forTask: (taskId) => resolveComputerForTask(taskId)
-    })
-  }
+    // Where a task's worktree work goes (./task-worktree-routing.ts). Read at call
+    // time (`placement` is built below, before any request can reach a task op). At
+    // boot no computer is connected: the Trash purge waits, and runs again on
+    // `computer-connected` (below, R5-1).
+    projectRootForTask: taskWorktreeRouting.projectRootForTask,
+    worktreeRootForTask: taskWorktreeRouting.worktreeRootForTask,
+    worktreeComputerState: taskWorktreeRouting.worktreeComputerState
+    // `satisfies`: a seam added to TaskRuntimeAdapters and not wired here fails the
+    // typecheck — unwired, it silently falls back to its no-computer default.
+  } satisfies TaskRuntimeAdapters
   configureTaskRuntimeAdapters(baseTaskAdapters)
   // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
   // + chat transports in THIS process, plus chats owned by a computer. Callers:
@@ -2064,15 +2061,8 @@ export function composeServer(opts: {
     // every base field so nothing is dropped, plus the routing worktree adapter.
     configureTaskRuntimeAdapters({
       ...baseTaskAdapters,
-      worktrees: createRemoteWorktreeAdapters({
+      worktrees: taskWorktreeRouting.remoteWorktrees({
         gateway: computerGateway,
-        // Route each task's worktree/git/fs work to the SAME computer its agents
-        // spawn on — the seam now carries the taskId, so this is the same
-        // resolution the pty/chat backends use (explicit binding, else the
-        // connected default computer). Without it a task whose agent runs on a
-        // computer had its worktree created on the hub, leaving the agent with a cwd
-        // that does not exist on its own machine.
-        resolveComputerId: (taskId) => resolveComputerForTask(taskId),
         gate: placement.gate,
         local: hubWorktreeExecAdapters
       })

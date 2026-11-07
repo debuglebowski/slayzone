@@ -4759,6 +4759,18 @@ export const migrations: Migration[] = [
           ORDER BY w2.created_at DESC, w2.id DESC LIMIT 1
         );`)
     }
+  },
+  {
+    version: 197,
+    up(db) {
+      // The computer a task's worktree was made on — where it is removed (Trash purge,
+      // archive). Without it the removal went to the task's CURRENT computer, which for
+      // an unbound task is whichever computer is the default now: on a hub with several
+      // computers that may not be the one holding the worktree. NULL = not recorded
+      // (worktrees made before this, linked by hand): the task's computer, as before.
+      // Kept when that computer is deleted, so the purge sees it is gone.
+      db.exec('ALTER TABLE tasks ADD COLUMN worktree_computer_id TEXT DEFAULT NULL')
+    }
   }
 ]
 

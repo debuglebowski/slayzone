@@ -102,6 +102,8 @@ run_harness packages/apps/api/src/path-ids.test.ts
 run_harness packages/apps/hub/src/worktree-computer-state.test.ts
 # Trash purge waits for the worktree computer (R5-1)
 run_harness packages/domains/task/src/server/ops/startup-purge-computer.test.ts
+# Trash purge removes a worktree on the computer it was made on (R6 follow-up)
+run_harness packages/apps/hub/src/trash-purge-worktree-owner.test.ts
 # machine-local settings never exported or imported (R3-2)
 run_harness packages/apps/api/src/export-import-machine-local.test.ts
 # Final review H1: cron catch-up waits for the computer, runs once on connect.

@@ -4,7 +4,8 @@
  * R5-1). The purge runs at boot, before any computer is connected; it deletes a task
  * only once its worktree is gone, and runs again on `computer-connected`.
  *
- *   - BOUND (the task's or its project's computer): `ready` while that computer is
+ *   - RECORDED (`tasks.worktree_computer_id`: the computer the worktree was made on)
+ *     or else BOUND (the task's or its project's computer): `ready` while that computer is
  *     usable; `gone` when its record is deleted or revoked — it will never answer, so
  *     it must not hold the purge forever; else `wait`.
  *   - UNBOUND: the worktree is on whichever computer ran the task — the default pick.
@@ -27,6 +28,18 @@ export interface WorktreeComputerStateDeps {
   forTask: (taskId: string) => Promise<string | null>
 }
 
+/** The computer the task's worktree was made on (`tasks.worktree_computer_id`), if recorded. */
+export async function recordedWorktreeComputer(
+  db: SlayzoneDb,
+  taskId: string
+): Promise<string | null> {
+  const row = await db.get<{ worktree_computer_id: string | null }>(
+    'SELECT worktree_computer_id FROM tasks WHERE id = ?',
+    [taskId]
+  )
+  return row?.worktree_computer_id ?? null
+}
+
 export function createWorktreeComputerState(
   deps: WorktreeComputerStateDeps
 ): (taskId: string) => Promise<WorktreeComputerState> {
@@ -42,7 +55,8 @@ export function createWorktreeComputerState(
   const isUsable = (id: string) => usable().some((c) => c.computerId === id)
 
   return async (taskId) => {
-    const bound = await resolveTaskComputerId(db, taskId)
+    const bound =
+      (await recordedWorktreeComputer(db, taskId)) ?? (await resolveTaskComputerId(db, taskId))
     if (bound) {
       const row = await db.get<{ revoked_at: number | null }>(
         'SELECT revoked_at FROM computers WHERE id = ?',

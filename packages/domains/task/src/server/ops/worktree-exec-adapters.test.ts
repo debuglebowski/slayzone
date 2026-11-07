@@ -77,6 +77,7 @@ const makeFakes = (
 ): WorktreeExecAdapters => ({
   createWorktree: async () => {
     calls.push('create')
+    return { computerId: null }
   },
   removeWorktree: async () => {
     calls.push('remove')
@@ -134,6 +135,7 @@ test('maybeAutoCreateWorktree: create → link → copy → setup ordering', asy
     createWorktree: async () => {
       linkAtCreate = taskRow(h, taskId).worktree_path
       calls.push('create')
+      return { computerId: null }
     },
     copyIgnoredFiles: async () => {
       linkAtCopy = taskRow(h, taskId).worktree_path
