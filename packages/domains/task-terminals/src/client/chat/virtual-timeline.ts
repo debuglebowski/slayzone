@@ -51,8 +51,11 @@ export interface VirtualTimelineController {
   ) => VirtualTimelineView
   /** After each commit of the rows: rebinds a replaced scroller, settles anchors. */
   afterRender: () => void
-  /** Scroll so row `index` is at the top (or centred) — mounted or not. */
-  revealIndex: (index: number, opts?: { align?: 'start' | 'center' }) => void
+  /**
+   * Scroll so row `index` is at the top (or centred) — mounted or not. With
+   * `inner`, the element it selects inside the row is, once the row is mounted.
+   */
+  revealIndex: (index: number, opts?: { align?: 'start' | 'center'; inner?: string }) => void
   /** `revealIndex` by the row's `itemKey` (the timeline reveal seam). */
   revealKey: RevealTimelineItem
   /** A reveal still re-aiming stops here (the user scrolled, or a position was set). */
@@ -140,6 +143,8 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
   let lastIndexes: number[] = []
   let keyIndex: Map<Key, number> | null = null
   let revealTimer: ReturnType<typeof setTimeout> | null = null
+  /** A reveal's element inside its row, not found yet (the row is not mounted). */
+  let revealInner: { key: Key; selector: string; align: 'start' | 'center' } | null = null
   let detachInput: (() => void) | null = null
   /**
    * The row at the top of the view when the rows changed, and how far into it
@@ -220,6 +225,7 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
   }
 
   const cancelReveal = (): void => {
+    revealInner = null
     if (revealTimer === null) return
     clearTimeout(revealTimer)
     revealTimer = null
@@ -254,6 +260,7 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
     if (detachInput === null && scrollRef.current) detachInput = watchUserInput(scrollRef.current)
     virtualizer._willUpdate()
     keepAnchor()
+    aimInner()
     // Row measurements can commit another list height after the content's
     // ResizeObserver ran. Align this commit before paint, rather than waiting
     // for its next observer delivery. Reveals and text selection keep their place.
@@ -276,6 +283,33 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
     if (Math.abs(el.scrollTop - target) <= 1) return
     el.scrollTop = target
     virtualizer.scrollOffset = el.scrollTop
+  }
+
+  /**
+   * Aim the view at a reveal's element inside its row: the row's place plus the
+   * element's place in it. Waits (next commit) until the row is mounted and the
+   * element in it rendered; tanstack only scrolls to whole rows.
+   */
+  const aimInner = (): void => {
+    const held = revealInner
+    const el = getScrollElement()
+    if (!held || !el) return
+    const index = indexOfKey(held.key)
+    if (index === undefined) {
+      revealInner = null
+      return
+    }
+    const row = el.querySelector<HTMLElement>(
+      `[data-item-key="${String(held.key).replace(/["\\]/g, '\\$&')}"]`
+    )
+    const inner = row?.querySelector<HTMLElement>(held.selector)
+    const start = virtualizer.measurementsCache[index]?.start
+    if (!row || !inner || start === undefined) return
+    revealInner = null
+    const box = inner.getBoundingClientRect()
+    const into = box.top - row.getBoundingClientRect().top
+    const lead = held.align === 'center' ? Math.max(0, (el.clientHeight - box.height) / 2) : 0
+    virtualizer.scrollToOffset(Math.max(0, start + into - lead))
   }
 
   const indexOfKey = (key: Key): number | undefined => {
@@ -349,6 +383,10 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
       revealTimer = null
     }, REVEAL_SETTLE_MS)
     virtualizer.scrollToIndex(index, { align: opts?.align ?? 'start' })
+    revealInner = opts?.inner
+      ? { key: itemKey(items[index], index), selector: opts.inner, align: opts.align ?? 'start' }
+      : null
+    aimInner()
   }
 
   const revealKey: RevealTimelineItem = (key, opts) => {
@@ -381,6 +419,7 @@ export function createVirtualTimelineController(follow: TimelineFollow): Virtual
     dispose: () => {
       if (revealTimer !== null) clearTimeout(revealTimer)
       revealTimer = null
+      revealInner = null
       detachInput?.()
       detachInput = null
       virtualizer._didMount()()

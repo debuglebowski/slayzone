@@ -559,22 +559,27 @@ export function useChatDisplay({
 
   // Reveal a row by its key — not here (paged history): its page (`row`) loads,
   // then it is revealed.
-  const pendingRevealRef = useRef<{ key: Key; align: 'start' | 'center' } | null>(null)
+  const pendingRevealRef = useRef<{
+    key: Key
+    align: 'start' | 'center'
+    inner?: string
+  } | null>(null)
   const revealItem = useStableCallback<Parameters<RevealTimelineItem>, void>((key, opts) => {
     const align = opts?.align ?? 'start'
+    const inner = opts?.inner
     const target = baseTimeline.find((it, i) => itemKey(it, i) === key)
     const host = target && activity?.hosts.get(target)
     if (host) {
       const at = displayedTimeline.indexOf(host)
-      if (at >= 0) virtual.revealIndex(at, { align })
+      if (at >= 0) virtual.revealIndex(at, { align, inner })
       return
     }
     if (displayedTimeline.some((it, i) => itemKey(it, i) === key)) {
-      virtual.revealKey(key, { align })
+      virtual.revealKey(key, { align, inner })
       return
     }
     if (opts?.row === undefined || !paging || !loadPages) return
-    pendingRevealRef.current = { key, align }
+    pendingRevealRef.current = { key, align, inner }
     loadPages([Math.floor(opts.row / paging.pageRows)])
   })
   // Memory holds what is near the view: past the budget, the loaded pages
@@ -606,13 +611,13 @@ export function useChatDisplay({
       const at = displayedTimeline.indexOf(host)
       if (at >= 0) {
         pendingRevealRef.current = null
-        virtual.revealIndex(at, { align: pending.align })
+        virtual.revealIndex(at, { align: pending.align, inner: pending.inner })
       }
       return
     }
     if (!displayedTimeline.some((it, i) => itemKey(it, i) === pending.key)) return
     pendingRevealRef.current = null
-    virtual.revealKey(pending.key, { align: pending.align })
+    virtual.revealKey(pending.key, { align: pending.align, inner: pending.inner })
   }, [displayedTimeline, baseTimeline, activity, itemKey, virtual])
 
   return {
