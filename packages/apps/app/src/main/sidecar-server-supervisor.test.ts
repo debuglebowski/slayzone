@@ -1011,6 +1011,34 @@ test('fallback port is sticky: a crash respawn keeps it while the fixed port is 
   }
 })
 
+test('fixedPort whose holder goes away during the identity probe: binds the fixed port', async () => {
+  // Our previous hub finishing its stop between "the port is taken" and "who holds
+  // it?" fails the probe. A failed probe is not someone else: the port came free
+  // (under load the 300 ms close below landed there, and the app moved to a
+  // fallback port for good).
+  const dir = mkTmp()
+  const fixedPort = await freePort()
+  const holder = http.createServer()
+  holder.on('connection', (socket) => {
+    socket.destroy()
+    holder.close()
+  })
+  await new Promise<void>((done) => holder.listen(fixedPort, '127.0.0.1', done))
+  const { handle } = makeHarness(
+    dir,
+    { SLAYZONE_ROOT: path.join(dir, 'hub') },
+    { healthPollIntervalMs: 40, backoffMs: [100, 200, 400, 800, 1600] },
+    { fixedPort }
+  )
+  try {
+    await handle.waitForReady()
+    expect(handle.getPort(), 'the fixed port, free once its holder left').toBe(fixedPort)
+  } finally {
+    await handle.stop()
+    holder.close()
+  }
+})
+
 test('fixedPort held by our OWN previous hub (same root, still stopping): waits, then binds the fixed port', async () => {
   const dir = mkTmp()
   const root = path.join(dir, 'hub')

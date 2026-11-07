@@ -432,6 +432,10 @@ export function startSidecarServer(opts: SidecarServerOpts): SidecarServerHandle
       )
       return fixed
     }
+    // No hub answered: maybe nobody holds it any more. Our previous hub finishing its
+    // stop between the bind check and the probe failed the probe, and that moved this
+    // app off its fixed port for good.
+    if (!holder.ok && (await canBind(opts.host, fixed))) return fixed
     const fallback = await firstBindablePort(opts.host, HUB_DYNAMIC_PORT_RANGE)
     const who = holder.ok
       ? `another hub (pid ${holder.pid ?? '?'}, root ${holder.root ?? 'unknown'})`
