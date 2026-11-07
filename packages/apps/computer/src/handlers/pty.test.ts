@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from '../config'
-import { createSpawnAdmission } from '../spawn-admission'
+import { type AdmissionSlot, createSpawnAdmission } from '../spawn-admission'
 import { createPtyHandlers } from './pty'
 import type { ComputerDialer } from './types'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
@@ -16,18 +16,27 @@ interface Notify {
 
 function controlledPty(pid: number) {
   let onExit: ((event: { exitCode: number; signal: number }) => void) | undefined
+  let onData: ((data: string) => void) | undefined
   const proc = {
     pid,
     kill: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),
-    onData: () => ({ dispose() {} }),
+    onData: (listener: typeof onData) => {
+      onData = listener
+      return { dispose() {} }
+    },
     onExit: (listener: typeof onExit) => {
       onExit = listener
       return { dispose() {} }
     }
   } as unknown as nodePty.IPty
-  return { proc, exit: () => onExit?.({ exitCode: 0, signal: 0 }) }
+  return {
+    proc,
+    /** The process prints `data`: delivered to the handler's onData, synchronously. */
+    emit: (data: string) => onData?.(data),
+    exit: () => onExit?.({ exitCode: 0, signal: 0 })
+  }
 }
 
 describe('remote session ownership', () => {
@@ -222,15 +231,28 @@ describe('remote session ownership', () => {
  *  notification is recorded but reported undelivered, as the real dialer does. */
 function makeCtx({ online = true }: { online?: boolean } = {}) {
   const notifies: Notify[] = []
+  const waiters = new Set<() => void>()
   const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({
         method,
         params: (params ?? {}) as Record<string, unknown>
       })
+      for (const waiter of [...waiters]) waiter()
       return online
     }
   }
+  /** Resolves on the notification that makes `pred` true — awaits the event, never polls. */
+  const until = (pred: () => boolean): Promise<void> =>
+    new Promise((resolve) => {
+      if (pred()) return resolve()
+      const waiter = () => {
+        if (!pred()) return
+        waiters.delete(waiter)
+        resolve()
+      }
+      waiters.add(waiter)
+    })
   const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
@@ -238,7 +260,7 @@ function makeCtx({ online = true }: { online?: boolean } = {}) {
     allowedRoots: [tmpdir(), process.cwd()],
     capabilities: ['pty']
   }
-  return { notifies, ctx: { dialer, config, log: () => {} } }
+  return { notifies, until, ctx: { dialer, config, log: () => {} } }
 }
 
 async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {
@@ -518,21 +540,52 @@ describe('createPtyHandlers', () => {
   // restarted, carry window over) got a fresh buffer at seq 0 — below what the
   // terminal had already shown, so it dropped everything the shell printed. The hub
   // says where the session's seqs reached; a fresh carried buffer continues there.
+  const carryFresh = {
+    sessionId: 'carry-fresh',
+    spawnId: 'spawn-2',
+    carryOutput: { fromSpawnId: 'spawn-gone', preamble: '[recovered]\r\n', afterSeq: 41 },
+    command: 'sh',
+    args: ['-c', 'printf shell'],
+    cwd: process.cwd()
+  }
   it('a continuing spawn with no tombstone continues after the seq the hub names', async () => {
     const { notifies, ctx } = makeCtx()
+    const child = controlledPty(9101)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
+    })
+    try {
+      const reply = (await pty.handlers['pty.spawn'](carryFresh)) as { seq?: number }
+      expect(reply.seq).toBe(42)
+      // The shell prints whenever it prints: every frame it produces still lands
+      // after what the terminal already showed.
+      child.emit('shell')
+      child.emit(' more\r\n')
+      const frames = dataParams(notifies)
+      expect(frames.map((d) => d.data).join('')).toBe('shell more\r\n')
+      expect(Math.min(...frames.map((d) => d.seq))).toBeGreaterThan(41)
+    } finally {
+      child.exit()
+      pty.disposeAll()
+    }
+  })
+
+  it('a continuing spawn with no tombstone continues after the seq the hub names (real pty)', async () => {
+    const { notifies, until, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
-    const reply = (await pty.handlers['pty.spawn']({
-      sessionId: 'carry-fresh',
-      spawnId: 'spawn-2',
-      carryOutput: { fromSpawnId: 'spawn-gone', preamble: '[recovered]\r\n', afterSeq: 41 },
-      command: 'sh',
-      args: ['-c', 'printf shell'],
-      cwd: process.cwd()
-    })) as { seq?: number }
-    expect(reply.seq).toBe(42)
-    await waitFor(() => dataParams(notifies).some((d) => d.data.includes('shell')))
-    expect(Math.min(...dataParams(notifies).map((d) => d.seq))).toBeGreaterThan(41)
-    pty.disposeAll()
+    try {
+      const reply = (await pty.handlers['pty.spawn'](carryFresh)) as { seq?: number }
+      expect(reply.seq).toBe(42)
+      await until(() =>
+        dataParams(notifies)
+          .map((d) => d.data)
+          .join('')
+          .includes('shell')
+      )
+      expect(Math.min(...dataParams(notifies).map((d) => d.seq))).toBeGreaterThan(41)
+    } finally {
+      pty.disposeAll()
+    }
   })
 
   it('emits pty.exit with exitCode 0 for a short-lived command', async () => {
@@ -1182,13 +1235,20 @@ describe('agent-start admission', () => {
     pty.disposeAll()
   })
 
-  it('the startup deadline counts from the start, not from the queue', async () => {
-    const { notifies, ctx } = makeCtx()
-    const pty = createPtyHandlers(ctx, undefined, { admission: oneSlot() })
-    void pty.handlers['pty.spawn'](holder('holder', 0.6))
-    // Queued for ~600ms with a 300ms deadline: counted from the queue, it would be
-    // killed before it ever ran.
-    const queued = pty.handlers['pty.spawn']({
+  /**
+   * The sole slot held by the test itself (not by a sleeping process), and one
+   * queued agent with a 300ms startup deadline whose pty the test drives.
+   */
+  const queuedBehindHeldSlot = (ctx: ReturnType<typeof makeCtx>['ctx']) => {
+    const admission = oneSlot()
+    let holder!: AdmissionSlot
+    admission.enqueue('foreground', (slot) => {
+      holder = slot
+    })
+    const child = controlledPty(9201)
+    const spawnPty = vi.fn(() => child.proc) as unknown as typeof nodePty.spawn
+    const pty = createPtyHandlers(ctx, undefined, { admission, spawnPty })
+    const reply = pty.handlers['pty.spawn']({
       sessionId: 'queued',
       admission: 'background',
       startupTimeoutMs: 300,
@@ -1196,11 +1256,96 @@ describe('agent-start admission', () => {
       args: ['-c', 'printf alive; exec cat'],
       cwd
     }) as Promise<SpawnResult>
-    expect((await queued).startupDeadline).toBe(true)
-    await waitFor(() => outputOf(notifies, 'queued').includes('alive'))
-    await new Promise((r) => setTimeout(r, 400))
-    expect(exitOf(notifies, 'queued')).toBeUndefined()
-    pty.disposeAll()
+    return { holder, child, spawnPty, pty, reply: settled(reply), replyPromise: reply }
+  }
+
+  it('the startup deadline counts from the start, not from the queue', async () => {
+    vi.useFakeTimers()
+    const { notifies, ctx } = makeCtx()
+    const q = queuedBehindHeldSlot(ctx)
+    try {
+      // Queued for 1s, over three times its 300ms deadline: counted from the queue,
+      // it would be killed before it ever ran.
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(q.spawnPty).not.toHaveBeenCalled()
+      expect(q.reply.done).toBe(false)
+      expect(exitOf(notifies, 'queued')).toBeUndefined()
+
+      q.holder.release()
+      expect((await q.replyPromise).startupDeadline).toBe(true)
+      expect(q.spawnPty).toHaveBeenCalledTimes(1)
+      // The deadline starts now: 299ms of silence is still inside it.
+      await vi.advanceTimersByTimeAsync(299)
+      expect(q.child.proc.kill).not.toHaveBeenCalled()
+      q.child.emit('alive')
+      // Output clears it for good.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(q.child.proc.kill).not.toHaveBeenCalled()
+      expect(exitOf(notifies, 'queued')).toBeUndefined()
+      expect(outputOf(notifies, 'queued')).toBe('alive')
+    } finally {
+      q.child.exit()
+      q.pty.disposeAll()
+      vi.useRealTimers()
+    }
+  })
+
+  it('a queued agent silent past its deadline after its start is killed as a startup timeout', async () => {
+    vi.useFakeTimers()
+    const { notifies, ctx } = makeCtx()
+    const q = queuedBehindHeldSlot(ctx)
+    try {
+      await vi.advanceTimersByTimeAsync(1_000)
+      q.holder.release()
+      await q.replyPromise
+      await vi.advanceTimersByTimeAsync(299)
+      expect(q.child.proc.kill).not.toHaveBeenCalled()
+      // Past the deadline (+1ms for the verdict, which is delivered after pending
+      // output has been read).
+      await vi.advanceTimersByTimeAsync(2)
+      expect(q.child.proc.kill).toHaveBeenCalledWith('SIGKILL')
+      q.child.exit()
+      expect(exitOf(notifies, 'queued')).toMatchObject({ reason: 'startup-timeout' })
+    } finally {
+      q.pty.disposeAll()
+      vi.useRealTimers()
+    }
+  })
+
+  it('a queued agent with a startup deadline runs once admitted (real pty)', async () => {
+    const { notifies, until, ctx } = makeCtx()
+    const admission = oneSlot()
+    let holder!: AdmissionSlot
+    admission.enqueue('foreground', (slot) => {
+      holder = slot
+    })
+    const pty = createPtyHandlers(ctx, undefined, { admission })
+    try {
+      const reply = settled(
+        pty.handlers['pty.spawn']({
+          sessionId: 'queued',
+          admission: 'background',
+          // Generous on purpose: this smoke proves the real wiring (armed at the
+          // start, cleared by real output); the timing is proven above.
+          startupTimeoutMs: 60_000,
+          command: 'sh',
+          args: ['-c', 'printf alive; exec cat'],
+          cwd
+        }) as Promise<unknown>
+      )
+      // Every microtask settled: nothing but the slot holds it back.
+      await new Promise((r) => setImmediate(r))
+      expect(reply.done).toBe(false)
+      holder.release()
+      await until(() => reply.done)
+      expect((reply.value as SpawnResult).startupDeadline).toBe(true)
+      await until(() => outputOf(notifies, 'queued').includes('alive'))
+      await pty.handlers['pty.kill']({ sessionId: 'queued' })
+      await until(() => exitOf(notifies, 'queued') !== undefined)
+      expect(exitOf(notifies, 'queued')!.reason).toBeUndefined()
+    } finally {
+      pty.disposeAll()
+    }
   })
 
   it('a resize while queued sets the size it starts at', async () => {
