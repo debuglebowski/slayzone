@@ -30,6 +30,28 @@ async function closeDevTools(page: Page, app: ElectronApplication, viewId: strin
   }
 }
 
+/**
+ * Open the view's DevTools and wait for Electron's `devtools-opened`: armed in main
+ * BEFORE asking, so a fast open is not missed. Polling isDevToolsOpened for 5 s timed
+ * out while a loaded machine was still booting the inspector.
+ */
+async function openDevTools(page: Page, app: ElectronApplication, viewId: string, mode: string) {
+  const id = (await testInvoke(page, 'browser:get-web-contents-id', viewId)) as number
+  await app.evaluate(({ webContents }, id) => {
+    const wc = webContents.fromId(id)
+    const g = globalThis as { __e2eDevtoolsOpened?: Promise<void> }
+    g.__e2eDevtoolsOpened = new Promise<void>((resolve) => {
+      if (!wc) return
+      wc.once('devtools-opened', () => resolve())
+    })
+  }, id)
+  await testInvoke(page, 'browser:open-devtools', viewId, mode)
+  await app.evaluate(
+    () => (globalThis as { __e2eDevtoolsOpened?: Promise<void> }).__e2eDevtoolsOpened
+  )
+  expect(await testInvoke(page, 'browser:is-devtools-open', viewId)).toBe(true)
+}
+
 test.describe('Browser view DevTools (WebContentsView)', () => {
   let taskId: string
 
@@ -58,8 +80,7 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'bottom')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'bottom')
 
     await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
@@ -69,8 +90,7 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'right')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'right')
 
     await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
@@ -80,8 +100,7 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'undocked')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'undocked')
 
     await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
@@ -91,8 +110,7 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     await ensureBrowserPanelVisible(mainWindow)
     const viewId = await getActiveViewId(mainWindow, taskId)
 
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'detach')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'detach')
 
     await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
@@ -114,16 +132,14 @@ test.describe('Browser view DevTools (WebContentsView)', () => {
     const viewId = await getActiveViewId(mainWindow, taskId)
 
     // Open
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'bottom')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'bottom')
 
     // Close
     await closeDevTools(mainWindow, electronApp, viewId)
     await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(false)
 
     // Re-open
-    await testInvoke(mainWindow, 'browser:open-devtools', viewId, 'bottom')
-    await expect.poll(() => testInvoke(mainWindow, 'browser:is-devtools-open', viewId)).toBe(true)
+    await openDevTools(mainWindow, electronApp, viewId, 'bottom')
 
     // Final close
     await closeDevTools(mainWindow, electronApp, viewId)
