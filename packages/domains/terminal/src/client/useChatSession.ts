@@ -33,6 +33,7 @@ import {
   decodeTimelineState
 } from '../shared/chat-timeline-checkpoint'
 import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
+import { SessionReadyGate } from '../shared/chat-session-ready'
 import {
   initialState,
   reducer,
@@ -198,8 +199,8 @@ interface HydrateChatCtx {
   }
   gen: number
   genRef: RefObject<number>
-  /** Settles once this load's hydrate answered (either way): sends wait on it. */
-  sessionReadyRef: RefObject<Promise<void>>
+  /** Holds sends until this load's hydrate answered (either way). */
+  sessionReady: SessionReadyGate
   hydratedRef: RefObject<boolean>
   /** True once any load of this hook finished — the next one is a reload. */
   loadedOnceRef: RefObject<boolean>
@@ -242,7 +243,7 @@ async function hydrateAndReplay({
   target,
   gen,
   genRef,
-  sessionReadyRef,
+  sessionReady,
   hydratedRef,
   loadedOnceRef,
   liveQueueRef,
@@ -258,13 +259,8 @@ async function hydrateAndReplay({
   onError,
   onHydrateError
 }: HydrateChatCtx): Promise<void> {
-  const hydrating = trpcClient.chat.hydrate.mutate(target)
-  sessionReadyRef.current = hydrating.then(
-    () => undefined,
-    () => undefined
-  )
   try {
-    await hydrating
+    await sessionReady.track(trpcClient.chat.hydrate.mutate(target))
     if (gen === genRef.current) onHydrateError(null)
   } catch (e) {
     // Surface hydrate failure but still attempt replay (e.g. session may
@@ -334,20 +330,6 @@ async function hydrateAndReplay({
       flushLive()
       onHydrated()
     }
-  }
-}
-
-/**
- * Until the tab's latest hydrate answered — a reload started meanwhile is waited
- * for too. A failed hydrate does not hold anything back: the command then fails
- * (or succeeds) on its own.
- */
-async function untilSessionReady(ref: RefObject<Promise<void>>): Promise<void> {
-  let ready = ref.current
-  for (;;) {
-    await ready
-    if (ready === ref.current) return
-    ready = ref.current
   }
 }
 
@@ -438,7 +420,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // The current load's hydrate: the computer holds the tab's session only once it
   // ran there, and a command that overtakes it is refused ("No chat session for
   // tab"). Commands that need the session wait on it.
-  const sessionReadyRef = useRef<Promise<void>>(Promise.resolve())
+  const [sessionReady] = useState(() => new SessionReadyGate())
   const hydratedRef = useRef(false)
   const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<
@@ -866,7 +848,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       },
       gen,
       genRef,
-      sessionReadyRef,
+      sessionReady,
       hydratedRef,
       loadedOnceRef,
       liveQueueRef,
@@ -905,7 +887,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     trpcClient,
     reopenToken,
     openTimelineRead,
-    getReplayRead
+    getReplayRead,
+    sessionReady
   ])
 
   const createOpts = (): {
@@ -938,7 +921,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // `user-sent` is renderer-only; never persisted.
       dispatchLocal({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
-        await untilSessionReady(sessionReadyRef)
+        await sessionReady.ready()
         await trpcClient.chat.send.mutate({
           tabId: opts.tabId,
           message: { id, content },
@@ -953,7 +936,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         throw err
       }
     },
-    [opts.tabId, trpcClient, dispatchLocal]
+    [opts.tabId, trpcClient, dispatchLocal, sessionReady]
   )
 
   // Read the failed message's text from the reducer; `state` is read via a
@@ -973,7 +956,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       ...(item.text ? [{ type: 'text' as const, text: item.text }] : [])
     ]
     try {
-      await untilSessionReady(sessionReadyRef)
+      await sessionReady.ready()
       // Same id: the server retries it (or takes it, if it never got it).
       await trpcClient.chat.send.mutate({
         tabId: opts.tabId,
