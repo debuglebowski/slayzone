@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -926,6 +926,116 @@ describe('computer-owned session lifecycle', () => {
     pty.disposeAll()
   })
 
+  // P2 (product check): "under load, the startup deadline can fire before the
+  // operating system delivers the first output". The deadline's timer only OPENS
+  // the verdict; the verdict is delivered after the loop has read the output that
+  // was already waiting (`@slayzone/platform/startup-deadline`). In fake time an
+  // immediate queued by a timer runs on the next advance — the window between
+  // the timer firing and the verdict, where pending output is read.
+  const deadlineOnControlledPty = async (ctx: ReturnType<typeof makeCtx>['ctx']) => {
+    const child = controlledPty(9301)
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => child.proc) as typeof nodePty.spawn
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 'late',
+      command: 'sh',
+      cwd: process.cwd(),
+      startupTimeoutMs: 300
+    })
+    return { child, pty }
+  }
+
+  it('startup deadline (P2): output read after the deadline timer fired, before its verdict, keeps the session', async () => {
+    vi.useFakeTimers()
+    const { notifies, ctx } = makeCtx()
+    const { child, pty } = await deadlineOnControlledPty(ctx)
+    try {
+      await vi.advanceTimersByTimeAsync(300)
+      // The deadline timer has fired; its verdict waits for pending I/O.
+      expect(child.proc.kill).not.toHaveBeenCalled()
+      // The output that was waiting is read now — the first output, seconds late.
+      child.emit('first output')
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(child.proc.kill).not.toHaveBeenCalled()
+      expect(exitOf(notifies, 'late')).toBeUndefined()
+    } finally {
+      child.exit()
+      pty.disposeAll()
+    }
+  })
+
+  it('startup deadline (P2): with no output waiting, the verdict right after the timer kills it', async () => {
+    vi.useFakeTimers()
+    const { notifies, ctx } = makeCtx()
+    const { child, pty } = await deadlineOnControlledPty(ctx)
+    try {
+      await vi.advanceTimersByTimeAsync(300)
+      expect(child.proc.kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(child.proc.kill).toHaveBeenCalledWith('SIGKILL')
+      child.exit()
+      expect(exitOf(notifies, 'late')).toMatchObject({ reason: 'startup-timeout' })
+    } finally {
+      pty.disposeAll()
+    }
+  })
+
+  // The same on a real pty and a real event loop: the loop is stalled (as a
+  // starved computer's is) until the child HAS written its first output and the
+  // deadline is overdue. The stall runs in the check phase, so the loop resumes
+  // with a new turn: Node runs the due deadline timer BEFORE it polls the pty —
+  // the exact order P2 describes. Never a race: the marker is created only after
+  // `printf` returned, so the output is in the pty's kernel buffer, and the pty
+  // master is polled on the loop thread itself (libuv kqueue/epoll; on macOS
+  // node-pty's tty gets no select() helper thread — one extra thread per pty, its
+  // exit watcher), so it is read in the poll phase between timer and verdict.
+  it('startup deadline (P2): a real pty whose output waits while the loop is stalled past the deadline is not killed', async () => {
+    const { notifies, until, ctx } = makeCtx()
+    const dir = mkdtempSync(join(tmpdir(), 'pty-p2-'))
+    const marker = join(dir, 'printed')
+    const pty = createPtyHandlers(ctx)
+    try {
+      await new Promise<void>((resolve, reject) =>
+        setImmediate(() => {
+          try {
+            pty.handlers['pty.spawn']({
+              sessionId: 'stalled',
+              command: 'sh',
+              args: ['-c', `printf alive; : > '${marker}'; exec cat`],
+              cwd: process.cwd(),
+              startupTimeoutMs: 50
+            })
+            const armedBy = Date.now()
+            // Busy-wait: the event loop is stuck. Bounded only so a child that
+            // never starts fails the test instead of hanging it.
+            while (!existsSync(marker) || Date.now() - armedBy < 100) {
+              if (Date.now() - armedBy > 20_000) throw new Error('child never printed')
+            }
+            resolve()
+          } catch (err) {
+            reject(err)
+          }
+        })
+      )
+      await until(() =>
+        dataParams(notifies)
+          .map((d) => d.data)
+          .join('')
+          .includes('alive')
+      )
+      // The deadline has decided by now either way (its verdict lands in the
+      // turn that read the output). End it ourselves: a deadline kill would
+      // have stamped the exit 'startup-timeout'.
+      await pty.handlers['pty.kill']({ sessionId: 'stalled' })
+      await until(() => exitOf(notifies, 'stalled') !== undefined)
+      expect(exitOf(notifies, 'stalled')!.reason).toBeUndefined()
+    } finally {
+      pty.disposeAll()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('no startupTimeoutMs ⇒ no deadline and no acknowledgement (an older hub runs its own)', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)
@@ -1301,7 +1411,7 @@ describe('agent-start admission', () => {
       await vi.advanceTimersByTimeAsync(299)
       expect(q.child.proc.kill).not.toHaveBeenCalled()
       // Past the deadline (+1ms for the verdict, which is delivered after pending
-      // output has been read).
+      // output has been read: see the P2 guard below).
       await vi.advanceTimersByTimeAsync(2)
       expect(q.child.proc.kill).toHaveBeenCalledWith('SIGKILL')
       q.child.exit()
