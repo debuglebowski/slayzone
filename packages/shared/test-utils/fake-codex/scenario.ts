@@ -43,6 +43,8 @@ export type CodexStep =
   | { stderr: string }
   | { sleep: number }
   | { hang: true }
+  /** Block until the test opens this gate (`epoch.openGate(name)`); an interrupt aborts it. */
+  | { gate: string }
   | { exit: number; signal?: undefined }
   | { exit: null; signal: NodeJS.Signals }
   /** Send a server→client request and block until the app replies; then run the matching branch (`error` for an error reply, else `default`). */
@@ -69,8 +71,11 @@ export interface CodexProcessScript {
   turns?: CodexStep[][]
   /** Every turn past `turns`. Unset → an error + failed turn naming it. */
   defaultTurn?: CodexStep[]
-  /** `turn/start`: hold back its reply AND `turn/started` (`replyDelayMs`), or refuse it. */
-  turnStart?: { replyDelayMs?: number; error?: { code: number; message: string } }
+  /**
+   * `turn/start`: hold back its reply AND `turn/started` (`replyDelayMs`, or until
+   * the test opens `gate` with `epoch.openGate(gate)`), or refuse it.
+   */
+  turnStart?: { replyDelayMs?: number; gate?: string; error?: { code: number; message: string } }
   /**
    * `turn/interrupt`: default acks `{}` and aborts the turn (then idle +
    * `turn/completed {interrupted}` + `serverRequest/resolved` for open requests).
@@ -296,6 +301,7 @@ export const cstep = {
   stderr: (text: string): CodexStep => ({ stderr: text }),
   sleep: (ms: number): CodexStep => ({ sleep: ms }),
   hang: (): CodexStep => ({ hang: true }),
+  gate: (name: string): CodexStep => ({ gate: name }),
   exit: (code: number): CodexStep => ({ exit: code }),
   endTurn: (status: 'completed' | 'interrupted' | 'failed', message?: string): CodexStep => ({
     endTurn: { status, error: message ? { message } : null }
