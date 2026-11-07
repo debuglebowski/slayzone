@@ -392,62 +392,69 @@ test.describe('Chat theme tokens', () => {
     await seed(mainWindow).setTheme(startedDark ? 'dark' : 'light')
   })
 
-  test('renders every coloured row kind in light and dark', async ({ mainWindow }, testInfo) => {
-    await openTaskViaSearch(mainWindow, EMPTY_TASK)
-    await expect(mainWindow.getByText('Chat with Claude Code')).toBeVisible({
-      timeout: 10_000
-    })
-    await openTaskViaSearch(mainWindow, TASK)
-    const scroller = chatScroller(mainWindow)
-    await expect(scroller).toBeVisible({ timeout: 10_000 })
-    await revealFixture(mainWindow)
-    for (const text of [
-      'Assistant reply fixture',
-      '+ seeded-new-string',
-      'In-flight sub-agent fixture',
-      'Pick a colour fixture?',
-      'Final plan',
-      'Turn interrupted',
-      'stderr fixture line',
-      'Plan explanation fixture'
-    ]) {
-      await expect(mainWindow.getByText(text).first(), text).toBeVisible()
-    }
-    await expect(mainWindow.getByText(/API request retried once/)).toBeVisible()
-    await expect(mainWindow.getByText('rate limit: rejected')).toBeVisible()
-
-    // Selected option: filled radio + tinted row.
-    await scroller.getByText('Option A', { exact: true }).click()
-
-    for (const theme of ['light', 'dark'] as const) {
-      await seed(mainWindow).setTheme(theme)
-      const dark = mainWindow.locator('html.dark')
-      await (theme === 'dark' ? expect(dark).toBeAttached() : expect(dark).not.toBeAttached())
-      await captureChat(mainWindow, scroller, testInfo, `chat-${theme}`)
-
-      // Find-in-chat: <mark> hits + the active case-sensitive toggle.
-      await scroller.click({ button: 'right', position: { x: 20, y: 20 } })
-      await mainWindow.getByRole('menuitem', { name: /Find in chat/ }).click()
-      await mainWindow.getByPlaceholder('Find in chat…').fill('fixture')
-      await mainWindow.getByTitle('Case sensitive').click()
-      await expect(scroller.locator('mark').first()).toBeVisible()
-      await captureChat(mainWindow, scroller, testInfo, `search-${theme}`, {
-        fromTop: false,
-        maxSlices: 1
-      })
-      await mainWindow.getByTitle('Case sensitive').click()
-      await mainWindow.getByTitle('Close (Escape)').click()
-
+  // One test per theme: both passes in one test ran 10-28 s against its 30 s budget,
+  // and a loaded machine ran it out mid-way. The rows are revealed once, for both.
+  test.describe('every coloured row kind', () => {
+    test.beforeAll(async ({ mainWindow }) => {
       await openTaskViaSearch(mainWindow, EMPTY_TASK)
-      const empty = mainWindow
-        .getByText('Chat with Claude Code', { exact: true })
-        .locator('xpath=ancestor::div[contains(@class, "inset-0")][1]')
-      await expect(empty).toBeVisible()
-      await captureChat(mainWindow, empty, testInfo, `empty-${theme}`, {
-        maxSlices: 1
+      await expect(mainWindow.getByText('Chat with Claude Code')).toBeVisible({
+        timeout: 10_000
       })
       await openTaskViaSearch(mainWindow, TASK)
-      await expect(scroller).toBeVisible()
+      const scroller = chatScroller(mainWindow)
+      await expect(scroller).toBeVisible({ timeout: 10_000 })
+      await revealFixture(mainWindow)
+      for (const text of [
+        'Assistant reply fixture',
+        '+ seeded-new-string',
+        'In-flight sub-agent fixture',
+        'Pick a colour fixture?',
+        'Final plan',
+        'Turn interrupted',
+        'stderr fixture line',
+        'Plan explanation fixture'
+      ]) {
+        await expect(mainWindow.getByText(text).first(), text).toBeVisible()
+      }
+      await expect(mainWindow.getByText(/API request retried once/)).toBeVisible()
+      await expect(mainWindow.getByText('rate limit: rejected')).toBeVisible()
+
+      // Selected option: filled radio + tinted row.
+      await scroller.getByText('Option A', { exact: true }).click()
+    })
+
+    for (const theme of ['light', 'dark'] as const) {
+      test(`renders in ${theme}`, async ({ mainWindow }, testInfo) => {
+        const scroller = chatScroller(mainWindow)
+        await seed(mainWindow).setTheme(theme)
+        const dark = mainWindow.locator('html.dark')
+        await (theme === 'dark' ? expect(dark).toBeAttached() : expect(dark).not.toBeAttached())
+        await captureChat(mainWindow, scroller, testInfo, `chat-${theme}`)
+
+        // Find-in-chat: <mark> hits + the active case-sensitive toggle.
+        await scroller.click({ button: 'right', position: { x: 20, y: 20 } })
+        await mainWindow.getByRole('menuitem', { name: /Find in chat/ }).click()
+        await mainWindow.getByPlaceholder('Find in chat…').fill('fixture')
+        await mainWindow.getByTitle('Case sensitive').click()
+        await expect(scroller.locator('mark').first()).toBeVisible()
+        await captureChat(mainWindow, scroller, testInfo, `search-${theme}`, {
+          fromTop: false,
+          maxSlices: 1
+        })
+        await mainWindow.getByTitle('Case sensitive').click()
+        await mainWindow.getByTitle('Close (Escape)').click()
+
+        await openTaskViaSearch(mainWindow, EMPTY_TASK)
+        const empty = mainWindow
+          .getByText('Chat with Claude Code', { exact: true })
+          .locator('xpath=ancestor::div[contains(@class, "inset-0")][1]')
+        await expect(empty).toBeVisible()
+        await captureChat(mainWindow, empty, testInfo, `empty-${theme}`, {
+          maxSlices: 1
+        })
+        await openTaskViaSearch(mainWindow, TASK)
+        await expect(scroller).toBeVisible()
+      })
     }
   })
 
