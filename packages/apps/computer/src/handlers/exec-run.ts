@@ -22,7 +22,7 @@ import type { HandlerContext, HubMethodTable } from './types'
 
 /** Per-stream capture cap: the head is dropped first (the tail says what failed). */
 const OUTPUT_CAP = 1024 * 1024
-const KILL_GRACE_MS = 2000
+export const KILL_GRACE_MS = 2000
 
 function capped(): { push(chunk: string): void; text(): string } {
   let buf = ''
@@ -66,10 +66,30 @@ export function programInvocation(
   return { file: resolved, args: argv.args }
 }
 
+/**
+ * What `exec.run` touches outside itself. Production uses the defaults; tests
+ * inject a fake child, a hand-driven clock, or a recorded signal to prove the
+ * timeout/kill contract without racing a wall clock.
+ */
+export interface ExecRunDeps {
+  spawn?: typeof spawn
+  setTimer?: (fn: () => void, ms: number) => unknown
+  clearTimer?: (handle: unknown) => void
+  /** Signal a whole process group (POSIX). */
+  killGroup?: (pgid: number, sig: NodeJS.Signals) => void
+}
+
 export function createExecRunHandlers(
   ctx: HandlerContext,
-  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null
+  getProjectPaths?: () => { get(projectId: string): { path: string } | null } | null,
+  deps: ExecRunDeps = {}
 ): HubMethodTable {
+  const spawnChild = deps.spawn ?? spawn
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms))
+  const clearTimer =
+    deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>))
+  const killGroup =
+    deps.killGroup ?? ((pgid: number, sig: NodeJS.Signals) => process.kill(-pgid, sig))
   async function execRun(raw: unknown): Promise<ExecRunResult> {
     const params = execRunParamsSchema.parse(raw)
     const projectDir =
@@ -93,7 +113,7 @@ export function createExecRunHandlers(
       }
     }
     const stdin = params.argv?.stdin
-    const child = spawn(invocation.file, invocation.args, {
+    const child = spawnChild(invocation.file, invocation.args, {
       cwd,
       env: process.env,
       stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -117,27 +137,27 @@ export function createExecRunHandlers(
     let timedOut = false
     const signalTree = (sig: NodeJS.Signals): void => {
       try {
-        if (!win && child.pid) process.kill(-child.pid, sig)
+        if (!win && child.pid) killGroup(child.pid, sig)
         else child.kill(sig)
       } catch {
         /* already gone */
       }
     }
-    const timer = setTimeout(() => {
+    const timer = setTimer(() => {
       timedOut = true
       signalTree('SIGTERM')
-      setTimeout(() => signalTree('SIGKILL'), KILL_GRACE_MS).unref?.()
+      ;(setTimer(() => signalTree('SIGKILL'), KILL_GRACE_MS) as { unref?: () => void })?.unref?.()
     }, params.timeoutMs)
 
     return new Promise<ExecRunResult>((resolve) => {
       child.on('close', (code) => {
-        clearTimeout(timer)
+        clearTimer(timer)
         // A backgrounded child may still hold the group: end it with its leader.
         if (timedOut) signalTree('SIGKILL')
         resolve({ stdout: stdout.text(), stderr: stderr.text(), status: code, timedOut })
       })
       child.on('error', (err) => {
-        clearTimeout(timer)
+        clearTimer(timer)
         resolve({ stdout: '', stderr: err.message, status: null, timedOut: false })
       })
     })
