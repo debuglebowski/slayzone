@@ -112,6 +112,45 @@ function loadComputerProcHandlers(): LoadedComputer {
   return { handlers: created.handlers, disposeAll: created.disposeAll, events }
 }
 
+type RoutedTestHandle = {
+  onData(cb: (chunk: string, stream?: string) => void): unknown
+  onSpawned(cb: (e: { pid: number }) => void): unknown
+  write(data: string): Promise<void>
+  kill(): void
+}
+
+/** Resolves once the routed process is running on the computer (its spawn reply). */
+function spawned(handle: RoutedTestHandle): Promise<void> {
+  return new Promise((resolve) => handle.onSpawned(() => resolve()))
+}
+
+/** Resolves with the stdout delivered so far once `done` holds for it. */
+function stdoutUntil(handle: RoutedTestHandle, done: (out: string) => boolean): Promise<string> {
+  let out = ''
+  return new Promise((resolve) =>
+    handle.onData((chunk, stream) => {
+      if (stream === 'stderr') return
+      out += chunk
+      if (done(out)) resolve(out)
+    })
+  )
+}
+
+/** The computer's next `proc.data` frame for `sessionId` with `seq`, as it leaves the computer. */
+function frameLeaves(
+  events: TypedEventEmitter<ComputerGatewayEvents>,
+  sessionId: string,
+  seq: number
+): Promise<string> {
+  return new Promise((resolve) => {
+    const off = events.on('proc.data', (p) => {
+      if (p.sessionId !== sessionId || p.seq !== seq || p.stream === 'stderr') return
+      off()
+      resolve(p.data)
+    })
+  })
+}
+
 describe('proc.* hub⇄computer round trip', () => {
   it('routes a spawn, streams sequenced stdout back, and reports exit', async () => {
     const computer = loadComputerProcHandlers()
@@ -165,22 +204,13 @@ describe('proc.* hub⇄computer round trip', () => {
       computerId: COMPUTER_ID,
       command: 'cat',
       cwd: dir
-    } as never)
-
-    let out = ''
-    handle.onData((chunk) => {
-      out += chunk
-    })
+    } as never) as unknown as RoutedTestHandle
+    const echoed = stdoutUntil(handle, (out) => out.includes('ping'))
+    await spawned(handle)
 
     // The duplex direction the channel lacked entirely before this change.
-    await new Promise((r) => setTimeout(r, 150))
-    ;(handle as unknown as { write: (d: string) => void }).write('ping\n')
-
-    const start = Date.now()
-    while (!out.includes('ping') && Date.now() - start < 5000) {
-      await new Promise((r) => setTimeout(r, 25))
-    }
-    expect(out).toContain('ping')
+    await handle.write('ping\n')
+    expect(await echoed).toContain('ping')
     handle.kill()
   })
 
@@ -194,7 +224,7 @@ describe('proc.* hub⇄computer round trip', () => {
     let dropped = 0
     const lossy = new TypedEventEmitter<ComputerGatewayEvents>()
     computer.events.on('proc.data', (p) => {
-      if (p.stream !== 'stderr' && typeof p.seq === 'number' && p.seq === 1 && dropped === 0) {
+      if (p.stream !== 'stderr' && p.seq === 1 && dropped === 0) {
         dropped++
         return
       }
@@ -211,33 +241,28 @@ describe('proc.* hub⇄computer round trip', () => {
       resolveComputerId: () => COMPUTER_ID
     })
 
-    // Three separate writes with gaps → three distinct seqs, so seq 1 is a real
-    // mid-stream frame rather than part of one coalesced chunk.
+    // `cat` echoes each write as it arrives. The next write goes in only once the
+    // previous chunk has left the computer, so each is its own seq (0, 1, 2) and
+    // seq 1 is a real mid-stream frame, never part of one coalesced chunk.
     const handle = backend.spawn({
       id: 'rt-3',
       taskId: 'task-1',
       projectId: null,
       computerId: COMPUTER_ID,
-      command: 'printf one; sleep 0.2; printf two; sleep 0.2; printf three',
-      shell: true,
+      command: 'cat',
       cwd: dir
-    } as never)
-
-    let out = ''
-    handle.onData((chunk, stream) => {
-      if (stream === 'stdout') out += chunk
-    })
-    const exited = new Promise<{ code: number | null }>((resolve) => {
-      handle.onExit((e) => resolve(e))
-    })
-    await exited
-    // Give the async backfill a moment to land after exit.
-    const start = Date.now()
-    while (!out.includes('two') && Date.now() - start < 3000) {
-      await new Promise((r) => setTimeout(r, 25))
+    } as never) as unknown as RoutedTestHandle
+    const delivered = stdoutUntil(handle, (out) => out.includes('three'))
+    await spawned(handle)
+    for (const [seq, word] of ['one', 'two', 'three'].entries()) {
+      const left = frameLeaves(computer.events, 'rt-3', seq)
+      await handle.write(word)
+      expect(await left).toBe(word)
     }
 
+    // Seq 2 arriving after the lost seq 1 is the gap; `three` is only delivered after it.
     expect(dropped).toBe(1) // the drop actually happened
-    expect(out).toBe('onetwothree') // …and was invisible downstream
+    expect(await delivered).toBe('onetwothree') // …and was invisible downstream
+    handle.kill()
   })
 })
