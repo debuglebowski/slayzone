@@ -225,6 +225,24 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
   cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())))
   const hub = await startLoopbackHub({ floodLimits: false }, { server })
   cleanups.push(() => hub.close())
+  // The 1.0.0 connector's enrollment is still in flight when the supervisor decides to
+  // upgrade (under load it used to be, sometimes): the hub's reply is held until then.
+  // Replacing the connector before it saved that credential enrolls a 2nd computer; the
+  // controller waits for it (ordering pinned by auto-upgrade.test.ts).
+  let releaseEnrollReply!: () => void
+  const upgradeDecided = new Promise<void>((resolve) => (releaseEnrollReply = resolve))
+  let enrollReplyHeld = false
+  hub.wss.prependListener('connection', (socket) => {
+    const send = socket.send.bind(socket) as (...args: unknown[]) => void
+    socket.send = ((data: string, ...args: unknown[]) => {
+      if (!enrollReplyHeld && JSON.parse(String(data)).result?.apiKey) {
+        enrollReplyHeld = true
+        void upgradeDecided.then(() => send(data, ...args))
+        return
+      }
+      send(data, ...args)
+    }) as typeof socket.send
+  })
   const { port } = server.address() as AddressInfo
   const config = {
     hubUrl: `ws://127.0.0.1:${port}/computers`,
@@ -245,7 +263,9 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
       )
     }
   })
-  const log = vi.fn()
+  const log = vi.fn((message: string) => {
+    if (message === 'auto-upgrade: installing') releaseEnrollReply()
+  })
   const original = { version: '1.0.0', entry: oldEntry }
   const first = await superviseUpgrades(config, original, root, log, { probationMs: 0 })
   cleanups.push(() => first.stop(true))
@@ -259,6 +279,9 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
     },
     { timeout: 10_000 }
   )
+  expect(enrollReplyHeld).toBe(true)
+  // One enrollment: the 2.0.0 connector said hello with the credential 1.0.0 saved.
+  expect(hub.auth.enrollCalls).toHaveLength(1)
   const id = hub.gateway.listComputers()[0].computerId
   expect(
     JSON.parse(readFileSync(join(runtime, 'hubs', `127.0.0.1_${port}`, 'current.json'), 'utf8'))

@@ -249,3 +249,75 @@ it('retains visible failure and retry deadline while target is cooling down', as
   )
   await c.stop()
 })
+
+// A connector stopped between the hub's enrollment reply and saving its credential
+// leaves the hub an enrollment nobody holds: its replacement enrolls again (a second
+// computer, the join token spent twice). The upgrade waits until it has connected.
+it('replaces the running connector only once it has connected (or failed to)', async () => {
+  const events: string[] = []
+  let enrolled!: () => void
+  const enrolling = new Promise<void>((resolve) => (enrolled = resolve))
+  const worker = (version: string, connected: () => Promise<void>): UpgradeWorker => ({
+    connected,
+    drain: async () => {
+      events.push(`drain:${version}`)
+      return true
+    },
+    stop: async () => {
+      events.push(`stop:${version}`)
+    }
+  })
+  const c = createUpgradeController(
+    { version: '1.0.0', entry: '/original/bin.cjs', worker: worker('1.0.0', () => enrolling) },
+    {
+      discover: async () => '2.0.0',
+      install: async () => '/runtime/2.0.0/bin.cjs',
+      launch: (entry) => {
+        events.push(`launch:${entry}`)
+        return worker('2.0.0', async () => {})
+      },
+      commit: async () => {},
+      probationMs: 0,
+      retry: false,
+      status: () => {}
+    }
+  )
+  const check = c.check()
+  // Let discovery and the install run up to where the controller waits on the connector.
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  expect(events).toEqual([])
+  enrolled()
+  await check
+  expect(events).toEqual(['drain:1.0.0', 'stop:1.0.0', 'launch:/runtime/2.0.0/bin.cjs'])
+
+  // A connector that cannot connect at all (its protocol is refused) is replaced at once.
+  const refused: string[] = []
+  const d = createUpgradeController(
+    {
+      version: '1.0.0',
+      entry: '/original/bin.cjs',
+      worker: {
+        connected: async () => {
+          throw new Error('protocol mismatch')
+        },
+        drain: async () => true,
+        stop: async () => {
+          refused.push('stop:1.0.0')
+        }
+      }
+    },
+    {
+      discover: async () => '2.0.0',
+      install: async () => '/runtime/2.0.0/bin.cjs',
+      launch: () => worker('2.0.0', async () => {}),
+      commit: async () => {
+        refused.push('commit:2.0.0')
+      },
+      probationMs: 0,
+      retry: false,
+      status: () => {}
+    }
+  )
+  await d.check()
+  expect(refused).toEqual(['stop:1.0.0', 'commit:2.0.0'])
+})

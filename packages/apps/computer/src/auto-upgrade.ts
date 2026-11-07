@@ -119,6 +119,12 @@ export function createUpgradeController(
         if (stopping) return
         await deps.validate?.(staged)
         if (stopping) return
+        // Never replace a connector mid-enrollment: stopped between the hub's reply and
+        // saving its credential, it leaves the hub an enrollment nobody holds, and the
+        // candidate enrolls again (a second computer; a single-use join token is spent).
+        // Connected (credential saved) or refused (e.g. its protocol): either settles it.
+        await current.worker.connected().catch(() => undefined)
+        if (stopping) return
         if (!(await current.worker.drain())) {
           deps.status('waiting-for-idle', { target })
           return
