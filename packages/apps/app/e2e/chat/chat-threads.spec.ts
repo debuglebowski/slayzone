@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { openTaskById, resetApp } from '../fixtures/electron'
+import { resetApp } from '../fixtures/electron'
 import { type ChatTask, echoTurn, expect, test } from '../fixtures/chat'
 
 /**
@@ -18,20 +18,6 @@ async function storedPanel(t: ChatTask): Promise<{ activeId: string | null } | n
     }
     return null
   }, t.tabId)
-}
-
-/**
- * `t.reload()`, minus its strict single-panel check: an open threads panel renders
- * each thread's chat as a nested `[data-chat-panel]`, so once the panel restores
- * that check sees two and fails (a race against the restore). Waits for the main
- * (outermost) panel instead.
- */
-async function reload(t: ChatTask): Promise<void> {
-  await t.page.reload({ waitUntil: 'domcontentloaded' })
-  await openTaskById(t.page, t.taskId)
-  await expect(t.page.locator('[data-chat-panel]:visible').first()).toBeVisible({
-    timeout: 10_000
-  })
 }
 
 /** This main conversation's threads, as the server stores them. */
@@ -66,7 +52,7 @@ test.describe('Answer threads', () => {
       scenario: { processes: [{ defaultTurn: echoTurn() }] }
     })
     await t.send('main question')
-    const main = t.page.locator('[data-chat-panel]:visible').first()
+    const main = t.panel
     const answer = main
       .getByTestId('chat-assistant-answer')
       .filter({ hasText: 'echo: main question' })
@@ -115,7 +101,7 @@ test.describe('Answer threads', () => {
       }
     })
     await t.send('main question')
-    const main = t.page.locator('[data-chat-panel]:visible').first()
+    const main = t.panel
     const answer = main
       .getByTestId('chat-assistant-answer')
       .filter({ hasText: 'echo: main question' })
@@ -153,8 +139,8 @@ test.describe('Answer threads', () => {
     await expect(main.getByText(/^echo: Answer from thread “first side question”/)).toBeVisible()
     await expectIdle(main)
     await expect.poll(() => storedPanel(t)).toBeNull()
-    await reload(t)
-    const reopened = t.page.locator('[data-chat-panel]:visible').first()
+    await t.reload()
+    const reopened = t.panel
     await expect(reopened.getByRole('button', { name: /Threads 2 items/ })).toHaveCount(1)
     await reopened.getByRole('button', { name: /Threads 2 items/ }).click()
     await expect(
@@ -170,21 +156,19 @@ test.describe('Answer threads', () => {
     const second = (await listThreads(t, original)).find((x) => x.title === 'second side question')
     expect(second).toBeTruthy()
     await expect.poll(async () => (await storedPanel(t))?.activeId).toBe(second!.id)
-    await reload(t)
+    await t.reload()
     const restored = t.page.getByRole('complementary', { name: 'Answer threads' })
     await expect(
       restored.getByRole('tab', { name: 'second side question', exact: true })
     ).toHaveAttribute('aria-selected', 'true')
     await expect(restored.getByText('echo: second side question', { exact: true })).toBeVisible()
+    // The task handle still names one panel, its own, while a thread's chat is open beside it.
+    await expect(t.panel).toBeVisible()
+    await expect(t.panel.getByText('echo: main question', { exact: true })).toBeVisible()
     await restored.getByRole('button', { name: 'Close threads', exact: true }).click()
     await expect.poll(() => storedPanel(t)).toBeNull()
-    await reload(t)
-    await expect(
-      t.page
-        .locator('[data-chat-panel]:visible')
-        .first()
-        .getByRole('button', { name: /Threads 2 items/ })
-    ).toHaveCount(1)
+    await t.reload()
+    await expect(t.panel.getByRole('button', { name: /Threads 2 items/ })).toHaveCount(1)
     await expect(t.page.getByRole('complementary', { name: 'Answer threads' })).toHaveCount(0)
   })
 
@@ -203,7 +187,7 @@ test.describe('Answer threads', () => {
       }
     })
     await t.send('main question')
-    const main = t.page.locator('[data-chat-panel]:visible').first()
+    const main = t.panel
     const answer = main
       .getByTestId('chat-assistant-answer')
       .filter({ hasText: 'echo: main question' })
@@ -244,7 +228,7 @@ test.describe('Answer threads', () => {
       )
       .toContainEqual(['first side question', true])
     await expect.poll(async () => (await storedPanel(t))?.activeId).toBe(second!.id)
-    await reload(t)
+    await t.reload()
     const restored = t.page.getByRole('complementary', { name: 'Answer threads' })
     await expect(restored.getByRole('tab')).toHaveCount(1)
 
@@ -278,11 +262,6 @@ test.describe('Answer threads', () => {
     await expect(
       restored.getByRole('button', { name: 'Closed threads (2)', exact: true })
     ).toBeVisible()
-    await expect(
-      t.page
-        .locator('[data-chat-panel]:visible')
-        .first()
-        .getByRole('button', { name: /Threads 2 closed/ })
-    ).toBeVisible()
+    await expect(t.panel.getByRole('button', { name: /Threads 2 closed/ })).toBeVisible()
   })
 })

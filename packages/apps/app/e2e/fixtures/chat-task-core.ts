@@ -57,7 +57,7 @@ export interface ChatTaskCore<M extends ChatMode> {
   /** The task's repo (the agent's cwd). */
   cwd: string
   page: Page
-  /** The visible chat panel of this task. */
+  /** The visible chat panel of this task's tab (never one of its threads' panels). */
   panel: Locator
   composer: Locator
   stopButton: Locator
@@ -145,7 +145,9 @@ export async function openChatTaskCore<M extends ChatMode>(
   await seedChatEvents(page, tabId, o.seedEvents ?? [])
   await s.refreshData()
   await openTaskById(page, task.id)
-  const panel = page.locator('[data-chat-panel]:visible')
+  // This tab's own panel: an open answer-threads panel shows each thread's chat as
+  // another `[data-chat-panel]` beside it (with the thread's tab id).
+  const panel = page.locator(`[data-chat-panel][data-chat-tab-id="${tabId}"]:visible`)
   await expect(panel).toBeVisible({ timeout: 10_000 })
   const composer = panel.locator('textarea')
   if ((o.spawn ?? 'on-open') === 'on-open') {

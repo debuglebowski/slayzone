@@ -828,6 +828,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     <div
                       ref={panelRef}
                       data-chat-panel
+                      // Names whose chat this is: a thread's chat panel sits beside its main one.
+                      data-chat-tab-id={tabId}
                       className={cn(
                         'relative flex flex-col h-full min-w-0 flex-1 bg-background',
                         CHAT_PANEL_GUTTER_CLASS
