@@ -15,7 +15,9 @@ import type { AnyTRPCRouter } from '@trpc/server'
  * web shell talking tRPC to the hub.
  *
  * Hermetic: every off-origin request is aborted. The task gets its own temp
- * working folder beside the hub root (the hub has no computer), never an agent.
+ * working folder beside the hub root, never an agent. Project files are read and
+ * written only on a computer (the hub has no local fallback), so every hub here gets
+ * one real computer, jailed to the hub's scratch dir.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -134,10 +136,9 @@ async function seed(hub: Hub, name: string): Promise<string> {
     sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')",
     method: 'run'
   })
-  // This hub has no computer, so a project folder has nowhere to live (a folder
-  // belongs to a computer). The terminal only has to render here, so the task gets
-  // its own working folder instead — beside the hub root, never inside it: the
-  // owner gate refuses any path in the hub's own state directory.
+  // The task gets its own working folder rather than a project folder placement —
+  // beside the hub root, never inside it: the owner gate refuses any path in the
+  // hub's own state directory. The hub's one computer (attachComputer) reads it.
   const workDir = fs.mkdtempSync(path.join(hub.scratch, 'project-'))
   const project = await post('/api/projects', { name: `${name} Project` })
   const task = await post('/api/tasks', {
@@ -156,25 +157,27 @@ async function seed(hub: Hub, name: string): Promise<string> {
 const COMPUTER_BIN = path.resolve(HUB_DIR, '..', 'computer', 'dist', 'bin.cjs')
 
 /**
- * A computer of the hub owner's, jailed to the hub's scratch dir. On a hub with
- * login, file work runs only on its owner's computers (computer-placement.ts), so a
- * signed-in editor needs one to read anything at all.
+ * A real computer, jailed to the hub's scratch dir. Project files are read and written
+ * only on a computer, never by the hub itself, so the editor needs one to read
+ * anything at all. Without login it is the hub's sole (default) computer; with login
+ * it is enrolled for the owner, since file work runs only on its owner's computers
+ * (computer-placement.ts).
  */
-async function attachOwnerComputer(hub: Hub): Promise<() => Promise<void>> {
+async function attachComputer(hub: Hub): Promise<() => Promise<void>> {
   const { createTRPCClient, createWSClient, wsLink } = await import('@trpc/client')
   const superjson = (await import('superjson')).default
-  const owner = hub.owner!
+  const owner = hub.owner
   /** The two hub procedures this helper calls. */
   interface OwnerClient {
     computers: {
-      mintJoinToken: { mutate: (i: { label: string; forUser: string }) => Promise<unknown> }
+      mintJoinToken: { mutate: (i: { label: string; forUser?: string }) => Promise<unknown> }
       list: { query: () => Promise<unknown> }
     }
   }
   const withClient = async <T>(fn: (c: OwnerClient) => Promise<T>): Promise<T> => {
     const ws = createWSClient({
       url: `${hub.base.replace(/^http/, 'ws')}/trpc`,
-      connectionParams: async () => ({ token: owner.token })
+      connectionParams: async () => (owner ? { token: owner.token } : {})
     })
     try {
       return await fn(
@@ -188,7 +191,9 @@ async function attachOwnerComputer(hub: Hub): Promise<() => Promise<void>> {
   }
   const name = 'e2e-editor-computer'
   const minted = (await withClient((c) =>
-    c.computers.mintJoinToken.mutate({ label: name, forUser: owner.email })
+    c.computers.mintJoinToken.mutate(
+      owner ? { label: name, forUser: owner.email } : { label: name }
+    )
   )) as { token: string }
   const rootDir = path.join(hub.scratch, 'computer-root')
   fs.mkdirSync(rootDir, { recursive: true })
@@ -233,6 +238,7 @@ test.describe('web shell file editor — real hub, real browser', () => {
   // One hub per test: the shell restores the last-open task's layout, so a second
   // seeded project on a shared hub is not on screen to click.
   let hub: Hub
+  let stopComputer: (() => Promise<void>) | null = null
 
   test.beforeAll(async () => {
     browser = await chromium.launch()
@@ -240,9 +246,12 @@ test.describe('web shell file editor — real hub, real browser', () => {
 
   test.beforeEach(async () => {
     hub = await spawnHub(false)
+    stopComputer = await attachComputer(hub)
   })
 
   test.afterEach(async () => {
+    await stopComputer?.()
+    stopComputer = null
     await hub?.stop()
     if (hub) fs.rmSync(hub.scratch, { recursive: true, force: true })
   })
@@ -325,15 +334,13 @@ test.describe('web shell file editor — real hub, real browser', () => {
   })
 
   test("a signed-in browser session (login-required hub) edits its own task's files", async () => {
+    await stopComputer?.()
+    stopComputer = null
     await hub.stop()
     fs.rmSync(hub.scratch, { recursive: true, force: true })
     hub = await spawnHub(true)
-    const stopComputer = await attachOwnerComputer(hub)
-    try {
-      await signedInEdit()
-    } finally {
-      await stopComputer()
-    }
+    stopComputer = await attachComputer(hub)
+    await signedInEdit()
   })
 
   async function signedInEdit(): Promise<void> {
