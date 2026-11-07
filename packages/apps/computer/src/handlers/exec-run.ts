@@ -17,7 +17,7 @@ import {
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnCwd } from '../path-jail'
-import { resolveCommand } from './resolve-command'
+import { resolveCommand } from '@slayzone/platform'
 import type { HandlerContext, HubMethodTable } from './types'
 
 /** Per-stream capture cap: the head is dropped first (the tail says what failed). */

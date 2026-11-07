@@ -74,7 +74,7 @@ import {
   type SpawnAdmission
 } from '../spawn-admission'
 import { terminateTree } from '../terminate-tree'
-import { resolveCommand } from './resolve-command'
+import { resolveCommand } from '@slayzone/platform'
 import { buildSpawnEnv } from './spawn-env'
 import type { HandlerContext, HubMethodTable } from './types'
 

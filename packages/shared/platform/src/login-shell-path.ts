@@ -13,7 +13,8 @@
 import { execFile } from 'node:child_process'
 import { platform } from 'node:os'
 import path from 'node:path'
-import { getShellStartupArgs, quoteForShell, resolveUserShell } from './shell'
+import { resolveCommand } from './resolve-command'
+import { getShellStartupArgs, resolveUserShell } from './shell'
 
 export const LOGIN_SHELL_PATH_MARKER = '__SLAYZONE_PATH__'
 export const LOGIN_SHELL_PATH_PROBE_TIMEOUT_MS = 5000
@@ -98,20 +99,21 @@ export async function probeLoginShellPath(
 const FIND_ON_PATH_TIMEOUT_MS = 3000
 
 /**
- * Where `name` resolves on `env.PATH` — `command -v` (`where` on Windows) — or
- * null when it doesn't. Plain sh, not the user's shell: an interactive shell's
- * startup files print to the same stdout `command -v` answers on, so the first
- * line read back could be a prompt theme instead of a path. Callers pass the
- * PATH they mean: the hub its login-shell PATH, a computer its own env (which
- * adopted that PATH at boot).
+ * Where `name` resolves on `env.PATH` — what `command -v` (`where` on Windows) would
+ * print for an executable — or null when it doesn't. Callers pass the PATH they mean:
+ * the hub its login-shell PATH, a computer its own env (which adopted that PATH at
+ * boot).
+ *
+ * POSIX answers from the filesystem ({@link resolveCommand}). It used to start
+ * `/bin/sh -c 'command -v …'` with a timeout, and on a loaded machine that probe ran
+ * past it: Doctor then reported an installed binary as missing. A name is only ever
+ * a file name here, never shell syntax. Windows keeps `where` (its PATHEXT order).
  */
 export function findOnPath(name: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-  const [file, args] =
-    platform() === 'win32'
-      ? ['where', [name]]
-      : ['/bin/sh', ['-c', `command -v ${quoteForShell(name)}`]]
+  if (platform() !== 'win32')
+    return Promise.resolve(resolveCommand(name, env as Record<string, string>, undefined))
   return new Promise((resolve) => {
-    execFile(file, args, { timeout: FIND_ON_PATH_TIMEOUT_MS, env }, (err, stdout) => {
+    execFile('where', [name], { timeout: FIND_ON_PATH_TIMEOUT_MS, env }, (err, stdout) => {
       const found = err ? '' : String(stdout).trim().split('\n')[0]?.trim()
       resolve(found ? found : null)
     })

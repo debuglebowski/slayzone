@@ -8,7 +8,10 @@
  * refusal up front names the binary. A race (removed between this check and the
  * spawn) still surfaces as the ENOENT exit, as before.
  *
- * @module computer/handlers/resolve-command
+ * Also `findOnPath`'s answer on POSIX: a filesystem lookup, never a process that
+ * may not start in time on a loaded machine.
+ *
+ * @module platform/resolve-command
  */
 import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'

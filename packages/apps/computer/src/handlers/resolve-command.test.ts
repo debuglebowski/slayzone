@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { programInvocation } from './exec-run'
-import { resolveCommand } from './resolve-command'
+import { resolveCommand } from '@slayzone/platform'
 
 let dir = ''
 afterEach(() => {
