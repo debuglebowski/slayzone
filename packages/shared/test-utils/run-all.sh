@@ -1197,6 +1197,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/diagnostics/src/server/boot-steps.test.ts \
   packages/shared/transport/src/client/hubOwnershipStore.test.ts \
   packages/shared/transport/src/client/hubConnection.test.tsx \
+  packages/shared/transport/src/client/hubIssues.test.ts \
   packages/shared/transport/src/client/computerConnect.test.tsx \
   packages/shared/transport/src/client/inProcessHub.test.tsx \
   packages/domains/tasks/src/client/useCompleteAndCloseTask.test.tsx \
@@ -1230,6 +1231,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/ui/src/use-stable-poll.test.ts \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
+  packages/domains/settings/src/client/HubIssueBanners.test.tsx \
   packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \
   packages/domains/projects/src/client/useProjectLockState.test.tsx \
