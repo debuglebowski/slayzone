@@ -12,6 +12,6 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   }
 }

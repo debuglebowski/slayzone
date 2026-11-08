@@ -26,7 +26,7 @@
     "@trpc/server": "^11.19.0",
     "@trpc/tanstack-react-query": "^11.19.0",
     "superjson": "^2.2.6",
-    "zod": "^4.3.5",
+    "zod": "^4.6.6",
     "zustand": "^5.0.16"
   },
   "peerDependencies": {

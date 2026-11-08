@@ -307,6 +307,7 @@ run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
+run_harness packages/domains/tasks/src/client/scratch-task.test.ts
 # listForTask scoping — null taskId (Home/project view) must not leak other projects' processes.
 run_harness packages/domains/processes/src/server/process-manager.test.ts
 # Background processes on a computer: async resolve per spawn, no hub pid work, timer errors become status.

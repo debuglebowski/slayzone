@@ -48,7 +48,7 @@
     "@trpc/server": "^11.19.0",
     "codemirror": "^6.0.2",
     "lucide-react": "^1.61.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "react": "^19.3.1"
