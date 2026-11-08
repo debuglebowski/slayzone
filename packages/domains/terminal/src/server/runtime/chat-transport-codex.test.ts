@@ -11,6 +11,13 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 import * as mgr from './chat-transport-manager'
+import { onTaskReachedTerminal, setTaskAgentsStopper, stopTaskAgents } from '../task-events'
+import { onTaskReachedTerminal as stopRuntimeTaskAgents } from './pty-manager'
+import { createChatQueueRuntime } from './chat-queue-handlers'
+import type { ChatQueueData } from './chat-queue-data'
+import type { QueuedChatMessage } from '@slayzone/terminal-contracts'
+import type { SlayzoneDb } from '@slayzone/platform'
+import { chatTranscriptFromEvents, formatChatTranscript } from '../../shared/chat-transcript'
 
 type Json = Record<string, unknown>
 /** Answer to one request: a result, a JSON-RPC error, or nothing (hang). */
@@ -120,6 +127,7 @@ beforeEach(() => {
   mgr.resetTransportDeps()
 })
 afterEach(() => {
+  setTaskAgentsStopper(() => {})
   mgr.__resetForTests()
 })
 
@@ -321,6 +329,92 @@ async function openWithServer(
   server.bind(h.children[0])
   return h.children[0]
 }
+
+test.each(['task-events', 'status-adapter'])(
+  'self-completion via %s (including repeated done writes) leaves Codex alive and idle after completion',
+  async (path) => {
+    const server = turnServer()
+    const c = await openWithServer(server, 'tab-self-done')
+    setTaskAgentsStopper(stopRuntimeTaskAgents)
+    mgr.dispatchUserMessage('tab-self-done', {
+      id: 'go-ahead',
+      content: [{ type: 'text', text: 'Go ahead' }]
+    })
+    await until(() => c.requests('turn/start').length === 1)
+    // The status hook called by `slay tasks done <own id>`, before the
+    // command returns and Codex can emit its final answer / turn completion.
+    const complete = path === 'task-events' ? onTaskReachedTerminal : stopRuntimeTaskAgents
+    complete('task-codex')
+    complete('task-codex')
+    await wait(30)
+    expect(mgr.getTurnStatus('tab-self-done')).toMatchObject({ state: 'running', turnOpen: true })
+    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } })
+    await until(() => mgr.getSessionTerminalState('tab-self-done') === 'idle')
+    expect(mgr.getTurnStatus('tab-self-done')).toMatchObject({ state: 'idle', turnOpen: false })
+    expect(formatChatTranscript(chatTranscriptFromEvents(h.events))).toContain('-- turn done')
+    expect(formatChatTranscript(chatTranscriptFromEvents(h.events))).not.toContain('-- interrupted')
+    expect(c.requests('turn/interrupt')).toHaveLength(0)
+    expect(h.children).toHaveLength(1)
+    // Closing/stopping a task explicitly must still tear down its chat.
+    await stopTaskAgents('task-codex')
+    await until(() => mgr.getSessionTerminalState('tab-self-done') === 'dead')
+  }
+)
+
+test('a message queued during a Codex turn waits for completion; both turns finish idle', async () => {
+  const server = turnServer()
+  const c = await openWithServer(server, 'tab-queued')
+  const runtime = createChatQueueRuntime()
+  const rows: QueuedChatMessage[] = []
+  const unused = async (): Promise<never> => {
+    throw new Error('unexpected queue operation')
+  }
+  const data: ChatQueueData = {
+    list: async () => [...rows],
+    push: async (tabId, send, original, opts) => {
+      const row = { id: opts!.id!, tabId, send, original, position: rows.length, createdAt: 'now' }
+      rows.push(row)
+      return row
+    },
+    pop: async () => rows.shift() ?? null,
+    requeue: async (row) => {
+      rows.unshift(row)
+    },
+    update: unused,
+    move: unused,
+    remove: unused,
+    clear: unused,
+    getTabIdForItem: unused
+  }
+  const queue = runtime.createChatQueueOps({} as SlayzoneDb, data)
+  try {
+    mgr.dispatchUserMessage('tab-queued', {
+      id: 'first',
+      content: [{ type: 'text', text: 'work' }]
+    })
+    await until(() => c.requests('turn/start').length === 1)
+    await queue.push('tab-queued', 'follow up', 'follow up', { id: 'second' })
+    expect(await queue.list('tab-queued')).toHaveLength(1)
+    expect(c.requests('turn/start')).toHaveLength(1)
+    expect(mgr.getTurnStatus('tab-queued')).toMatchObject({ state: 'running', turnOpen: true })
+    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } })
+    await until(() => c.requests('turn/start').length === 2)
+    expect(await queue.list('tab-queued')).toHaveLength(0)
+    expect(c.requests('turn/start')[1]).toMatchObject({ clientUserMessageId: 'second' })
+    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-2', status: 'completed' } } })
+    await until(() => mgr.getSessionTerminalState('tab-queued') === 'idle')
+    expect(mgr.getTurnStatus('tab-queued')).toMatchObject({ state: 'idle', turnOpen: false })
+    expect(h.events.filter((e) => e.kind === 'result').map((e) => e.subtype)).toEqual([
+      'completed',
+      'completed'
+    ])
+    expect(c.requests('turn/interrupt')).toHaveLength(0)
+    expect(c.requests('turn/steer')).toHaveLength(0)
+    expect(h.children).toHaveLength(1)
+  } finally {
+    await runtime.close()
+  }
+})
 
 const stopOpts = (tabId: string) => ({
   restorePrompt: true,

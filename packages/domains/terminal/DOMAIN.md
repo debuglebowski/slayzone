@@ -4,6 +4,14 @@ Manages PTY sessions for task execution. Supports multiple agents (Claude Code, 
 
 ## Architecture
 
+### Task completion and chat lifecycle
+
+Reaching a terminal task status stops PTYs but preserves chat agents. An agent
+may mark its own task done before sending its final answer; its turn still ends
+normally and the session stays idle. Explicit task closure stops every agent,
+including computer-owned chats. Messages sent during a turn queue until it ends;
+only explicit steering adds them to the running turn.
+
 ### Workspace changes in chat
 
 Chat keeps exact native file-tool edits separate from saved net workspace changes.
