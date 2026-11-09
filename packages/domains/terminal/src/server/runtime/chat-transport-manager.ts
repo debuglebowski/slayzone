@@ -851,7 +851,7 @@ export function createChatTransport(
     })
   }
 
-  function fireWatchdog(tab: ChatTab): void {
+  async function fireWatchdog(tab: ChatTab): Promise<void> {
     tab.watchdogTimer = null
     // Already terminal / replaced — nothing to do.
     if (tab.closed || tab.ended || tab.terminalState === 'dead' || tabs.get(tab.tabId) !== tab) {
@@ -927,6 +927,45 @@ export function createChatTransport(
       proc.reap(null, 'SIGKILL')
       return
     }
+    if (
+      vector === 'running-stall' &&
+      tab.watchdogKillStage === 'none' &&
+      proc.driver.probeLiveness
+    ) {
+      const progressAt = tab.watchdogLastProgress
+      const responsive = await proc.driver.probeLiveness(5_000).catch(() => false)
+      // An answer belongs to this process and this silence window only. Stop,
+      // completion, new input, replacement, or progress while probing wins.
+      if (
+        tab.closed ||
+        tab.ended ||
+        tabs.get(tab.tabId) !== tab ||
+        tab.proc !== proc ||
+        proc.ended ||
+        proc.stopRequested ||
+        proc.stoppingTurn ||
+        tab.terminalState !== 'running' ||
+        tab.watchdogKillStage !== 'none'
+      )
+        return
+      if (
+        responsive ||
+        tab.watchdogLastProgress !== progressAt ||
+        runningDeadlineOf(tab) > Date.now()
+      ) {
+        if (responsive) {
+          diagnostic(
+            tab,
+            'info',
+            'chat.watchdog_responsive',
+            'silent provider answered health probe'
+          )
+          tab.watchdogLastProgress = Date.now()
+        }
+        armWatchdog(tab)
+        return
+      }
+    }
     if (tab.watchdogKillStage === 'sigkill' && !canProbe) {
       // Routed: SIGKILL sent a grace ago and still no exit (computer unreachable,
       // or the frame lost). Nothing more can be learned — end it as dead rather
@@ -947,6 +986,7 @@ export function createChatTransport(
         // conversation), unless it already hung that often in a row.
         const restart = tab.watchdogRestarts < WATCHDOG_MAX_RESTARTS
         proc.watchdogRestart = restart
+        proc.watchdogKilled = true
         const name = tab.backend.displayName
         // Every failure is visible: say why the agent is being stopped.
         routeHostEvent(tab, {
@@ -1832,7 +1872,12 @@ export function createChatTransport(
         console.error('[chat-transport] agent state (stopped) write failed:', err)
       }
     }
-    routeHostEvent(tab, { kind: 'process-exit', code, signal })
+    routeHostEvent(tab, {
+      kind: 'process-exit',
+      code,
+      signal,
+      ...(proc.watchdogKilled ? { reason: 'watchdog' as const } : {})
+    })
     deps.broadcastExit(tab.tabId, tab.sessionId, code, signal)
     deps.userInputTracker.clear(stateKey(tab))
     if (restart) {
@@ -2860,7 +2905,7 @@ export function createChatTransport(
       tab.proc.interruptIssued = true
       tab.proc.stoppingTurn = true
     }
-    routeHostEvent(tab, { kind: 'interrupted' })
+    routeHostEvent(tab, { kind: 'interrupted', reason: 'stop-request' })
   }
 
   /**

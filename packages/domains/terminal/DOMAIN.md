@@ -12,6 +12,27 @@ normally and the session stays idle. Explicit task closure stops every agent,
 including computer-owned chats. Messages sent during a turn queue until it ends;
 only explicit steering adds them to the running turn.
 
+### Codex silence and cancellation provenance
+
+The running watchdog checks Codex with a bounded `thread/read` before treating
+silence as a stall. A responsive app-server keeps its turn and conversation;
+quiet reasoning is not evidence of failure. A failed health check retains the
+existing kill/restart policy. Completion, Stop, and process replacement supersede
+an outstanding probe. The check neither resumes a thread nor sends input.
+
+Watchdog exits persist their cause; UI and ordinary CLI transcripts distinguish
+them from requested Stops and unspecified interruptions. An OS exit code or a
+Codex `turn_aborted` event alone does not establish that a user clicked Stop.
+
+Audit task `9f22908f` reproduced the silence timeout on 2026-11-08 at
+21:26:16, 23:02:22, 23:16:44, and 23:29:25 UTC. Computer event-log `watchdog-killed`
+notices immediately preceded process exits and matching Codex rollout aborts.
+Each followed five minutes without visible progress. The first two restarted
+thread `01a1bd01-33ae-7ee2-8367-7259ad643b27`; the later kills had exhausted the restart
+budget. This occurred before task completion, separately from the completion
+lifecycle bug fixed for task `e06a3842`. The logs establish watchdog cancellation,
+not whether inference was still progressing during those silent periods.
+
 ### Workspace changes in chat
 
 Chat keeps exact native file-tool edits separate from saved net workspace changes.

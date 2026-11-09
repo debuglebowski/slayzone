@@ -230,6 +230,11 @@ export interface ChatSessionDriver {
   start(ctx: ChatDriverContext): void | Promise<void>
   /** Handle one stdout line. Emits zero or more events via `ctx.emit`. Must never throw. */
   handleLine(line: string): void
+  /** Read-only, bounded provider health check before a silent turn is killed.
+   * True means the provider still answers; silence alone is not a failed turn.
+   * Absent: the transport retains its stream-only watchdog policy.
+   */
+  probeLiveness?(timeoutMs: number): Promise<boolean>
   /** Dispatch a user message to the provider (plain text). */
   sendUserMessage(text: string): void
   /**

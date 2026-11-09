@@ -801,3 +801,128 @@ test('a Codex older than the tested one: a non-blocking warning naming Codex and
   expect(notice?.text).toContain('npm install -g @openai/codex')
   expect(mgr.getSessionTerminalState('tab-old')).toBe('idle')
 })
+
+// Audit 9f22908f: quiet reasoning was killed five minutes after visible output.
+test('watchdog preserves a silent resumed Codex turn when its server answers a read-only probe', async () => {
+  const server = turnServer()
+  setup([
+    handshake('unused', (method, params) =>
+      method === 'thread/read'
+        ? {
+            result: {
+              thread: {
+                id: params.threadId,
+                status: { type: 'active', activeFlags: [] }
+              }
+            }
+          }
+        : server.answer(method, params)
+    )
+  ])
+  mgr.configureTransport({
+    isProcessAlive: () => true,
+    watchdogTimings: {
+      startingBoundMs: 1000,
+      runningStallMs: 60,
+      killGraceMs: 20
+    }
+  })
+  await open('tab-quiet', 'thr-audit')
+  const c = h.children[0]
+  server.bind(c)
+  mgr.dispatchUserMessage('tab-quiet', {
+    id: 'resume',
+    content: [{ type: 'text', text: 'Resume' }]
+  })
+  await wait(240)
+  expect(c.requests('thread/read').length).toBeGreaterThanOrEqual(2)
+  expect(c.requests('turn/interrupt')).toHaveLength(0)
+  expect(h.children).toHaveLength(1)
+  expect(notices().some((e) => e.code === 'watchdog-killed')).toBe(false)
+  expect(mgr.confirmedConversation('tab-quiet')).toBe('thr-audit')
+  // A real Stop must still interrupt the same live turn.
+  await mgr.stopTurn('tab-quiet', stopOpts('tab-quiet'))
+  expect(c.requests('turn/interrupt')).toHaveLength(1)
+})
+
+test('failed watchdog probe records its cause and restarts with the original conversation', async () => {
+  const server = turnServer()
+  setup([
+    handshake('unused', (method, params) =>
+      method === 'thread/read'
+        ? { error: { code: -32000, message: 'unavailable' } }
+        : server.answer(method, params)
+    )
+  ])
+  mgr.configureTransport({
+    isProcessAlive: () => true,
+    watchdogTimings: {
+      startingBoundMs: 1000,
+      runningStallMs: 60,
+      killGraceMs: 20
+    }
+  })
+  await open('tab-probe-failed', 'thr-audit')
+  server.bind(h.children[0])
+  mgr.dispatchUserMessage('tab-probe-failed', {
+    id: 'resume',
+    content: [{ type: 'text', text: 'Resume' }]
+  })
+  await until(() => h.children.length === 2)
+  await until(() => h.children[1].requests('thread/resume').length === 1)
+  expect(h.children[0].requests('thread/read')).toEqual([
+    { threadId: 'thr-audit', includeTurns: false }
+  ])
+  expect(h.children[1].requests('thread/resume')).toEqual([
+    expect.objectContaining({ threadId: 'thr-audit' })
+  ])
+  expect(h.invalidResumes).toBe(0)
+  expect(h.events).toContainEqual(
+    expect.objectContaining({ kind: 'process-exit', reason: 'watchdog' })
+  )
+  expect(chatTranscriptFromEvents(h.events).some((r) => r.text === 'interrupted by watchdog')).toBe(
+    true
+  )
+})
+
+test.each(['completion', 'Stop'] as const)(
+  '%s while a watchdog probe waits prevents a late failed probe from killing the process',
+  async (end) => {
+    const server = turnServer()
+    setup([
+      handshake('unused', (method, params) =>
+        method === 'thread/read' ? 'hang' : server.answer(method, params)
+      )
+    ])
+    mgr.configureTransport({
+      isProcessAlive: () => true,
+      watchdogTimings: {
+        startingBoundMs: 1000,
+        runningStallMs: 60,
+        killGraceMs: 20
+      }
+    })
+    await open('tab-probe-race', 'thr-audit')
+    const c = h.children[0]
+    server.bind(c)
+    mgr.dispatchUserMessage('tab-probe-race', {
+      id: 'resume',
+      content: [{ type: 'text', text: 'Resume' }]
+    })
+    await until(() => c.requests('thread/read').length === 1)
+    const probe = c.stdin.find((m) => m.method === 'thread/read')!
+    const stopping =
+      end === 'Stop' ? mgr.stopTurn('tab-probe-race', stopOpts('tab-probe-race')) : null
+    if (end === 'completion')
+      c.send({
+        method: 'turn/completed',
+        params: { turn: { id: 'turn-1', status: 'completed' } }
+      })
+    c.send({ id: probe.id, error: { code: -32000, message: 'late failure' } })
+    await stopping
+    await until(() => mgr.getSessionTerminalState('tab-probe-race') === 'idle')
+    await wait(100)
+    expect(h.children).toHaveLength(1)
+    expect(notices().some((e) => e.code === 'watchdog-killed')).toBe(false)
+  }
+)
