@@ -652,6 +652,49 @@ describe('IdP-role mode: a device code never outlives the grant it was approved 
     })
   })
 
+  it('a poll that finds the code pending binds nothing: approved before the plugin re-reads it, it fails closed', async () => {
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const winner = new Browser()
+    expect((await winner.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: code.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    // A racing approval already recorded a provisional, NEWER authentication.
+    idpRolesOf(auth)!.recordDeviceApproval(
+      row.id,
+      Date.now() + 60_000,
+      new Date(row.expiresAt).getTime()
+    )
+    // The token hook's lookup of this code sees it pending; the winning approval lands
+    // right after, before the plugin reads the code itself.
+    const findOne = ctx.adapter.findOne.bind(ctx.adapter)
+    let armed = true
+    const spy = vi.spyOn(ctx.adapter, 'findOne').mockImplementation((async (
+      args: Parameters<typeof findOne>[0]
+    ) => {
+      const found = await findOne(args)
+      const where = (args as { where?: Array<{ field: string }> }).where
+      if (armed && args.model === 'deviceCode' && where?.[0]?.field === 'deviceCode') {
+        armed = false
+        spy.mockRestore()
+        expect((found as { status?: string } | null)?.status).toBe('pending')
+        expect((await winner.approve(code.user_code)).status).toBe(200)
+      }
+      return found
+    }) as typeof ctx.adapter.findOne)
+    const token = await poll(code.device_code, 'slayzone-desktop')
+    expect(armed).toBe(false)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'unbound_issuance' }
+    })
+  })
+
   it('racing approvals keep the oldest authentication whichever records first', async () => {
     const code = await requestCode()
     const ctx = await auth.$context

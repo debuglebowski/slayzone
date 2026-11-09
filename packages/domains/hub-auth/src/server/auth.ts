@@ -136,8 +136,13 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     const row = (await ctx.context.adapter.findOne({
       model: 'deviceCode',
       where: [{ field: 'deviceCode', value: deviceCode }]
-    })) as { id?: unknown } | null
-    const approval = typeof row?.id === 'string' ? idp.deviceApprovalOf(row.id) : null
+    })) as { id?: unknown; status?: unknown } | null
+    // Only an APPROVED code has its final binding. A poll that finds it still pending
+    // binds nothing: were it approved before the plugin re-reads it, this request is
+    // refused (fail closed) rather than issued under a provisional, possibly newer,
+    // authentication a racing approval recorded.
+    if (row?.status !== 'approved' || typeof row.id !== 'string') return
+    const approval = idp.deviceApprovalOf(row.id)
     if (approval) await deviceBindingState.set(approval)
   })
   const passwordOn = config.enablePassword !== false
