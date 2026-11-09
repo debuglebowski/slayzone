@@ -489,7 +489,17 @@ export type EntraVerdict =
       /** `idp`: the verified sign-in's role evidence (./idp-roles.ts persists it). */
       evidence: { subject: string; grants: string[]; verifiedAt: number } | null
     }
-  | { ok: false; reason: EntraRefusal; accountId: string | null }
+  | {
+      ok: false
+      reason: EntraRefusal
+      accountId: string | null
+      /**
+       * `no_mapped_role` only: the verified token's signed evidence — a DENIAL is ordered
+       * like a grant (./idp-roles.ts `denyNoMappedRole`), so a delayed older one can never
+       * revoke a newer sign-in.
+       */
+      denial?: { subject: string; verifiedAt: number }
+    }
 
 /** `<oid>.<tid>` — the identity key on an Entra `account` row. */
 export function entraAccountId(oid: string, tid: string): string {
@@ -581,10 +591,9 @@ export async function evaluateIdToken(
     }
     role = roles.includes(ENTRA_ADMIN_ROLE) ? 'admin' : 'user'
   } else if (provider.roleMode === 'idp' && provider.idpRoles) {
-    const grants = highestHubRole(resolveGrants(claims, provider.idpRoles))
-    if (grants.length === 0) return refuse('no_mapped_role')
-    // The sign-in's signed issue time IS the role evidence's time (contract): numeric,
-    // not in the future, younger than the recheck interval.
+    // The sign-in's signed issue time IS the evidence's time (contract): numeric, not in
+    // the future, younger than the recheck interval — checked FIRST, for a grant and a
+    // denial alike: evidence that is not fresh decides nothing.
     const iat = claims.iat
     const subject = str(claims.sub)
     if (
@@ -594,6 +603,15 @@ export async function evaluateIdToken(
       freshness(nowSec, iat, provider.idpRoles.intervalSec) !== 'ok'
     ) {
       return refuse('stale_evidence')
+    }
+    const grants = highestHubRole(resolveGrants(claims, provider.idpRoles))
+    if (grants.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_mapped_role',
+        accountId,
+        denial: { subject, verifiedAt: iat }
+      }
     }
     evidence = { subject, grants, verifiedAt: iat }
   }
@@ -829,7 +847,10 @@ export interface SsoHooks {
    * IdP-role mode: a verified sign-in with no mapped role. The identity's account, if
    * any, loses its managed role, sessions and user credentials (./idp-roles.ts).
    */
-  onNoMappedRole?: (userId: string) => Promise<void>
+  onNoMappedRole?: (
+    userId: string,
+    denial: { subject: string; verifiedAt: number }
+  ) => Promise<void>
 }
 
 /** The provider better-auth calls; see the module note for why it is not better-auth's. */
@@ -894,7 +915,9 @@ function ssoOAuthProvider(
       signIn.verdict = verdict
       if (!verdict.ok) {
         const userId = await auditRefusal(provider, verdict, getContext())
-        if (verdict.reason === 'no_mapped_role' && userId) await hooks.onNoMappedRole?.(userId)
+        if (verdict.reason === 'no_mapped_role' && userId && verdict.denial) {
+          await hooks.onNoMappedRole?.(userId, verdict.denial)
+        }
         return null
       }
       return {

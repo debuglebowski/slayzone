@@ -317,9 +317,9 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       ...(config.sso
         ? [
             entraSso(config.sso, {
-              onNoMappedRole: async (userId) => {
+              onNoMappedRole: async (userId, denial) => {
                 const idp = self ? idpRolesOf(self) : null
-                await idp?.denyNoMappedRole(userId)
+                await idp?.denyNoMappedRole(userId, denial)
               }
             }),
             ...deviceSignIn()

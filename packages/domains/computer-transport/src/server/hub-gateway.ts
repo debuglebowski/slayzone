@@ -94,6 +94,9 @@ export interface ComputerDescriptor {
   peerLoopback: boolean
   /** v8: whether it answers WebRTC offers (`direct.rtcOffer`), from this connection's frame. */
   directRtc: boolean
+  /** Whether it enforces a direct grant's absolute `notAfter`, from this connection's
+   *  frame. Absent = no. */
+  directNotAfter?: boolean
   connectedAt: number
   lastSeenAt: number
 }
@@ -716,6 +719,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -879,6 +883,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

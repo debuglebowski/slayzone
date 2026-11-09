@@ -713,6 +713,45 @@ async function pendingSignIn(claims: IssuedClaims, target: HubAuth = auth) {
   }
 }
 
+describe('denials are ordered like grants: an older unmapped callback never revokes newer access', () => {
+  it('old denial (signed earlier) completes AFTER a newer valid sign-in: refused itself, revokes nothing', async () => {
+    await signIn(person('yul', ['Hub.User']))
+    const staleDenial = await pendingSignIn(person('yul', ['Finance.Reader']))
+    later(1100)
+    const newer = await signIn(person('yul', ['Hub.Admin']))
+    expect((await viaCookie(newer))?.role).toBe('admin')
+    audit.length = 0
+    const delayed = await staleDenial(auth)
+    expect(delayed.error).not.toBeNull() // that sign-in is still refused …
+    expect((await viaCookie(newer))?.role).toBe('admin') // … and the newer access stands
+    expect(userRow('yul')!.idpGrantedAt).not.toBeNull()
+    expect(external).toEqual([])
+    expect(events('idp_roles.denied').map((l) => (l.detail as { reason: string }).reason)).toEqual([
+      'superseded_denial'
+    ])
+  })
+
+  it('a denial signed before the current activation revokes nothing in the new epoch', async () => {
+    const signedAt = nowSec()
+    later(1100)
+    const newer = await boot(managed({ IDP_RECHECK_INTERVAL_SECONDS: '1800' }))
+    const fresh = await signIn(person('zed', ['Hub.User']), newer)
+    expect((await viaCookie(fresh, newer))?.role).toBe('user')
+    // An unmapped token signed before the activation arrives on a request made now.
+    expect((await signIn(person('zed', ['Other'], { iat: signedAt }), newer)).error).not.toBeNull()
+    expect((await viaCookie(fresh, newer))?.role).toBe('user')
+  })
+
+  it('a NEWER denial still revokes (and same-second as the stored evidence revokes: fail closed)', async () => {
+    const s = await signIn(person('ada', ['Hub.User']))
+    expect((await signIn(person('ada', ['Other']))).error).not.toBeNull() // same second
+    expect(await viaCookie(s)).toBeNull()
+    expect(events('idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'no_mapped_role' }
+    })
+  })
+})
+
 describe('evidence cutoff: a login pending across an activation or a revocation never completes', () => {
   it('request + evidence → activation (another boot) → delayed callback: refused; a truly fresh SSO works', async () => {
     const complete = await pendingSignIn(person('vic', ['Hub.Admin']))

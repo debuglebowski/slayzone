@@ -12,8 +12,11 @@ import {
 import {
   DIRECT_GRANT_TTL_MS,
   DIRECT_LINK_PROTOCOL,
+  type DirectGrantParams,
+  type DirectRevokeParams,
   HubToComputerMethods
 } from '@slayzone/computer-transport/shared'
+import { createDirectGrantStore } from '../../computer/src/direct/grants'
 import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createDirectLinkIssuer, type DirectLinkIssuerDeps } from './direct-link'
 
@@ -678,28 +681,120 @@ it('the SDP limit clients see equals the one the computer enforces', async () =>
   expect(clientMax).toBe(wireMax)
 })
 
-describe('direct-link issuer: IdP-role deadline', () => {
-  it("IdP-role mode: a grant never outlives the caller's role evidence; none is issued past it", async () => {
-    let deadline = Date.now() + 90_000 // 90 s of evidence left: shorter than the grant TTL
-    const { issuer, requests } = setup({ accessDeadlineMs: () => deadline, now: () => Date.now() })
-    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+describe("direct-link issuer: IdP-role deadline, end to end with the computer's grant store", () => {
+  // One wall clock for hub and computer (the contract assumes synchronised clocks), and
+  // the computer store's own monotonic clock; a "network" between them that can delay.
+  function e2e(opts: { notAfterSupport?: boolean } = {}) {
+    let wall = Date.parse('2026-11-09T12:00:00Z')
+    let mono = 50_000
+    const advance = (ms: number) => {
+      wall += ms
+      mono += ms
+    }
+    const store = createDirectGrantStore({ now: () => mono, wallNow: () => wall })
+    let deliveryDelayMs = 0
+    let ackDelayMs = 0
+    const sent: Array<{ method: string; params: Record<string, unknown> }> = []
+    const deadline = { at: (wall + 60_000) as number | null }
+    const computers = [
+      {
+        computerId: 'c-local',
+        directAddress: '127.0.0.1:5001',
+        peerLoopback: true,
+        ...(opts.notAfterSupport === false ? {} : { directNotAfter: true })
+      }
+    ]
+    const { issuer } = setup(
+      {
+        now: () => wall,
+        accessDeadlineMs: () => deadline.at,
+        gateway: {
+          listUsableComputers: () => computers,
+          request: async (_computerId, method, params) => {
+            sent.push({ method, params: params as Record<string, unknown> })
+            advance(deliveryDelayMs) // on the wire
+            if (method === HubToComputerMethods.directGrant) {
+              store.grant('hub', params as DirectGrantParams) // throws when past notAfter
+              advance(ackDelayMs) // the acknowledgement on its way back
+              return { ok: true }
+            }
+            return { revoked: store.revoke('hub', params as DirectRevokeParams) }
+          }
+        }
+      },
+      computers
+    )
+    return {
+      issuer,
+      store,
+      sent,
+      advance,
+      deadline,
+      setDelay: (d: number, a = 0) => ((deliveryDelayMs = d), (ackDelayMs = a))
+    }
+  }
+
+  it('a grant delivered late ends at the evidence deadline on the computer, not TTL after receipt', async () => {
+    const t = e2e()
+    t.deadline.at = Date.parse('2026-11-09T12:00:00Z') + 60_000 // 60 s of evidence left
+    t.setDelay(20_000) // 20 s in transit
+    const out = await t.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
     expect(out.available).toBe(true)
-    const ttl = requests[0]!.params.ttlMs as number
-    expect(ttl).toBeLessThanOrEqual(90_000)
-    expect(ttl).toBeGreaterThan(80_000)
-    if (out.available) expect(out.expiresInMs).toBe(ttl)
-    // Evidence expired: no grant at all.
-    deadline = Date.now() - 1
-    expect(await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)).toEqual({
+    expect(t.sent[0]!.params.notAfter).toBe(t.deadline.at)
+    if (!out.available) return
+    // 40 s left at receipt (not the 60 s relative TTL counted from receipt): alive until
+    // then, gone exactly at the absolute deadline.
+    t.advance(39_999)
+    expect(t.store.get(out.grantId)).not.toBeNull()
+    t.advance(1)
+    expect(t.store.get(out.grantId)).toBeNull()
+  })
+
+  it('delivered after the deadline: the computer refuses it, the hub offers nothing', async () => {
+    const t = e2e()
+    t.setDelay(61_000)
+    expect(
+      await t.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    ).toEqual({
       available: false,
       reason: 'revoked'
     })
-    expect(requests).toHaveLength(1)
+    expect(t.store.size()).toBe(0)
   })
 
-  it('mode off (no deadline): the full TTL, unchanged', async () => {
-    const { issuer, requests } = setup({ accessDeadlineMs: () => null })
-    await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
-    expect(requests[0]!.params.ttlMs).toBe(DIRECT_GRANT_TTL_MS)
+  it('registered in time but ACKed after the deadline: undone on the computer, no token handed out', async () => {
+    const t = e2e()
+    t.setDelay(10_000, 51_000)
+    expect(
+      await t.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    ).toEqual({
+      available: false,
+      reason: 'revoked'
+    })
+    expect(t.sent.map((r) => r.method)).toEqual([
+      HubToComputerMethods.directGrant,
+      HubToComputerMethods.directRevoke
+    ])
+    expect(t.store.size()).toBe(0)
+  })
+
+  it('a computer that does not enforce notAfter gets no grant while a deadline applies', async () => {
+    const t = e2e({ notAfterSupport: false })
+    expect(
+      await t.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    ).toEqual({
+      available: false,
+      reason: 'unsupported'
+    })
+    expect(t.sent).toEqual([])
+  })
+
+  it('mode off (no deadline): the full TTL, no notAfter, any computer — unchanged', async () => {
+    const t = e2e({ notAfterSupport: false })
+    t.deadline.at = null
+    const out = await t.issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    expect(out.available).toBe(true)
+    expect(t.sent[0]!.params.ttlMs).toBe(DIRECT_GRANT_TTL_MS)
+    expect(t.sent[0]!.params).not.toHaveProperty('notAfter')
   })
 })

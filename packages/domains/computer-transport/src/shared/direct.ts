@@ -66,7 +66,15 @@ export const directGrantParamsSchema = z.object({
   /** The user the hub gated. `null` = a hub without login (its one local user). */
   userId: idField.nullable(),
   resource: directResourceSchema,
-  ttlMs: z.number().int().positive().max(DIRECT_GRANT_MAX_TTL_MS)
+  ttlMs: z.number().int().positive().max(DIRECT_GRANT_MAX_TTL_MS),
+  /**
+   * Absolute end (Unix ms, wall clock): the grant — and every connection it opened —
+   * ends at `min(receipt + ttlMs, notAfter)`, and a grant received at or after it is
+   * refused. Lets the hub bound a grant by an absolute deadline (IdP-role evidence)
+   * whatever the delivery delay. Sent only to a computer that advertised
+   * `directNotAfter`. Assumes synchronised clocks.
+   */
+  notAfter: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()
 })
 export type DirectGrantParams = z.infer<typeof directGrantParamsSchema>
 

@@ -204,7 +204,14 @@ export const enrollParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -234,7 +241,14 @@ export const helloParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 

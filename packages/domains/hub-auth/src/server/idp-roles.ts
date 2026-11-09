@@ -365,8 +365,15 @@ export interface IdpRoles {
    * this runtime's epoch. Exempt accounts (break-glass, service) pass.
    */
   authorizeIssuance(userId: string, binding?: { authAtMs: number } | null): void
-  /** A verified sign-in mapped to no role: clear and revoke the account. */
-  denyNoMappedRole(userId: string): Promise<void>
+  /**
+   * A verified sign-in mapped to no role (its signed evidence: `denial`): clear and
+   * revoke the account — ordered like a grant, under the same lock. A denial signed in
+   * or before the second of the current activation or the account's last revocation,
+   * or before the stored verified evidence, decides nothing (the sign-in itself is
+   * still refused): a delayed older denial never revokes a newer sign-in. Same-second
+   * as the stored evidence: revoked (fail closed).
+   */
+  denyNoMappedRole(userId: string, denial: { subject: string; verifiedAt: number }): Promise<void>
   /**
    * Wire the hub's half (late: the hub builds it after hub-auth). Revokes, outside
    * hub-auth, the access of every human this boot's activation invalidated.
@@ -832,10 +839,32 @@ export function createIdpRoles(opts: {
         throw new SupersededError()
       }
     },
-    async denyNoMappedRole(userId) {
+    async denyNoMappedRole(userId, denial) {
       await withLock(userId, async () => {
+        if (!current()) return // a stale runtime decides nothing
         const user = readUser(userId)
         if (!user || isExempt(user)) return
+        const cutoffSec = Math.floor(Math.max(activation.activatedAt, user.revokedAt) / 1000)
+        const superseded =
+          denial.verifiedAt <= cutoffSec ||
+          (user.verifiedAt !== null && denial.verifiedAt < user.verifiedAt) ||
+          (user.subject !== null && user.subject !== denial.subject)
+        if (superseded) {
+          auditIdp(
+            {
+              event: 'idp_roles.denied',
+              service: IDP_AUDIT_SERVICE,
+              actor: IDP_ACTOR,
+              subject: userId,
+              source: 'oidc',
+              previousGrants: [user.role],
+              newGrants: [user.role],
+              reason: 'superseded_denial'
+            },
+            'denied'
+          )
+          return
+        }
         await revokeFenced(user, readAccount(userId), 'no_mapped_role')
       })
     },

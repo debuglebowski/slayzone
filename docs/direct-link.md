@@ -55,6 +55,11 @@ the chat's bootstrap first, checks the computer cannot make.
 - **Lifetime.** 5 minutes, counted on the computer's monotonic clock, so clock skew
   cannot stretch it. Clients renew at half the lifetime through the hub, and every
   renewal re-runs the gates.
+- **Absolute end (IdP-role mode).** A grant may also carry `notAfter` (wall-clock Unix ms):
+  the computer ends it at `min(receipt + TTL, notAfter)` and refuses one that arrives at
+  or after it, so delivery delay never extends it. The hub sends it only to computers
+  that advertise `directNotAfter` in `enroll`/`hello`, and while a deadline applies gives
+  other computers no direct link (the relay serves them). See docs/hub-sso-roles.md.
 - **Revocation** (`direct.revoke` by grant id, or `all`) is pushed:
   - **Account disabled, or refused by SSO:** every grant of that user.
   - **Task closed** (its agents stopped): the task's grants.

@@ -96,6 +96,11 @@ names of an earlier draft (never released) and the other services' old names.
   automatic admin promotion: the hub has no admin until someone signs in holding a value
   that maps to `admin`. Recovery is server administration (`slayzone-hub break-glass` on
   the hub machine).
+- **Denials are ordered like grants**: an unmapped sign-in's verified token carries its
+  signed `iat`; it revokes only if that evidence is fresh, from a later second than the
+  activation and the last revocation, and not older than the stored evidence (same
+  second: revoked, fail closed). A delayed older unmapped callback is refused itself but
+  revokes nothing.
 - **Evidence time** is the ID token's signed `iat`, never the receipt time. Evidence only
   moves forward: a sign-in signed before the stored evidence is refused. It must also be
   signed in a **later second** than the current activation and the account's last
@@ -115,9 +120,12 @@ names of an earlier draft (never released) and the other services' old names.
   desktop, iOS app tokens), web sessions (`resolveWebSession`), the browser-session reads
   that mint web, device and app credentials (`sso-page.ts`), the task CLI relay's owner
   (`cli-relay.ts`), open `/trpc` sockets (closed synchronously at the deadline unless the
-  deadline already moved forward; subscriptions with them), direct-link grants (TTL cut
-  to the deadline; the computer closes the connection when a grant expires; none issued
-  past it).
+  deadline already moved forward; subscriptions with them), direct-link grants (each
+  carries the deadline as an absolute `notAfter` the computer enforces whatever the
+  delivery delay, closing the direct connection then; a grant arriving past it is
+  refused, an acknowledgement arriving past it is undone; a computer that does not
+  advertise `directNotAfter` — an older release — gets no direct link while a deadline
+  applies and its clients use the hub relay).
 - **Issuance binding**: a session that is not itself an SSO sign-in (device token, app
   code) is minted only if the SSO authentication that approved it happened under the
   account's current grant. A code approved before a revocation or activation never mints

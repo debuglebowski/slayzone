@@ -326,7 +326,9 @@ export class HubDialer {
       epoch: this.epoch,
       ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
       directAddress: this.opts.identity.directAddress?.() ?? null,
-      directRtc: this.opts.identity.directRtc?.() ?? false
+      directRtc: this.opts.identity.directRtc?.() ?? false,
+      // The grant registry of this release enforces `notAfter` (apps/computer grants.ts).
+      directNotAfter: true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -369,7 +371,8 @@ export class HubDialer {
             // adopted a peer's host id while it was offline.
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
             directAddress: this.opts.identity.directAddress?.() ?? null,
-            directRtc: this.opts.identity.directRtc?.() ?? false
+            directRtc: this.opts.identity.directRtc?.() ?? false,
+            directNotAfter: true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return
