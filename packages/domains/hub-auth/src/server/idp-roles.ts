@@ -27,6 +27,10 @@
  *     Seconds, conservatively: evidence signed in the SAME second as the cutoff (or the
  *     activation's second) is refused — the person signs in again a second later.
  *   - `session.idpEpoch`: the activation epoch a session was created in.
+ *   - `slayzone_idp_device_approval`: per approved device code (the plugin's row id), the
+ *     `createdAt` of the SSO browser session that approved it — the authentication its
+ *     token is bound to ({@link IdpRoles.recordDeviceApproval}). Removed once the code
+ *     has expired (by the next approval and by the sweep).
  *   - `slayzone_idp_activation` (one row): the config identity the mode last ran with
  *     (`off`, or a hash of issuer, client, claim and mapping), its epoch and when it
  *     began. Written in ONE transaction with the invalidation it causes.
@@ -248,6 +252,12 @@ const ACTIVATION_DDL = `CREATE TABLE IF NOT EXISTS slayzone_idp_activation (
   activated_at INTEGER NOT NULL
 )`
 
+const DEVICE_APPROVAL_DDL = `CREATE TABLE IF NOT EXISTS slayzone_idp_device_approval (
+  device_code_id TEXT PRIMARY KEY,
+  auth_at_ms INTEGER NOT NULL,
+  expires_at_ms INTEGER NOT NULL
+)`
+
 /** Human accounts: every user row but the computer service user and break-glass. */
 const HUMANS = `SELECT id, role FROM "user" WHERE email <> ? AND email NOT LIKE 'break-glass%@hub.slayzone.local'`
 
@@ -434,6 +444,22 @@ export interface IdpRoles {
    */
   authorizeIssuance(userId: string, binding?: { authAtMs: number } | null): void
   /**
+   * The device page approved a code (`deviceCodeId`: the plugin's row id) with an SSO
+   * browser session created at `authAtMs` — one the gate accepted, so at or after the
+   * account's grant. The code's token is bound to THAT authentication
+   * ({@link deviceApprovalOf}), never to when the code was issued: the approving sign-in
+   * is necessarily later than the code, and may itself be the one that granted access.
+   * Kept until the code expires (`expiresAtMs`).
+   *
+   * Two approvals of one code may race (both see it pending; the plugin lets one win).
+   * The OLDEST authentication any of them recorded is kept, never a newer one: a losing
+   * approval made with a newer sign-in (say, after a revocation re-granted access) can
+   * never upgrade the binding of the approval that won. Fails closed in either order.
+   */
+  recordDeviceApproval(deviceCodeId: string, authAtMs: number, expiresAtMs: number): void
+  /** The authentication a code was approved with ({@link recordDeviceApproval}), or null. */
+  deviceApprovalOf(deviceCodeId: string): { authAtMs: number } | null
+  /**
    * A verified sign-in mapped to no role (its signed evidence: `denial`): clear and
    * revoke the account — ordered like a grant, under the same lock. A denial signed in
    * or before the second of the current activation or the account's last revocation,
@@ -487,6 +513,7 @@ export function createIdpRoles(opts: {
   const config = provider.idpRoles
   if (!config) throw new Error('[hub-auth] IdP-role runtime without an enabled config')
   const { db, activation } = opts
+  db.exec(DEVICE_APPROVAL_DDL)
   const keys = entraKeySet(opts.cfg, opts.fetch)
   let hub: IdpRolesHub = {}
   const log = (m: string) => (hub.log ?? ((x: string) => console.log(x)))(m)
@@ -824,6 +851,9 @@ export function createIdpRoles(opts: {
     },
     async sweep() {
       try {
+        db.prepare('DELETE FROM slayzone_idp_device_approval WHERE expires_at_ms < ?').run(
+          Date.now()
+        )
         const margin = Math.min(IDP_SWEEP_MARGIN_SEC, Math.floor(config.intervalSec / 4))
         const due = db
           .prepare(
@@ -912,6 +942,27 @@ export function createIdpRoles(opts: {
           }
         }
       })
+    },
+    recordDeviceApproval(deviceCodeId, authAtMs, expiresAtMs) {
+      inTransaction(db, () => {
+        db.prepare('DELETE FROM slayzone_idp_device_approval WHERE expires_at_ms < ?').run(
+          Date.now()
+        )
+        db.prepare(
+          `INSERT INTO slayzone_idp_device_approval (device_code_id, auth_at_ms, expires_at_ms)
+           VALUES (?, ?, ?)
+           ON CONFLICT(device_code_id) DO UPDATE SET
+             auth_at_ms = MIN(auth_at_ms, excluded.auth_at_ms)`
+        ).run(deviceCodeId, authAtMs, expiresAtMs)
+      })
+    },
+    deviceApprovalOf(deviceCodeId) {
+      const row = db
+        .prepare(
+          'SELECT auth_at_ms FROM slayzone_idp_device_approval WHERE device_code_id = ? AND expires_at_ms >= ?'
+        )
+        .get(deviceCodeId, Date.now()) as { auth_at_ms: unknown } | undefined
+      return typeof row?.auth_at_ms === 'number' ? { authAtMs: row.auth_at_ms } : null
     },
     authorizeIssuance(userId, binding) {
       const bound = binding ?? issuance.getStore() ?? null

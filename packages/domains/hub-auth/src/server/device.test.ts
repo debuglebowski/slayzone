@@ -22,6 +22,7 @@ import { DEVICE_CODE_TTL_MS, MAX_PENDING_DEVICE_CODES } from './device'
 import { createDevicePage, WRONG_CODE_LIMIT, WRONG_CODE_WINDOW_MS } from './device-page'
 import { ENTRA_ADMIN_ROLE, ENTRA_PROVIDER_ID, loadEntraClientCredential } from './entra'
 import { CLIENT_ID, type Claims, FakeEntra, TENANT, writeHubCredential } from './fake-entra-harness'
+import { idpRolesOf } from './idp-roles'
 import { createHubUser } from './users'
 import { verifySession } from './verify'
 
@@ -560,6 +561,40 @@ describe('IdP-role mode: a device code never outlives the grant it was approved 
     expect(ctx?.role).toBe('user')
   })
 
+  it("the account's FIRST sign-in after activation is the one the page asks for, after the code: the token is issued", async () => {
+    // Production 0.38.1: code 13:58:59, the page's SSO (first grant) 13:59:04, approve
+    // 13:59:05, poll 13:59:10 — refused as stale while the code's ISSUE time was the binding.
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(5_000)
+    const token = await poll(code.device_code, 'slayzone-desktop')
+    expect(token.status).toBe(200)
+    const ctx = await verifySession(
+      auth,
+      new Headers({ authorization: `Bearer ${String(token.body.access_token)}` })
+    )
+    expect(ctx?.role).toBe('user')
+    expect(audit.filter((l) => l.event === 'idp_roles.denied')).toEqual([])
+  })
+
+  it('a grant older than the code: the page sends the browser through SSO again; the token is issued', async () => {
+    const first = await requestCode('slayzone-desktop')
+    expect((await new Browser().open(first.user_code, MFA)).status).toBe(200)
+    advance(140_000)
+    const code = await requestCode('slayzone-desktop')
+    advance(5_000)
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(5_000)
+    expect((await poll(code.device_code, 'slayzone-desktop')).status).toBe(200)
+  })
+
   it('approve → access revoked (no mapped role) → valid SSO again → redeeming the OLD code mints nothing', async () => {
     const old = await requestCode()
     const browser = new Browser()
@@ -580,5 +615,55 @@ describe('IdP-role mode: a device code never outlives the grant it was approved 
     expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
       detail: { reason: 'stale_authorization' }
     })
+  })
+
+  it('a losing concurrent approval with a NEWER sign-in never upgrades the binding of the one that won', async () => {
+    const old = await requestCode()
+    expect((await new Browser().open(old.user_code, MFA)).status).toBe(200)
+    // Approval A wins with the sign-in above.
+    const browser = new Browser()
+    expect((await browser.open(old.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(old.user_code)).status).toBe(200)
+    advance(1_000)
+    // Revoked, then re-granted by a newer valid sign-in.
+    const other = await requestCode()
+    await new Browser().open(other.user_code, { ...MFA, roles: ['Other'] })
+    advance(1_000)
+    const third = await requestCode()
+    expect((await new Browser().open(third.user_code, MFA)).status).toBe(200)
+    advance(1_000)
+    // Approval B raced A: it saw the code pending and records its (newer) sign-in before
+    // its own approve fails. Controlled here; over HTTP it is a narrow interleaving.
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: old.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    const idp = idpRolesOf(auth)!
+    const before = idp.deviceApprovalOf(row.id)!
+    idp.recordDeviceApproval(row.id, Date.now(), new Date(row.expiresAt).getTime())
+    expect(idp.deviceApprovalOf(row.id)).toEqual(before) // the oldest stays
+    advance(5_000)
+    const token = await poll(old.device_code)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'stale_authorization' }
+    })
+  })
+
+  it('racing approvals keep the oldest authentication whichever records first', async () => {
+    const code = await requestCode()
+    const ctx = await auth.$context
+    const row = (await ctx.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: code.device_code }]
+    })) as { id: string; expiresAt: Date | string }
+    const idp = idpRolesOf(auth)!
+    const expires = new Date(row.expiresAt).getTime()
+    idp.recordDeviceApproval(row.id, Date.now() + 2_000, expires)
+    idp.recordDeviceApproval(row.id, Date.now() + 1_000, expires)
+    idp.recordDeviceApproval(row.id, Date.now() + 3_000, expires)
+    expect(idp.deviceApprovalOf(row.id)).toEqual({ authAtMs: Date.now() + 1_000 })
   })
 })

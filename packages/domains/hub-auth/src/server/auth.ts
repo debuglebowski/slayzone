@@ -10,7 +10,7 @@ import { defineRequestState, hasRequestState } from '@better-auth/core/context'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
-import { DEVICE_CODE_TTL_MS, deviceSignIn, markSignInMethod } from './device'
+import { deviceSignIn, markSignInMethod } from './device'
 import {
   entraSso,
   entraUserCreateAfter,
@@ -96,26 +96,17 @@ export const SESSION_LIFETIME = {
 } as const
 
 /**
- * The SSO authentication a device code's token derives from (IdP-role mode): the code's
- * issue time — the device page only approves with an SSO sign-in made after the code
- * was issued (device-page.ts), so that sign-in is at least this recent. Read BEFORE the
- * token endpoint runs (the plugin deletes the code before it creates the session) and
- * carried in request-scoped state to the session hook.
+ * The SSO authentication a device code's token derives from (IdP-role mode): the browser
+ * session that APPROVED the code on the device page, as recorded there
+ * (`IdpRoles.recordDeviceApproval`). Not the code's issue time: the page approves only
+ * with an SSO sign-in made after the code was issued, and that sign-in may itself be the
+ * one that granted the account access (its first after an activation or a revocation) —
+ * a grant later than the issue time, which would refuse every such token. Read BEFORE
+ * the token endpoint runs (the plugin deletes the code before it creates the session)
+ * and carried in request-scoped state to the session hook. No recorded approval = no
+ * binding = refused (fail closed).
  */
 const deviceBindingState = defineRequestState<{ authAtMs: number } | null>(() => null)
-
-const captureDeviceBinding = createAuthMiddleware(async (ctx) => {
-  if (ctx.path !== '/device/token') return
-  const deviceCode = (ctx.body as { device_code?: unknown } | undefined)?.device_code
-  if (typeof deviceCode !== 'string') return
-  const row = (await ctx.context.adapter.findOne({
-    model: 'deviceCode',
-    where: [{ field: 'deviceCode', value: deviceCode }]
-  })) as { expiresAt?: unknown } | null
-  const expires = row ? new Date(row.expiresAt as string | Date).getTime() : Number.NaN
-  if (Number.isFinite(expires))
-    await deviceBindingState.set({ authAtMs: expires - DEVICE_CODE_TTL_MS })
-})
 
 async function deviceBinding(): Promise<{ authAtMs: number } | null> {
   return (await hasRequestState()) ? deviceBindingState.get() : null
@@ -136,6 +127,19 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
   let newAccountRole = (): Promise<HubRole> =>
     Promise.reject(new Error('[hub-auth] role lookup used before the instance was built'))
   let self: object | null = null
+  const captureDeviceBinding = createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== '/device/token') return
+    const idp = self ? idpRolesOf(self) : null
+    if (!idp) return
+    const deviceCode = (ctx.body as { device_code?: unknown } | undefined)?.device_code
+    if (typeof deviceCode !== 'string') return
+    const row = (await ctx.context.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: deviceCode }]
+    })) as { id?: unknown } | null
+    const approval = typeof row?.id === 'string' ? idp.deviceApprovalOf(row.id) : null
+    if (approval) await deviceBindingState.set(approval)
+  })
   const passwordOn = config.enablePassword !== false
   const auth = betterAuth({
     baseURL: config.baseURL,
