@@ -25,7 +25,8 @@ import {
   createDevicePage,
   createWebSignIn,
   ENTRA_AUTHORITY,
-  loadEntraClientCredential
+  loadEntraClientCredential,
+  ssoDisplayLabelOf
 } from '@slayzone/hub-auth/server'
 import {
   bindInHubPortBlock,
@@ -365,8 +366,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     switches,
     // B13 — gates the host-describing fields behind "no proxy in the path".
     reachable: boot.reachable,
-    // The native app's Microsoft sign-in is served exactly where `appSignIn` below is.
+    // The native app's SSO sign-in is served exactly where `appSignIn` below is. The
+    // field keeps its name (`microsoft`) for older clients, whatever the provider;
+    // `ssoLabel` is what clients call the sign-in (Microsoft or SSO).
     appSignIn: { microsoft: hubAuth !== null && boot.ssoActive },
+    ...(hubAuth && boot.ssoActive ? { ssoLabel: ssoDisplayLabelOf(hubAuth) } : {}),
     // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
     // single authority for "can this computer do work right now?" and warns that the
     // raw map means only "socket is open", including a computer that has stopped

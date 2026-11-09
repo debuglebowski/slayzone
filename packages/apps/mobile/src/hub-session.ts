@@ -17,6 +17,7 @@ import {
   type HubHealthProbe,
   type HubTokenStore,
   type HubTransport,
+  DEFAULT_SSO_LABEL,
   probeHubHealth,
   signInWithPassword
 } from '@slayzone/hub-auth/client'
@@ -177,8 +178,11 @@ export type SignInResult = { ok: true; session: HubSession } | { ok: false; erro
 
 /** How a hub lets this app sign in. */
 export interface HubSignInOffer {
-  /** "Sign in with Microsoft" (the hub's app sign-in, `/health` `appSignIn`). */
+  /** "Sign in with <ssoLabel>" (the hub's app sign-in, `/health` `appSignIn.microsoft`
+   *  — the field keeps its name whatever the provider). */
   microsoft: boolean
+  /** What the hub calls its SSO sign-in (`/health` `ssoLabel`): Microsoft or SSO. */
+  ssoLabel: string
   /** Email + password; a hub too old to say is taken to offer it. */
   password: boolean
 }
@@ -187,7 +191,8 @@ export interface HubSignInOffer {
 export function signInOfferOf(probe: Extract<HubHealthProbe, { ok: true }>): HubSignInOffer {
   return {
     microsoft: probe.appSignIn?.microsoft === true,
-    password: probe.signIn?.password !== false
+    password: probe.signIn?.password !== false,
+    ssoLabel: probe.signIn?.ssoLabel ?? DEFAULT_SSO_LABEL
   }
 }
 

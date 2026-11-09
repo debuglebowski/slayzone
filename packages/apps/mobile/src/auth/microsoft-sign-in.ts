@@ -85,8 +85,7 @@ export async function signInWithMicrosoft(
   if (!probe.ok) {
     return probe.reason === 'address' ? { ok: false, error: probe.error } : unreachable(probe.error)
   }
-  if (!probe.offer.microsoft)
-    return { ok: false, error: 'This hub does not offer Microsoft sign-in' }
+  if (!probe.offer.microsoft) return { ok: false, error: 'This hub does not offer single sign-on' }
 
   const pending = await startAppSignIn(probe.baseUrl, deps.crypto)
   let ended: AuthSessionResult

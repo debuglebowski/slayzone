@@ -59,6 +59,7 @@ export {
   isEntraSsoAuth,
   loadEntraClientCredential,
   OIDC_PROVIDER_ID,
+  ssoDisplayLabelOf,
   ssoProviderIdOf,
   ssoProviderOf,
   type EntraClientCredential,

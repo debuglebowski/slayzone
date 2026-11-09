@@ -45,6 +45,11 @@ export type HealthState = {
    *  when this hub serves the app sign-in (hub-auth `app-sign-in.ts`; Entra hubs). The
    *  switches cannot tell — an older hub has SSO on but not the app routes. */
   appSignIn: { microsoft: boolean }
+  /** What clients call the SSO sign-in ("Sign in with <label>"): `Microsoft` (Entra
+   *  setup) or `SSO` (a generic OpenID provider); absent without SSO. `appSignIn.microsoft`
+   *  keeps its name for older clients: it means "the app sign-in is served", whatever
+   *  the provider. */
+  ssoLabel?: string
   /** Live count of connected computers. A GETTER, not a number — the value must
    *  reflect the gateway at request time, not a boot-time snapshot. */
   computersConnected: () => number
@@ -159,7 +164,8 @@ export function handleHealth(
     buildId: build.buildId,
     authRequired: state.authRequired,
     switches: state.switches,
-    appSignIn: state.appSignIn
+    appSignIn: state.appSignIn,
+    ...(state.ssoLabel ? { ssoLabel: state.ssoLabel } : {})
   }
   if (mayReadHostFields(state, req)) {
     payload.name = state.name

@@ -111,7 +111,8 @@ const authNeedFromProbe = (authRequired: boolean | undefined): AuthNeed =>
  * the hub's page in the system browser and never asks for a password (device sign-in,
  * T-14). A hub too old to say keeps the email + password form.
  */
-type SignInMethods = { sso: boolean; password: boolean }
+/** `ssoLabel`: what the hub calls its SSO sign-in (`/health`): Microsoft or SSO. */
+type SignInMethods = { sso: boolean; password: boolean; ssoLabel?: string }
 
 /** Device sign-in progress inside the Sign in dialog. */
 type DeviceSignInState =
@@ -543,6 +544,8 @@ export function HubsSettingsTab() {
   // (or cannot say). An SSO-only hub shows no password field at all.
   const signInMethodsOfHub = signInMethods[signInHubId]
   const offerBrowserSignIn = signInMethodsOfHub?.sso === true
+  // Hubs from before `ssoLabel` only had Entra sign-in.
+  const ssoLabel = signInMethodsOfHub?.ssoLabel ?? 'Microsoft'
   const offerPassword = signInMethodsOfHub === undefined || signInMethodsOfHub.password
   const editHub = remotes.find((h) => h.id === editHubId)
   const editUrlChanged = !!editHub && editUrl.trim() !== (editHub.url ?? '')
@@ -1035,7 +1038,7 @@ export function HubsSettingsTab() {
               <DialogDescription>
                 This remote hub requires auth.{' '}
                 {offerBrowserSignIn
-                  ? 'Sign in with Microsoft in your browser'
+                  ? `Sign in with ${ssoLabel} in your browser`
                   : 'Sign in with your hub account'}
                 ; the token is stored encrypted on this machine.
               </DialogDescription>
@@ -1051,7 +1054,7 @@ export function HubsSettingsTab() {
                 >
                   {deviceSignIn.kind === 'waiting'
                     ? 'Waiting for approval…'
-                    : 'Sign in with Microsoft'}
+                    : `Sign in with ${ssoLabel}`}
                 </Button>
                 {deviceSignIn.kind === 'waiting' && (
                   <div className="text-sm" data-testid="hub-signin-code">

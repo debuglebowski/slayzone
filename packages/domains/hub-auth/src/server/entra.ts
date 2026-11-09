@@ -998,6 +998,17 @@ export function ssoProviderOf(auth: {
   return cfg ? ssoProvider(cfg) : null
 }
 
+/**
+ * What clients call this hub's SSO sign-in ("Sign in with <label>", `/health`
+ * `ssoLabel`): `Microsoft` for the Entra setup, `SSO` for a generic OpenID provider.
+ */
+export function ssoDisplayLabelOf(auth: {
+  options: { plugins?: ReadonlyArray<{ id: string }> }
+}): string {
+  const provider = ssoProviderOf(auth)
+  return !provider || provider.entraTenantId ? 'Microsoft' : 'SSO'
+}
+
 /** The better-auth provider id SSO sign-in starts with (`microsoft` or `oidc`). */
 export function ssoProviderIdOf(auth: {
   options: { plugins?: ReadonlyArray<{ id: string }> }

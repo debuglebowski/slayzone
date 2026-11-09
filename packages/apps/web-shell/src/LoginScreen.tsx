@@ -1,13 +1,16 @@
 import { useState } from 'react'
+import { DEFAULT_SSO_LABEL } from '@slayzone/hub-auth/client'
 import { electronBootstrap } from '@slayzone/transport/client'
 import type { SignInError } from './sign-in-error'
 
-/** Where "Sign in with Microsoft" goes (hub-auth `web-sign-in.ts`). */
+/** Where "Sign in with <ssoLabel>" goes (hub-auth `web-sign-in.ts`). */
 const SSO_SIGN_IN_PATH = '/api/auth/web-sso'
 
 export interface LoginScreenProps {
   /** What the hub offers a browser (`/health`'s switches, hub-health.ts). */
   methods: { password: boolean; sso: boolean }
+  /** What the hub calls its SSO sign-in (`/health` `ssoLabel`): Microsoft or SSO. */
+  ssoLabel?: string
   /** Why the last sign-in did not complete (`?signin=failed` / `?error=`), if it did not. */
   signInError?: SignInError | null
 }
@@ -34,7 +37,11 @@ export interface LoginScreenProps {
  * and mount the real app — same recovery-via-reload pattern `RemoteConfigScreen` uses
  * after `setBootSettings`. A Microsoft sign-in comes back to `/` by redirect.
  */
-export function LoginScreen({ methods, signInError = null }: LoginScreenProps) {
+export function LoginScreen({
+  methods,
+  signInError = null,
+  ssoLabel = DEFAULT_SSO_LABEL
+}: LoginScreenProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<
@@ -81,7 +88,7 @@ export function LoginScreen({ methods, signInError = null }: LoginScreenProps) {
 
         {methods.sso && (
           <a href={SSO_SIGN_IN_PATH} data-testid="web-login-sso" style={linkButtonStyle}>
-            Sign in with Microsoft
+            Sign in with {ssoLabel}
           </a>
         )}
 

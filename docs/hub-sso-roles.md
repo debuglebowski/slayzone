@@ -43,6 +43,11 @@ Redirect URI: `https://<public address>/api/auth/callback/microsoft`.
 Redirect URI: `https://<public address>/api/auth/callback/oidc`. Accounts are keyed on
 `<issuer>|<sub>` and never linked by email.
 
+Clients name the sign-in from `/health` `ssoLabel`: "Sign in with Microsoft" for the
+Entra setup, "Sign in with SSO" for a generic provider (web shell, desktop Settings, iOS
+app, `slay hub login`, the device page). A client talking to an older hub, which reports
+no label, says "Microsoft" — those hubs only had Entra sign-in.
+
 ### Migrating Entra from the tenant settings to the generic ones
 
 `SLAYZONE_HUB_OIDC_ISSUER=https://login.microsoftonline.com/<tenant id>/v2.0` with
@@ -193,8 +198,8 @@ does not makes people sign in again every interval.
 
 ### Known limitations
 
-- The web shell's button still reads "Sign in with Microsoft" and `/health` names the
-  native app sign-in `appSignIn.microsoft` (client contracts) on a generic provider too.
+- `/health` keeps the field name `appSignIn.microsoft` (older clients read it): it means
+  "the app sign-in is served", whatever the provider.
 - The refresh lock is per process (a hub is one node); the storage CAS still fails closed
   across processes.
 - SAML sign-in is not part of the hub (Cloudable's adapter covers SAML).

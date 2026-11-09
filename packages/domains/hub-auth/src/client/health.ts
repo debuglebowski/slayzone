@@ -14,12 +14,29 @@ import { appSignInOf, type HubAppSignIn } from './app-sign-in'
 import { HEALTH_MAX_CHARS, HUB_AUTH_PATHS, parseJson } from './protocol'
 import { type HubTransport, isHubTransportTimeout, transportErrorText } from './transport'
 
+/**
+ * The name to show for a hub's SSO sign-in ("Sign in with <label>"): `/health`
+ * `ssoLabel` — `Microsoft` for the Entra setup, `SSO` for a generic OpenID provider.
+ * A hub too old to report it only had Entra sign-in: {@link DEFAULT_SSO_LABEL}.
+ */
+export const DEFAULT_SSO_LABEL = 'Microsoft'
+
+/** `/health` `ssoLabel`, checked (short, plain text), else {@link DEFAULT_SSO_LABEL}. */
+export function ssoLabelOf(health: unknown): string {
+  const label = (health as { ssoLabel?: unknown } | null | undefined)?.ssoLabel
+  return typeof label === 'string' && /^[\p{L}\p{N} ._-]{1,32}$/u.test(label)
+    ? label
+    : DEFAULT_SSO_LABEL
+}
+
 /** How a hub lets a native client (desktop, CLI, mobile) sign in, from its `/health` switches. */
 export interface HubSignInMethods {
-  /** Entra sign-in on: the client uses device sign-in (browser + MFA). */
+  /** SSO sign-in on: the client uses device sign-in (browser + MFA). */
   sso: boolean
   /** Email + password sign-in on. */
   password: boolean
+  /** What to call the SSO sign-in ({@link ssoLabelOf}). */
+  ssoLabel?: string
 }
 
 export type HubHealthRead =
@@ -71,7 +88,11 @@ export function signInMethodsOf(health: unknown): HubSignInMethods | undefined {
   const switches = (health as { switches?: unknown }).switches
   if (!switches) return undefined
   const sw = switches as { enableSso?: unknown; enablePassword?: unknown }
-  return { sso: sw.enableSso === true, password: sw.enablePassword !== false }
+  return {
+    sso: sw.enableSso === true,
+    password: sw.enablePassword !== false,
+    ssoLabel: ssoLabelOf(health)
+  }
 }
 
 export type HubHealthProbe =
@@ -127,6 +148,8 @@ export interface HubBrowserSignIn {
   authRequired: boolean
   /** Sign-in methods the hub offers a browser. */
   methods: { password: boolean; sso: boolean }
+  /** What to call the SSO sign-in ({@link ssoLabelOf}). */
+  ssoLabel?: string
 }
 
 /** The fail-closed answer: sign-in required, no method offered (the screen says to reload). */
@@ -138,7 +161,7 @@ export const HUB_BROWSER_SIGN_IN_UNKNOWN: HubBrowserSignIn = {
 /**
  * The browser reading of a 200 `/health` body. FAILS CLOSED: only an explicit
  * `authRequired: false` skips sign-in. Password sign-in when `enablePassword` is on;
- * "Sign in with Microsoft" only where the hub serves it to browsers (`enableSso` with
+ * "Sign in with <ssoLabel>" only where the hub serves it to browsers (`enableSso` with
  * `requireLogin`, the hub's `ssoActive`). Pure.
  */
 export function hubBrowserSignInOf(health: unknown): HubBrowserSignIn {
@@ -153,6 +176,7 @@ export function hubBrowserSignInOf(health: unknown): HubBrowserSignIn {
     methods: {
       password: sw.enablePassword !== false,
       sso: sw.enableSso === true && sw.requireLogin === true
-    }
+    },
+    ssoLabel: ssoLabelOf(health)
   }
 }

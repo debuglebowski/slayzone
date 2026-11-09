@@ -35,6 +35,7 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { isAPIError } from 'better-auth/api'
 import type { HubAuth } from './auth'
 import { DEVICE_CLIENTS, DEVICE_CODE_TTL_MS, DEVICE_PAGE_PATH, deviceRequestRef } from './device'
+import { ssoDisplayLabelOf } from './entra'
 import {
   cookieOnlyHeaders,
   escapeHtml as esc,
@@ -268,7 +269,7 @@ export function createDevicePage(
         res,
         401,
         'Sign-in did not complete',
-        '<p>Microsoft sign-in was cancelled or refused, so nothing was approved.</p>' +
+        `<p>${esc(ssoDisplayLabelOf(auth))} sign-in was cancelled or refused, so nothing was approved.</p>` +
           restartLink(code)
       )
       return
@@ -334,7 +335,8 @@ export function createDevicePage(
         res,
         401,
         'Sign in again',
-        '<p>Approving needs a Microsoft sign-in made for this request.</p>' + restartLink(code)
+        `<p>Approving needs a ${esc(ssoDisplayLabelOf(auth))} sign-in made for this request.</p>` +
+          restartLink(code)
       )
       return
     }
