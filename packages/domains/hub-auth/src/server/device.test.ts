@@ -13,6 +13,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
+import { parseConfig } from '@normain/idp-role-contract'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAuthExpressApp } from './app'
@@ -502,5 +503,82 @@ describe('device sign-in', () => {
     const token = await poll(code.device_code)
     expect(token.status).toBe(403)
     expect(token.body.access_token).toBeUndefined()
+  })
+})
+
+describe('IdP-role mode: a device code never outlives the grant it was approved under', () => {
+  beforeEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()))
+    server = createServer()
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    auth = await createHubAuth({
+      dbPath: join(tmpDir, `auth-${++dbCounter}.sqlite`),
+      baseURL: base,
+      secret: SECRET,
+      enablePassword: false,
+      sso: {
+        tenantId: TENANT,
+        clientId: CLIENT_ID,
+        credential: loadEntraClientCredential(credentialPaths),
+        requireMfa: true,
+        authority: entra.authority,
+        idpRoles: parseConfig(
+          {
+            IDP_ROLES_ENABLED: 'true',
+            IDP_ROLE_CLAIM: 'roles',
+            IDP_ROLE_MAPPING: JSON.stringify({
+              'SlayZone.Admin': ['admin'],
+              'SlayZone.User': ['user']
+            })
+          },
+          ['admin', 'user']
+        )
+      }
+    })
+    const authApp = createAuthExpressApp(auth)
+    const page = createDevicePage(auth, { signInOrigin: entra.authority })
+    server.on('request', (req, res) => {
+      if ((req.url ?? '').startsWith('/api/auth/')) authApp(req, res)
+      else if (!page(req, res)) res.writeHead(404).end()
+    })
+    advance(1100) // sign-in evidence counts from the second after the activation
+  })
+
+  it('approved under the current grant: the token works through the gate', async () => {
+    const code = await requestCode()
+    const browser = new Browser()
+    expect((await browser.open(code.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(code.user_code)).status).toBe(200)
+    advance(6_000)
+    const token = await poll(code.device_code)
+    expect(token.status).toBe(200)
+    const ctx = await verifySession(
+      auth,
+      new Headers({ authorization: `Bearer ${String(token.body.access_token)}` })
+    )
+    expect(ctx?.role).toBe('user')
+  })
+
+  it('approve → access revoked (no mapped role) → valid SSO again → redeeming the OLD code mints nothing', async () => {
+    const old = await requestCode()
+    const browser = new Browser()
+    expect((await browser.open(old.user_code, MFA)).status).toBe(200)
+    expect((await browser.approve(old.user_code)).status).toBe(200)
+    advance(1_000)
+    // The role is removed at the IdP; the person's next sign-in is refused (revoked).
+    const other = await requestCode()
+    await new Browser().open(other.user_code, { ...MFA, roles: ['Other'] })
+    advance(1_000)
+    // Given back: a valid sign-in re-grants access.
+    const third = await requestCode()
+    expect((await new Browser().open(third.user_code, MFA)).status).toBe(200)
+    advance(6_000)
+    const token = await poll(old.device_code)
+    expect(token.status).not.toBe(200)
+    expect(token.body.access_token).toBeUndefined()
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'stale_authorization' }
+    })
   })
 })

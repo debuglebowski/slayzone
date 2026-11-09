@@ -67,7 +67,7 @@ Opt-in env vars for `pnpm dev`. Set inline: `FLAG=1 pnpm dev`.
 
 ## Env Var Naming
 
-1. Prefix `SLAYZONE_`.
+1. Prefix `SLAYZONE_`. One exception: the shared IdP-role contract's `IDP_ROLES_ENABLED` (`true|false`), `IDP_ROLE_CLAIM`, `IDP_ROLE_MAPPING`, `IDP_RECHECK_INTERVAL_SECONDS` — same names in every service of the contract (docs/hub-sso-roles.md). Hub-only, in `NON_PREFIXED_INFRA` (stripped from terminals). Nothing else may follow it.
 2. Name by what the value IS, not who reads it. App-specific → include the app (`SLAYZONE_HUB_ADDRESS`). Universal → don't (`SLAYZONE_ROOT`, `SLAYZONE_TASK_ID`).
 3. Same concept → same suffix: `_ADDRESS` `_TOKEN` `_DIR` `_PATH` `_ID`. Same *subsystem* → same prefix: `SLAYZONE_AGENT_HOOK_URL` (where to post) + `SLAYZONE_AGENT_HOOK_CONTEXT` (who is posting).
 4. One name, one meaning. "Where the hub listens" and "the hub to connect to" are two concepts, so two vars: the hub reads `SLAYZONE_HUB_LISTEN_ADDRESS` (and refuses to boot if it still sees the old `SLAYZONE_HUB_ADDRESS`), the computer/CLI dial `SLAYZONE_HUB_ADDRESS`. One concept used by several roles keeps ONE var. `sanitizeSpawnEnv` strips non-`global` vars at every terminal-spawn boundary.

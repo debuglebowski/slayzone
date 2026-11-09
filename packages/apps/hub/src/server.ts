@@ -25,7 +25,6 @@ import {
   createDevicePage,
   createWebSignIn,
   ENTRA_AUTHORITY,
-  findHubAccount,
   loadEntraClientCredential
 } from '@slayzone/hub-auth/server'
 import {
@@ -104,7 +103,7 @@ import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
 import { createWarmWindowSockets } from './warm-window-sockets.js'
 import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
-import { createHubCliRelay } from './cli-relay'
+import { createHubCliRelay, relayOwnerAccount } from './cli-relay'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -588,7 +587,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         'SELECT owner_user_id, revoked_at FROM computers WHERE id = ?',
         [id]
       )) ?? null,
-    account: async (id) => (hubAuth ? findHubAccount(hubAuth, id) : null),
+    // The computer's credential stays automation (verified by the gateway); the HUMAN
+    // owner it acts for passes the same IdP-role gate as a session (hub-auth
+    // authorizeDelegatedHuman: persisted mode, current grant, fresh evidence).
+    account: async (id) => (hubAuth ? relayOwnerAccount(hubAuth, id) : null),
     dispatch: gatedDispatch
   })
   computerGateway?.setCliRelayHandler(cliRelay.request)

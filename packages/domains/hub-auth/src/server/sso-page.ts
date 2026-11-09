@@ -14,7 +14,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isDisabled } from './account'
 import type { HubAuth } from './auth'
 import { SIGN_IN_METHOD } from './device'
-import { ENTRA_PROVIDER_ID } from './entra'
+import { ssoProviderIdOf } from './entra'
+import { idpModeFenceOk, idpRolesOf } from './idp-roles'
 
 /** Only the cookie: a page never accepts a bearer as the browser's session. */
 export function cookieOnlyHeaders(req: IncomingMessage): Headers {
@@ -38,7 +39,10 @@ const toMs = (v: unknown): number =>
  * The browser's better-auth session from `headers`' cookie, when an Entra sign-in that
  * passed the checks made it (`session.signInMethod === 'sso'`) and its account is not
  * disabled. Null otherwise: no session, a password (break-glass) session, a device
- * token's session, a disabled account.
+ * token's session, a disabled account — and, in the IdP-role mode, a session the gate
+ * refuses (another epoch, no current grant, evidence that cannot be re-proven), or a
+ * process whose view of the mode is not the persisted one. Every web, device and app
+ * credential is minted from what this returns.
  */
 export async function ssoSessionFromCookie(
   auth: HubAuth,
@@ -50,7 +54,14 @@ export async function ssoSessionFromCookie(
   if (!session || !user || session.signInMethod !== SIGN_IN_METHOD.sso || isDisabled(user)) {
     return null
   }
-  return { userId: user.id, email: user.email, createdAt: toMs(session.createdAt) }
+  const createdAt = toMs(session.createdAt)
+  const idp = idpRolesOf(auth)
+  if (!idp) return idpModeFenceOk(auth) ? { userId: user.id, email: user.email, createdAt } : null
+  const verdict = await idp.authorize(user.id, {
+    createdAtMs: createdAt,
+    epoch: typeof session.idpEpoch === 'number' ? session.idpEpoch : null
+  })
+  return verdict.ok ? { userId: user.id, email: user.email, createdAt } : null
 }
 
 interface SignInSocialApi {
@@ -78,7 +89,7 @@ export async function redirectToEntraSignIn(
   const api = auth.api as unknown as SignInSocialApi
   const { headers: set, response } = await api.signInSocial({
     body: {
-      provider: ENTRA_PROVIDER_ID,
+      provider: ssoProviderIdOf(auth),
       callbackURL: urls.callbackURL,
       errorCallbackURL: urls.errorCallbackURL,
       disableRedirect: true

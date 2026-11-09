@@ -291,17 +291,24 @@ import {
 import {
   createHubAuth,
   type EntraClientCredential,
-  type EntraSsoConfig,
-  type HubAuth
+  type HubAuth,
+  idpRolesOf,
+  type SsoConfig
 } from '@slayzone/hub-auth/server'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import type { HubSsoBootConfig } from './boot-rules.js'
+import { ssoConfigFromBoot } from './sso-config.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
 
 import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
-import { webLogin, webSessionCookieSecure } from './web-sessions.js'
+import {
+  hasLiveWebSession,
+  SSO_WEB_SESSION_LIFETIME,
+  webLogin,
+  webSessionCookieSecure
+} from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
 import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
@@ -429,7 +436,8 @@ export function composeServer(opts: {
    * this hub. Becomes hub-auth's base URL. Unset = the loopback constant (below).
    */
   publicAddress?: string
-  /** Entra sign-in, when on (`assertSsoCredential` in boot-rules.ts). */
+  /** SSO sign-in, when on (`assertSsoCredential` in boot-rules.ts): the Entra tenant
+   *  setup or a generic OpenID issuer, and the IdP-role mode's config. */
   sso?: HubSsoBootConfig<EntraClientCredential> | null
   /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
   enablePassword?: boolean
@@ -1833,7 +1841,7 @@ export function composeServer(opts: {
   setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
   computersReady = (async () => {
-    const sso: EntraSsoConfig | undefined = opts.sso ?? undefined
+    const sso: SsoConfig | undefined = opts.sso ? ssoConfigFromBoot(opts.sso) : undefined
     const hubAuth = await createHubAuth({
       dbPath: resolveAuthDbPath(dataRoot),
       // better-auth baseURL. A hub other machines reach is addressed by its public
@@ -1857,8 +1865,23 @@ export function composeServer(opts: {
       rateLimit: opts.floodLimits
     })
     hubAuthRef = hubAuth
-    // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
-    // (sso-recheck.ts). No-op without SSO — the desktop app's hub creates no timer.
+    // The IdP-role mode (hub-auth idp-roles.ts): its revocations reach what lives here —
+    // web sessions, open sockets, direct-link grants — and a role change closes the
+    // account's sockets. Attaching also revokes, here, the access of every human this
+    // boot's activation invalidated, BEFORE the hub serves (server.ts awaits this).
+    const idp = idpRolesOf(hubAuth)
+    if (idp) {
+      await idp.attachHub({
+        revokeExternal: (userId) => userAccess.endSessions(userId),
+        onRoleChange: (userId) => userAccess.reconnectUser(userId),
+        hasExternalSession: (userId) => hasLiveWebSession(db, userId, SSO_WEB_SESSION_LIFETIME)
+      })
+      // A `/trpc` socket closes at its account's evidence deadline unless re-proven.
+      trpcConnections.setDeadline((userId) => idp.deadlineMs(userId))
+    }
+    // T-12: with SSO sign-in, every signed-in account is re-checked with the issuer
+    // hourly — or, in the IdP-role mode, swept ahead of its deadline (sso-recheck.ts).
+    // No-op without SSO — the desktop app's hub creates no timer.
     startSsoRecheck({ auth: hubAuth, sso, db, revoker: userAccess })
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
     // which enroll name is the co-located auto-spawned computer so it collapses to
@@ -1916,6 +1939,8 @@ export function composeServer(opts: {
       },
       ...(placement.gate ? { gate: placement.gate } : {}),
       onChatOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
+      // IdP-role mode: grants never outlive the caller's role evidence.
+      accessDeadlineMs: (userId) => idpRolesOf(hubAuth)?.deadlineMs(userId) ?? null,
       // Validated at boot (rule B19), so this is the parsed value.
       stunAddresses: () => {
         const stun = readHubStunAddresses()

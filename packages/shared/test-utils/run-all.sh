@@ -142,6 +142,9 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
+run_harness packages/apps/hub/src/trpc-connections.test.ts
+# The IdP-role mode through native hub routes + the shared contract's acceptance suite.
+run_harness packages/apps/hub/src/idp-roles-acceptance.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
 run_harness packages/apps/hub/src/chat-relay-watch.test.ts
 run_harness packages/apps/hub/src/user-access.test.ts

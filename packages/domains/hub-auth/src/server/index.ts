@@ -16,6 +16,8 @@ export {
 } from './break-glass'
 export {
   API_KEY_HEADER,
+  authorizeDelegatedHuman,
+  authorizeExternalSession,
   getHubAuthContext,
   getComputerPrincipal,
   requireApiKey,
@@ -56,10 +58,26 @@ export {
   entraAccountId,
   isEntraSsoAuth,
   loadEntraClientCredential,
+  OIDC_PROVIDER_ID,
+  ssoProviderIdOf,
+  ssoProviderOf,
   type EntraClientCredential,
   type EntraFetch,
-  type EntraSsoConfig
+  type EntraSsoConfig,
+  type OidcClientAuth,
+  type OidcSsoConfig,
+  type RoleMode,
+  type SsoConfig
 } from './entra'
+export {
+  IDP_AUDIT_SERVICE,
+  IDP_REVALIDATION_REQUIRED,
+  idpRolesOf,
+  isIdpRolesAuth,
+  type IdpAuthorization,
+  type IdpRoles,
+  type IdpRolesHub
+} from './idp-roles'
 export {
   createEntraRecheck,
   DEFINITE_REFUSALS,

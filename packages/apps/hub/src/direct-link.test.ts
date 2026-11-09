@@ -677,3 +677,29 @@ it('the SDP limit clients see equals the one the computer enforces', async () =>
   const { DIRECT_RTC_MAX_SDP: wireMax } = await import('@slayzone/computer-transport/shared')
   expect(clientMax).toBe(wireMax)
 })
+
+describe('direct-link issuer: IdP-role deadline', () => {
+  it("IdP-role mode: a grant never outlives the caller's role evidence; none is issued past it", async () => {
+    let deadline = Date.now() + 90_000 // 90 s of evidence left: shorter than the grant TTL
+    const { issuer, requests } = setup({ accessDeadlineMs: () => deadline, now: () => Date.now() })
+    const out = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    expect(out.available).toBe(true)
+    const ttl = requests[0]!.params.ttlMs as number
+    expect(ttl).toBeLessThanOrEqual(90_000)
+    expect(ttl).toBeGreaterThan(80_000)
+    if (out.available) expect(out.expiresInMs).toBe(ttl)
+    // Evidence expired: no grant at all.
+    deadline = Date.now() - 1
+    expect(await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)).toEqual({
+      available: false,
+      reason: 'revoked'
+    })
+    expect(requests).toHaveLength(1)
+  })
+
+  it('mode off (no deadline): the full TTL, unchanged', async () => {
+    const { issuer, requests } = setup({ accessDeadlineMs: () => null })
+    await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)
+    expect(requests[0]!.params.ttlMs).toBe(DIRECT_GRANT_TTL_MS)
+  })
+})

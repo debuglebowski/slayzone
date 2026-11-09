@@ -314,8 +314,9 @@ export interface RestApiDeps {
           ok: true
           user: { id: string; email: string; name: string; role: PrincipalRole; password: string }
         }
-      /** `sso-managed`: an admin account asked for on a hub with Entra sign-in. */
-      | { ok: false; reason: 'exists' | 'sso-managed' }
+      /** `sso-managed`: an admin account asked for on the Entra setup (IdP-role mode
+       *  off). `idp-managed`: any role asked for with the IdP-role mode on. */
+      | { ok: false; reason: 'exists' | 'sso-managed' | 'idp-managed' }
     >
     list: () => Promise<HubUserListRow[]>
     /** Keeps every row; revokes the account's better-auth AND web sessions. */
@@ -323,11 +324,12 @@ export interface RestApiDeps {
       email: string
     ) => Promise<'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'>
     enable: (email: string) => Promise<'ok' | 'not-found' | 'protected'>
-    /** `sso-managed`: on a hub with Entra sign-in the role is the Entra app role. */
+    /** `sso-managed`: the Entra setup's app role (IdP-role mode off). `idp-managed`:
+     *  the IdP-role mode — 409 ROLES_MANAGED_BY_IDP. */
     setRole: (
       email: string,
       role: PrincipalRole
-    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'>
+    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed' | 'idp-managed'>
   }
   /**
    * The hub's bearer-auth authority, for routes that accept an OFF-BOX caller who

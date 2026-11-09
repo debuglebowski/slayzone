@@ -1,4 +1,9 @@
 import type { IncomingHttpHeaders } from 'node:http'
+import {
+  ROLES_MANAGED_BY_IDP,
+  ROLES_MANAGED_HTTP_STATUS,
+  ROLES_MANAGED_MESSAGE
+} from '@normain/idp-role-contract'
 import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
@@ -48,6 +53,11 @@ import { respondSwitchRefusal } from '../switch-refusal'
  * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
  * role change, or `add` asking for an admin, answers 409 with the stable code
  * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
+ * WITH THE IdP-ROLE MODE ON (`IDP_ROLES_ENABLED=true`, hub-auth idp-roles.ts) a role
+ * change, or `add` naming any role, answers the shared contract's refusal: 409
+ * `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." — the same
+ * code and text in every service of the contract.
  *
  * WITH PASSWORD SIGN-IN OFF (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10) `add` answers 403
  * `HUB_PASSWORD_DISABLED`: every account it makes is a password account
@@ -132,6 +142,13 @@ const SSO_MANAGED_ROLE = {
   error:
     'roles on this hub come from Entra ID: assign or remove the SlayZone.Admin app role ' +
     'on the enterprise application — it applies at the account’s next sign-in'
+} as const
+
+/** The shared contract's refusal of an in-hub role change (IdP-role mode). */
+const ROLES_MANAGED = {
+  ok: false,
+  code: ROLES_MANAGED_BY_IDP,
+  error: ROLES_MANAGED_MESSAGE
 } as const
 
 const ROLES: readonly PrincipalRole[] = ['admin', 'user']
@@ -251,6 +268,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ...(role === undefined ? {} : { role })
       })
       if (!result.ok) {
+        if (result.reason === 'idp-managed') {
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
+          return
+        }
         res
           .status(409)
           .json(
@@ -353,6 +374,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
           return
         case 'sso-managed':
           res.status(409).json(SSO_MANAGED_ROLE)
+          return
+        case 'idp-managed':
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
           return
       }
     } catch (err) {

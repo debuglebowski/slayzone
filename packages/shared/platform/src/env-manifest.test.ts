@@ -134,6 +134,24 @@ describe('manifest shape', () => {
   test('PLAYWRIGHT in NON_PREFIXED_INFRA', () => {
     expect(NON_PREFIXED_INFRA.has('PLAYWRIGHT')).toBe(true)
   })
+
+  test('the shared IdP-role contract names (unprefixed by contract) are NON_PREFIXED_INFRA', () => {
+    for (const name of [
+      'IDP_ROLES_ENABLED',
+      'IDP_ROLE_CLAIM',
+      'IDP_ROLE_MAPPING',
+      'IDP_RECHECK_INTERVAL_SECONDS'
+    ]) {
+      expect(NON_PREFIXED_INFRA.has(name), name).toBe(true)
+    }
+  })
+
+  test('generic OIDC settings: issuer/client id/scopes infra, client secret secret', () => {
+    expect(ENV_MANIFEST.SLAYZONE_HUB_OIDC_ISSUER).toBe('infra')
+    expect(ENV_MANIFEST.SLAYZONE_HUB_OIDC_CLIENT_ID).toBe('infra')
+    expect(ENV_MANIFEST.SLAYZONE_HUB_OIDC_SCOPES).toBe('infra')
+    expect(ENV_MANIFEST.SLAYZONE_HUB_OIDC_CLIENT_SECRET).toBe('secret')
+  })
 })
 
 describe('`_URL` carve-out (CLAUDE.md § Env Var Naming rule 6)', () => {
@@ -235,6 +253,13 @@ describe('sanitizeSpawnEnv behavior', () => {
     ELECTRON_RUN_AS_NODE: '1',
     PLAYWRIGHT: '1',
     NODE_PATH: '/some/unpacked/node_modules',
+    // the hub's IdP-role contract settings — hub-only, must be stripped
+    IDP_ROLES_ENABLED: 'true',
+    IDP_ROLE_CLAIM: 'roles',
+    IDP_ROLE_MAPPING: '{"A":["admin"]}',
+    IDP_RECHECK_INTERVAL_SECONDS: '3600',
+    // a user's own unrelated IDP_-ish var — kept (only the four contract names strip)
+    IDP_UNRELATED: 'kept',
     // undefined value — must be dropped (produces a string-only record)
     SOME_UNSET: undefined
   }
@@ -362,6 +387,18 @@ describe('sanitizeSpawnEnv behavior', () => {
 
   test('strips non-prefixed PLAYWRIGHT', () => {
     expect(out).not.toHaveProperty('PLAYWRIGHT')
+  })
+
+  test('strips the hub-only IDP_* role settings, keeps an unrelated IDP_ var', () => {
+    for (const name of [
+      'IDP_ROLES_ENABLED',
+      'IDP_ROLE_CLAIM',
+      'IDP_ROLE_MAPPING',
+      'IDP_RECHECK_INTERVAL_SECONDS'
+    ]) {
+      expect(out, name).not.toHaveProperty(name)
+    }
+    expect(out.IDP_UNRELATED).toBe('kept')
   })
 
   test('strips non-prefixed NODE_PATH', () => {

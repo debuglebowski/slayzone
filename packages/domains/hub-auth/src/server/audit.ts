@@ -33,7 +33,7 @@ import { createHmac } from 'node:crypto'
 import { securityEvent, type SecurityOutcome } from '@slayzone/platform/security-log'
 import { createAuthMiddleware } from 'better-auth/api'
 import { ACCOUNT_DISABLED_CODE } from './account'
-import { ENTRA_PROVIDER_ID, entraSignIn } from './entra'
+import { entraSignIn, SSO_PROVIDER_IDS } from './entra'
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
   typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined
@@ -135,7 +135,10 @@ export const auditAuthResponse = createAuthMiddleware(async (ctx) => {
       })
       return
     }
-    if (path.startsWith('/callback/') && asRecord(ctx.params)?.id === ENTRA_PROVIDER_ID) {
+    if (
+      path.startsWith('/callback/') &&
+      SSO_PROVIDER_IDS.includes(String(asRecord(ctx.params)?.id))
+    ) {
       // A POST (form_post) only re-dispatches to the GET, which writes the line.
       if (ctx.method !== 'POST') await auditEntraCallback(asRecord(ctx.query), context)
       return

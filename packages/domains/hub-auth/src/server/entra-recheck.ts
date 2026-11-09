@@ -62,9 +62,9 @@ import type { HubRole } from '../shared/types'
 import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import {
-  ENTRA_PROVIDER_ID,
   type EntraFetch,
-  type EntraSsoConfig,
+  type SsoConfig,
+  ssoProvider,
   EntraTokenError,
   entraKeySet,
   evaluateRefreshedIdToken,
@@ -106,7 +106,9 @@ export interface RecheckReport {
 }
 
 export interface EntraRecheckOptions {
-  cfg: EntraSsoConfig
+  /** The SSO setup. Role modes `entra-app-roles` and `hub` only: the IdP-role mode
+   *  revalidates through ./idp-roles.ts instead (the hub never starts both). */
+  cfg: SsoConfig
   /** Test seam: the token endpoint and the key set are reached through it. */
   fetch?: EntraFetch
   timeoutMs?: number
@@ -186,7 +188,7 @@ export function createEntraRecheck(auth: HubAuth, opts: EntraRecheckOptions): En
   ): Promise<RecheckOutcome> {
     const ctx = await auth.$context
     const current = (await ctx.internalAdapter.findAccountByKey({
-      providerId: ENTRA_PROVIDER_ID,
+      providerId: ssoProvider(cfg).providerId,
       accountId: account.accountId
     })) as AccountRow | null
     if (current && current.refreshToken !== storedToken) {
@@ -371,7 +373,7 @@ export function createEntraRecheck(auth: HubAuth, opts: EntraRecheckOptions): En
         const ctx = await auth.$context
         const accounts = (await ctx.adapter.findMany({
           model: 'account',
-          where: [{ field: 'providerId', value: ENTRA_PROVIDER_ID }],
+          where: [{ field: 'providerId', value: ssoProvider(cfg).providerId }],
           limit: ACCOUNT_LIMIT
         })) as AccountRow[]
         for (const account of accounts) {

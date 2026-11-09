@@ -86,6 +86,12 @@ export interface DirectLinkIssuerDeps {
   onChatOwnershipChange?: (listener: (tabIds: readonly string[]) => void) => () => void
   /** WebRTC offers per user, and per client address, per minute. Default 30. */
   signalLimitPerMinute?: number
+  /**
+   * IdP-role mode: when the user's role evidence expires (Unix ms; null = no limit). A
+   * grant never outlives it — its TTL is cut to the deadline, and the computer closes
+   * the direct connection when the grant expires — and none is issued past it.
+   */
+  accessDeadlineMs?: (userId: string) => number | null
 }
 
 /** What the client says it can use (`computers.issueDirectLink` input). */
@@ -293,13 +299,20 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         // request would, not a silent fallback.
         await deps.gate?.(computer.computerId, located.work)
 
+        // Never past the caller's role-evidence deadline (IdP-role mode).
+        let ttlMs = DIRECT_GRANT_TTL_MS
+        if (deps.accessDeadlineMs && caller.userId !== null) {
+          const deadline = deps.accessDeadlineMs(caller.userId)
+          if (deadline !== null) ttlMs = Math.min(ttlMs, Math.floor(deadline - now()))
+          if (ttlMs <= 0) return { available: false, reason: 'revoked' }
+        }
         const token = randomBytes(32).toString('base64url')
         const params: DirectGrantParams = {
           grantId: randomUUID(),
           tokenHash: createHash('sha256').update(token).digest('hex'),
           userId: caller.userId,
           resource: located.resource,
-          ttlMs: DIRECT_GRANT_TTL_MS
+          ttlMs
         }
         prune()
         const held: IssuedGrant = {

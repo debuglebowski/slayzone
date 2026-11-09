@@ -68,6 +68,21 @@ export const SECURITY_EVENTS = [
   'user.enable',
   /** Includes the boot-time first-admin promotion (`detail.reason: 'first_admin'`). */
   'user.role_change',
+  // The IdP-role mode (hub-auth `idp-roles.ts`): the shared contract's audit events
+  // (@normain/idp-role-contract `AuditEventName`), one name for every service. `detail`
+  // is the contract's AuditEvent: service, actor, subject, source, previousGrants,
+  // newGrants, reason — opaque ids and reason codes, never a token.
+  /** A role taken from a verified sign-in. */
+  'idp_roles.granted',
+  /** No mapped role (or no fresh evidence): denied, sessions and credentials revoked. */
+  'idp_roles.denied',
+  /** A verified token refresh confirmed the role (changed or not). */
+  'idp_roles.revalidated',
+  /** An in-hub role change refused (409 ROLES_MANAGED_BY_IDP). */
+  'idp_roles.local_change_refused',
+  /** The mode was activated (or its role config changed): every human session and
+   *  credential invalidated once. */
+  'idp_roles.activation',
   // Computers: enrollment credentials and lifecycle.
   'computer.join_token.mint',
   'computer.join_token.redeem',
