@@ -55,6 +55,60 @@ setChatDeps({
 const ctx = { db: {} as never, dataRoot: '' }
 
 describe('chat router', () => {
+  test.each(['start', 'hydrate', 'interrupt'] as const)(
+    'scoped %s uses only the server-resolved launch',
+    async (method) => {
+      const previous = getChatDeps()
+      const target = { taskId: 'task', tabId: 'tab' }
+      const resolved = {
+        ...target,
+        mode: 'claude-chat',
+        cwd: '/stored',
+        providerFlagsOverride: '--verbose'
+      }
+      const got: unknown[] = []
+      const scopedCtx = {
+        ...ctx,
+        principal: { userId: 'user', role: 'user' as const, scopes: ['agent'] as const }
+      }
+      setChatDeps({
+        ...previous,
+        resolveScopedLaunch: async (input, context) => {
+          expect(input).toEqual(target)
+          expect(context).toMatchObject(scopedCtx)
+          return resolved
+        },
+        ops: {
+          ...previous.ops,
+          [method]: async (input: unknown) => {
+            got.push(input)
+          }
+        }
+      })
+      try {
+        await chatRouter.createCaller(scopedCtx)[method]({
+          ...target,
+          mode: 'attacker',
+          cwd: '/attacker',
+          providerFlagsOverride: '--attacker',
+          ...(method === 'start' ? { reason: 'restore' as const } : {})
+        })
+        expect(got).toEqual([{ ...resolved, ...(method === 'start' ? { reason: 'restore' } : {}) }])
+        setChatDeps({ ...getChatDeps(), resolveScopedLaunch: undefined })
+        await expect(chatRouter.createCaller(scopedCtx)[method]({ ...resolved })).rejects.toThrow(
+          'Scoped chat launch is unavailable'
+        )
+        expect(got).toHaveLength(1)
+        await chatRouter
+          .createCaller({ ...ctx, principal: { ...scopedCtx.principal, scopes: ['full'] } })
+          [method]({ ...resolved, cwd: '/desktop' })
+        expect(got[1]).toEqual({ ...resolved, cwd: '/desktop' })
+      } finally {
+        setChatDeps(previous)
+      }
+    }
+  )
+
   test('computer storage test ports refuse production calls and delegate only in explicit test mode', async () => {
     const previous = getChatDeps(),
       saved = process.env.PLAYWRIGHT,

@@ -94,6 +94,7 @@ import {
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
+  checkOwnership,
   resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
@@ -119,6 +120,7 @@ import {
   setTaskDeps,
   getTaskOp,
   resolveMainAgentLaunch,
+  resolveChatAgentLaunch,
   startMainAgent,
   type TaskRuntimeAdapters
 } from '@slayzone/task/server'
@@ -1068,6 +1070,18 @@ export function composeServer(opts: {
   })
   setChatDeps({
     ...computerChat.relay,
+    resolveScopedLaunch: async (target, ctx) => {
+      const launch = await resolveChatAgentLaunch(db, target, (id) => getTaskOp(db, id))
+      // The first owner gate checked client input. Check the actual stored folder
+      // too: editing a task must not let a launch enter another user's project.
+      await checkOwnership({
+        ctx,
+        path: 'chat.start',
+        type: 'mutation',
+        getRawInput: async () => launch
+      })
+      return launch
+    },
     computers: computerChat.computers,
     testing: computerChat.testing,
     availability: computerChat.availability,

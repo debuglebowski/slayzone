@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { clearAllConversationIds, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
+import { getProviderFlags } from '@slayzone/task-contracts/types'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
 import { getRuntimeAdapters } from './ops/shared'
@@ -29,6 +30,7 @@ import { getChatDeps, getPtyDeps } from '@slayzone/terminal/hub'
 import {
   isChatSupported,
   spawnConversationIds,
+  type ChatCreateOpts,
   type TerminalState
 } from '@slayzone/terminal-contracts'
 import {
@@ -140,24 +142,60 @@ export async function resolveMainAgentLaunch(
     kind: isChatSupported(props.mode) ? 'chat' : 'pty',
     props,
     providerFlagsOverride: props.providerFlags ?? null,
-    async resolveCwd() {
-      // The project's folder on the computer this task's work runs on — where its
-      // worktrees are and where the task's other agents start.
-      const projectRoot = await getRuntimeAdapters().projectRootForTask(db, taskId, task.project_id)
-      const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
-        ? await detectChildRepos(taskId, projectRoot!)
-        : []
-      const cwd = mainTerminalCwd(task, project, projectRoot, detected)
-      if (!cwd) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message:
-            "This task has no folder to run in: set the project's folder or the task's base dir"
-        })
-      }
-      return cwd
-    }
+    resolveCwd: () => resolveTaskAgentCwd(db, task, project)
   }
+}
+
+/** Resolve a scoped chat launch from stored task/tab state, never client launch options. */
+export async function resolveChatAgentLaunch(
+  db: SlayzoneDb,
+  { taskId, tabId }: { taskId: string; tabId: string },
+  getTask: (taskId: string) => Promise<Task | null>
+): Promise<ChatCreateOpts> {
+  const tab = await db.get<{ task_id: string; mode: string; is_main: number }>(
+    'SELECT task_id,mode,is_main FROM terminal_tabs WHERE id=?',
+    [tabId]
+  )
+  if (!tab || tab.task_id !== taskId)
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  const task = await getTask(taskId)
+  if (!task) throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found' })
+  const mode = tab.is_main ? task.agent_id : tab.mode
+  const agent = (await getPtyDeps().ops.agentsList()).find((a) => a.id === mode)
+  if (!isChatSupported(mode) || !agent?.enabled) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Select an enabled chat agent for this tab'
+    })
+  }
+  const project = parseProject(
+    await db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', [task.project_id])
+  )
+  return {
+    tabId,
+    taskId,
+    mode,
+    cwd: await resolveTaskAgentCwd(db, task, project),
+    providerFlagsOverride: tab.is_main ? getProviderFlags(task.provider_config, mode) : null
+  }
+}
+
+async function resolveTaskAgentCwd(
+  db: SlayzoneDb,
+  task: Task,
+  project: ReturnType<typeof parseProject>
+): Promise<string> {
+  const projectRoot = await getRuntimeAdapters().projectRootForTask(db, task.id, task.project_id)
+  const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
+    ? await detectChildRepos(task.id, projectRoot!)
+    : []
+  const cwd = mainTerminalCwd(task, project, projectRoot, detected)
+  if (!cwd)
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: "This task has no folder to run in: set the project's folder or the task's base dir"
+    })
+  return cwd
 }
 
 async function startOnce(

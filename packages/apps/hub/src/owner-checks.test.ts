@@ -37,6 +37,8 @@ import {
   type ResourceKind
 } from '@slayzone/api'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
+import { getChatDeps, setChatDeps, getPtyDeps, setPtyDeps } from '@slayzone/terminal/server'
+import { mintWebSession, DEFAULT_WEB_LOGIN_SCOPES } from './web-sessions'
 import {
   BY_MUTATION,
   EMIT,
@@ -223,6 +225,70 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
     raw?.close()
     for (const c of [ca, cb, cadmin]) c?.close()
     await hub?.stop()
+  })
+
+  test('scoped web chat startup resolves stored options and refuses foreign tasks', async () => {
+    const chat = getChatDeps(),
+      pty = getPtyDeps()
+    const session = await mintWebSession(db, {
+      userId: users.a.userId,
+      scopes: DEFAULT_WEB_LOGIN_SCOPES
+    })
+    const web = hubClient(hub, session.token)
+    const seen: unknown[] = []
+    setPtyDeps({
+      ...pty,
+      ops: { ...pty.ops, agentsList: async () => [{ id: 'claude-chat', enabled: true }] as never }
+    })
+    setChatDeps({
+      ...chat,
+      ops: {
+        ...chat.ops,
+        start: async (input) => {
+          seen.push(input)
+          return null as never
+        },
+        hydrate: async (input) => {
+          seen.push(input)
+          return null as never
+        }
+      }
+    })
+    raw.prepare("UPDATE terminal_tabs SET mode='claude-chat' WHERE id=?").run(A.tab)
+    const input = {
+      taskId: A.task,
+      tabId: A.tab,
+      mode: 'forged-mode',
+      cwd: A.path,
+      providerFlagsOverride: '--forged-flags'
+    }
+    try {
+      await web.client.chat.hydrate.mutate(input)
+      await web.client.chat.start.mutate({ ...input, reason: 'user' })
+      const launch = {
+        taskId: A.task,
+        tabId: A.tab,
+        mode: 'claude-chat',
+        cwd: A.path,
+        providerFlagsOverride: null
+      }
+      expect(seen).toEqual([launch, { ...launch, reason: 'user' }])
+      await expect(
+        web.client.chat.start.mutate({ ...input, taskId: B.task, tabId: B.tab })
+      ).rejects.toMatchObject({ data: { code: 'NOT_FOUND' } })
+      await expect(web.client.chat.start.mutate({ ...input, tabId: A.task })).rejects.toThrow(
+        'chat agent'
+      )
+      expect(seen).toHaveLength(2)
+      await expect(
+        web.client.pty.create.mutate({ sessionId: 'forged' } as never)
+      ).rejects.toMatchObject({ data: { code: 'FORBIDDEN' } })
+    } finally {
+      web.close()
+      setChatDeps(chat)
+      setPtyDeps(pty)
+      raw.prepare("UPDATE terminal_tabs SET mode='claude-code' WHERE id=?").run(A.tab)
+    }
   })
 
   // ── 1. every id-checked procedure, every id: NOT_FOUND for B and the admin ──

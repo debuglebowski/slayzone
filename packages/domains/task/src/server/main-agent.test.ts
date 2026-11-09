@@ -23,7 +23,7 @@ import { taskRouter } from './task-router'
 import { setTaskDeps } from './task-router-deps'
 import { taskOps } from './task-ops-bundle'
 import { configureTaskRuntimeAdapters, getRuntimeAdapters } from './ops/shared'
-import { setMainAgentDeps } from './main-agent'
+import { resolveChatAgentLaunch, setMainAgentDeps } from './main-agent'
 
 const h = await createTestHarness()
 // The task's current conversation per mode, as the agent-session ledger would answer
@@ -167,6 +167,58 @@ function seedTask(
     )
   return id
 }
+
+describe('stored chat launch', () => {
+  test('resolves main and extra tabs from stored settings', async () => {
+    const taskId = seedTask(seedProject('/p'), {
+      mode: 'claude-chat',
+      flags: '--verbose',
+      baseDir: '/base'
+    })
+    await caller.startMainAgent({ taskId })
+    const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+    expect(await resolveChatAgentLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)).toEqual({
+      taskId,
+      tabId: taskId,
+      mode: 'claude-chat',
+      cwd: '/base',
+      providerFlagsOverride: '--verbose'
+    })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES(?,?,?,1)')
+      .run('extra', taskId, 'claude-chat')
+    expect(await resolveChatAgentLaunch(h.slayDb, { taskId, tabId: 'extra' }, getTask)).toEqual({
+      taskId,
+      tabId: 'extra',
+      mode: 'claude-chat',
+      cwd: '/base',
+      providerFlagsOverride: null
+    })
+    const other = seedTask(seedProject('/other'), { mode: 'claude-chat' })
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId: other, tabId: 'extra' }, getTask)
+    ).rejects.toThrow('Not found')
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId, tabId: 'missing' }, getTask)
+    ).rejects.toThrow('Not found')
+  })
+
+  test('refuses terminal modes and tasks without a folder', async () => {
+    const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+    const taskId = seedTask(seedProject('/p'))
+    await caller.startMainAgent({ taskId })
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)
+    ).rejects.toThrow('chat agent')
+    const noFolder = seedTask(seedProject(null), { mode: 'claude-chat' })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,is_main,position) VALUES(?,?,?,1,0)')
+      .run(noFolder, noFolder, 'claude-chat')
+    await expect(
+      resolveChatAgentLaunch(h.slayDb, { taskId: noFolder, tabId: noFolder }, getTask)
+    ).rejects.toThrow('no folder')
+  })
+})
 
 describe('terminal (pty) agents', () => {
   test("starts the agent with the task's own props and ensures its main tab", async () => {
