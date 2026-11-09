@@ -25,9 +25,10 @@ describe('on a Windows computer', () => {
     dir = mkdtempSync(join(tmpdir(), 'resolve-win-'))
     mkdirSync(join(dir, 'bin'))
     writeFileSync(join(dir, 'bin', 'claude'), '#!/bin/sh\n')
-    writeFileSync(join(dir, 'bin', 'claude.cmd'), '@echo off\r\n')
+    writeFileSync(join(dir, 'bin', 'claude.CMD'), '@echo off\r\n')
     const env = { PATH: join(dir, 'bin'), PATHEXT: '.COM;.EXE;.BAT;.CMD' }
-    // PATHEXT spells it .CMD; Windows (like this test's disk) matches case-insensitively.
+    // Named as PATHEXT spells it (.CMD): Windows matches case-insensitively, but this also
+    // runs on case-sensitive POSIX disks (CI's Linux), where only that spelling exists.
     expect(resolveCommand('claude', env, dir, 'win32')?.toLowerCase()).toBe(
       join(dir, 'bin', 'claude.cmd').toLowerCase()
     )

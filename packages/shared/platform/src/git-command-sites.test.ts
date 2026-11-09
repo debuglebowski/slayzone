@@ -5,7 +5,7 @@
  * `execCapture`).
  */
 import { readdirSync, readFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { expect, test } from 'vitest'
 
 const repo = resolve(import.meta.dirname, '../../../..')
@@ -31,7 +31,8 @@ test('no production code spawns git by its bare name', () => {
   const hits: string[] = []
   for (const root of ['packages/apps', 'packages/domains', 'packages/shared']) {
     for (const file of sources(join(repo, root))) {
-      const rel = relative(repo, file)
+      // POSIX separators on every OS, so the prefix check below also holds on Windows.
+      const rel = relative(repo, file).split(sep).join('/')
       if (rel.startsWith('packages/shared/test-utils/')) continue
       const text = readFileSync(file, 'utf8')
       for (const m of text.matchAll(BARE_GIT)) {

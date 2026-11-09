@@ -91,17 +91,19 @@ describe.skipIf(process.platform === 'win32')('createCommandResolver', () => {
   })
 })
 
+// Each file is named with its PATHEXT spelling: Windows matches suffixes case-insensitively,
+// but these run on case-sensitive POSIX disks too (CI's Linux), where only that spelling exists.
 describe('createCommandResolver on Windows', () => {
   it('keeps the bare name for a .cmd/.bat: spawn without a shell cannot run those', () => {
     dir = mkdtempSync(join(tmpdir(), 'resolve-cached-'))
-    writeFileSync(join(dir, 'git.cmd'), '@echo off\r\n')
+    writeFileSync(join(dir, 'git.CMD'), '@echo off\r\n')
     const resolve = createCommandResolver('git', 'win32')
     expect(resolve({ PATH: dir, PATHEXT: '.CMD' })).toBe('git')
   })
 
   it('caches git.exe', () => {
     dir = mkdtempSync(join(tmpdir(), 'resolve-cached-'))
-    writeFileSync(join(dir, 'git.exe'), '')
+    writeFileSync(join(dir, 'git.EXE'), '')
     const resolve = createCommandResolver('git', 'win32')
     expect(resolve({ Path: dir, PATHEXT: '.EXE' })?.toLowerCase()).toBe(
       join(dir, 'git.exe').toLowerCase()
