@@ -19,17 +19,23 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage } from './storage'
 import { createLocalChatData, type ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
+import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
 
 export function createComputerChatRuntime(opts: {
   stateDir: string
   hubScope: string
   computerId: string
+  /** Offline maintenance must not run another task's scheduled retention/backups. */
+  maintenance?: boolean
   hasExternalTaskWork?(taskId: string): boolean
   sessionReader?: ClaudeSessionReader
   transport?: Partial<TransportDeps>
   onMetadata?: (update: ChatMetadataUpdate) => void
 }) {
   const storage = openChatStorage(opts)
+  // Register before artifact purge listeners: every deletion delivery captures
+  // retry identifiers before its source records disappear, including old clients.
+  storage.onTaskPurge((taskId) => storage.compose((raw) => prepareStoredTaskErasure(raw, taskId)))
   const diagnosticsConfig = () =>
     storage.getRecord<{ enabled: boolean; verbose: boolean }>(
       '__slz_settings__',
@@ -62,7 +68,7 @@ export function createComputerChatRuntime(opts: {
   transfers.collectActivated()
   const attachments = createLocalAttachments(storage, local)
   const artifacts = createLocalArtifacts(storage, local, attachments)
-  const backups = createChatBackups(storage)
+  const backups = createChatBackups(storage, { automatic: !opts.maintenance })
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
@@ -169,6 +175,7 @@ export function createComputerChatRuntime(opts: {
   const invoke = createChatInvoker({ storage, local, ops, queueOps })
   const tabTransitions = new Map<string, Promise<ChatTabTransition['to']>>()
   retention = createChatRetention({
+    automatic: !opts.maintenance,
     storage,
     local,
     busy: (owner) => {
@@ -287,6 +294,24 @@ export function createComputerChatRuntime(opts: {
       }
       return applied
     },
+    async eraseTask(taskId: string, revision: number, stopExternal?: () => Promise<void>) {
+      storage.compose((raw) => prepareStoredTaskErasure(raw, taskId))
+      const closing = storage
+        .listForTask(taskId)
+        .map((o) => transport.removeSession(o.identity.tabId))
+      const applied = storage.applyTaskLifecycle(taskId, 'deleted', revision)
+      if (applied.state !== 'deleted' || applied.revision !== revision)
+        throw new Error('Stale computer erasure request')
+      await stopExternal?.()
+      await Promise.all(closing)
+      transfers.removeTask(taskId)
+      artifacts.cleanupDeletedTasks()
+      await artifacts.retryErasures(taskId)
+      artifacts.collectGarbage()
+      storage.compose((raw) => finishStoredTaskErasure(raw, storage.dir, taskId))
+      await backups.eraseTask(taskId)
+      return { taskId, revision, erased: true as const }
+    },
     async close() {
       if (closed) return
       closed = true
@@ -295,7 +320,7 @@ export function createComputerChatRuntime(opts: {
       await queueRuntime.close()
       await transport.shutdownAll()
       transfers.close()
-      artifacts.close()
+      await artifacts.close()
       storage.close()
     }
   }

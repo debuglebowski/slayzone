@@ -1431,6 +1431,27 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'diagnostics.getConfig': none(HUB_CONFIG),
   'diagnostics.setConfig': none(HUB_CONFIG),
   'hub.setLabel': none(HUB_CONFIG),
+  'hub.users.list': none('account management metadata only; no user content'),
+  'hub.users.access': none('the current caller role only; no other account or content'),
+  'hub.users.disable': none('account access revocation, without content access'),
+  'hub.users.previewErasure': none('disabled-user erasure counts only; checked in handler'),
+  'hub.users.eraseContent': none(
+    'erase only a disabled user, checked in handler; never returns content'
+  ),
+  'hub.users.erasureReports': none('erasure operation metadata only; checked in handler'),
+  'hub.users.retryErasure': none('retry confirmed disabled-user erasure; checked in handler'),
+  'hub.users.erasureReceipt': none(
+    'operation metadata only; owner or disabled-user admin authority checked in handler'
+  ),
+  'hub.erasure.reports': none(
+    'operation metadata only; owner or disabled-user admin authority checked in handler'
+  ),
+  'hub.erasure.retry': none(
+    'operation metadata only; owner or disabled-user admin authority checked in handler'
+  ),
+  'hub.erasure.receipt': none(
+    'operation metadata only; owner or disabled-user admin authority checked in handler'
+  ),
   'testPanel.saveProfile': none(`${HUB_CONFIG}: test profiles (a hub-wide setting)`),
   'testPanel.deleteProfile': none(`${HUB_CONFIG}: test profiles (a hub-wide setting)`)
 }

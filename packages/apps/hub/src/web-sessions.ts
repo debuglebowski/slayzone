@@ -31,7 +31,12 @@ import {
   runAsSecurityActor,
   securityEvent
 } from '@slayzone/platform/security-log'
-import { findHubAccount, type HubAuth, isEntraSsoAuth } from '@slayzone/hub-auth/server'
+import {
+  authorizeExternalSession,
+  findHubAccount,
+  type HubAuth,
+  isEntraSsoAuth
+} from '@slayzone/hub-auth/server'
 import type { HubRole } from '@slayzone/hub-auth'
 import type { Scope } from '@slayzone/api'
 
@@ -217,7 +222,8 @@ export async function mintWebSession(
 }
 
 export type VerifyWebSessionResult =
-  | { ok: true; userId: string; scopes: Scope[] }
+  /** `createdAt`: Unix ms the session was created (the IdP-role epoch check). */
+  | { ok: true; userId: string; scopes: Scope[]; createdAt: number }
   | { ok: false; reason: 'unknown' | 'revoked' | 'expired' }
 
 /**
@@ -265,7 +271,7 @@ export async function verifyWebSessionToken(
     return { ok: false, reason: 'unknown' } // corrupt row — treat as no session
   }
   if (!Array.isArray(scopes)) return { ok: false, reason: 'unknown' }
-  return { ok: true, userId: row.user_id, scopes: scopes as Scope[] }
+  return { ok: true, userId: row.user_id, scopes: scopes as Scope[], createdAt: row.created_at }
 }
 
 /** The principal a live web session resolves to. */
@@ -273,6 +279,8 @@ export interface WebSessionPrincipal {
   userId: string
   role: HubRole
   scopes: Scope[]
+  /** When the web session was created (Unix ms): the per-operation check reads it. */
+  session: { createdAtMs: number }
 }
 
 /**
@@ -284,6 +292,10 @@ export interface WebSessionPrincipal {
  * its role. Disabling an account revokes its rows (`revokeAllWebSessions`); this is
  * the second line, for a row that exists anyway. No hub-auth instance → null: the
  * account cannot be checked, so the session is not honoured.
+ *
+ * IdP-role mode (hub-auth idp-roles.ts): also null unless the row was created in the
+ * current activation epoch and the account's role evidence is fresh (revalidated at the
+ * issuer inline when due); the role is the freshly proven one.
  */
 export async function resolveWebSession(
   auth: HubAuth | null,
@@ -294,7 +306,14 @@ export async function resolveWebSession(
   if (!result.ok || !auth) return null
   const account = await findHubAccount(auth, result.userId)
   if (!account || account.disabled) return null
-  return { userId: result.userId, role: account.role, scopes: result.scopes }
+  const idp = await authorizeExternalSession(auth, result.userId, result.createdAt)
+  if (!idp.ok) return null
+  return {
+    userId: result.userId,
+    role: idp.role ?? account.role,
+    scopes: result.scopes,
+    session: { createdAtMs: result.createdAt }
+  }
 }
 
 /**

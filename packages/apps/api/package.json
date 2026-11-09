@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/api",
-  "version": "0.38.0",
+  "version": "0.38.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -14,12 +14,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@normain/idp-role-contract": "file:../../../vendor/normain-idp-role-contract-0.1.0.tgz",
     "@slayzone/agent-panels": "workspace:*",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/automations": "workspace:*",
     "@slayzone/chat-runtime": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/feedback": "workspace:*",

@@ -72,6 +72,7 @@ import {
   type SsoBrowserSession,
   ssoSessionFromCookie
 } from './sso-page'
+import { IDP_REVALIDATION_REQUIRED, withIssuanceBinding } from './idp-roles'
 
 /** The start and return legs. Under `/api/auth/` but the hub's, not better-auth's. */
 export const APP_SIGN_IN_PATH = '/api/auth/app-sso'
@@ -141,6 +142,9 @@ interface IssuedCode {
   replayed: boolean
   /** The session the exchange minted, revoked on a replay. */
   sessionToken: string | null
+  /** When the browser's SSO session that confirmed this code was created (ms): the
+   *  IdP-role mode mints from it only under the grant that session was made in. */
+  authAtMs: number
 }
 
 interface SignOutApi {
@@ -396,7 +400,8 @@ export function createAppSignIn(
       requestRef,
       used: false,
       replayed: false,
-      sessionToken: null
+      sessionToken: null,
+      authAtMs: sso.createdAt
     })
     securityEvent({
       event: 'auth.app_sso.code',
@@ -514,16 +519,18 @@ export function createAppSignIn(
     let session: { token: string }
     try {
       session = await runAsSecurityActor(issued.userId, () =>
-        ctx.internalAdapter.createSession(
-          issued.userId,
-          false,
-          {
-            signInMethod: SIGN_IN_METHOD.app,
-            ipAddress: typeof address === 'string' ? address : '',
-            userAgent:
-              typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : ''
-          },
-          true
+        withIssuanceBinding({ authAtMs: issued.authAtMs }, () =>
+          ctx.internalAdapter.createSession(
+            issued.userId,
+            false,
+            {
+              signInMethod: SIGN_IN_METHOD.app,
+              ipAddress: typeof address === 'string' ? address : '',
+              userAgent:
+                typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : ''
+            },
+            true
+          )
         )
       )
     } catch (err) {
@@ -533,6 +540,14 @@ export function createAppSignIn(
         (err.body as { code?: unknown } | undefined)?.code === ACCOUNT_DISABLED_CODE
       ) {
         json(res, 403, { error: 'access_denied', code: ACCOUNT_DISABLED_CODE })
+        return
+      }
+      // IdP-role mode: the code was confirmed under a grant that no longer stands.
+      if (
+        isAPIError(err) &&
+        (err.body as { code?: unknown } | undefined)?.code === IDP_REVALIDATION_REQUIRED
+      ) {
+        json(res, 403, { error: 'access_denied', code: IDP_REVALIDATION_REQUIRED })
         return
       }
       throw err

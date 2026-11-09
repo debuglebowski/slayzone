@@ -234,7 +234,7 @@ describe('signInWithMicrosoft', () => {
     const session = authSession(() => ({ type: 'cancel' }))
     expect(await run(hub, session).result).toEqual({
       ok: false,
-      error: 'This hub does not offer Microsoft sign-in'
+      error: 'This hub does not offer single sign-on'
     })
     expect(session.open).not.toHaveBeenCalled()
   })

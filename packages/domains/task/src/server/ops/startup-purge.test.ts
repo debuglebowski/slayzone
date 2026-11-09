@@ -173,7 +173,7 @@ test('purge: scratch terminals survive regardless of any user tab state', async 
   expect(ids.has('orphan')).toBe(true)
 })
 
-test('purge: deleted tasks remain recoverable for 30 days', async () => {
+test('startup never deletes content based on its age', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   seedProject(h, projectId, 'TrashRetention')
@@ -189,10 +189,10 @@ test('purge: deleted tasks remain recoverable for 30 days', async () => {
     .map((row) => (row as { id: string }).id)
   expect(ids).toContain('deleted-hour')
   expect(ids).toContain('deleted-29-days')
-  expect(ids).not.toContain('deleted-31-days')
+  expect(ids).toContain('deleted-31-days')
 })
 
-test('Trash: lists only recoverable deletions in the selected project and restores them', async () => {
+test('legacy Trash listing is empty; new erasure has no recoverable deletion window', async () => {
   const h = await createTestHarness()
   const projectId = crypto.randomUUID()
   const otherProject = crypto.randomUUID()
@@ -203,7 +203,7 @@ test('Trash: lists only recoverable deletions in the selected project and restor
   insert.run('recent', projectId, 'Recover me', '-2 days')
   insert.run('expired', projectId, 'Expired', '-31 days')
   insert.run('other-owner', otherProject, 'Other owner', '-1 hour')
-  expect((await getDeletedTasksOp(h.slayDb, projectId)).map((t) => t.id)).toEqual(['recent'])
+  expect(await getDeletedTasksOp(h.slayDb, projectId)).toEqual([])
   const restored = await restoreTaskOp(h.slayDb, 'recent', {})
   expect(h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get('recent')).toEqual({
     deleted_at: null

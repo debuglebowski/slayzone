@@ -10,6 +10,8 @@ import {
 } from 'node:fs'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { z } from 'zod'
+import { startErasureRetries, resumeErasure } from '@slayzone/content-erasure/server'
+import type { ErasureManifest } from '@slayzone/content-erasure/server'
 import { join } from 'node:path'
 import {
   createStandaloneArtifacts,
@@ -257,6 +259,7 @@ export function createLocalArtifacts(
   } catch {
     // A damaged deleted task must not make unrelated live history unavailable.
   }
+  const erasureRetries = startErasureRetries(db, storage.dir)
   async function checkArtifact(id: string, taskId: string) {
     const a = await store.getArtifact(db, id)
     if (!a || a.task_id !== taskId) throw new Error('Artifact is outside this task')
@@ -569,9 +572,24 @@ export function createLocalArtifacts(
   return {
     invoke,
     cleanupDeletedTasks,
-    close() {
+    async close() {
       closed = true
       if (cleanupTimer) clearTimeout(cleanupTimer)
+      await erasureRetries.close()
+    },
+    async retryErasures(taskId: string) {
+      for (const row of await db.all<{ id: string; manifest: string }>(
+        "SELECT id,manifest FROM content_erasure_jobs WHERE state='incomplete'"
+      )) {
+        const manifest = JSON.parse(row.manifest) as ErasureManifest
+        if (
+          !manifest.taskIds.includes(taskId) &&
+          !manifest.artifactTasks.some((a) => a.taskId === taskId)
+        )
+          continue
+        const report = await resumeErasure(db, storage.dir, row.id)
+        if (report.state !== 'complete') throw new Error('Computer file erasure has not finished')
+      }
     },
     deleteFolders,
     deletedFolderInventory(after: number) {

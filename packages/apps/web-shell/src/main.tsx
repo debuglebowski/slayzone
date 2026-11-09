@@ -11,6 +11,7 @@ import { setupWindowApi } from './window-api'
 import { authInvalidationLink } from './auth-invalidation-link'
 import { LoginScreen } from './LoginScreen'
 import { SignOutControl } from './SignOutControl'
+import { signInErrorMessage } from '@slayzone/hub-auth/client'
 import { fetchHubSignIn } from './hub-health'
 import { fetchSignedIn } from './web-session'
 import { clearLegacySessionToken } from './web-session-storage'
@@ -53,7 +54,18 @@ async function boot(): Promise<void> {
   // enforces auth; there the session is the hub's HttpOnly cookie, which this page
   // cannot read, so it asks the hub whether this browser holds a live one.
   if (signIn.authRequired && !(await fetchSignedIn())) {
-    createRoot(el).render(<LoginScreen methods={signIn.methods} signInError={signInError} />)
+    createRoot(el).render(
+      <LoginScreen
+        methods={signIn.methods}
+        signInError={
+          // Worded for this hub's provider (the error was read before /health answered).
+          signInError && signIn.ssoLabel
+            ? { ...signInError, message: signInErrorMessage(signInError.code, signIn.ssoLabel) }
+            : signInError
+        }
+        {...(signIn.ssoLabel ? { ssoLabel: signIn.ssoLabel } : {})}
+      />
+    )
     return
   }
 

@@ -121,7 +121,7 @@ export type {
   WorktreeExecAdapters,
   WorktreePolicyAdapters
 } from './ops/shared'
-export { purgeExpiredTrash, purgeStaleAndOrphanedTasks } from './ops/startup-purge'
+export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
   TaskRuntimeAdapters,

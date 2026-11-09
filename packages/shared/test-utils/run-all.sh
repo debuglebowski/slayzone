@@ -63,6 +63,18 @@ run_harness packages/domains/task/src/server/ops/conversation-id-heal.test.ts
 run_harness packages/domains/task/src/server/conversation-healer.test.ts
 run_harness packages/domains/task/src/server/ops/task-conversations.test.ts
 run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
+run_harness packages/domains/task/src/server/ops/permanent-delete.test.ts
+run_harness packages/domains/content-erasure/src/server/erasure.test.ts
+run_harness packages/domains/task-artifacts/src/server/permanent-delete.test.ts
+run_harness packages/domains/content-erasure/src/server/admin.test.ts
+run_harness packages/domains/content-erasure/src/server/restore.test.ts
+run_harness packages/domains/content-erasure/src/server/router.test.ts
+run_harness packages/domains/chat-runtime/src/server/computer-erasure.test.ts
+run_harness packages/domains/diagnostics/src/server/content-erasure.test.ts
+run_harness packages/apps/computer/src/offline-erasure.test.ts
+run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
+run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
+run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts
@@ -142,6 +154,11 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 # T-19: a computer works only for its owner — bindings, auto-pick, the exec gate.
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
+run_harness packages/apps/hub/src/trpc-connections.test.ts
+# An open /trpc socket fenced by persisted IdP-role state changed by another runtime.
+run_harness packages/apps/hub/src/trpc-live-fence.test.ts
+# The IdP-role mode through native hub routes + the shared contract's acceptance suite.
+run_harness packages/apps/hub/src/idp-roles-acceptance.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
 run_harness packages/apps/hub/src/chat-relay-watch.test.ts
 run_harness packages/apps/hub/src/user-access.test.ts

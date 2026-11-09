@@ -30,6 +30,7 @@ import type {
 import { CHAT_STORAGE_SCHEMA_VERSION, type ChatStorage } from './storage'
 import { captureArtifactWorkingFiles } from './artifact-backup'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
+import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const activeBackupStaging = new Set<string>()
 
@@ -142,7 +143,7 @@ function durableJson(path: string, value: unknown) {
 }
 
 /** Online SQLite snapshot + immutable referenced blobs. Restore never opens a live runtime. */
-export function createChatBackups(store: ChatStorage) {
+export function createChatBackups(store: ChatStorage, options: { automatic?: boolean } = {}) {
   const dir = join(store.dir, 'backups'),
     archiveDir = join(store.dir, 'archives'),
     scope = basename(store.dir)
@@ -570,7 +571,7 @@ export function createChatBackups(store: ChatStorage) {
   function schedule() {
     if (timer) clearTimeout(timer)
     timer = null
-    if (closed || !policy.autoEnabled) return
+    if (closed || options.automatic === false || !policy.autoEnabled) return
     const last = list().find((b) => b.kind === 'auto')?.createdAt ?? 0
     const delay = Math.max(1000, last + policy.intervalMinutes * 60_000 - Date.now())
     timer = setTimeout(() => {
@@ -862,6 +863,53 @@ export function createChatBackups(store: ChatStorage) {
           throw new Error('Archive file integrity failure')
         return { name: row.name, data: readFileSync(path) }
       })
+    },
+    async eraseTask(taskId: string) {
+      // Finish already-started copies before cleaning readable restored copies.
+      // Retained backup snapshots keep their normal retention policy.
+      await Promise.all([...restoring.values()].map((r) => r.work))
+      for (const id of readdirSync(archiveDir).filter((id) => UUID.test(id))) {
+        const path = folder(archiveDir, id),
+          m = manifest(archiveDir, id)
+        const db = new Database(fileWithin(path, 'chat.sqlite'), { fileMustExist: true })
+        try {
+          if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId))
+            continue
+          // A restored copy has no live backup writer; copied leases are stale.
+          db.exec('DELETE FROM blob_leases')
+          if (
+            db
+              .prepare(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_blob_leases'"
+              )
+              .get()
+          )
+            db.exec('DELETE FROM artifact_blob_leases')
+          prepareStoredTaskErasure(db, taskId)
+          finishStoredTaskErasure(db, path, taskId)
+        } finally {
+          db.close()
+        }
+        // Archive manifests describe the remaining readable files. Rebuild after
+        // every retry, including a crash between DB cleanup and manifest publish.
+        m.files = m.files
+          .filter((file) => {
+            try {
+              return existsSync(fileWithin(path, file.path))
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+              throw error
+            }
+          })
+          .map((file) => {
+            const actual = fileWithin(path, file.path)
+            return { ...file, size: statSync(actual).size, hash: hashFile(actual) }
+          })
+        const next = join(path, `.erasure-${randomUUID()}.json`)
+        durableJson(next, m)
+        renameSync(next, join(path, 'manifest.json'))
+        await syncDir(path)
+      }
     },
     async close() {
       closed = true

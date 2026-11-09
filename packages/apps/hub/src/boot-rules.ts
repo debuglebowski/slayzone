@@ -11,13 +11,16 @@
  *                           SLAYZONE_HUB_ADDRESS · B8 public address is host[:port] ·
  *                           B15 trusted proxies are IPs/CIDRs ·
  *                           B16 session retention is a whole number of days ·
- *                           B19 STUN servers are host:port authorities
+ *                           B19 STUN servers are host:port authorities ·
+ *                           B20 the IdP-role settings parse (even with the mode off)
  *   Started by the app:     B9 listens on loopback
  *   Reachable off-box:      B1 login required · B3 public address set · B10 no raw-SQL
  *   (B13)                   dev endpoint · B14 auth secret in env · B17 it matches any
  *                           secret this hub generated earlier (`assertKeptAuthSecret`)
- *   Login required:         B2 password or SSO on · B7 SSO settings complete (and
- *                           its certificate loads, `assertSsoCredential`) ·
+ *   Login required:         B2 password or SSO on · B7 SSO settings complete: the
+ *                           Entra tenant setup OR a generic OpenID issuer, never both
+ *                           (and its certificate loads, `assertSsoCredential`) ·
+ *                           B20 the IdP-role mode needs SSO on and password off ·
  *                           B11 the auth database loads (`assertAuthLoaded`, once
  *                           the database has been opened) · B18 the computer
  *                           startup completed and left a project-folder host
@@ -44,8 +47,10 @@ import {
   isBareAuthority,
   parseHubAddress
 } from '@slayzone/platform/hub-addr'
+import { IdpRoleError, parseConfig, type RoleConfig } from '@normain/idp-role-contract'
 import {
   HUB_ADDRESS_ENV,
+  HUB_OIDC_ENV,
   HUB_SSO_ENV,
   HUB_SWITCH_ENV,
   HubSwitchValueError,
@@ -93,6 +98,11 @@ export interface HubBootSettings {
    * owner). `ENABLE_SSO=1` on a hub without login is inert, like B2/B7 there.
    */
   ssoActive: boolean
+  /**
+   * The IdP-role mode's config (B20, the shared contract's `parseConfig` over the
+   * literal `IDP_*` names). `enabled: false` = off, the default.
+   */
+  idpRoles: RoleConfig
   /** The host the hub binds. */
   host: string
   /** `SLAYZONE_HUB_PUBLIC_ADDRESS`, trimmed; undefined when unset or blank. */
@@ -297,7 +307,8 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
     // https://<public address>/api/auth/callback/microsoft, which must be registered on
     // the app and must not move. Whether the certificate actually loads is the second
     // half of B7, checked in server.ts (it reads files; this module does no I/O).
-    if (switches.enableSso) {
+    if (switches.enableSso && sso.issuer !== undefined) assertGenericOidc(env, sso, publicAddress)
+    else if (switches.enableSso) {
       const missing: string[] = []
       if (!sso.tenantId) missing.push(HUB_SSO_ENV.tenantId)
       if (!sso.clientId) missing.push(HUB_SSO_ENV.clientId)
@@ -340,8 +351,132 @@ export function assertHubBootRules(input: HubBootInput): HubBootSettings {
   }
 
   const ssoActive = switches.requireLogin && switches.enableSso
-  return { switches, sso, ssoActive, host, publicAddress, reachable }
+
+  // B20 — the IdP-role mode (the shared contract, @normain/idp-role-contract). Its
+  // settings are parsed on EVERY hub, mode on or off: a malformed value, an unknown
+  // target role, an empty mapping or a retired name (`SLAYZONE_HUB_SSO_*ROLE*`,
+  // Kahuna's and Cloudable's old names) refuses boot rather than being ignored. With the
+  // mode on, roles come only from SSO: SSO must be on and password sign-in off.
+  let idpRoles: RoleConfig
+  try {
+    idpRoles = parseConfig(env, IDP_ROLE_TARGETS)
+  } catch (err) {
+    throw new HubBootRefusal(
+      'B20',
+      `[slayzone] ${err instanceof IdpRoleError ? err.message : 'IdP role settings are invalid'} ` +
+        `(IDP_ROLES_ENABLED, IDP_ROLE_CLAIM, IDP_ROLE_MAPPING, IDP_RECHECK_INTERVAL_SECONDS; ` +
+        `see docs/hub-sso-roles.md).`
+    )
+  }
+  if (idpRoles.enabled && !ssoActive) {
+    throw new HubBootRefusal(
+      'B20',
+      `[slayzone] IDP_ROLES_ENABLED=true takes every role from the identity provider at ` +
+        `sign-in, but SSO sign-in is not on (needs ${HUB_SWITCH_ENV.requireLogin}=1 and ` +
+        `${HUB_SWITCH_ENV.enableSso}=1).`
+    )
+  }
+  if (idpRoles.enabled && switches.enablePassword) {
+    throw new HubBootRefusal(
+      'B20',
+      `[slayzone] IDP_ROLES_ENABLED=true requires ${HUB_SWITCH_ENV.enablePassword}=0: with roles ` +
+        `managed by the identity provider, sign-in is through SSO only (recovery: ` +
+        `\`slayzone-hub break-glass\` on the hub machine).`
+    )
+  }
+
+  return { switches, sso, ssoActive, idpRoles, host, publicAddress, reachable }
 }
+
+/** The hub roles the IdP-role mapping may target. */
+export const IDP_ROLE_TARGETS: readonly string[] = ['admin', 'user']
+
+/** An https issuer URL (no query, no fragment). */
+const isHttpsIssuer = (v: string): boolean => {
+  try {
+    const u = new URL(v)
+    return u.protocol === 'https:' && !u.search && !u.hash && !u.username && !u.password
+  } catch {
+    return false
+  }
+}
+
+/**
+ * B7 for a generic OpenID issuer (`SLAYZONE_HUB_OIDC_ISSUER` set). The Entra tenant
+ * settings must not be set with it (two setups is contradictory); a client id; exactly
+ * one client credential — the certificate pair or a client secret; `openid` in the
+ * scopes; the public address (the issuer redirects to
+ * https://<public address>/api/auth/callback/oidc, or /callback/microsoft for an Entra
+ * issuer). An Entra issuer authenticates with the certificate only, as the tenant setup.
+ */
+function assertGenericOidc(
+  env: NodeJS.ProcessEnv,
+  sso: HubSsoSettings,
+  publicAddress: string | undefined
+): void {
+  const contradictory = [HUB_SSO_ENV.tenantId, HUB_SSO_ENV.clientId].filter(
+    (k) => trimmed(env[k]) !== undefined
+  )
+  if (contradictory.length > 0) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${HUB_OIDC_ENV.issuer} is set together with ${contradictory.join(' and ')}: ` +
+        `use the Entra tenant settings OR the generic OIDC settings, not both. To move to ` +
+        `the generic settings, set ${HUB_OIDC_ENV.issuer}=https://login.microsoftonline.com/` +
+        `<tenant id>/v2.0 and ${HUB_OIDC_ENV.clientId}, and unset ${contradictory.join(', ')}.`
+    )
+  }
+  const missing: string[] = []
+  if (!sso.oidcClientId) missing.push(HUB_OIDC_ENV.clientId)
+  const hasCert = sso.certPath !== undefined || sso.keyPath !== undefined
+  if (!hasCert && !sso.clientSecret) {
+    missing.push(`${HUB_SSO_ENV.certPath} + ${HUB_SSO_ENV.keyPath} or ${HUB_OIDC_ENV.clientSecret}`)
+  }
+  if (hasCert && (!sso.certPath || !sso.keyPath)) {
+    missing.push(sso.certPath ? HUB_SSO_ENV.keyPath : HUB_SSO_ENV.certPath)
+  }
+  if (publicAddress === undefined) missing.push(HUB_ADDRESS_ENV.public)
+  if (missing.length > 0) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${HUB_OIDC_ENV.issuer} needs its settings; missing: ${missing.join(', ')}.`
+    )
+  }
+  if (hasCert && sso.clientSecret) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] set ONE client credential: the certificate (${HUB_SSO_ENV.certPath} + ` +
+        `${HUB_SSO_ENV.keyPath}) or ${HUB_OIDC_ENV.clientSecret}, not both.`
+    )
+  }
+  if (!isHttpsIssuer(sso.issuer ?? '')) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${HUB_OIDC_ENV.issuer} must be the issuer's https URL exactly as its tokens' ` +
+        `"iss", got '${sso.issuer}'.`
+    )
+  }
+  if (ENTRA_ISSUER.test((sso.issuer ?? '').replace(/\/+$/, '')) && !hasCert) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] an Entra issuer authenticates with a certificate (${HUB_SSO_ENV.certPath} + ` +
+        `${HUB_SSO_ENV.keyPath}), not ${HUB_OIDC_ENV.clientSecret}.`
+    )
+  }
+  if (sso.scopes && !sso.scopes.includes('openid')) {
+    throw new HubBootRefusal('B7', `[slayzone] ${HUB_OIDC_ENV.scopes} must include openid.`)
+  }
+  if (trimmed(env[RETIRED_HUB_SSO_CLIENT_SECRET_ENV]) !== undefined) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${RETIRED_HUB_SSO_CLIENT_SECRET_ENV} is not read; a generic issuer's secret ` +
+        `is ${HUB_OIDC_ENV.clientSecret}.`
+    )
+  }
+}
+
+const ENTRA_ISSUER =
+  /^https:\/\/login\.microsoftonline\.com\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/v2\.0$/i
 
 /**
  * B17 — a hub other machines can reach takes its auth secret from env (B14), but its
@@ -380,13 +515,22 @@ export function assertKeptAuthSecret(input: {
 /** A GUID as Entra writes tenant and client ids (case-insensitive). */
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** What Entra sign-in runs with, once B7 has passed in full. */
+/**
+ * What SSO sign-in runs with, once B7 has passed in full: the Entra tenant setup
+ * (`tenantId` set) or a generic issuer (`issuer` set; a certificate `credential` or a
+ * `clientSecret`). `idpRoles`: the IdP-role mode (B20), null when off.
+ */
 export interface HubSsoBootConfig<C> {
-  /** Lowercased: Entra writes `tid` and `aud` lowercase. */
-  tenantId: string
+  /** Entra tenant setup. Lowercased: Entra writes `tid` and `aud` lowercase. */
+  tenantId?: string
+  /** Generic OpenID issuer. */
+  issuer?: string
   clientId: string
   requireMfa: boolean
-  credential: C
+  credential?: C
+  clientSecret?: string
+  scopes?: string[]
+  idpRoles: RoleConfig | null
 }
 
 /**
@@ -402,7 +546,21 @@ export function assertSsoCredential<C>(
   load: (paths: { certPath: string; keyPath: string }) => C
 ): HubSsoBootConfig<C> | null {
   if (!boot.ssoActive) return null
-  const { tenantId, clientId, certPath, keyPath, requireMfa } = boot.sso
+  const idpRoles = boot.idpRoles.enabled ? boot.idpRoles : null
+  const { tenantId, clientId, certPath, keyPath, requireMfa, issuer } = boot.sso
+  if (issuer !== undefined) {
+    // B7 (generic) guarantees a client id and one credential.
+    const oidcClientId = boot.sso.oidcClientId ?? ''
+    const base = {
+      issuer: issuer.replace(/\/+$/, ''),
+      clientId: oidcClientId,
+      requireMfa,
+      idpRoles,
+      ...(boot.sso.scopes ? { scopes: boot.sso.scopes } : {})
+    }
+    if (boot.sso.clientSecret) return { ...base, clientSecret: boot.sso.clientSecret }
+    return { ...base, credential: loadCredential(load, certPath ?? '', keyPath ?? '') }
+  }
   // B7 guarantees all four once SSO is active.
   if (!tenantId || !clientId || !certPath || !keyPath) {
     throw new HubBootRefusal('B7', '[slayzone] SSO settings incomplete')
@@ -422,7 +580,25 @@ export function assertSsoCredential<C>(
     tenantId: tenantId.toLowerCase(),
     clientId: clientId.toLowerCase(),
     requireMfa,
-    credential
+    credential,
+    idpRoles
+  }
+}
+
+function loadCredential<C>(
+  load: (paths: { certPath: string; keyPath: string }) => C,
+  certPath: string,
+  keyPath: string
+): C {
+  try {
+    return load({ certPath, keyPath })
+  } catch (err) {
+    throw new HubBootRefusal(
+      'B7',
+      `[slayzone] ${HUB_SSO_ENV.certPath} / ${HUB_SSO_ENV.keyPath}: ` +
+        `${err instanceof Error ? err.message : String(err)}. Point them at the PEM ` +
+        `certificate registered with the issuer and its unencrypted RSA key.`
+    )
   }
 }
 

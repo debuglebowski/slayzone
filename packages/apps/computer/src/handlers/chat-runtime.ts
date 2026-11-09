@@ -191,6 +191,12 @@ const requestSchema = z.discriminatedUnion('kind', [
     revision: z.number().int().positive()
   }),
   z.object({
+    kind: z.literal('task.erase'),
+    jobId: z.string().uuid(),
+    taskId: z.string().min(1).max(200),
+    revision: z.number().int().positive()
+  }),
+  z.object({
     kind: z.literal('migration.checkpoint'),
     identity: chatIdentitySchema,
     migrationId: z.string(),
@@ -329,7 +335,14 @@ export function createChatRuntimeHandlers(opts: {
         }
       },
       opts.getProjectPaths,
-      { admission: opts.admission, spawnProcess: opts.spawnProcess }
+      {
+        admission: opts.admission,
+        spawnProcess: opts.spawnProcess,
+        assertTaskActive: (taskId) => {
+          if (instance && instance.storage.taskLifecycle(taskId).state !== 'active')
+            throw new Error('Task is paused or deleted')
+        }
+      }
     )
     localProcs = procs
     const gateway: RoutingGateway = {
@@ -564,6 +577,11 @@ export function createChatRuntimeHandlers(opts: {
         if (applied.state !== 'active') await opts.stopTask?.(req.taskId, applied.state)
         return applied
       }
+      case 'task.erase':
+        return r.eraseTask(req.taskId, req.revision, async () => {
+          await opts.stopTask?.(req.taskId, 'deleted')
+          await localProcs?.stopTask(req.taskId)
+        })
       case 'migration.checkpoint':
         return r.storage.migrationCheckpoint(req.identity, req.migrationId, req.candidate)
       case 'prompts':

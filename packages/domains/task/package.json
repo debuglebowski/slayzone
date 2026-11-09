@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task",
-  "version": "0.38.0",
+  "version": "0.38.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -39,6 +39,7 @@
     "@milkdown/core": "^7.22.3",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/editor": "workspace:*",

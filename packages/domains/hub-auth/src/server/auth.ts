@@ -6,19 +6,36 @@ import { betterAuth } from 'better-auth'
 import { getMigrations } from 'better-auth/db/migration'
 import { bearer, jwt, organization } from 'better-auth/plugins'
 import { CLIENT_ADDRESS_HEADER } from '@slayzone/platform/client-address'
+import { defineRequestState, hasRequestState } from '@better-auth/core/context'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { refuseDisabledSessions } from './account'
 import { auditAuthResponse, auditDatabaseHooks } from './audit'
 import { deviceSignIn, markSignInMethod } from './device'
 import {
-  type EntraSsoConfig,
   entraSso,
   entraUserCreateAfter,
   entraUserCreateBefore,
+  passedVerdict,
+  type SsoConfig,
+  ssoProvider,
   syncEntraRole
 } from './entra'
+import {
+  auditIdp,
+  createIdpRoles,
+  IDP_AUDIT_SERVICE,
+  IDP_REVALIDATION_REQUIRED,
+  idpConfigIdentity,
+  idpRolesOf,
+  readIdpActivation,
+  recordIdpActivation,
+  setIdpModeFence,
+  setIdpRoles
+} from './idp-roles'
+import type { HubRole } from '../shared/types'
 import { PASSWORD_AUTH_ENDPOINTS } from './password'
 import { hubAuthRateLimit } from './rate-limit'
-import { demoteNonEntraAdmins, ensureFirstAdmin } from './users'
+import { demoteNonEntraAdmins, ensureFirstAdmin, roleForNewAccount } from './users'
 
 export interface HubAuthConfig {
   /**
@@ -39,9 +56,11 @@ export interface HubAuthConfig {
   /**
    * Entra ID sign-in (T-09, ./entra.ts) and, with it, device sign-in for the CLI and
    * desktop (T-14, ./device.ts). Absent = no SSO: the desktop app's hub and every hub
-   * without `SLAYZONE_HUB_ENABLE_SSO=1` + login required.
+   * without `SLAYZONE_HUB_ENABLE_SSO=1` + login required. The Entra tenant setup or a
+   * generic OpenID issuer (./entra.ts `SsoConfig`); `idpRoles` on it turns the
+   * IdP-role mode on (./idp-roles.ts).
    */
-  sso?: EntraSsoConfig
+  sso?: SsoConfig
   /**
    * `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10, ./password.ts). Default on: the desktop app's
    * hub and every hub that does not set it to 0. Off: no password sign-in, sign-up,
@@ -77,6 +96,23 @@ export const SESSION_LIFETIME = {
 } as const
 
 /**
+ * The SSO authentication a device code's token derives from (IdP-role mode): the browser
+ * session that APPROVED the code on the device page, as recorded there
+ * (`IdpRoles.recordDeviceApproval`). Not the code's issue time: the page approves only
+ * with an SSO sign-in made after the code was issued, and that sign-in may itself be the
+ * one that granted the account access (its first after an activation or a revocation) —
+ * a grant later than the issue time, which would refuse every such token. Read BEFORE
+ * the token endpoint runs (the plugin deletes the code before it creates the session)
+ * and carried in request-scoped state to the session hook. No recorded approval = no
+ * binding = refused (fail closed).
+ */
+const deviceBindingState = defineRequestState<{ authAtMs: number } | null>(() => null)
+
+async function deviceBinding(): Promise<{ authAtMs: number } | null> {
+  return (await hasRequestState()) ? deviceBindingState.get() : null
+}
+
+/**
  * Options are built inline inside `betterAuth()` so the instance type keeps
  * the plugin-inferred `auth.api` endpoints (bearer/jwt/organization/apiKey).
  */
@@ -86,6 +122,29 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
   let findUser = (_userId: string): Promise<Record<string, unknown> | null> =>
     Promise.reject(new Error('[hub-auth] user lookup used before the instance was built'))
   const refuseDisabled = refuseDisabledSessions((userId) => findUser(userId))
+  // Same late binding: the role an SSO-created account gets in role mode `hub`, and
+  // this instance (for its IdP-role runtime) once built.
+  let newAccountRole = (): Promise<HubRole> =>
+    Promise.reject(new Error('[hub-auth] role lookup used before the instance was built'))
+  let self: object | null = null
+  const captureDeviceBinding = createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== '/device/token') return
+    const idp = self ? idpRolesOf(self) : null
+    if (!idp) return
+    const deviceCode = (ctx.body as { device_code?: unknown } | undefined)?.device_code
+    if (typeof deviceCode !== 'string') return
+    const row = (await ctx.context.adapter.findOne({
+      model: 'deviceCode',
+      where: [{ field: 'deviceCode', value: deviceCode }]
+    })) as { id?: unknown; status?: unknown } | null
+    // Only an APPROVED code has its final binding. A poll that finds it still pending
+    // binds nothing: were it approved before the plugin re-reads it, this request is
+    // refused (fail closed) rather than issued under a provisional, possibly newer,
+    // authentication a racing approval recorded.
+    if (row?.status !== 'approved' || typeof row.id !== 'string') return
+    const approval = idp.deviceApprovalOf(row.id)
+    if (approval) await deviceBindingState.set(approval)
+  })
   const passwordOn = config.enablePassword !== false
   const auth = betterAuth({
     baseURL: config.baseURL,
@@ -119,10 +178,17 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     // FIELD_NOT_ALLOWED); only ./users.ts writes them. `getMigrations` adds the
     // columns to an existing `user` table without a default, so a row from before
     // reads NULL — `readRole` reads that as 'user'.
+    // The IdP-role mode's evidence (./idp-roles.ts): the identity's `sub`, the signed
+    // `iat` of its newest verified role evidence (Unix seconds) and the CAS revision.
     user: {
       additionalFields: {
         role: { type: 'string', required: false, defaultValue: 'user', input: false },
-        disabledAt: { type: 'date', required: false, input: false }
+        disabledAt: { type: 'date', required: false, input: false },
+        idpSubject: { type: 'string', required: false, input: false },
+        idpVerifiedAt: { type: 'number', required: false, input: false },
+        idpRevision: { type: 'number', required: false, input: false },
+        idpGrantedAt: { type: 'number', required: false, input: false },
+        idpDeniedAt: { type: 'number', required: false, input: false }
       }
     },
     // 7 days (O-8), see SESSION_LIFETIME above.
@@ -132,7 +198,9 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     session: {
       ...SESSION_LIFETIME,
       additionalFields: {
-        signInMethod: { type: 'string', required: false, input: false }
+        signInMethod: { type: 'string', required: false, input: false },
+        // The IdP-role activation epoch the session was created in (./idp-roles.ts).
+        idpEpoch: { type: 'number', required: false, input: false }
       }
     },
     // OAuth accounts (only Entra's, ./entra.ts; inert on a hub without SSO). An Entra
@@ -177,11 +245,17 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
     },
     // Security audit lines on stdout (T-03): sign-in, sign-out, sessions, password
     // change. See ./audit.ts.
-    hooks: { after: auditAuthResponse },
+    // Before: the device code a token request redeems (IdP-role issuance binding).
+    hooks: { before: captureDeviceBinding, after: auditAuthResponse },
     databaseHooks: {
       // The Entra hooks act only inside an Entra callback whose ID token passed the
       // checks (request-scoped, see entra.ts); everywhere else they return untouched.
-      user: { create: { before: entraUserCreateBefore, after: entraUserCreateAfter } },
+      user: {
+        create: {
+          before: (user) => entraUserCreateBefore(user, () => newAccountRole()),
+          after: entraUserCreateAfter
+        }
+      },
       session: {
         create: {
           // A disabled account gets no session, whichever route asked for one. Then an
@@ -189,6 +263,24 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
           // sign-in changes nothing. Last, the session records how it was made.
           before: async (session, ctx) => {
             await refuseDisabled(session, ctx)
+            const idp = self ? idpRolesOf(self) : null
+            if (idp) {
+              // IdP-role mode: an SSO sign-in persists its evidence; any other session
+              // (device token, app code, …) must be bound to the SSO authentication
+              // that approved it, under the account's current grant. Then the session
+              // is stamped with the current activation epoch.
+              try {
+                if (await passedVerdict()) await idp.applySignIn(session, ctx)
+                else idp.authorizeIssuance(String(session.userId), await deviceBinding())
+              } catch {
+                throw APIError.from('FORBIDDEN', {
+                  message: 'Sign in again through your identity provider',
+                  code: IDP_REVALIDATION_REQUIRED
+                })
+              }
+              const marked = await markSignInMethod(session, ctx)
+              return { data: { ...(marked?.data ?? session), idpEpoch: idp.activation.epoch } }
+            }
             await syncEntraRole(session, ctx)
             return markSignInMethod(session, ctx)
           },
@@ -231,7 +323,17 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         // default because the default is a footgun for this key class.
         rateLimit: { enabled: false }
       }),
-      ...(config.sso ? [entraSso(config.sso), ...deviceSignIn()] : [])
+      ...(config.sso
+        ? [
+            entraSso(config.sso, {
+              onNoMappedRole: async (userId, denial) => {
+                const idp = self ? idpRolesOf(self) : null
+                await idp?.denyNoMappedRole(userId, denial)
+              }
+            }),
+            ...deviceSignIn()
+          ]
+        : [])
     ]
   })
   findUser = async (userId) =>
@@ -239,6 +341,8 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
       string,
       unknown
     > | null
+  newAccountRole = () => roleForNewAccount(auth)
+  self = auth
   return auth
 }
 
@@ -260,7 +364,47 @@ export async function createHubAuth(config: HubAuthConfig): Promise<HubAuth> {
   const auth = buildAuth(config, database)
   const { runMigrations } = await getMigrations(auth.options)
   await runMigrations()
-  if (config.sso) await demoteNonEntraAdmins(auth)
-  else await ensureFirstAdmin(auth)
+  const provider = config.sso ? ssoProvider(config.sso) : null
+  // The IdP-role mode's epoch is recorded on EVERY boot, off included, so off → on is a
+  // new activation (./idp-roles.ts).
+  const identity =
+    provider?.roleMode === 'idp' && provider.idpRoles
+      ? idpConfigIdentity(provider, provider.idpRoles)
+      : null
+  const recorded = recordIdpActivation(database, identity)
+  // Every request of this process is fenced against the persisted mode (idp-roles.ts).
+  setIdpModeFence(auth, { db: database, identity, epoch: recorded.epoch })
+  if (recorded.activated) {
+    for (const { id, role } of recorded.invalidated) {
+      auditIdp({
+        event: 'idp_roles.activation',
+        service: IDP_AUDIT_SERVICE,
+        actor: 'operator',
+        subject: id,
+        source: 'activation',
+        previousGrants: [role],
+        newGrants: [],
+        reason: 'activated'
+      })
+    }
+  }
+  if (config.sso && provider?.roleMode === 'idp') {
+    const activation = readIdpActivation(database)
+    if (!activation) throw new Error('[hub-auth] IdP-role activation was not recorded')
+    setIdpRoles(
+      auth,
+      createIdpRoles({
+        db: database,
+        cfg: config.sso,
+        getContext: async () => (await auth.$context) as never,
+        activation,
+        invalidated: recorded.invalidated.map((u) => u.id)
+      })
+    )
+  } else if (provider?.roleMode === 'entra-app-roles') {
+    await demoteNonEntraAdmins(auth)
+  } else {
+    await ensureFirstAdmin(auth)
+  }
   return auth
 }

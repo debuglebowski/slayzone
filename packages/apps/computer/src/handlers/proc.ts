@@ -103,6 +103,8 @@ const REAP_ESCALATE_MS = 2_000
 const WRITE_ID_MEMORY = 256
 
 interface ProcSession {
+  taskId?: string
+  erased?: boolean
   revokeCli?: () => void
   child: ChildProcess
   /** stdout only — the replayable stream. */
@@ -121,6 +123,7 @@ interface ProcSession {
 
 /** An admitted spawn waiting for its start slot. */
 interface QueuedProcSpawn {
+  taskId?: string
   spawnId?: string
   ticket: AdmissionTicket
   promise: Promise<{ pid: number | null }>
@@ -129,6 +132,7 @@ interface QueuedProcSpawn {
 }
 
 export interface ProcHandlers {
+  stopTask(taskId: string): Promise<void>
   hasWork(): boolean
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
@@ -140,6 +144,7 @@ export interface ProcHandlers {
 }
 
 export interface ProcHandlerOptions {
+  assertTaskActive?: (taskId: string) => void
   /** The computer-wide agent-start queue (see spawn-admission.ts); tests get a private one. */
   admission?: SpawnAdmission
   /**
@@ -230,6 +235,7 @@ export function createProcHandlers(
       reject = rej
     })
     const item: QueuedProcSpawn = {
+      taskId: params.taskId ?? params.env?.SLAYZONE_TASK_ID,
       ...(params.spawnId !== undefined ? { spawnId: params.spawnId } : {}),
       ticket: undefined as unknown as AdmissionTicket,
       promise,
@@ -259,6 +265,8 @@ export function createProcHandlers(
   }
 
   function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
+    const taskId = params.taskId ?? params.env?.SLAYZONE_TASK_ID
+    if (taskId) options.assertTaskActive?.(taskId)
     if (params.spawnId !== undefined) {
       const live = procs.get(params.sessionId)
       // The hub re-sent an attempt whose reply it lost: this process IS it.
@@ -329,6 +337,7 @@ export function createProcHandlers(
     }
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
+      taskId,
       revokeCli: capability?.revoke,
       child,
       buffer,
@@ -367,12 +376,14 @@ export function createProcHandlers(
       }
       if (procs.get(params.sessionId) !== session) return
       procs.delete(params.sessionId)
+      if (session.erased) return
       const delivered = ctx.dialer.notify(ProcNotifications.procExit, {
         sessionId: params.sessionId,
         ...tag,
         ...payload
       })
       tombstones.add(params.sessionId, {
+        taskId: session.taskId,
         spawnId: session.spawnId,
         ...(typeof child.pid === 'number' ? { pid: child.pid } : {}),
         exitCode: payload.exitCode,
@@ -386,7 +397,7 @@ export function createProcHandlers(
     const stderrDecoder = new StringDecoder('utf8')
     const emitStdout = (data: string): void => {
       // A chunk that ended mid-character decodes to '' until the rest arrives.
-      if (!data || procs.get(params.sessionId) !== session) return
+      if (!data || session.erased || procs.get(params.sessionId) !== session) return
       // Buffer + stream the SAME text under the same seq: the hub's demux keeps
       // whichever copy of a seq arrives first (live or backfilled) and emits it
       // once, so any per-seq divergence would make output depend on timing.
@@ -400,7 +411,7 @@ export function createProcHandlers(
       })
     }
     const emitStderr = (data: string): void => {
-      if (!data || procs.get(params.sessionId) !== session) return
+      if (!data || session.erased || procs.get(params.sessionId) !== session) return
       // Unsequenced: stderr is diagnostic, never protocol, and is not replayable.
       ctx.dialer.notify(ProcNotifications.procData, {
         sessionId: params.sessionId,
@@ -627,6 +638,23 @@ export function createProcHandlers(
   }
 
   return {
+    async stopTask(taskId: string) {
+      for (const [id, item] of queued)
+        if (item.taskId === taskId) {
+          admission.cancel(item.ticket)
+          queued.delete(id)
+          item.reject(new Error('Task was permanently erased'))
+        }
+      for (const [id, session] of procs)
+        if (session.taskId === taskId) {
+          session.erased = true
+          const result = await procKill({ sessionId: id, spawnId: session.spawnId })
+          if (!result.clean) throw new Error('Task process could not be stopped')
+          if (procs.get(id) === session) procs.delete(id)
+          session.buffer = new RingBuffer(MAX_BUFFER_SIZE)
+        }
+      tombstones.forgetTask(taskId)
+    },
     hasWork: () => procs.size > 0 || queued.size > 0,
     handlers,
     disposeAll,

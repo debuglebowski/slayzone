@@ -43,7 +43,8 @@ import { COMPUTER_VERSION, startComputer, watchPrimaryHubExitCode } from './main
 import { createSupervisorIpc } from './supervisor-ipc'
 import { isUpgradeWorker, receiveUpgradeBoot, superviseUpgrades } from './upgrade-runtime'
 import { dirname, join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { eraseComputerOffline } from './offline-erasure'
 import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 import { atomicRuntimeJson, startSessionHost } from './session-host'
@@ -152,6 +153,23 @@ async function maybeInteractiveSetup(): Promise<{
 }
 
 async function main(): Promise<void> {
+  if (process.argv.includes('--erase-data')) {
+    const requestFile = process.argv[process.argv.indexOf('--erase-data') + 1]
+    const receiptIndex = process.argv.indexOf('--receipt'),
+      receiptFile = receiptIndex >= 0 ? process.argv[receiptIndex + 1] : undefined
+    if (!requestFile || !receiptFile)
+      throw new Error(
+        'Usage: slayzone-computer --erase-data <request.json> --receipt <new-receipt.json> [--worktrees-verified]'
+      )
+    const receipt = await eraseComputerOffline(
+      process.env.SLAYZONE_ROOT ?? process.cwd(),
+      JSON.parse(readFileSync(requestFile, 'utf8')),
+      { worktreesVerified: process.argv.includes('--worktrees-verified') }
+    )
+    writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+    process.stdout.write('SlayZone-managed computer data erased. Cleanup receipt saved.\n')
+    return
+  }
   if (process.argv.includes('--runtime-contract')) {
     process.stdout.write(
       JSON.stringify({

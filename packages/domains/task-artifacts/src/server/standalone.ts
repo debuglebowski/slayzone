@@ -3,6 +3,8 @@ import type { SlayzoneDb, PreparedBridge, BatchOp } from '@slayzone/platform'
 import { createArtifactStore } from './artifact-store'
 import { artifactsTxns } from './artifact-store-txns'
 import { ensureArtifactBlobPins } from './blob-pins'
+import { contentErasureTxns, ensureErasureStorage } from '@slayzone/content-erasure/db'
+import { CONTENT_ERASURE_ARTIFACT_FENCES } from '@slayzone/db-migrations/content-erasure-schema'
 
 /** Artifact-owned schema: computers reuse the full artifact implementation without hub tables. */
 export function createStandaloneArtifacts(
@@ -12,6 +14,7 @@ export function createStandaloneArtifacts(
 ) {
   raw.pragma('foreign_keys=ON')
   ensureArtifactBlobPins(raw)
+  ensureErasureStorage(raw)
   raw.exec(`
  CREATE TABLE IF NOT EXISTS artifact_storage_schema(version INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS artifact_folders (
@@ -37,6 +40,7 @@ export function createStandaloneArtifacts(
  CREATE INDEX IF NOT EXISTS artifact_folders_task ON artifact_folders(task_id);
  CREATE TABLE IF NOT EXISTS artifact_blobs(hash TEXT PRIMARY KEY,size INTEGER NOT NULL);
  `)
+  raw.exec(CONTENT_ERASURE_ARTIFACT_FENCES)
   const version = raw.prepare('SELECT version FROM artifact_storage_schema').get() as
     | { version: number }
     | undefined
@@ -74,7 +78,10 @@ export function createStandaloneArtifacts(
     },
     namedTxn: (async (name: string, params: unknown) => {
       const implementation = (
-        artifactsTxns as unknown as Record<string, (db: Database.Database, p: unknown) => unknown>
+        { ...artifactsTxns, ...contentErasureTxns } as unknown as Record<
+          string,
+          (db: Database.Database, p: unknown) => unknown
+        >
       )[name]
       if (!implementation) throw new Error('Unknown standalone artifact transaction')
       if (

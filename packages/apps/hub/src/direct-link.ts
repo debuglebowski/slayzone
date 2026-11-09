@@ -57,6 +57,8 @@ export interface DirectLinkGateway {
     peerLoopback: boolean
     /** Whether it answers WebRTC offers (absent: no). */
     directRtc?: boolean
+    /** Whether it enforces a grant's absolute `notAfter` (absent: no). */
+    directNotAfter?: boolean
   }>
   request(computerId: string, method: string, params: unknown): Promise<unknown>
 }
@@ -86,6 +88,14 @@ export interface DirectLinkIssuerDeps {
   onChatOwnershipChange?: (listener: (tabIds: readonly string[]) => void) => () => void
   /** WebRTC offers per user, and per client address, per minute. Default 30. */
   signalLimitPerMinute?: number
+  /**
+   * IdP-role mode: when the user's role evidence expires (Unix ms; null = no limit). A
+   * grant never outlives it: it carries the deadline as an ABSOLUTE `notAfter` the
+   * computer enforces whatever the delivery delay (and closes the direct connection
+   * then); only a computer that advertised `directNotAfter` gets one; none is issued
+   * past the deadline; an acknowledgement arriving at or after it is undone.
+   */
+  accessDeadlineMs?: (userId: string) => number | null
 }
 
 /** What the client says it can use (`computers.issueDirectLink` input). */
@@ -293,13 +303,28 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         // request would, not a silent fallback.
         await deps.gate?.(computer.computerId, located.work)
 
+        // Never past the caller's role-evidence deadline (IdP-role mode): an absolute
+        // end the computer enforces, so delivery delay cannot extend it.
+        let ttlMs = DIRECT_GRANT_TTL_MS
+        let notAfter: number | null = null
+        if (deps.accessDeadlineMs && caller.userId !== null) {
+          const deadline = deps.accessDeadlineMs(caller.userId)
+          if (deadline !== null) {
+            if (computer.directNotAfter !== true) return { available: false, reason: 'unsupported' }
+            notAfter = Math.floor(deadline)
+            ttlMs = Math.min(ttlMs, notAfter - now())
+            if (ttlMs <= 0) return { available: false, reason: 'revoked' }
+          }
+        }
+        const pastDeadline = (): boolean => notAfter !== null && now() >= notAfter
         const token = randomBytes(32).toString('base64url')
         const params: DirectGrantParams = {
           grantId: randomUUID(),
           tokenHash: createHash('sha256').update(token).digest('hex'),
           userId: caller.userId,
           resource: located.resource,
-          ttlMs: DIRECT_GRANT_TTL_MS
+          ttlMs,
+          ...(notAfter !== null ? { notAfter } : {})
         }
         prune()
         const held: IssuedGrant = {
@@ -321,9 +346,13 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
           await deps.gateway.request(computer.computerId, HubToComputerMethods.directGrant, params)
         } catch (err) {
           grants.delete(params.grantId)
+          // The computer refused a grant that reached it at or after its absolute end.
+          if (pastDeadline()) return { available: false, reason: 'revoked' }
           throw err
         }
-        if (grants.get(params.grantId) !== held || revokedSince(start, held)) {
+        // An acknowledgement that arrives at or after the deadline is undone like a
+        // revocation: the client never gets a token it could only use past it.
+        if (grants.get(params.grantId) !== held || revokedSince(start, held) || pastDeadline()) {
           grants.delete(params.grantId)
           // Revoked while registering: drop it on the computer, which holds it now.
           await asHub(() =>

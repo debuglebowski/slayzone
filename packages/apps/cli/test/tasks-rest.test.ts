@@ -610,7 +610,7 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI id-prefix addressing works without a local d
     const row = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
       deleted_at: string | null
     }
-    expect(row.deleted_at !== null).toBe(true)
+    expect(row).toBeUndefined()
   })
 
   test('tasks open <prefix> broadcasts the FULL id', async () => {

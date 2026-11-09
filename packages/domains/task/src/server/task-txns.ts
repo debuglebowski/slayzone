@@ -116,64 +116,13 @@ function recordEvents(db: Database, p: { events: RecordActivityEventInput[] }): 
   })()
 }
 
-/**
- * Hard-delete expired Trash rows (startup-purge.ts). Deleting a task moves only that
- * task to Trash — its subtasks stay — but `tasks.parent_id` is `ON DELETE CASCADE`, so a
- * plain DELETE would take every descendant with it. A child that is not itself purged
- * here (live, still restorable from Trash, or expired but kept until its computer
- * connects) first moves up to its nearest ancestor that stays, else to the top level.
- * One transaction, the tree read inside it: a subtask added under a purged task
- * meanwhile is caught too. Returns the moved tasks so the caller can announce them.
- */
-function purge(
-  db: Database,
-  p: { ids: string[] }
-): { deleted: number; reparented: { id: string; projectId: string }[] } {
-  return db.transaction(() => {
-    const purging = new Set(p.ids)
-    const parentOf = db.prepare('SELECT parent_id FROM tasks WHERE id = ?')
-    const childrenOf = db.prepare('SELECT id, project_id FROM tasks WHERE parent_id = ?')
-    const setParent = db.prepare(
-      `UPDATE tasks SET parent_id = ?, updated_at = datetime('now') WHERE id = ?`
-    )
-    const remove = db.prepare('DELETE FROM tasks WHERE id = ?')
-    /** Nearest ancestor of `id` that is not purged, or null. Cycle-safe. */
-    const keptAncestor = (id: string): string | null => {
-      const seen = new Set<string>([id])
-      let cursor = (parentOf.get(id) as { parent_id: string | null } | undefined)?.parent_id
-      while (cursor && !seen.has(cursor)) {
-        if (!purging.has(cursor)) return cursor
-        seen.add(cursor)
-        cursor = (parentOf.get(cursor) as { parent_id: string | null } | undefined)?.parent_id
-      }
-      return null
-    }
-    const reparented: { id: string; projectId: string }[] = []
-    for (const id of p.ids) {
-      const kept = (childrenOf.all(id) as { id: string; project_id: string }[]).filter(
-        (c) => !purging.has(c.id)
-      )
-      if (kept.length === 0) continue
-      const target = keptAncestor(id)
-      for (const child of kept) {
-        setParent.run(target, child.id)
-        reparented.push({ id: child.id, projectId: child.project_id })
-      }
-    }
-    let deleted = 0
-    for (const id of p.ids) deleted += remove.run(id).changes
-    return { deleted, reparented }
-  })()
-}
-
 export const taskTxns = {
   'task:insert-row': insertRow,
   'task:soft-delete': softDelete,
   'task:soft-delete-many': softDeleteMany,
   'task:archive': archive,
   'task:update': update,
-  'task:record-events': recordEvents,
-  'task:purge': purge
+  'task:record-events': recordEvents
 }
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this

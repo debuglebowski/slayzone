@@ -1,4 +1,5 @@
 export { createDiagnosticsSchema, applyDiagnosticsPragmas } from './schema'
+export { eraseDiagnosticContent } from './content-erasure'
 export { diagnosticsBlobDirBeside } from './blob-retention'
 export {
   createBootStepRecorder,

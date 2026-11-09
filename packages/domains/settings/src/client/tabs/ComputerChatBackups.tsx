@@ -56,8 +56,8 @@ export function ComputerChatBackups() {
       <CardHeader>
         <CardTitle>Computer chat backups</CardTitle>
         <CardDescription>
-          Each computer backs up its conversations and attached files. Restore opens a read-only
-          archive; agent sessions cannot be resumed from it.
+          Each computer backs up its conversations and attached files. Backups can contain content
+          erased later. Restore opens a read-only archive; agent sessions cannot be resumed from it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

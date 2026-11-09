@@ -63,6 +63,7 @@ export {
   getHubDescribeDepsOrNull,
   type HubDescribeDeps
 } from './app-deps'
+export { setHubAdminDeps, getHubAdminDeps, type HubAdminDeps } from './hub-admin-deps'
 export {
   setPowerResumeEvents,
   getPowerResumeEvents,

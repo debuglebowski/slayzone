@@ -25,8 +25,8 @@ import {
   createDevicePage,
   createWebSignIn,
   ENTRA_AUTHORITY,
-  findHubAccount,
-  loadEntraClientCredential
+  loadEntraClientCredential,
+  ssoDisplayLabelOf
 } from '@slayzone/hub-auth/server'
 import {
   bindInHubPortBlock,
@@ -67,11 +67,7 @@ import {
 } from './hub-admin-socket.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
-import {
-  connectionToken,
-  parseWindowIdFromUrl,
-  resolveConnectionPrincipal
-} from './hub-trpc-context.js'
+import { createHubTrpcContext } from './trpc-socket-context.js'
 import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
 import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
@@ -104,7 +100,7 @@ import type { ServerHandle, StartServerConfig } from './index.js'
 import { withSecurityHeaders } from './security-headers.js'
 import { createWarmWindowSockets } from './warm-window-sockets.js'
 import { createHubFloodGuard, refuseUpgrade } from './flood-limits.js'
-import { createHubCliRelay } from './cli-relay'
+import { createHubCliRelay, relayOwnerAccount } from './cli-relay'
 
 /**
  * The web shell's build output (`@slayzone/web-shell`'s `vite.config.ts` sets
@@ -366,8 +362,11 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
     switches,
     // B13 — gates the host-describing fields behind "no proxy in the path".
     reachable: boot.reachable,
-    // The native app's Microsoft sign-in is served exactly where `appSignIn` below is.
+    // The native app's SSO sign-in is served exactly where `appSignIn` below is. The
+    // field keeps its name (`microsoft`) for older clients, whatever the provider;
+    // `ssoLabel` is what clients call the sign-in (Microsoft or SSO).
     appSignIn: { microsoft: hubAuth !== null && boot.ssoActive },
+    ...(hubAuth && boot.ssoActive ? { ssoLabel: ssoDisplayLabelOf(hubAuth) } : {}),
     // `listUsableComputers`, NOT `listComputers` — its own docstring names itself the
     // single authority for "can this computer do work right now?" and warns that the
     // raw map means only "socket is open", including a computer that has stopped
@@ -588,7 +587,10 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
         'SELECT owner_user_id, revoked_at FROM computers WHERE id = ?',
         [id]
       )) ?? null,
-    account: async (id) => (hubAuth ? findHubAccount(hubAuth, id) : null),
+    // The computer's credential stays automation (verified by the gateway); the HUMAN
+    // owner it acts for passes the same IdP-role gate as a session (hub-auth
+    // authorizeDelegatedHuman: persisted mode, current grant, fresh evidence).
+    account: async (id) => (hubAuth ? relayOwnerAccount(hubAuth, id) : null),
     dispatch: gatedDispatch
   })
   computerGateway?.setCliRelayHandler(cliRelay.request)
@@ -674,76 +676,18 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // A window's warm-pool tab counts are dropped once its last socket is gone for good
   // (a closed window never reports empty counts) — see warm-window-sockets.ts.
   const warmWindowSockets = createWarmWindowSockets({ clearWindow: clearWindowTabCounts })
-  // createContext verifies the bearer only when this hub enforces auth
-  // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
-  // principal stays null, no verify → byte-identical to trusted loopback.
-  const createTrpcContext = async ({
-    req,
-    res,
-    info
-  }: {
-    req: IncomingMessage
-    res?: WebSocket
-    info?: { connectionParams?: Record<string, string | undefined> | null }
-  }) => {
-    // windowId (?windowId=N) → ctx.windowId. Required by claimSession +
-    // panel-ownership + warm-pool (warmSetProjectTabCounts) procs; without it they
-    // throw "windowId required". This sidecar's applyWSSHandler had omitted it (the
-    // transport ws-server parses it, but the sidecar uses THIS handler) — so the
-    // whole warm-agent pool silently never fired. The renderer already sends it
-    // (see main.tsx withWindowId).
-    const windowId = parseWindowIdFromUrl(req.url)
-    // The window's warm-pool tab counts live only as long as the window does.
-    if (windowId != null && res) warmWindowSockets.track(windowId, res)
-    // Verify the bearer token from tRPC connectionParams when this hub enforces
-    // auth. An invalid/absent token → principal stays null; individual procedures
-    // gate on ctx.principal via the auth gate (an authed hub still accepts the
-    // connection but attributes it). See hub-trpc-context.ts for the decision.
-    //
-    // The credential: the connectionParams token, else the web shell's session cookie
-    // from the hub's own page only (T-13, `connectionToken`). Login off: neither is read.
-    const presented = hubAuthRequired
-      ? connectionToken({
-          connectionParamsToken: info?.connectionParams?.token,
-          cookies: parseCookieHeader(req.headers),
-          cookieOriginAllowed: isCookieOriginAllowed(req)
-        })
-      : null
-    if (presented?.cookieRefused) {
-      securityEvent({
-        event: 'authz.denied',
-        outcome: 'denied',
-        actor: null,
-        ip: clientAddress(req),
-        route: routeOf(req.method, req.url),
-        detail: { reason: 'cookie_origin', origin: req.headers.origin ?? null }
-      })
-    }
-    const resolve = () =>
-      resolveConnectionPrincipal({
-        hubAuthRequired,
-        hubAuth,
-        db,
-        token: presented?.token
-      })
-    const principal = await resolve()
-    // T-12: the principal is resolved once per socket, so the socket is tracked by its
-    // account — revoking the account closes it, and its credential is re-resolved
-    // periodically (trpc-connections.ts). Login off: no principal, nothing tracked.
-    if (principal && res) {
-      composition.trpcConnections.track(res, principal.userId, async () => {
-        return (await resolve())?.userId ?? null
-      })
-    }
-    return {
-      db,
-      dataRoot,
-      req,
-      automationEngine: composition.automationEngine,
-      windowId,
-      principal
-    }
-  }
+  // The socket context (trpc-socket-context.ts): window id, the principal verified when
+  // this hub enforces auth (login off: none, byte-identical to trusted loopback), and on
+  // an authenticated socket the per-operation persisted check (`principalLive`).
+  const createTrpcContext = createHubTrpcContext({
+    hubAuthRequired,
+    hubAuth,
+    db,
+    connections: composition.trpcConnections,
+    isCookieOriginAllowed,
+    trackWindow: (windowId, socket) => warmWindowSockets.track(windowId, socket),
+    extra: { dataRoot, automationEngine: composition.automationEngine }
+  })
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
 
   // PORT RESOLUTION. An explicit port (cfg / SLAYZONE_HUB_LISTEN_ADDRESS) binds verbatim
@@ -907,6 +851,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()
+      await composition.closeErasures()
       // The idle sweep must not arm countdowns on sessions being torn down.
       stopIdleChecker()
       // Kill the pool's pre-booted agents (billable, and nothing can adopt them once

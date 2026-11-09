@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task-artifacts",
-  "version": "0.38.0",
+  "version": "0.38.2",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@codemirror/view": "^6.43.15",
+    "@slayzone/content-erasure": "workspace:*",
+    "@slayzone/db-migrations": "workspace:*",
     "@slayzone/editor": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/host-capabilities": "workspace:*",

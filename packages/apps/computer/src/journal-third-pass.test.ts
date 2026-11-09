@@ -43,7 +43,13 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
   )
   const disconnectedJournal = join(runtimeDir(root), 'hooks-' + 'a'.repeat(16) + '.json')
   mkdirSync(runtimeDir(root), { recursive: true })
-  const hooks = [{ id: 'native-hook', params: { name: 'agent-hook', payload: { status: 'done' } } }]
+  const hooks = [
+    { id: 'native-hook', params: { name: 'agent-hook', payload: { status: 'done' } } },
+    {
+      id: 'owned-native-hook',
+      params: { name: 'agent-hook', payload: { taskId: 'task', text: 'private native hook' } }
+    }
+  ]
   const legacy = legacyChatMarker
     ? [
         ...hooks,
@@ -239,6 +245,24 @@ test('upgrade removes abandoned complete and partial hook journal temps while re
     expect(readFileSync(f.activeStaging!, 'utf8')).toContain(marker)
     expect(f.journalText()).toContain('native-hook')
     expect(f.journalText()).not.toContain(marker)
+  } finally {
+    await f.close()
+  }
+})
+
+test('verified task erasure removes its native hook journal copy, scoped to this hub', async () => {
+  const f = await fixture()
+  try {
+    expect(f.journalText()).toContain('private native hook')
+    await f.request({
+      kind: 'task.erase',
+      jobId: '11111111-1111-4111-8111-111111111111',
+      taskId: 'task',
+      revision: 2
+    })
+    expect(f.journalText()).not.toContain('private native hook')
+    expect(f.journalText()).toContain('native-hook')
+    expect(f.disconnectedJournalText()).toContain('private native hook')
   } finally {
     await f.close()
   }

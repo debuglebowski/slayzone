@@ -380,7 +380,8 @@ export function BulkTaskContextMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {taskIds.length} tasks</AlertDialogTitle>
             <AlertDialogDescription>
-              Move {taskIds.length} selected tasks to Trash? You can restore them for 30 days.
+              Permanently delete {taskIds.length} selected tasks and their SlayZone files and
+              history? This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

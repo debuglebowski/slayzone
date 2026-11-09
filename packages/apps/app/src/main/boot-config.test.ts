@@ -495,7 +495,24 @@ describe('probeRemoteHealth', () => {
       )
     })
     const result = await probeRemoteHealth(`http://127.0.0.1:${port}`)
-    expect(result.signIn).toEqual({ sso: true, password: false })
+    // No `ssoLabel` = a hub from before it was reported: Entra only, so "Microsoft".
+    expect(result.signIn).toEqual({ sso: true, password: false, ssoLabel: 'Microsoft' })
+  })
+
+  it('names the SSO sign-in by the label the hub reports', async () => {
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          ok: true,
+          authRequired: true,
+          ssoLabel: 'SSO',
+          switches: { enableSso: true, enablePassword: false }
+        })
+      )
+    })
+    const result = await probeRemoteHealth(`http://127.0.0.1:${port}`)
+    expect(result.signIn).toEqual({ sso: true, password: false, ssoLabel: 'SSO' })
   })
 
   it('rejects invalid URLs without attempting a request', async () => {

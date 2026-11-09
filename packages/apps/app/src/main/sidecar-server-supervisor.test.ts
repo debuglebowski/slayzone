@@ -320,7 +320,19 @@ test('hub-side config the app inherited never reaches the child hub', async () =
     // Inherited, the desktop's hub would hand every WebRTC peer someone else's STUN server.
     SLAYZONE_HUB_STUN_ADDRESSES: 'stun.elsewhere.example:3478',
     // Inherited, a shared hub's telemetry opt-out would silently switch off the desktop's.
-    SLAYZONE_HUB_ENABLE_TELEMETRY: '0'
+    SLAYZONE_HUB_ENABLE_TELEMETRY: '0',
+    // Inherited, the desktop's hub would sign people in against someone else's OpenID
+    // provider (with its client secret).
+    SLAYZONE_HUB_OIDC_ISSUER: 'https://idp.elsewhere.example',
+    SLAYZONE_HUB_OIDC_CLIENT_ID: 'inherited-oidc-client',
+    SLAYZONE_HUB_OIDC_CLIENT_SECRET: 'inherited-oidc-secret',
+    SLAYZONE_HUB_OIDC_SCOPES: 'openid inherited',
+    // A shared hub's IdP-role mode (the contract's unprefixed names): inherited, the
+    // desktop's hub would take someone else's role policy (and B20 would refuse it).
+    IDP_ROLES_ENABLED: 'true',
+    IDP_ROLE_CLAIM: 'roles',
+    IDP_ROLE_MAPPING: '{"Inherited.Admin":["admin"]}',
+    IDP_RECHECK_INTERVAL_SECONDS: '3600'
   }
   // The list under test must be the WHOLE hub-side surface, not what this test
   // remembers: a hub variable added to the platform list without a case here is a

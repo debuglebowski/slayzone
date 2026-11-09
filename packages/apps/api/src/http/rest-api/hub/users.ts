@@ -1,4 +1,9 @@
 import type { IncomingHttpHeaders } from 'node:http'
+import {
+  ROLES_MANAGED_BY_IDP,
+  ROLES_MANAGED_HTTP_STATUS,
+  ROLES_MANAGED_MESSAGE
+} from '@normain/idp-role-contract'
 import type { Express } from 'express'
 import { isLoopbackPeer } from '@slayzone/platform'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
@@ -7,6 +12,8 @@ import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { RestApiDeps } from '../types'
 import { respondSwitchRefusal } from '../switch-refusal'
+import { getHubAdminDeps } from '@slayzone/content-erasure/router'
+import { AdminContentErasureError, type ErasureActor } from '@slayzone/content-erasure/admin'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
@@ -48,6 +55,11 @@ import { respondSwitchRefusal } from '../switch-refusal'
  * ON A HUB WITH ENTRA SIGN-IN the role is the Entra app role (hub-auth entra.ts): a
  * role change, or `add` asking for an admin, answers 409 with the stable code
  * {@link SSO_MANAGED_ROLE_CODE}. Disable / enable are unchanged.
+ *
+ * WITH THE IdP-ROLE MODE ON (`IDP_ROLES_ENABLED=true`, hub-auth idp-roles.ts) a role
+ * change, or `add` naming any role, answers the shared contract's refusal: 409
+ * `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." — the same
+ * code and text in every service of the contract.
  *
  * WITH PASSWORD SIGN-IN OFF (`SLAYZONE_HUB_ENABLE_PASSWORD=0`, T-10) `add` answers 403
  * `HUB_PASSWORD_DISABLED`: every account it makes is a password account
@@ -134,6 +146,13 @@ const SSO_MANAGED_ROLE = {
     'on the enterprise application — it applies at the account’s next sign-in'
 } as const
 
+/** The shared contract's refusal of an in-hub role change (IdP-role mode). */
+const ROLES_MANAGED = {
+  ok: false,
+  code: ROLES_MANAGED_BY_IDP,
+  error: ROLES_MANAGED_MESSAGE
+} as const
+
 const ROLES: readonly PrincipalRole[] = ['admin', 'user']
 const isRole = (value: unknown): value is PrincipalRole =>
   typeof value === 'string' && (ROLES as readonly string[]).includes(value)
@@ -157,7 +176,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     res: {
       status: (code: number) => { json: (body: unknown) => void }
     }
-  ): Promise<NonNullable<RestApiDeps['hubUsers']> | null> => {
+  ): Promise<
+    (NonNullable<RestApiDeps['hubUsers']> & { erasureActor: ErasureActor | null }) | null
+  > => {
     const loopback = isLoopbackAddress(req.socket.remoteAddress ?? undefined)
     const authRequired = deps.restAuth?.required() === true
     // Only verify when the answer can matter — mirrors join-token.ts. An absent
@@ -214,10 +235,71 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     const actor = principal?.userId ?? null
     return {
       ...users,
+      erasureActor:
+        principal?.role === 'admin' && principal.scopes.includes('full') ? principal : null,
       create: (input) => runAsSecurityActor(actor, () => users.create(input)),
       disable: (email) => runAsSecurityActor(actor, () => users.disable(email)),
       enable: (email) => runAsSecurityActor(actor, () => users.enable(email)),
       setRole: (email, role) => runAsSecurityActor(actor, () => users.setRole(email, role))
+    }
+  }
+  async function erasureCall(
+    res: import('express').Response,
+    actor: ErasureActor | null,
+    action: string,
+    input: Record<string, unknown>
+  ) {
+    if (!actor) {
+      res.status(403).json({
+        ok: false,
+        error: 'Content erasure requires an authenticated hub admin with a full session.'
+      })
+      return
+    }
+    const erasure = getHubAdminDeps()?.erasure
+    if (!erasure) {
+      res.status(503).json({ ok: false, error: 'Content erasure is unavailable.' })
+      return
+    }
+    try {
+      const userId = typeof input.userId === 'string' ? input.userId : ''
+      const jobId = typeof input.jobId === 'string' ? input.jobId : ''
+      let data: unknown
+      if (action === 'preview' && userId) data = await erasure.preview({ actor, userId })
+      else if (action === 'reports' && userId) data = await erasure.reports({ actor, userId })
+      else if (action === 'receipt' && jobId) data = await erasure.receipt({ actor, jobId })
+      else if (action === 'erase-content' && userId && typeof input.confirmation === 'string')
+        data = await erasure.erase({ actor, userId, confirmation: input.confirmation })
+      else if (action === 'retry-erasure' && jobId) data = await erasure.retry({ actor, jobId })
+      else if (
+        action === 'computer-erasure-request' &&
+        jobId &&
+        typeof input.computerId === 'string' &&
+        typeof input.hubUrl === 'string'
+      )
+        data = await erasure.computerRequest({
+          actor,
+          jobId,
+          computerId: input.computerId,
+          hubUrl: input.hubUrl
+        })
+      else if (action === 'confirm-computer-erasure')
+        data = await erasure.confirmComputer({ actor, receipt: input.receipt })
+      else {
+        res.status(400).json({ ok: false, error: 'Invalid content erasure request.' })
+        return
+      }
+      res.json({ ok: true, data })
+    } catch (error) {
+      if (error instanceof AdminContentErasureError)
+        res
+          .status(error.code === 'ADMIN_ONLY' ? 403 : error.code === 'USER_NOT_FOUND' ? 404 : 409)
+          .json({ ok: false, code: error.code, error: error.message })
+      else
+        res.status(500).json({
+          ok: false,
+          error: 'The operation could not finish. Check cleanup status and retry.'
+        })
     }
   }
 
@@ -251,6 +333,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
         ...(role === undefined ? {} : { role })
       })
       if (!result.ok) {
+        if (result.reason === 'idp-managed') {
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
+          return
+        }
         res
           .status(409)
           .json(
@@ -275,6 +361,10 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.get('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
+    if (typeof req.query.erasure === 'string') {
+      await erasureCall(res, users.erasureActor, req.query.erasure, req.query)
+      return
+    }
     try {
       res.json({ ok: true, data: await users.list() })
     } catch (err) {
@@ -291,6 +381,15 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.patch('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
+    if (typeof req.body?.action === 'string') {
+      await erasureCall(
+        res,
+        users.erasureActor,
+        req.body.action,
+        req.body as Record<string, unknown>
+      )
+      return
+    }
     const body = (req.body ?? {}) as { email?: unknown; disabled?: unknown; role?: unknown }
     if (!isPlausibleEmail(body.email)) {
       res.status(400).json({ ok: false, error: 'email required' })
@@ -318,6 +417,13 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
             ? await users.disable(email)
             : await users.enable(email)
       switch (outcome) {
+        case 'erasure-in-progress':
+          res.status(409).json({
+            ok: false,
+            code: 'ERASURE_IN_PROGRESS',
+            error: 'This user cannot be enabled while their content is being erased.'
+          })
+          return
         case 'ok':
           res.json({ ok: true, data: { email, ...change } })
           return
@@ -353,6 +459,9 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
           return
         case 'sso-managed':
           res.status(409).json(SSO_MANAGED_ROLE)
+          return
+        case 'idp-managed':
+          res.status(ROLES_MANAGED_HTTP_STATUS).json(ROLES_MANAGED)
           return
       }
     } catch (err) {

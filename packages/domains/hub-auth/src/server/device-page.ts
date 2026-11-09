@@ -35,6 +35,8 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { isAPIError } from 'better-auth/api'
 import type { HubAuth } from './auth'
 import { DEVICE_CLIENTS, DEVICE_CODE_TTL_MS, DEVICE_PAGE_PATH, deviceRequestRef } from './device'
+import { ssoDisplayLabelOf } from './entra'
+import { idpRolesOf } from './idp-roles'
 import {
   cookieOnlyHeaders,
   escapeHtml as esc,
@@ -147,7 +149,15 @@ export function createDevicePage(
   type Resolved =
     | { kind: 'sign-in' }
     | { kind: 'done' }
-    | { kind: 'ok'; row: DeviceCodeRow; userId: string; email: string; requestRef: string }
+    | {
+        kind: 'ok'
+        row: DeviceCodeRow
+        userId: string
+        email: string
+        requestRef: string
+        /** `createdAt` of the SSO browser session approving it (Unix ms). */
+        authAtMs: number
+      }
 
   /**
    * Everything both the page and the forms check, in order. `done` = a page was sent;
@@ -243,7 +253,14 @@ export function createDevicePage(
       )
       return { kind: 'done' }
     }
-    return { kind: 'ok', row: claimed, userId: user.id, email: user.email, requestRef }
+    return {
+      kind: 'ok',
+      row: claimed,
+      userId: user.id,
+      email: user.email,
+      requestRef,
+      authAtMs: sso.createdAt
+    }
   }
 
   const view = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
@@ -268,7 +285,7 @@ export function createDevicePage(
         res,
         401,
         'Sign-in did not complete',
-        '<p>Microsoft sign-in was cancelled or refused, so nothing was approved.</p>' +
+        `<p>${esc(ssoDisplayLabelOf(auth))} sign-in was cancelled or refused, so nothing was approved.</p>` +
           restartLink(code)
       )
       return
@@ -334,13 +351,18 @@ export function createDevicePage(
         res,
         401,
         'Sign in again',
-        '<p>Approving needs a Microsoft sign-in made for this request.</p>' + restartLink(code)
+        `<p>Approving needs a ${esc(ssoDisplayLabelOf(auth))} sign-in made for this request.</p>` +
+          restartLink(code)
       )
       return
     }
     const detail = { clientId: r.row.clientId ?? null, requestRef: r.requestRef }
-    if (step === 'approve') await api.deviceApprove({ body: { userCode: code }, headers })
-    else await api.deviceDeny({ body: { userCode: code }, headers })
+    if (step === 'approve') {
+      // IdP-role mode: the token is bound to THIS sign-in (auth.ts captureDeviceBinding),
+      // recorded before the code can be redeemed.
+      idpRolesOf(auth)?.recordDeviceApproval(r.row.id, r.authAtMs, toMs(r.row.expiresAt))
+      await api.deviceApprove({ body: { userCode: code }, headers })
+    } else await api.deviceDeny({ body: { userCode: code }, headers })
     securityEvent({
       event: step === 'approve' ? 'auth.device.approve' : 'auth.device.deny',
       outcome: 'success',

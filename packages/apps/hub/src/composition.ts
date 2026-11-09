@@ -90,6 +90,7 @@ import {
   setBackupOps,
   setAuthEvents,
   setComputersDeps,
+  setHubAdminDeps,
   setHubDiskComputer,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
@@ -111,7 +112,6 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
-  purgeExpiredTrash,
   purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
@@ -294,18 +294,29 @@ import {
 } from '@slayzone/computer-transport/server'
 import {
   createHubAuth,
+  findHubUser,
   type EntraClientCredential,
-  type EntraSsoConfig,
-  type HubAuth
+  type HubAuth,
+  idpRolesOf,
+  type SsoConfig
 } from '@slayzone/hub-auth/server'
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import type { HubSsoBootConfig } from './boot-rules.js'
+import { ssoConfigFromBoot } from './sso-config.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
 
 import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
+import { createAdminContentErasure } from '@slayzone/content-erasure/admin'
+import { configureContentErasure, startErasureRetries } from '@slayzone/content-erasure/server'
+import { eraseDiagnosticContent, flushWriteQueue } from '@slayzone/diagnostics/server'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
-import { webLogin, webSessionCookieSecure } from './web-sessions.js'
+import {
+  hasLiveWebSession,
+  SSO_WEB_SESSION_LIFETIME,
+  webLogin,
+  webSessionCookieSecure
+} from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
 import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
@@ -382,6 +393,7 @@ const noop = (): void => {
 }
 
 export type ServerComposition = {
+  closeErasures: () => Promise<void>
   notifyRenderer: (change?: TasksChange) => void
   automationEngine: AutomationEngine
   restDeps: RestApiDeps
@@ -433,7 +445,8 @@ export function composeServer(opts: {
    * this hub. Becomes hub-auth's base URL. Unset = the loopback constant (below).
    */
   publicAddress?: string
-  /** Entra sign-in, when on (`assertSsoCredential` in boot-rules.ts). */
+  /** SSO sign-in, when on (`assertSsoCredential` in boot-rules.ts): the Entra tenant
+   *  setup or a generic OpenID issuer, and the IdP-role mode's config. */
   sso?: HubSsoBootConfig<EntraClientCredential> | null
   /** `SLAYZONE_HUB_ENABLE_PASSWORD` (T-10). Absent = on, the desktop app's hub. */
   enablePassword?: boolean
@@ -1592,6 +1605,70 @@ export function composeServer(opts: {
   })
 
   // --- REST deps (capability slots; absent → 501) ------------------------------
+  const hubUsers = createHubUsersCapability(() => hubAuthRef, userAccess, { db })
+  const adminErasure = createAdminContentErasure({
+    db,
+    dataRoot,
+    findUser: async (id) => {
+      if (!hubAuthRef) throw new Error('Hub accounts are unavailable')
+      return findHubUser(hubAuthRef, id)
+    }
+  })
+  setHubAdminDeps({ dataRoot, users: hubUsers, erasure: adminErasure })
+  configureContentErasure(db, {
+    cleanupAdditionalStores: async (target) => {
+      if (!opts.diagnostics) return
+      await flushWriteQueue()
+      await eraseDiagnosticContent(opts.diagnostics.db, opts.diagnostics.blobDir ?? null, target)
+    },
+    beforeDelete: async (taskIds) => {
+      for (const taskId of taskIds) {
+        baseTaskAdapters.killPtysByTaskId(taskId)
+        baseTaskAdapters.removeTaskProcesses(taskId)
+      }
+    },
+    beforeResume: async (scope) => {
+      if (scope.kind !== 'user') return
+      const user = hubAuthRef ? await findHubUser(hubAuthRef, scope.userId) : null
+      if (!user?.disabledAt) throw new Error('USER_NOT_DISABLED')
+    },
+    cleanupComputer: async (request) =>
+      runAsSecurityActor(null, async () => {
+        if (!execGateway?.listUsableComputers().some((c) => c.computerId === request.computerId))
+          throw new Error('COMPUTER_UNAVAILABLE')
+        const replies: Array<{ taskId: string; revision: number; erased: true }> = []
+        for (const taskId of request.taskIds) {
+          const lifecycle = await db.get<{ revision: number }>(
+            'SELECT revision FROM chat_task_lifecycle WHERE task_id=?',
+            [taskId]
+          )
+          if (!lifecycle) throw new Error('DELETION_FENCE_MISSING')
+          replies.push(
+            (await execGateway.request(
+              request.computerId,
+              HubToComputerMethods.chatRequest,
+              { kind: 'task.erase', jobId: request.jobId, taskId, revision: lifecycle.revision },
+              60_000
+            )) as { taskId: string; revision: number; erased: true }
+          )
+        }
+        return replies
+      }),
+    cleanupWorktree: async (target) =>
+      runAsSecurityActor(null, async () => {
+        if (!target.computerId || !target.repoPath) throw new Error('WORKTREE_LOCATION_UNKNOWN')
+        if (!execGateway?.listUsableComputers().some((c) => c.computerId === target.computerId))
+          throw new Error('COMPUTER_UNAVAILABLE')
+        await execGateway.request(
+          target.computerId,
+          'git.removeWorktree',
+          { projectPath: target.repoPath, worktreePath: target.path },
+          60_000
+        )
+      }),
+    onProgress: () => notifyRenderer()
+  })
+  const erasureRetries = startErasureRetries(db, dataRoot)
   const restDeps: RestApiDeps = {
     captureAgentPrompt: computerChat.captureHook,
     db,
@@ -1647,7 +1724,7 @@ export function composeServer(opts: {
     // into a diagnostic), which the route surfaces as a 503 naming
     // `computer.init_failed`. Disabling also revokes the account's web sessions,
     // sockets and computers (see user-access.ts).
-    hubUsers: createHubUsersCapability(() => hubAuthRef, userAccess),
+    hubUsers,
     // Bearer authority for routes that self-guard rather than sitting behind the
     // outer gate — `POST /api/computers/join-token` (so `slay computer mint` can
     // target a hub on another machine) and `/api/hub/users` (so `slay hub users …`
@@ -1847,7 +1924,7 @@ export function composeServer(opts: {
   setRemoteMcpEnvProvider(createRemoteMcpEnvProvider({ getBoundPort: () => boundPort }))
 
   computersReady = (async () => {
-    const sso: EntraSsoConfig | undefined = opts.sso ?? undefined
+    const sso: SsoConfig | undefined = opts.sso ? ssoConfigFromBoot(opts.sso) : undefined
     const hubAuth = await createHubAuth({
       dbPath: resolveAuthDbPath(dataRoot),
       // better-auth baseURL. A hub other machines reach is addressed by its public
@@ -1871,8 +1948,23 @@ export function composeServer(opts: {
       rateLimit: opts.floodLimits
     })
     hubAuthRef = hubAuth
-    // T-12: with Entra sign-in, every signed-in account is re-checked with Entra hourly
-    // (sso-recheck.ts). No-op without SSO — the desktop app's hub creates no timer.
+    // The IdP-role mode (hub-auth idp-roles.ts): its revocations reach what lives here —
+    // web sessions, open sockets, direct-link grants — and a role change closes the
+    // account's sockets. Attaching also revokes, here, the access of every human this
+    // boot's activation invalidated, BEFORE the hub serves (server.ts awaits this).
+    const idp = idpRolesOf(hubAuth)
+    if (idp) {
+      await idp.attachHub({
+        revokeExternal: (userId) => userAccess.endSessions(userId),
+        onRoleChange: (userId) => userAccess.reconnectUser(userId),
+        hasExternalSession: (userId) => hasLiveWebSession(db, userId, SSO_WEB_SESSION_LIFETIME)
+      })
+      // A `/trpc` socket closes at its account's evidence deadline unless re-proven.
+      trpcConnections.setDeadline((userId) => idp.deadlineMs(userId))
+    }
+    // T-12: with SSO sign-in, every signed-in account is re-checked with the issuer
+    // hourly — or, in the IdP-role mode, swept ahead of its deadline (sso-recheck.ts).
+    // No-op without SSO — the desktop app's hub creates no timer.
     startSsoRecheck({ auth: hubAuth, sso, db, revoker: userAccess })
     // Identity-based local-computer dedup (Wave3.5-D5): tell the auth adapters
     // which enroll name is the co-located auto-spawned computer so it collapses to
@@ -1930,6 +2022,8 @@ export function composeServer(opts: {
       },
       ...(placement.gate ? { gate: placement.gate } : {}),
       onChatOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
+      // IdP-role mode: grants never outlive the caller's role evidence.
+      accessDeadlineMs: (userId) => idpRolesOf(hubAuth)?.deadlineMs(userId) ?? null,
       // Validated at boot (rule B19), so this is the parsed value.
       stunAddresses: () => {
         const stun = readHubStunAddresses()
@@ -2205,9 +2299,10 @@ export function composeServer(opts: {
     computerGateway.events.on('computer-connected', () => {
       if (!resettingForTest) void automationEngine.computerConnected()
     })
-    // Expired Trash entries kept until their computer connected are purged now (R5-1).
+    // Resume durable cleanup when a recorded computer reconnects.
     computerGateway.events.on('computer-connected', () => {
-      if (!resettingForTest) bootBestEffort('trash-purge-on-connect', () => purgeExpiredTrash(db))
+      if (!resettingForTest)
+        bootBestEffort('erasure-retry-on-connect', () => erasureRetries.retry())
     })
     // A deleted tab's terminal output, saved on its computer to outlive restarts,
     // goes with it — also when nothing runs in the tab (deleted after a restart).
@@ -2498,6 +2593,7 @@ export function composeServer(opts: {
   }
 
   return {
+    closeErasures: () => erasureRetries.close(),
     resetForTest,
     notifyRenderer,
     automationEngine,

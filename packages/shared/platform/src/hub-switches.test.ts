@@ -234,6 +234,23 @@ test('isHubLoginRequired: garbage → false (does not throw)', () => {
   })
 }
 
+// --- generic OIDC settings (blank = unset; scopes split on whitespace) ---
+test('sso: the generic OIDC settings are read; blank is unset', () => {
+  const none = resolveHubSso({ SLAYZONE_HUB_OIDC_ISSUER: ' ', SLAYZONE_HUB_OIDC_SCOPES: '' })
+  expect(none.issuer).toBeUndefined()
+  expect(none.scopes).toBeUndefined()
+  const full = resolveHubSso({
+    SLAYZONE_HUB_OIDC_ISSUER: ' https://idp.example/realms/x ',
+    SLAYZONE_HUB_OIDC_CLIENT_ID: 'hub',
+    SLAYZONE_HUB_OIDC_CLIENT_SECRET: 's3cret',
+    SLAYZONE_HUB_OIDC_SCOPES: 'openid  email\toffline_access'
+  })
+  expect(full.issuer).toBe('https://idp.example/realms/x')
+  expect(full.oidcClientId).toBe('hub')
+  expect(full.clientSecret).toBe('s3cret')
+  expect(full.scopes).toEqual(['openid', 'email', 'offline_access'])
+})
+
 // --- HUB_PROCESS_ENV: everything a parent must clear before spawning a hub ---
 {
   const list = new Set(HUB_PROCESS_ENV)
@@ -307,5 +324,19 @@ test('SLAYZONE_HUB_STUN_ADDRESSES: default, none, a list; never a URL', () => {
     if (!r.ok) expect(r.message).toContain('SLAYZONE_HUB_STUN_ADDRESSES')
   }
   expect(HUB_PROCESS_ENV).toContain('SLAYZONE_HUB_STUN_ADDRESSES')
+  // The shared IdP-role contract settings and the generic OIDC settings configure a
+  // hub process too: a parent clears them before spawning one.
+  for (const name of [
+    'IDP_ROLES_ENABLED',
+    'IDP_ROLE_CLAIM',
+    'IDP_ROLE_MAPPING',
+    'IDP_RECHECK_INTERVAL_SECONDS',
+    'SLAYZONE_HUB_OIDC_ISSUER',
+    'SLAYZONE_HUB_OIDC_CLIENT_ID',
+    'SLAYZONE_HUB_OIDC_CLIENT_SECRET',
+    'SLAYZONE_HUB_OIDC_SCOPES'
+  ]) {
+    expect(HUB_PROCESS_ENV, name).toContain(name)
+  }
   expect(ENV_MANIFEST.SLAYZONE_HUB_STUN_ADDRESSES).toBe('infra')
 })

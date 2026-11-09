@@ -240,13 +240,13 @@ describe('valid ids still work', () => {
     expectIntact()
   })
 
-  test('task.archive archives and cleans its own artifacts only', async () => {
+  test('task.archive preserves original files and other tasks', async () => {
     fs.mkdirSync(path.join(dataRoot, 'artifacts', taskA), { recursive: true })
     fs.writeFileSync(path.join(dataRoot, 'artifacts', taskA, 'gone.md'), 'G')
     const res = await call(null, 'task.archive', { id: taskA })
     expect(res.status).toBe(200)
     expect(archivedAt(taskA)).not.toBeNull()
-    expect(fs.existsSync(path.join(dataRoot, 'artifacts', taskA))).toBe(false)
+    expect(fs.existsSync(path.join(dataRoot, 'artifacts', taskA))).toBe(true)
     expectIntact()
   })
 

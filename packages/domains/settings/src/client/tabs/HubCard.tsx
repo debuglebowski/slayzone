@@ -28,6 +28,7 @@ import {
 import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
+import { HubUsersSection } from './HubUsersSection'
 
 /**
  * A hub, as a card that owns its computers.
@@ -902,6 +903,7 @@ export function HubCard({
               )}
             </tbody>
           </table>
+          <HubUsersSection />
         </>
       }
     />

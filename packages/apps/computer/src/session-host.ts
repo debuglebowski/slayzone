@@ -7,7 +7,10 @@ import {
   writeFileSync,
   renameSync,
   unlinkSync,
-  readdirSync
+  readdirSync,
+  openSync,
+  fsyncSync,
+  closeSync
 } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -175,6 +178,26 @@ class SessionTransport extends HubDialer {
   private delivering = false
   private closed = false
   private readonly journal: string
+  private readonly erasedTasks = new Set<string>()
+  async forgetTaskEvents(taskId: string): Promise<void> {
+    this.erasedTasks.add(taskId)
+    this.eventsQueue = this.eventsQueue.filter((event) => !eventBelongsToTask(event.params, taskId))
+    atomicRuntimeJson(this.journal, this.eventsQueue)
+    const fd = openSync(this.journal, 'r')
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    if (process.platform !== 'win32') {
+      const directory = openSync(resolve(this.journal, '..'), 'r')
+      try {
+        fsyncSync(directory)
+      } finally {
+        closeSync(directory)
+      }
+    }
+  }
   constructor(
     readonly options: HubDialerOptions,
     root: string,
@@ -231,6 +254,7 @@ class SessionTransport extends HubDialer {
   }
   override notify(method: string, params?: unknown): boolean {
     if (method === 'event' && !isChatNotification(params)) {
+      if ([...this.erasedTasks].some((taskId) => eventBelongsToTask(params, taskId))) return false
       const entry = { id: randomUUID(), params }
       if (Buffer.byteLength(JSON.stringify(entry)) > 1024 * 1024) {
         this.logEvent('hook exceeds buffer size; dropped')
@@ -262,6 +286,14 @@ class SessionTransport extends HubDialer {
     if (!this.hubOnline || !this.peer) return Promise.reject(new Error('hub connector unavailable'))
     return this.peer.rpc.request<T>('upstream', { method, params, timeoutMs }, timeoutMs)
   }
+}
+
+function eventBelongsToTask(params: unknown, taskId: string): boolean {
+  if (!params || typeof params !== 'object') return false
+  const payload = 'payload' in params ? params.payload : null
+  return (
+    !!payload && typeof payload === 'object' && 'taskId' in payload && payload.taskId === taskId
+  )
 }
 
 export async function startSessionHost(

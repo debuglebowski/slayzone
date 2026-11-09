@@ -46,6 +46,9 @@ export interface ConnectionPrincipal {
   role: HubRole
   orgId?: string | null
   scopes: readonly Scope[]
+  /** The credential's session: when it was created (Unix ms) and, for a better-auth
+   *  session, its IdP-role activation epoch — what the per-operation check reads. */
+  session?: { createdAtMs: number; epoch?: number | null; sessionId?: string }
 }
 
 /**
@@ -148,7 +151,19 @@ export async function resolveConnectionPrincipal(
   if (!opts.hubAuth) return null
   try {
     const ctx = await verifySession(opts.hubAuth, new Headers({ authorization: `Bearer ${token}` }))
-    return ctx ? { userId: ctx.userId, role: ctx.role, orgId: ctx.orgId, scopes: ['full'] } : null
+    if (!ctx) return null
+    const epoch = ctx.session.idpEpoch
+    return {
+      userId: ctx.userId,
+      role: ctx.role,
+      orgId: ctx.orgId,
+      scopes: ['full'],
+      session: {
+        createdAtMs: new Date(ctx.session.createdAt).getTime(),
+        epoch: typeof epoch === 'number' ? epoch : null,
+        sessionId: ctx.session.id
+      }
+    }
   } catch {
     // Verification failure → unauthenticated (principal null), never throw.
     return null

@@ -573,10 +573,6 @@ export async function getModeDefaultFlags(
   return fallback ? (fallback.defaultFlags ?? '') : undefined
 }
 
-/** Trash keeps a deleted task (row, files, worktree) restorable for 30 days. A task
- *  deleted before this SQL instant has expired: the purge (startup-purge.ts) removes it. */
-export const TRASH_CUTOFF_SQL = "datetime('now', '-30 days')"
-
 /** Kill PTY only — used for soft-delete (preserves worktree for undo) */
 export function cleanupTaskImmediate(taskId: string): void {
   runtimeAdapters.killPtysByTaskId(taskId)
@@ -590,7 +586,7 @@ export async function cleanupTaskFull(
   taskId: string,
   batchIds: string[] = [taskId],
   /** The purge of a task whose computer is gone for good: there is no one to ask. */
-  opts: { skipWorktree?: boolean } = {}
+  opts: { skipWorktree?: boolean; preserveArtifacts?: boolean } = {}
 ): Promise<WorktreeCleanup> {
   // Resolved first: an id that is not one plain path segment (`..` named the data dir)
   // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
@@ -600,7 +596,10 @@ export async function cleanupTaskFull(
   runtimeAdapters.removeTaskProcesses(taskId)
   // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
-  if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
+  if (
+    !opts.preserveArtifacts &&
+    (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir))
+  ) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
 
@@ -611,16 +610,13 @@ export async function cleanupTaskFull(
 
   if (!task?.worktree_path || opts.skipWorktree) return 'none'
 
-  // Skip removal if any other task (outside this batch) may still need the same worktree:
-  // a live one, or one still restorable from Trash (Trash keeps a task's files until
-  // TRASH_CUTOFF_SQL — restore must find its worktree). Subtasks inherit parent's
-  // worktree_path; first batch member to run cleanup actually removes, siblings
-  // short-circuit on `existsSync(worktreePath)` inside removeWorktree.
+  // Skip removal if any other live task (outside this batch) still references the same worktree.
+  // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
+  // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
   const ids = batchIds.length > 0 ? batchIds : [taskId]
   const placeholders = ids.map(() => '?').join(',')
   const sharedRow = await db.get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders})
-      AND archived_at IS NULL AND (deleted_at IS NULL OR deleted_at >= ${TRASH_CUTOFF_SQL})`,
+    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`,
     [task.worktree_path, ...ids]
   )
   if ((sharedRow?.n ?? 0) > 0) return 'none'

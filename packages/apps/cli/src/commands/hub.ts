@@ -21,6 +21,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, openSync } from 'node:fs'
 import { join, resolve as resolvePath } from 'node:path'
 import { Argument, Command } from 'commander'
+import { registerHubErasureCommands } from './hub-erasure'
 import { discoverHubs, findHub, type DiscoveredHub } from '@slayzone/platform/hub-discovery'
 import {
   LOOPBACK_HOSTS,
@@ -52,7 +53,13 @@ import {
   type ResolvedHubTarget
 } from '../hub-config'
 import { hubRequest, resolveHubRequestTarget } from '../hub-request'
-import { deviceSignIn, hubSignIn, readSignInMethods, signedInEmail } from '../hub-sign-in'
+import {
+  DEFAULT_SSO_LABEL,
+  deviceSignIn,
+  hubSignIn,
+  readSignInMethods,
+  signedInEmail
+} from '../hub-sign-in'
 import { hubOwnerPasswordCommand } from './hub-owner-password'
 import { hubBreakGlassCommand, hubComputersCommand } from './hub-break-glass'
 import {
@@ -476,11 +483,15 @@ async function readPasswordFromStdin(): Promise<string> {
  * `discoverAllHubs` is passed in so the sweep also sees the desktop app's
  * out-of-block sidecar port.
  */
-function hubUsersRequest<T>(method: string, body?: Record<string, unknown>): Promise<T> {
+function hubUsersRequest<T>(
+  method: string,
+  body?: Record<string, unknown>,
+  query?: Record<string, string>
+): Promise<T> {
   return resolveHubRequestTarget('hub users …', discoverAllHubs).then((target) =>
     hubRequest<T>({
       target,
-      path: '/api/hub/users',
+      path: '/api/hub/users' + (query ? '?' + new URLSearchParams(query).toString() : ''),
       method,
       ...(body === undefined ? {} : { body }),
       unwrap: 'data'
@@ -496,6 +507,7 @@ function hubUsersCommand(): Command {
     .description('Manage the accounts that can sign in to a hub')
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
+  registerHubErasureCommands(users, hubUsersRequest)
 
   users
     .command('add <email>')
@@ -1209,10 +1221,10 @@ export function hubCommand(): Command {
     .option(
       '--email <email>',
       'Sign in with this account and a password (see `slay hub users ls`). ' +
-        'Omit on a hub with Microsoft sign-in: you approve in a browser instead'
+        'Omit on a hub with SSO sign-in (Microsoft or another provider): you approve in a browser instead'
     )
     .option('--password <password>', 'Account password (omit to read from stdin)')
-    .option('--no-browser', 'Microsoft sign-in: print the page, do not try to open a browser')
+    .option('--no-browser', 'SSO sign-in: print the page, do not try to open a browser')
     .action(
       async (rawUrl: string, opts: { email?: string; password?: string; browser: boolean }) => {
         const url = normalizeHubUrl(rawUrl)
@@ -1228,11 +1240,13 @@ export function hubCommand(): Command {
             )
           }
           token = await deviceSignIn(url, { openBrowser: opts.browser })
-          who = (await signedInEmail(url, token)) ?? 'your Microsoft account'
+          who =
+            (await signedInEmail(url, token)) ??
+            `your ${methods.ssoLabel ?? DEFAULT_SSO_LABEL} account`
         } else {
           if (!methods.password) {
             fail(
-              `Password sign-in is off on ${url}. Sign in through Microsoft instead:\n` +
+              `Password sign-in is off on ${url}. Sign in through ${methods.ssoLabel ?? DEFAULT_SSO_LABEL} instead:\n` +
                 `  slay hub login ${rawUrl}`
             )
           }

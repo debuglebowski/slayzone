@@ -464,7 +464,8 @@ export function TaskContextMenu({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Task</AlertDialogTitle>
               <AlertDialogDescription>
-                Move "{task.title}" to Trash? You can restore it for 30 days.
+                Permanently delete "{task.title}" and its SlayZone files and history? This cannot be
+                undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

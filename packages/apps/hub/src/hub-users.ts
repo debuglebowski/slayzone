@@ -24,10 +24,13 @@ import {
 } from '@slayzone/hub-auth/server'
 import type { ComputersDeps, RestApiDeps } from '@slayzone/api'
 import type { UserAccessRevoker } from './user-access.js'
+import type { SlayzoneDb } from '@slayzone/platform'
+import { withErasureAccountLock } from '@slayzone/content-erasure/admin'
 
 export function createHubUsersCapability(
   getAuth: () => HubAuth | null,
-  revoker: Pick<UserAccessRevoker, 'revokeUser'>
+  revoker: Pick<UserAccessRevoker, 'revokeUser'>,
+  options: { db?: SlayzoneDb } = {}
 ): NonNullable<RestApiDeps['hubUsers']> {
   return {
     ready: () => getAuth() !== null,
@@ -54,7 +57,21 @@ export function createHubUsersCapability(
     },
     enable: async (email) => {
       const auth = getAuth()
-      return auth ? enableHubUser(auth, email) : 'not-found'
+      if (!auth) return 'not-found'
+      const user = await findHubUser(auth, email)
+      if (!user) return enableHubUser(auth, email)
+      return withErasureAccountLock(user.id, async () => {
+        if (
+          options.db &&
+          (await options.db.get(
+            `SELECT 1 FROM content_erasure_jobs
+          WHERE owner_user_id=? AND state='incomplete' AND json_extract(scope,'$.kind')='user' LIMIT 1`,
+            [user.id]
+          ))
+        )
+          return 'erasure-in-progress'
+        return enableHubUser(auth, email)
+      })
     },
     setRole: async (email, role) => {
       const auth = getAuth()
