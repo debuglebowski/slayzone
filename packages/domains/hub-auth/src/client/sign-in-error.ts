@@ -25,41 +25,64 @@ const CODE = /^[A-Za-z0-9_'-]{1,64}$/
 
 const ASK_ADMIN = 'If it keeps failing, ask your administrator.'
 
-const MESSAGES: Readonly<Record<string, string>> = {
-  // T-09 refuses every ID token that fails its checks with this generic code: another
-  // tenant, no MFA, no SlayZone app role, no email (the audit line names which).
-  unable_to_get_user_info:
-    'Microsoft refused this account for this hub: it may belong to another organisation, ' +
-    'have signed in without multi-factor authentication, or not be assigned to SlayZone. ' +
-    'Ask your administrator.',
-  ACCOUNT_DISABLED: 'This account is disabled on this hub. Ask your administrator.',
-  account_not_linked:
-    'The email of this Microsoft account already belongs to another account on this hub, ' +
-    'so it cannot sign in. Ask your administrator.',
-  unable_to_link_account:
-    'This Microsoft account could not be connected to an account on this hub. Ask your administrator.',
-  access_denied: 'Sign-in was cancelled at Microsoft. Try again.',
-  state_mismatch: 'The sign-in took too long or was started in another tab. Try again.',
-  please_restart_the_process: 'The sign-in took too long or was started in another tab. Try again.',
-  invalid_callback_request: 'The sign-in took too long or was started in another tab. Try again.',
-  no_session: `Microsoft sign-in did not complete. Try again. ${ASK_ADMIN}`,
-  // App sign-in (`src/server/app-sign-in.ts`).
-  flow_expired: 'The sign-in took too long or its browser window was closed. Try again.',
-  temporarily_unavailable: 'Too many sign-ins are waiting on this hub. Try again in a few minutes.'
+/**
+ * The name a hub gives its SSO sign-in when it gives none (`/health` `ssoLabel`): hubs
+ * from before the label only had Microsoft Entra sign-in.
+ */
+export const DEFAULT_SSO_LABEL = 'Microsoft'
+
+/** The fixed messages, worded for the hub's SSO provider (`ssoLabel`). */
+function messagesFor(ssoLabel: string): Readonly<Record<string, string>> {
+  const microsoft = ssoLabel === DEFAULT_SSO_LABEL
+  const provider = microsoft ? 'Microsoft' : 'your identity provider'
+  const Provider = microsoft ? 'Microsoft' : 'Your identity provider'
+  const account = microsoft ? 'Microsoft account' : 'account at your identity provider'
+  const signIn = microsoft ? 'Microsoft sign-in' : 'Single sign-on'
+  return {
+    // T-09 refuses every ID token that fails its checks with this generic code: another
+    // tenant, no MFA, no role, no email (the audit line names which).
+    unable_to_get_user_info:
+      `${Provider} refused this account for this hub: it may belong to another organisation, ` +
+      'have signed in without multi-factor authentication, or not be assigned to SlayZone. ' +
+      'Ask your administrator.',
+    ACCOUNT_DISABLED: 'This account is disabled on this hub. Ask your administrator.',
+    account_not_linked:
+      `The email of this ${account} already belongs to another account on this hub, ` +
+      'so it cannot sign in. Ask your administrator.',
+    unable_to_link_account: `This ${account} could not be connected to an account on this hub. Ask your administrator.`,
+    access_denied: `Sign-in was cancelled at ${provider}. Try again.`,
+    state_mismatch: 'The sign-in took too long or was started in another tab. Try again.',
+    please_restart_the_process:
+      'The sign-in took too long or was started in another tab. Try again.',
+    invalid_callback_request: 'The sign-in took too long or was started in another tab. Try again.',
+    no_session: `${signIn} did not complete. Try again. ${ASK_ADMIN}`,
+    // App sign-in (`src/server/app-sign-in.ts`).
+    flow_expired: 'The sign-in took too long or its browser window was closed. Try again.',
+    temporarily_unavailable:
+      'Too many sign-ins are waiting on this hub. Try again in a few minutes.',
+    unknown: `${signIn} did not complete. Try again. ${ASK_ADMIN}`
+  }
 }
 
-/** The message for a code; anything unknown gets the general one. */
-export function signInErrorMessage(code: string): string {
-  return MESSAGES[code] ?? `Microsoft sign-in did not complete. Try again. ${ASK_ADMIN}`
+/**
+ * The message for a code; anything unknown gets the general one. `ssoLabel`: what the
+ * hub calls its SSO sign-in (`/health` `ssoLabel`) — Microsoft by default.
+ */
+export function signInErrorMessage(code: string, ssoLabel: string = DEFAULT_SSO_LABEL): string {
+  const messages = messagesFor(ssoLabel)
+  return Object.prototype.hasOwnProperty.call(messages, code) ? messages[code]! : messages.unknown!
 }
 
 /** The sign-in error a URL's query carries, or null. Pure. */
-export function signInErrorFrom(search: string): SignInError | null {
+export function signInErrorFrom(
+  search: string,
+  ssoLabel: string = DEFAULT_SSO_LABEL
+): SignInError | null {
   const params = new URLSearchParams(search)
   const raw = params.get('signin') === 'failed' ? (params.get('reason') ?? '') : params.get('error')
   if (raw === null) return null
   const code = CODE.test(raw) ? raw : 'unknown'
-  return { code, message: signInErrorMessage(code) }
+  return { code, message: signInErrorMessage(code, ssoLabel) }
 }
 
 /** The query parameters a sign-in error arrives in (a client drops them once read). */

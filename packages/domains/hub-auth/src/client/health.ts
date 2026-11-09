@@ -12,14 +12,11 @@
  */
 import { appSignInOf, type HubAppSignIn } from './app-sign-in'
 import { HEALTH_MAX_CHARS, HUB_AUTH_PATHS, parseJson } from './protocol'
+import { DEFAULT_SSO_LABEL } from './sign-in-error'
 import { type HubTransport, isHubTransportTimeout, transportErrorText } from './transport'
 
-/**
- * The name to show for a hub's SSO sign-in ("Sign in with <label>"): `/health`
- * `ssoLabel` — `Microsoft` for the Entra setup, `SSO` for a generic OpenID provider.
- * A hub too old to report it only had Entra sign-in: {@link DEFAULT_SSO_LABEL}.
- */
-export const DEFAULT_SSO_LABEL = 'Microsoft'
+// What a hub too old to report `/health` `ssoLabel` called its SSO sign-in (Entra only).
+export { DEFAULT_SSO_LABEL }
 
 /** `/health` `ssoLabel`, checked (short, plain text), else {@link DEFAULT_SSO_LABEL}. */
 export function ssoLabelOf(health: unknown): string {

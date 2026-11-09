@@ -11,6 +11,7 @@ import { setupWindowApi } from './window-api'
 import { authInvalidationLink } from './auth-invalidation-link'
 import { LoginScreen } from './LoginScreen'
 import { SignOutControl } from './SignOutControl'
+import { signInErrorMessage } from '@slayzone/hub-auth/client'
 import { fetchHubSignIn } from './hub-health'
 import { fetchSignedIn } from './web-session'
 import { clearLegacySessionToken } from './web-session-storage'
@@ -56,7 +57,12 @@ async function boot(): Promise<void> {
     createRoot(el).render(
       <LoginScreen
         methods={signIn.methods}
-        signInError={signInError}
+        signInError={
+          // Worded for this hub's provider (the error was read before /health answered).
+          signInError && signIn.ssoLabel
+            ? { ...signInError, message: signInErrorMessage(signInError.code, signIn.ssoLabel) }
+            : signInError
+        }
         {...(signIn.ssoLabel ? { ssoLabel: signIn.ssoLabel } : {})}
       />
     )

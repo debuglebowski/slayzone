@@ -107,7 +107,15 @@ export async function signInWithMicrosoft(
     }
   }
   const callback = readAppSignInCallback(ended.url, pending)
-  if (!callback.ok) return { ok: false, error: callback.message }
+  if (!callback.ok) {
+    // Worded for this hub's provider (`/health` `ssoLabel`).
+    return {
+      ok: false,
+      error: callback.code
+        ? signInErrorMessage(callback.code, probe.offer.ssoLabel)
+        : callback.message
+    }
+  }
 
   const exchanged = await exchangeAppSignInCode(deps.transport, probe.baseUrl, {
     code: callback.code,
