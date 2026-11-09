@@ -140,8 +140,36 @@ async function openFileImpl(
   }
 }
 
+/**
+ * Fold a fresh disk read into an open tab without ever losing the user's buffer.
+ * Returns the same object when nothing changes.
+ * - `ownWrite`: content of this tab's save still in flight. Disk equal to it is
+ *   our own echo, never an outside change.
+ * - Clean tab: adopt disk content.
+ * - Dirty tab: never touch `content`. Disk equal to the buffer → now clean; disk
+ *   equal to the baseline → nothing changed outside; otherwise → `diskChanged`.
+ */
+function reconcileWithDisk(file: OpenFile, disk: string, ownWrite?: string): OpenFile {
+  if (ownWrite !== undefined && disk === ownWrite) return file
+  const dirty = file.content !== file.originalContent
+  if (!dirty) {
+    if (file.content === disk && !file.diskChanged && !file.deleted) return file
+    return { ...file, content: disk, originalContent: disk, diskChanged: false, deleted: false }
+  }
+  if (disk === file.content) {
+    return { ...file, originalContent: disk, diskChanged: false, deleted: false }
+  }
+  if (disk === file.originalContent) {
+    return file.deleted ? { ...file, deleted: false } : file
+  }
+  if (file.diskChanged && !file.deleted) return file
+  return { ...file, diskChanged: true, deleted: false }
+}
+
 interface ReloadFileDeps {
   openFilesRef: { current: OpenFile[] }
+  /** Content of each path's save currently in flight (see saveFileImpl). */
+  inFlightWrites: Map<string, string>
   setOpenFiles: Dispatch<SetStateAction<OpenFile[]>>
   setActiveFilePath: Dispatch<SetStateAction<string | null>>
   setFileVersions: Dispatch<SetStateAction<Map<string, number>>>
@@ -149,9 +177,16 @@ interface ReloadFileDeps {
 }
 
 // Plain module function (not compiled by React Compiler, which can't lower
-// conditional expressions inside try/catch). Body moved verbatim from the hook.
+// conditional expressions inside try/catch).
 async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<void> {
-  const { openFilesRef, setOpenFiles, setActiveFilePath, setFileVersions, readFile } = deps
+  const {
+    openFilesRef,
+    inFlightWrites,
+    setOpenFiles,
+    setActiveFilePath,
+    setFileVersions,
+    readFile
+  } = deps
   try {
     // Binary files: just bump version for cache busting, no content to reload
     if (isImageFile(filePath)) {
@@ -165,34 +200,34 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
 
     const result = await readFile(filePath)
     if (result.tooLarge || result.content == null) return
+    const disk = result.content
     const current = openFilesRef.current.find((f) => f.path === filePath)
-    if (
-      current &&
-      current.content === result.content &&
-      current.originalContent === result.content &&
-      !current.diskChanged &&
-      !current.deleted
-    ) {
-      return
-    }
-    setOpenFiles((prev) =>
-      prev.map((f) =>
-        f.path === filePath
-          ? {
-              ...f,
-              content: result.content,
-              originalContent: result.content,
-              diskChanged: false,
-              deleted: false
-            }
-          : f
-      )
-    )
-    setFileVersions((prev) => {
-      const next = new Map(prev)
-      next.set(filePath, (next.get(filePath) ?? 0) + 1)
-      return next
+    if (!current) return
+    // Read the in-flight write AFTER the read resolved: a save that finished in
+    // the meantime already moved the baseline, so the plain rules cover it.
+    const ownWrite = inFlightWrites.get(filePath)
+    if (reconcileWithDisk(current, disk, ownWrite) === current) return
+    // Reconcile against the state at apply time (`prev`), not the snapshot the
+    // read started from — keys typed while the read was in flight are kept.
+    setOpenFiles((prev) => {
+      let changed = false
+      const next = prev.map((f) => {
+        if (f.path !== filePath) return f
+        const reconciled = reconcileWithDisk(f, disk, ownWrite)
+        if (reconciled !== f) changed = true
+        return reconciled
+      })
+      return changed ? next : prev
     })
+    // Tells the editor to pull the new content. Harmless when the buffer was kept:
+    // the editor only replaces its doc when it differs from `content`.
+    if (disk !== current.content) {
+      setFileVersions((prev) => {
+        const next = new Map(prev)
+        next.set(filePath, (next.get(filePath) ?? 0) + 1)
+        return next
+      })
+    }
   } catch {
     const current = openFilesRef.current.find((f) => f.path === filePath)
     if (!current) return
@@ -224,6 +259,37 @@ async function reloadFileImpl(deps: ReloadFileDeps, filePath: string): Promise<v
       return next
     })
   }
+}
+
+interface SaveFileDeps {
+  openFilesRef: { current: OpenFile[] }
+  inFlightWrites: Map<string, string>
+  setOpenFiles: Dispatch<SetStateAction<OpenFile[]>>
+  writeFile: (filePath: string, content: string) => Promise<unknown>
+}
+
+// Plain module function (React Compiler can't lower try/finally). Reads the
+// buffer when the save actually starts (saves are serialized per path by the
+// caller), and moves the baseline to exactly what was written — keys typed
+// while the write was in flight stay dirty.
+async function saveFileImpl(deps: SaveFileDeps, filePath: string): Promise<void> {
+  const { openFilesRef, inFlightWrites, setOpenFiles, writeFile } = deps
+  const file = openFilesRef.current.find((f) => f.path === filePath)
+  if (!file || file.content == null || file.content === file.originalContent) return
+  const written = file.content
+  inFlightWrites.set(filePath, written)
+  try {
+    await writeFile(filePath, written)
+  } finally {
+    if (inFlightWrites.get(filePath) === written) inFlightWrites.delete(filePath)
+  }
+  setOpenFiles((prev) =>
+    prev.map((f) =>
+      f.path === filePath
+        ? { ...f, originalContent: written, diskChanged: false, deleted: false }
+        : f
+    )
+  )
 }
 
 export function useFileEditor(
@@ -315,6 +381,10 @@ export function useFileEditor(
 
   const projectPathRef = useRef(projectPath)
   const openFilesRef = useRef(openFiles)
+  // Per path: content of the save in flight (own-echo detection) and the tail of
+  // the save queue (saves of one file never overlap, so disk + baseline stay ordered).
+  const inFlightWrites = useRef(new Map<string, string>())
+  const saveQueue = useRef(new Map<string, Promise<void>>())
   // Latest-value refs for handlers; synced at commit (not during render). The
   // openFiles ref is also written eagerly inside setOpenFilesAndRef updaters.
   useInsertionEffect(() => {
@@ -327,6 +397,7 @@ export function useFileEditor(
     reloadFileImpl(
       {
         openFilesRef,
+        inFlightWrites: inFlightWrites.current,
         setOpenFiles,
         setActiveFilePath,
         setFileVersions,
@@ -417,24 +488,10 @@ export function useFileEditor(
         setTreeRefreshKey((k) => k + 1)
       }, 500)
 
-      setOpenFiles((prev) => {
-        const fileIdx = prev.findIndex((f) => f.path === relPath)
-        if (fileIdx === -1) return prev
-
-        const file = prev[fileIdx]
-        const isDirty = file.content !== file.originalContent
-
-        if (isDirty) {
-          // Mark as disk-changed, don't auto-reload
-          const next = [...prev]
-          next[fileIdx] = { ...file, diskChanged: true, deleted: false }
-          return next
-        }
-
-        // Not dirty — schedule silent reload (async, outside setState)
-        reloadFile(relPath)
-        return prev
-      })
+      // Open text tab → read and reconcile. Clean tabs reload silently; dirty tabs
+      // keep their buffer and get `diskChanged` only if disk really differs (the
+      // save's own echo is recognised by content, not treated as outside change).
+      if (openFilesRef.current.some((f) => f.path === relPath)) void reloadFile(relPath)
     }
   )
   const watch = useSubscription(
@@ -522,25 +579,36 @@ export function useFileEditor(
     setOpenFiles((prev) => prev.map((f) => (f.path === filePath ? { ...f, content } : f)))
   }, [])
 
+  // Saves of one path are serialized: a save issued while another is in flight
+  // runs after it (and writes the buffer as it is then), so writes land on disk
+  // in order and each moves the baseline forward. A failed save rejects to its
+  // caller but does not block the next one.
   const saveFile = useCallback(
-    async (filePath: string) => {
-      const file = openFiles.find((f) => f.path === filePath)
-      if (!file || file.content == null || file.content === file.originalContent) return
-      await writeFile({
-        ...target,
-        rootPath: projectPath,
-        filePath,
-        content: file.content
-      })
-      setOpenFiles((prev) =>
-        prev.map((f) =>
-          f.path === filePath
-            ? { ...f, originalContent: f.content, diskChanged: false, deleted: false }
-            : f
+    (filePath: string): Promise<void> => {
+      const queue = saveQueue.current
+      const previous = queue.get(filePath) ?? Promise.resolve()
+      const run = previous
+        .catch(() => undefined)
+        .then(() =>
+          saveFileImpl(
+            {
+              openFilesRef,
+              inFlightWrites: inFlightWrites.current,
+              setOpenFiles,
+              writeFile: (path, content) =>
+                writeFile({ ...target, rootPath: projectPath, filePath: path, content })
+            },
+            filePath
+          )
         )
-      )
+      queue.set(filePath, run)
+      const release = () => {
+        if (queue.get(filePath) === run) queue.delete(filePath)
+      }
+      run.then(release, release)
+      return run
     },
-    [projectPath, openFiles, writeFile, target]
+    [projectPath, writeFile, target]
   )
 
   const closeFile = useCallback(

@@ -26,8 +26,8 @@ export interface UseWatchedFileResult {
 
 interface PerformSaveDeps {
   savingRef: { current: string | null }
-  saveRef: { current: (content: string) => Promise<void> }
-  contentRef: { current: string }
+  /** Bumped on every target (projectPath/relPath) change. */
+  generationRef: { current: number }
   originalContentRef: { current: string }
   setOriginalContent: (content: string) => void
   setDiskChanged: (changed: boolean) => void
@@ -38,27 +38,35 @@ function saveErrorMessage(err: unknown): string {
   return err instanceof Error && err.message ? err.message : String(err)
 }
 
-// Core save: idempotent, dedupes via savingRef. Plain module function — React
-// Compiler can't lower try/finally, and the finally must keep its exact timing.
+// Core save. Plain module function — React Compiler can't lower try/finally, and
+// the finally must keep its exact timing. Runs serialized (see `performSave`).
 // Never rejects: a failed save is reported through setSaveError (the callers are
 // fire-and-forget — blur, debounce), and the draft stays dirty so the next save retries.
-async function performSaveImpl(deps: PerformSaveDeps, target: string): Promise<void> {
+async function performSaveImpl(
+  deps: PerformSaveDeps,
+  request: { target: string; save: (content: string) => Promise<void>; generation: number }
+): Promise<void> {
   const {
     savingRef,
-    saveRef,
-    contentRef,
+    generationRef,
     originalContentRef,
     setOriginalContent,
     setDiskChanged,
     setSaveError
   } = deps
-  if (savingRef.current === target) return
+  const { target, save, generation } = request
+  // Queued behind an identical save that already landed.
+  if (generationRef.current === generation && originalContentRef.current === target) return
   savingRef.current = target
   try {
-    await saveRef.current(target)
+    // `save` was captured at enqueue: a queued save always writes the file it was
+    // issued for, even if the target swapped while it waited.
+    await save(target)
     setSaveError(null)
-    // Only update baseline if no newer edits happened during the save
-    if (contentRef.current === target) {
+    // Baseline = exactly what was written. Keys typed during the write differ
+    // from it, so they stay dirty and get saved next. Skipped once the target
+    // swapped — the baseline now belongs to another file.
+    if (generationRef.current === generation) {
       originalContentRef.current = target
       setOriginalContent(target)
       setDiskChanged(false)
@@ -70,6 +78,61 @@ async function performSaveImpl(deps: PerformSaveDeps, target: string): Promise<v
       savingRef.current = null
     }
   }
+}
+
+interface ReloadDeps {
+  readRef: { current: () => Promise<string | null> }
+  generationRef: { current: number }
+  contentRef: { current: string }
+  originalContentRef: { current: string }
+  savingRef: { current: string | null }
+  setContentState: (content: string) => void
+  setOriginalContent: (content: string) => void
+  setDiskChanged: (changed: boolean) => void
+}
+
+/**
+ * Read disk and fold it into the draft without losing keystrokes.
+ * - `discardDraft` (explicit Reload): adopt disk, unless keys were typed while the
+ *   read was in flight — those are newer than the click and are kept.
+ * - Otherwise a clean draft adopts disk; a dirty draft is never overwritten:
+ *   disk === draft → now clean; disk === baseline or our in-flight write → no
+ *   outside change; anything else → `diskChanged`.
+ */
+async function reloadImpl(deps: ReloadDeps, discardDraft: boolean): Promise<void> {
+  const {
+    readRef,
+    generationRef,
+    contentRef,
+    originalContentRef,
+    savingRef,
+    setContentState,
+    setOriginalContent,
+    setDiskChanged
+  } = deps
+  const generation = generationRef.current
+  const draftAtRead = contentRef.current
+  const next = await readRef.current()
+  // Target swapped during the read: the result belongs to the previous file.
+  if (next == null || generationRef.current !== generation) return
+  const typedDuringRead = contentRef.current !== draftAtRead
+  const dirty = contentRef.current !== originalContentRef.current
+  if ((discardDraft && !typedDuringRead) || !dirty) {
+    contentRef.current = next
+    originalContentRef.current = next
+    setContentState(next)
+    setOriginalContent(next)
+    setDiskChanged(false)
+    return
+  }
+  if (next === contentRef.current) {
+    originalContentRef.current = next
+    setOriginalContent(next)
+    setDiskChanged(false)
+    return
+  }
+  if (next === originalContentRef.current || next === savingRef.current) return
+  setDiskChanged(true)
 }
 
 /**
@@ -84,7 +147,10 @@ async function performSaveImpl(deps: PerformSaveDeps, target: string): Promise<v
  *   processes the IPC regardless of renderer teardown, so side-effects survive.
  * - Strict-mode double cleanup: savingRef dedupes identical in-flight saves.
  * - relPath swap while dirty: previous file flushed before new file loads — no cross-file contamination.
- * - Self-write harmless: after save, content === originalContent, so the watcher's reload is a no-op.
+ * - Saves are serialized: one issued while another is in flight runs after it.
+ * - Baseline after a save = exactly what was written; keys typed meanwhile stay dirty.
+ * - Reloads never overwrite a draft that is dirty (or was typed into during the read).
+ * - Self-write harmless: the watcher's read matches the written content → no-op.
  */
 export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileResult {
   const { projectPath, relPath, read, save, debounceMs = 500 } = options
@@ -128,23 +194,32 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Core save: idempotent, dedupes via savingRef
-  const performSave = useCallback(
-    (target: string): Promise<void> =>
+  // Tail of the save queue: writes run one at a time, in issue order, so disk and
+  // baseline never go backwards. performSaveImpl never rejects.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+  // Identifies the current target; bumped by the load effect on every swap.
+  const generationRef = useRef(0)
+
+  // Core save: serialized; dedupes an identical save already in flight.
+  const performSave = useCallback((target: string): Promise<void> => {
+    if (savingRef.current === target) return saveChainRef.current
+    const request = { target, save: saveRef.current, generation: generationRef.current }
+    const run = saveChainRef.current.then(() =>
       performSaveImpl(
         {
           savingRef,
-          saveRef,
-          contentRef,
+          generationRef,
           originalContentRef,
           setOriginalContent,
           setDiskChanged,
           setSaveError
         },
-        target
-      ),
-    []
-  )
+        request
+      )
+    )
+    saveChainRef.current = run
+    return run
+  }, [])
 
   // Track whether the hook currently has a target — flushNow/onBlur no-op when null.
   const hasTargetRef = useRef(false)
@@ -161,15 +236,18 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     await performSave(contentRef.current)
   }, [performSave])
 
-  const reloadFromDisk = useCallback(async (): Promise<void> => {
-    const next = await readRef.current()
-    if (next == null) return
-    contentRef.current = next
-    originalContentRef.current = next
-    setContentState(next)
-    setOriginalContent(next)
-    setDiskChanged(false)
-  }, [])
+  const reloadDeps: ReloadDeps = {
+    readRef,
+    generationRef,
+    contentRef,
+    originalContentRef,
+    savingRef,
+    setContentState,
+    setOriginalContent,
+    setDiskChanged
+  }
+  const reloadFromDisk = useStableCallback((): Promise<void> => reloadImpl(reloadDeps, true))
+  const reconcileWithDisk = useStableCallback((): Promise<void> => reloadImpl(reloadDeps, false))
 
   // No target: clear the draft state on mount / target change — adjusted during
   // render. The refs are still cleared in the load effect below (commit time, after
@@ -193,6 +271,7 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
 
   // Load on mount / relPath change. Cleanup flushes the OUTGOING relPath.
   useEffect(() => {
+    generationRef.current += 1
     if (!projectPath || !relPath) {
       contentRef.current = ''
       originalContentRef.current = ''
@@ -226,12 +305,15 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
         if (savingRef.current !== target) {
           savingRef.current = target
           // Fire-and-forget. Do not await — cleanup must return synchronously.
+          // Queued behind any save in flight so writes stay ordered.
           // A file swap (still mounted) shows the outgoing file's failure too.
-          void capturedSave(target)
+          const run = saveChainRef.current
+            .then(() => capturedSave(target))
             .catch((err: unknown) => setSaveError(saveErrorMessage(err)))
             .finally(() => {
               if (savingRef.current === target) savingRef.current = null
             })
+          saveChainRef.current = run
         }
       }
     }
@@ -261,13 +343,6 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
     relPathRef.current = relPath
   })
 
-  // Keep a stable handle to reloadFromDisk so the subscription's onData closure
-  // never goes stale without re-subscribing.
-  const reloadFromDiskRef = useRef(reloadFromDisk)
-  useEffect(() => {
-    reloadFromDiskRef.current = reloadFromDisk
-  })
-
   const onWatchEvent = useStableCallback(
     (event: { type: 'changed' | 'deleted'; root: string; relPath: string }) => {
       if (event.type !== 'changed') return
@@ -280,11 +355,9 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
       // Ignore echoes from our own in-flight save
       if (savingRef.current !== null) return
 
-      if (dirtyRef.current) {
-        setDiskChanged(true)
-        return
-      }
-      void reloadFromDiskRef.current()
+      // Read + reconcile: clean draft reloads; dirty draft keeps its buffer and is
+      // flagged only when disk differs from both the draft and the last write.
+      void reconcileWithDisk()
     }
   )
 

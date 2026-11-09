@@ -412,7 +412,8 @@ describe('useWatchedFile', () => {
   })
 
   it('target cleared while dirty → outgoing file flushed, state reset to empty + clean', async () => {
-    const read = vi.fn(async () => 'A-disk')
+    let disk = 'A-disk'
+    const read = vi.fn(async () => disk)
     const save = vi.fn(async (_content: string) => undefined)
 
     const { result, rerender } = renderHook(
@@ -426,10 +427,13 @@ describe('useWatchedFile', () => {
     act(() => {
       result.current.setContent('A-edited')
     })
-    // Dirty + a disk change while dirty → diskChanged banner state is set too.
+    // Dirty + an outside disk change while dirty → diskChanged banner state is set too.
+    disk = 'A-external'
     act(() => {
       watchController.emit(ROOT, 'A.md')
     })
+    await flushPromises()
+    expect(result.current.content).toBe('A-edited')
     expect(result.current.dirty).toBe(true)
     expect(result.current.diskChanged).toBe(true)
 
@@ -453,11 +457,13 @@ describe('useWatchedFile', () => {
     expect(save).toHaveBeenCalledTimes(1)
 
     // Re-targeting loads the file fresh and clean.
+    disk = 'A-disk'
     rerender({ rel: 'A.md' })
     await flushPromises()
     expect(result.current.content).toBe('A-disk')
     expect(result.current.dirty).toBe(false)
-    expect(read).toHaveBeenCalledTimes(2)
+    // initial load + watcher reconcile read + re-target load
+    expect(read).toHaveBeenCalledTimes(3)
   })
 
   it('own save does not trigger diskChanged banner', async () => {
@@ -485,6 +491,210 @@ describe('useWatchedFile', () => {
     await flushPromises()
 
     expect(result.current.diskChanged).toBe(false)
+  })
+
+  describe('keystrokes during save / reload are never lost', () => {
+    function deferred<T = void>() {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>((res) => {
+        resolve = res
+      })
+      return { promise, resolve }
+    }
+
+    it('keys typed while a watcher reload read is in flight are kept (marked diskChanged)', async () => {
+      const gate = deferred<string>()
+      const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('v1')
+      const save = vi.fn(async () => undefined)
+      const { result } = renderHook(
+        () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+        { wrapper }
+      )
+      await flushPromises()
+      expect(result.current.content).toBe('v1')
+
+      read.mockReturnValueOnce(gate.promise)
+      act(() => {
+        watchController.emit(ROOT, REL)
+      })
+      act(() => {
+        result.current.setContent('v1 typed')
+      })
+      await act(async () => {
+        gate.resolve('v2 external')
+      })
+      await flushPromises()
+
+      expect(result.current.content).toBe('v1 typed')
+      expect(result.current.dirty).toBe(true)
+      expect(result.current.diskChanged).toBe(true)
+    })
+
+    it('keys typed while an explicit reloadFromDisk read is in flight are kept', async () => {
+      const gate = deferred<string>()
+      const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('v1')
+      const save = vi.fn(async () => undefined)
+      const { result } = renderHook(
+        () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+        { wrapper }
+      )
+      await flushPromises()
+
+      read.mockReturnValueOnce(gate.promise)
+      let reloading!: Promise<void>
+      act(() => {
+        reloading = result.current.reloadFromDisk()
+      })
+      act(() => {
+        result.current.setContent('v1 typed')
+      })
+      await act(async () => {
+        gate.resolve('v2 external')
+        await reloading
+      })
+
+      expect(result.current.content).toBe('v1 typed')
+      expect(result.current.dirty).toBe(true)
+      expect(result.current.diskChanged).toBe(true)
+    })
+
+    it('save echo arriving after the save resolved (keys typed meanwhile) is not an outside change', async () => {
+      let disk = 'v0'
+      const read = vi.fn(async () => disk)
+      const gate = deferred()
+      const save = vi.fn(async (content: string) => {
+        await gate.promise
+        disk = content
+      })
+      const { result } = renderHook(
+        () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+        { wrapper }
+      )
+      await flushPromises()
+
+      act(() => {
+        result.current.setContent('v1')
+      })
+      act(() => {
+        result.current.onBlur()
+      })
+      act(() => {
+        result.current.setContent('v12')
+      })
+      await act(async () => {
+        gate.resolve()
+      })
+      await flushPromises()
+      expect(result.current.dirty).toBe(true)
+
+      act(() => {
+        watchController.emit(ROOT, REL)
+      })
+      await flushPromises()
+      expect(result.current.content).toBe('v12')
+      expect(result.current.dirty).toBe(true)
+      expect(result.current.diskChanged).toBe(false)
+    })
+
+    it('a save issued while another is in flight waits for it (ordered writes)', async () => {
+      const read = vi.fn(async () => 'v0')
+      const gate = deferred()
+      const order: string[] = []
+      const save = vi
+        .fn<(content: string) => Promise<void>>()
+        .mockImplementationOnce(async (content) => {
+          await gate.promise
+          order.push(content)
+        })
+        .mockImplementation(async (content) => {
+          order.push(content)
+        })
+      const { result } = renderHook(
+        () => useWatchedFile({ projectPath: ROOT, relPath: REL, read, save, debounceMs: 5000 }),
+        { wrapper }
+      )
+      await flushPromises()
+
+      act(() => {
+        result.current.setContent('v1')
+      })
+      act(() => {
+        result.current.onBlur()
+      })
+      act(() => {
+        result.current.setContent('v2')
+      })
+      act(() => {
+        result.current.onBlur()
+      })
+      await flushPromises()
+      expect(save).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        gate.resolve()
+      })
+      await flushPromises()
+      expect(save).toHaveBeenCalledTimes(2)
+      expect(order).toEqual(['v1', 'v2'])
+      expect(result.current.content).toBe('v2')
+      expect(result.current.dirty).toBe(false)
+    })
+  })
+
+  it('a save queued behind an in-flight one still writes its own file after a relPath swap', async () => {
+    const contentMap: Record<string, string> = { 'A.md': 'A-disk', 'B.md': 'B-disk' }
+    const saveCalls: Array<{ rel: string; content: string }> = []
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let first = true
+    const makeSave = (rel: string) => async (content: string) => {
+      if (first) {
+        first = false
+        await gate
+      }
+      saveCalls.push({ rel, content })
+      contentMap[rel] = content
+    }
+    const { result, rerender } = renderHook(
+      ({ rel }: { rel: string }) =>
+        useWatchedFile({
+          projectPath: ROOT,
+          relPath: rel,
+          read: async () => contentMap[rel] ?? '',
+          save: makeSave(rel),
+          debounceMs: 5000
+        }),
+      { initialProps: { rel: 'A.md' }, wrapper }
+    )
+    await flushPromises()
+
+    act(() => {
+      result.current.setContent('A1')
+    })
+    act(() => {
+      result.current.onBlur()
+    })
+    act(() => {
+      result.current.setContent('A2')
+    })
+    act(() => {
+      result.current.onBlur()
+    })
+    rerender({ rel: 'B.md' })
+    await flushPromises()
+
+    await act(async () => {
+      release()
+    })
+    await flushPromises()
+
+    expect(saveCalls.every((c) => c.rel === 'A.md')).toBe(true)
+    expect(contentMap['A.md']).toBe('A2')
+    expect(contentMap['B.md']).toBe('B-disk')
+    expect(result.current.content).toBe('B-disk')
+    expect(result.current.dirty).toBe(false)
   })
 
   // QA 964073b0 row 5b: a refused save (the hub threw) left the edit on screen, dirty,

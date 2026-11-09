@@ -53,14 +53,16 @@ function installFsStub(diskContent: Record<string, string> = {}): FsStub {
 const ROOT = '/tmp/proj'
 
 let fs: FsStub
+let disk: Record<string, string>
 
 beforeEach(() => {
-  fs = installFsStub({
+  disk = {
     'a.ts': 'A',
     'b.ts': 'B',
     'src/c.ts': 'C',
     'src/nested/d.ts': 'D'
-  })
+  }
+  fs = installFsStub(disk)
 })
 
 afterEach(() => {
@@ -286,6 +288,227 @@ describe('useFileEditor — delete handling', () => {
     await flush()
 
     expect(result.current.openFiles.map((f) => f.path)).toEqual(['src/c.ts'])
+  })
+})
+
+function deferred() {
+  let resolve!: () => void
+  let reject!: (err: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+// Drains the in-process tRPC round trips (several promise hops + a macrotask).
+async function settle() {
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+  }
+}
+
+/** Next writeFile call blocks until `gate` resolves, then lands on disk. */
+function gateNextWrite() {
+  const gate = deferred()
+  fs.writeFile.mockImplementationOnce(async (_root: string, rel: string, content: string) => {
+    await gate.promise
+    disk[rel] = content
+  })
+  return gate
+}
+
+describe('useFileEditor — keystrokes during save / reload are never lost', () => {
+  async function openA() {
+    const hook = renderHook(() => useFileEditor(ROOT), { wrapper: fs.wrapper })
+    await flush()
+    await act(async () => {
+      await hook.result.current.openFile('a.ts')
+    })
+    return hook
+  }
+  const contentOf = (files: { path: string; content: string | null }[], path: string) =>
+    files.find((f) => f.path === path)?.content
+
+  it('keys typed while the write is in flight stay dirty, and the save echo keeps them', async () => {
+    const { result } = await openA()
+    const gate = gateNextWrite()
+
+    act(() => {
+      result.current.updateContent('a.ts', 'A1')
+    })
+    let saving!: Promise<void>
+    act(() => {
+      saving = result.current.saveFile('a.ts')
+    })
+    await settle()
+    // Typed while the write is in flight.
+    act(() => {
+      result.current.updateContent('a.ts', 'A12')
+    })
+
+    gate.resolve()
+    await act(async () => {
+      await saving
+    })
+    expect(disk['a.ts']).toBe('A1')
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A12')
+    expect(result.current.isDirty('a.ts')).toBe(true)
+
+    // The save's own watcher echo: disk === what we wrote → not an outside change.
+    act(() => {
+      fs.emitChanged(ROOT, 'a.ts')
+    })
+    await settle()
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A12')
+    expect(result.current.isDirty('a.ts')).toBe(true)
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(false)
+  })
+
+  it('a save echo that arrives while the write is still in flight is not an outside change', async () => {
+    const { result } = await openA()
+    const gate = deferred()
+    // Disk updates immediately, but the mutation response is delayed (hub→computer).
+    fs.writeFile.mockImplementationOnce(async (_root: string, rel: string, content: string) => {
+      disk[rel] = content
+      await gate.promise
+    })
+
+    act(() => {
+      result.current.updateContent('a.ts', 'A1')
+    })
+    let saving!: Promise<void>
+    act(() => {
+      saving = result.current.saveFile('a.ts')
+    })
+    await settle()
+    act(() => {
+      result.current.updateContent('a.ts', 'A12')
+    })
+    act(() => {
+      fs.emitChanged(ROOT, 'a.ts')
+    })
+    await settle()
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A12')
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(false)
+
+    gate.resolve()
+    await act(async () => {
+      await saving
+    })
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A12')
+    expect(result.current.isDirty('a.ts')).toBe(true)
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(false)
+  })
+
+  it('keys typed while a clean reload read is in flight are kept (marked disk-changed)', async () => {
+    const { result } = await openA()
+    const gate = deferred()
+    disk['a.ts'] = 'A-external'
+    fs.readFile.mockImplementationOnce(async (_root: string, rel: string) => {
+      await gate.promise
+      return { content: disk[rel] }
+    })
+
+    // Clean tab → the change event schedules a silent reload.
+    act(() => {
+      fs.emitChanged(ROOT, 'a.ts')
+    })
+    await settle()
+    act(() => {
+      result.current.updateContent('a.ts', 'A-typed')
+    })
+    gate.resolve()
+    await settle()
+
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A-typed')
+    expect(result.current.isDirty('a.ts')).toBe(true)
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(true)
+  })
+
+  it('dirty tab + real outside change → disk-changed, buffer kept', async () => {
+    const { result } = await openA()
+    act(() => {
+      result.current.updateContent('a.ts', 'A-local')
+    })
+    disk['a.ts'] = 'A-external'
+    act(() => {
+      fs.emitChanged(ROOT, 'a.ts')
+    })
+    await settle()
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A-local')
+    expect(result.current.isDirty('a.ts')).toBe(true)
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(true)
+  })
+
+  it('clean tab + outside change still reloads silently', async () => {
+    const { result } = await openA()
+    disk['a.ts'] = 'A-external'
+    act(() => {
+      fs.emitChanged(ROOT, 'a.ts')
+    })
+    await settle()
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A-external')
+    expect(result.current.isDirty('a.ts')).toBe(false)
+    expect(result.current.isFileDiskChanged('a.ts')).toBe(false)
+  })
+
+  it('a save issued while another is in flight waits for it, then writes the latest buffer', async () => {
+    const { result } = await openA()
+    const gate = gateNextWrite()
+
+    act(() => {
+      result.current.updateContent('a.ts', 'A1')
+    })
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.saveFile('a.ts')
+    })
+    await settle()
+    act(() => {
+      result.current.updateContent('a.ts', 'A12')
+    })
+    let second!: Promise<void>
+    act(() => {
+      second = result.current.saveFile('a.ts')
+    })
+    await settle()
+    // Serialized: the second write must not race the first on disk.
+    expect(fs.writeFile).toHaveBeenCalledTimes(1)
+
+    gate.resolve()
+    await act(async () => {
+      await first
+      await second
+    })
+    expect(fs.writeFile).toHaveBeenCalledTimes(2)
+    expect(fs.writeFile).toHaveBeenLastCalledWith(ROOT, 'a.ts', 'A12')
+    expect(disk['a.ts']).toBe('A12')
+    expect(contentOf(result.current.openFiles, 'a.ts')).toBe('A12')
+    expect(result.current.isDirty('a.ts')).toBe(false)
+  })
+
+  it('a failed save keeps the buffer dirty and does not block the next save', async () => {
+    const { result } = await openA()
+    fs.writeFile.mockImplementationOnce(async () => {
+      throw new Error('computer offline')
+    })
+    act(() => {
+      result.current.updateContent('a.ts', 'A1')
+    })
+    await act(async () => {
+      await expect(result.current.saveFile('a.ts')).rejects.toThrow()
+    })
+    expect(result.current.isDirty('a.ts')).toBe(true)
+    expect(disk['a.ts']).toBe('A')
+
+    await act(async () => {
+      await result.current.saveFile('a.ts')
+    })
+    expect(disk['a.ts']).toBe('A1')
+    expect(result.current.isDirty('a.ts')).toBe(false)
   })
 })
 
