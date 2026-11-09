@@ -244,6 +244,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(supports-color@7.2.0)(zod@4.6.7)
+      '@normain/idp-role-contract':
+        specifier: file:../../../vendor/normain-idp-role-contract-0.1.0.tgz
+        version: file:vendor/normain-idp-role-contract-0.1.0.tgz
       '@slayzone/agent-panels':
         specifier: workspace:*
         version: link:../../domains/agent-panels
@@ -874,6 +877,9 @@ importers:
 
   packages/apps/hub:
     dependencies:
+      '@normain/idp-role-contract':
+        specifier: file:../../../vendor/normain-idp-role-contract-0.1.0.tgz
+        version: file:vendor/normain-idp-role-contract-0.1.0.tgz
       '@slayzone/agent-turns':
         specifier: workspace:*
         version: link:../../domains/agent-turns
@@ -1990,6 +1996,9 @@ importers:
       '@better-auth/core':
         specifier: 1.7.12
         version: 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-call@1.4.4(zod@4.6.7))(jose@6.2.13)(kysely@0.29.7)(nanostores@1.5.5)
+      '@normain/idp-role-contract':
+        specifier: file:../../../vendor/normain-idp-role-contract-0.1.0.tgz
+        version: file:vendor/normain-idp-role-contract-0.1.0.tgz
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -6436,6 +6445,11 @@ packages:
     resolution: {integrity: sha512-eU0w/9ykrNaA5vWs5gjVs3Qxa45jbQ8mYoMyh5OWnRCE5GzXKxHCpfhFUnO+jGqi0KxkyP0hSA6fiwXXkirk6g==}
     cpu: [x64]
     os: [win32]
+
+  '@normain/idp-role-contract@file:vendor/normain-idp-role-contract-0.1.0.tgz':
+    resolution: {integrity: sha512-e13xLunW4LdBnY1ENYkQVayyM3eU0afYjf3sUXlm95Nvjwd/iQmp9v16WSoNEC3zzvqkVyZ6+z/5XJ4BTJnG6A==, tarball: file:vendor/normain-idp-role-contract-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=20'}
 
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.11':
     resolution: {integrity: sha512-tqvZOVmSoiJzm7QjQ+whPxCP45J2C1zCAZnzc1HhwmJrFIWw/qyA8o9Cup0aVqnjNVAN+as9GHX+DbAmkCbGlQ==}
@@ -17528,6 +17542,8 @@ snapshots:
 
   '@node-datachannel/win32-x64-msvc@0.33.4':
     optional: true
+
+  '@normain/idp-role-contract@file:vendor/normain-idp-role-contract-0.1.0.tgz': {}
 
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.11':
     optional: true

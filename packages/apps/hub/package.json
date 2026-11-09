@@ -17,6 +17,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@normain/idp-role-contract": "file:../../../vendor/normain-idp-role-contract-0.1.0.tgz",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/ai-config": "workspace:*",
     "@slayzone/api": "workspace:*",
@@ -38,9 +39,9 @@
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/task-terminals": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
-    "@slayzone/test-panel": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
+    "@slayzone/test-panel": "workspace:*",
     "@slayzone/types": "workspace:*",
     "@slayzone/usage-analytics": "workspace:*",
     "@slayzone/worktrees": "workspace:*",
