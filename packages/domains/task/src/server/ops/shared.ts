@@ -573,6 +573,10 @@ export async function getModeDefaultFlags(
   return fallback ? (fallback.defaultFlags ?? '') : undefined
 }
 
+/** Trash keeps a deleted task (row, files, worktree) restorable for 30 days. A task
+ *  deleted before this SQL instant has expired: the purge (startup-purge.ts) removes it. */
+export const TRASH_CUTOFF_SQL = "datetime('now', '-30 days')"
+
 /** Kill PTY only — used for soft-delete (preserves worktree for undo) */
 export function cleanupTaskImmediate(taskId: string): void {
   runtimeAdapters.killPtysByTaskId(taskId)
@@ -607,13 +611,16 @@ export async function cleanupTaskFull(
 
   if (!task?.worktree_path || opts.skipWorktree) return 'none'
 
-  // Skip removal if any other live task (outside this batch) still references the same worktree.
-  // Subtasks inherit parent's worktree_path; first batch member to run cleanup actually removes,
-  // siblings short-circuit on `existsSync(worktreePath)` inside removeWorktree.
+  // Skip removal if any other task (outside this batch) may still need the same worktree:
+  // a live one, or one still restorable from Trash (Trash keeps a task's files until
+  // TRASH_CUTOFF_SQL — restore must find its worktree). Subtasks inherit parent's
+  // worktree_path; first batch member to run cleanup actually removes, siblings
+  // short-circuit on `existsSync(worktreePath)` inside removeWorktree.
   const ids = batchIds.length > 0 ? batchIds : [taskId]
   const placeholders = ids.map(() => '?').join(',')
   const sharedRow = await db.get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders}) AND archived_at IS NULL AND deleted_at IS NULL`,
+    `SELECT COUNT(*) AS n FROM tasks WHERE worktree_path = ? AND id NOT IN (${placeholders})
+      AND archived_at IS NULL AND (deleted_at IS NULL OR deleted_at >= ${TRASH_CUTOFF_SQL})`,
     [task.worktree_path, ...ids]
   )
   if ((sharedRow?.n ?? 0) > 0) return 'none'

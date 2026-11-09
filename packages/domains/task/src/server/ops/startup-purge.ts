@@ -1,5 +1,8 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { cleanupTaskFull, getRuntimeAdapters } from './shared.js'
+import { taskEvents } from '../events.js'
+import { cleanupTaskFull, getRuntimeAdapters, TRASH_CUTOFF_SQL } from './shared.js'
+// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
+import type {} from '../task-txns.js'
 
 /** Reap expired Trash entries and pooled agent sessions at startup.
  * Scratch terminals are persistent: age and client tab state never imply deletion.
@@ -57,7 +60,7 @@ async function purgeExpiredTrashOnce(db: SlayzoneDb): Promise<void> {
   const stale = (await db
     .prepare(
       `SELECT id, project_id, worktree_path FROM tasks
-        WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-30 days')`
+        WHERE deleted_at IS NOT NULL AND deleted_at < ${TRASH_CUTOFF_SQL}`
     )
     .all()) as { id: string; project_id: string; worktree_path: string | null }[]
   const staleIds = stale.map((r) => r.id)
@@ -96,9 +99,17 @@ async function purgeExpiredTrashOnce(db: SlayzoneDb): Promise<void> {
     purged.push(task.id)
   }
   if (purged.length > 0) {
-    const placeholders = purged.map(() => '?').join(',')
-    await db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...purged)
+    // Never a cascade: a subtask that stays (live, still in Trash, or waiting above)
+    // moves up to the nearest ancestor that stays first — see `task:purge`. Its
+    // worktree, if shared with a purged task, was kept by cleanupTaskFull's check.
+    const { reparented } = await db.namedTxn('task:purge', { ids: purged })
     console.log(`Purged ${purged.length} soft-deleted task(s)`)
+    for (const { id, projectId } of reparented) {
+      taskEvents.emit('task:updated', { taskId: id, projectId })
+    }
+    if (reparented.length > 0) {
+      console.log(`Moved ${reparented.length} surviving subtask(s) out of purged task(s)`)
+    }
   }
   if (waiting > 0) {
     console.log(`Kept ${waiting} expired task(s) until their computer connects`)
