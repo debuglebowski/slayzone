@@ -718,8 +718,11 @@ export const REGRESSIONS = [
   {
     round: 17,
     id: 'DL-L5h',
-    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC from a resolve) and loads the addon on the first offer; a failed load refuses that offer',
-    files: [`${P}apps/computer/src/main.test.ts`]
+    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC when its binary for this platform is on disk) and loads the addon on the first offer; a failed load refuses that offer and stops advertising WebRTC',
+    files: [
+      `${P}apps/computer/src/main.test.ts`,
+      `${P}apps/computer/src/direct/rtc-runtime.test.ts`
+    ]
   },
   {
     round: 18,

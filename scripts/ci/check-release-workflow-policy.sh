@@ -92,6 +92,11 @@ require_contains \
 
 require_contains \
   ".github/workflows/release-foundation.yml" \
+  "check-native-arch.mjs" \
+  "release-foundation.yml must gate every build's natives on its target arch (cross-built macOS x64 / Windows arm64)"
+
+require_contains \
+  ".github/workflows/release-foundation.yml" \
   "container: ubuntu:22.04" \
   "release-foundation.yml must build Linux in the pinned glibc-floor container (#165)"
 

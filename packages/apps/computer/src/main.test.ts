@@ -357,6 +357,48 @@ describe('startComputer direct link: WebRTC addon off the boot path', () => {
       await handle.stop()
     }
   })
+
+  it('stops advertising WebRTC once the addon fails to load', async () => {
+    // A binary on disk that still cannot load (corrupt, wrong ABI): the next hello
+    // must not invite more offers that cannot be answered.
+    let identity: { directRtc?: () => boolean } | undefined
+    let onHubRequest:
+      | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
+      | undefined
+    let started = false
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      rtc: { available: () => true, load: () => null },
+      createDialer: (options) => {
+        identity = options.identity as typeof identity
+        onHubRequest = options.onHubRequest as typeof onHubRequest
+        return {
+          events: { on: () => undefined },
+          computerId: null,
+          start: () => {
+            started = true
+          },
+          stop: async () => undefined,
+          notify: () => true
+        } as never
+      }
+    })
+    try {
+      await vi.waitFor(() => expect(started).toBe(true))
+      expect(identity?.directRtc?.()).toBe(true)
+      await expect(
+        onHubRequest?.(
+          HubToComputerMethods.directRtcOffer,
+          { grantId: 'g', sdp: 'v=0', stunAddresses: [], clientAddress: null },
+          ACTOR
+        )
+      ).rejects.toThrow(/no WebRTC/)
+      expect(identity?.directRtc?.()).toBe(false)
+    } finally {
+      await handle.stop()
+    }
+  })
 })
 
 describe('startComputer direct link: a hub grant reaches that hub’s terminals', () => {

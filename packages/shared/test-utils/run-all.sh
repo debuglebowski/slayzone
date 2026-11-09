@@ -322,6 +322,8 @@ run_harness packages/domains/processes/src/server/process-switch.test.ts
 run_harness packages/domains/processes/src/server/process-routed-lifecycle.test.ts
 # Processes switched off but routed to computers: rows load, starts go to the computer.
 run_harness packages/domains/processes/src/server/process-switch-routed.test.ts
+# Spawn preparer (local roots widened before a spawn) + written listener.
+run_harness packages/domains/processes/src/server/process-spawn-preparer.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-router.test.ts
 run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
@@ -545,6 +547,9 @@ run_harness packages/apps/app/src/main/dev-launcher-contract.test.ts
 run_harness scripts/release/update-manifest.test.mjs
 # Linux glibc-floor release gate (#165): ELF symbol-version parser + floor check.
 run_harness scripts/release/check-glibc-floor.test.mjs
+# Native-arch release gate: cross-built releases ship the TARGET arch's natives
+# (node-datachannel's per-platform binary) — Mach-O/PE/ELF header reader + package check.
+run_harness scripts/release/check-native-arch.test.mjs
 # `pnpm lint:trpc-deps`: flags a useMutation() result object bare in a hook dep array
 # (by `*Mutation` name and by binding, multi-line arrays included); quiet on stable forms.
 run_harness scripts/check-trpc-stable-deps.test.mjs

@@ -596,8 +596,9 @@ export function startComputer(
   // Folder limits stay local (T-27): a standalone computer applies the roots its
   // own computer.config.json declares whenever that file changes — what
   // `slay computer roots --add` writes. Polled, not fs.watch: an atomic rename
-  // replaces the inode a watcher holds. Not for the desktop's supervised computer,
-  // which never reads the file (its loopback hub edits its roots instead).
+  // replaces the inode a watcher holds. Not for the desktop's supervised computer:
+  // its loopback hub edits its roots live, and the file — which those edits persist
+  // to — is read back only at boot (config.ts `supervisedComputerConfigFile`).
   const watchLocalRoots = !config.hubMayEditRoots
   if (watchLocalRoots) {
     watchFile(configFile, { interval: 2000, persistent: false }, (current, previous) => {
@@ -671,16 +672,21 @@ export function startComputer(
     })
   identity.directAddress = () => directListener?.advertisedAddress ?? null
   // WebRTC rides on the listener (its channels are served like its sockets). The
-  // addon is only resolved here: loading it is left to the first offer, so dialing
-  // the hubs never waits on it.
+  // addon is only located here (its binary for this platform on disk, not loaded):
+  // loading it is left to the first offer, so dialing the hubs never waits on it.
   const rtcRuntime = deps.rtc ?? {
     available: rtcRuntimeAvailable,
     load: () => loadRtcPolyfill(log)
   }
-  identity.directRtc = () => directListener !== null && rtcRuntime.available()
+  // The last load failed: a binary that is on disk yet cannot load. Each later offer
+  // still retries, but hellos stop advertising WebRTC until one loads, so a hub that
+  // reconnects stops sending offers this computer cannot answer.
+  let rtcLoadFailed = false
+  identity.directRtc = () => directListener !== null && !rtcLoadFailed && rtcRuntime.available()
   const getRtcAnswerer = (): RtcAnswerer | null => {
     if (rtcAnswerer || !directListener || !rtcRuntime.available()) return rtcAnswerer
     const rtc = rtcRuntime.load()
+    rtcLoadFailed = rtc === null
     if (rtc) {
       rtcAnswerer = createRtcAnswerer({ rtc, grants: directGrants, listener: directListener, log })
     }

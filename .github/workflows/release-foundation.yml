@@ -277,13 +277,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # platform/arch: the TARGET (what the app runs on), not the runner. pnpm installs
+          # its per-platform optional packages too, and check-native-arch.mjs reads
+          # `unpacked_dir` against it. Only runnable builds have a `smoke_dir`.
           - name: macos-arm64
             os: macos-latest
             build_args: --mac --arm64
+            platform: darwin
+            arch: arm64
+            unpacked_dir: mac-arm64
             smoke_dir: mac-arm64
+          # Cross-built on the arm64 runner.
           - name: macos-x64
             os: macos-latest
             build_args: --mac --x64
+            platform: darwin
+            arch: x64
+            unpacked_dir: mac
           # Builds INSIDE a pinned container, never on the runner image: electron-builder
           # compiles natives without a Linux prebuild (node-pty) on the build host, so
           # its glibc is the oldest the app loads on. ubuntu-latest moved to glibc 2.42
@@ -295,6 +305,9 @@ jobs:
             os: ubuntu-latest
             container: ubuntu:22.04
             build_args: --linux --x64
+            platform: linux
+            arch: x64
+            unpacked_dir: linux-unpacked
             smoke_dir: linux-unpacked
             glibc_gate: true
           # One job per arch, in parallel (one job building both ran them back to back,
@@ -308,14 +321,18 @@ jobs:
           - name: windows-x64
             os: windows-latest
             build_args: --win --x64
+            platform: win32
             arch: x64
             native_rebuild: prebuilt
+            unpacked_dir: win-unpacked
             smoke_dir: win-unpacked
           - name: windows-arm64
             os: windows-latest
             build_args: --win --arm64
+            platform: win32
             arch: arm64
             native_rebuild: prebuilt
+            unpacked_dir: win-arm64-unpacked
 
     runs-on: ${{ matrix.os }}
     # Empty for every entry but linux-x64, which then runs on the runner directly.
@@ -362,8 +379,19 @@ jobs:
         if: runner.os == 'Windows'
         run: pip install setuptools
 
+      # pnpm installs a per-platform optional package (node-datachannel's
+      # @node-datachannel/<platform>-<arch>, esbuild's, …) only for the host it runs on, and
+      # electron-builder packs what is on disk — so a cross-built release (macOS x64 on the
+      # arm64 runner, Windows arm64 on x64) shipped the HOST's WebRTC binary and no other.
+      # --os/--cpu name the runner (its tools still run here) AND the target. CI only:
+      # `supportedArchitectures` in pnpm-workspace.yaml would install every platform's
+      # binaries of every tool into every developer's tree. Same lockfile, no re-resolve.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile \
+            --os="$(node -p process.platform),${{ matrix.platform }}" \
+            --cpu="$(node -p process.arch),${{ matrix.arch }}"
         env:
           CI_SKIP_POSTINSTALL: '1'
 
@@ -462,6 +490,18 @@ jobs:
         shell: bash
         run: node scripts/release/stamp-min-system-version.mjs --dist packages/apps/app/dist
 
+      # Every build, cross-built ones included: macOS x64 and Windows arm64 cannot be
+      # smoke-run on their runner, so nothing else proves they carry their own arch's
+      # natives. Reads Mach-O/PE/ELF headers; fails on a wrong-arch native or a missing
+      # target per-platform package (node-datachannel's WebRTC binary).
+      - name: Gate natives on the target arch
+        shell: bash
+        run: |
+          node scripts/release/check-native-arch.mjs \
+            "packages/apps/app/dist/${{ matrix.unpacked_dir }}" \
+            --platform ${{ matrix.platform }} \
+            --arch ${{ matrix.arch }}
+
       # The smoke step below runs the build on the host that built it, so it cannot
       # see a native that needs a newer glibc than our users have (#165). This reads
       # every ELF file's symbol-version requirements against the floor instead. The
@@ -475,7 +515,8 @@ jobs:
       # unpacked output. Nothing else in CI runs from a packaged layout, which is how
       # two release-blocking packaging bugs (the hub could not open its database; no
       # computer bundle shipped) went unseen. Only runnable builds: the macOS x64 and
-      # Windows arm64 outputs share this packaging config but not this runner's CPU.
+      # Windows arm64 outputs share this packaging config but not this runner's CPU
+      # (their natives' arch is gated by check-native-arch.mjs above instead).
       - name: Smoke packaged app
         if: matrix.smoke_dir != ''
         shell: bash

@@ -115,8 +115,8 @@ the client's `transports`):
 1. The computer's WebSocket listener, when this client can dial it (loopback on one
    machine, or the operator's public address).
 2. Otherwise WebRTC, when the client says it speaks it (`transports` includes
-   `webrtc`) and the computer advertises `directRtc` in `hello` (node-datachannel
-   loaded and its listener bound).
+   `webrtc`) and the computer advertises `directRtc` in `hello` (its listener bound,
+   and node-datachannel's binary for its platform and arch on disk).
 3. Otherwise the hub relay, with the same reasons as before. An older client sends no
    `transports` and an older computer no `directRtc`: both keep today's behaviour.
 
@@ -159,12 +159,18 @@ relay, as for an unreachable listener. The hub hands both peers its STUN servers
 
 **Runtimes.**
 - Computer: `node-datachannel` (libdatachannel), Node-API prebuilds per platform; loaded
-  lazily and optional — a computer where it does not load advertises no `directRtc`.
+  lazily (on the first offer) and optional. At boot the computer only checks that the
+  binary for its own platform and arch is on disk (`findRtcBinary`, no load) and
+  advertises no `directRtc` without it; a load that then fails refuses that offer and
+  drops `directRtc` from later hellos.
   A standalone computer (session host + connector) answers offers in its host; the
   host hands the connector its direct identity as values (`directIdentity`), since
   JSON-RPC drops functions.
-  Unpacked from the desktop app's asar; optional in the npm computer; checked by the
-  packaged-app smoke.
+  Unpacked from the desktop app's asar; optional in the npm computer. Each release job
+  installs the TARGET arch's per-platform package (`pnpm install --os/--cpu`, since
+  macOS x64 and Windows arm64 are cross-built), `check-native-arch.mjs` asserts every
+  build ships it with the right Mach-O/PE/ELF arch, and the packaged-app smoke loads it
+  where the runner can run the build.
 - Desktop: the renderer's `RTCPeerConnection`. A failed WebRTC connect is not a failed
   WebSocket, so it cannot slow the hub's socket.
 - Mobile: `react-native-webrtc`, data channels only (no camera or microphone
