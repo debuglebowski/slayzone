@@ -110,17 +110,24 @@ const MAX_BUFFER_SIZE = 750 * 1024
  */
 const APPENDED_PIECE_CHARS = 16 * 1024
 
-/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
-function appendInPieces(buffer: RingBuffer, text: string): void {
+/** `text` as pieces of at most {@link APPENDED_PIECE_CHARS}. */
+function inPieces(text: string): string[] {
+  const pieces: string[] = []
   let at = 0
   while (at < text.length) {
     let end = Math.min(at + APPENDED_PIECE_CHARS, text.length)
     // Never split a surrogate pair across chunks.
     const code = text.charCodeAt(end - 1)
     if (end < text.length && code >= 0xd800 && code <= 0xdbff) end--
-    buffer.append(text.slice(at, end))
+    pieces.push(text.slice(at, end))
     at = end
   }
+  return pieces
+}
+
+/** `text` into `buffer` as chunks of at most {@link APPENDED_PIECE_CHARS}. */
+function appendInPieces(buffer: RingBuffer, text: string): void {
+  for (const piece of inPieces(text)) buffer.append(piece)
 }
 
 /**
@@ -440,9 +447,14 @@ export function createPtyHandlers(
     return session.stopping
   }
 
-  async function stopBeforeReplacement(id: string): Promise<void> {
+  /**
+   * Stop the session a new spawn replaces. Answers its buffer when its output was
+   * being saved: the next start restores from it — the file is up to a flush behind
+   * (its final write is still in flight).
+   */
+  async function stopBeforeReplacement(id: string): Promise<RingBuffer | undefined> {
     const old = sessions.get(id)
-    if (!old) return
+    if (!old) return undefined
     old.replacing = true
     try {
       await stopPty(old)
@@ -450,6 +462,7 @@ export function createPtyHandlers(
       old.replacing = false
       throw err
     }
+    return old.history ? old.buffer : undefined
   }
 
   /**
@@ -482,8 +495,7 @@ export function createPtyHandlers(
   function trackHistory(session: PtySession): void {
     if (!options.history || session.warm || !session.taskId || session.history) return
     const buffer = session.buffer
-    session.history =
-      options.history.track(session.taskId, session.id, () => buffer.toString()) ?? undefined
+    session.history = options.history.track(session.taskId, session.id, buffer) ?? undefined
   }
 
   /** Stop saving a session's output and delete what was saved. */
@@ -772,7 +784,11 @@ export function createPtyHandlers(
 
   type SpawnReply = { pid: number; startupDeadline?: true; detection?: true; seq?: number }
 
-  function startSession(params: PtySpawnParams): SpawnReply {
+  /**
+   * `replaced`: the buffer of the session this spawn replaced, when its output was
+   * being saved (see {@link stopBeforeReplacement}).
+   */
+  function startSession(params: PtySpawnParams, replaced?: RingBuffer): SpawnReply {
     const shell = params.computerShell ? resolveUserShell() : params.command
     const args = params.computerShell
       ? [
@@ -780,24 +796,45 @@ export function createPtyHandlers(
           ...(params.computerShellCommand ? ['-c', params.computerShellCommand] : [])
         ]
       : params.args
+    // What this session showed last: the replaced process's buffer, else the saved file.
+    const previousOutput = (): string | null => {
+      if (!params.taskId || !options.history) return null
+      if (replaced) return replaced.toString() || null
+      return options.history.load(params.taskId, params.sessionId)
+    }
     // A continuing spawn keeps the session's scrollback: the reaped attempt's
     // buffer (seq continues), then the hub's preamble, then the new process.
     let carried: RingBuffer | undefined
     if (params.carryOutput) {
       const { fromSpawnId, afterSeq } = params.carryOutput
       carried =
-        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ??
-        new RingBuffer(MAX_BUFFER_SIZE)
-      // No buffer left to continue: numbering continues where the hub's reached (M2).
+        (fromSpawnId ? tombstones.takeBuffer(params.sessionId, fromSpawnId) : null) ?? undefined
+      if (!carried) {
+        carried = new RingBuffer(MAX_BUFFER_SIZE)
+        // No buffer left to continue (this computer restarted, the carry window
+        // closed): the saved output stands in for it — else the scrollback is only
+        // the preamble, and the next save overwrites the file with that. It takes
+        // the seqs up to `afterSeq`, which the hub already has: never streamed to a
+        // terminal still showing it, never in a backfill after it, yet in every
+        // replay. History with more pieces than that runs on past `afterSeq`, still
+        // within the seq the reply names (output the hub treats as delivered).
+        const saved = previousOutput()
+        if (saved) {
+          const pieces = inPieces(restoredPrefix(saved))
+          if (afterSeq !== undefined) carried.continueAfter(afterSeq - pieces.length)
+          for (const piece of pieces) carried.append(piece)
+        }
+      }
+      // Numbering continues where the hub's reached (M2).
       if (afterSeq !== undefined) carried.continueAfter(afterSeq)
       if (params.carryOutput.preamble) appendInPieces(carried, params.carryOutput.preamble)
     }
     // A fresh start of a task terminal begins with what it showed last time (the
-    // computer restarted since). Never for a continuing spawn — the hub still shows
-    // that output — nor an agent resume, which reprints its own conversation.
+    // computer restarted since, or the process was replaced). Never for a continuing
+    // spawn — handled above — nor an agent resume, which reprints its own conversation.
     let restored: RingBuffer | undefined
-    if (!carried && params.taskId && options.history && !params.detection?.resuming) {
-      const saved = options.history.load(params.taskId, params.sessionId)
+    if (!carried && !params.detection?.resuming) {
+      const saved = previousOutput()
       if (saved) {
         restored = new RingBuffer(MAX_BUFFER_SIZE)
         appendInPieces(restored, restoredPrefix(saved))
@@ -935,9 +972,9 @@ export function createPtyHandlers(
               params.spawnId,
               params.taskId,
               async (assertActive) => {
-                await stopBeforeReplacement(params.sessionId)
+                const replaced = await stopBeforeReplacement(params.sessionId)
                 assertActive()
-                return startSession(params)
+                return startSession(params, replaced)
               }
             )
           : startSession(params)
@@ -954,13 +991,16 @@ export function createPtyHandlers(
         params.spawnId,
         params.taskId,
         async (assertActive) => {
-          await stopBeforeReplacement(params.sessionId)
+          const replaced = await stopBeforeReplacement(params.sessionId)
           assertActive()
-          return startSession({
-            ...params,
-            ...(item.cols !== undefined ? { cols: item.cols } : {}),
-            ...(item.rows !== undefined ? { rows: item.rows } : {})
-          })
+          return startSession(
+            {
+              ...params,
+              ...(item.cols !== undefined ? { cols: item.cols } : {}),
+              ...(item.rows !== undefined ? { rows: item.rows } : {})
+            },
+            replaced
+          )
         }
       )
       const session = sessions.get(params.sessionId)!
@@ -1153,6 +1193,7 @@ export function createPtyHandlers(
       // warm session never streamed, so no seq of it has reached anyone.
       session.signals?.absorb(session.buffer.toString())
       session.buffer.rewriteUnstreamed(filterBufferData)
+      session.history?.rewritten()
     }
     // `getCurrentSeq()` is -1 on an empty buffer — the same "nothing seen yet"
     // sentinel the hub's gap detector starts from, so an adopt with no output
@@ -1461,7 +1502,9 @@ export function createPtyHandlers(
     if (!buffer) return { clearedSeq: -1 }
     const clearedSeq = buffer.getCurrentSeq()
     buffer.clear()
-    sessions.get(params.sessionId)?.history?.changed()
+    const history = sessions.get(params.sessionId)?.history
+    history?.rewritten()
+    history?.changed()
     return { clearedSeq }
   }
 
