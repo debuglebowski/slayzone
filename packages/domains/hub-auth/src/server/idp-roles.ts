@@ -16,14 +16,16 @@
  *     survived a revocation (a failed revoke outside hub-auth), or was issued late
  *     (a device or app code redeemed after the revocation), stays dead — also after the
  *     person's next valid sign-in.
- *   - `user.idpRevokedAt`: when the account last lost its access (Unix ms) — the
- *     revocation watermark. With the epoch's start it is the CUTOFF for sign-in
- *     evidence: a sign-in counts only if its ID token was signed in a later second
- *     (`iat` > floor(cutoff / 1000)), so a login or code exchange still pending when the
- *     mode was activated or the account was revoked can never complete into access.
- *     Seconds against milliseconds, conservatively: evidence signed in the SAME second
- *     as the cutoff is refused — a person signing in within one second of an activation
- *     or a revocation simply signs in again a second later.
+ *   - `user.idpDeniedAt`: the SIGNED issue time (`iat`, Unix seconds) of the newest
+ *     verified denial (a token mapping to no role, at a sign-in or a revalidation). With
+ *     the epoch's start it is the CUTOFF for sign-in evidence: a sign-in counts only if
+ *     its ID token was signed in a later second than both, so a login or code exchange
+ *     still pending when the mode was activated or the IdP denied the account can never
+ *     complete into access. Only SIGNED evidence moves it: a revocation for an unsigned
+ *     reason (a failed or empty refresh, an unreachable issuer) withdraws access but sets
+ *     no cutoff, so it never rejects a newer signed sign-in that was already in flight.
+ *     Seconds, conservatively: evidence signed in the SAME second as the cutoff (or the
+ *     activation's second) is refused — the person signs in again a second later.
  *   - `session.idpEpoch`: the activation epoch a session was created in.
  *   - `slayzone_idp_activation` (one row): the config identity the mode last ran with
  *     (`off`, or a hash of issuer, client, claim and mapping), its epoch and when it
@@ -164,16 +166,73 @@ export function idpModeFenceOk(auth: object): boolean {
   return persistedMatches(fence.db, fence.identity, fence.epoch)
 }
 
+const activationReads = new WeakMap<DatabaseSync, { get(): unknown }>()
+
+/**
+ * What an open socket captured when it was authorized, and must still match on every
+ * operation (verify.ts `idpSessionLiveNow`): the credential it presented, the role its
+ * context carries, and (mode on) the grant it was opened under.
+ */
+export interface SessionBinding {
+  /** When the credential's session was created (Unix ms). */
+  createdAtMs: number
+  /** The better-auth session's activation epoch; absent for a web session. */
+  epoch?: number | null
+  /** The better-auth session row; absent for a web session (its row is the hub's). */
+  sessionId?: string
+  /** The role the socket's context carries. */
+  role?: HubRole
+  /** The account's `idpGrantedAt` when the socket was authorized (mode on). */
+  grantedAt?: number | null
+}
+
+/** The persisted half of a binding every runtime checks: account enabled, same role, and
+ *  the better-auth session (if any) still present and unexpired. */
+function bindingHolds(db: DatabaseSync, userId: string, binding: SessionBinding): boolean {
+  const user = db.prepare('SELECT role, disabledAt FROM "user" WHERE id = ?').get(userId) as
+    | { role: unknown; disabledAt: unknown }
+    | undefined
+  if (!user || (user.disabledAt !== null && user.disabledAt !== undefined)) return false
+  if (binding.role !== undefined && readRole(user.role) !== binding.role) return false
+  if (binding.sessionId !== undefined) {
+    const row = db.prepare('SELECT expiresAt FROM session WHERE id = ?').get(binding.sessionId) as
+      | { expiresAt: unknown }
+      | undefined
+    if (!row || new Date(row.expiresAt as string | number).getTime() <= Date.now()) return false
+  }
+  return true
+}
+
+/** The mode-off per-operation check (verify.ts): the binding against the instance's DB. */
+export function bindingHoldsFor(auth: object, userId: string, binding: SessionBinding): boolean {
+  const fence = fences.get(auth)
+  return fence ? bindingHolds(fence.db, userId, binding) : true
+}
+
+/** The account's `idpGrantedAt` now (Unix ms), or null — captured when a socket opens. */
+export function captureGrant(auth: object, userId: string): number | null {
+  const fence = fences.get(auth)
+  if (!fence) return null
+  const row = fence.db.prepare('SELECT idpGrantedAt FROM "user" WHERE id = ?').get(userId) as
+    | { idpGrantedAt: unknown }
+    | undefined
+  return typeof row?.idpGrantedAt === 'number' ? row.idpGrantedAt : null
+}
+
 function persistedMatches(
   db: DatabaseSync,
   identity: string | null,
   epoch: number | null
 ): boolean {
   try {
-    db.exec(ACTIVATION_DDL)
-    const row = db
-      .prepare('SELECT config_identity, epoch FROM slayzone_idp_activation WHERE id = 1')
-      .get() as { config_identity: string; epoch: number } | undefined
+    // A prepared read (no DDL): this runs on every operation of every open socket.
+    let stmt = activationReads.get(db)
+    if (!stmt) {
+      db.exec(ACTIVATION_DDL)
+      stmt = db.prepare('SELECT config_identity, epoch FROM slayzone_idp_activation WHERE id = 1')
+      activationReads.set(db, stmt)
+    }
+    const row = stmt.get() as { config_identity: string; epoch: number } | undefined
     const persisted = row?.config_identity ?? 'off'
     if (identity === null) return persisted === 'off'
     return persisted === identity && row?.epoch === epoch
@@ -344,6 +403,15 @@ export interface IdpRoles {
     session: { createdAtMs: number; epoch?: number | null }
   ): Promise<IdpAuthorization>
   /**
+   * The SYNCHRONOUS check of an already-authorized session — every operation and every
+   * subscription output of an open `/trpc` socket (verify.ts `idpSessionLiveNow`). From
+   * storage only, never a refresh: the persisted mode and epoch are this runtime's, the
+   * account exists and is not disabled, holds a grant this session was created under,
+   * and its evidence is still fresh. False = stop now (the socket reconnects, and the
+   * async gate re-proves or refuses it).
+   */
+  liveNow(userId: string, session: SessionBinding): boolean
+  /**
    * The gate for a HUMAN acted for without a session of theirs — the task CLI relay,
    * where a computer's (automation) credential acts as its owner: the persisted mode,
    * a current grant and fresh evidence (revalidated inline when due).
@@ -390,8 +458,9 @@ interface UserState {
   revision: number
   /** Unix ms; null = the account holds no access until a verified sign-in. */
   grantedAt: number | null
-  /** Unix ms of the last revocation (0 = never): the evidence cutoff with the epoch. */
-  revokedAt: number
+  /** Signed `iat` (Unix s) of the newest verified denial (0 = none): the evidence cutoff
+   *  with the activation's second. */
+  deniedAt: number
 }
 
 interface AccountState {
@@ -438,7 +507,7 @@ export function createIdpRoles(opts: {
   const readUser = (userId: string): UserState | null => {
     const row = db
       .prepare(
-        'SELECT id, email, role, idpSubject, idpVerifiedAt, idpRevision, idpGrantedAt, idpRevokedAt FROM "user" WHERE id = ?'
+        'SELECT id, email, role, idpSubject, idpVerifiedAt, idpRevision, idpGrantedAt, idpDeniedAt FROM "user" WHERE id = ?'
       )
       .get(userId) as
       | {
@@ -449,7 +518,7 @@ export function createIdpRoles(opts: {
           idpVerifiedAt: number | null
           idpRevision: number | null
           idpGrantedAt: number | null
-          idpRevokedAt: number | null
+          idpDeniedAt: number | null
         }
       | undefined
     if (!row) return null
@@ -461,7 +530,7 @@ export function createIdpRoles(opts: {
       verifiedAt: typeof row.idpVerifiedAt === 'number' ? row.idpVerifiedAt : null,
       revision: row.idpRevision ?? 0,
       grantedAt: typeof row.idpGrantedAt === 'number' ? row.idpGrantedAt : null,
-      revokedAt: typeof row.idpRevokedAt === 'number' ? row.idpRevokedAt : 0
+      deniedAt: typeof row.idpDeniedAt === 'number' ? row.idpDeniedAt : 0
     }
   }
 
@@ -515,7 +584,10 @@ export function createIdpRoles(opts: {
   async function revokeFenced(
     user: UserState,
     account: AccountState | null,
-    reason: string
+    reason: string,
+    /** The signed `iat` of a verified denial (moves the evidence cutoff); null for an
+     *  unsigned reason (moves nothing). */
+    signedDenialAt: number | null
   ): Promise<void> {
     inTransaction(db, () => {
       assertUnchanged(user, account)
@@ -525,8 +597,8 @@ export function createIdpRoles(opts: {
       // then on.
       db.prepare(
         `UPDATE "user" SET role = 'user', idpRevision = ?, idpGrantedAt = NULL,
-           idpRevokedAt = ? WHERE id = ?`
-      ).run(user.revision + 1, Date.now(), user.id)
+           idpDeniedAt = MAX(COALESCE(idpDeniedAt, 0), ?) WHERE id = ?`
+      ).run(user.revision + 1, signedDenialAt ?? 0, user.id)
       db.prepare('DELETE FROM session WHERE userId = ?').run(user.id)
       db.prepare('DELETE FROM apikey WHERE referenceId = ?').run(user.id)
     })
@@ -579,6 +651,8 @@ export function createIdpRoles(opts: {
       }
       let superseded = false
       let roleChanged: HubRole | null = null
+      /** The `iat` of the refreshed token this revalidation verified, if any. */
+      let verifiedIat: number | null = null
       try {
         const result = await revalidateOidc({
           config: config!,
@@ -603,6 +677,7 @@ export function createIdpRoles(opts: {
             },
             verifyIdToken: async (idToken) => {
               const claims = await verifyIdTokenClaims(provider, idToken, keys)
+              verifiedIat = typeof claims.iat === 'number' ? claims.iat : null
               // Bound to this very account (Entra: oid + tid; generic: issuer + sub).
               if (!account || provider.accountIdOf(claims) !== account.accountId) {
                 throw new Error('[hub-auth] refreshed ID token names another account')
@@ -633,7 +708,14 @@ export function createIdpRoles(opts: {
             },
             requireSso: async ({ reason }) => {
               try {
-                await revokeFenced(user, account, reason)
+                // Only a verified token that maps to no role is a SIGNED denial; every
+                // other reason is unsigned and moves no cutoff.
+                await revokeFenced(
+                  user,
+                  account,
+                  reason,
+                  reason === 'no_mapped_role' ? verifiedIat : null
+                )
               } catch (err) {
                 if (err instanceof SupersededError) superseded = true
                 throw err
@@ -703,6 +785,26 @@ export function createIdpRoles(opts: {
         return { ok: false, reason: 'error' }
       }
     },
+    liveNow(userId, session) {
+      try {
+        if (!current()) return false
+        const user = readUser(userId)
+        if (!user || !bindingHolds(db, userId, session)) return false
+        if (isExempt(user)) return true
+        // The grant this socket was opened under is still the account's (a revocation
+        // and a re-grant in between, by any runtime, changes it).
+        if (session.grantedAt !== undefined && session.grantedAt !== user.grantedAt) return false
+        const inEpoch =
+          session.epoch !== undefined && session.epoch !== null
+            ? session.epoch === activation.epoch
+            : session.createdAtMs >= activation.activatedAt
+        if (!inEpoch || user.grantedAt === null || session.createdAtMs < user.grantedAt)
+          return false
+        return freshness(nowSec(), user.verifiedAt, config.intervalSec) === 'ok'
+      } catch {
+        return false
+      }
+    },
     async authorizeAccount(userId) {
       try {
         if (!current()) return { ok: false, reason: 'epoch' }
@@ -754,7 +856,7 @@ export function createIdpRoles(opts: {
         // allowed to put back an older role.
         // …and only from after the cutoff: signed in a later second than both this
         // epoch's activation and the account's last revocation.
-        const cutoffSec = Math.floor(Math.max(activation.activatedAt, user.revokedAt) / 1000)
+        const cutoffSec = Math.max(Math.floor(activation.activatedAt / 1000), user.deniedAt)
         const preCutoff = evidence.verifiedAt <= cutoffSec
         if (preCutoff || (user.verifiedAt !== null && evidence.verifiedAt < user.verifiedAt)) {
           auditIdp(
@@ -844,7 +946,7 @@ export function createIdpRoles(opts: {
         if (!current()) return // a stale runtime decides nothing
         const user = readUser(userId)
         if (!user || isExempt(user)) return
-        const cutoffSec = Math.floor(Math.max(activation.activatedAt, user.revokedAt) / 1000)
+        const cutoffSec = Math.floor(activation.activatedAt / 1000)
         const superseded =
           denial.verifiedAt <= cutoffSec ||
           (user.verifiedAt !== null && denial.verifiedAt < user.verifiedAt) ||
@@ -865,7 +967,7 @@ export function createIdpRoles(opts: {
           )
           return
         }
-        await revokeFenced(user, readAccount(userId), 'no_mapped_role')
+        await revokeFenced(user, readAccount(userId), 'no_mapped_role', denial.verifiedAt)
       })
     },
     async attachHub(next) {

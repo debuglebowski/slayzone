@@ -98,16 +98,17 @@ names of an earlier draft (never released) and the other services' old names.
   the hub machine).
 - **Denials are ordered like grants**: an unmapped sign-in's verified token carries its
   signed `iat`; it revokes only if that evidence is fresh, from a later second than the
-  activation and the last revocation, and not older than the stored evidence (same
-  second: revoked, fail closed). A delayed older unmapped callback is refused itself but
-  revokes nothing.
+  activation, and not older than the stored evidence (same second: revoked, fail
+  closed). A delayed older unmapped callback is refused itself but revokes nothing.
 - **Evidence time** is the ID token's signed `iat`, never the receipt time. Evidence only
   moves forward: a sign-in signed before the stored evidence is refused. It must also be
-  signed in a **later second** than the current activation and the account's last
-  revocation, so a login or code still pending at either moment never completes. Same-
-  second evidence is refused (conservative seconds-vs-milliseconds handling): someone
-  signing in within one second of an activation or a revocation signs in again a second
-  later.
+  signed in a **later second** than the current activation and the newest **signed**
+  denial (the `iat` of a verified token that mapped to no role), so a login or code still
+  pending at either moment never completes. A revocation for an UNSIGNED reason (refresh
+  failed or returned no ID token, issuer unreachable) withdraws access but moves no
+  cutoff: a newer signed sign-in already in flight still completes. Same-second evidence
+  is refused (conservative seconds-vs-milliseconds handling): someone signing in within
+  one second of an activation or a signed denial signs in again a second later.
 - **Freshness**: every human authenticated entry checks, from storage, that the evidence
   is younger than the interval; at the deadline the shared `revalidateOidc` runs inline —
   a refresh at the issuer, a new ID token verified (signature, issuer, audience, tenant,
@@ -119,8 +120,13 @@ names of an earlier draft (never released) and the other services' old names.
 - **Entry points gated**: REST bearers and cookies (`verifySession`: REST, `/trpc`, CLI,
   desktop, iOS app tokens), web sessions (`resolveWebSession`), the browser-session reads
   that mint web, device and app credentials (`sso-page.ts`), the task CLI relay's owner
-  (`cli-relay.ts`), open `/trpc` sockets (closed synchronously at the deadline unless the
-  deadline already moved forward; subscriptions with them), direct-link grants (each
+  (`cli-relay.ts`), open `/trpc` sockets — every operation and every subscription output
+  is checked synchronously against persisted state first (this process's view of the
+  mode, config identity and epoch; account enabled; the role, grant and credential the
+  socket was opened with, its session row present and unexpired; evidence age), never
+  waiting on a refresh, so a change by ANOTHER hub process, a demotion or a sign-out
+  elsewhere stops it at the next use; and the socket closes at the deadline unless the
+  deadline already moved forward — direct-link grants (each
   carries the deadline as an absolute `notAfter` the computer enforces whatever the
   delivery delay, closing the direct connection then; a grant arriving past it is
   refused, an acknowledgement arriving past it is undone; a computer that does not

@@ -37,7 +37,7 @@ export type RefreshAnswer =
       /** Hold the answer until this resolves (concurrency tests). */
       hold?: Promise<void>
     }
-  | { kind: 'error'; status: number; error: string }
+  | { kind: 'error'; status: number; error: string; hold?: Promise<void> }
 
 export class FakeOidcIssuer {
   server!: Server
@@ -159,6 +159,7 @@ export class FakeOidcIssuer {
       const answer =
         this.refreshAnswers.length > 1 ? this.refreshAnswers.shift()! : this.refreshAnswers[0]!
       if (answer.kind === 'error') {
+        await answer.hold
         send(answer.status, { error: answer.error })
         return
       }

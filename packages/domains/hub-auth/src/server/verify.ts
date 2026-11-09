@@ -5,7 +5,13 @@ import type { HubAuthContext, ComputerPrincipal } from '../shared/types'
 import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { findComputerServiceUserId } from './computer-keys'
-import { type IdpAuthorization, idpModeFenceOk, idpRolesOf } from './idp-roles'
+import {
+  bindingHoldsFor,
+  type IdpAuthorization,
+  idpModeFenceOk,
+  idpRolesOf,
+  type SessionBinding
+} from './idp-roles'
 
 /** Header computers present their API key in (mirrors the apiKey plugin default). */
 export const API_KEY_HEADER = 'x-api-key'
@@ -50,6 +56,22 @@ export async function verifySession(
   }
   const orgId = (result.session.activeOrganizationId as string | null | undefined) ?? null
   return { userId: user.id, role, orgId, session: result.session }
+}
+
+/**
+ * The synchronous per-operation check of an already-verified session (open `/trpc`
+ * sockets: every operation, every subscription output). Storage only, never a network
+ * call. Mode off: this process's view of the mode must still be the persisted one, and
+ * the account must exist and not be disabled. Mode on: the runtime's `liveNow`.
+ */
+export function idpSessionLiveNow(auth: HubAuth, userId: string, session: SessionBinding): boolean {
+  try {
+    const idp = idpRolesOf(auth)
+    if (idp) return idp.liveNow(userId, session)
+    return idpModeFenceOk(auth) && bindingHoldsFor(auth, userId, session)
+  } catch {
+    return false
+  }
 }
 
 /**

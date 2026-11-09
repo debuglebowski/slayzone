@@ -107,6 +107,99 @@ function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
   return data
 }
 
+/** The error a connection whose principal no longer stands gets (operation or output). */
+function notLiveError(): TRPCError {
+  return new TRPCError({ code: 'UNAUTHORIZED', message: 'session no longer valid; sign in again' })
+}
+
+/**
+ * `data` (a subscription's observable or async iterable) that delivers nothing once
+ * `live()` turns false: every output is checked first, synchronously; a failed check ends
+ * the subscription with UNAUTHORIZED instead of delivering.
+ */
+function withLiveness(live: () => boolean, data: unknown): unknown {
+  if (typeof data === 'object' && data !== null && 'subscribe' in data) {
+    const inner = data as {
+      subscribe: (observer: {
+        next: (v: unknown) => void
+        error: (e: unknown) => void
+        complete: () => void
+      }) => { unsubscribe: () => void }
+    }
+    type Op = (prev: unknown) => unknown
+    const wrapped = {
+      subscribe: (observer: {
+        next: (v: unknown) => void
+        error: (e: unknown) => void
+        complete: () => void
+      }) => {
+        let ended = false
+        let sub: { unsubscribe: () => void } | null = null
+        const stop = (): void => {
+          if (ended) return
+          ended = true
+          sub?.unsubscribe()
+          observer.error(notLiveError())
+        }
+        sub = inner.subscribe({
+          next: (v) => {
+            if (ended) return
+            if (!live()) return stop()
+            observer.next(v)
+          },
+          error: (e) => !ended && observer.error(e),
+          complete: () => !ended && observer.complete()
+        })
+        if (ended) sub.unsubscribe()
+        return { unsubscribe: () => ((ended = true), sub?.unsubscribe()) }
+      },
+      pipe: (...ops: Op[]): unknown => ops.reduce((prev: unknown, op) => op(prev), wrapped)
+    }
+    return wrapped
+  }
+  if (data && typeof (data as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function') {
+    const inner = data as AsyncIterable<unknown>
+    return {
+      [Symbol.asyncIterator]() {
+        const it = inner[Symbol.asyncIterator]()
+        return {
+          async next(...a: [] | [unknown]) {
+            const r = await it.next(...a)
+            if (!r.done && !live()) {
+              await it.return?.()
+              throw notLiveError()
+            }
+            return r
+          },
+          ...(it.return ? { return: (v?: unknown) => it.return!(v) } : {}),
+          ...(it.throw ? { throw: (e?: unknown) => it.throw!(e) } : {})
+        }
+      }
+    }
+  }
+  return data
+}
+
+/**
+ * Liveness gate: on a connection whose context carries `principalLive` (the hub, for an
+ * authenticated socket), the principal is re-checked SYNCHRONOUSLY from persisted state
+ * before the operation — and, for a subscription, before every output. A failure is
+ * UNAUTHORIZED at once; nothing waits on a network refresh while the cached principal
+ * keeps working. No `principalLive` (every other host, login off): a pass-through.
+ */
+const livenessGate = t.middleware(async ({ ctx, next, path, type }) => {
+  const live = ctx.principalLive
+  if (!ctx.principal || !live) return next()
+  if (!live()) {
+    auditDenied(path, { reason: 'principal_not_live' })
+    throw notLiveError()
+  }
+  const result = await next()
+  if (type === 'subscription' && result.ok)
+    return { ...result, data: withLiveness(live, result.data) }
+  return result
+})
+
 /** One `authz.denied` line for a gate refusal; actor/ip/route come from the context. */
 function auditDenied(path: string, detail: Record<string, unknown>): void {
   securityEvent({
@@ -249,6 +342,7 @@ const unsafePathRefusal = t.middleware(async ({ next }) => {
  */
 export const publicProcedure = t.procedure
   .use(securityContext)
+  .use(livenessGate)
   .use(authGate)
   .use(adminGate)
   .use(scopeGate)

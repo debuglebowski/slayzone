@@ -279,6 +279,8 @@ export interface WebSessionPrincipal {
   userId: string
   role: HubRole
   scopes: Scope[]
+  /** When the web session was created (Unix ms): the per-operation check reads it. */
+  session: { createdAtMs: number }
 }
 
 /**
@@ -306,7 +308,12 @@ export async function resolveWebSession(
   if (!account || account.disabled) return null
   const idp = await authorizeExternalSession(auth, result.userId, result.createdAt)
   if (!idp.ok) return null
-  return { userId: result.userId, role: idp.role ?? account.role, scopes: result.scopes }
+  return {
+    userId: result.userId,
+    role: idp.role ?? account.role,
+    scopes: result.scopes,
+    session: { createdAtMs: result.createdAt }
+  }
 }
 
 /**

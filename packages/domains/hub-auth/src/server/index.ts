@@ -18,6 +18,7 @@ export {
   API_KEY_HEADER,
   authorizeDelegatedHuman,
   authorizeExternalSession,
+  idpSessionLiveNow,
   getHubAuthContext,
   getComputerPrincipal,
   requireApiKey,
@@ -73,8 +74,10 @@ export {
 export {
   IDP_AUDIT_SERVICE,
   IDP_REVALIDATION_REQUIRED,
+  captureGrant,
   idpRolesOf,
   isIdpRolesAuth,
+  type SessionBinding,
   type IdpAuthorization,
   type IdpRoles,
   type IdpRolesHub

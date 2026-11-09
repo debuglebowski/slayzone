@@ -12,6 +12,11 @@ export interface HubAuthSession {
   userId: string
   token: string
   expiresAt: Date
+  /** When the session was created (better-auth always sets it). */
+  createdAt: Date
+  /** The IdP-role activation epoch it was created in (hub-auth idp-roles.ts); absent
+   *  with the mode off or on rows from before it. */
+  idpEpoch?: number | null
   /** Set by the organization plugin when the session has an active organization. */
   activeOrganizationId?: string | null
 }

@@ -179,7 +179,7 @@ function buildAuth(config: HubAuthConfig, database: DatabaseSync) {
         idpVerifiedAt: { type: 'number', required: false, input: false },
         idpRevision: { type: 'number', required: false, input: false },
         idpGrantedAt: { type: 'number', required: false, input: false },
-        idpRevokedAt: { type: 'number', required: false, input: false }
+        idpDeniedAt: { type: 'number', required: false, input: false }
       }
     },
     // 7 days (O-8), see SESSION_LIFETIME above.

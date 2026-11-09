@@ -752,6 +752,54 @@ describe('denials are ordered like grants: an older unmapped callback never revo
   })
 })
 
+describe('an UNSIGNED revocation sets no evidence cutoff', () => {
+  it('a refresh fails while a newer signed sign-in is in flight: that sign-in still completes', async () => {
+    const s = await signIn(person('una', ['Hub.User']))
+    ageEvidence('una', 3600)
+    let release!: () => void
+    issuer.refreshAnswers = [
+      {
+        kind: 'error',
+        status: 503,
+        error: 'temporarily_unavailable',
+        hold: new Promise<void>((r) => (release = r))
+      }
+    ]
+    const pendingRefresh = viaCookie(s) // the refresh is now at the issuer
+    while (issuer.refreshes.length === 0) await new Promise((r) => setTimeout(r, 5))
+    later(1100)
+    // A newer, validly signed sign-in starts while the refresh is pending …
+    const complete = await pendingSignIn(person('una', ['Hub.Admin']))
+    later(1100)
+    // … the refresh fails (unsigned): access revoked …
+    release()
+    expect(await pendingRefresh).toBeNull()
+    expect(userRow('una')!.idpGrantedAt).toBeNull()
+    expect(events('idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'refresh_failed' }
+    })
+    // … and the in-flight signed sign-in completes after it: accepted (no invented cutoff).
+    const done = await complete(auth)
+    expect(done.error).toBeNull()
+    expect((await viaCookie(done))?.role).toBe('admin')
+    expect(userRow('una')!.idpGrantedAt).not.toBeNull()
+  })
+
+  it('a SIGNED denial does set the cutoff, at its signed issue time', async () => {
+    await signIn(person('vee', ['Hub.User']))
+    later(1100)
+    const deniedAt = nowSec()
+    expect((await signIn(person('vee', ['Other']))).error).not.toBeNull()
+    expect(
+      (
+        raw().prepare('SELECT idpDeniedAt FROM "user" WHERE email = ?').get('vee@example.test') as {
+          idpDeniedAt: number
+        }
+      ).idpDeniedAt
+    ).toBe(deniedAt)
+  })
+})
+
 describe('evidence cutoff: a login pending across an activation or a revocation never completes', () => {
   it('request + evidence → activation (another boot) → delayed callback: refused; a truly fresh SSO works', async () => {
     const complete = await pendingSignIn(person('vic', ['Hub.Admin']))

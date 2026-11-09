@@ -67,11 +67,7 @@ import {
 } from './hub-admin-socket.js'
 import { createLogger } from './log.js'
 import { claimServerPort } from './port-claim.js'
-import {
-  connectionToken,
-  parseWindowIdFromUrl,
-  resolveConnectionPrincipal
-} from './hub-trpc-context.js'
+import { createHubTrpcContext } from './trpc-socket-context.js'
 import { parseCookieHeader, withRestAuth } from './rest-auth.js'
 import { handleDevSql, isDevSqlEnabled } from './dev-sql.js'
 import { cookieOriginDecision, wsOriginDecision, resolveAllowedWebOrigins } from './ws-origin.js'
@@ -680,76 +676,18 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   // A window's warm-pool tab counts are dropped once its last socket is gone for good
   // (a closed window never reports empty counts) — see warm-window-sockets.ts.
   const warmWindowSockets = createWarmWindowSockets({ clearWindow: clearWindowTabCounts })
-  // createContext verifies the bearer only when this hub enforces auth
-  // (`hubAuthRequired`, defined above). A hub with login off leaves it off →
-  // principal stays null, no verify → byte-identical to trusted loopback.
-  const createTrpcContext = async ({
-    req,
-    res,
-    info
-  }: {
-    req: IncomingMessage
-    res?: WebSocket
-    info?: { connectionParams?: Record<string, string | undefined> | null }
-  }) => {
-    // windowId (?windowId=N) → ctx.windowId. Required by claimSession +
-    // panel-ownership + warm-pool (warmSetProjectTabCounts) procs; without it they
-    // throw "windowId required". This sidecar's applyWSSHandler had omitted it (the
-    // transport ws-server parses it, but the sidecar uses THIS handler) — so the
-    // whole warm-agent pool silently never fired. The renderer already sends it
-    // (see main.tsx withWindowId).
-    const windowId = parseWindowIdFromUrl(req.url)
-    // The window's warm-pool tab counts live only as long as the window does.
-    if (windowId != null && res) warmWindowSockets.track(windowId, res)
-    // Verify the bearer token from tRPC connectionParams when this hub enforces
-    // auth. An invalid/absent token → principal stays null; individual procedures
-    // gate on ctx.principal via the auth gate (an authed hub still accepts the
-    // connection but attributes it). See hub-trpc-context.ts for the decision.
-    //
-    // The credential: the connectionParams token, else the web shell's session cookie
-    // from the hub's own page only (T-13, `connectionToken`). Login off: neither is read.
-    const presented = hubAuthRequired
-      ? connectionToken({
-          connectionParamsToken: info?.connectionParams?.token,
-          cookies: parseCookieHeader(req.headers),
-          cookieOriginAllowed: isCookieOriginAllowed(req)
-        })
-      : null
-    if (presented?.cookieRefused) {
-      securityEvent({
-        event: 'authz.denied',
-        outcome: 'denied',
-        actor: null,
-        ip: clientAddress(req),
-        route: routeOf(req.method, req.url),
-        detail: { reason: 'cookie_origin', origin: req.headers.origin ?? null }
-      })
-    }
-    const resolve = () =>
-      resolveConnectionPrincipal({
-        hubAuthRequired,
-        hubAuth,
-        db,
-        token: presented?.token
-      })
-    const principal = await resolve()
-    // T-12: the principal is resolved once per socket, so the socket is tracked by its
-    // account — revoking the account closes it, and its credential is re-resolved
-    // periodically (trpc-connections.ts). Login off: no principal, nothing tracked.
-    if (principal && res) {
-      composition.trpcConnections.track(res, principal.userId, async () => {
-        return (await resolve())?.userId ?? null
-      })
-    }
-    return {
-      db,
-      dataRoot,
-      req,
-      automationEngine: composition.automationEngine,
-      windowId,
-      principal
-    }
-  }
+  // The socket context (trpc-socket-context.ts): window id, the principal verified when
+  // this hub enforces auth (login off: none, byte-identical to trusted loopback), and on
+  // an authenticated socket the per-operation persisted check (`principalLive`).
+  const createTrpcContext = createHubTrpcContext({
+    hubAuthRequired,
+    hubAuth,
+    db,
+    connections: composition.trpcConnections,
+    isCookieOriginAllowed,
+    trackWindow: (windowId, socket) => warmWindowSockets.track(windowId, socket),
+    extra: { dataRoot, automationEngine: composition.automationEngine }
+  })
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext: createTrpcContext })
 
   // PORT RESOLUTION. An explicit port (cfg / SLAYZONE_HUB_LISTEN_ADDRESS) binds verbatim

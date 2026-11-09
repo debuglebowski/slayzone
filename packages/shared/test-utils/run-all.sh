@@ -143,6 +143,8 @@ run_harness packages/apps/hub/src/local-computer-roots.test.ts
 run_harness packages/apps/hub/src/computer-placement.test.ts
 run_harness packages/apps/hub/src/direct-link.test.ts
 run_harness packages/apps/hub/src/trpc-connections.test.ts
+# An open /trpc socket fenced by persisted IdP-role state changed by another runtime.
+run_harness packages/apps/hub/src/trpc-live-fence.test.ts
 # The IdP-role mode through native hub routes + the shared contract's acceptance suite.
 run_harness packages/apps/hub/src/idp-roles-acceptance.test.ts
 run_harness packages/apps/hub/src/chat-direct-write.test.ts
