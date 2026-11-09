@@ -12,8 +12,7 @@ import { ADMIN_ONLY } from '../../../admin-policy'
 import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { RestApiDeps } from '../types'
 import { respondSwitchRefusal } from '../switch-refusal'
-import { getHubAdminDeps } from '@slayzone/content-erasure/router'
-import { AdminContentErasureError, type ErasureActor } from '@slayzone/content-erasure/admin'
+import { CONTENT_ERASURE_PATH } from './content-erasure'
 
 /**
  * REST: `/api/hub/users` — operator account management, backing
@@ -176,9 +175,7 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     res: {
       status: (code: number) => { json: (body: unknown) => void }
     }
-  ): Promise<
-    (NonNullable<RestApiDeps['hubUsers']> & { erasureActor: ErasureActor | null }) | null
-  > => {
+  ): Promise<NonNullable<RestApiDeps['hubUsers']> | null> => {
     const loopback = isLoopbackAddress(req.socket.remoteAddress ?? undefined)
     const authRequired = deps.restAuth?.required() === true
     // Only verify when the answer can matter — mirrors join-token.ts. An absent
@@ -235,72 +232,23 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
     const actor = principal?.userId ?? null
     return {
       ...users,
-      erasureActor:
-        principal?.role === 'admin' && principal.scopes.includes('full') ? principal : null,
       create: (input) => runAsSecurityActor(actor, () => users.create(input)),
       disable: (email) => runAsSecurityActor(actor, () => users.disable(email)),
       enable: (email) => runAsSecurityActor(actor, () => users.enable(email)),
       setRole: (email, role) => runAsSecurityActor(actor, () => users.setRole(email, role))
     }
   }
-  async function erasureCall(
-    res: import('express').Response,
-    actor: ErasureActor | null,
-    action: string,
-    input: Record<string, unknown>
-  ) {
-    if (!actor) {
-      res.status(403).json({
-        ok: false,
-        error: 'Content erasure requires an authenticated hub admin with a full session.'
-      })
-      return
-    }
-    const erasure = getHubAdminDeps()?.erasure
-    if (!erasure) {
-      res.status(503).json({ ok: false, error: 'Content erasure is unavailable.' })
-      return
-    }
-    try {
-      const userId = typeof input.userId === 'string' ? input.userId : ''
-      const jobId = typeof input.jobId === 'string' ? input.jobId : ''
-      let data: unknown
-      if (action === 'preview' && userId) data = await erasure.preview({ actor, userId })
-      else if (action === 'reports' && userId) data = await erasure.reports({ actor, userId })
-      else if (action === 'receipt' && jobId) data = await erasure.receipt({ actor, jobId })
-      else if (action === 'erase-content' && userId && typeof input.confirmation === 'string')
-        data = await erasure.erase({ actor, userId, confirmation: input.confirmation })
-      else if (action === 'retry-erasure' && jobId) data = await erasure.retry({ actor, jobId })
-      else if (
-        action === 'computer-erasure-request' &&
-        jobId &&
-        typeof input.computerId === 'string' &&
-        typeof input.hubUrl === 'string'
-      )
-        data = await erasure.computerRequest({
-          actor,
-          jobId,
-          computerId: input.computerId,
-          hubUrl: input.hubUrl
-        })
-      else if (action === 'confirm-computer-erasure')
-        data = await erasure.confirmComputer({ actor, receipt: input.receipt })
-      else {
-        res.status(400).json({ ok: false, error: 'Invalid content erasure request.' })
-        return
-      }
-      res.json({ ok: true, data })
-    } catch (error) {
-      if (error instanceof AdminContentErasureError)
-        res
-          .status(error.code === 'ADMIN_ONLY' ? 403 : error.code === 'USER_NOT_FOUND' ? 404 : 409)
-          .json({ ok: false, code: error.code, error: error.message })
-      else
-        res.status(500).json({
-          ok: false,
-          error: 'The operation could not finish. Check cleanup status and retry.'
-        })
-    }
+  /**
+   * Content erasure first shipped on this path (`GET ?erasure=…`, `PATCH { action }`),
+   * which a break-glass session may call (O-6 forbids it erasure) and which put
+   * destructive actions behind GET. It moved to {@link CONTENT_ERASURE_PATH}; the old
+   * shapes answer 410 naming it, so an older `slay` gets a reason, not a silent list.
+   */
+  const erasureMoved = (res: import('express').Response): void => {
+    res.status(410).json({
+      ok: false,
+      error: `content erasure moved to ${CONTENT_ERASURE_PATH} — update slay and repeat the command`
+    })
   }
 
   // Create an account. Returns the generated password ONCE — it is not recoverable.
@@ -361,8 +309,8 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.get('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
-    if (typeof req.query.erasure === 'string') {
-      await erasureCall(res, users.erasureActor, req.query.erasure, req.query)
+    if (req.query.erasure !== undefined) {
+      erasureMoved(res)
       return
     }
     try {
@@ -381,13 +329,8 @@ export function registerHubUsersRoutes(app: Express, deps: RestApiDeps): void {
   app.patch('/api/hub/users', async (req, res) => {
     const users = await gate(req, res)
     if (!users) return
-    if (typeof req.body?.action === 'string') {
-      await erasureCall(
-        res,
-        users.erasureActor,
-        req.body.action,
-        req.body as Record<string, unknown>
-      )
+    if (req.body?.action !== undefined) {
+      erasureMoved(res)
       return
     }
     const body = (req.body ?? {}) as { email?: unknown; disabled?: unknown; role?: unknown }

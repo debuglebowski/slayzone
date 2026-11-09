@@ -10,6 +10,7 @@ import type {
   UpdateProjectInput
 } from '@slayzone/projects-contracts'
 import { deleteProjectPlacements } from '@slayzone/computers/server'
+import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
 import { eraseContent } from '@slayzone/content-erasure/server'
 import {
   defaultProjectRoot,
@@ -331,7 +332,8 @@ export async function deleteProject(
   const existing = await db.get('SELECT 1 FROM projects WHERE id=?', [id])
   if (!existing) return false
   const report = await eraseContent(db, path.dirname(iconsDir), { kind: 'projects', ids: [id] })
-  if (report.state !== 'complete')
+  // A scheduled database compaction is not a failure: it completes the job later.
+  if (!isErasureDoneOrCompacting(report))
     throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
   // No foreign key on `project_placements`: its rows go explicitly.
   await deleteProjectPlacements(db, id)

@@ -10,11 +10,13 @@ import {
   fsyncSync,
   closeSync
 } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { basename, join } from 'node:path'
 import { z } from 'zod'
 import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
+import { HOOK_JOURNAL_FILE, hookJournalPath, legacyHookJournalPath } from './hook-journal'
+import { ptyHistoryDir } from './pty-history'
 
 const requestSchema = z.object({
   version: z.literal(1),
@@ -40,6 +42,44 @@ function alive(pid: number, processGroup = false): boolean {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
     throw error
   }
+}
+/** An unpublished journal write (session-host.ts `atomicRuntimeJson`), any hub's. */
+const HOOK_JOURNAL_STAGING = /^(hooks-[a-f0-9]{16}\.json)\.(\d+)\.[a-f0-9]{8}\.tmp$/
+const journalSchema = z.array(z.object({ id: z.string(), params: z.unknown() }))
+const taskOf = (params: unknown): string | undefined =>
+  (params as { payload?: { taskId?: unknown } } | null)?.payload?.taskId as string | undefined
+
+/** This hub's journal names: the one its URL names in any spelling (hook-journal.ts),
+ *  and the one an older host named by the given spelling verbatim. */
+const ownJournalNames = (runtime: string, hubUrl: string): Set<string> =>
+  new Set(
+    [hookJournalPath(runtime, hubUrl), legacyHookJournalPath(runtime, hubUrl)].map((path) =>
+      basename(path)
+    )
+  )
+
+/**
+ * This hub's existing hook journals, checked before anything is deleted. Any OTHER
+ * journal holding an event of a task being erased means the computer was configured
+ * with a spelling neither name reaches (an older host that has not run since): refuse
+ * instead of issuing a receipt over it. So must a journal write of this hub's still
+ * running.
+ */
+function ownHookJournals(runtime: string, hubUrl: string, tasks: ReadonlySet<string>): string[] {
+  const own = ownJournalNames(runtime, hubUrl)
+  for (const entry of readdirSync(runtime)) {
+    const staging = HOOK_JOURNAL_STAGING.exec(entry)
+    if (staging && own.has(staging[1]) && alive(Number(staging[2])))
+      throw new Error('A hook journal writer is still running')
+    if (!HOOK_JOURNAL_FILE.test(entry) || own.has(entry)) continue
+    const events = journalSchema.parse(JSON.parse(readFileSync(join(runtime, entry), 'utf8')))
+    if (events.some((event) => tasks.has(taskOf(event.params) ?? '')))
+      throw new Error(
+        'Agent hook events of these tasks are kept under another spelling of the hub URL. ' +
+          'Repeat with --computer-hub-url exactly as this computer is configured (its hubUrl); nothing was deleted.'
+      )
+  }
+  return [...own].map((name) => join(runtime, name)).filter((path) => existsSync(path))
 }
 function sync(path: string) {
   if (process.platform === 'win32' || !existsSync(path)) return
@@ -80,6 +120,8 @@ export async function eraseComputerOffline(
     throw new Error(
       'This hub’s existing chat store was not found; no cleanup receipt can be issued'
     )
+  const ids = new Set(request.tasks.map((t) => t.taskId))
+  const journals = ownHookJournals(runtime, request.hubUrl, ids)
   const r = createComputerChatRuntime({
     stateDir: root,
     hubScope: request.hubScope,
@@ -95,12 +137,11 @@ export async function eraseComputerOffline(
     for (const task of request.tasks) {
       assertPathSafeId(task.taskId, 'taskId')
       await r.eraseTask(task.taskId, task.revision)
-      const historyRoot = join(
-        runtime,
-        'pty-history',
-        createHash('sha256').update(request.hubScope).digest('hex')
-      )
+      // Where the live computer keeps it (main.ts): the same helper, so never another dir.
+      const historyRoot = ptyHistoryDir(root, request.hubScope)
       const history = containedPath(historyRoot, task.taskId)
+      // The task's whole dir: its sessions' files and any write a crash left
+      // (pty-history.ts `<file>.<pid>.<n>.tmp`).
       rmSync(history, { recursive: true, force: true })
       if (existsSync(history)) throw new Error('Terminal history remains')
       sync(historyRoot)
@@ -108,35 +149,24 @@ export async function eraseComputerOffline(
   } finally {
     await r.close()
   }
-  const journal = join(
-    runtime,
-    'hooks-' + createHash('sha256').update(request.hubUrl).digest('hex').slice(0, 16) + '.json'
-  )
-  const ids = new Set(request.tasks.map((t) => t.taskId))
-  if (existsSync(journal)) {
-    const entries = z
-      .array(z.object({ id: z.string(), params: z.unknown() }))
+  for (const journal of journals) {
+    const remaining = journalSchema
       .parse(JSON.parse(readFileSync(journal, 'utf8')))
-    const remaining = entries.filter((entry) => {
-      const params = entry.params as { payload?: { taskId?: string } } | null
-      return !params?.payload?.taskId || !ids.has(params.payload.taskId)
-    })
+      .filter((entry) => !ids.has(taskOf(entry.params) ?? ''))
     const temp = journal + '.' + randomUUID() + '.tmp'
     writeFileSync(temp, JSON.stringify(remaining), { flag: 'wx', mode: 0o600 })
     sync(temp)
     renameSync(temp, journal)
     sync(runtime)
   }
-  // Unpublished journal staging is already discarded on normal host startup.
-  for (const entry of readdirSync(runtime))
-    if (entry.startsWith(journal.slice(dirname(journal).length + 1) + '.')) {
-      const match = /\.(\d+)\.[a-f0-9]{8}\.tmp$/.exec(entry)
-      if (match) {
-        if (alive(Number(match[1]))) throw new Error('A hook journal writer is still running')
-        rmSync(join(runtime, entry))
-        sync(runtime)
-      }
-    }
+  // Unpublished journal writes (any hub's) whose writer is gone: discarded, as the
+  // host's own startup does (session-host.ts `scrubChatJournals`).
+  for (const entry of readdirSync(runtime)) {
+    const staging = HOOK_JOURNAL_STAGING.exec(entry)
+    if (!staging || alive(Number(staging[2]))) continue
+    rmSync(join(runtime, entry))
+    sync(runtime)
+  }
   return {
     request,
     verifiedAt: new Date().toISOString(),

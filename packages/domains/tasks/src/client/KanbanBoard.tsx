@@ -51,7 +51,7 @@ interface KanbanBoardProps {
   onBulkUpdateTasks?: (taskIds: string[], updates: Partial<Task>) => void
   onClearBlockers?: (taskId: string) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => Promise<void>
   onBulkDeleteTasks?: (taskIds: string[]) => void
   onArchiveAllTasks?: (taskIds: string[]) => void
   activeAgentTaskIds?: Set<string>

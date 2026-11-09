@@ -117,6 +117,18 @@ test('upgrading migration 197 preserves old Trash as Archive without reactivatin
   }
 })
 
+/** The worktree's computer acknowledges its task's erasure. */
+const ackFrom = (raw: Database.Database) => async (request: { taskIds: string[] }) =>
+  request.taskIds.map((taskId) => ({
+    taskId,
+    revision: (
+      raw.prepare('SELECT revision FROM chat_task_lifecycle WHERE task_id=?').get(taskId) as {
+        revision: number
+      }
+    ).revision,
+    erased: true as const
+  }))
+
 async function worktreeFixture() {
   const h = await createTestHarness()
   fixtures.push(h)
@@ -124,8 +136,21 @@ async function worktreeFixture() {
     path = join(root, 'worktree-erasure.sqlite')
   const secret = 'PRIVATE-WORKTREE-TITLE-d2e50bc1'
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
+  // A located worktree: its computer and that computer's project folder are known.
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
+    .prepare(
+      "INSERT INTO computers(id,name,platform,version,capabilities_json,created_at) VALUES('c','Computer','darwin','1','[]',1)"
+    )
+    .run()
+  h.db
+    .prepare(
+      "INSERT INTO project_placements(computer_id,project_id,root_path,status,updated_at) VALUES('c','p',?,'ready',1)"
+    )
+    .run(join(root, 'repo'))
+  h.db
+    .prepare(
+      "INSERT INTO tasks(id,project_id,title,worktree_path,worktree_computer_id) VALUES(?,?,?,?,'c')"
+    )
     .run('t', 'p', secret, join(root, secret))
   await h.db.backup(path)
   const raw = new Database(path)
@@ -142,6 +167,7 @@ test('completed worktree cleanup leaves no private path in SQLite or historical 
       root,
       { kind: 'tasks', ids: ['t'] },
       {
+        cleanupComputer: ackFrom(raw),
         cleanupWorktree: async () => {}
       }
     )
@@ -171,6 +197,7 @@ test('a failed final compaction stays incomplete and resumes after restart witho
       fixture.root,
       { kind: 'tasks', ids: ['t'] },
       {
+        cleanupComputer: ackFrom(raw),
         cleanupWorktree: async () => {
           removals++
         }

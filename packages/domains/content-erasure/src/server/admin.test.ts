@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
+import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { createTestHarness, type TestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createAdminContentErasure, type ErasureAccount } from './admin'
 
@@ -119,4 +120,22 @@ test('offline receipts must match the issued computer, scope and current deletio
     verifiedBy: 'operator'
   })
   expect(h.db.prepare("SELECT 1 FROM tasks WHERE id='t-bob'").get()).toBeDefined()
+})
+
+test('the started audit line names the operator and the erased user, never their email', async () => {
+  const { service } = await fixture()
+  const lines: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => lines.push(JSON.parse(line) as Record<string, unknown>))
+  try {
+    await service.erase({ actor: admin, userId: 'alice', confirmation: 'alice@example.com' })
+  } finally {
+    setSecurityLogSink()
+  }
+  const started = lines.find((l) => l.event === 'content.erase.started')
+  expect(started).toMatchObject({
+    actor: 'operator',
+    targetKind: 'erasure',
+    detail: { scope: 'user', userId: 'alice' }
+  })
+  expect(JSON.stringify(started)).not.toContain('alice@example.com')
 })

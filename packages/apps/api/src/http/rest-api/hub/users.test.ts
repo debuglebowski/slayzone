@@ -19,9 +19,7 @@
  * can produce is loopback — which is why the auth-required matrix is asserted
  * directly against the pure function as well as through a request.
  */
-import { afterEach, describe, expect, test, vi } from 'vitest'
-import { setHubAdminDeps } from '@slayzone/content-erasure/router'
-import { AdminContentErasureError, type AdminContentErasure } from '@slayzone/content-erasure/admin'
+import { describe, expect, test } from 'vitest'
 import express from 'express'
 import { mountRestApp } from '../../../../../../shared/test-utils/rest-harness.js'
 import { currentSecurityContext, setSecurityLogSink } from '@slayzone/platform/security-log'
@@ -35,7 +33,6 @@ import {
 import type { RestApiDeps } from '../types.js'
 
 const SERVICE_EMAIL = 'computers@slayzone.internal'
-afterEach(() => setHubAdminDeps(null))
 
 type HubUsers = NonNullable<RestApiDeps['hubUsers']>
 
@@ -222,37 +219,6 @@ describe('POST /api/hub/users', () => {
     )
     expect(res.status).toBe(500)
     expect(res.body.message).toBe('sqlite exploded')
-  })
-})
-
-test('erasure REST action uses the verified admin and surfaces disabled-user refusal safely', async () => {
-  const erase = vi.fn(async () => {
-    throw new AdminContentErasureError(
-      'USER_NOT_DISABLED',
-      'Disable the user before erasing their content.'
-    )
-  })
-  const users = stubUsers()
-  setHubAdminDeps({
-    dataRoot: '/unused',
-    users,
-    erasure: { erase } as unknown as AdminContentErasure
-  })
-  const res = await call<{ code: string; error: string }>(
-    users,
-    'PATCH',
-    { action: 'erase-content', userId: 'alice', confirmation: 'alice@example.com' },
-    {
-      required: () => true,
-      verifyBearer: async () => ({ userId: 'operator', role: 'admin', scopes: ['full'] })
-    }
-  )
-  expect(res.status).toBe(409)
-  expect(res.body.code).toBe('USER_NOT_DISABLED')
-  expect(erase).toHaveBeenCalledWith({
-    actor: { userId: 'operator', role: 'admin', scopes: ['full'] },
-    userId: 'alice',
-    confirmation: 'alice@example.com'
   })
 })
 

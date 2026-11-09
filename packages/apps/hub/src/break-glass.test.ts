@@ -43,6 +43,8 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { adoptClientAddress, parseTrustedProxies } from '@slayzone/platform/client-address'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { createMcpRestApp } from '@slayzone/api'
+import { setHubAdminDeps } from '@slayzone/content-erasure/router'
+import type { AdminContentErasure } from '@slayzone/content-erasure/admin'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import {
   BREAK_GLASS_GRANT_TTL_MS,
@@ -445,6 +447,76 @@ describe('with the admin socket open', () => {
       '/trpc never accepts it'
     ).toEqual(null)
     expect(breakGlass.status().state, 'still the one session').toEqual('active')
+  })
+
+  test('…and erases no content: every erasure action, preview, report and receipt is refused (O-6)', async () => {
+    const reached: string[] = []
+    const spy =
+      (name: string) =>
+      async (..._args: unknown[]): Promise<never> => {
+        reached.push(name)
+        throw new Error(`break-glass reached erasure.${name}`)
+      }
+    setHubAdminDeps({
+      dataRoot,
+      users: createHubUsersCapability(() => auth, userAccess),
+      erasure: Object.fromEntries(
+        [
+          'preview',
+          'reports',
+          'receipt',
+          'erase',
+          'retry',
+          'computerRequest',
+          'confirmComputer'
+        ].map((name) => [name, spy(name)])
+      ) as unknown as AdminContentErasure
+    })
+    try {
+      const jobId = '22222222-2222-4222-8222-222222222222'
+      const attempts: Array<[string, string, unknown?]> = [
+        // The shapes erasure first shipped with, on the account routes break-glass may use.
+        ['GET', `/api/hub/users?erasure=preview&userId=${bob.id}`],
+        ['GET', `/api/hub/users?erasure=reports&userId=${bob.id}`],
+        ['GET', `/api/hub/users?erasure=receipt&jobId=${jobId}`],
+        [
+          'PATCH',
+          '/api/hub/users',
+          { action: 'erase-content', userId: bob.id, confirmation: 'bob@example.com' }
+        ],
+        ['PATCH', '/api/hub/users', { action: 'retry-erasure', jobId }],
+        // Its own route.
+        ['GET', `/api/hub/content-erasure?view=preview&userId=${bob.id}`],
+        ['GET', `/api/hub/content-erasure?view=reports&userId=${bob.id}`],
+        [
+          'POST',
+          '/api/hub/content-erasure',
+          { action: 'erase-content', userId: bob.id, confirmation: 'bob@example.com' }
+        ],
+        ['POST', '/api/hub/content-erasure', { action: 'retry-erasure', jobId }],
+        ['POST', '/api/hub/content-erasure', { action: 'receipt', jobId }],
+        [
+          'POST',
+          '/api/hub/content-erasure',
+          {
+            action: 'computer-erasure-request',
+            jobId,
+            computerId: 'c-laptop',
+            hubUrl: 'wss://hub.example/computers'
+          }
+        ],
+        ['POST', '/api/hub/content-erasure', { action: 'confirm-computer-erasure', receipt: {} }]
+      ]
+      for (const [method, path, body] of attempts) {
+        const r = await call(method, path, { token: session, body })
+        expect(r.status >= 400, `${method} ${path}: ${r.status} ${JSON.stringify(r.body)}`).toBe(
+          true
+        )
+      }
+      expect(reached, 'no erasure call ran for a break-glass session').toEqual([])
+    } finally {
+      setHubAdminDeps(null)
+    }
   })
 
   test('TTL: refused at expiry even before the timer runs; the timer closes the account', async () => {

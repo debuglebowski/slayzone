@@ -101,28 +101,31 @@ export function createArtifactBackupProtection(
       signature = `${stat.size}:${stat.mtimeMs}`
     if (inspected.get(filename) === signature) return
     const refs = references(path)
-    await db.run('DELETE FROM artifact_blob_pins WHERE scope=? AND owner_id=?', [
-      HUB_BACKUP_PIN_SCOPE,
-      filename
+    // Replace the owner's pins in ONE transaction: a failed rebuild keeps the
+    // previous pins, so a retained backup is never left with none (its bytes
+    // would become collectable once the recovery guard lapses).
+    await db.batchTxn([
+      {
+        type: 'run' as const,
+        sql: 'DELETE FROM artifact_blob_pins WHERE scope=? AND owner_id=?',
+        params: [HUB_BACKUP_PIN_SCOPE, filename]
+      },
+      ...refs.map((r) => ({
+        type: 'run' as const,
+        sql: 'INSERT INTO artifact_blob_pins VALUES(?,?,?,?,?,?,?,?,?)',
+        params: [
+          HUB_BACKUP_PIN_SCOPE,
+          filename,
+          filename,
+          r.hash,
+          r.taskId,
+          r.artifactId,
+          0,
+          r.hash,
+          r.size
+        ]
+      }))
     ])
-    for (let offset = 0; offset < refs.length; offset += 500)
-      await db.batchTxn(
-        refs.slice(offset, offset + 500).map((r) => ({
-          type: 'run' as const,
-          sql: 'INSERT INTO artifact_blob_pins VALUES(?,?,?,?,?,?,?,?,?)',
-          params: [
-            HUB_BACKUP_PIN_SCOPE,
-            filename,
-            filename,
-            r.hash,
-            r.taskId,
-            r.artifactId,
-            0,
-            r.hash,
-            r.size
-          ]
-        }))
-      )
     inspected.set(filename, signature)
   }
   function prepare(): Promise<void> {

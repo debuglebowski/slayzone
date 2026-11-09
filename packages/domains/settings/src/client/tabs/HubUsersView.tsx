@@ -210,7 +210,9 @@ export function HubUsersView(props: Props) {
                     ? 'Old files have no recorded owner. An operator must check them locally before erasure can be confirmed.'
                     : report.failures.includes('BLOB_CLEANUP_WAITING_FOR_BACKUP')
                       ? 'File cleanup will continue when the running backup finishes.'
-                      : 'Some data could not be deleted. Cleanup will retry.'}
+                      : report.failures.includes('WORKTREE_COMPUTER_GONE')
+                        ? 'A worktree is on a computer that was removed or revoked. It will not be retried; an operator must confirm its removal locally.'
+                        : 'Some data could not be deleted. Cleanup will retry.'}
                 </p>
               ) : null}
               {report.retainedSharedBlobs > 0 ? (

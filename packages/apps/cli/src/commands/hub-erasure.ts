@@ -13,9 +13,20 @@ interface Report {
   computers: Array<{ name: string; deleted: boolean }>
   failures: string[]
 }
-export function registerHubErasureCommands(users: Command, request: Request): void {
+/**
+ * `slay hub users erase-content|erasure-status|retry-erasure|erasure-receipt|
+ * computer-erasure-request|confirm-computer-erasure`. `accounts` reaches
+ * `/api/hub/users` (to find the account by email); `erasure` reaches
+ * `/api/hub/content-erasure`, where GET only reads (`view`: preview, reports) and
+ * every change or export is a POST.
+ */
+export function registerHubErasureCommands(
+  users: Command,
+  accounts: Request,
+  erasure: Request
+): void {
   async function userId(email: string) {
-    const list = await request<Array<{ id: string; email: string }>>('GET')
+    const list = await accounts<Array<{ id: string; email: string }>>('GET')
     const user = list.find((u) => u.email.toLowerCase() === email.trim().toLowerCase())
     if (!user) throw new Error('User not found on the selected hub.')
     return user.id
@@ -40,8 +51,8 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
     .action(async (email: string, opts: { confirm?: string; json?: boolean }) => {
       const id = await userId(email)
       if (opts.confirm === undefined) {
-        const preview = await request<{ counts: Report['counts'] }>('GET', undefined, {
-          erasure: 'preview',
+        const preview = await erasure<{ counts: Report['counts'] }>('GET', undefined, {
+          view: 'preview',
           userId: id
         })
         console.log(JSON.stringify(preview, null, 2))
@@ -52,7 +63,7 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
       if (opts.confirm.trim().toLowerCase() !== email.trim().toLowerCase())
         throw new Error('--confirm must match the selected email.')
       show(
-        await request<Report>('PATCH', {
+        await erasure<Report>('POST', {
           action: 'erase-content',
           userId: id,
           confirmation: opts.confirm
@@ -65,8 +76,8 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
     .description('Show erasure progress and remaining computer copies')
     .option('--json', 'Output JSON')
     .action(async (email: string, opts: { json?: boolean }) => {
-      const reports = await request<Report[]>('GET', undefined, {
-        erasure: 'reports',
+      const reports = await erasure<Report[]>('GET', undefined, {
+        view: 'reports',
         userId: await userId(email)
       })
       if (opts.json) {
@@ -82,14 +93,14 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
     .description('Resume an already-confirmed erasure')
     .option('--json', 'Output JSON')
     .action(async (jobId: string, opts: { json?: boolean }) =>
-      show(await request<Report>('PATCH', { action: 'retry-erasure', jobId }), opts.json)
+      show(await erasure<Report>('POST', { action: 'retry-erasure', jobId }), opts.json)
     )
   users
     .command('erasure-receipt <job-id>')
     .description('Save non-content erasure evidence outside the hub backup')
     .requiredOption('--output <path>', 'Create a new receipt file')
     .action(async (jobId: string, opts: { output: string }) => {
-      const receipt = await request<unknown>('GET', undefined, { erasure: 'receipt', jobId })
+      const receipt = await erasure<unknown>('POST', { action: 'receipt', jobId })
       save(opts.output, receipt)
       console.log(`Saved erasure receipt: ${opts.output}`)
     })
@@ -107,7 +118,7 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
         computerId: string,
         opts: { computerHubUrl: string; output: string }
       ) => {
-        const data = await request<unknown>('PATCH', {
+        const data = await erasure<unknown>('POST', {
           action: 'computer-erasure-request',
           jobId,
           computerId,
@@ -124,7 +135,7 @@ export function registerHubErasureCommands(users: Command, request: Request): vo
     .action(async (file: string, opts: { json?: boolean }) => {
       const receipt = JSON.parse(readFileSync(file, 'utf8')) as unknown
       show(
-        await request<Report>('PATCH', { action: 'confirm-computer-erasure', receipt }),
+        await erasure<Report>('POST', { action: 'confirm-computer-erasure', receipt }),
         opts.json
       )
     })

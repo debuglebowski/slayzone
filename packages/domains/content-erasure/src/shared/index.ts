@@ -18,6 +18,23 @@ export interface ErasureReport {
   failures: string[]
   retainedSharedBlobs: number
   retainedBackupBlobs: number
+  /** True while the job's content is gone from live rows and files and it waits for
+   *  the scheduled database compaction (free pages and WAL). Not complete until then. */
+  compactionPending?: boolean
+}
+
+/**
+ * Nothing the user must act on: complete, or only the scheduled compaction remains
+ * (no failure, every recorded computer confirmed). Receipts still say `incomplete`
+ * until that compaction ran.
+ */
+export function isErasureDoneOrCompacting(report: ErasureReport): boolean {
+  return (
+    report.state === 'complete' ||
+    (report.compactionPending === true &&
+      report.failures.length === 0 &&
+      report.computers.every((computer) => computer.deleted))
+  )
 }
 
 export interface ComputerErasureRequest {

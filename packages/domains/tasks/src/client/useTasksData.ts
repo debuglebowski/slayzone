@@ -15,7 +15,7 @@ import {
   type TasksTrpcClient
 } from './trpc'
 import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contracts'
-import { refreshTaskScopedQueries } from '@slayzone/task/client'
+import { refreshTaskScopedQueries, settleDeleteTaskResult } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { useTabStore } from '@slayzone/tabs-state'
@@ -934,23 +934,9 @@ export function useTasksData(): UseTasksDataReturn {
   const deleteTask = useCallback(
     async (taskId: string) => {
       const c = clientForTask(taskId)
-      const result = await c.task.delete.mutate({ id: taskId })
-      if (typeof result === 'object' && 'blocked' in result) {
-        toast.error('Unlink this task from its external provider before deleting it.')
-        throw new Error('Task is linked to an external provider.')
-      }
-      if (result === false) throw new Error('Task was not deleted.')
+      // Throws (already reported) when the task still exists, so it stays on the board.
+      settleDeleteTaskResult(await c.task.delete.mutate({ id: taskId }))
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
-      if (typeof result === 'object' && 'incomplete' in result) {
-        const computers = result.erasure.computers
-          .filter((computer) => !computer.deleted)
-          .map((computer) => computer.name)
-        toast.warning(
-          computers.length
-            ? `Data on ${computers.join(', ')} has not been deleted yet.`
-            : 'Some data has not been deleted. Cleanup will retry.'
-        )
-      } else toast.success('Task permanently deleted.')
     },
     [clientForTask]
   )

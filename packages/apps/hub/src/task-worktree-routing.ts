@@ -1,7 +1,8 @@
 /**
  * Where a task's worktree work goes — the hub's wiring of the task runtime seams that
  * pick a computer for it: the project folder a worktree is made next to, the routing
- * worktree adapters, and the Trash purge's {@link createWorktreeComputerState}. One
+ * worktree adapters, and the Trash purge's {@link createWorktreeComputerState} (and
+ * permanent deletion's {@link createErasedWorktreeComputer}). One
  * module, so the composition root and its tests wire the same thing.
  *
  * Two computers, on purpose:
@@ -23,7 +24,11 @@ import {
   type RoutingGateway
 } from '@slayzone/computer-transport/server'
 import type { TaskRuntimeAdapters, WorktreeExecAdapters } from '@slayzone/task/server'
-import { createWorktreeComputerState, recordedWorktreeComputer } from './worktree-computer-state'
+import {
+  createErasedWorktreeComputer,
+  createWorktreeComputerState,
+  recordedWorktreeComputer
+} from './worktree-computer-state'
 
 export interface TaskWorktreeRoutingDeps {
   db: SlayzoneDb
@@ -32,6 +37,8 @@ export interface TaskWorktreeRoutingDeps {
   usable: () => readonly { computerId: string }[]
   /** Placement's computer for a task: its binding, else the connected default. */
   forTask: (taskId: string) => Promise<string | null>
+  /** Placement's connected default for an owner's work whose rows may be gone. */
+  forOwner: (ownerUserId: string | null) => Promise<string | null>
 }
 
 export interface TaskWorktreeRouting {
@@ -40,6 +47,8 @@ export interface TaskWorktreeRouting {
   projectRootForTask: TaskRuntimeAdapters['projectRootForTask']
   worktreeRootForTask: TaskRuntimeAdapters['worktreeRootForTask']
   worktreeComputerState: TaskRuntimeAdapters['worktreeComputerState']
+  /** Permanent deletion: the computer holding a worktree no binding names. */
+  erasedWorktreeComputer: ReturnType<typeof createErasedWorktreeComputer>
   /** The routing worktree adapters, once the gateway exists. */
   remoteWorktrees(opts: {
     gateway: RoutingGateway
@@ -73,6 +82,8 @@ export function createTaskWorktreeRouting(deps: TaskWorktreeRoutingDeps): TaskWo
     // The Trash purge removes a worktree before its task, so it asks whether the
     // computer holding it can (R5-1).
     worktreeComputerState: createWorktreeComputerState(deps),
+    // Permanent deletion asks the same after the task row is gone (content-erasure).
+    erasedWorktreeComputer: createErasedWorktreeComputer(deps),
     remoteWorktrees: ({ gateway, gate, local }) =>
       createRemoteWorktreeAdapters({
         gateway,

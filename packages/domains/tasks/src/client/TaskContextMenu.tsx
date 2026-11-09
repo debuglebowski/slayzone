@@ -54,7 +54,12 @@ import {
 } from 'lucide-react'
 import { useTrack } from '@slayzone/telemetry/client'
 import { format } from 'date-fns'
-import { getSnoozePresets, CustomSnoozeDialog, BlockerDialog } from '@slayzone/task/client'
+import {
+  getSnoozePresets,
+  CustomSnoozeDialog,
+  BlockerDialog,
+  reportDeleteTaskError
+} from '@slayzone/task/client'
 
 interface TaskContextMenuProps {
   task: Task
@@ -65,7 +70,8 @@ interface TaskContextMenuProps {
   isBlocked?: boolean
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void
   onArchiveTask: (taskId: string) => void
-  onDeleteTask: (taskId: string) => void
+  /** Reports its own outcome; rejects when the task was not deleted. */
+  onDeleteTask: (taskId: string) => Promise<void>
   onTaskTagsChange?: (taskId: string, tagIds: string[]) => void
   onTagCreated?: (tag: Tag) => void
   /** Provided when the task has an active agent session (PTY or chat). Renders a "Shut down agent" item. */
@@ -165,10 +171,12 @@ export function TaskContextMenu({
     setArchiveDialogOpen(false)
   }
 
-  const handleDeleteConfirm = (): void => {
+  const handleDeleteConfirm = async (): Promise<void> => {
     trackTask(task.id, 'task_deleted', { was_temporary: Boolean(task.is_temporary) })
-    onDeleteTask(task.id)
     setDeleteDialogOpen(false)
+    // Delete is permanent: a refusal or failure must reach the user, never vanish
+    // as an unhandled rejection.
+    await onDeleteTask(task.id).catch(reportDeleteTaskError)
   }
 
   // Blocked handlers

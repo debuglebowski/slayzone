@@ -79,6 +79,7 @@ import { registerComputersListRoute } from './computers/list'
 import { registerComputersDirectAddressesRoute } from './computers/direct-addresses'
 import { registerHubUsersRoutes } from './hub/users'
 import { registerHubComputersRoute } from './hub/computers'
+import { registerHubContentErasureRoutes } from './hub/content-erasure'
 import { registerWebLoginRoute } from './hub/web-login'
 
 export type { RestApiDeps } from './types'
@@ -198,6 +199,9 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // only way to create an account now that public signup is closed. 503 where
   // hub-auth is absent (the Electron host) or its init failed.
   registerHubUsersRoutes(app, deps)
+  // Erasing a disabled account's content (`slay hub users erase-content …`). Its own
+  // path, behind the ordinary bearer gate: never reachable by a break-glass session.
+  registerHubContentErasureRoutes(app, deps)
   // Revoke / unrevoke a computer (`slay hub computers`, a break-glass session). Admin only.
   registerHubComputersRoute(app, deps)
 

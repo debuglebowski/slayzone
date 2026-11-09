@@ -884,6 +884,9 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
  *                                 twin: everyone enrolls their own computer; naming
  *                                 someone else is the admin's (`join-token-policy.ts`).
  * `PATCH /api/hub/computers`      revoke / unrevoke any computer (`slay hub computers`).
+ * `/api/hub/content-erasure`      erase a disabled account's content (`slay hub users
+ *                                 erase-content …`). Behind the bearer gate, off the
+ *                                 break-glass allowlist (O-6).
  *
  * ── open ────────────────────────────────────────────────────────────────────
  * `POST /api/auth/web-login`      how a browser obtains a session.
@@ -1031,7 +1034,10 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'GET /api/templates/:id': 'user',
   'PATCH /api/templates/:id': 'user',
   // Break-glass v2 (added): revoke / unrevoke any computer, the REST twin of the tRPC pair.
-  'PATCH /api/hub/computers': 'admin'
+  'PATCH /api/hub/computers': 'admin',
+  // Content erasure (added): GET reads a preview or reports, POST erases/retries/exports.
+  'GET /api/hub/content-erasure': 'admin',
+  'POST /api/hub/content-erasure': 'admin'
 }
 
 /**

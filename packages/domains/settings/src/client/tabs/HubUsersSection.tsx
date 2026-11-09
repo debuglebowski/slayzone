@@ -55,7 +55,9 @@ export function HubUsersSection() {
             ))}
           {report.failures.length ? (
             <p className="text-destructive">
-              Cleanup could not finish. It will retry automatically.
+              {report.failures.includes('WORKTREE_COMPUTER_GONE')
+                ? 'A worktree is on a computer that was removed or revoked. It will not be retried; an operator must confirm its removal locally.'
+                : 'Cleanup could not finish. It will retry automatically.'}
             </p>
           ) : null}
           <Button

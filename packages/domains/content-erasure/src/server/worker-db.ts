@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import type { ErasureScope } from '../shared'
+import { SHARED_WORKTREE_SQL, addComputerTask } from './manifest'
 import type { ErasureJob, ErasureManifest } from './manifest'
 import { closeSync, existsSync, fsyncSync, openSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -88,17 +89,11 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
     ).map((r) => r.id)
   }
   if (scope.kind === 'tasks') {
+    // Only the tasks the user selected. Their other subtasks survive, re-parented
+    // at commit to their nearest surviving ancestor (reparentSurvivors).
     manifest.taskIds = rows<{ id: string }>(
       db,
-      `WITH RECURSIVE selected(id) AS (
-      SELECT id FROM tasks WHERE id IN ${inJson}
-      UNION SELECT t.id FROM tasks t JOIN selected s ON t.parent_id=s.id
-        JOIN tasks parent ON parent.id=s.id
-        JOIN projects child_project ON child_project.id=t.project_id
-        JOIN projects parent_project ON parent_project.id=parent.project_id
-        WHERE t.project_id=parent.project_id OR
-          (child_project.owner_user_id IS NOT NULL AND child_project.owner_user_id=parent_project.owner_user_id)
-    ) SELECT id FROM selected`,
+      `SELECT id FROM tasks WHERE id IN ${inJson}`,
       JSON.stringify(scope.ids)
     ).map((r) => r.id)
   } else if (scope.kind !== 'artifacts') {
@@ -168,34 +163,41 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
     manifest.blobHashes = unique([...manifest.blobHashes, ...pins.map((r) => r.content_hash)])
   }
   if (manifest.taskIds.length) {
+    // The computer holding each worktree: recorded where it was made, else the task's
+    // or its project's computer. An unbound task's is the hub's default computer —
+    // only the hub knows which are connected; it picks after planning (index.ts).
     const worktrees = rows<{
       id: string
       computer_id: string | null
       project_id: string
+      owner_user_id: string | null
       worktree_path: string
     }>(
       db,
-      `SELECT id,coalesce(worktree_computer_id,computer_id) AS computer_id,project_id,worktree_path FROM tasks WHERE id IN ${inJson} AND worktree_path IS NOT NULL`,
+      `SELECT t.id,coalesce(t.worktree_computer_id,t.computer_id,p.default_computer_id) AS computer_id,
+        t.project_id,p.owner_user_id,t.worktree_path
+       FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+       WHERE t.id IN ${inJson} AND t.worktree_path IS NOT NULL`,
       tasks
     )
     for (const w of worktrees) {
       const shared = db
-        .prepare(
-          `SELECT 1 FROM tasks WHERE worktree_path=? AND coalesce(worktree_computer_id,computer_id) IS ? AND id NOT IN ${inJson} LIMIT 1`
-        )
-        .get(w.worktree_path, w.computer_id, tasks)
+        .prepare(SHARED_WORKTREE_SQL)
+        .get(w.worktree_path, tasks, w.computer_id, w.computer_id)
       if (shared) continue
-      const placement = w.computer_id
-        ? (db
-            .prepare(
-              'SELECT root_path FROM project_placements WHERE project_id=? AND computer_id=?'
-            )
-            .get(w.project_id, w.computer_id) as { root_path: string } | undefined)
-        : undefined
+      // Captured now: a project's erasure removes its placements before cleanup.
+      const repoPaths = rows<{ computerId: string; path: string }>(
+        db,
+        'SELECT computer_id AS computerId,root_path AS path FROM project_placements WHERE project_id=? ORDER BY computer_id',
+        w.project_id
+      )
       manifest.worktrees.push({
         taskId: w.id,
+        projectId: w.project_id,
+        ownerUserId: w.owner_user_id,
         computerId: w.computer_id,
-        repoPath: placement?.root_path ?? null,
+        repoPath: repoPaths.find((r) => r.computerId === w.computer_id)?.path ?? null,
+        repoPaths,
         path: w.worktree_path,
         deleted: false
       })
@@ -247,6 +249,9 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
         taskIds: unique(computers.filter((r) => r.computer_id === computerId).map((r) => r.task_id))
       })
     }
+    // A worktree's computer holds the task's data too (a project computer included).
+    for (const w of manifest.worktrees)
+      if (w.computerId) addComputerTask(manifest, w.computerId, w.taskId)
   }
   manifest.conversationIds = unique(manifest.conversationIds)
   if (!manifest.ownerUserId && exists(db, 'projects') && exists(db, 'tasks')) {
@@ -346,6 +351,49 @@ const DELIVERY_TABLES = new Set([
   'artifact_blob_pins'
 ])
 
+/**
+ * Every task that survives while its parent is erased moves to its nearest ancestor
+ * that is not erased, else to top level. Deleting a task erases only the selected
+ * tasks, so its unselected subtasks stay (a selected subtask goes with its parent).
+ * A project or account erasure reaches here only for out-of-scope children (older or
+ * imported databases can hold a cross-project/cross-owner link). The new parent must
+ * be in the child's project, as the reparent validator requires; else top level.
+ */
+function reparentSurvivors(db: Database, erasedIds: string[]): void {
+  const erased = JSON.stringify(erasedIds)
+  const erasedSet = new Set(erasedIds)
+  const parentOf = new Map(
+    rows<{ id: string; parent_id: string | null }>(
+      db,
+      `SELECT id,parent_id FROM tasks WHERE id IN ${inJson}`,
+      erased
+    ).map((r) => [r.id, r.parent_id])
+  )
+  const survivors = rows<{ id: string; parent_id: string; project_id: string }>(
+    db,
+    `SELECT id,parent_id,project_id FROM tasks WHERE parent_id IN ${inJson} AND id NOT IN ${inJson}`,
+    erased,
+    erased
+  )
+  const projectOf = db.prepare('SELECT project_id FROM tasks WHERE id=?')
+  const move = db.prepare("UPDATE tasks SET parent_id=?,updated_at=datetime('now') WHERE id=?")
+  for (const child of survivors) {
+    let ancestor: string | null = child.parent_id
+    const seen = new Set<string>()
+    // A legacy parent cycle ends the walk at top level.
+    while (ancestor !== null && erasedSet.has(ancestor) && !seen.has(ancestor)) {
+      seen.add(ancestor)
+      ancestor = parentOf.get(ancestor) ?? null
+    }
+    if (ancestor !== null && erasedSet.has(ancestor)) ancestor = null
+    if (ancestor !== null) {
+      const row = projectOf.get(ancestor) as { project_id: string } | undefined
+      if (row?.project_id !== child.project_id) ancestor = null
+    }
+    move.run(ancestor, child.id)
+  }
+}
+
 function commit(db: Database, p: { id: string }): ErasureManifest {
   return durable(db, () => {
     const job = db.prepare('SELECT * FROM content_erasure_jobs WHERE id=?').get(p.id) as
@@ -411,12 +459,8 @@ function commit(db: Database, p: { id: string }): ErasureManifest {
     // The task trigger creates durable tombstones and deletion targets before
     // content references disappear. Epochs remain available for offline devices.
     db.prepare('UPDATE content_erasure_jobs SET db_erased=1 WHERE id=?').run(p.id)
-    // Older/imported databases can contain a cross-project parent link that the
-    // current reparent validator forbids. Preserve the out-of-scope child.
-    if (m.taskIds.length)
-      db.prepare(
-        `UPDATE tasks SET parent_id=NULL WHERE parent_id IN ${inJson} AND id NOT IN ${inJson}`
-      ).run(tasks, tasks)
+    // Before the delete: parent_id cascades, so a surviving subtask must move first.
+    if (m.taskIds.length) reparentSurvivors(db, m.taskIds)
     if (m.taskIds.length)
       db.prepare(
         `UPDATE artifact_folders SET parent_id=NULL WHERE task_id NOT IN ${inJson} AND parent_id IN(SELECT id FROM artifact_folders WHERE task_id IN ${inJson})`

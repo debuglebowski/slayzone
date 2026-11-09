@@ -67,6 +67,8 @@ interface AppDialogsProps {
   editingTask: EditTaskProps['task']
   handleTaskUpdated: EditTaskProps['onUpdated']
   deletingTask: DeleteTaskProps['task']
+  /** Deletes + reports (the board's delete); the dialog never deletes on its own here. */
+  handleDeleteTask: NonNullable<DeleteTaskProps['onDeleteTask']>
   handleTaskDeleted: DeleteTaskProps['onDeleted']
   // Project dialogs
   createProjectOpen: boolean
@@ -153,6 +155,7 @@ export function AppDialogs({
   editingTask,
   handleTaskUpdated,
   deletingTask,
+  handleDeleteTask,
   handleTaskDeleted,
   createProjectOpen,
   handleProjectCreated,
@@ -257,6 +260,7 @@ export function AppDialogs({
               onOpenChange={(open) => {
                 if (!open) useDialogStore.getState().closeDeleteTask()
               }}
+              onDeleteTask={handleDeleteTask}
               onDeleted={handleTaskDeleted}
             />
           </OwnerHubScope>

@@ -14,6 +14,39 @@ import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
 interface Candidates {
   attachments: string[]
   artifacts: string[]
+  /** A VACUUM ran after this task's content was last removed: a repeated request
+   *  that removes nothing more needs no new one. */
+  compacted?: boolean
+}
+const CONTENT_TABLES = [
+  'provider_configs',
+  'queue_message_identities',
+  'task_artifacts',
+  'artifact_folders'
+]
+
+/** Content of this task still in the database (removed by the lifecycle purge or finish). */
+function hasStoredContent(db: Database.Database, taskId: string): boolean {
+  for (const table of ['events', 'records', 'receipts'])
+    if (
+      db
+        .prepare(
+          `SELECT 1 FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE task_id=?) LIMIT 1`
+        )
+        .get(taskId)
+    )
+      return true
+  for (const table of CONTENT_TABLES)
+    if (has(db, table) && db.prepare(`SELECT 1 FROM ${table} WHERE task_id=? LIMIT 1`).get(taskId))
+      return true
+  return (
+    has(db, 'migration_checkpoints') &&
+    !!db
+      .prepare(
+        "SELECT 1 FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=? LIMIT 1"
+      )
+      .get(taskId)
+  )
 }
 const has = (db: Database.Database, table: string) =>
   !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
@@ -38,6 +71,9 @@ export function prepareStoredTaskErasure(db: Database.Database, taskId: string):
       ? JSON.parse(old.candidates)
       : { attachments: [], artifacts: [] }
     const candidates: Candidates = {
+      // Whatever is removed after this point (here or by the lifecycle purge that
+      // follows) needs a new VACUUM.
+      compacted: previous.compacted === true && !hasStoredContent(db, taskId),
       attachments: [
         ...new Set([
           ...previous.attachments,
@@ -88,6 +124,7 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
       }
     }
   }
+  let removed = 0
   db.transaction(() => {
     for (const table of ['blob_leases', 'artifact_blob_leases'])
       if (
@@ -96,23 +133,23 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
       )
         throw new Error('A backup lease is still using computer files')
     for (const table of ['events', 'records', 'receipts'])
-      db.prepare(
-        `DELETE FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`
-      ).run(taskId)
-    for (const table of [
-      'provider_configs',
-      'queue_message_identities',
-      'task_artifacts',
-      'artifact_folders'
-    ])
-      if (has(db, table)) db.prepare(`DELETE FROM ${table} WHERE task_id=?`).run(taskId)
+      removed += db
+        .prepare(
+          `DELETE FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`
+        )
+        .run(taskId).changes
+    for (const table of CONTENT_TABLES)
+      if (has(db, table))
+        removed += db.prepare(`DELETE FROM ${table} WHERE task_id=?`).run(taskId).changes
     if (has(db, 'migration_checkpoints'))
-      db.prepare("DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=?").run(
-        taskId
+      removed += db
+        .prepare("DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=?")
+        .run(taskId).changes
+    removed += db
+      .prepare(
+        "UPDATE conversations SET state='deleted',migration_id=NULL,migration_hash=NULL WHERE task_id=? AND (state<>'deleted' OR migration_id IS NOT NULL OR migration_hash IS NOT NULL)"
       )
-    db.prepare(
-      "UPDATE conversations SET state='deleted',migration_id=NULL,migration_hash=NULL WHERE task_id=?"
-    ).run(taskId)
+      .run(taskId).changes
     for (const hash of candidates.attachments) {
       if (!/^[a-f0-9]{64}$/.test(hash)) continue
       if (
@@ -135,7 +172,8 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
         continue
       erase(join(root, 'blobs', hash.slice(0, 2), hash.slice(2)))
       erase(join(root, 'blobs', '.gc', hash))
-      if (has(db, 'artifact_blobs')) db.prepare('DELETE FROM artifact_blobs WHERE hash=?').run(hash)
+      if (has(db, 'artifact_blobs'))
+        removed += db.prepare('DELETE FROM artifact_blobs WHERE hash=?').run(hash).changes
     }
   }).immediate()
   for (const directory of ['artifacts', 'assets'])
@@ -164,7 +202,16 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
         .get(taskId)
     )
       throw new Error('Computer content remains')
-  db.exec('VACUUM')
+  // Free pages, stale cell copies in live pages and WAL frames still hold removed rows
+  // (secure_delete misses the copies a page split leaves): only a VACUUM rewrites them.
+  // Skipped when nothing was removed since the last one for this task.
+  const vacuum = removed > 0 || candidates.compacted !== true
+  if (vacuum) db.exec('VACUUM')
   const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
   if (checkpoint.some((row) => row.busy)) throw new Error('Computer checkpoint is busy')
+  if (vacuum)
+    db.prepare('UPDATE task_erasure_checks SET candidates=? WHERE task_id=?').run(
+      JSON.stringify({ ...candidates, compacted: true }),
+      taskId
+    )
 }

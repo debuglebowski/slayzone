@@ -22,6 +22,7 @@ let h: Harness
 let projectId: string
 let usable: string[]
 let calls: { computerId: string; method: string; params: unknown }[]
+let routing: ReturnType<typeof createTaskWorktreeRouting>
 
 const gateway = {
   request: async (computerId: string, method: string, params?: unknown) => {
@@ -72,11 +73,12 @@ beforeEach(async () => {
     requireLogin: false,
     usable: () => usable.map((computerId) => ({ computerId, name: computerName(computerId) }))
   })
-  const routing = createTaskWorktreeRouting({
+  routing = createTaskWorktreeRouting({
     db: h.slayDb,
     requireLogin: false,
     usable: () => usable.map((computerId) => ({ computerId })),
-    forTask: (taskId) => placement.forTask(taskId)
+    forTask: (taskId) => placement.forTask(taskId),
+    forOwner: (ownerUserId) => placement.forOwner(ownerUserId)
   })
   configureTaskRuntimeAdapters({
     getDataRoot: () => mkdtempSync(join(tmpdir(), 'purge-owner-')),
@@ -156,12 +158,78 @@ test('a revoked computer cannot be silently counted as erased', async () => {
     cleanupOptions()
   )
   expect(report.state).toBe('incomplete')
-  expect(report.failures).toContain('WORKTREE_NOT_DELETED')
+  expect(report.failures).toContain('WORKTREE_COMPUTER_GONE')
+  expect(report.computers).toContainEqual(expect.objectContaining({ id: REMOTE, deleted: false }))
+  // Gone for good: not retried automatically (the operator procedure resolves it).
+  const again = await resumeErasure(h.slayDb, h.tmpDir(), report.id, cleanupOptions())
+  expect(again.failures).toContain('WORKTREE_COMPUTER_GONE')
+  expect(removals()).toEqual([])
+})
+
+/** A desktop task: unbound, its worktree made before the computer was recorded. */
+async function unboundTaskWithWorktree(): Promise<{ id: string; path: string }> {
+  usable = [LOCAL]
+  const task = await createTaskOp(h.slayDb, { projectId, title: 'Unbound' }, {})
+  if (!task) throw new Error('task not created')
+  h.db
+    .prepare('UPDATE tasks SET worktree_computer_id=NULL, computer_id=NULL WHERE id=?')
+    .run(task.id)
+  const row = h.db.prepare('SELECT worktree_path FROM tasks WHERE id=?').get(task.id) as {
+    worktree_path: string
+  }
+  calls = []
+  return { id: task.id, path: row.worktree_path }
+}
+
+test("an unbound task's worktree is removed on the default computer, like the old purge", async () => {
+  const { id, path } = await unboundTaskWithWorktree()
+  usable = [LOCAL, REMOTE]
+  const report = await eraseContent(
+    h.slayDb,
+    h.tmpDir(),
+    { kind: 'tasks', ids: [id] },
+    cleanupOptions()
+  )
+  expect(removals()).toEqual([
+    { computerId: LOCAL, projectPath: '/Users/k/app', worktreePath: path }
+  ])
+  expect(report.state).toBe('complete')
+})
+
+test('an unbound worktree waits while no computer is connected, then completes', async () => {
+  const { id, path } = await unboundTaskWithWorktree()
+  const root = h.tmpDir()
+  usable = []
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: [id] }, cleanupOptions())
+  expect(report.state).toBe('incomplete')
+  expect(report.failures).toContain('WORKTREE_COMPUTER_UNAVAILABLE')
+  expect(exists(id)).toBe(false)
+  usable = [LOCAL]
+  const resumed = await resumeErasure(h.slayDb, root, report.id, cleanupOptions())
+  expect(resumed.state).toBe('complete')
+  expect(removals()).toEqual([
+    { computerId: LOCAL, projectPath: '/Users/k/app', worktreePath: path }
+  ])
+})
+
+test('an unbound worktree with every computer revoked is reported gone, not retried', async () => {
+  const { id } = await unboundTaskWithWorktree()
+  h.db.prepare('UPDATE computers SET revoked_at=5').run()
+  usable = []
+  const report = await eraseContent(
+    h.slayDb,
+    h.tmpDir(),
+    { kind: 'tasks', ids: [id] },
+    cleanupOptions()
+  )
+  expect(report.state).toBe('incomplete')
+  expect(report.failures).toContain('WORKTREE_COMPUTER_GONE')
   expect(removals()).toEqual([])
 })
 
 function cleanupOptions(): ErasureOptions {
   return {
+    resolveWorktreeComputer: routing.erasedWorktreeComputer,
     cleanupComputer: async (request) => {
       if (!usable.includes(request.computerId)) throw new Error('offline')
       return request.taskIds.map((taskId) => ({

@@ -144,6 +144,21 @@ interface OnDisk {
 
 type WritePlan = { whole: boolean; data: string; seq: number }
 
+/**
+ * Where one hub's task terminal history lives under a computer's state dir:
+ * `<stateDir>/computer-runtime/pty-history/<sha256(hubScope) hex, 24 chars>`. The ONE
+ * definition — the live computer writes there (main.ts) and offline erasure deletes
+ * there (offline-erasure.ts), so the two can never name different folders.
+ */
+export function ptyHistoryDir(stateDir: string, hubScope: string): string {
+  return join(
+    stateDir,
+    'computer-runtime',
+    'pty-history',
+    createHash('sha256').update(hubScope).digest('hex').slice(0, 24)
+  )
+}
+
 const appendTo = (fd: number, data: string): Promise<void> =>
   new Promise((resolve, reject) => appendFile(fd, data, (err) => (err ? reject(err) : resolve())))
 const closeFd = (fd: number): Promise<void> => new Promise((resolve) => close(fd, () => resolve()))

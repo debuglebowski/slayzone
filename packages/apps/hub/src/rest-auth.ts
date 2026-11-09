@@ -297,6 +297,11 @@ const MCP_PATH = '/mcp'
  * Role changes through `PATCH /api/hub/users` are still the hub's to refuse: on a hub
  * with Entra sign-in every one (`SSO_MANAGED_ROLE`), and the break-glass account's own
  * anywhere (hub-auth `protected`).
+ *
+ * A route listed here is reachable in EVERY shape it takes — the match is method and
+ * path, never query or body. So nothing beyond stopping access may ride on one: content
+ * erasure has its own `/api/hub/content-erasure`, which is not listed (the account
+ * routes answer its old `?erasure=` / `{ action }` shapes 410).
  */
 export const BREAK_GLASS_ROUTES: ReadonlySet<string> = new Set([
   'GET /api/hub/users',

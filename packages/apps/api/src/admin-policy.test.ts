@@ -514,7 +514,8 @@ describe('REST, over HTTP through registerRestApi', () => {
 
   const ADMIN_ROUTES = ofClass(REST_ADMIN_POLICY, 'admin')
 
-  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(12))
+  // 12, plus content erasure's GET/POST `/api/hub/content-erasure`.
+  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(14))
 
   for (const key of ADMIN_ROUTES) {
     test(`${key}: a user account gets 403 ADMIN_ONLY and one audit line; an admin does not`, async () => {

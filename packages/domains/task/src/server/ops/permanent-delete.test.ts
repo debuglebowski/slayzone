@@ -4,6 +4,8 @@ import { afterEach, expect, test } from 'vitest'
 import { createTestHarness, type TestHarness } from '../../../../../shared/test-utils/ipc-harness'
 import { archiveTaskOp } from './archive'
 import { deleteTaskOp } from './delete'
+import { deleteManyTasksOp } from './delete-many'
+import { taskEvents } from '../events'
 import { configureTaskRuntimeAdapters } from './shared'
 import { deleteProject } from '@slayzone/projects/server'
 
@@ -64,4 +66,52 @@ test('project deletion removes task directories instead of only cascading the da
   expect(readFileSync(join(root, 'artifacts', 'task-bob', 'original.txt'), 'utf8')).toBe(
     'bob original, never saved as a version'
   )
+})
+
+test('Delete keeps subtasks: re-parented, announced as updated, never erased', async () => {
+  const { h } = await fixture()
+  h.db
+    .prepare(
+      "INSERT INTO tasks(id,project_id,title,parent_id) VALUES('child','project-alice','c','task-alice')"
+    )
+    .run()
+  h.db
+    .prepare(
+      "INSERT INTO tasks(id,project_id,title,parent_id) VALUES('second','project-alice','s','task-alice')"
+    )
+    .run()
+  const updated: unknown[] = []
+  const listener = (event: unknown) => updated.push(event)
+  taskEvents.on('task:updated', listener)
+  try {
+    await deleteManyTasksOp(h.slayDb, ['task-alice', 'second'], {})
+  } finally {
+    taskEvents.off('task:updated', listener)
+  }
+  expect(h.db.prepare("SELECT parent_id FROM tasks WHERE id='child'").get()).toEqual({
+    parent_id: null
+  })
+  expect(h.db.prepare("SELECT 1 FROM tasks WHERE id='second'").get()).toBeUndefined()
+  expect(updated).toEqual([{ taskId: 'child', projectId: 'project-alice' }])
+})
+
+test('Deleting one parent announces its surviving subtask as updated', async () => {
+  const { h } = await fixture()
+  h.db
+    .prepare(
+      "INSERT INTO tasks(id,project_id,title,parent_id) VALUES('child','project-alice','c','task-alice')"
+    )
+    .run()
+  const updated: unknown[] = []
+  const listener = (event: unknown) => updated.push(event)
+  taskEvents.on('task:updated', listener)
+  try {
+    await deleteTaskOp(h.slayDb, 'task-alice', {})
+  } finally {
+    taskEvents.off('task:updated', listener)
+  }
+  expect(h.db.prepare("SELECT parent_id FROM tasks WHERE id='child'").get()).toEqual({
+    parent_id: null
+  })
+  expect(updated).toEqual([{ taskId: 'child', projectId: 'project-alice' }])
 })

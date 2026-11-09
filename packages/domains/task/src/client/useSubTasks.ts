@@ -6,6 +6,7 @@ import type { DragEndEvent } from '@dnd-kit/core'
 import { arrayMove } from '@dnd-kit/sortable'
 import type { CreateTaskInput, Task } from '@slayzone/task-contracts'
 import { useTrack } from '@slayzone/telemetry/client'
+import { settleDeleteTaskResult } from './deleteTaskResult'
 
 export interface UseSubTasksReturn {
   subTasks: Task[]
@@ -15,6 +16,7 @@ export interface UseSubTasksReturn {
     status: string
   }) => Promise<Task | null>
   updateSubTask: (subId: string, updates: Record<string, unknown>) => Promise<void>
+  /** Deletes and tells the user how it ended; rejects when the subtask still exists. */
   deleteSubTask: (subId: string) => Promise<void>
   handleDragEnd: (event: DragEndEvent) => void
 }
@@ -94,7 +96,7 @@ export function useSubTasks(
 
   const deleteSubTask = useCallback(
     async (subId: string): Promise<void> => {
-      await deleteTask({ id: subId })
+      settleDeleteTaskResult(await deleteTask({ id: subId }))
       if (parentId) {
         queryClient.setQueryData<Task[]>(trpc.task.getSubTasks.queryKey({ parentId }), (prev) =>
           (prev ?? []).filter((s) => s.id !== subId)

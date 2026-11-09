@@ -6,8 +6,7 @@ import type { DirectChatService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
-import { createHash } from 'node:crypto'
-import { createPtyHistory } from './pty-history'
+import { createPtyHistory, ptyHistoryDir } from './pty-history'
 import { createChatRuntimeHandlers } from './handlers/chat-runtime'
 /**
  * Computer main — wires config + credential store + hub dialer into a running
@@ -317,14 +316,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // Task terminals' output outlives this process — per hub: one hub's sessions
     // never restore into another's.
     history: createPtyHistory({
-      dir: join(
+      dir: ptyHistoryDir(
         deps.stateDir ?? dirname(getComputerConfigFilePath()),
-        'computer-runtime',
-        'pty-history',
-        createHash('sha256')
-          .update(deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? '')
-          .digest('hex')
-          .slice(0, 24)
+        deps.hubScope ?? deps.hubHost ?? deps.config.hubUrl ?? ''
       )
     }),
     ...(deps.admission ? { admission: deps.admission } : {}),

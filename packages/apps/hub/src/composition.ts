@@ -308,7 +308,11 @@ import { resolveAllowedWebOrigins } from './ws-origin.js'
 import { createHubUsersCapability, createJoinTokenAccountLookup } from './hub-users.js'
 import { createAdminContentErasure } from '@slayzone/content-erasure/admin'
 import { configureContentErasure, startErasureRetries } from '@slayzone/content-erasure/server'
-import { eraseDiagnosticContent, flushWriteQueue } from '@slayzone/diagnostics/server'
+import {
+  compactDiagnosticContent,
+  eraseDiagnosticContent,
+  flushWriteQueue
+} from '@slayzone/diagnostics/server'
 import { type BreakGlass, createBreakGlass } from './break-glass.js'
 import { verifyRestBearer } from './rest-auth.js'
 import {
@@ -657,7 +661,9 @@ export function composeServer(opts: {
     db,
     requireLogin: opts.requireLogin,
     usable: () => execGateway?.listUsableComputers() ?? [],
-    forTask: (taskId) => resolveComputerForTask(taskId)
+    forTask: (taskId) => resolveComputerForTask(taskId),
+    // Read at call time, like `forTask` (`placement` is built below).
+    forOwner: (ownerUserId) => placement.forOwner(ownerUserId)
   })
   const baseTaskAdapters = {
     getDataRoot: () => dataRoot,
@@ -1621,6 +1627,12 @@ export function composeServer(opts: {
       await flushWriteQueue()
       await eraseDiagnosticContent(opts.diagnostics.db, opts.diagnostics.blobDir ?? null, target)
     },
+    compactAdditionalStores: async () => {
+      if (opts.diagnostics) await compactDiagnosticContent(opts.diagnostics.db)
+    },
+    // Item deletes return once rows/files are gone; the VACUUM that removes their old
+    // free pages and WAL frames runs once per burst, and only then are they complete.
+    compaction: { quietMs: 30_000, maxDelayMs: 5 * 60_000 },
     beforeDelete: async (taskIds) => {
       for (const taskId of taskIds) {
         baseTaskAdapters.killPtysByTaskId(taskId)
@@ -1654,6 +1666,9 @@ export function composeServer(opts: {
         }
         return replies
       }),
+    // An unbound task's worktree is on the default computer (the old Trash purge's
+    // rule); the engine persists the pick so retries never follow a later default.
+    resolveWorktreeComputer: taskWorktreeRouting.erasedWorktreeComputer,
     cleanupWorktree: async (target) =>
       runAsSecurityActor(null, async () => {
         if (!target.computerId || !target.repoPath) throw new Error('WORKTREE_LOCATION_UNKNOWN')

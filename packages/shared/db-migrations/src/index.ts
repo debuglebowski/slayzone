@@ -16,3 +16,9 @@ export {
   SchemaTooNewError
 } from './migrations'
 export { createPreMigrationBackup } from './pre-migration-backup'
+export {
+  CONTENT_ERASURE_UNFENCED_TABLES,
+  contentErasureFences,
+  installContentErasureFences,
+  staleContentErasureFences
+} from './content-erasure-fences'

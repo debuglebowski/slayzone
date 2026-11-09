@@ -22,6 +22,19 @@ function files(value: unknown, result = new Set<string>()): Set<string> {
 function payloadPaths(json: string | null): Set<string> {
   return files(JSON.parse(json ?? 'null'))
 }
+
+/**
+ * Counts erasures that removed something since the last compaction. Bumped in the same
+ * transaction as the deletion it follows (`changes()` = that statement's rows), so a
+ * crash can never leave removed content without a pending compaction.
+ */
+const COMPACTION_TABLE =
+  'CREATE TABLE IF NOT EXISTS diagnostic_erasure_compaction(id INTEGER PRIMARY KEY CHECK(id=1),pending INTEGER NOT NULL)'
+const MARK_PENDING = {
+  type: 'run' as const,
+  sql: 'INSERT INTO diagnostic_erasure_compaction(id,pending) SELECT 1,1 WHERE changes()>0 ON CONFLICT(id) DO UPDATE SET pending=pending+1',
+  params: []
+}
 /** Private payloads follow their proven task/project ownership; security logs are separate. */
 export async function eraseDiagnosticContent(
   db: SlayzoneDb,
@@ -29,6 +42,7 @@ export async function eraseDiagnosticContent(
   target: { jobId: string; taskIds: string[]; projectIds: string[]; verifyOwnership?: boolean }
 ): Promise<void> {
   await db.exec(`PRAGMA secure_delete=ON;
+    ${COMPACTION_TABLE};
     CREATE TABLE IF NOT EXISTS diagnostic_erased_tasks(id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS diagnostic_erased_projects(id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS diagnostic_erasure_files(job_id TEXT NOT NULL,path TEXT NOT NULL,PRIMARY KEY(job_id,path));
@@ -91,7 +105,9 @@ export async function eraseDiagnosticContent(
       sql: 'DELETE FROM diagnostic_content_holds WHERE event_id IN(SELECT value FROM json_each(?))',
       params: [ids]
     },
-    { type: 'run', sql: `DELETE FROM diagnostics_events WHERE ${owned}`, params }
+    MARK_PENDING,
+    { type: 'run', sql: `DELETE FROM diagnostics_events WHERE ${owned}`, params },
+    MARK_PENDING
   ])
   const retained = new Set<string>()
   for (const row of await db.all<{ payload_json: string | null }>(
@@ -125,19 +141,56 @@ export async function eraseDiagnosticContent(
       closeSync(fd)
     }
   }
-  await db.run('DELETE FROM diagnostic_erasure_files WHERE job_id=?', [target.jobId])
-  if (locks)
-    await db.run(
-      'DELETE FROM chat_content_locks WHERE task_id IN(SELECT value FROM json_each(?))',
-      [JSON.stringify(target.taskIds)]
-    )
-  await db.exec('VACUUM')
-  const checkpoint = await db.all<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
-  if (checkpoint.some((row) => row.busy)) throw new Error('Diagnostic checkpoint is busy')
+  await db.batchTxn([
+    {
+      type: 'run',
+      sql: 'DELETE FROM diagnostic_erasure_files WHERE job_id=?',
+      params: [target.jobId]
+    },
+    MARK_PENDING,
+    ...(locks
+      ? [
+          {
+            type: 'run' as const,
+            sql: 'DELETE FROM chat_content_locks WHERE task_id IN(SELECT value FROM json_each(?))',
+            params: [JSON.stringify(target.taskIds)]
+          },
+          MARK_PENDING
+        ]
+      : [])
+  ])
+  // Free pages and WAL frames still hold the removed rows: compactDiagnosticContent
+  // removes them once per burst of erasures (content-erasure compaction.ts).
   if (target.verifyOwnership) {
     const unknown =
       await db.get(`SELECT 1 FROM diagnostic_content_holds h LEFT JOIN diagnostics_events e ON e.id=h.event_id
       WHERE e.task_id IS NULL AND e.project_id IS NULL ${legacy ? 'AND NOT EXISTS(SELECT 1 FROM chat_legacy_diagnostics l WHERE l.event_id=h.event_id AND l.task_id IS NOT NULL)' : ''} LIMIT 1`)
     if (unknown) throw new Error('LEGACY_DIAGNOSTICS_NEED_OWNERSHIP_REVIEW')
   }
+}
+
+/**
+ * Removes erased diagnostics from the file itself: VACUUM (only if an erasure removed
+ * something since the last one; secure_delete alone leaves stale copies in live pages)
+ * and WAL checkpoint(TRUNCATE). Throws while the checkpoint is busy.
+ */
+export async function compactDiagnosticContent(db: SlayzoneDb): Promise<void> {
+  await db.exec(COMPACTION_TABLE)
+  const pending =
+    (
+      await db.get<{ pending: number }>(
+        'SELECT pending FROM diagnostic_erasure_compaction WHERE id=1'
+      )
+    )?.pending ?? 0
+  if (pending) {
+    await db.exec('PRAGMA secure_delete=ON')
+    await db.exec('VACUUM')
+  }
+  const checkpoint = await db.all<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
+  if (checkpoint.some((row) => row.busy)) throw new Error('Diagnostic checkpoint is busy')
+  // An erasure that committed meanwhile bumped the count: it stays pending.
+  if (pending)
+    await db.run('UPDATE diagnostic_erasure_compaction SET pending=0 WHERE id=1 AND pending=?', [
+      pending
+    ])
 }

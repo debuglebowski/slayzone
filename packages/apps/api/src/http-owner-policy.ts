@@ -203,6 +203,8 @@ const DIRECT_ADDRESSES =
   "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
+const ERASURE =
+  "erasing a disabled account's content: decided by content-erasure admin.ts (admin + full session, disabled target, typed email); answers counts, ids and receipts, never content"
 
 // ── REST ──────────────────────────────────────────────────────────────────────
 
@@ -446,7 +448,12 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   // `mayManageComputer` (an admin: any existing computer), else 404.
   'PATCH /api/hub/computers': none(
     'computer lifecycle (revoked or not): management metadata, decided in the handler by computer-access.ts mayManageComputer (T-19); no content'
-  )
+  ),
+  // Content erasure (added): another account's content is ERASED, never read. The
+  // service decides (content-erasure admin.ts: admin + full session, a disabled target,
+  // the typed email); it answers counts, ids and receipts only.
+  'GET /api/hub/content-erasure': none(ERASURE),
+  'POST /api/hub/content-erasure': none(ERASURE)
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────

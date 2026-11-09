@@ -483,21 +483,25 @@ async function readPasswordFromStdin(): Promise<string> {
  * `discoverAllHubs` is passed in so the sweep also sees the desktop app's
  * out-of-block sidecar port.
  */
-function hubUsersRequest<T>(
-  method: string,
-  body?: Record<string, unknown>,
-  query?: Record<string, string>
-): Promise<T> {
-  return resolveHubRequestTarget('hub users …', discoverAllHubs).then((target) =>
-    hubRequest<T>({
-      target,
-      path: '/api/hub/users' + (query ? '?' + new URLSearchParams(query).toString() : ''),
-      method,
-      ...(body === undefined ? {} : { body }),
-      unwrap: 'data'
-    })
-  )
+/** A request to one of the `slay hub users` routes on the selected hub. */
+function hubUsersRouteRequest(path: string) {
+  return <T>(
+    method: string,
+    body?: Record<string, unknown>,
+    query?: Record<string, string>
+  ): Promise<T> =>
+    resolveHubRequestTarget('hub users …', discoverAllHubs).then((target) =>
+      hubRequest<T>({
+        target,
+        path: path + (query ? '?' + new URLSearchParams(query).toString() : ''),
+        method,
+        ...(body === undefined ? {} : { body }),
+        unwrap: 'data'
+      })
+    )
 }
+const hubUsersRequest = hubUsersRouteRequest('/api/hub/users')
+const hubContentErasureRequest = hubUsersRouteRequest('/api/hub/content-erasure')
 
 /** `slay hub users` — accounts on a hub. */
 function hubUsersCommand(): Command {
@@ -507,7 +511,7 @@ function hubUsersCommand(): Command {
     .description('Manage the accounts that can sign in to a hub')
     .showSuggestionAfterError(true)
     .showHelpAfterError(true)
-  registerHubErasureCommands(users, hubUsersRequest)
+  registerHubErasureCommands(users, hubUsersRequest, hubContentErasureRequest)
 
   users
     .command('add <email>')

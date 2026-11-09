@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import { CONTENT_ERASURE_SCHEMA, CONTENT_ERASURE_ARTIFACT_FENCES } from './content-erasure-schema'
+import { installContentErasureFences } from './content-erasure-fences'
 // eslint-disable-next-line no-restricted-imports -- boot-time DB migration, finishes before the hub serves anything.
 import { spawnSync } from 'node:child_process'
 import { gitCommand } from '@slayzone/platform/resolve-command'
@@ -4873,6 +4874,19 @@ export const migrations: Migration[] = [
             BEGIN SELECT RAISE(ABORT,'Content was permanently erased'); END;`)
         }
       }
+    }
+  },
+  {
+    version: 199,
+    up(db) {
+      // v198 fenced artifact_blob_pins like content. Backup pins are retention
+      // metadata for bytes a retained backup still holds (erasure keeps them until
+      // that backup is gone), so the hub's startup re-pin of every backup taken
+      // before an erasure aborted: GC stayed deferred and every later deletion
+      // stayed incomplete. Reinstall all fences from the one shared definition,
+      // which keeps 'hub-backup' pins writable. Future migrations that create or
+      // rebuild a task_id/tab_id table call it too (see content-erasure-fences.ts).
+      installContentErasureFences(db)
     }
   }
 ]

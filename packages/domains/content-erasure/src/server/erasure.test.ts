@@ -364,3 +364,265 @@ test('unattributed blob staging cannot be silently counted as erased', async () 
   expect(report.failures).toContain('LEGACY_FILES_NEED_OWNERSHIP_REVIEW')
   expect(existsSync(join(stage, 'abandoned-write'))).toBe(true)
 })
+
+// --- Subtasks: deleting a task erases only what was selected --------------------
+
+function insertTask(h: TestHarness, id: string, parentId: string | null, extra = '') {
+  h.db
+    .prepare(
+      `INSERT INTO tasks(id,project_id,title,parent_id${extra ? ',' + extra : ''}) VALUES(?,?,?,?${extra ? ',?' : ''})`
+    )
+    .run(id, 'project-alice', `${id} title`, parentId, ...(extra ? ['/wt/shared'] : []))
+}
+const parentOf = (h: TestHarness, id: string) =>
+  (
+    h.db.prepare('SELECT parent_id FROM tasks WHERE id=?').get(id) as
+      | { parent_id: string | null }
+      | undefined
+  )?.parent_id
+
+test('deleting a parent task keeps its subtasks, re-parented to the nearest surviving ancestor', async () => {
+  const { h, root } = await fixture()
+  insertTask(h, 'grand', null)
+  insertTask(h, 'parent', 'grand')
+  insertTask(h, 'child', 'parent')
+  insertTask(h, 'grandchild', 'child')
+  h.db
+    .prepare(
+      "INSERT INTO task_artifacts(id,task_id,title) VALUES('artifact-child','child','c.txt')"
+    )
+    .run()
+  mkdirSync(join(root, 'artifacts', 'child'), { recursive: true })
+  writeFileSync(join(root, 'artifacts', 'child', 'artifact-child.txt'), 'child original')
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['parent'] })
+  expect(report.state).toBe('complete')
+  expect(report.counts.tasks).toBe(1)
+  expect(parentOf(h, 'parent')).toBeUndefined()
+  expect(parentOf(h, 'child')).toBe('grand')
+  expect(parentOf(h, 'grandchild')).toBe('child')
+  expect(h.db.prepare("SELECT deleted_at FROM tasks WHERE id='child'").get()).toEqual({
+    deleted_at: null
+  })
+  expect(readFileSync(join(root, 'artifacts', 'child', 'artifact-child.txt'), 'utf8')).toBe(
+    'child original'
+  )
+  expect(h.db.prepare("SELECT 1 FROM task_artifacts WHERE id='artifact-child'").get()).toBeDefined()
+})
+
+test('a deleted top-level task leaves its subtasks top-level', async () => {
+  const { h, root } = await fixture()
+  insertTask(h, 'parent', null)
+  insertTask(h, 'child', 'parent')
+  await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['parent'] })
+  expect(parentOf(h, 'child')).toBeNull()
+})
+
+test('a bulk delete selecting a parent and its subtask erases both; unselected descendants skip erased ancestors', async () => {
+  const { h, root } = await fixture()
+  insertTask(h, 'grand', null)
+  insertTask(h, 'parent', 'grand')
+  insertTask(h, 'child', 'parent')
+  insertTask(h, 'grandchild', 'child')
+  insertTask(h, 'sibling', 'parent')
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['parent', 'child'] })
+  expect(report.counts.tasks).toBe(2)
+  expect(parentOf(h, 'parent')).toBeUndefined()
+  expect(parentOf(h, 'child')).toBeUndefined()
+  expect(parentOf(h, 'grandchild')).toBe('grand')
+  expect(parentOf(h, 'sibling')).toBe('grand')
+})
+
+test('project erasure still erases every task in the project, subtasks included', async () => {
+  const { h, root } = await fixture()
+  insertTask(h, 'parent', null)
+  insertTask(h, 'child', 'parent')
+  await eraseContent(h.slayDb, root, { kind: 'projects', ids: ['project-alice'] })
+  for (const id of ['parent', 'child', 'task-alice']) expect(parentOf(h, id)).toBeUndefined()
+  expect(parentOf(h, 'task-bob')).toBeNull()
+})
+
+test('a surviving subtask keeps the worktree it shares with its deleted parent', async () => {
+  const { h, root } = await fixture()
+  insertTask(h, 'parent', null, 'worktree_path')
+  insertTask(h, 'child', 'parent', 'worktree_path')
+  const cleaned: string[] = []
+  const report = await eraseContent(
+    h.slayDb,
+    root,
+    { kind: 'tasks', ids: ['parent'] },
+    {
+      cleanupWorktree: async (target) => {
+        cleaned.push(target.path)
+      }
+    }
+  )
+  expect(report.state).toBe('complete')
+  expect(cleaned).toEqual([])
+  expect(h.db.prepare("SELECT worktree_path FROM tasks WHERE id='child'").get()).toEqual({
+    worktree_path: '/wt/shared'
+  })
+})
+
+// --- Worktree location: recorded, else the task's computer, else the hub default ---
+
+function computer(h: TestHarness, id: string, revokedAt: number | null = null) {
+  h.db
+    .prepare(
+      'INSERT INTO computers(id,name,platform,version,capabilities_json,created_at,owner_user_id,revoked_at) VALUES(?,?,?,?,?,?,?,?)'
+    )
+    .run(id, `${id} name`, 'darwin', 'fixture', '[]', Date.now(), 'alice', revokedAt)
+  h.db
+    .prepare(
+      "INSERT INTO project_placements(computer_id,project_id,root_path,status,updated_at) VALUES(?,'project-alice',?,'ready',1)"
+    )
+    .run(id, `/repo/on-${id}`)
+}
+function ackAll(h: TestHarness) {
+  return async (request: { taskIds: string[] }) =>
+    request.taskIds.map((taskId) => ({
+      taskId,
+      revision: (
+        h.db.prepare('SELECT revision FROM chat_task_lifecycle WHERE task_id=?').get(taskId) as {
+          revision: number
+        }
+      ).revision,
+      erased: true as const
+    }))
+}
+
+test('an unbound worktree resolves through the project computer and its placement', async () => {
+  const { h, root } = await fixture()
+  computer(h, 'pc')
+  h.db.prepare("UPDATE projects SET default_computer_id='pc' WHERE id='project-alice'").run()
+  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  const removed: unknown[] = []
+  const report = await eraseContent(
+    h.slayDb,
+    root,
+    { kind: 'tasks', ids: ['task-alice'] },
+    {
+      cleanupComputer: ackAll(h),
+      cleanupWorktree: async (t) => {
+        removed.push({ computerId: t.computerId, repoPath: t.repoPath, path: t.path })
+      }
+    }
+  )
+  expect(removed).toEqual([{ computerId: 'pc', repoPath: '/repo/on-pc', path: '/wt/a' }])
+  expect(report.state).toBe('complete')
+})
+
+test('an unbound worktree resolves to the hub default once, durably, and waits while none is connected', async () => {
+  const { h, root } = await fixture()
+  computer(h, 'first')
+  computer(h, 'second')
+  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  const picks: Array<string | null> = [null, 'first', 'second']
+  const asked: unknown[] = [],
+    removed: unknown[] = []
+  const options = {
+    cleanupComputer: ackAll(h),
+    resolveWorktreeComputer: async (target: unknown) => {
+      asked.push(target)
+      const computerId = picks.shift() ?? null
+      return computerId ? { computerId } : { computerId: null, gone: false }
+    },
+    cleanupWorktree: async (t: { computerId: string | null; repoPath: string | null }) => {
+      removed.push({ computerId: t.computerId, repoPath: t.repoPath })
+      if (removed.length === 1) throw new Error('computer busy')
+    }
+  }
+  const waiting = await eraseContent(
+    h.slayDb,
+    root,
+    { kind: 'tasks', ids: ['task-alice'] },
+    options
+  )
+  expect(waiting.state).toBe('incomplete')
+  expect(waiting.failures).toContain('WORKTREE_COMPUTER_UNAVAILABLE')
+  expect(removed).toEqual([])
+  expect(asked).toEqual([
+    { taskId: 'task-alice', projectId: 'project-alice', ownerUserId: 'alice' }
+  ])
+  // The default connects: resolved after the task row is gone, from durable state.
+  const failed = await resumeErasure(h.slayDb, root, waiting.id, options)
+  expect(failed.state).toBe('incomplete')
+  expect(failed.computers).toContainEqual(expect.objectContaining({ id: 'first', deleted: false }))
+  // A later retry keeps the resolved computer even though the default changed.
+  const done = await resumeErasure(h.slayDb, root, waiting.id, options)
+  expect(done.state).toBe('complete')
+  expect(removed).toEqual([
+    { computerId: 'first', repoPath: '/repo/on-first' },
+    { computerId: 'first', repoPath: '/repo/on-first' }
+  ])
+  expect(asked).toHaveLength(2)
+})
+
+test('a revoked worktree computer is reported clearly and never retried automatically', async () => {
+  const { h, root } = await fixture()
+  computer(h, 'gone', 5)
+  h.db
+    .prepare(
+      "UPDATE tasks SET worktree_path='/wt/a',worktree_computer_id='gone' WHERE id='task-alice'"
+    )
+    .run()
+  let attempts = 0
+  const options = {
+    cleanupComputer: async () => {
+      throw new Error('COMPUTER_UNAVAILABLE')
+    },
+    cleanupWorktree: async () => {
+      attempts++
+    }
+  }
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['task-alice'] }, options)
+  expect(report.state).toBe('incomplete')
+  expect(report.failures).toContain('WORKTREE_COMPUTER_GONE')
+  expect(report.computers).toContainEqual(expect.objectContaining({ id: 'gone', deleted: false }))
+  const again = await resumeErasure(h.slayDb, root, report.id, options)
+  expect(again.failures).toContain('WORKTREE_COMPUTER_GONE')
+  expect(attempts).toBe(0)
+})
+
+test('no computer that could ever hold an unbound worktree: reported gone, not retried', async () => {
+  const { h, root } = await fixture()
+  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  let asked = 0
+  const options = {
+    resolveWorktreeComputer: async () => {
+      asked++
+      return { computerId: null, gone: true }
+    },
+    cleanupWorktree: async () => {
+      throw new Error('must not be called')
+    }
+  }
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['task-alice'] }, options)
+  expect(report.failures).toContain('WORKTREE_COMPUTER_GONE')
+  await resumeErasure(h.slayDb, root, report.id, options)
+  expect(asked).toBe(1)
+})
+
+test('a live task sharing the path keeps the worktree even when only the deleted task recorded its computer', async () => {
+  const { h, root } = await fixture()
+  computer(h, 'pc')
+  h.db
+    .prepare(
+      "UPDATE tasks SET worktree_path='/wt/s',worktree_computer_id='pc' WHERE id='task-alice'"
+    )
+    .run()
+  insertTask(h, 'other', null, 'worktree_path')
+  h.db.prepare("UPDATE tasks SET worktree_path='/wt/s' WHERE id='other'").run()
+  const removed: string[] = []
+  await eraseContent(
+    h.slayDb,
+    root,
+    { kind: 'tasks', ids: ['task-alice'] },
+    {
+      cleanupComputer: ackAll(h),
+      cleanupWorktree: async (t) => {
+        removed.push(t.path)
+      }
+    }
+  )
+  expect(removed).toEqual([])
+})

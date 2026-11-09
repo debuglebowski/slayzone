@@ -26,6 +26,7 @@ import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
+import { adoptHookJournal } from './hook-journal'
 
 export function runtimeDir(root: string): string {
   return join(root, 'computer-runtime')
@@ -204,10 +205,8 @@ class SessionTransport extends HubDialer {
     private logEvent: (message: string) => void
   ) {
     super(options)
-    this.journal = join(
-      runtimeDir(root),
-      'hooks-' + createHash('sha256').update(options.url).digest('hex').slice(0, 16) + '.json'
-    )
+    // Named by the canonical hub URL; a file an older host named by this spelling moves.
+    this.journal = adoptHookJournal(runtimeDir(root), options.url)
     try {
       this.eventsQueue = JSON.parse(readFileSync(this.journal, 'utf8'))
     } catch (err) {

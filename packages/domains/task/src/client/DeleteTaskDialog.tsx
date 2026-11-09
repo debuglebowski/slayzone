@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { Task } from '@slayzone/task-contracts'
+import { reportDeleteTaskError, settleDeleteTaskResult } from './deleteTaskResult'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,7 +17,12 @@ interface DeleteTaskDialogProps {
   task: Task | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Runs only once the task is actually deleted. */
   onDeleted: () => void
+  /**
+   * Performs the delete, telling the user how it ended and rejecting when the
+   * task was not deleted. Without it the dialog deletes and reports itself.
+   */
   onDeleteTask?: (taskId: string) => Promise<void>
 }
 
@@ -30,14 +36,15 @@ export function DeleteTaskDialog({
   const trpc = useTRPC()
   const deleteTask = useMutation(trpc.task.delete.mutationOptions())
 
-  const handleDelete = async (): Promise<void> => {
+  // Delete is permanent: a refusal or failure must reach the user, never vanish as
+  // an unhandled rejection, and `onDeleted` must not run for a task that still exists.
+  const deleteAndReport = async (taskId: string): Promise<void> => {
+    if (onDeleteTask) await onDeleteTask(taskId)
+    else settleDeleteTaskResult(await deleteTask.mutateAsync({ id: taskId }))
+  }
+  const handleDelete = (): void => {
     if (!task) return
-    if (onDeleteTask) {
-      await onDeleteTask(task.id)
-    } else {
-      await deleteTask.mutateAsync({ id: task.id })
-    }
-    onDeleted()
+    deleteAndReport(task.id).then(onDeleted, reportDeleteTaskError)
   }
 
   return (

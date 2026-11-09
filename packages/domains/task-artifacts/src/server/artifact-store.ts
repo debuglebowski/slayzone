@@ -25,6 +25,7 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
 import { VersionError } from './errors'
+import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
 import { eraseContent } from '@slayzone/content-erasure/server'
 import { cleanupTaskWorkingCopies, workingCopyJournalDir } from './working-copy'
 import {
@@ -203,7 +204,8 @@ export function createArtifactStore(dataDir: string) {
       const existing = await getRow(db, id)
       if (!existing) return false
       const report = await eraseContent(db, dataDir, { kind: 'artifacts', ids: [id] })
-      if (report.state !== 'complete')
+      // A scheduled database compaction is not a failure: it completes the job later.
+      if (!isErasureDoneOrCompacting(report))
         throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
       return true
     },

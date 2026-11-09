@@ -1095,11 +1095,10 @@ function App(): React.JSX.Element {
     [updateTask, trpcClient]
   )
 
+  // The dialog already ran `deleteTask` (onDeleteTask) and only calls this once the
+  // task is gone; deleting again here would erase twice and report a false failure.
   const handleTaskDeleted = (): void => {
-    if (deletingTask) {
-      deleteTask(deletingTask.id)
-      useDialogStore.getState().closeDeleteTask()
-    }
+    useDialogStore.getState().closeDeleteTask()
   }
   // Stable: handed to every board card, so a new identity re-renders all of them.
   const handleTaskClick = useStableCallback((task: Task): void => {
@@ -1823,6 +1822,7 @@ function App(): React.JSX.Element {
             editingTask={editingTask}
             handleTaskUpdated={handleTaskUpdated}
             deletingTask={deletingTask}
+            handleDeleteTask={deleteTask}
             handleTaskDeleted={handleTaskDeleted}
             createProjectOpen={createProjectOpen}
             handleProjectCreated={handleProjectCreated}

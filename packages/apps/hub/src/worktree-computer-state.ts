@@ -81,3 +81,39 @@ export function createWorktreeComputerState(
     return live ? 'wait' : 'gone'
   }
 }
+
+export interface ErasedWorktreeComputerDeps {
+  db: SlayzoneDb
+  requireLogin: boolean
+  /** Placement's connected default for work owned by this user (rows may be gone). */
+  forOwner: (ownerUserId: string | null) => Promise<string | null>
+}
+
+/**
+ * Permanent deletion's question for a worktree no binding names (an unbound task's,
+ * whose row may already be erased): the computer it is on — the default pick, as the
+ * Trash purge resolved it (`createWorktreeComputerState`'s UNBOUND case). Null while
+ * none is usable but one that could still come back exists (on a hub with login: one
+ * the owner owns); `gone` when none does — it will never be removed automatically.
+ */
+export function createErasedWorktreeComputer(
+  deps: ErasedWorktreeComputerDeps
+): (target: {
+  taskId: string
+  projectId: string | null
+  ownerUserId: string | null
+}) => Promise<{ computerId: string } | { computerId: null; gone: boolean }> {
+  const { db } = deps
+  return async ({ ownerUserId }) => {
+    const picked = await deps.forOwner(ownerUserId).catch(() => null)
+    if (picked) return { computerId: picked }
+    const live = deps.requireLogin
+      ? ownerUserId !== null &&
+        (await db.get(
+          'SELECT 1 FROM computers WHERE owner_user_id = ? AND revoked_at IS NULL LIMIT 1',
+          [ownerUserId]
+        )) !== undefined
+      : (await db.get('SELECT 1 FROM computers WHERE revoked_at IS NULL LIMIT 1')) !== undefined
+    return { computerId: null, gone: !live }
+  }
+}

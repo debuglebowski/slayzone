@@ -1,8 +1,9 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { taskEvents } from '../events.js'
 import { eraseContent, resumeErasure } from '@slayzone/content-erasure/server'
-import type { ErasureReport } from '@slayzone/content-erasure'
+import { isErasureDoneOrCompacting, type ErasureReport } from '@slayzone/content-erasure'
 import { cleanupTaskImmediate, getRuntimeAdapters, parseTask, type OpDeps } from './shared.js'
+import { announceSurvivingSubtasks, survivingSubtasks } from './surviving-subtasks.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -47,14 +48,16 @@ export async function deleteTaskOp(
     )
     if (!existing) return false
     const report = await resumeErasure(db, adapters.getDataRoot(), existing.job_id, options)
-    return report.state === 'complete' ? true : { incomplete: true, erasure: report }
+    return isErasureDoneOrCompacting(report) ? true : { incomplete: true, erasure: report }
   }
+  const survivors = await survivingSubtasks(db, [id])
   const report = await eraseContent(
     db,
     adapters.getDataRoot(),
     { kind: 'tasks', ids: [id] },
     options
   )
+  await announceSurvivingSubtasks(db, survivors)
   if (report.counts.tasks > 0) {
     ipcMain?.emit('db:tasks:delete:done', null, id)
     if (previousTask) {
@@ -62,5 +65,5 @@ export async function deleteTaskOp(
     }
     onMutation?.()
   }
-  return report.state === 'complete' ? true : { incomplete: true, erasure: report }
+  return isErasureDoneOrCompacting(report) ? true : { incomplete: true, erasure: report }
 }

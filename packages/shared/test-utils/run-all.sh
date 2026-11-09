@@ -66,15 +66,29 @@ run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
 run_harness packages/domains/task/src/server/ops/permanent-delete.test.ts
 run_harness packages/domains/content-erasure/src/server/erasure.test.ts
 run_harness packages/domains/task-artifacts/src/server/permanent-delete.test.ts
+# Backup pins stay rebuildable for erased tasks; a failed re-pin keeps the old pins.
+run_harness packages/domains/task-artifacts/src/server/backup-pins.test.ts
 run_harness packages/domains/content-erasure/src/server/admin.test.ts
 run_harness packages/domains/content-erasure/src/server/restore.test.ts
 run_harness packages/domains/content-erasure/src/server/router.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-erasure.test.ts
 run_harness packages/domains/diagnostics/src/server/content-erasure.test.ts
+# Erasure compaction: deferred/coalesced VACUUM, no repeated local steps or acked re-sends,
+# retry backoff; diagnostics and computer stores VACUUM only when something was erased.
+run_harness packages/domains/content-erasure/src/server/compaction.test.ts
+run_harness packages/domains/diagnostics/src/server/content-erasure-compaction.test.ts
+run_harness packages/domains/chat-runtime/src/server/erase-stored-task.test.ts
 run_harness packages/apps/computer/src/offline-erasure.test.ts
 run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
 run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
 run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
+# Every client delete asks first (subtasks too) and reports blocked/incomplete/failed
+# results instead of dropping them; a refused delete keeps the task (and its window).
+run_vitest_files 'task delete confirmation + result handling' \
+  packages/domains/task/src/client/DeleteTaskDialog.test.tsx \
+  packages/domains/task/src/client/useSubTasks.test.tsx \
+  packages/domains/task/src/client/task-detail/TaskOverviewRow.test.tsx \
+  packages/domains/tasks/src/client/TaskContextMenu.delete.test.tsx
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts
@@ -512,6 +526,8 @@ run_harness packages/shared/db-migrations/src/v185-codex-chat-mode-tags-migratio
 run_harness packages/shared/db-migrations/src/v193-agent-sessions-conversation-index-migration.test.ts
 # v192: terminal_modes → agents, *.terminal_mode → agent_id, default_terminal_mode → default_agent_id.
 run_harness packages/shared/db-migrations/src/v192-agent-id-rename-migration.test.ts
+# v199: content-erasure fences reinstalled (hub-backup pins writable); every task_id/tab_id table fenced.
+run_harness packages/shared/db-migrations/src/v199-content-erasure-fences-migration.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
 # Quit WAITS for the local hub's and computer's reaps (fire-and-forget orphaned them), bounded.
@@ -629,6 +645,8 @@ run_harness packages/apps/api/src/http/rest-api/computers/direct-addresses.test.
 # Loopback operator account routes (`slay hub users`). The routes never touch the DB
 # (the hubUsers capability is stubbed).
 run_harness packages/apps/api/src/http/rest-api/hub/users.test.ts
+# Content erasure's own REST route (never break-glass's: O-6); GET reads, POST changes.
+run_harness packages/apps/api/src/http/rest-api/hub/content-erasure.test.ts
 run_harness packages/apps/api/src/http/rest-api/hub/web-login.test.ts
 run_harness packages/apps/api/src/routers/integrations.test.ts
 run_harness packages/domains/integrations/src/server/integrations-switch.test.ts
