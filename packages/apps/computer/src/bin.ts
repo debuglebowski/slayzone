@@ -31,7 +31,13 @@ import {
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import { ENV_VARS, effectiveHubUrls, ignoredCertPinNotices, loadBootComputerConfig } from './config'
+import {
+  ENV_VARS,
+  effectiveHubUrls,
+  ignoredCertPinNotices,
+  loadBootComputerConfig,
+  supervisedComputerConfigFile
+} from './config'
 import { adoptLoginShellPath } from './login-shell-path'
 import { COMPUTER_VERSION, startComputer, watchPrimaryHubExitCode } from './main'
 import { createSupervisorIpc } from './supervisor-ipc'
@@ -234,10 +240,16 @@ async function main(): Promise<void> {
             }
           })()
         : undefined
+    // Supervised: of its own config file only the roots its loopback hub set — see
+    // supervisedComputerConfigFile (they used to be lost on every restart).
     const snapshot =
       !workerBoot && !supervised
         ? readComputerConfigSnapshot(undefined, { allowLegacy: !savedSeed?.currentFileSeen })
-        : { config: {}, fingerprint: 'absent', currentFileSeen: false }
+        : {
+            config: supervised && !workerBoot ? supervisedComputerConfigFile() : {},
+            fingerprint: 'absent',
+            currentFileSeen: false
+          }
     const candidateSeed: ComputerBootSeed = (process.argv.includes('--supervisor')
       ? savedSeed
       : undefined) ?? {

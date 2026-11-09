@@ -18,6 +18,8 @@ export {
   killAllProcesses,
   shutdownAllProcesses,
   setProcessComputerResolver,
+  setProcessSpawnPreparer,
+  setProcessWrittenListener,
   processesComputerConnected,
   isAdoptedOnComputer,
   restartProcessForUi,
@@ -31,6 +33,7 @@ export type {
   ProcessShutdownOptions,
   ProcessShutdownResult,
   ProcessComputerResolver,
+  ProcessSpawnPreparer,
   PidStats,
   StartProcessRefusal,
   StartProcessResult

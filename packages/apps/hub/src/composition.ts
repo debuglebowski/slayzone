@@ -246,6 +246,8 @@ import {
   subscribeToProcessLogs,
   setProcessComputerResolver,
   setProcessComputerReachability,
+  setProcessSpawnPreparer,
+  setProcessWrittenListener,
   processesComputerConnected,
   processesComputerRemoved,
   isAdoptedOnComputer,
@@ -2344,10 +2346,19 @@ export function composeServer(opts: {
         recordDiagnosticEvent({ level, source: 'server', event, message, payload })
     })
     syncComputerProjects = (computerId) => projectSync.onConnect(computerId)
-    // The local computer's other work folders — the worktree base setting and an
-    // automation's own folder — are registered again when they change (M6).
+    // The local computer's other work folders — the worktree base setting, an
+    // automation's own folder and a background process's — are registered again when
+    // they change (M6).
     if (supervised) {
       setAutomationWrittenListener(() => void projectSync.localWorkFoldersChanged())
+      setProcessWrittenListener(() => void projectSync.localWorkFoldersChanged())
+      // And before every process start on the local computer, awaited: a start on its
+      // (re)connect — an auto-restart process that waited for it — must not reach it
+      // before its roots cover the process's folder (it would be refused).
+      const localComputerId = deterministicLocalComputerId(localComputerName)
+      setProcessSpawnPreparer(({ computerId }) =>
+        computerId === localComputerId ? projectSync.localWorkFoldersChanged() : Promise.resolve()
+      )
       notifyEvents.on('settings-changed', (change) => {
         if (!change || change.keys.includes('worktree_base_path'))
           void projectSync.localWorkFoldersChanged()

@@ -549,3 +549,66 @@ test('R4-1: a soft-deleted task restored after a relaunch keeps its worktree roo
   await relaunched.localWorkFoldersChanged()
   expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(false)
 })
+
+function processWithCwd(
+  id: string,
+  cwd: string,
+  owner: { taskId?: string; projectId?: string } = {}
+): void {
+  raw
+    .prepare(
+      `INSERT INTO processes (id, task_id, project_id, label, command, cwd, auto_restart)
+       VALUES (?, ?, ?, 'p', 'x', ?, 1)`
+    )
+    .run(id, owner.taskId ?? null, owner.projectId ?? null, cwd)
+}
+
+// v0.38.0 moved background processes onto the computer, whose jail refused a cwd
+// outside its roots: a process the user had set up in `/tmp`, `/opt/x` or on an
+// external drive — which ran in v0.38 — failed on every start. Its folder is a work
+// folder of the local computer like an automation's, and goes with the process.
+test('a background process folder becomes a local root, and goes with the process', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/srv'] }))
+  upgraded('p1', '/Users/k/app')
+  project('p-remote', null, remote)
+  raw
+    .prepare(`INSERT INTO tasks (id, project_id, title, computer_id) VALUES ('t-r', 'p1', 't', ?)`)
+    .run(remote)
+  raw.prepare(`INSERT INTO tasks (id, project_id, title) VALUES ('t-l', 'p1', 't')`).run()
+  processWithCwd('plain', '/Volumes/X/svc')
+  processWithCwd('task-local', '/opt/x', { taskId: 't-l', projectId: 'p1' })
+  // A project process sends no cwd (its computer resolves the project's folder).
+  processWithCwd('proj-local', '/opt/unused', { projectId: 'p1' })
+  // Another computer's paths: never a root here.
+  processWithCwd('task-remote', '/srv/elsewhere', { taskId: 't-r', projectId: 'p1' })
+  // A task on no computer of its own, in a project another computer serves.
+  raw.prepare(`INSERT INTO tasks (id, project_id, title) VALUES ('t-pr', 'p-remote', 't')`).run()
+  processWithCwd('proj-remote', '/srv/remote-plain', { taskId: 't-pr', projectId: 'p-remote' })
+  processWithCwd('relative', 'some/dir')
+  const { sync } = makeSync()
+
+  await sync.onConnect(LOCAL)
+
+  let roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/X/svc', roots)).toBe(true)
+  expect(isCoveredByRoots('/opt/x', roots)).toBe(true)
+  expect(isCoveredByRoots('/srv/elsewhere', roots)).toBe(false)
+  expect(isCoveredByRoots('/srv/remote-plain', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/unused', roots)).toBe(false)
+  expect(roots.some((r) => r.includes('some/dir'))).toBe(false)
+
+  // Created later: registered on the next change, not only on connect.
+  processWithCwd('later', '/opt/later')
+  await sync.localWorkFoldersChanged()
+  expect(isCoveredByRoots('/opt/later', computers.get(LOCAL)!.roots)).toBe(true)
+
+  // Removed: its root goes; the user's own root stays.
+  raw.prepare(`DELETE FROM processes`).run()
+  await sync.localWorkFoldersChanged()
+  roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/Volumes/X/svc', roots)).toBe(false)
+  expect(isCoveredByRoots('/opt/later', roots)).toBe(false)
+  expect(roots).toContain('/Users/k')
+  expect(computers.get(remote)!.roots).toEqual(['/srv'])
+})

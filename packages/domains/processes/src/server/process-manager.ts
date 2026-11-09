@@ -60,6 +60,34 @@ export function setProcessComputerResolver(resolver: ProcessComputerResolver | n
 }
 
 /**
+ * Make the computer ready for one spawn, before it is sent there: the hub widens the
+ * desktop's own computer's allowed roots to cover the process's folder (a cwd outside
+ * them is refused by the computer's jail, T-27). Awaited before EVERY spawn — initial,
+ * start, restart, auto-restart, a start on a computer connect — so a spawn never
+ * races the widening. `cwd` is what the spawn sends ('' when the computer resolves
+ * the project's folder itself). Best-effort: a failure is ignored and the computer
+ * answers for itself.
+ */
+export type ProcessSpawnPreparer = (spawn: {
+  processId: string
+  computerId: string
+  cwd: string
+}) => Promise<void>
+let spawnPreparer: ProcessSpawnPreparer | null = null
+export function setProcessSpawnPreparer(fn: ProcessSpawnPreparer | null): void {
+  spawnPreparer = fn
+}
+
+/**
+ * Called once a process row was created, changed or deleted (its cwd may be a folder
+ * the hub registered on a computer, and no longer needs).
+ */
+let processWritten: (() => void) | null = null
+export function setProcessWrittenListener(fn: (() => void) | null): void {
+  processWritten = fn
+}
+
+/**
  * Whether a computer is reachable now (connected and heard from). A kept run whose
  * computer is NOT reachable cannot be ended, yet it is no survivor either (G3): that
  * difference decides between "stop it first" and "it is ended when its computer
@@ -297,17 +325,26 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
   if (isShuttingDown || !processes.has(proc.id)) return
   // A stop/restart issued while this spawn awaited the resolver supersedes it.
   if (proc.generation !== generation) return
-  proc.spawnedAt = new Date().toISOString()
-  startStatsPolling()
   // A project process sends no cwd: its computer resolves the project's own folder
   // on its disk (the hub's stored path names no particular machine).
+  const cwd = proc.taskId === null && proc.projectId != null ? '' : proc.cwd
+  const prepare = spawnPreparer
+  if (prepare) {
+    await Promise.resolve()
+      .then(() => prepare({ processId: proc.id, computerId, cwd }))
+      .catch(noop)
+    // Superseded (or removed) while the computer was being prepared.
+    if (isShuttingDown || !processes.has(proc.id) || proc.generation !== generation) return
+  }
+  proc.spawnedAt = new Date().toISOString()
+  startStatsPolling()
   const handle = getProcessBackend().spawn({
     id: proc.id,
     taskId: proc.taskId,
     projectId: proc.projectId,
     computerId,
     command: proc.command,
-    cwd: proc.taskId === null && proc.projectId != null ? '' : proc.cwd
+    cwd
   })
 
   proc.handle = handle
@@ -505,6 +542,7 @@ async function persistNew(proc: ManagedProcess): Promise<void> {
   const { id, taskId, projectId, label, command, cwd, autoRestart } = proc
   await persistence?.insert({ id, taskId, projectId, label, command, cwd, autoRestart })
   processes.set(id, proc)
+  processWritten?.()
 }
 
 export async function createProcess(
@@ -578,6 +616,7 @@ export async function updateProcess(
   }
   await persistence?.update({ id, ...next })
   Object.assign(proc, next)
+  processWritten?.()
   return true
 }
 
@@ -688,7 +727,8 @@ export function removeProcess(id: string): boolean {
     if (result === 'unreachable' && keptOn) strand(keptOn, id)
   })
   processes.delete(id)
-  void persistence?.remove(id)
+  // Heard once the row is gone, so a listener reading the table no longer sees it.
+  void persistence?.remove(id)?.then(() => processWritten?.())
   return true
 }
 

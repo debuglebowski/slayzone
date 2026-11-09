@@ -89,8 +89,9 @@ export interface SetFolderResult {
 export interface ComputerProjectSync {
   onConnect(computerId: string): Promise<void>
   /**
-   * The worktree base setting or an automation's folder changed: register the local
-   * computer's work folders again (M6). Best-effort: an offline computer is widened on
+   * The worktree base setting, an automation's folder or a background process's
+   * folder changed — or a process is about to start on the local computer: register
+   * the local computer's work folders again (M6). Best-effort: an offline computer is widened on
    * its next connect.
    */
   localWorkFoldersChanged(): Promise<void>
@@ -159,8 +160,8 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * Folders the local computer works in besides project folders, as the desktop did
    * with no jail (M6): the worktree base each local project resolves to when the
    * setting names one (the default, a sibling, is covered by the project's parent),
-   * and each automation action's own absolute folder (a `{{…}}` one resolves to a
-   * project's folder, already covered).
+   * each automation action's own absolute folder (a `{{…}}` one resolves to a
+   * project's folder, already covered), and each background process's own folder.
    */
   async function localWorkFolders(computerId: string): Promise<string[]> {
     const folders: string[] = []
@@ -186,6 +187,22 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
         const cwd = (action as { params?: { cwd?: unknown } })?.params?.cwd
         if (typeof cwd === 'string' && !cwd.includes('{{') && isAbsolute(cwd)) folders.push(cwd)
       }
+    }
+    // Background processes ran on the desktop's own disk, unjailed, until v0.38.0 moved
+    // them onto the computer: one set up in `/tmp`, `/opt/x` or on an external drive
+    // must keep starting there. A project process sends no cwd (its computer resolves
+    // the project's folder, covered above); one whose task or project is bound to
+    // another computer names a folder on THAT computer.
+    for (const p of await db.all<{ cwd: string }>(
+      `SELECT pr.cwd FROM processes pr
+         LEFT JOIN tasks t ON t.id = pr.task_id
+         LEFT JOIN projects p ON p.id = COALESCE(t.project_id, pr.project_id)
+        WHERE pr.cwd != ''
+          AND NOT (pr.task_id IS NULL AND pr.project_id IS NOT NULL)
+          AND COALESCE(t.computer_id, p.default_computer_id, ?) = ?`,
+      [computerId, computerId]
+    )) {
+      if (isAbsolute(p.cwd)) folders.push(p.cwd)
     }
     return folders
   }
