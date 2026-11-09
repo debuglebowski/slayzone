@@ -2,10 +2,56 @@ import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { expect, test } from 'vitest'
 import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import { createFileCredentialStore } from '@slayzone/computer-transport/client'
 import { eraseComputerOffline } from './offline-erasure'
+
+test.skipIf(process.platform === 'win32')(
+  'offline cleanup refuses a surviving process group after its leader exits',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'offline-erasure-process-'))
+    const leader = spawn('sh', ['-c', 'sleep 120 & exit 0'], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: root
+    })
+    const pgid = leader.pid!
+    try {
+      await once(leader, 'exit')
+      expect(() => process.kill(-pgid, 0)).not.toThrow()
+      await createFileCredentialStore('hub.example', { baseDir: root }).save({
+        computerId: 'pc',
+        apiKey: 'fixture'
+      })
+      const runtime = join(root, 'computer-runtime')
+      mkdirSync(runtime, { recursive: true })
+      writeFileSync(join(runtime, 'proc-groups.json'), JSON.stringify({ groups: [{ pgid }] }))
+      await expect(
+        eraseComputerOffline(root, {
+          version: 1,
+          requestId: '11111111-1111-4111-8111-111111111111',
+          jobId: '22222222-2222-4222-8222-222222222222',
+          computerId: 'pc',
+          hubUrl: 'wss://hub.example/computers',
+          hubScope: 'hub.example',
+          tasks: [{ taskId: 'alice', revision: 2 }],
+          worktreeTaskIds: []
+        })
+      ).rejects.toThrow(/process is still running/)
+    } finally {
+      try {
+        process.kill(-pgid, 'SIGKILL')
+      } catch {
+        /* Already stopped. */
+      }
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)
+
 test('a revoked/offline computer erases only the issued hub/task scope and returns non-content evidence', async () => {
   const root = mkdtempSync(join(tmpdir(), 'offline-erasure-'))
   const r = createComputerChatRuntime({ stateDir: root, hubScope: 'hub.example', computerId: 'pc' })

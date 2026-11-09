@@ -28,10 +28,13 @@ const requestSchema = z.object({
     .min(1),
   worktreeTaskIds: z.array(z.string())
 })
-function alive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('Invalid computer process identity')
+function alive(pid: number, processGroup = false): boolean {
+  if (!Number.isSafeInteger(pid) || pid < (processGroup ? 2 : 1))
+    throw new Error('Invalid computer process identity')
   try {
-    process.kill(pid, 0)
+    // A detached group's children may survive after its leader exits. Probe the
+    // whole POSIX group before issuing evidence that no writer remains.
+    process.kill(processGroup && process.platform !== 'win32' ? -pid : pid, 0)
     return true
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
@@ -66,7 +69,7 @@ export async function eraseComputerOffline(
   const groups = join(runtime, 'proc-groups.json')
   if (existsSync(groups))
     for (const group of JSON.parse(readFileSync(groups, 'utf8')).groups ?? [])
-      if (alive(group.pgid))
+      if (alive(group.pgid, true))
         throw new Error('A computer process is still running. Stop it before offline cleanup.')
   if (request.worktreeTaskIds.length && !options.worktreesVerified)
     throw new Error(

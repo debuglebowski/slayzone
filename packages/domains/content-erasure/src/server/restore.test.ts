@@ -8,7 +8,7 @@ import {
   createSlayzoneDbAdapter,
   type TestHarness
 } from '../../../../shared/test-utils/ipc-harness'
-import { eraseContent, exportErasureReceipt } from './index'
+import { eraseContent, exportErasureReceipt, resumeErasure } from './index'
 import type { ErasureReceipt } from '../shared'
 const fixtures: TestHarness[] = []
 afterEach(() => {
@@ -114,5 +114,80 @@ test('upgrading migration 197 preserves old Trash as Archive without reactivatin
     ).toEqual([{ task_id: 't', content_hash: attachmentHash }])
   } finally {
     raw.close()
+  }
+})
+
+async function worktreeFixture() {
+  const h = await createTestHarness()
+  fixtures.push(h)
+  const root = h.tmpDir(),
+    path = join(root, 'worktree-erasure.sqlite')
+  const secret = 'PRIVATE-WORKTREE-TITLE-d2e50bc1'
+  h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
+  h.db
+    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
+    .run('t', 'p', secret, join(root, secret))
+  await h.db.backup(path)
+  const raw = new Database(path)
+  raw.pragma('journal_mode=WAL')
+  return { raw, root, path, secret }
+}
+
+test('completed worktree cleanup leaves no private path in SQLite or historical WAL frames', async () => {
+  const { raw, root, path, secret } = await worktreeFixture()
+  try {
+    const db = createSlayzoneDbAdapter(raw)
+    const report = await eraseContent(
+      db,
+      root,
+      { kind: 'tasks', ids: ['t'] },
+      {
+        cleanupWorktree: async () => {}
+      }
+    )
+    expect(report.state).toBe('complete')
+    for (const file of [path, path + '-wal'])
+      if (existsSync(file)) expect(readFileSync(file).includes(Buffer.from(secret))).toBe(false)
+  } finally {
+    raw.close()
+  }
+})
+
+test('a failed final compaction stays incomplete and resumes after restart without repeating worktree removal', async () => {
+  const fixture = await worktreeFixture()
+  let raw = fixture.raw
+  let removals = 0,
+    compactions = 0
+  try {
+    const db = createSlayzoneDbAdapter(raw),
+      original = db.namedTxn.bind(db)
+    db.namedTxn = ((name, params) => {
+      if (name === 'content-erasure:compact' && ++compactions === 2)
+        throw new Error('CHECKPOINT_BUSY')
+      return original(name, params)
+    }) as typeof db.namedTxn
+    const report = await eraseContent(
+      db,
+      fixture.root,
+      { kind: 'tasks', ids: ['t'] },
+      {
+        cleanupWorktree: async () => {
+          removals++
+        }
+      }
+    )
+    expect(report.state).toBe('incomplete')
+    expect(report.failures).toContain('DATABASE_HISTORY_NOT_COMPACTED')
+    raw.close()
+    raw = new Database(fixture.path)
+    raw.pragma('journal_mode=WAL')
+    const resumed = await resumeErasure(createSlayzoneDbAdapter(raw), fixture.root, report.id)
+    expect(resumed.state).toBe('complete')
+    expect(removals).toBe(1)
+    for (const file of [fixture.path, fixture.path + '-wal'])
+      if (existsSync(file))
+        expect(readFileSync(file).includes(Buffer.from(fixture.secret))).toBe(false)
+  } finally {
+    if (raw.open) raw.close()
   }
 })

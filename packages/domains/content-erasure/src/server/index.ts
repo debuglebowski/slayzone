@@ -393,11 +393,29 @@ async function run(
     !failures.length &&
     report.computers.every((c) => c.deleted)
   ) {
-    // Retain replay identifiers and counts, not file names, after completion.
-    m.worktrees = []
+    if (m.worktrees.length) {
+      // Worktree paths can contain private task titles. Remove the retry paths
+      // before the last compaction, including their older SQLite/WAL images.
+      // Persist incomplete cleanup first so a busy checkpoint or restart retries
+      // verification without requiring the already-removed worktree again.
+      m.worktrees = []
+      await db.run('UPDATE content_erasure_jobs SET manifest=?,local_erased=0 WHERE id=?', [
+        JSON.stringify(m),
+        id
+      ])
+      try {
+        await db.namedTxn('content-erasure:compact', {})
+      } catch {
+        await db.run('UPDATE content_erasure_jobs SET failure_codes=? WHERE id=?', [
+          JSON.stringify(['DATABASE_HISTORY_NOT_COMPACTED']),
+          id
+        ])
+        return getErasureReport(db, id)
+      }
+    }
     await db.run(
-      `UPDATE content_erasure_jobs SET state='complete',manifest=?,completed_at=datetime('now') WHERE id=?`,
-      [JSON.stringify(m), id]
+      `UPDATE content_erasure_jobs SET state='complete',local_erased=1,completed_at=datetime('now') WHERE id=?`,
+      [id]
     )
   }
   return getErasureReport(db, id)
