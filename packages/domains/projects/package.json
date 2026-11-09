@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/file-editor": "workspace:*",
     "@slayzone/host-capabilities": "workspace:*",

@@ -32,10 +32,10 @@ export async function archiveManyTasksOp(
   ).map((r) => r.id)
   const allIds = [...ids, ...childIds]
   for (const id of ids) {
-    await cleanupTaskFull(db, id, allIds)
+    await cleanupTaskFull(db, id, allIds, { preserveArtifacts: true })
   }
   for (const childId of childIds) {
-    await cleanupTaskFull(db, childId, allIds)
+    await cleanupTaskFull(db, childId, allIds, { preserveArtifacts: true })
   }
   const placeholders = allIds.map(() => '?').join(',')
   await db.namedTxn('task:archive', {

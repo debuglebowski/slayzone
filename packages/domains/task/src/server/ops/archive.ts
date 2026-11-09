@@ -28,9 +28,9 @@ export async function archiveTaskOp(
     )
   ).map((r) => r.id)
   const batch = [id, ...childIds]
-  await cleanupTaskFull(db, id, batch)
+  await cleanupTaskFull(db, id, batch, { preserveArtifacts: true })
   for (const childId of childIds) {
-    await cleanupTaskFull(db, childId, batch)
+    await cleanupTaskFull(db, childId, batch, { preserveArtifacts: true })
   }
   await db.namedTxn('task:archive', {
     sql: `

@@ -1938,6 +1938,7 @@ export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
   /** Idempotency key — see `pty.spawn`. */
   spawnId: spawnIdField,
   /** Resolve cwd from this project when `cwd` is absent. See `pty.spawn`. */

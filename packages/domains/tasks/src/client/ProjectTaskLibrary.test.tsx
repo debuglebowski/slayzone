@@ -81,31 +81,13 @@ it('promotes a scratch terminal on its remote hub', async () => {
 it('only deletes on an explicit Delete action', async () => {
   const { onDelete } = setup()
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  expect(onDelete).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }))
   await waitFor(() => expect(onDelete).toHaveBeenCalledWith('t'))
 })
 
-it('loads and restores Trash through the owning hub', async () => {
-  const { onUpdate } = setup()
-  fireEvent.click(screen.getByRole('button', { name: 'Trash' }))
-  await screen.findByText('Deleted terminal')
-  expect(getDeleted).toHaveBeenCalledWith({ projectId: 'p' })
-  fireEvent.click(screen.getByRole('button', { name: 'Restore' }))
-  await waitFor(() =>
-    expect(onUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'deleted', deleted_at: null })
-    )
-  )
-  expect(restore).toHaveBeenCalledWith({ id: 'deleted' })
-  expect(noteTaskHub).toHaveBeenCalledWith('deleted', 'remote')
-})
-
-it('surfaces restore failures without removing the recoverable entry', async () => {
-  restore.mockRejectedValue(new Error('Hub offline'))
-  const { onUpdate } = setup()
-  fireEvent.click(screen.getByRole('button', { name: 'Trash' }))
-  await screen.findByText('Deleted terminal')
-  fireEvent.click(screen.getByRole('button', { name: 'Restore' }))
-  expect((await screen.findByRole('alert')).textContent).toContain('Hub offline')
-  expect(screen.getByText('Deleted terminal')).toBeTruthy()
-  expect(onUpdate).not.toHaveBeenCalled()
+it('does not offer recoverable Trash or query deleted content', () => {
+  setup()
+  expect(screen.queryByRole('button', { name: 'Trash' })).toBeNull()
+  expect(getDeleted).not.toHaveBeenCalled()
 })

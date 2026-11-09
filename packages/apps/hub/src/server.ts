@@ -851,6 +851,7 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
       // Every quit path funnels here: SIGTERM/SIGINT, parent-pipe close and the
       // ppid-reparent poll in bin.ts all call `handle.stop()`.
       beginTerminalShutdown()
+      await composition.closeErasures()
       // The idle sweep must not arm countdowns on sessions being torn down.
       stopIdleChecker()
       // Kill the pool's pre-booted agents (billable, and nothing can adopt them once

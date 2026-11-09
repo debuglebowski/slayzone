@@ -25,6 +25,7 @@
     "@slayzone/chat-runtime": "workspace:*",
     "@slayzone/computer-transport": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/file-editor": "workspace:*",

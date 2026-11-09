@@ -88,6 +88,28 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
+it('task erasure stops its processes and clears buffers while preserving another task', async () => {
+  const { ctx } = makeCtx(roots)
+  const proc = createProcHandlers(ctx)
+  try {
+    for (const id of ['alice', 'bob'])
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: id,
+        taskId: id,
+        command: process.execPath,
+        args: ['-e', 'setInterval(()=>{},1000)'],
+        cwd: dir
+      })
+    await proc.stopTask('alice')
+    const result = (await proc.handlers[ProcMethods.procList]({})) as {
+      sessions: Array<{ sessionId: string }>
+    }
+    expect(result.sessions.map((s) => s.sessionId)).toEqual(['bob'])
+  } finally {
+    proc.disposeAll()
+  }
+})
+
 describe('createProcHandlers — proc.spawn streaming', () => {
   it('streams stdout then emits proc.exit(0) for a short-lived command', async () => {
     const { notifies, ctx } = makeCtx(roots)

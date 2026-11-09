@@ -323,7 +323,7 @@ export interface RestApiDeps {
     disable: (
       email: string
     ) => Promise<'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'>
-    enable: (email: string) => Promise<'ok' | 'not-found' | 'protected'>
+    enable: (email: string) => Promise<'ok' | 'not-found' | 'protected' | 'erasure-in-progress'>
     /** `sso-managed`: the Entra setup's app role (IdP-role mode off). `idp-managed`:
      *  the IdP-role mode — 409 ROLES_MANAGED_BY_IDP. */
     setRole: (

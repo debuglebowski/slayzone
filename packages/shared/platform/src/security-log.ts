@@ -68,6 +68,10 @@ export const SECURITY_EVENTS = [
   'user.enable',
   /** Includes the boot-time first-admin promotion (`detail.reason: 'first_admin'`). */
   'user.role_change',
+  'content.erase.started',
+  'content.erase.completed',
+  'content.erase.incomplete',
+  'content.erase.computer-confirmed',
   // The IdP-role mode (hub-auth `idp-roles.ts`): the shared contract's audit events
   // (@normain/idp-role-contract `AuditEventName`), one name for every service. `detail`
   // is the contract's AuditEvent: service, actor, subject, source, previousGrants,
@@ -199,6 +203,7 @@ export type SecurityLevel = 'info' | 'warn' | 'error'
 
 /** What an event acted on. */
 export type SecurityTargetKind =
+  | 'erasure'
   | 'session'
   | 'web_session'
   | 'user'

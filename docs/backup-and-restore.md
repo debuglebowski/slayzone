@@ -22,6 +22,8 @@ on Windows the same folders under the user profile).
 
 ## Rules
 
+- **Reapply prior erasures before reopening restored data.** Keep receipts outside the restored backup set and follow [Permanent deletion](user-data-erasure.md#restore-procedure-and-precise-guarantee). This is an operator procedure; restoring a snapshot does not automatically replay later erasures.
+
 - **Stop the hub first**, then copy `<ROOT>` (or snapshot the volume). A copy of a
   live SQLite file without its `-wal` is not a backup.
 - **Forward only.** Migrations have no `down`. A build refuses to start on a DB
@@ -90,7 +92,7 @@ that hub. Unset or `0` keeps content until explicit deletion. A positive whole
 number enables a sweep shortly after connection/startup and then daily. Each
 computer persists its last configured policy for offline operation. Expiry removes
 old saved chat content, invalidates derived pages and collects unreferenced sealed
-attachments. Live agents, in-flight operations, Trash and unfinished migrations
+attachments. Live agents, in-flight operations, archived tasks and unfinished migrations
 defer pruning. Original task files remain; backups follow their separate retention
 policy. Existing hub backups remain under their original retention rules.
 

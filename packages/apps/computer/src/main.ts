@@ -332,6 +332,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   })
   // Chat agents (proc.spawn with an admission lane) share the pty agents' start queue.
   const proc = createProcHandlers(ctx, deps.getProjectPaths, {
+    assertTaskActive: (taskId) => chat.assertTaskActive(taskId),
     ...(deps.admission ? { admission: deps.admission } : {}),
     // The computer's protected runtime dir: no hub frame can read or rewrite it.
     groupLedgerPath: join(
@@ -349,7 +350,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     getProjectPaths: deps.getProjectPaths ?? (() => null),
     admission: deps.admission,
     hasTaskWork: pty.hasTaskWork,
-    stopTask: pty.stopTask
+    stopTask: async (taskId, state) => {
+      await pty.stopTask(taskId, state)
+      if (state === 'deleted') {
+        await proc.stopTask(taskId)
+        await deps.dialer.forgetTaskEvents?.(taskId)
+      }
+    }
   })
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {

@@ -63,6 +63,18 @@ run_harness packages/domains/task/src/server/ops/conversation-id-heal.test.ts
 run_harness packages/domains/task/src/server/conversation-healer.test.ts
 run_harness packages/domains/task/src/server/ops/task-conversations.test.ts
 run_harness packages/domains/task/src/server/ops/startup-purge.test.ts
+run_harness packages/domains/task/src/server/ops/permanent-delete.test.ts
+run_harness packages/domains/content-erasure/src/server/erasure.test.ts
+run_harness packages/domains/task-artifacts/src/server/permanent-delete.test.ts
+run_harness packages/domains/content-erasure/src/server/admin.test.ts
+run_harness packages/domains/content-erasure/src/server/restore.test.ts
+run_harness packages/domains/content-erasure/src/server/router.test.ts
+run_harness packages/domains/chat-runtime/src/server/computer-erasure.test.ts
+run_harness packages/domains/diagnostics/src/server/content-erasure.test.ts
+run_harness packages/apps/computer/src/offline-erasure.test.ts
+run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
+run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
+run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
 run_harness packages/domains/task/src/server/artifact-watcher.test.ts
 # v147 first-class agent-session entity — new resolver parity vs the v145 ledger.
 run_harness packages/domains/task/src/server/ops/agent-sessions.test.ts

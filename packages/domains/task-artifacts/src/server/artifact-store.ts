@@ -2,7 +2,6 @@ import path from 'node:path'
 import {
   existsSync,
   readFileSync,
-  unlinkSync,
   rmSync,
   statSync,
   mkdtempSync,
@@ -26,6 +25,7 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
 import { VersionError } from './errors'
+import { eraseContent } from '@slayzone/content-erasure/server'
 import { cleanupTaskWorkingCopies, workingCopyJournalDir } from './working-copy'
 import {
   artifactFilePathIn,
@@ -202,9 +202,9 @@ export function createArtifactStore(dataDir: string) {
     async deleteArtifact(db: SlayzoneDb, id: string): Promise<boolean> {
       const existing = await getRow(db, id)
       if (!existing) return false
-      const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-      if (existsSync(filePath)) unlinkSync(filePath)
-      await db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
+      const report = await eraseContent(db, dataDir, { kind: 'artifacts', ids: [id] })
+      if (report.state !== 'complete')
+        throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
       return true
     },
 

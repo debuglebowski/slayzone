@@ -865,12 +865,11 @@ test('reorder: sets order column', async () => {
 // ===========================================================================
 // db:tasks:delete
 // ===========================================================================
-test('delete: soft-deletes task (still readable, hidden from getAll)', async () => {
+test('delete: permanently removes task and its read paths', async () => {
   const t = await createTask('ToDelete')
   expect(await caller.delete({ id: t.id })).toBe(true)
   const deleted = await caller.get({ id: t.id })
-  expect(deleted).toBeTruthy()
-  expect((deleted as { deleted_at?: string | null }).deleted_at).toBeTruthy()
+  expect(deleted).toBeNull()
   const visible = await caller.getAll()
   expect(visible.some((task) => task.id === t.id)).toBe(false)
 })
@@ -1002,12 +1001,12 @@ test('onMutation: does not fire on failed delete', async () => {
   expect(mutCount).toBe(0)
 })
 
-test('onMutation: fires on restore', async () => {
+test('onMutation: does not fire when restore cannot undo permanent deletion', async () => {
   const t = await reMk('MutRestore')
   await caller.delete({ id: t.id })
   mutCount = 0
-  await caller.restore({ id: t.id })
-  expect(mutCount).toBe(1)
+  await expect(caller.restore({ id: t.id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  expect(mutCount).toBe(0)
 })
 
 test('onMutation: fires on archive', async () => {

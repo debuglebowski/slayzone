@@ -34,6 +34,7 @@ export const TOMBSTONE_MAX = 64
 export const CARRY_WINDOW_MS = 60_000
 
 export interface ExitTombstone {
+  taskId?: string
   spawnId?: string
   pid?: number
   exitCode: number | null
@@ -54,6 +55,11 @@ interface Stored extends ExitTombstone {
 
 export class ExitTombstones {
   private readonly bySession = new Map<string, Stored>()
+  forgetTask(taskId: string): void {
+    for (const [id, t] of this.bySession)
+      if (t.taskId === taskId || id === taskId || id.startsWith(taskId + ':'))
+        this.bySession.delete(id)
+  }
 
   add(sessionId: string, tombstone: ExitTombstone): void {
     // Re-insert so iteration order stays oldest-first for eviction.

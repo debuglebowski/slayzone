@@ -49,7 +49,7 @@ describe('mcp delete_task', () => {
     expect(stub.get('delete_task')!.description.length).toBeGreaterThan(0)
   })
 
-  test('happy: soft-deletes; emits taskEvents', async () => {
+  test('happy: permanently deletes; emits taskEvents', async () => {
     const id = seedTask()
     __resetIpcEmitCalls()
     const spy = spyTaskEvents(taskEvents, 'task:deleted')
@@ -66,7 +66,7 @@ describe('mcp delete_task', () => {
     const row = h.db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
       deleted_at: string | null
     }
-    expect(row.deleted_at !== null).toBe(true)
+    expect(row).toBeUndefined()
     expect(spy.calls.length).toBe(1)
     expect(notifyCount).toBeGreaterThanOrEqual(1)
   })
@@ -81,7 +81,7 @@ describe('mcp delete_task', () => {
     expect(res.content[0].text.includes('not found')).toBe(true)
   })
 
-  test('blocked: linked_to_provider returns isError + does NOT soft-delete', async () => {
+  test('blocked: linked_to_provider returns isError + does not delete', async () => {
     const id = seedTask()
     const connId = crypto.randomUUID()
     h.db

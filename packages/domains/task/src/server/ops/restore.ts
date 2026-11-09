@@ -12,6 +12,9 @@ export async function restoreTaskOp(
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
+  // Old clients cannot turn a partially completed permanent erasure back into
+  // live content. Items migrated from old Trash are restored via Archive instead.
+  if (await db.get('SELECT 1 FROM content_erasure_tasks WHERE task_id=?', [id])) return null
   // Read project_id up-front so the restore event can be built before the write —
   // lets the UPDATE + event recording commit atomically via the `task:update` named
   // transaction (the restored event only needs id + project_id).

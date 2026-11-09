@@ -586,7 +586,7 @@ export async function cleanupTaskFull(
   taskId: string,
   batchIds: string[] = [taskId],
   /** The purge of a task whose computer is gone for good: there is no one to ask. */
-  opts: { skipWorktree?: boolean } = {}
+  opts: { skipWorktree?: boolean; preserveArtifacts?: boolean } = {}
 ): Promise<WorktreeCleanup> {
   // Resolved first: an id that is not one plain path segment (`..` named the data dir)
   // is refused (`UnsafePathError`) before anything is killed or removed. getDataRoot()
@@ -596,7 +596,10 @@ export async function cleanupTaskFull(
   runtimeAdapters.removeTaskProcesses(taskId)
   // Clean up artifact files on disk.
   // HUB storage, not workspace: never routed to a computer (see hubPathExists).
-  if (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir)) {
+  if (
+    !opts.preserveArtifacts &&
+    (await runtimeAdapters.worktrees.hubPathExists(artifactsBaseDir))
+  ) {
     await runtimeAdapters.worktrees.removeArtifactDir(artifactsBaseDir)
   }
 

@@ -13,6 +13,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/terminal": "workspace:*",

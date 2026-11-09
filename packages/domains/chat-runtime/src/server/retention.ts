@@ -17,6 +17,7 @@ export interface ChatRetentionReport {
 
 /** Durable per-hub policy. Foreground calls and cold-history pruning never overlap. */
 export function createChatRetention(opts: {
+  automatic?: boolean
   storage: ChatStorage
   local: ReturnType<typeof createLocalChatData>
   busy(owner: ChatOwnership): boolean
@@ -41,7 +42,7 @@ export function createChatRetention(opts: {
   function schedule(delay = DAY) {
     if (timer) clearTimeout(timer)
     timer = null
-    if (!stopped && days > 0) {
+    if (!stopped && opts.automatic !== false && days > 0) {
       timer = setTimeout(() => {
         void runNow()
           .catch(() => {

@@ -1,0 +1,32 @@
+{
+  "name": "@slayzone/content-erasure",
+  "version": "0.38.2",
+  "private": true,
+  "type": "module",
+  "main": "./src/shared/index.ts",
+  "types": "./src/shared/index.ts",
+  "exports": {
+    ".": "./src/shared/index.ts",
+    "./server": "./src/server/index.ts",
+    "./admin": "./src/server/admin.ts",
+    "./db": "./src/server/worker-db.ts",
+    "./router": "./src/server/router.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@slayzone/db-migrations": "workspace:*",
+    "@slayzone/platform": "workspace:*",
+    "@slayzone/trpc-server": "workspace:*",
+    "@trpc/server": "^11.19.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@slayzone/test-utils": "workspace:*",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.2",
+    "better-sqlite3": "^13.0.3",
+    "vitest": "^5.0.5"
+  }
+}

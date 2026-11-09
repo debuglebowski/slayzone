@@ -934,8 +934,23 @@ export function useTasksData(): UseTasksDataReturn {
   const deleteTask = useCallback(
     async (taskId: string) => {
       const c = clientForTask(taskId)
+      const result = await c.task.delete.mutate({ id: taskId })
+      if (typeof result === 'object' && 'blocked' in result) {
+        toast.error('Unlink this task from its external provider before deleting it.')
+        throw new Error('Task is linked to an external provider.')
+      }
+      if (result === false) throw new Error('Task was not deleted.')
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
-      await c.task.delete.mutate({ id: taskId })
+      if (typeof result === 'object' && 'incomplete' in result) {
+        const computers = result.erasure.computers
+          .filter((computer) => !computer.deleted)
+          .map((computer) => computer.name)
+        toast.warning(
+          computers.length
+            ? `Data on ${computers.join(', ')} has not been deleted yet.`
+            : 'Some data has not been deleted. Cleanup will retry.'
+        )
+      } else toast.success('Task permanently deleted.')
     },
     [clientForTask]
   )
@@ -950,9 +965,24 @@ export function useTasksData(): UseTasksDataReturn {
         removed = prev.filter((t) => idSet.has(t.id))
         return prev.filter((t) => !idSet.has(t.id))
       })
-      const outcome = await runPerHub(taskIds, ownedTasks(), defaultHubId, clientForHub, (c, ids) =>
-        c.task.deleteMany.mutate({ ids })
+      let incomplete = false
+      const blockedIds = new Set<string>()
+      const outcome = await runPerHub(
+        taskIds,
+        ownedTasks(),
+        defaultHubId,
+        clientForHub,
+        async (c, ids) => {
+          const result = await c.task.deleteMany.mutate({ ids })
+          for (const id of result.blockedIds) blockedIds.add(id)
+          if (result.erasure?.state === 'incomplete') incomplete = true
+          return result
+        }
       )
+      for (const id of blockedIds) outcome.failedIds.add(id)
+      if (blockedIds.size)
+        if (outcome.error === undefined)
+          outcome.error = new Error('Unlink tasks from their external provider first.')
       if (outcome.failedIds.size > 0) {
         setTasks((prev) => {
           const present = new Set(prev.map((t) => t.id))
@@ -961,6 +991,10 @@ export function useTasksData(): UseTasksDataReturn {
         })
         toastBulkFailure('delete', taskIds.length, outcome)
       }
+      if (incomplete)
+        toast.warning('Some data has not been deleted. Check cleanup status in Settings → Hubs.')
+      else if (outcome.failedIds.size < taskIds.length)
+        toast.success(`${taskIds.length - outcome.failedIds.size} tasks permanently deleted.`)
       return taskIds.filter((id) => !outcome.failedIds.has(id))
     },
     [clientForHub, defaultHubId]

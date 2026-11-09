@@ -707,6 +707,7 @@ export function createPtyHandlers(
     void session.history?.close()
     if (session.replacing) {
       tombstones.add(session.id, {
+        taskId: session.taskId,
         spawnId: session.spawnId,
         pid: session.proc.pid,
         exitCode,
@@ -730,6 +731,7 @@ export function createPtyHandlers(
       ...(reason ? { reason } : {})
     })
     tombstones.add(session.id, {
+      taskId: session.taskId,
       spawnId: session.spawnId,
       pid: session.proc.pid,
       exitCode,
@@ -1230,6 +1232,7 @@ export function createPtyHandlers(
         reason: 'killed-before-start'
       })
       tombstones.add(params.sessionId, {
+        taskId: pending.taskId,
         spawnId: pending.spawnId,
         exitCode: null,
         signal: params.signal ?? 'SIGHUP',
@@ -1605,6 +1608,7 @@ export function createPtyHandlers(
       )
       await Promise.allSettled(waiting.map(([, s]) => s.promise))
       if (purge) await options.history?.forgetTask(taskId)
+      if (state === 'deleted') tombstones.forgetTask(taskId)
     },
     handlers,
     disposeAll,

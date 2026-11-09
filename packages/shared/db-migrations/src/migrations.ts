@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { CONTENT_ERASURE_SCHEMA, CONTENT_ERASURE_ARTIFACT_FENCES } from './content-erasure-schema'
 // eslint-disable-next-line no-restricted-imports -- boot-time DB migration, finishes before the hub serves anything.
 import { spawnSync } from 'node:child_process'
 import { gitCommand } from '@slayzone/platform/resolve-command'
@@ -4771,6 +4772,107 @@ export const migrations: Migration[] = [
       // (worktrees made before this, linked by hand): the task's computer, as before.
       // Kept when that computer is deleted, so the purge sees it is gone.
       db.exec('ALTER TABLE tasks ADD COLUMN worktree_computer_id TEXT DEFAULT NULL')
+    }
+  },
+  {
+    version: 198,
+    up(db) {
+      db.exec(CONTENT_ERASURE_SCHEMA)
+      db.exec(CONTENT_ERASURE_ARTIFACT_FENCES)
+      // Sealed legacy chat copies are independent consumers of immutable bytes.
+      // Their pins must outlive deletion/pruning of the original artifact and be
+      // respected by every GC path, not only the new erasure operation.
+      for (const spec of [
+        {
+          table: 'chat_attachment_messages',
+          owner: 'task_id',
+          token: 'message_id',
+          document: 'attachments',
+          scope: 'legacy-chat-reference',
+          task: (row: string) => `${row}.task_id`
+        },
+        {
+          table: 'chat_events',
+          owner: 'tab_id',
+          token: 'seq',
+          document: 'event',
+          scope: 'legacy-chat-event',
+          task: (row: string) => `(SELECT task_id FROM terminal_tabs WHERE id=${row}.tab_id)`
+        }
+      ]) {
+        const source = (row: string, from = '') =>
+          `SELECT ${row}.${spec.owner} AS owner,CAST(${row}.${spec.token} AS TEXT) AS token,${row}.${spec.document} AS document,${spec.task(row)} AS task_id ${from}`
+        const pin = (
+          select: string
+        ) => `INSERT OR IGNORE INTO artifact_blob_pins(scope,owner_id,token,reference_key,task_id,artifact_id,owner_epoch,content_hash,size)
+          SELECT '${spec.scope}',r.owner,r.token,j.fullkey,r.task_id,
+            COALESCE(json_extract(r.document,substr(j.fullkey,1,length(j.fullkey)-12)||'.artifactId'),'__sealed__'),
+            1,j.atom,COALESCE(json_extract(r.document,substr(j.fullkey,1,length(j.fullkey)-12)||'.size'),(SELECT size FROM artifact_blobs WHERE hash=j.atom),0)
+          FROM (${select}) r,json_tree(CASE WHEN json_valid(r.document) THEN r.document ELSE '{}' END) j
+          WHERE r.task_id IS NOT NULL AND j.key='contentHash' AND j.type='text'
+            AND length(j.atom)=64 AND j.atom NOT GLOB '*[^a-f0-9]*';`
+        const release = `DELETE FROM artifact_blob_pins WHERE scope='${spec.scope}' AND owner_id=OLD.${spec.owner} AND token=CAST(OLD.${spec.token} AS TEXT);`
+        db.exec(`CREATE TRIGGER ${spec.table}_sealed_pins_insert AFTER INSERT ON ${spec.table} BEGIN ${pin(source('NEW'))} END;
+          CREATE TRIGGER ${spec.table}_sealed_pins_update AFTER UPDATE ON ${spec.table} BEGIN ${release} ${pin(source('NEW'))} END;
+          CREATE TRIGGER ${spec.table}_sealed_pins_delete AFTER DELETE ON ${spec.table} BEGIN ${release} END;`)
+        db.exec(pin(source('s', `FROM ${spec.table} s`)))
+      }
+      db.exec(`
+        CREATE TRIGGER erased_task_cannot_return BEFORE INSERT ON tasks
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks WHERE task_id=NEW.id)
+          BEGIN SELECT RAISE(ABORT,'Task was permanently erased'); END;
+        CREATE TRIGGER erasing_task_has_no_new_artifacts BEFORE INSERT ON task_artifacts
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks t JOIN content_erasure_jobs j ON j.id=t.job_id WHERE t.task_id=NEW.task_id AND j.db_erased=0)
+          BEGIN SELECT RAISE(ABORT,'Task is being permanently erased'); END;
+        CREATE TRIGGER erasing_task_has_no_updated_artifacts BEFORE UPDATE ON task_artifacts
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks t JOIN content_erasure_jobs j ON j.id=t.job_id WHERE t.task_id=NEW.task_id AND j.db_erased=0)
+          BEGIN SELECT RAISE(ABORT,'Task is being permanently erased'); END;
+      `)
+      // Preserve existing recoverable items when Trash is removed. Updating both
+      // columns together keeps computer lifecycle paused, never active.
+      db.exec(`UPDATE tasks SET archived_at=COALESCE(archived_at,deleted_at),deleted_at=NULL
+        WHERE deleted_at IS NOT NULL`)
+      // A late agent hook/editor save must not recreate erased content. Delivery
+      // metadata is exempt: offline computers still need their deletion fences.
+      const delivery = new Set([
+        'chat_task_lifecycle',
+        'chat_task_computers',
+        'chat_lifecycle_acks',
+        'chat_ownership',
+        'chat_deletion_targets',
+        'chat_tab_bindings',
+        'chat_provider_bindings',
+        'chat_metadata_progress',
+        'chat_bootstrap_reservations',
+        'chat_unavailable_owners',
+        'chat_folder_deletions',
+        'chat_folder_deletion_acks'
+      ])
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .all() as Array<{ name: string }>
+      for (const { name } of tables) {
+        if (name.startsWith('content_erasure_') || delivery.has(name) || name === 'tasks') continue
+        const quoted = '"' + name.replaceAll('"', '""') + '"'
+        const columns = new Set(
+          (db.prepare(`PRAGMA table_info(${quoted})`).all() as Array<{ name: string }>).map(
+            (c) => c.name
+          )
+        )
+        for (const action of ['INSERT', 'UPDATE']) {
+          if (name === 'task_artifacts' && action === 'UPDATE') continue
+          const conditions: string[] = []
+          if (columns.has('task_id'))
+            conditions.push('EXISTS(SELECT 1 FROM content_erasure_tasks WHERE task_id=NEW.task_id)')
+          if (columns.has('tab_id'))
+            conditions.push('EXISTS(SELECT 1 FROM content_erasure_tabs WHERE tab_id=NEW.tab_id)')
+          if (!conditions.length) continue
+          const trigger =
+            '"content_erasure_' + name.replaceAll('"', '""') + '_' + action.toLowerCase() + '"'
+          db.exec(`CREATE TRIGGER ${trigger} BEFORE ${action} ON ${quoted} WHEN ${conditions.join(' OR ')}
+            BEGIN SELECT RAISE(ABORT,'Content was permanently erased'); END;`)
+        }
+      }
     }
   }
 ]

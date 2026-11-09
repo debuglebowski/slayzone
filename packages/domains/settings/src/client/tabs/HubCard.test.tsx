@@ -89,6 +89,8 @@ const editRootsSpy = vi.fn(
 let renderingHubId = 'local'
 
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
+vi.mock('./HubUsersSection', () => ({ HubUsersSection: () => null }))
+
 vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({
   // Live status pushes are wired in the component; these tests drive the list

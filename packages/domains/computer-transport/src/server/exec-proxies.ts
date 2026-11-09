@@ -2310,6 +2310,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           // its own (the hub used to, against its own pids).
           reapGroupOnExit: true
         }),
+      ...(spec.taskId ? { taskId: spec.taskId } : {}),
       // After the override: the idempotency key is the transport's, not the
       // caller's — see `spawnIdField` in frames.ts.
       spawnId

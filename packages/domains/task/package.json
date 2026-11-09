@@ -39,6 +39,7 @@
     "@milkdown/core": "^7.22.3",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/editor": "workspace:*",

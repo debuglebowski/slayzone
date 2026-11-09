@@ -265,6 +265,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../../domains/computers
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../../domains/content-erasure
       '@slayzone/db-migrations':
         specifier: workspace:*
         version: link:../../shared/db-migrations
@@ -901,6 +904,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../../domains/computers
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../../domains/content-erasure
       '@slayzone/db-migrations':
         specifier: workspace:*
         version: link:../../shared/db-migrations
@@ -1600,6 +1606,9 @@ importers:
 
   packages/domains/chat-runtime:
     dependencies:
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../content-erasure
       '@slayzone/platform':
         specifier: workspace:*
         version: link:../../shared/platform
@@ -1709,6 +1718,40 @@ importers:
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@24.19.2)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/domains/content-erasure:
+    dependencies:
+      '@slayzone/db-migrations':
+        specifier: workspace:*
+        version: link:../../shared/db-migrations
+      '@slayzone/platform':
+        specifier: workspace:*
+        version: link:../../shared/platform
+      '@slayzone/trpc-server':
+        specifier: workspace:*
+        version: link:../../shared/trpc-server
+      '@trpc/server':
+        specifier: ^11.19.0
+        version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-beta)
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@slayzone/test-utils':
+        specifier: workspace:*
+        version: link:../../shared/test-utils
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -2187,6 +2230,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../computers
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../content-erasure
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs
@@ -2318,6 +2364,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../computers
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../content-erasure
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -2580,6 +2629,9 @@ importers:
       '@slayzone/computers':
         specifier: workspace:*
         version: link:../computers
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../content-erasure
       '@slayzone/diagnostics':
         specifier: workspace:*
         version: link:../diagnostics
@@ -2701,6 +2753,12 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.15
         version: 6.43.15
+      '@slayzone/content-erasure':
+        specifier: workspace:*
+        version: link:../content-erasure
+      '@slayzone/db-migrations':
+        specifier: workspace:*
+        version: link:../../shared/db-migrations
       '@slayzone/editor':
         specifier: workspace:*
         version: link:../../shared/editor

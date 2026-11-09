@@ -10,6 +10,7 @@ import type {
   UpdateProjectInput
 } from '@slayzone/projects-contracts'
 import { deleteProjectPlacements } from '@slayzone/computers/server'
+import { eraseContent } from '@slayzone/content-erasure/server'
 import {
   defaultProjectRoot,
   parseColumnsConfig,
@@ -327,7 +328,11 @@ export async function deleteProject(
   id: string,
   iconsDir: string
 ): Promise<boolean> {
-  const result = await db.run('DELETE FROM projects WHERE id = ?', [id])
+  const existing = await db.get('SELECT 1 FROM projects WHERE id=?', [id])
+  if (!existing) return false
+  const report = await eraseContent(db, path.dirname(iconsDir), { kind: 'projects', ids: [id] })
+  if (report.state !== 'complete')
+    throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
   // No foreign key on `project_placements`: its rows go explicitly.
   await deleteProjectPlacements(db, id)
   // A per-user key (see `settingScope`): global on a hub without login, one row
@@ -335,7 +340,7 @@ export async function deleteProject(
   await db.run('DELETE FROM settings WHERE key = ?', [`commit_graph:project:${id}`])
   await db.run('DELETE FROM user_settings WHERE key = ?', [`commit_graph:project:${id}`])
   unlinkProjectIconFiles(iconsDir, id)
-  return result.changes > 0
+  return true
 }
 
 export async function uploadProjectIcon(

@@ -21,6 +21,7 @@
     "@slayzone/automations": "workspace:*",
     "@slayzone/chat-runtime": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/db-migrations": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/feedback": "workspace:*",
