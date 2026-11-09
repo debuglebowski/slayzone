@@ -19,6 +19,7 @@ export { setTaskDeps, getTaskOps } from './task-router-deps'
 export {
   setMainAgentDeps,
   resolveMainAgentLaunch,
+  resolveChatAgentLaunch,
   startMainAgent,
   switchMainAgentMode,
   type SwitchMainAgentModeInput,

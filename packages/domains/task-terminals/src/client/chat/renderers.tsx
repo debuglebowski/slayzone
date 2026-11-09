@@ -347,7 +347,11 @@ export function InterruptedBlock({
       <span>
         {item.reason === 'already-in-conversation'
           ? `Not run again: ${provider.agent} already had this message`
-          : 'Turn interrupted'}
+          : item.reason === 'watchdog'
+            ? 'Turn interrupted by SlayZone watchdog'
+            : item.reason === 'stop-request'
+              ? 'Turn stopped by request'
+              : 'Turn interrupted'}
       </span>
     </div>
   )

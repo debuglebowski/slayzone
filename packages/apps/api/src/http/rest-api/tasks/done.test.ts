@@ -14,6 +14,15 @@ import {
 } from '../../../../../../shared/test-utils/mock-electron.js'
 import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
 import { tmpdir } from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { resolve, join } from 'node:path'
+import {
+  onTaskReachedTerminal,
+  setTaskAgentsStopper,
+  stopTaskAgents
+} from '@slayzone/terminal/server'
 import { registerDoneTaskRoute } from './done.js'
 
 const h = await createTestHarness()
@@ -117,6 +126,51 @@ type DoneBody = {
 }
 
 describe('POST /api/tasks/:id/done', () => {
+  test('CLI self-completion signals status completion, including repeat done; explicit stop stays distinct', async () => {
+    const id = seedTask()
+    h.db.prepare("UPDATE tasks SET agent_id='codex-chat' WHERE id=?").run(id)
+    const root = mkdtempSync(join(tmpdir(), 'slay-self-done-'))
+    const stops: Array<[string, string]> = []
+    setTaskAgentsStopper((taskId, reason) => {
+      stops.push([taskId, reason])
+    })
+    configureTaskRuntimeAdapters({
+      getDataRoot: () => root,
+      onReachedTerminal: onTaskReachedTerminal
+    })
+    try {
+      for (let i = 0; i < 2; i++) {
+        await promisify(execFile)(
+          process.execPath,
+          [resolve(import.meta.dirname, '../../../../../cli/dist/slay.js'), 'tasks', 'done'],
+          {
+            env: {
+              ...process.env,
+              ELECTRON_RUN_AS_NODE: '1',
+              SLAYZONE_ROOT: root,
+              SLAYZONE_DEV: '1',
+              SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`,
+              SLAYZONE_TASK_ID: id
+            }
+          }
+        )
+      }
+      expect(stops).toEqual([
+        [id, 'terminal-status'],
+        [id, 'terminal-status']
+      ])
+      expect(h.db.prepare('SELECT status FROM tasks WHERE id=?').get(id)).toEqual({
+        status: 'done'
+      })
+      await stopTaskAgents(id)
+      expect(stops.at(-1)).toEqual([id, 'explicit-stop'])
+    } finally {
+      configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
+      setTaskAgentsStopper(() => {})
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test('happy: writes the project default-columns done status + dual-emits', async () => {
     const id = seedTask()
     reset()

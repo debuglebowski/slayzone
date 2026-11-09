@@ -1,6 +1,7 @@
 import { defaultChatTransport, type ChatTransport } from './chat-transport-manager'
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { ChatCreateOpts } from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
@@ -124,14 +125,6 @@ export interface ChatHandlerOpts {
   conversations?: import('./live-conversations').ConversationRegistry
   sessionReader?: ClaudeSessionReader
   notifyQueueChanged?: (tabId: string) => void
-}
-
-interface ChatCreateOpts {
-  tabId: string
-  taskId: string
-  mode: string
-  cwd: string
-  providerFlagsOverride?: string | null
 }
 
 /** What started an agent: a user action (default) or a workspace restore. */

@@ -904,6 +904,23 @@ class CodexChatSession implements ChatSessionDriver {
     this.client?.handleLine(line)
   }
 
+  async probeLiveness(timeoutMs: number): Promise<boolean> {
+    if (!this.client || !this.threadId || !this.handshakeDone || this.disposed) return false
+    const threadId = this.threadId
+    try {
+      // Reasoning need not emit deltas. Reading the loaded thread checks the
+      // app-server without resuming, steering, or cancelling its running turn.
+      const reply = await this.client.request<{ thread?: { id?: string } }>(
+        'thread/read',
+        { threadId, includeTurns: false },
+        timeoutMs
+      )
+      return reply.thread?.id === threadId
+    } catch {
+      return false
+    }
+  }
+
   sendUserMessage(text: string): void {
     if (!this.handshakeDone) {
       this.queued.push({ text })

@@ -25,6 +25,7 @@ const ptySession = `${ptyTask}:${ptyTask}`
 
 let calls: unknown[][] = []
 let chatStatus: ChatTurnStatus | null = null
+let chatMode: 'claude-chat' | 'codex-chat' = 'claude-chat'
 let ptyState: TerminalState = 'running'
 let ptyLive = true
 const stateCbs = new Set<(s: TerminalState) => void>()
@@ -56,7 +57,7 @@ const chat: ChatAccess = {
       taskId,
       tabId: taskId,
       sessionId: `${taskId}:${taskId}`,
-      mode: taskId === ptyTask ? 'claude-code' : 'claude-chat',
+      mode: taskId === ptyTask ? 'claude-code' : chatMode,
       kind: taskId === ptyTask ? 'pty' : 'chat',
       props: {} as never,
       providerFlagsOverride: null,
@@ -92,6 +93,7 @@ afterAll(async () => {
 })
 beforeEach(() => {
   calls = []
+  chatMode = 'claude-chat'
   chatStatus = { state: 'idle', turnOpen: false, pendingRequestIds: [], outboxInFlight: 0 }
   ptyState = 'running'
   ptyLive = true
@@ -100,6 +102,23 @@ beforeEach(() => {
 type Ok<T> = { ok: true; data: T }
 
 describe('a chat task', () => {
+  test.each(['claude-chat', 'codex-chat'] as const)(
+    'send to running %s only queues; never restarts or interrupts',
+    async (mode) => {
+      chatMode = mode
+      chatStatus = { state: 'running', turnOpen: true, pendingRequestIds: [], outboxInFlight: 0 }
+      const res = await rest.request<Ok<{ started: boolean }>>(
+        'POST',
+        `/api/agent/${chatTask}/send`,
+        { text: 'next' }
+      )
+      expect(res.status).toBe(200)
+      expect(res.body.data.started).toBe(false)
+      expect(calls).toEqual([['chat.push', chatTask, 'next']])
+      expect(chatStatus).toMatchObject({ state: 'running', turnOpen: true })
+    }
+  )
+
   test('send queues into the chat; status/wait read the turn', async () => {
     const sent = await rest.request<Ok<{ kind: string }>>('POST', `/api/agent/${chatTask}/send`, {
       text: 'go'

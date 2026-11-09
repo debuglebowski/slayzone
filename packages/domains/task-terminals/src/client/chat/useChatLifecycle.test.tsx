@@ -29,6 +29,7 @@ const m = vi.hoisted(() => {
   const settingsGet = vi.fn<SettingsGet>()
   const recordClientEvent = vi.fn<RecordClientEvent>()
   return {
+    hubAllows: vi.fn<(client: unknown, path: string) => Promise<boolean>>(),
     settingsGet,
     recordClientEvent,
     toast: vi.fn(),
@@ -43,6 +44,7 @@ const m = vi.hoisted(() => {
 
 vi.mock('../trpc', () => ({ useTRPCClient: () => m.client }))
 vi.mock('@slayzone/ui', () => ({ toast: m.toast }))
+vi.mock('@slayzone/transport/client', () => ({ hubAllows: m.hubAllows }))
 
 import { useChatLifecycle, type UseChatLifecycleOpts } from './useChatLifecycle'
 import { chatsLoadingCount } from './chat-loading'
@@ -147,6 +149,7 @@ async function unhandledRejectionsDuring(fn: () => Promise<void>): Promise<unkno
 }
 
 beforeEach(() => {
+  m.hubAllows.mockReset().mockResolvedValue(true)
   m.settingsGet.mockReset().mockResolvedValue('auto')
   m.recordClientEvent.mockReset().mockResolvedValue(undefined)
   m.toast.mockReset()
@@ -241,6 +244,32 @@ describe('useChatLifecycle startup (non-main tab)', () => {
 })
 
 describe('useChatLifecycle startup decision', () => {
+  it.each([false, true])(
+    'skips auto-start when scope denies chat.start (main: %s)',
+    async (isMain) => {
+      m.hubAllows.mockResolvedValue(false)
+      m.settingsGet.mockResolvedValue('instant')
+      const { chatApi } = setup({ isMain, agentState: 'running' })
+      await flush()
+      expect(m.hubAllows).toHaveBeenCalledWith(m.client, 'chat.start')
+      expect(chatApi.start).not.toHaveBeenCalled()
+      expect(chatsLoadingCount()).toBe(0)
+      expect(m.toast).not.toHaveBeenCalled()
+    }
+  )
+
+  it('waits for scope discovery before auto-starting', async () => {
+    const allowed = deferred<boolean>()
+    m.hubAllows.mockReturnValue(allowed.promise)
+    const { chatApi } = setup({ agentState: 'running' })
+    await flush()
+    expect(chatApi.start).not.toHaveBeenCalled()
+    expect(chatsLoadingCount()).toBe(1)
+    await act(async () => allowed.resolve(true))
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+  })
+
   it('reads the startup setting by its key', async () => {
     setup()
     await flush()

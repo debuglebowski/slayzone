@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTRPCClient } from '../trpc'
+import { hubAllows } from '@slayzone/transport/client'
 import { toast } from '@slayzone/ui'
 import type { ChatTimelineState } from '@slayzone/terminal/client'
 import {
@@ -174,9 +175,17 @@ export function useChatLifecycle({
     autoStartedRef.current = true
     // Not cancelled on re-render: the ref makes this one-shot, so a cancelled
     // query would never start the agent (`chatApi` identity can change per render).
-    void trpcClient.settings.get
-      .query({ key: AGENT_STARTUP_SETTING })
-      .then((raw) => {
+    void Promise.all([
+      trpcClient.settings.get.query({ key: AGENT_STARTUP_SETTING }),
+      hubAllows(trpcClient, 'chat.start')
+    ])
+      .then(([raw, canStart]) => {
+        // Older hubs and narrower credentials may deny startup. Restoring a tab
+        // must not issue a forbidden spawn or leave the startup card loading.
+        if (!canStart) {
+          setStartDecision('none')
+          return
+        }
         if (!openState.isMain) {
           setStartDecision(openState.agentState === 'running' ? 'now' : 'none')
           return

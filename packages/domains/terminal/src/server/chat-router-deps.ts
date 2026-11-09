@@ -1,4 +1,10 @@
-import type { ChatComputerOps, ChatAvailability, AgentEvent } from '@slayzone/terminal-contracts'
+import type {
+  ChatComputerOps,
+  ChatAvailability,
+  AgentEvent,
+  ChatCreateOpts
+} from '@slayzone/terminal-contracts'
+import type { TrpcContext } from '@slayzone/trpc-server'
 import type { TypedEmitter } from '@slayzone/platform/events'
 import type { createChatOps } from './runtime/chat-handlers'
 import type { createChatQueueOps, ChatQueueEventMap } from './runtime/chat-queue-handlers'
@@ -32,6 +38,11 @@ export type ChatCatalog = {
   ) => Promise<Awaited<ReturnType<ReturnType<typeof createChatOps>[K]>>>
 }
 export type ChatDeps = {
+  /** Resolve and authorize stored launch settings for a non-full caller. Fail closed if absent. */
+  resolveScopedLaunch?(
+    target: { taskId: string; tabId: string },
+    ctx: TrpcContext
+  ): Promise<ChatCreateOpts>
   testing?: {
     seedEvents(tabId: string, fromSeq: number, events: Record<string, unknown>[]): Promise<void>
     readEvents(

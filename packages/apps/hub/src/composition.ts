@@ -95,6 +95,7 @@ import {
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
+  checkOwnership,
   resetAgentHookStateForTest,
   type AppDeps,
   type NotifyEventMap,
@@ -119,6 +120,7 @@ import {
   setTaskDeps,
   getTaskOp,
   resolveMainAgentLaunch,
+  resolveChatAgentLaunch,
   startMainAgent,
   type TaskRuntimeAdapters
 } from '@slayzone/task/server'
@@ -684,13 +686,11 @@ export function composeServer(opts: {
     // typecheck — unwired, it silently falls back to its no-computer default.
   } satisfies TaskRuntimeAdapters
   configureTaskRuntimeAdapters(baseTaskAdapters)
-  // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
-  // + chat transports in THIS process, plus chats owned by a computer. Callers:
-  // status→terminal (task-ops onReachedTerminal above, integrations sync/pull)
-  // and pty.killTask (closing a scratch terminal's tab). The Electron host's
-  // handler only sees its own (empty) session maps post-cutover.
-  setTaskAgentsStopper(async (taskId) => {
-    runtimeOnTaskReachedTerminal(taskId)
+  // Status completion preserves chats: an agent may mark its own task done
+  // before its turn ends. Explicit task closure still stops every agent.
+  setTaskAgentsStopper(async (taskId, reason) => {
+    runtimeOnTaskReachedTerminal(taskId, reason)
+    if (reason === 'terminal-status') return
     await computerChat.stopTask(taskId).catch(() => {
       /* Disconnected computers reconcile on reconnect. */
     })
@@ -1083,6 +1083,18 @@ export function composeServer(opts: {
   })
   setChatDeps({
     ...computerChat.relay,
+    resolveScopedLaunch: async (target, ctx) => {
+      const launch = await resolveChatAgentLaunch(db, target, (id) => getTaskOp(db, id))
+      // The first owner gate checked client input. Check the actual stored folder
+      // too: editing a task must not let a launch enter another user's project.
+      await checkOwnership({
+        ctx,
+        path: 'chat.start',
+        type: 'mutation',
+        getRawInput: async () => launch
+      })
+      return launch
+    },
     computers: computerChat.computers,
     testing: computerChat.testing,
     availability: computerChat.availability,

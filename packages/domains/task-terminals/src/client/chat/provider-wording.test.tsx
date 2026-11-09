@@ -169,3 +169,14 @@ describe('the app slash commands follow the provider', () => {
     for (const b of builtinCommands) expect(b.description).not.toMatch(/Claude/)
   })
 })
+
+describe('interruption provenance', () => {
+  it.each([
+    ['watchdog', 'Turn interrupted by SlayZone watchdog'],
+    ['stop-request', 'Turn stopped by request'],
+    [undefined, 'Turn interrupted']
+  ] as const)('labels %s without inventing a user action', (reason, label) => {
+    inCodex(renderTimelineItem({ kind: 'interrupted', reason, timestamp: 1 }, 'interruption'))
+    expect(screen.getByTestId('chat-interrupted').textContent).toBe(label)
+  })
+})
