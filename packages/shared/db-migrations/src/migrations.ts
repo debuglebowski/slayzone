@@ -5537,6 +5537,20 @@ export const migrations: Migration[] = [
          ON CONFLICT(computer_id, project_id) DO NOTHING`
       ).run(Date.now())
     }
+  },
+  {
+    version: 213,
+    up: (db) => {
+      // The per-tab session recovery queue (v201) holds terminal sessions only. v201
+      // queued chat-mode sessions too, but the recovery (hub session-tab-recovery.ts)
+      // re-attributes a session only from the `pty.create` diagnostics of the spawn
+      // that minted it, and runs only when the hub prepares a task before a terminal
+      // resume. A chat session has neither: its row could only ever settle on the main
+      // tab — which it already is — yet stayed queued forever. Found by the migration
+      // persona suite (tools/migration-personas, p08-v0380-tabs-usage).
+      // The chat modes as of this migration (CHAT_SUPPORTED_MODES), frozen.
+      db.exec(`DELETE FROM session_tab_recovery WHERE mode IN ('claude-chat', 'codex-chat')`)
+    }
   }
 ]
 
