@@ -43,7 +43,7 @@ The tool will prepend a `## <old-tag>...main` section to CHANGELOG.md. After it 
 
 ### 5. Update in-app changelog
 
-Read `packages/apps/app/src/renderer/src/components/changelog/changelog-data.json`.
+Read `packages/domains/onboarding/src/client/changelog/changelog-data.json`.
 
 Add a new entry at the top of the JSON array for the new version:
 - `version`: the new version string (without `v` prefix)
@@ -63,7 +63,7 @@ Categories:
 
 ```
 git add -A -- '*package.json'
-git add CHANGELOG.md packages/apps/app/src/renderer/src/components/changelog/changelog-data.json
+git add CHANGELOG.md packages/domains/onboarding/src/client/changelog/changelog-data.json
 git commit -m "release: v<new-version>"
 ```
 
@@ -85,8 +85,19 @@ Print a summary:
 - Number of breaking changes/features/improvements/fixes in the in-app changelog
 - Link to the GitHub Actions release run (https://github.com/debuglebowski/SlayZone/actions)
 
+### 8. Freeze a migration persona of this release
+
+Every stable release adds one persona to the migration suite (`tools/migration-personas/`, README there): this release's real build, used by a scripted user, frozen — so every future migration is tested against the data THIS release writes. Do it once CI has published the release.
+
+1. Wait until the release has its Linux build: `gh release view v<new-version> --json assets -q '.assets[].name'` lists `SlayZone-amd64.deb` and `SHA256SUMS.txt` (use the `release-monitor-ci` skill to follow CI).
+2. Copy the newest full journey to `tools/migration-personas/generate/journeys/v<new-version>-full/journey.sh`, and the newest full persona to `tools/migration-personas/personas/p<NN>-v<nodots>-full/persona.json` (next free `NN`; set `release`, `journey`, `summary` — schema = last migration number at the tag).
+3. `tools/migration-personas/generate/generate.sh p<NN>-v<nodots>-full`. If the journey fails, this release changed a CLI flag or API the journey uses: adapt the journey to the release's own source (`git show v<new-version>:<path>`), never the working tree. Stop and report if it cannot be made to work.
+4. `tools/migration-personas/run.sh --twice --update p<NN>-v<nodots>-full` — must end with "deterministic across two runs" and every line of `personas/p<NN>-…/expected/invariants.txt` `ok` or `note`. A `FAIL` is an upgrade bug in today's code: stop and report it.
+5. Commit only the persona's paths: `git commit -m "test(migrations): v<new-version> persona" -- tools/migration-personas`.
+
 ## Important
 
 - The release CI triggers on `v*` tag push — builds macOS/Linux/Windows + deploys Convex
 - All workspace manifests share one version, stamped from `packages/apps/app/package.json` by `scripts/sync-versions.mjs`. Only the app version matters to electron-builder; the rest (incl. root) are synced for consistency and enforced by `pnpm lint:versions`.
 - Always confirm with the user before running `git push`
+- The persona (step 8) is for stable releases only, never betas
