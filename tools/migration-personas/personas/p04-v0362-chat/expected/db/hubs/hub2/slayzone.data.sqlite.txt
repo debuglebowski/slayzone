@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -373,12 +373,14 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## chat_lifecycle_acks (1)
 {"task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","revision":1}
 
-## chat_metadata_progress (0)
+## chat_metadata_progress (1)
+{"conversation_id":"<new-uuid>","sequence":1,"store_id":"<new-uuid>"}
 
-## chat_metadata_receipts (0)
+## chat_metadata_receipts (1)
+{"conversation_id":"<new-uuid>","operation_id":"<new-uuid>","sequence":1,"acked":1}
 
 ## chat_ownership (1)
-{"id":"<new-uuid>","task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","tab_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","mode":"claude-chat","computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":1,"settings_hash":"<new-token>"}
+{"id":"<new-uuid>","task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","tab_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","mode":"claude-chat","computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":2,"settings_hash":"<new-token>"}
 
 ## chat_provider_transitions (0)
 
@@ -419,7 +421,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","connector_generation":1,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
 
 ## computers (1)
-{"id":"df6aac29-b0b9-40bd-a263-ed28629e901c","name":"gpu-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"aDpqvDdJAn6fESHUTc7wN93ZaQqQJlzs","last_seen_at":<run-ms>,"created_at":1794325503273,"revoked_at":null,"owner_user_id":null,"host_id":"fe113a46-0ed7-48f7-8cd0-29732225ef67","visibility":"private","disabled_at":null}
+{"id":"df6aac29-b0b9-40bd-a263-ed28629e901c","name":"gpu-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"aDpqvDdJAn6fESHUTc7wN93ZaQqQJlzs","last_seen_at":<run-ms>,"created_at":1794325503273,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -454,8 +456,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## join_tokens (1)
 {"id":"c2047013-b83d-4bbe-9521-97d3f5129459","token_hash":"832caee24088cc5eb2962c1778d0a2e6e70cd5dd23c80d682ab2b923e0e8240f","label":"gpu-box","created_at":1794325498583,"expires_at":1794326398583,"used_at":1794325503273,"computer_id":"df6aac29-b0b9-40bd-a263-ed28629e901c","minted_by_user_id":null,"owner_user_id":null}
 
-## machines (1)
-{"id":"<new-uuid>","host_id":"fe113a46-0ed7-48f7-8cd0-29732225ef67","name":null,"created_at":<run-ms>,"updated_at":<run-ms>}
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 
@@ -523,7 +524,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## task_templates (0)
 
 ## tasks (1)
-{"id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","project_id":"fcce6a7b-0f83-473d-8ff2-a0713cb580b8","title":"Chat: tune the learning rate","description":null,"status":"inbox","priority":3,"due_date":null,"created_at":"2026-11-10 15:45:38","updated_at":"2026-11-10 15:45:49","archived_at":null,"claude_session_id":null,"agent_id":"claude-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{\"chatConversationId\":\"3b58c655-4403-48bc-9c52-a6e3efa9d93c\"},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794325549138,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
+{"id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","project_id":"fcce6a7b-0f83-473d-8ff2-a0713cb580b8","title":"Chat: tune the learning rate","description":null,"status":"inbox","priority":3,"due_date":null,"created_at":"2026-11-10 15:45:38","updated_at":"2026-11-10 15:45:49","archived_at":null,"claude_session_id":null,"agent_id":"claude-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794325549138,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
 
 ## terminal_tabs (1)
 {"id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T15:45:38.086Z","group_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","agent_state":"running"}
@@ -538,7 +539,12 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## usage_cursor_handoff (0)
 
-## usage_records (0)
+## usage_records (5)
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","timestamp":"2026-11-10T15:45:47.930Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/ml","task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","source_file":"/home/persona/.claude/projects/-home-persona-repos-ml/3b58c655-4403-48bc-9c52-a6e3efa9d93c.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","timestamp":"2026-11-10T15:45:49.140Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/ml","task_id":"e562c0ee-8f43-4bb9-bb17-365cae71542e","source_file":"/home/persona/.claude/projects/-home-persona-repos-ml/3b58c655-4403-48bc-9c52-a6e3efa9d93c.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"7bb11ac0-18eb-433b-86fb-8dbfa8b277bd","timestamp":"2026-11-10T15:45:32.472Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/7bb11ac0-18eb-433b-86fb-8dbfa8b277bd.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","timestamp":"2026-11-10T15:45:21.019Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","timestamp":"2026-11-10T15:45:22.672Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1.jsonl","source_offset":0}
 
 ## user_settings (0)
 

@@ -419,7 +419,7 @@
 .local/state/slayzone/.clean-shutdown  (text)
     1794341437320
 .local/state/slayzone/.clean-shutdown.boot  (text)
-    {"ts":1794341405361,"pid":47,"version":"0.38.0"}
+    {"ts":1794341405361,"pid":"<pid>","version":"0.38.0"}
 .local/state/slayzone/.updaterId  (text)
     5911d6d5-5be9-5e58-b93e-449de549be6b
 .local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db  sha256=97e8d54f8a725510 bytes=4096

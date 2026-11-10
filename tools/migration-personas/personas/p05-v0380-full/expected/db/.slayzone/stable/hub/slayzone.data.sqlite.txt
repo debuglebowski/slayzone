@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -310,22 +310,26 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## chat_legacy_task_copies (0)
 
-## chat_lifecycle_acks (3)
+## chat_lifecycle_acks (4)
+{"task_id":"46443fda-56dc-4782-8c5b-3f99071948fd","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
 {"task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
 {"task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","revision":1}
 {"task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","revision":1}
 
 ## chat_metadata_progress (3)
-{"conversation_id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","sequence":7,"store_id":"<new-uuid>"}
-{"conversation_id":"4a4c9be7-8d62-493b-8bfc-e0ca3dcb8389","sequence":13,"store_id":"<new-uuid>"}
-{"conversation_id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","sequence":8,"store_id":"<new-uuid>"}
+{"conversation_id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","sequence":8,"store_id":"<new-uuid>"}
+{"conversation_id":"4a4c9be7-8d62-493b-8bfc-e0ca3dcb8389","sequence":14,"store_id":"<new-uuid>"}
+{"conversation_id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","sequence":9,"store_id":"<new-uuid>"}
 
-## chat_metadata_receipts (0)
+## chat_metadata_receipts (3)
+{"conversation_id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","operation_id":"<new-uuid>","sequence":8,"acked":1}
+{"conversation_id":"4a4c9be7-8d62-493b-8bfc-e0ca3dcb8389","operation_id":"<new-uuid>","sequence":14,"acked":1}
+{"conversation_id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","operation_id":"<new-uuid>","sequence":9,"acked":1}
 
 ## chat_ownership (3)
-{"id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","tab_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","mode":"claude-chat","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"94d744a2-88d3-4339-850f-23e37f737926","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
-{"id":"4a4c9be7-8d62-493b-8bfc-e0ca3dcb8389","task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","tab_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
-{"id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","tab_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","mode":"claude-chat","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"94d744a2-88d3-4339-850f-23e37f737926","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
+{"id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","tab_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","mode":"claude-chat","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"94d744a2-88d3-4339-850f-23e37f737926","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
+{"id":"4a4c9be7-8d62-493b-8bfc-e0ca3dcb8389","task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","tab_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
+{"id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","tab_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","mode":"claude-chat","computer_id":"94d744a2-88d3-4339-850f-23e37f737926","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"94d744a2-88d3-4339-850f-23e37f737926","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
 
 ## chat_provider_transitions (0)
 
@@ -336,7 +340,8 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"tab_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","conversation_id":"442d46ca-36eb-423e-ad33-ebdb352aa3a8","revision":1}
 {"tab_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","conversation_id":"ae74c2ba-2448-4d08-8a47-4b56a7c1e761","revision":1}
 
-## chat_task_computers (3)
+## chat_task_computers (4)
+{"task_id":"46443fda-56dc-4782-8c5b-3f99071948fd","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb"}
 {"task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb"}
 {"task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","computer_id":"94d744a2-88d3-4339-850f-23e37f737926"}
 {"task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","computer_id":"94d744a2-88d3-4339-850f-23e37f737926"}
@@ -361,8 +366,8 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"computer_id":"94d744a2-88d3-4339-850f-23e37f737926","connector_generation":2,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
 
 ## computers (2)
-{"id":"94d744a2-88d3-4339-850f-23e37f737926","name":"build-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"OJ8p0IPHE5zlDjc1wMj3QRIjcPcPpeQA","last_seen_at":<run-ms>,"created_at":1794328343752,"revoked_at":null,"owner_user_id":null,"host_id":"5edd802f-93e5-4541-86a1-a4cc7813c806","visibility":"private","disabled_at":null}
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"tv9WM5DkrYOKEiah6hZeffh8gAfOnexd","last_seen_at":<run-ms>,"created_at":1794328316228,"revoked_at":null,"owner_user_id":null,"host_id":null,"visibility":"private","disabled_at":null}
+{"id":"94d744a2-88d3-4339-850f-23e37f737926","name":"build-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"OJ8p0IPHE5zlDjc1wMj3QRIjcPcPpeQA","last_seen_at":<run-ms>,"created_at":1794328343752,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"tv9WM5DkrYOKEiah6hZeffh8gAfOnexd","last_seen_at":<run-ms>,"created_at":1794328316228,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -399,8 +404,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"<new-uuid>","token_hash":"<new-token>","label":"local-computer","created_at":<run-ms>,"expires_at":<run-ms>,"used_at":null,"computer_id":null,"minted_by_user_id":null,"owner_user_id":null}
 {"id":"c5cd4b40-9ebf-4eaa-ae5b-b2779dff13c8","token_hash":"5a95c53eb652b8ece3c06deb58256ff439b43c5913c801e63e8f1bcf93adda32","label":"local-computer","created_at":1794328314117,"expires_at":1794329214117,"used_at":1794328316228,"computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","minted_by_user_id":null,"owner_user_id":null}
 
-## machines (1)
-{"id":"3d1b5019-a1b8-45c1-bcfa-3f7c5cecef74","host_id":"5edd802f-93e5-4541-86a1-a4cc7813c806","name":null,"created_at":1794328343752,"updated_at":1794328343752}
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 
@@ -486,10 +490,10 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","project_id":"e4896656-71d5-4ae4-9a72-cc6f9016ce36","title":"Rotate certs","description":null,"status":"done","priority":3,"due_date":null,"created_at":"2026-11-10 16:32:57","updated_at":"2026-11-10 16:33:18","archived_at":null,"claude_session_id":null,"agent_id":"claude-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794328396573,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
 
 ## terminal_tabs (4)
-{"id":"46443fda-56dc-4782-8c5b-3f99071948fd","task_id":"46443fda-56dc-4782-8c5b-3f99071948fd","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T16:32:59.976Z","group_id":"46443fda-56dc-4782-8c5b-3f99071948fd","agent_state":"new"}
+{"id":"46443fda-56dc-4782-8c5b-3f99071948fd","task_id":"46443fda-56dc-4782-8c5b-3f99071948fd","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T16:32:59.976Z","group_id":"46443fda-56dc-4782-8c5b-3f99071948fd","agent_state":"stopped"}
 {"id":"58423320-ef6b-4c4f-8c14-19d858dff86d","task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T16:32:49.812Z","group_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","agent_state":"running"}
 {"id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T16:32:54.017Z","group_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","agent_state":"running"}
-{"id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T16:32:57.505Z","group_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","agent_state":"stopped"}
+{"id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T16:32:57.505Z","group_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","agent_state":"running"}
 
 ## test_categories (0)
 
@@ -501,7 +505,14 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## usage_cursor_handoff (0)
 
-## usage_records (0)
+## usage_records (7)
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"21eb788f-54a3-482b-9595-4fd001c01112","timestamp":"2026-11-10T16:33:17.033Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/infra","task_id":"e9d0d5ae-dd3d-4549-97fb-9a247df971f1","source_file":"/home/persona/.claude/projects/-home-persona-repos-infra/21eb788f-54a3-482b-9595-4fd001c01112.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"468bb172-cac7-4936-bc5b-5a841bdd84f7","timestamp":"2026-11-10T16:33:09.631Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/468bb172-cac7-4936-bc5b-5a841bdd84f7.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"468bb172-cac7-4936-bc5b-5a841bdd84f7","timestamp":"2026-11-10T16:33:12.271Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":"58423320-ef6b-4c4f-8c14-19d858dff86d","source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/468bb172-cac7-4936-bc5b-5a841bdd84f7.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"4d2f55d8-fb4d-4584-b112-a81713d99c80","timestamp":"2026-11-10T16:33:14.878Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":"bcaf620c-f767-4f16-8f30-bfb14edc1b13","source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/4d2f55d8-fb4d-4584-b112-a81713d99c80.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"7788dabf-ea26-47ab-a877-58488a4e89c0","timestamp":"2026-11-10T16:33:31.223Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/ml","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-ml/7788dabf-ea26-47ab-a877-58488a4e89c0.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"7788dabf-ea26-47ab-a877-58488a4e89c0","timestamp":"2026-11-10T16:33:33.022Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/ml","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-ml/7788dabf-ea26-47ab-a877-58488a4e89c0.jsonl","source_offset":0}
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"83e4cace-963d-46cf-a0f9-77d71b313f0a","timestamp":"2026-11-10T16:33:35.206Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/ml","task_id":null,"source_file":"/home/persona/.claude/projects/-home-persona-repos-ml/83e4cace-963d-46cf-a0f9-77d71b313f0a.jsonl","source_offset":0}
 
 ## user_settings (0)
 

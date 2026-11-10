@@ -1,9 +1,19 @@
+note use :51100: opened Usage (usageAnalytics.refresh all)
+note use :51100: continued 4/4 agent tab(s) (chat.start / pty.create)
+note use :51110: opened Usage (usageAnalytics.refresh all)
+note use :51110: continued 2/2 agent tab(s) (chat.start / pty.create)
 ok   settle: settled
+ok   settle: after use: settled
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 58423320-ef6b-4c4f-8c14-19d858dff86d — 18 events kept, in order
 ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat bcaf620c-f767-4f16-8f30-bfb14edc1b13 — 10 events kept, in order
 ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat e9d0d5ae-dd3d-4549-97fb-9a247df971f1 — 10 events kept, in order
 ok   computers/c2/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite: chat ba7c56a4-1ca2-4abb-b060-81069c14017b — 10 events kept, in order
 ok   computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite: chat b3c73299-574c-4998-ae94-e9a0b418855b — 18 events kept, in order
+ok   tab 58423320-ef6b-4c4f-8c14-19d858dff86d after the upgrade: should resume its own session 468bb172-cac7-4936-bc5b-5a841bdd84f7
+ok   tab bcaf620c-f767-4f16-8f30-bfb14edc1b13 after the upgrade: should resume its own session 4d2f55d8-fb4d-4584-b112-a81713d99c80
+ok   tab e9d0d5ae-dd3d-4549-97fb-9a247df971f1 after the upgrade: should resume its own session 21eb788f-54a3-482b-9595-4fd001c01112
+ok   tab ba7c56a4-1ca2-4abb-b060-81069c14017b after the upgrade: should resume its own session 83e4cace-963d-46cf-a0f9-77d71b313f0a
+ok   tab b3c73299-574c-4998-ae94-e9a0b418855b after the upgrade: should resume its own session 7788dabf-ea26-47ab-a877-58488a4e89c0
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
@@ -11,7 +21,7 @@ ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 212 (latest 212)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 213 (latest 213)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 2 → 2
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 4 → 4
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tags rows 1 → 1
@@ -19,6 +29,8 @@ ok   .slayzone/stable/hub/slayzone.data.sqlite: task_tags rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: task_templates rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: task_artifacts rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: session_tab_recovery rows left 0 (v201, after continuing every agent tab)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: usage_cursor_handoff rows left 0 (v209, after opening Usage)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: computer_data_handoff rows left 0
 ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)
@@ -35,10 +47,12 @@ ok   hubs/hub2/slayzone.auth.sqlite: integrity_check ok
 ok   hubs/hub2/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   hubs/hub2/slayzone.data.sqlite: integrity_check ok
 ok   hubs/hub2/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   hubs/hub2/slayzone.data.sqlite: user_version 212 (latest 212)
+ok   hubs/hub2/slayzone.data.sqlite: user_version 213 (latest 213)
 ok   hubs/hub2/slayzone.data.sqlite: projects rows 1 → 1
 ok   hubs/hub2/slayzone.data.sqlite: tasks rows 2 → 2
 ok   hubs/hub2/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   hubs/hub2/slayzone.data.sqlite: session_tab_recovery rows left 0 (v201, after continuing every agent tab)
+ok   hubs/hub2/slayzone.data.sqlite: usage_cursor_handoff rows left 0 (v209, after opening Usage)
 ok   hubs/hub2/slayzone.data.sqlite: computer_data_handoff rows left 0
 ok   hubs/hub2/slayzone.diagnostics.sqlite: integrity_check ok
 ok   hubs/hub2/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)

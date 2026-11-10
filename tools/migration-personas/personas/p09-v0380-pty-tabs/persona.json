@@ -1,0 +1,13 @@
+{
+  "release": "v0.38.0",
+  "journey": "v0.38.0-pty-tabs",
+  "summary": "v0.38.0 desktop user (schema v194, pre-v201) with TERMINAL Claude sessions in two tabs of one task (main + 'Deploy'), each started fresh. After the upgrade each tab must resume its own session (v201 + its lazy recovery).",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": [
+      "local-computer"
+    ],
+    "hubs": [],
+    "computers": []
+  }
+}

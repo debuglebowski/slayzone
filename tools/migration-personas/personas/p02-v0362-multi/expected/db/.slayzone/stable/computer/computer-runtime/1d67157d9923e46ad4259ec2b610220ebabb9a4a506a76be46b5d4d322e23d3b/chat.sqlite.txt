@@ -96,7 +96,9 @@ trigger task_artifacts_state_version_delete: CREATE TRIGGER task_artifacts_state
 trigger task_artifacts_state_version_insert: CREATE TRIGGER task_artifacts_state_version_insert AFTER INSERT ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state_version_update AFTER UPDATE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 
-## agent_sessions (0)
+## agent_sessions (2)
+{"id":"<new-uuid>","mode":"claude-code","cwd":null,"task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","tab_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":<run-ms>,"bound_at":<run-ms>,"ended_at":null}
+{"id":"<new-uuid>","mode":"claude-code","cwd":null,"task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","tab_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":<run-ms>,"bound_at":<run-ms>,"ended_at":null}
 
 ## agent_turns (0)
 
@@ -140,8 +142,10 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 
 ## content_erasure_tasks (0)
 
-## conversations (1)
+## conversations (3)
 {"id":"__slz_settings__","task_id":"__slz_settings__","tab_id":"__slz_settings__","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
+{"id":"hook-inbox:b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","tab_id":"hook-inbox:b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
+{"id":"hook-inbox:cdc375a8-7759-498f-b2e6-466fff31a4a6","task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","tab_id":"hook-inbox:cdc375a8-7759-498f-b2e6-466fff31a4a6","mode":"claude-chat","epoch":1,"state":"active","migration_id":null,"migration_hash":null}
 
 ## events (0)
 
@@ -161,8 +165,12 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 
 ## receipts (0)
 
-## records (1)
+## records (5)
 {"conversation_id":"__slz_settings__","kind":"settings","id":"diagnostics-config","value":"{\"enabled\":true,\"verbose\":false}","saved_at":<run-ms>}
+{"conversation_id":"hook-inbox:b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","kind":"prompt","id":"<new-uuid>","value":"{\"id\":\"<new-uuid>\",\"taskId\":\"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670\",\"agentId\":\"claude-code\",\"cliSessionId\":\"<new-uuid>\",\"text\":\"hello\",\"createdAt\":<run-ms>}","saved_at":<run-ms>}
+{"conversation_id":"hook-inbox:b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","kind":"settings","id":"inbox","value":"true","saved_at":0}
+{"conversation_id":"hook-inbox:cdc375a8-7759-498f-b2e6-466fff31a4a6","kind":"prompt","id":"<new-uuid>","value":"{\"id\":\"<new-uuid>\",\"taskId\":\"cdc375a8-7759-498f-b2e6-466fff31a4a6\",\"agentId\":\"claude-code\",\"cliSessionId\":\"<new-uuid>\",\"text\":\"hello\",\"createdAt\":<run-ms>}","saved_at":<run-ms>}
+{"conversation_id":"hook-inbox:cdc375a8-7759-498f-b2e6-466fff31a4a6","kind":"settings","id":"inbox","value":"true","saved_at":0}
 
 ## retention_policy (1)
 {"id":1,"days":0}
@@ -171,7 +179,9 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 
 ## session_resets (0)
 
-## session_turns (0)
+## session_turns (2)
+{"conversation_id":"<new-uuid>","first_turn_at":<run-ms>}
+{"conversation_id":"<new-uuid>","first_turn_at":<run-ms>}
 
 ## storage_maintenance (1)
 {"id":"attachment-pins-v4"}
@@ -183,15 +193,21 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 
 ## task_cleanup_pending (0)
 
-## task_conversations (0)
+## task_conversations (2)
+{"id":"<new-uuid>","task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","mode":"claude-code","tab_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","pending_meta":null,"created_at":<run-ms>}
+{"id":"<new-uuid>","task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","mode":"claude-code","tab_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","pending_meta":null,"created_at":<run-ms>}
 
-## task_lifecycle (0)
+## task_lifecycle (2)
+{"task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","state":"active","revision":1}
+{"task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","state":"active","revision":1}
 
 ## task_path_releases (0)
 
 ## task_paths (0)
 
-## task_state_versions (1)
+## task_state_versions (3)
 {"task_id":"__slz_settings__","version":1}
+{"task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","version":1}
+{"task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","version":1}
 
 ## usage_cursors (0)

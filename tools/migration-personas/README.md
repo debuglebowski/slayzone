@@ -24,6 +24,8 @@ Local only (Docker, no network). Never part of CI.
 | `p04-v0362-chat` | v0.36.2 (schema v171) | Claude chats on 2 hubs, one run on a remote computer (gpu-box) |
 | `p06-v0362-codex` | v0.36.2 (schema v171) | Codex chats (hub-held) + a Claude chat in one project |
 | `p07-v0380-codex` | v0.38.0 (schema v194) | Codex chats (computer-held) + a Claude chat in one project |
+| `p08-v0380-tabs-usage` | v0.38.0 (schema v194) | a task with 2 chat tabs + usage offsets (lazy v201/v209 data) |
+| `p09-v0380-pty-tabs` | v0.38.0 (schema v194) | terminal Claude in 2 tabs of 2 tasks, both pre-v201 tab bugs (shared / stolen session) |
 | `p05-v0380-full` | v0.38.0 (schema v194) | everything: 2 hubs, build-box on both from one process, per-computer folders, bindings, chats on every computer |
 
 The harness image links today's hub/computer bundles at the `.deb` install paths
@@ -66,6 +68,23 @@ files that aren't ignored), installed for Linux and plain Node. Then, per person
 6. **Dump and check.** It dumps every database and data file in normalized form and
    checks the invariants.
 
+After everything has settled, the harness **uses the upgraded app** the way a user
+would. Some migrations only finish lazily: v201's per-tab session recovery and v209's
+usage handoff.
+
+1. It opens Usage.
+2. It continues every agent tab: chats via `chat.hydrate` + `chat.start`; terminal
+   agents via `pty.create`, with the main tab passing `agentSessions.current` as the
+   renderer does.
+3. It checks that each tab resumes **its own** pre-upgrade session, or starts fresh
+   where that is what the old release itself did.
+
+The expectations come from the input (a chat's last session) or from
+`personas/<p>/facts.json`. That file holds ground truth recorded by the generator, or a
+baseline measured on the old release.
+
+The upgraded machine has the scripted `claude` and `codex` installed.
+
 Normalization replaces values this run creates with stable tokens: `<new-uuid>` for
 UUIDs not present in the input, `<run-ms>` / `<run-s>` / `<run-time>` for wall-clock
 times. Logs and the user's own git repos are not dumped.
@@ -87,8 +106,6 @@ macOS breaks SQLite WAL locking and silently loses writes.
 
 ## Not covered yet
 
-- **Lazy migrations** that only run on use: per-task session recovery (v201) and the
-  usage-cursor handoff (v209).
 - **Login-required hubs.** Out of scope by decision.
 - **macOS / Windows paths.** Linux only by decision. Path *values* from other platforms
   belong in persona data instead.

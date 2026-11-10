@@ -120,6 +120,18 @@
         . /etc/bash_completion
       fi
     fi
+.claude/projects/-home-persona-repos-infra/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/infra","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
+.claude/projects/-home-persona-repos-ml/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/ml","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
+.claude/projects/-home-persona-repos-ml/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/ml","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
+.claude/projects/-home-persona-repos-webapp/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/webapp","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
+.claude/projects/-home-persona-repos-webapp/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/webapp","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
+.claude/projects/-home-persona-repos-webapp/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/webapp","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
 .claude/settings.json  (json)
     {
       "hooks": {
@@ -227,6 +239,79 @@
         ]
       }
     }
+.codex/hooks.json  (json)
+    {
+      "hooks": {
+        "PermissionRequest": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "PostToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "PreToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
 .config/opencode/plugin/slayzone-notify.js  (text)
     // SLAYZONE_COMPUTER_DISPATCHER=1
     import { pathToFileURL } from 'node:url';
@@ -237,7 +322,7 @@
 .local/state/slayzone/.clean-shutdown  (text)
     1794320248445
 .local/state/slayzone/.clean-shutdown.boot  (text)
-    {"ts":1794320214535,"pid":88,"version":"0.36.2"}
+    {"ts":1794320214535,"pid":"<pid>","version":"0.36.2"}
 .local/state/slayzone/.updaterId  (text)
     22882515-5631-579e-ba0b-4ff04087d577
 .local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db  sha256=97e8d54f8a725510 bytes=4096
@@ -894,6 +979,8 @@ computers/c2/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
         }
       }
     }
+computers/c2/computer-runtime/hooks-1a442751931899ca.json  (json)
+    []
 computers/c2/computer-runtime/host-config.json  (json)
     {
       "connection": {
@@ -1276,6 +1363,8 @@ computers/c2b/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
         }
       }
     }
+computers/c2b/computer-runtime/hooks-34a5fe17d8ff404d.json  (json)
+    []
 computers/c2b/computer-runtime/host-config.json  (json)
     {
       "connection": {
@@ -1658,6 +1747,8 @@ computers/c3/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
         }
       }
     }
+computers/c3/computer-runtime/hooks-34a5fe17d8ff404d.json  (json)
+    []
 computers/c3/computer-runtime/host-config.json  (json)
     {
       "connection": {

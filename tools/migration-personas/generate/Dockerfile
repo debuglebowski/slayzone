@@ -7,7 +7,7 @@
 # uses the same uid and home, so every absolute path the old build wrote stays valid.
 FROM --platform=linux/amd64 node:22-bookworm-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    xvfb xauth dbus-x11 git sqlite3 ca-certificates procps \
+    xvfb xauth dbus-x11 git sqlite3 ca-certificates procps curl \
     libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libuuid1 libsecret-1-0 \
     libgbm1 libasound2 libdrm2 && rm -rf /var/lib/apt/lists/*
 COPY slayzone.deb /tmp/slayzone.deb

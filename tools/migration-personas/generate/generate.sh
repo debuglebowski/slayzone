@@ -40,7 +40,7 @@ TU="$ROOT/../../packages/shared/test-utils"
 mkdir -p "$CTX/fake/fake-claude" "$CTX/fake/fake-cli"
 cp "$TU/fake-claude/fake-claude.mjs" "$TU/fake-claude/fake-claude-tasks.mjs" "$CTX/fake/fake-claude/"
 cp "$TU/fake-cli/runtime.mjs" "$CTX/fake/fake-cli/"
-cp "$HERE/fake-claude/claude" "$HERE/fake-claude/scenario.json" "$CTX/fake/"
+cp "$HERE/fake-claude/claude" "$HERE/fake-claude/scenario.json" "$HERE/fake-claude/interactive.mjs" "$CTX/fake/"
 mkdir -p "$CTX/fake/fake-codex"
 cp "$TU/fake-codex/fake-codex.mjs" "$CTX/fake/fake-codex/"
 cp "$HERE/fake-codex/codex" "$CTX/fake/codex"
@@ -73,4 +73,6 @@ docker exec "$C" sh /gen/down.sh
 echo "[$P] packing"
 docker exec "$C" sh /gen/pack.sh
 docker cp "$C:/tmp/input.tar.gz" "$PD/input.tar.gz"
+# Ground truth the journey recorded (e.g. which session belongs to which tab), if any.
+if docker exec "$C" test -f /tmp/facts.json; then docker cp "$C:/tmp/facts.json" "$PD/facts.json"; fi
 echo "[$P] wrote $PD/input.tar.gz ($(du -h "$PD/input.tar.gz" | cut -f1))"

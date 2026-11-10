@@ -1,0 +1,13 @@
+{
+  "release": "v0.38.0",
+  "journey": "v0.38.0-tabs-usage",
+  "summary": "v0.38.0 desktop user (schema v194) with data for the LAZY migrations: a task whose chat sessions span its main tab and a second chat tab (v201), and usage read offsets from opening Usage once (v209).",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": [
+      "local-computer"
+    ],
+    "hubs": [],
+    "computers": []
+  }
+}

@@ -139,6 +139,8 @@
 .claude/projects/-home-persona-repos-webapp/4d2f55d8-fb4d-4584-b112-a81713d99c80.jsonl  (text)
     {"parentUuid":null,"isSidechain":false,"sessionId":"4d2f55d8-fb4d-4584-b112-a81713d99c80","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T16:33:14.860Z","type":"user","uuid":"945e5ae4-0087-420f-a9d8-2d3bd8fe68e3","message":{"role":"user","content":"Build it on build-box please."}}
     {"parentUuid":"945e5ae4-0087-420f-a9d8-2d3bd8fe68e3","isSidechain":false,"sessionId":"4d2f55d8-fb4d-4584-b112-a81713d99c80","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T16:33:14.878Z","type":"assistant","uuid":"evt-1-1-1","message":{"id":"msg_1_1","type":"message","role":"assistant","model":"opus","content":[{"type":"text","text":"reply: Build it on build-box please."}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+.claude/projects/-home-persona-repos-webapp/<new-uuid>.jsonl  (text)
+    {"type":"user","sessionId":"<new-uuid>","cwd":"/home/persona/repos/webapp","uuid":"<new-uuid>","parentUuid":null,"timestamp":"<run-time>","message":{"role":"user","content":"hello"}}
 .claude/settings.json  (json)
     {
       "hooks": {
@@ -246,6 +248,79 @@
         ]
       }
     }
+.codex/hooks.json  (json)
+    {
+      "hooks": {
+        "PermissionRequest": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "PostToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "PreToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
 .config/opencode/plugin/slayzone-notify.js  (text)
     // SLAYZONE_COMPUTER_DISPATCHER=1
     import { pathToFileURL } from 'node:url';
@@ -256,7 +331,7 @@
 .local/state/slayzone/.clean-shutdown  (text)
     1794328419315
 .local/state/slayzone/.clean-shutdown.boot  (text)
-    {"ts":1794328309979,"pid":100,"version":"0.38.0"}
+    {"ts":1794328309979,"pid":"<pid>","version":"0.38.0"}
 .local/state/slayzone/.updaterId  (text)
     b4cf7612-c315-583b-92c1-0f1ae09aa5e3
 .local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db  sha256=97e8d54f8a725510 bytes=4096

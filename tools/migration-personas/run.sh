@@ -36,6 +36,9 @@ echo "building harness image from the working tree…"
   | tar --null -T - -cf - \
   | (tar_dir=$(mktemp -d); tar -xf - -C "$tar_dir"; cp tools/migration-personas/harness/Dockerfile "$tar_dir/Dockerfile.harness"; \
      docker build -q -f "$tar_dir/Dockerfile.harness" -t "$IMAGE" "$tar_dir" >/dev/null; rc=$?; rm -rf "$tar_dir"; exit $rc))
+# Each build replaces the tag; drop the previous (now untagged) harness images, or the
+# multi-GB copies fill Docker's disk within a day.
+docker image prune -f --filter label=slz.migration-harness=1 >/dev/null
 
 run_one() { # <persona> <out dir>
   local p=$1 out=$2 c="slz-migration-harness-$1" rc=0
@@ -43,6 +46,7 @@ run_one() { # <persona> <out dir>
   docker run -d --name "$c" --network none "$IMAGE" sleep infinity >/dev/null
   docker cp "$HERE/personas/$p/persona.json" "$c:/tmp/persona.json"
   docker cp "$HERE/personas/$p/input.tar.gz" "$c:/tmp/input.tar.gz"
+  if [ -f "$HERE/personas/$p/facts.json" ]; then docker cp "$HERE/personas/$p/facts.json" "$c:/tmp/facts.json"; fi
   docker exec -e HOME=/home/persona -w /home/persona "$c" node /repo/tools/migration-personas/harness/dist/harness.cjs \
     /tmp/persona.json /tmp/input.tar.gz /tmp/out || rc=$?
   rm -rf "$out"; mkdir -p "$out"

@@ -235,6 +235,79 @@
         ]
       }
     }
+.codex/hooks.json  (json)
+    {
+      "hooks": {
+        "PermissionRequest": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "PostToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "PreToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
 .config/mimeapps.list  (text)
     
     [Default Applications]
@@ -355,7 +428,7 @@
 .local/state/slayzone/.clean-shutdown  (text)
     1794325061821
 .local/state/slayzone/.clean-shutdown.boot  (text)
-    {"ts":1794325030900,"pid":40,"version":"0.35.0"}
+    {"ts":1794325030900,"pid":"<pid>","version":"0.35.0"}
 .local/state/slayzone/.updaterId  (text)
     12fbeff8-829e-5536-b5e4-396a9db67f21
 .local/state/slayzone/slayzone.diagnostics.sqlite  (database → db/.local/state/slayzone/slayzone.diagnostics.sqlite.txt)

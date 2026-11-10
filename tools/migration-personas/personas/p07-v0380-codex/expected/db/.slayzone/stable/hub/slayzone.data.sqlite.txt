@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -312,16 +312,19 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"task_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
 
 ## chat_metadata_progress (3)
-{"conversation_id":"1639d528-d213-46d0-b8d0-a59ad8d1a132","sequence":7,"store_id":"<new-uuid>"}
-{"conversation_id":"4b85c1f7-5f10-4c2b-a58a-23d6e5938057","sequence":9,"store_id":"<new-uuid>"}
-{"conversation_id":"fa4e457d-71ef-412a-abf2-946c38244396","sequence":7,"store_id":"<new-uuid>"}
+{"conversation_id":"1639d528-d213-46d0-b8d0-a59ad8d1a132","sequence":8,"store_id":"<new-uuid>"}
+{"conversation_id":"4b85c1f7-5f10-4c2b-a58a-23d6e5938057","sequence":10,"store_id":"<new-uuid>"}
+{"conversation_id":"fa4e457d-71ef-412a-abf2-946c38244396","sequence":8,"store_id":"<new-uuid>"}
 
-## chat_metadata_receipts (0)
+## chat_metadata_receipts (3)
+{"conversation_id":"1639d528-d213-46d0-b8d0-a59ad8d1a132","operation_id":"<new-uuid>","sequence":8,"acked":1}
+{"conversation_id":"4b85c1f7-5f10-4c2b-a58a-23d6e5938057","operation_id":"<new-uuid>","sequence":10,"acked":1}
+{"conversation_id":"fa4e457d-71ef-412a-abf2-946c38244396","operation_id":"<new-uuid>","sequence":8,"acked":1}
 
 ## chat_ownership (3)
-{"id":"1639d528-d213-46d0-b8d0-a59ad8d1a132","task_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","tab_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
-{"id":"4b85c1f7-5f10-4c2b-a58a-23d6e5938057","task_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","tab_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
-{"id":"fa4e457d-71ef-412a-abf2-946c38244396","task_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","tab_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":2,"settings_hash":null}
+{"id":"1639d528-d213-46d0-b8d0-a59ad8d1a132","task_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","tab_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
+{"id":"4b85c1f7-5f10-4c2b-a58a-23d6e5938057","task_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","tab_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
+{"id":"fa4e457d-71ef-412a-abf2-946c38244396","task_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","tab_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":1,"state":"active","migration_id":null,"destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":null,"cleanup_pending":0,"settings_revision":3,"settings_hash":"<new-token>"}
 
 ## chat_provider_transitions (0)
 
@@ -355,7 +358,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_runtime_state (0)
 
 ## computers (1)
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"U3X97oNlly3fvW8HpqlqryLcNctnvTcZ","last_seen_at":<run-ms>,"created_at":1794341410719,"revoked_at":null,"owner_user_id":null,"host_id":null,"visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"U3X97oNlly3fvW8HpqlqryLcNctnvTcZ","last_seen_at":<run-ms>,"created_at":1794341410719,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -391,7 +394,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"7d68f63d-df22-4b12-a1af-2af86bb89df1","token_hash":"b2a508aadc0ed218ce744a7bf495c550b76f35af62bfa2c6debee292196279c0","label":"local-computer","created_at":1794341409290,"expires_at":1794342309290,"used_at":1794341410719,"computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","minted_by_user_id":null,"owner_user_id":null}
 {"id":"<new-uuid>","token_hash":"<new-token>","label":"local-computer","created_at":<run-ms>,"expires_at":<run-ms>,"used_at":null,"computer_id":null,"minted_by_user_id":null,"owner_user_id":null}
 
-## machines (0)
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 
@@ -471,7 +474,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## terminal_tabs (3)
 {"id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","task_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:10:20.413Z","group_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","agent_state":"running"}
 {"id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","task_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:10:16.158Z","group_id":"fc67d397-b324-4827-8b63-a7d3dd73fbc7","agent_state":"running"}
-{"id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","task_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:10:18.284Z","group_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","agent_state":"stopped"}
+{"id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","task_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:10:18.284Z","group_id":"fd04010a-8514-468e-8bcb-b7a5ee3c5f86","agent_state":"running"}
 
 ## test_categories (0)
 
@@ -483,7 +486,8 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## usage_cursor_handoff (0)
 
-## usage_records (0)
+## usage_records (1)
+{"id":"<new-token>","provider":"claude-code","model":"opus","session_id":"013b404b-7567-43d4-b2a0-4818d0d8bbdf","timestamp":"2026-11-10T20:10:33.726Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":"7de05bd0-453d-4b3d-989c-66bef8d7cab8","source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/013b404b-7567-43d4-b2a0-4818d0d8bbdf.jsonl","source_offset":0}
 
 ## user_settings (0)
 

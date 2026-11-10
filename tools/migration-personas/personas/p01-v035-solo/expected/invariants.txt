@@ -1,4 +1,7 @@
+note use :51100: opened Usage (usageAnalytics.refresh all)
+note use :51100: continued 0/0 agent tab(s) (chat.start / pty.create)
 ok   settle: settled
+ok   settle: after use: settled
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
@@ -6,7 +9,7 @@ ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 212 (latest 212)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 213 (latest 213)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 4 → 4
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tags rows 2 → 2
@@ -17,6 +20,8 @@ ok   .slayzone/stable/hub/slayzone.data.sqlite: automations rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" (folder /home/persona/repos/webapp) has a ready folder on local-computer
 ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" folder is ready on local-computer (project default there)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: session_tab_recovery rows left 0 (v201, after continuing every agent tab)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: usage_cursor_handoff rows left 0 (v209, after opening Usage)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: computer_data_handoff rows left 0
 ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)

@@ -6,8 +6,9 @@
 # The persona user is uid 1000 with home /home/persona, exactly as in the generate
 # image, so every absolute path an old release wrote into a persona stays valid.
 FROM node:24-bookworm-slim
+LABEL slz.migration-harness=1
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    git python3 make g++ ca-certificates procps sqlite3 && rm -rf /var/lib/apt/lists/*
+    git python3 make g++ ca-certificates procps sqlite3 curl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 RUN usermod -l persona -d /home/persona -m node && groupmod -n persona node
 WORKDIR /repo
@@ -38,4 +39,23 @@ USER root
 RUN mkdir -p /opt/SlayZone/resources/computer /opt/SlayZone/resources/hub \
     && ln -s /repo/packages/apps/computer/dist/bin.cjs /opt/SlayZone/resources/computer/bin.cjs \
     && ln -s /repo/packages/apps/hub/dist/bin.cjs /opt/SlayZone/resources/hub/bin.cjs
+USER persona
+
+# The scripted agents (same as the generator): after the upgrade the harness continues
+# every chat, which spawns `claude` / `codex` on the computers — they must resume each
+# chat's own pre-upgrade session (checked from the fakes' spawn logs).
+USER root
+RUN mkdir -p /opt/fake \
+    && ln -s /repo/packages/shared/test-utils/fake-claude /opt/fake/fake-claude \
+    && ln -s /repo/packages/shared/test-utils/fake-cli /opt/fake/fake-cli \
+    && ln -s /repo/packages/shared/test-utils/fake-codex /opt/fake/fake-codex \
+    && install -m 755 /repo/tools/migration-personas/generate/fake-claude/claude /usr/local/bin/claude \
+    && cp /repo/tools/migration-personas/generate/fake-claude/interactive.mjs /opt/fake/interactive.mjs \
+    && install -m 755 /repo/tools/migration-personas/generate/fake-codex/codex /usr/local/bin/codex \
+    && mkdir -p /opt/fake/state/epochs/1 /opt/fake/codex-state/epochs/1 \
+    && echo 1 > /opt/fake/state/current && echo 1 > /opt/fake/codex-state/current \
+    && cp /repo/tools/migration-personas/generate/fake-claude/scenario.json /opt/fake/state/epochs/1/scenario.json \
+    && cp /repo/tools/migration-personas/generate/fake-codex/scenario.json /opt/fake/codex-state/epochs/1/scenario.json \
+    && chown -R persona:persona /opt/fake/state /opt/fake/codex-state
+ENV SHELL=/bin/bash
 USER persona

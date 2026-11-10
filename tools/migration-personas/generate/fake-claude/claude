@@ -8,6 +8,15 @@ FAKE_CLAUDE_STATE_DIR=/opt/fake/state; export FAKE_CLAUDE_STATE_DIR
 # Set → the fake writes Claude's own session file, like the real CLI does.
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; export CLAUDE_CONFIG_DIR
 unset ELECTRON_RUN_AS_NODE
+# Interactive (terminal) Claude — the fake only speaks the chat protocol. Record the argv
+# (which session it starts or resumes) and stay alive like an idle terminal agent.
+case " $* " in *" -p "*) ;; *)
+  echo "$*" >> /opt/fake/state/interactive.log
+  SID=$(printf ' %s ' "$*" | sed -n 's/.* --\(session-id\|resume\) \([^ ]*\) .*/\2/p')
+  SRC=startup; case " $* " in *" --resume "*) SRC=resume ;; esac
+  /usr/local/bin/node /opt/fake/interactive.mjs "$SID" "$SRC" || true
+  exec tail -f /dev/null ;;
+esac
 case " $* " in *" -p "*)
   case " $* " in *" --replay-user-messages "*) ;; *) set -- "$@" --replay-user-messages ;; esac
   case " $* " in *" --include-partial-messages "*) ;; *) set -- "$@" --include-partial-messages ;; esac ;;

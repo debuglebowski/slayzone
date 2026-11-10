@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -380,14 +380,20 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"task_id":"503af8a7-29a2-4035-b371-1c54613a7d89","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
 {"task_id":"ec075a84-141d-4b8e-960a-01553217ca9d","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
 
-## chat_metadata_progress (0)
+## chat_metadata_progress (3)
+{"conversation_id":"<new-uuid>","sequence":1,"store_id":"<new-uuid>"}
+{"conversation_id":"<new-uuid>","sequence":1,"store_id":"<new-uuid>"}
+{"conversation_id":"<new-uuid>","sequence":1,"store_id":"<new-uuid>"}
 
-## chat_metadata_receipts (0)
+## chat_metadata_receipts (3)
+{"conversation_id":"<new-uuid>","operation_id":"<new-uuid>","sequence":1,"acked":1}
+{"conversation_id":"<new-uuid>","operation_id":"<new-uuid>","sequence":1,"acked":1}
+{"conversation_id":"<new-uuid>","operation_id":"<new-uuid>","sequence":1,"acked":1}
 
 ## chat_ownership (3)
 {"id":"<new-uuid>","task_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","tab_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":1,"settings_hash":"<new-token>"}
 {"id":"<new-uuid>","task_id":"503af8a7-29a2-4035-b371-1c54613a7d89","tab_id":"503af8a7-29a2-4035-b371-1c54613a7d89","mode":"codex-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":1,"settings_hash":"<new-token>"}
-{"id":"<new-uuid>","task_id":"ec075a84-141d-4b8e-960a-01553217ca9d","tab_id":"ec075a84-141d-4b8e-960a-01553217ca9d","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":1,"settings_hash":"<new-token>"}
+{"id":"<new-uuid>","task_id":"ec075a84-141d-4b8e-960a-01553217ca9d","tab_id":"ec075a84-141d-4b8e-960a-01553217ca9d","mode":"claude-chat","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","epoch":2,"state":"active","migration_id":"<new-uuid>","destination_computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","source_computer_id":null,"manifest_hash":"<new-token>","cleanup_pending":0,"settings_revision":2,"settings_hash":"<new-token>"}
 
 ## chat_provider_transitions (0)
 
@@ -433,7 +439,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_runtime_state (0)
 
 ## computers (1)
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"suOUessRmA9gJqKOzKTTTbgXtiQp5cNP","last_seen_at":<run-ms>,"created_at":1794341349288,"revoked_at":null,"owner_user_id":null,"host_id":null,"visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"suOUessRmA9gJqKOzKTTTbgXtiQp5cNP","last_seen_at":<run-ms>,"created_at":1794341349288,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -469,7 +475,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"291534a8-028f-40a8-98e6-d60cd681f1e7","token_hash":"8e7498acb6a87325fc48748c6b2be6ec507fe7ddb66b28bd924760096f3a62de","label":"local-computer","created_at":1794341348152,"expires_at":1794342248152,"used_at":1794341349288,"computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","minted_by_user_id":null,"owner_user_id":null}
 {"id":"<new-uuid>","token_hash":"<new-token>","label":"local-computer","created_at":<run-ms>,"expires_at":<run-ms>,"used_at":null,"computer_id":null,"minted_by_user_id":null,"owner_user_id":null}
 
-## machines (0)
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 
@@ -543,10 +549,10 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## tasks (3)
 {"id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","project_id":"5e7894b7-b0f7-43b2-92f2-de254e0ebb06","title":"Codex: write the changelog","description":null,"status":"done","priority":3,"due_date":null,"created_at":"2026-11-10 20:09:14","updated_at":"2026-11-10 20:09:35","archived_at":null,"claude_session_id":null,"agent_id":"codex-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\",\"lastPtyKilledAt\":1794341375004},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794341373965,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
 {"id":"503af8a7-29a2-4035-b371-1c54613a7d89","project_id":"5e7894b7-b0f7-43b2-92f2-de254e0ebb06","title":"Codex: fix login redirect","description":null,"status":"inbox","priority":1,"due_date":null,"created_at":"2026-11-10 20:09:12","updated_at":"2026-11-10 20:09:26","archived_at":null,"claude_session_id":null,"agent_id":"codex-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794341366236,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
-{"id":"ec075a84-141d-4b8e-960a-01553217ca9d","project_id":"5e7894b7-b0f7-43b2-92f2-de254e0ebb06","title":"Claude: review the router","description":null,"status":"inbox","priority":3,"due_date":null,"created_at":"2026-11-10 20:09:16","updated_at":"2026-11-10 20:09:42","archived_at":null,"claude_session_id":null,"agent_id":"claude-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{\"chatConversationId\":\"61546bdd-a023-4d66-83e3-166ea2e66fed\"},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794341382705,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
+{"id":"ec075a84-141d-4b8e-960a-01553217ca9d","project_id":"5e7894b7-b0f7-43b2-92f2-de254e0ebb06","title":"Claude: review the router","description":null,"status":"inbox","priority":3,"due_date":null,"created_at":"2026-11-10 20:09:16","updated_at":"2026-11-10 20:09:42","archived_at":null,"claude_session_id":null,"agent_id":"claude-chat","terminal_shell":null,"order":0,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":null,"web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":1,"dev_url_toast_dismissed":0,"last_interaction_at":1794341382705,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
 
 ## terminal_tabs (3)
-{"id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","task_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:09:14.440Z","group_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","agent_state":"stopped"}
+{"id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","task_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:09:14.440Z","group_id":"2d943df3-3822-4e15-ac13-47bbdbaadf19","agent_state":"running"}
 {"id":"503af8a7-29a2-4035-b371-1c54613a7d89","task_id":"503af8a7-29a2-4035-b371-1c54613a7d89","label":null,"mode":"codex-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:09:12.403Z","group_id":"503af8a7-29a2-4035-b371-1c54613a7d89","agent_state":"running"}
 {"id":"ec075a84-141d-4b8e-960a-01553217ca9d","task_id":"ec075a84-141d-4b8e-960a-01553217ca9d","label":null,"mode":"claude-chat","is_main":1,"position":0,"created_at":"2026-11-10T20:09:16.612Z","group_id":"ec075a84-141d-4b8e-960a-01553217ca9d","agent_state":"running"}
 
@@ -560,7 +566,8 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## usage_cursor_handoff (0)
 
-## usage_records (0)
+## usage_records (1)
+{"id":"<new-token>","provider":"claude-code","model":"default","session_id":"61546bdd-a023-4d66-83e3-166ea2e66fed","timestamp":"2026-11-10T20:09:42.733Z","input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"reasoning_tokens":0,"cost_usd":null,"cwd":"/home/persona/repos/webapp","task_id":"ec075a84-141d-4b8e-960a-01553217ca9d","source_file":"/home/persona/.claude/projects/-home-persona-repos-webapp/61546bdd-a023-4d66-83e3-166ea2e66fed.jsonl","source_offset":0}
 
 ## user_settings (0)
 

@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -348,7 +348,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_runtime_state (0)
 
 ## computers (1)
-{"id":"<new-uuid>","name":"local-computer","platform":"linux-arm64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"<new-token>","last_seen_at":<run-ms>,"created_at":<run-ms>,"revoked_at":null,"owner_user_id":null,"host_id":null,"visibility":"private","disabled_at":null}
+{"id":"<new-uuid>","name":"local-computer","platform":"linux-arm64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"<new-token>","last_seen_at":<run-ms>,"created_at":<run-ms>,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -383,7 +383,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## join_tokens (1)
 {"id":"<new-uuid>","token_hash":"<new-token>","label":"local-computer","created_at":<run-ms>,"expires_at":<run-ms>,"used_at":<run-ms>,"computer_id":"<new-uuid>","minted_by_user_id":null,"owner_user_id":null}
 
-## machines (0)
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 

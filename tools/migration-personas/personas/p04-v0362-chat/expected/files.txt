@@ -240,6 +240,79 @@
         ]
       }
     }
+.codex/hooks.json  (json)
+    {
+      "hooks": {
+        "PermissionRequest": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "PostToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "PreToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": ".*"
+          }
+        ],
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "bash /home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
 .config/opencode/plugin/slayzone-notify.js  (text)
     // SLAYZONE_COMPUTER_DISPATCHER=1
     import { pathToFileURL } from 'node:url';
@@ -250,7 +323,7 @@
 .local/state/slayzone/.clean-shutdown  (text)
     1794325552996
 .local/state/slayzone/.clean-shutdown.boot  (text)
-    {"ts":1794325492649,"pid":98,"version":"0.36.2"}
+    {"ts":1794325492649,"pid":"<pid>","version":"0.36.2"}
 .local/state/slayzone/.updaterId  (text)
     35bf966f-cbc7-5523-9d9f-df2b9996eaa6
 .local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db  sha256=97e8d54f8a725510 bytes=4096

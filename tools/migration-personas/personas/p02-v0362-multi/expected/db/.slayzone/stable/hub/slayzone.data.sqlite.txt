@@ -1,4 +1,4 @@
-user_version 212
+user_version 213
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)
@@ -309,7 +309,11 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## chat_legacy_task_copies (0)
 
-## chat_lifecycle_acks (0)
+## chat_lifecycle_acks (4)
+{"task_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","revision":1}
+{"task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
+{"task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb","revision":1}
+{"task_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","revision":1}
 
 ## chat_metadata_progress (0)
 
@@ -323,7 +327,11 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 
 ## chat_tab_bindings (0)
 
-## chat_task_computers (0)
+## chat_task_computers (4)
+{"task_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360"}
+{"task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb"}
+{"task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","computer_id":"f01a216a-4803-4214-98eb-f9e28951e1bb"}
+{"task_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360"}
 
 ## chat_task_lifecycle (4)
 {"task_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","state":"active","revision":1}
@@ -345,8 +353,8 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","connector_generation":1,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
 
 ## computers (2)
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"4iwiwyrSXf5b7J2FwYjvPVskFbjY94zn","last_seen_at":<run-ms>,"created_at":1794320218744,"revoked_at":null,"owner_user_id":null,"host_id":null,"visibility":"private","disabled_at":null}
-{"id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","name":"build-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"puypgtWo99A8nRQ8PaJPw2IE0k9D6pzS","last_seen_at":<run-ms>,"created_at":1794320222209,"revoked_at":null,"owner_user_id":null,"host_id":"8e9edf37-0432-4c20-8aab-f4f955be8d06","visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"4iwiwyrSXf5b7J2FwYjvPVskFbjY94zn","last_seen_at":<run-ms>,"created_at":1794320218744,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","name":"build-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"puypgtWo99A8nRQ8PaJPw2IE0k9D6pzS","last_seen_at":<run-ms>,"created_at":1794320222209,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
@@ -383,8 +391,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"7be6ebef-157c-4431-831f-cc1c420248ee","token_hash":"44dae73d9da6903549e8f5d01f4571df06df71de73244579af3c7b5d0bb29a17","label":"build-box","created_at":1794320221136,"expires_at":1794321121136,"used_at":1794320222209,"computer_id":"f74304a4-cb16-492b-b5e4-c1e41eaa0360","minted_by_user_id":null,"owner_user_id":null}
 {"id":"<new-uuid>","token_hash":"<new-token>","label":"local-computer","created_at":<run-ms>,"expires_at":<run-ms>,"used_at":null,"computer_id":null,"minted_by_user_id":null,"owner_user_id":null}
 
-## machines (1)
-{"id":"<new-uuid>","host_id":"8e9edf37-0432-4c20-8aab-f4f955be8d06","name":null,"created_at":<run-ms>,"updated_at":<run-ms>}
+## machines (runtime log of this boot — rows not compared)
 
 ## processes (0)
 
@@ -469,10 +476,10 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","project_id":"215d8710-72c6-4653-9583-fb9d6cc70d41","title":"Regression test","description":null,"status":"inbox","priority":3,"due_date":null,"created_at":"2026-11-10 14:17:16","updated_at":"2026-11-10 14:17:16","archived_at":null,"claude_session_id":null,"agent_id":"claude-code","terminal_shell":null,"order":1,"dangerously_skip_permissions":0,"panel_visibility":null,"browser_url":null,"browser_tabs":null,"worktree_parent_branch":null,"claude_flags":"--allow-dangerously-skip-permissions","codex_flags":"--sandbox workspace-write","merge_state":null,"assignee":null,"parent_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","web_panel_urls":null,"cursor_flags":"--force","gemini_flags":"--yolo","opencode_flags":"","provider_config":"{\"claude-code\":{\"flags\":\"--allow-dangerously-skip-permissions\"},\"claude-chat\":{},\"codex\":{\"flags\":\"--sandbox workspace-write\"},\"codex-chat\":{\"flags\":\"\"},\"gemini\":{\"flags\":\"--yolo\"},\"antigravity\":{\"flags\":\"--dangerously-skip-permissions\"},\"cursor-agent\":{\"flags\":\"--force\"},\"opencode\":{\"flags\":\"\"},\"qwen-code\":{\"flags\":\"--yolo\"},\"copilot\":{\"flags\":\"--allow-all-tools\"},\"terminal\":{\"flags\":\"\"}}","is_temporary":0,"merge_context":null,"editor_open_files":null,"web_panel_resolutions":null,"deleted_at":null,"pr_url":null,"graph_config":null,"repo_name":null,"loop_config":null,"snoozed_until":null,"description_format":"markdown","external_id":null,"external_provider":null,"is_blocked":0,"blocked_comment":null,"active_artifact_id":null,"progress":0,"diff_collapsed_files":null,"git_active_tab":null,"needs_attention":0,"dev_url_toast_dismissed":0,"last_interaction_at":null,"pinned":0,"pin_order":0,"tree_collapsed":0,"commit_graph_config":null,"panel_sizes":null,"computer_id":null,"artifacts_sidebar":null,"worktree_computer_id":null,"has_worktree":0,"has_base_dir":0}
 
 ## terminal_tabs (4)
-{"id":"2d650d5b-621b-4c96-a682-78501dc2e73b","task_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:14.554Z","group_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","agent_state":"new"}
-{"id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:13.574Z","group_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","agent_state":"new"}
-{"id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:15.546Z","group_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","agent_state":"new"}
-{"id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","task_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:16.508Z","group_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","agent_state":"new"}
+{"id":"2d650d5b-621b-4c96-a682-78501dc2e73b","task_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:14.554Z","group_id":"2d650d5b-621b-4c96-a682-78501dc2e73b","agent_state":"stopped"}
+{"id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","task_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:13.574Z","group_id":"b98e92e7-653f-4c7c-8e8b-00fd9e4b3670","agent_state":"stopped"}
+{"id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","task_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:15.546Z","group_id":"cdc375a8-7759-498f-b2e6-466fff31a4a6","agent_state":"stopped"}
+{"id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","task_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","label":null,"mode":"claude-code","is_main":1,"position":0,"created_at":"2026-11-10T14:17:16.508Z","group_id":"dfb9a0d2-770a-4671-b9c6-c2dbacdcd9be","agent_state":"stopped"}
 
 ## test_categories (0)
 
