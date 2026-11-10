@@ -1,0 +1,50 @@
+{
+  "release": "v0.36.2",
+  "journey": "v0.36.2-multi",
+  "summary": "v0.36.2 user (schema v171) with two hubs and four computers: the desktop hub + local computer, a standalone team hub registered in the app, build-box on both hubs, gpu-box on the team hub; projects/tasks bound to specific computers on both hubs.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": [
+      "local-computer",
+      "build-box"
+    ],
+    "hubs": [
+      {
+        "name": "team-hub",
+        "root": "hubs/hub2",
+        "env": {
+          "SLAYZONE_HUB_LISTEN_ADDRESS": "127.0.0.1:51110",
+          "SLAYZONE_HUB_NAME": "team-hub",
+          "SLAYZONE_HUB_ENABLE_TELEMETRY": "0"
+        },
+        "computers": [
+          "build-box",
+          "gpu-box"
+        ]
+      }
+    ],
+    "computers": [
+      {
+        "name": "build-box",
+        "root": "computers/c2",
+        "env": {
+          "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51100"
+        }
+      },
+      {
+        "name": "build-box",
+        "root": "computers/c2b",
+        "env": {
+          "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110"
+        }
+      },
+      {
+        "name": "gpu-box",
+        "root": "computers/c3",
+        "env": {
+          "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110"
+        }
+      }
+    ]
+  }
+}

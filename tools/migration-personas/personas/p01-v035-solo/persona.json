@@ -1,0 +1,13 @@
+{
+  "release": "v0.35.0",
+  "journey": "v0.35.0-solo",
+  "summary": "Desktop-only user on v0.35.0 (schema v145, Linux XDG state dir, no hubs/computers): one project, tags, default template, tasks in several states, subtask, tagged task, artifact, automation, web panel.",
+  "topology": {
+    "desktop": true,
+    "hubs": [],
+    "computers": [],
+    "desktopComputers": [
+      "local-computer"
+    ]
+  }
+}
