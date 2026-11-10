@@ -1,9 +1,8 @@
 /**
  * The git panel's procedures run on the computer that holds the checkout: the
- * caller's target (a task, a project, an explicit computer — or the caller's
- * default) resolves it, and the op leaves as one `git.op` request. Only with NO
- * computer does it run on the hub's own disk — and a hub with processes switched off
- * refuses that (`NO_COMPUTER_CONNECTED`), as every hub-local exec.
+ * caller's path scope (a task, or a project; §9 Phase 7b) resolves it, and the op
+ * leaves as one `git.op` request under that scope. A call naming neither is refused;
+ * with no computer the hub refuses too (it never runs git itself).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { TRPCError } from '@trpc/server'
@@ -51,8 +50,12 @@ afterEach(() => {
 
 afterAll(() => setGitOpTransport(null))
 
-// A hub that knows no checkout: no path names a target.
-const noRows = { get: async () => undefined, all: async () => [] }
+// A hub with one task (t1, project p1) and no checkouts.
+const noRows = {
+  get: async (_sql: string, params?: unknown[]) =>
+    params?.[0] === 't1' ? { project_id: 'p1' } : undefined,
+  all: async () => []
+}
 const noCheckouts = { ...noRows, prepare: () => noRows }
 const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot: '' } as never)
 
@@ -70,28 +73,30 @@ describe('git panel ops routed to the computer', () => {
   })
 
   test('a write says so (the audit log records it)', async () => {
-    await caller.stageFile({ path: '/w/repo', filePath: 'a.ts' })
+    await caller.stageFile({ target: { projectId: 'p-test' }, path: '/w/repo', filePath: 'a.ts' })
     expect(sent[0]?.params).toMatchObject({ op: 'stageFile', mutates: true })
   })
 
-  test('no target: the caller default decides', async () => {
-    await caller.listStashes({ repoPath: '/w/repo' })
-    expect(targets).toEqual([{}])
-    expect(sent).toHaveLength(1)
+  test('no scope: refused, nothing sent (a bare path names nobody)', async () => {
+    // Cast: the type requires a scope; this proves the run-time refusal too.
+    await expect(caller.listStashes({ repoPath: '/w/repo' } as never)).rejects.toThrow(
+      /must name the task or project/
+    )
+    expect(sent).toHaveLength(0)
   })
 
   test('works on a hub with processes off — nothing runs on the hub', async () => {
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-    await caller.fetch({ path: '/w/repo' })
+    await caller.fetch({ target: { projectId: 'p-test' }, path: '/w/repo' })
     expect(sent).toHaveLength(1)
   })
 
   test('no computer, on ANY hub: "connect a computer" — the hub never runs git itself', async () => {
     resolved = null
     for (const op of [
-      () => caller.getCurrentBranch({ path: '/w/repo' }),
-      () => caller.stageAll({ path: '/w/repo' }),
-      () => caller.watchStart({ worktreePath: '/w/never' })
+      () => caller.getCurrentBranch({ target: { projectId: 'p-test' }, path: '/w/repo' }),
+      () => caller.stageAll({ target: { projectId: 'p-test' }, path: '/w/repo' }),
+      () => caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/never' })
     ]) {
       const err = await op().catch((e: unknown) => e)
       expect(err).toBeInstanceOf(TRPCError)
@@ -104,7 +109,9 @@ describe('git panel ops routed to the computer', () => {
   test('no computer on a hub with processes off: NO_COMPUTER_CONNECTED, nothing sent', async () => {
     resolved = null
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
-    const err = await caller.getCurrentBranch({ path: '/w/repo' }).catch((e: unknown) => e)
+    const err = await caller
+      .getCurrentBranch({ target: { projectId: 'p-test' }, path: '/w/repo' })
+      .catch((e: unknown) => e)
     expect(err).toBeInstanceOf(TRPCError)
     expect((err as TRPCError).code).toBe('FORBIDDEN')
     expect(sent).toHaveLength(0)
@@ -113,7 +120,7 @@ describe('git panel ops routed to the computer', () => {
 
 describe('PR ops', () => {
   test('hasGithubRemote asks the computer', async () => {
-    await caller.hasGithubRemote({ repoPath: '/w/repo' })
+    await caller.hasGithubRemote({ target: { projectId: 'p-test' }, repoPath: '/w/repo' })
     expect(sent.at(-1)?.params).toMatchObject({ op: 'hasGithubRemote', mutates: false })
   })
 
@@ -125,6 +132,7 @@ describe('PR ops', () => {
     })
     try {
       const pr = await caller.createPr({
+        target: { projectId: 'p-test' },
         repoPath: '/w/repo',
         title: 't',
         body: 'b',
@@ -155,18 +163,26 @@ describe('worktree lifecycle and AI merge run on the computer', () => {
   })
 
   test('removeWorktree there', async () => {
-    await caller.removeWorktree({ repoPath: '/w/repo', worktreePath: '/w/wt-1' })
+    await caller.removeWorktree({
+      target: { projectId: 'p-test' },
+      repoPath: '/w/repo',
+      worktreePath: '/w/wt-1'
+    })
     expect(sent.at(-1)?.params).toMatchObject({ op: 'removeWorktree', mutates: true })
   })
 
   test("detectWorktrees: git there, colors from the hub's registry", async () => {
-    const out = await caller.detectWorktrees({ repoPath: '/w/repo' })
+    const out = await caller.detectWorktrees({
+      target: { projectId: 'p-test' },
+      repoPath: '/w/repo'
+    })
     expect(sent.at(-1)?.params.op).toBe('listWorktrees')
     expect(Array.isArray(out)).toBe(true)
   })
 
   test("mergeWithAI: its git steps there, the agent's prompt built here", async () => {
     await caller.mergeWithAI({
+      target: { projectId: 'p-test' },
       projectPath: '/w/repo',
       worktreePath: '/w/wt-1',
       parentBranch: 'main',

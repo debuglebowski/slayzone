@@ -163,6 +163,11 @@ function setupConflict() {
 
 // ── Clean merge (API) ───────────────────────────────────────────────
 
+/** The task whose checkout the direct API calls below touch (their path scope, §9 Phase 7b). */
+let scopeTaskId = ''
+/** The project the init describe's direct read names. */
+let scopeProjectId = ''
+
 test.describe('Clean merge', () => {
   let taskId: string
 
@@ -175,6 +180,7 @@ test.describe('Clean merge', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Clean Merge', color: '#10b981', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Clean merge task', status: 'todo' })
+    scopeTaskId = t.id
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: taskId,
@@ -190,14 +196,15 @@ test.describe('Clean merge', () => {
 
   test('clean merge via API returns success', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) =>
+      ({ pp, wp, parent, tid }) =>
         window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          target: { taskId: tid },
           projectPath: pp,
           worktreePath: wp,
           parentBranch: parent,
           sourceBranch: 'test-branch'
         }),
-      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
+      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch(), tid: scopeTaskId }
     )
     expect(result.success).toBe(true)
   })
@@ -223,6 +230,7 @@ test.describe('Clean merge UI', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'UI Merge', color: '#f59e0b', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Merge UI task', status: 'todo' })
+    scopeTaskId = t.id
     taskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: taskId,
@@ -279,6 +287,7 @@ test.describe('Merge with uncommitted changes', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Dirty Merge', color: '#ef4444', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Dirty merge task', status: 'todo' })
+    scopeTaskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
@@ -289,14 +298,15 @@ test.describe('Merge with uncommitted changes', () => {
 
   test('returns resolving with commit step when uncommitted changes', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) =>
+      ({ pp, wp, parent, tid }) =>
         window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          target: { taskId: tid },
           projectPath: pp,
           worktreePath: wp,
           parentBranch: parent,
           sourceBranch: 'test-branch'
         }),
-      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
+      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch(), tid: scopeTaskId }
     )
 
     expect(result.resolving).toBe(true)
@@ -322,6 +332,7 @@ test.describe('Merge with conflicts', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Conflict Test', color: '#dc2626', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Conflict task', status: 'todo' })
+    scopeTaskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
@@ -332,14 +343,15 @@ test.describe('Merge with conflicts', () => {
 
   test('returns conflicted files and resolution prompt', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) =>
+      ({ pp, wp, parent, tid }) =>
         window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          target: { taskId: tid },
           projectPath: pp,
           worktreePath: wp,
           parentBranch: parent,
           sourceBranch: 'test-branch'
         }),
-      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
+      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch(), tid: scopeTaskId }
     )
 
     expect(result.resolving).toBe(true)
@@ -350,27 +362,39 @@ test.describe('Merge with conflicts', () => {
 
   test('isMergeInProgress returns true after conflict', async ({ mainWindow }) => {
     const inProgress = await mainWindow.evaluate(
-      (pp) => window.getTrpcVanillaClient().worktrees.isMergeInProgress.query({ path: pp }),
-      gitDir
+      ({ pp, tid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.isMergeInProgress.query({ path: pp, target: { taskId: tid } }),
+      { pp: gitDir, tid: scopeTaskId }
     )
     expect(inProgress).toBe(true)
   })
 
   test('abort merge clears state', async ({ mainWindow }) => {
     await mainWindow.evaluate(
-      (pp) => window.getTrpcVanillaClient().worktrees.abortMerge.mutate({ path: pp }),
-      gitDir
+      ({ pp, tid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.abortMerge.mutate({ path: pp, target: { taskId: tid } }),
+      { pp: gitDir, tid: scopeTaskId }
     )
 
     const inProgress = await mainWindow.evaluate(
-      (pp) => window.getTrpcVanillaClient().worktrees.isMergeInProgress.query({ path: pp }),
-      gitDir
+      ({ pp, tid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.isMergeInProgress.query({ path: pp, target: { taskId: tid } }),
+      { pp: gitDir, tid: scopeTaskId }
     )
     expect(inProgress).toBe(false)
 
     const conflicted = await mainWindow.evaluate(
-      (pp) => window.getTrpcVanillaClient().worktrees.getConflictedFiles.query({ path: pp }),
-      gitDir
+      ({ pp, tid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.getConflictedFiles.query({ path: pp, target: { taskId: tid } }),
+      { pp: gitDir, tid: scopeTaskId }
     )
     expect(conflicted).toEqual([])
   })
@@ -389,6 +413,7 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
     const s = seed(mainWindow)
     const p = await s.createProject({ name: 'Both Issues', color: '#7c3aed', path: gitDir })
     const t = await s.createTask({ projectId: p.id, title: 'Both merge task', status: 'todo' })
+    scopeTaskId = t.id
     await mainWindow.evaluate((d) => window.getTrpcVanillaClient().task.update.mutate(d), {
       id: t.id,
       worktreePath: WORKTREE_PATH,
@@ -399,14 +424,15 @@ test.describe('Merge with conflicts and uncommitted changes', () => {
 
   test('prompt has both commit and conflict resolution steps', async ({ mainWindow }) => {
     const result = await mainWindow.evaluate(
-      ({ pp, wp, parent }) =>
+      ({ pp, wp, parent, tid }) =>
         window.getTrpcVanillaClient().worktrees.mergeWithAI.mutate({
+          target: { taskId: tid },
           projectPath: pp,
           worktreePath: wp,
           parentBranch: parent,
           sourceBranch: 'test-branch'
         }),
-      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch() }
+      { pp: gitDir, wp: WORKTREE_PATH, parent: getMainBranch(), tid: scopeTaskId }
     )
 
     expect(result.resolving).toBe(true)
@@ -449,6 +475,7 @@ test.describe('Git init', () => {
     const p = await s.createProject({ name: 'Init Test', color: '#06b6d4', path: NO_GIT_DIR })
     projectAbbrev = p.name.slice(0, 2).toUpperCase()
     await s.createTask({ projectId: p.id, title: 'Init task', status: 'todo' })
+    scopeProjectId = p.id
     await s.refreshData()
 
     await goHome(mainWindow)
@@ -488,8 +515,11 @@ test.describe('Git init', () => {
 
     // Verify via API
     const isRepo = await mainWindow.evaluate(
-      (p) => window.getTrpcVanillaClient().worktrees.isGitRepo.query({ path: p }),
-      NO_GIT_DIR
+      ({ p, pid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.isGitRepo.query({ path: p, target: { projectId: pid } }),
+      { p: NO_GIT_DIR, pid: scopeProjectId }
     )
     expect(isRepo).toBe(true)
   })

@@ -86,4 +86,25 @@ test('R3-2: an import ignores the machine-local key from an older bundle', async
   expect(value('r32_other_setting')).toBe('kept')
 })
 
+test('§9 7d: an export carries no computer path of a task (worktree, custom folder)', async () => {
+  const projectId = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+    .run(projectId, 'P7d', '#000')
+  h.db
+    .prepare(
+      'INSERT INTO tasks (id, project_id, title, has_worktree, has_base_dir) VALUES (?, ?, ?, 1, 1)'
+    )
+    .run(crypto.randomUUID(), projectId, 'T')
+  const file = join(dir, 'paths.slay')
+  expect((await ops.testExportAllToPath!(file)).success).toBe(true)
+  const text = readFileSync(file, 'utf8')
+  const tasks = (JSON.parse(text) as { data: { tasks: Record<string, unknown>[] } }).data.tasks
+  expect(tasks.length).toBeGreaterThan(0)
+  for (const t of tasks) {
+    expect(t).not.toHaveProperty('worktree_path')
+    expect(t).not.toHaveProperty('base_dir')
+  }
+})
+
 afterAll(() => h.cleanup())

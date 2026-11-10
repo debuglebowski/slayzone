@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
-import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
+import { parseTasks, TASK_ORDER_BY } from './shared.js'
 
 export async function getAllTasksOp(db: SlayzoneDb): Promise<Task[]> {
   const rows = await db.all<Record<string, unknown>>(
@@ -10,5 +10,5 @@ export async function getAllTasksOp(db: SlayzoneDb): Promise<Task[]> {
       WHERE t.deleted_at IS NULL
       ${TASK_ORDER_BY}`
   )
-  return parseAndColorTasks(db, rows)
+  return parseTasks(rows)
 }

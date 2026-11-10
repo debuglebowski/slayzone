@@ -292,7 +292,9 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
    */
   function copyInHandler(rawParams: unknown): { path: string } {
     const { rootPath, absoluteSrc, targetDir } = fsCopyInParamsSchema.parse(rawParams)
-    const src = allow(absoluteSrc)
+    // Picked by the user on this machine: outside the path scope only on a hub with
+    // no login (`hostReads`), as a desktop drag from Finder always could.
+    const src = allow(absoluteSrc, { hostRead: true })
     let isFile = false
     try {
       isFile = statSync(src).isFile()

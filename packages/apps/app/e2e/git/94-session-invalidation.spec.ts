@@ -4,7 +4,9 @@ import {
   openTaskTerminal,
   startAgentTerminal,
   getMainSessionId,
-  closeAllTaskTabs
+  closeAllTaskTabs,
+  seedSession,
+  currentSession
 } from '../fixtures/terminal'
 
 /**
@@ -55,6 +57,8 @@ test.describe('Session invalidation', () => {
       return mine[mine.length - 1] ?? null
     }, sessionId) as Promise<{
       existingConversationId?: string | null
+      /** What the spawn resumes (the ledger's, on the computer). */
+      resumeConversationId?: string | null
       mode?: string
     } | null>
 
@@ -119,14 +123,8 @@ test.describe('Session invalidation', () => {
   test('stale-session exit shows the "Start fresh" overlay', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI overlay', status: 'in_progress' })
-    await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'claude-code': { conversationId: 'stale-overlay' } }
-        }),
-      { id: t.id }
-    )
+    await seedSession(mainWindow, t.id, 'claude-code', 'stale-overlay')
+    await proveConversationTurn(mainWindow, t.id, 'stale-overlay')
     await s.refreshData()
 
     const sessionId = getMainSessionId(t.id)
@@ -148,14 +146,8 @@ test.describe('Session invalidation', () => {
   }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI fresh', status: 'in_progress' })
-    await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'claude-code': { conversationId: 'clear-on-fresh' } }
-        }),
-      { id: t.id }
-    )
+    await seedSession(mainWindow, t.id, 'claude-code', 'clear-on-fresh')
+    await proveConversationTurn(mainWindow, t.id, 'clear-on-fresh')
     await s.refreshData()
 
     const sessionId = getMainSessionId(t.id)
@@ -171,11 +163,7 @@ test.describe('Session invalidation', () => {
     await expect(mainWindow.getByRole('button', { name: 'Start fresh' })).toBeVisible()
 
     // Manual-only (issue #90 decision Q1): the id survives until the user acts.
-    const mid = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      t.id
-    )
-    expect(mid?.provider_config?.['claude-code']?.conversationId).toBe('clear-on-fresh')
+    expect(await currentSession(mainWindow, t.id, 'claude-code')).toBe('clear-on-fresh')
 
     await mainWindow.getByRole('button', { name: 'Start fresh' }).click()
 
@@ -183,11 +171,7 @@ test.describe('Session invalidation', () => {
     await expect
       .poll(
         async () => {
-          const task = await mainWindow.evaluate(
-            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-            t.id
-          )
-          return task?.provider_config?.['claude-code']?.conversationId ?? null
+          return currentSession(mainWindow, t.id, 'claude-code')
         },
         { timeout: 10_000 }
       )
@@ -202,14 +186,8 @@ test.describe('Session invalidation', () => {
   test('reset terminal clears conversationId and remounts', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI reset', status: 'in_progress' })
-    await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'claude-code': { conversationId: 'reset-me' } }
-        }),
-      { id: t.id }
-    )
+    await seedSession(mainWindow, t.id, 'claude-code', 'reset-me')
+    await proveConversationTurn(mainWindow, t.id, 'reset-me')
     await s.refreshData()
 
     const sessionId = getMainSessionId(t.id)
@@ -230,11 +208,7 @@ test.describe('Session invalidation', () => {
     await expect
       .poll(
         async () => {
-          const task = await mainWindow.evaluate(
-            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-            t.id
-          )
-          return task?.provider_config?.['claude-code']?.conversationId ?? null
+          return currentSession(mainWindow, t.id, 'claude-code')
         },
         { timeout: 10_000 }
       )
@@ -260,21 +234,13 @@ test.describe('Session invalidation', () => {
   // --- Restart terminal (menu) ---
 
   test('restart terminal preserves conversationId and remounts with same ID', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     const storedId = 'keep-on-restart'
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'SI restart', status: 'in_progress' })
-    await mainWindow.evaluate(
-      ({ id, cid }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { 'claude-code': { conversationId: cid } }
-        }),
-      { id: t.id, cid: storedId }
-    )
-    await proveConversationTurn(electronApp, storedId)
+    await seedSession(mainWindow, t.id, 'claude-code', storedId)
+    await proveConversationTurn(mainWindow, t.id, storedId)
     await s.refreshData()
 
     const sessionId = getMainSessionId(t.id)
@@ -292,11 +258,7 @@ test.describe('Session invalidation', () => {
     await mainWindow.getByRole('menuitem', { name: 'Restart session' }).click()
 
     // conversationId should be PRESERVED
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      t.id
-    )
-    expect(task?.provider_config?.['claude-code']?.conversationId).toBe(storedId)
+    expect(await currentSession(mainWindow, t.id, 'claude-code')).toBe(storedId)
 
     // PTY should have been killed
     await expect
@@ -309,12 +271,12 @@ test.describe('Session invalidation', () => {
       )
       .toBe(true)
 
-    // Terminal should remount with same existingConversationId
+    // Terminal should remount resuming the same conversation
     await expect
       .poll(() => getCreateCount(mainWindow, sessionId), { timeout: 10_000 })
       .toBeGreaterThan(countBefore)
 
     const opts = await getLastOpts(mainWindow, sessionId)
-    expect(opts?.existingConversationId).toBe(storedId)
+    expect(opts?.resumeConversationId).toBe(storedId)
   })
 })

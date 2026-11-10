@@ -1,28 +1,39 @@
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
+import { currentSession, seedSession } from '../fixtures/terminal'
 
 /**
- * Tests that changing worktree_path, base_dir, or project_id auto-clears
- * all conversation IDs while preserving flags (handlers.ts:383-397).
+ * Tests that changing worktree_path, base_dir, or project_id resets every session of
+ * the task (a reset intent its computer applies to its session ledger, robustness
+ * plan §9) while preserving flags.
  */
 test.describe('Worktree/project change clears conversation IDs', () => {
   let projectId: string
   let project2Id: string
   let taskId: string
 
-  /** Seed conversationIds and flags for claude-code + codex on the test task */
+  /**
+   * A folder the task's computer accepts as this task's (§9 7e: it judges every path a
+   * user sets — inside its allowed roots, never in another task's or project's folder).
+   */
+  const folder = (name: string) => `${TEST_PROJECT_PATH}-wt-clearing/${name}`
+
+  /** Seed sessions (on the task's computer) and flags for claude-code + codex */
   const seedConversationState = async (mainWindow: import('@playwright/test').Page, id: string) => {
     await mainWindow.evaluate(
       ({ id }) =>
         window.getTrpcVanillaClient().task.update.mutate({
           id,
           providerConfig: {
-            'claude-code': { conversationId: 'claude-conv-aaa', flags: '--claude-flag' },
-            codex: { conversationId: 'codex-conv-bbb', flags: '--codex-flag' }
+            'claude-code': { flags: '--claude-flag' },
+            codex: { flags: '--codex-flag' }
           }
         }),
       { id }
     )
+    // A session newer than any earlier reset.
+    await new Promise((r) => setTimeout(r, 5))
+    await seedSession(mainWindow, id, 'codex', 'codex-conv-bbb')
   }
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -46,18 +57,17 @@ test.describe('Worktree/project change clears conversation IDs', () => {
 
     // Change worktree path without explicit providerConfig
     await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath: '/tmp/new-worktree' }),
-      { id: taskId }
+      ({ id, worktreePath }) =>
+        window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath }),
+      { id: taskId, worktreePath: folder('new-worktree') }
     )
 
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    // Conversation IDs should be cleared
-    expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
-    expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
+    // The sessions reset
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     // Flags should survive
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
@@ -67,17 +77,15 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     await seedConversationState(mainWindow, taskId)
 
     await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({ id, baseDir: '/tmp/new-base' }),
-      { id: taskId }
+      ({ id, baseDir }) => window.getTrpcVanillaClient().task.update.mutate({ id, baseDir }),
+      { id: taskId, baseDir: folder('new-base') }
     )
 
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
-    expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
   })
@@ -94,8 +102,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    expect(task?.provider_config?.['claude-code']?.conversationId ?? null).toBeNull()
-    expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
 
@@ -113,22 +120,21 @@ test.describe('Worktree/project change clears conversation IDs', () => {
 
     // Change worktree AND provide explicit providerConfig — auto-clear should NOT trigger
     await mainWindow.evaluate(
-      ({ id }) =>
+      ({ id, worktreePath }) =>
         window.getTrpcVanillaClient().task.update.mutate({
           id,
-          worktreePath: '/tmp/another-worktree',
-          providerConfig: { 'claude-code': { conversationId: 'explicit-keep' } }
+          worktreePath,
+          providerConfig: { 'claude-code': { flags: '--explicit' } }
         }),
-      { id: taskId }
+      { id: taskId, worktreePath: folder('another-worktree') }
     )
 
     const task = await mainWindow.evaluate(
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
-    // claude-code should have the explicitly provided value (deep merged)
-    expect(task?.provider_config?.['claude-code']?.conversationId).toBe('explicit-keep')
-    // codex should also survive (auto-clear was suppressed by explicit providerConfig)
-    expect(task?.provider_config?.codex?.conversationId).toBe('codex-conv-bbb')
+    expect(task?.provider_config?.['claude-code']?.flags).toBe('--explicit')
+    // The session survives (the reset was suppressed by the explicit providerConfig)
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBe('codex-conv-bbb')
   })
 })

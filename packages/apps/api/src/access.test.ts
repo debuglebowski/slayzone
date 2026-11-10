@@ -31,6 +31,7 @@ import {
   invalidateAccessCache,
   resource,
   setHubDiskComputer,
+  setHubDiskTaskRoots,
   type AccessRequest,
   type ResourceKind
 } from './access'
@@ -61,10 +62,11 @@ sql(
   B,
   bNested
 )
+// A's worktree is on the hub's own computer, which reports it (hubDiskTaskRoots
+// below): the hub keeps only whether a task has one (§9 7e).
 sql(
-  `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES
-  ('tA', 'pA', 'a', ?), ('tB', 'pB', 'b', NULL), ('tU', 'pU', 'u', NULL)`,
-  aWorktree
+  `INSERT INTO tasks (id, project_id, title, has_worktree) VALUES
+  ('tA', 'pA', 'a', 1), ('tB', 'pB', 'b', 0), ('tU', 'pU', 'u', 0)`
 )
 // B's folder on a remote computer c1 — a second project of B's: pB's own folder is
 // its (hub-disk) project path, and a placed project's legacy path is stale (M8).
@@ -80,18 +82,6 @@ sql(
 sql(
   `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES ('tabA', 'tA', 'terminal', 0), ('tabB', 'tB', 'terminal', 0)`
 )
-sql(`INSERT INTO agent_sessions (id, mode, task_id, origin, status, created_at) VALUES
-  ('sA', 'claude-code', 'tA', 'pending-spawn', 'bound', 0),
-  ('sPool', 'claude-code', NULL, 'pending-spawn', 'pooled', 0)`)
-sql(
-  `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES ('prA', 'tA', 'claude-code', 'x', 0)`
-)
-sql(
-  `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, created_at) VALUES
-  ('trA', ?, 'tA', 'tabA', 'sha', 0), ('trOrphan', ?, NULL, 'tabA', 'sha', 0)`,
-  aWorktree,
-  aWorktree
-)
 sql(`INSERT INTO artifact_folders (id, task_id, name) VALUES ('fA', 'tA', 'f')`)
 sql(`INSERT INTO task_artifacts (id, task_id, title) VALUES ('arA', 'tA', 't')`)
 sql(`INSERT INTO processes (id, task_id, project_id, label, command) VALUES
@@ -100,15 +90,6 @@ sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagA', 'pA', 'x')`)
 sql(`INSERT INTO task_templates (id, project_id, name) VALUES ('tmA', 'pA', 'x')`)
 sql(`INSERT INTO test_categories (id, project_id, name, pattern) VALUES ('tcA', 'pA', 'x', '*')`)
 sql(`INSERT INTO test_labels (id, project_id, name) VALUES ('tlA', 'pA', 'x')`)
-// A queued chat message is the computer's; the hub keeps only its route (id → tab).
-sql(
-  `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES ('convA', 'tA', 'tabA', 'claude-chat', NULL, 1, 'active')`
-)
-sql(`INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES ('cqA', 'tabA', 'convA')`)
-// The hub's legacy queue (kept one release, never read): its ids belong to no one.
-sql(
-  `INSERT INTO chat_queue (id, tab_id, send, original, position) VALUES ('cqLegacy', 'tabA', 's', 'o', 0)`
-)
 sql(
   `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES ('auA', 'pA', 'x', '{}', '[]')`
 )
@@ -134,6 +115,9 @@ sql(
 // A task on no computer is not (Q1: removing a computer clears its tasks' computer).
 sql(`UPDATE tasks SET computer_id = 'cA' WHERE id = 'tA'`)
 setHubDiskComputer('cA')
+// The hub keeps no task path (§9 Phase 7c): the hub's computer reports its tasks' folders.
+const hubDiskTaskRoots = async () => [{ taskId: 'tA', root: aWorktree }]
+setHubDiskTaskRoots(hubDiskTaskRoots)
 
 const req = (userId: string | null, authRequired = true): AccessRequest => ({
   authRequired,
@@ -148,9 +132,8 @@ const OF_A: Record<ResourceKind, string> = {
   project: 'pA',
   task: 'tA',
   tab: 'tabA',
-  session: 'sA',
-  prompt: 'prA',
-  turn: 'trA',
+  // A runtime session key names its task (the ledger is on the computers, §9).
+  session: 'tA:tabA',
   artifact: 'arA',
   artifactFolder: 'fA',
   process: 'prcTask',
@@ -158,11 +141,11 @@ const OF_A: Record<ResourceKind, string> = {
   template: 'tmA',
   testCategory: 'tcA',
   testLabel: 'tlA',
-  chatQueueItem: 'cqA',
   automationRun: 'runA',
   aiConfigItem: 'aiA',
   projectGroup: 'gA',
-  path: join(aWorktree, 'src', 'index.ts'),
+  // A project root of A's: a task's folders are its computer's to judge (§9 7e).
+  path: join(aRoot, 'src', 'index.ts'),
   automation: 'auA',
   computer: 'cA',
   pathTree: aWorktree,
@@ -181,12 +164,6 @@ describe('every kind: the owner, and nobody else', () => {
       expect(await can(null, kind, OF_A[kind])).toBe(false)
     })
   }
-})
-
-describe('legacy chat queue', () => {
-  test("an item only in the hub's legacy queue authorizes no one", async () => {
-    expect(await can(A, 'chatQueueItem', 'cqLegacy')).toBe(false)
-  })
 })
 
 describe('a hub without login (the desktop app): everything, as before', () => {
@@ -224,7 +201,6 @@ describe('missing and ownerless: refused to everyone on a hub with login', () =>
     ['session', 'sPool', 'pooled agent session no task adopted yet'],
     ['session', 'random-uuid', 'unknown runtime key'],
     ['session', 'nope:tab', 'legacy key of a missing task'],
-    ['turn', 'trOrphan', 'turn whose task was deleted'],
     ['process', 'prcGlobal', 'process with neither task nor project'],
     ['tab', 'some-uuid-tab', 'unknown tab'],
     ['path', join(hubRoot, 'slayzone.data.sqlite'), "the hub's own database file"],
@@ -267,8 +243,10 @@ describe('how each kind finds its owner', () => {
     expect(await can(B, 'projectGroup', 'gMixed')).toBe(true)
     expect(await can(B, 'projectGroup', 'gA')).toBe(false)
   })
-  test("path: inside a task's worktree, a project's path, or a computer placement", async () => {
-    expect(await can(A, 'path', aWorktree)).toBe(true)
+  test("path: inside a project's path or a computer placement; a task's folder is the computer's", async () => {
+    // No hub record of a task folder (§9 7e): outside every root, so hub-wide here —
+    // the request names its task and that computer's jail confines the path.
+    expect(await can(B, 'path', aWorktree)).toBe(true)
     expect(await can(A, 'path', join(aRoot, 'README.md'))).toBe(true)
     expect(await can(B, 'path', join(aRoot, 'README.md'))).toBe(false)
     expect(await can(B, 'path', join(placement, 'x'))).toBe(true)
@@ -417,6 +395,24 @@ describe('ownedPath: a hub-local open needs a root the caller may access (N1)', 
   test('no login (the desktop app): allowed', async () => {
     expect(await can(null, 'ownedPath', '/etc/passwd', false)).toBe(true)
   })
+  test("a task folder is decided by what the hub's computer reports, owned per the hub's task record", async () => {
+    try {
+      // The computer away: its tasks' folders are nobody's (refused), never a stale copy's.
+      setHubDiskTaskRoots(async () => {
+        throw new Error('computer offline')
+      })
+      expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(false)
+      // A root the computer reports for B's task is B's — whatever project it claims.
+      setHubDiskTaskRoots(async () => [{ taskId: 'tB', root: aWorktree }])
+      expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(false)
+      expect(await can(B, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(true)
+      // A task the hub does not have owns nothing.
+      setHubDiskTaskRoots(async () => [{ taskId: 'ghost', root: aWorktree }])
+      expect(await can(A, 'ownedPath', join(aWorktree, 'x.ts'))).toBe(false)
+    } finally {
+      setHubDiskTaskRoots(hubDiskTaskRoots)
+    }
+  })
 })
 
 describe('/dev, /proc, /sys and /.vol: refused for every path kind on a hub with login (N1)', () => {
@@ -498,13 +494,6 @@ describe('scopes: many decisions for one request or one stream', () => {
     expect(await scope.allows(resource('task', 'tA'))).toBe(true)
     sql(`UPDATE projects SET owner_user_id = ? WHERE id = 'pA'`, A)
     invalidateAccessCache()
-  })
-  test('a stream picks up a session adopted by a task (pooled → bound) at once', async () => {
-    const scope = createAccessScope(db, req(A), { ttlMs: 60_000 })
-    expect(await scope.allows(resource('session', 'sPool'))).toBe(false)
-    const { bindSessionToTask } = await import('@slayzone/task/server')
-    await bindSessionToTask(db, { sessionId: 'sPool', taskId: 'tA', tabId: 'tabA' })
-    expect(await scope.allows(resource('session', 'sPool'))).toBe(true)
   })
 })
 

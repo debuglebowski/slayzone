@@ -1615,6 +1615,9 @@ importers:
       '@slayzone/task-artifacts':
         specifier: workspace:*
         version: link:../task-artifacts
+      '@slayzone/task-contracts':
+        specifier: workspace:*
+        version: link:../task-contracts
       '@slayzone/terminal':
         specifier: workspace:*
         version: link:../terminal
@@ -2482,6 +2485,9 @@ importers:
       '@slayzone/tags':
         specifier: workspace:*
         version: link:../tags
+      '@slayzone/task':
+        specifier: workspace:*
+        version: link:../task
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts
@@ -2497,6 +2503,9 @@ importers:
       '@slayzone/ui':
         specifier: workspace:*
         version: link:../../shared/ui
+      '@slayzone/worktrees':
+        specifier: workspace:*
+        version: link:../worktrees
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
@@ -2996,6 +3005,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.3.1)
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/dialogs':
         specifier: workspace:*
         version: link:../dialogs

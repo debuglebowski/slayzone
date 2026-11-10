@@ -41,7 +41,7 @@ import {
   setIntegrationOps
 } from '@slayzone/integrations/server'
 import type { LinearIssueSummary } from '@slayzone/integrations/shared'
-import { configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import { configureTaskRuntimeAdapters, setTaskPathsDelegate } from '@slayzone/task/server'
 import {
   defaultWorktreeExecAdapters,
   defaultWorktreePolicyAdapters
@@ -66,6 +66,31 @@ const h = await createTestHarness()
 setCredentialCipher(null)
 // Import auto-creates worktrees (issue #84) via task's injected adapters — wire the
 // in-process impls a composition root injects; unconfigured they reject silently.
+/**
+ * The computer holding each task's worktree (§9 7e: the hub keeps only whether one is
+ * set): this test's stand-in, reached through the task-paths delegate.
+ */
+const worktreeOf = new Map<string, string>()
+setTaskPathsDelegate({
+  changed: async (taskId, change) => {
+    if (change.op === 'set' && change.worktreePath) worktreeOf.set(taskId, change.worktreePath)
+    if (change.op === 'clear') worktreeOf.delete(taskId)
+  },
+  apply: async () => undefined,
+  read: async () => ({}),
+  release: async (taskId) => ({
+    worktreePath: worktreeOf.get(taskId) ?? null,
+    shared: false,
+    computerId: 'c'
+  }),
+  forget: async () => undefined
+})
+const taskWorktree = (projectId: string): { id: string; worktree: string | null } => {
+  const row = h.db
+    .prepare('SELECT id, has_worktree FROM tasks WHERE project_id = ?')
+    .get(projectId) as { id: string; has_worktree: number }
+  return { id: row.id, worktree: row.has_worktree ? (worktreeOf.get(row.id) ?? null) : null }
+}
 configureTaskRuntimeAdapters({
   worktrees: defaultWorktreeExecAdapters,
   worktreePolicy: defaultWorktreePolicyAdapters
@@ -984,13 +1009,10 @@ test('importLinearIssues: provisions worktree when setting=1 (issue #84)', async
     teamId: 'team-1'
   })
 
-  const task = h.db
-    .prepare('SELECT worktree_path FROM tasks WHERE project_id = ?')
-    .get(wtProjectId) as { worktree_path: string | null }
-  expect(task).toBeTruthy()
-  expect(typeof task.worktree_path === 'string' && task.worktree_path.length > 0).toBe(true)
-  expect(task.worktree_path!.startsWith(path.join(repo, '.worktrees'))).toBe(true)
-  expect(fs.existsSync(task.worktree_path!)).toBe(true)
+  const task = taskWorktree(wtProjectId)
+  expect(typeof task.worktree === 'string' && task.worktree.length > 0).toBe(true)
+  expect(task.worktree!.startsWith(path.join(repo, '.worktrees'))).toBe(true)
+  expect(fs.existsSync(task.worktree!)).toBe(true)
 })
 
 test('importLinearIssues: skips worktree when setting=0', async () => {
@@ -1026,11 +1048,7 @@ test('importLinearIssues: skips worktree when setting=0', async () => {
     teamId: 'team-1'
   })
 
-  const task = h.db
-    .prepare('SELECT worktree_path FROM tasks WHERE project_id = ?')
-    .get(wtProjectId) as { worktree_path: string | null }
-  expect(task).toBeTruthy()
-  expect(task.worktree_path == null || task.worktree_path === '').toBe(true)
+  expect(taskWorktree(wtProjectId).worktree).toBeNull()
 })
 
 test('importLinearIssues: re-import updates existing task without disturbing worktree', async () => {
@@ -1040,9 +1058,7 @@ test('importLinearIssues: re-import updates existing task without disturbing wor
       `INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_create_worktree_on_task_create', '1')`
     )
     .run()
-  const before = h.db
-    .prepare('SELECT worktree_path FROM tasks WHERE project_id = ?')
-    .get(wtProjectId) as { worktree_path: string | null }
+  const before = taskWorktree(wtProjectId)
   _mock.listIssues = async () => ({
     issues: [{ ...FIXTURES.normal, id: 'LIN-WT-1', title: 'Re-imported' }],
     nextCursor: null
@@ -1052,11 +1068,12 @@ test('importLinearIssues: re-import updates existing task without disturbing wor
     connectionId: apiConnId,
     teamId: 'team-1'
   })
-  const after = h.db
-    .prepare('SELECT worktree_path, title FROM tasks WHERE project_id = ?')
-    .get(wtProjectId) as { worktree_path: string | null; title: string }
+  const after = h.db.prepare('SELECT title FROM tasks WHERE project_id = ?').get(wtProjectId) as {
+    title: string
+  }
   expect(after.title).toBe('Re-imported')
-  expect(after.worktree_path).toBe(before.worktree_path)
+  expect(before.worktree).toBeTruthy()
+  expect(taskWorktree(wtProjectId)).toEqual(before)
 
   // Reset settings to avoid bleeding into later test runs.
   h.db.prepare(`DELETE FROM settings WHERE key = 'auto_create_worktree_on_task_create'`).run()

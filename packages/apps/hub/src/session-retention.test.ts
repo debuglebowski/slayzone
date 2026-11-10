@@ -30,7 +30,7 @@ import Database from 'better-sqlite3'
 import { afterAll, assert, expect, test } from 'vitest'
 import { DB_PRAGMAS, type SlayzoneDb } from '@slayzone/platform'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { getCurrentConversationId, getTaskOp, listTaskSessions } from '@slayzone/task/server'
+import { getTaskOp } from '@slayzone/task/server'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { runMigrations } from '../../../shared/db-migrations/src/migrations.js'
 import {
@@ -38,7 +38,6 @@ import {
   loadChatEvents,
   persistChatEvent
 } from '../../../domains/terminal/src/server/chat-events-store.js'
-import { listPromptsForTask } from '../../../domains/agent-turns/src/server/prompt-db.js'
 import {
   BOOT_SWEEP_DELAY_MS,
   SWEEP_INTERVAL_MS,
@@ -51,13 +50,7 @@ import {
 const DAY = 24 * 60 * 60 * 1000
 const HOUR = 60 * 60 * 1000
 const ON = { SLAYZONE_HUB_SESSION_RETENTION_DAYS: '90' }
-const SWEPT = new Set([
-  'chat_events',
-  'agent_prompts',
-  'chat_queue',
-  'agent_turns',
-  'chat_tab_state'
-])
+const SWEPT = new Set(['chat_events', 'chat_queue', 'chat_tab_state'])
 
 /** `datetime('now')` shape, for the TEXT clocks. */
 const sqlTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
@@ -123,13 +116,6 @@ function seed(raw: Database.Database, now: number, oldAge: number, newAge: numbe
     )
   }
 
-  const prompt = raw.prepare(
-    `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
-     VALUES (?, 't1', 'claude-code', ?, ?, ?)`
-  )
-  prompt.run('pr-old', 'conv-old', 'GONE-prompt', old)
-  prompt.run('pr-new', 'conv-live', 'KEEP-prompt', recent)
-
   const queue = raw.prepare(
     `INSERT INTO chat_queue (id, tab_id, send, original, position, created_at) VALUES (?, 'tab1', ?, ?, ?, ?)`
   )
@@ -148,24 +134,7 @@ function seed(raw: Database.Database, now: number, oldAge: number, newAge: numbe
   draft.run('tab2', 'GONE-draft', old)
   draft.run('tab1', 'KEEP-draft', recent)
 
-  const turn = raw.prepare(
-    `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at)
-     VALUES (?, '/repo', 't1', 'tab1', ?, 'head', ?, ?)`
-  )
-  turn.run('turn-old', 'sha-old', 'GONE-turn-preview', old)
-  turn.run('turn-new', 'sha-new', 'KEEP-turn-preview', recent)
-
-  const session = raw.prepare(
-    `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at, tab_id, ended_at)
-     VALUES (?, 'claude-code', '/repo', 't1', ?, 'slay-spawned-fresh', ?, ?, ?, 'tab1', ?)`
-  )
-  session.run('s-old', 'conv-old', 'dead', now - 200 * DAY, now - 200 * DAY, now - 120 * DAY)
-  session.run('s-live', 'conv-live', 'bound', now - 150 * DAY, now - 150 * DAY, null)
-  const firstTurn = raw.prepare(
-    'INSERT INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)'
-  )
-  firstTurn.run('conv-old', now - 200 * DAY)
-  firstTurn.run('conv-live', now - 150 * DAY)
+  // Sessions, prompts and turns are on the computers (robustness plan §9): not here.
   raw
     .prepare(
       `INSERT INTO usage_records (id, provider, model, session_id, timestamp, source_file)
@@ -264,28 +233,14 @@ test('91 days old is swept and 89 days old is kept, per table', async () => {
     raw.prepare('SELECT seq FROM chat_events ORDER BY seq').all() as { seq: number }[]
   ).map((r) => r.seq)
   expect(seqs, 'chat_events: the 91-day events went, the 89-day ones stayed').toEqual([3, 4])
-  expect(raw.prepare('SELECT id FROM agent_prompts ORDER BY id').all(), 'agent_prompts').toEqual([
-    { id: 'pr-new' }
-  ])
   expect(raw.prepare('SELECT id FROM chat_queue ORDER BY id').all(), 'chat_queue').toEqual([
     { id: 'q-new' }
   ])
   expect(raw.prepare('SELECT tab_id FROM chat_tab_state').all(), 'chat_tab_state').toEqual([
     { tab_id: 'tab1' }
   ])
-  expect(
-    raw.prepare('SELECT id, snapshot_sha, prompt_preview FROM agent_turns ORDER BY id').all(),
-    'agent_turns: both rows (and their snapshot) stay, the old preview is blanked'
-  ).toEqual([
-    { id: 'turn-new', snapshot_sha: 'sha-new', prompt_preview: 'KEEP-turn-preview' },
-    { id: 'turn-old', snapshot_sha: 'sha-old', prompt_preview: '' }
-  ])
-  expect(
-    { deleted: report.deleted, redacted: report.redacted, failed: report.failed },
-    'report counts'
-  ).toEqual({
-    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1, chat_tab_state: 1 },
-    redacted: { agent_turns: 1 },
+  expect({ deleted: report.deleted, failed: report.failed }, 'report counts').toEqual({
+    deleted: { chat_events: 3, chat_queue: 1, chat_tab_state: 1 },
     failed: []
   })
   handle.stop()
@@ -296,12 +251,9 @@ test('the boundary is the period itself: 90 days plus an hour goes, minus an hou
   seed(raw, Date.now(), 90 * DAY + HOUR, 90 * DAY - HOUR)
   const report = await sweepSessionContent(db, { days: 90 })
   expect(
-    { deleted: report.deleted, redacted: report.redacted },
+    report.deleted,
     'only the rows past the cutoff, on the TEXT and the ms clocks alike'
-  ).toEqual({
-    deleted: { chat_events: 3, agent_prompts: 1, chat_queue: 1, chat_tab_state: 1 },
-    redacted: { agent_turns: 1 }
-  })
+  ).toEqual({ chat_events: 3, chat_queue: 1, chat_tab_state: 1 })
 })
 
 test('nothing else changes; no dangling keys; the task still opens', async () => {
@@ -309,7 +261,6 @@ test('nothing else changes; no dangling keys; the task still opens', async () =>
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
   const before = snapshotOthers(raw)
-  const currentBefore = await getCurrentConversationId(db, 't1', 'claude-code')
   await sweepSessionContent(db, { days: 90, now })
 
   const after = snapshotOthers(raw)
@@ -321,41 +272,19 @@ test('nothing else changes; no dangling keys; the task still opens', async () =>
   const task = await getTaskOp(db, 't1')
   assert(task, 'the task loads')
   expect(task.description, 'its notes are intact').toBe('NOTE-KEEP task notes')
-  const sessions = await listTaskSessions(db, 't1', 'claude-code')
-  expect(
-    sessions.map((s) => [s.conversationId, s.messageCount, s.firstPrompt, s.isCurrent]),
-    'both sessions still listed; the old one has no messages left'
-  ).toEqual([
-    ['conv-live', 1, 'KEEP-prompt', true],
-    ['conv-old', 0, null, false]
-  ])
-  expect(
-    (await listPromptsForTask(db, 't1', 'claude-code')).map((p) => p.text),
-    'the message history holds the recent prompt'
-  ).toEqual(['KEEP-prompt'])
   expect(
     (await loadChatEvents(db, 'tab1')).map((e) => e.seq),
     'the chat history loads what is left'
   ).toEqual([3, 4])
-  expect(currentBefore, 'resume target before').toBe('conv-live')
-  expect(await getCurrentConversationId(db, 't1', 'claude-code'), 'resume target after').toBe(
-    'conv-live'
-  )
 })
 
-test('a live session keeps working: its task, its resume target, its chat seq', async () => {
+test('a live session keeps working: its task, its chat seq', async () => {
   const { raw, db } = newDb()
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
   const nextBefore = await getNextSeqForTab(db, 'tab1')
   await sweepSessionContent(db, { days: 90, now })
 
-  // The live agent's ledger row — started 150 days ago, never ended, bound to its
-  // task — is the task's resume binding, and the sweep does not touch it.
-  expect(
-    raw.prepare('SELECT status, ended_at, task_id FROM agent_sessions WHERE id = ?').get('s-live'),
-    'the live session row is as it was'
-  ).toEqual({ status: 'bound', ended_at: null, task_id: 't1' })
   expect(await getNextSeqForTab(db, 'tab1'), 'next chat seq is unchanged').toEqual(nextBefore)
   await persistChatEvent(db, 'tab1', nextBefore, { type: 'text', text: 'after' } as never)
   expect(
@@ -395,7 +324,7 @@ test('a malformed period is never treated as a period', async () => {
   expect([handle.days, fake.scheduled.length], 'off, no timer (B16 refused it at boot)').toEqual([
     0, 0
   ])
-  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'kept').toEqual({ n: 2 })
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), 'kept').toEqual({ n: 2 })
 })
 
 test('boot sweep, then the daily tick; timers unref’d; stop clears them', async () => {
@@ -417,18 +346,18 @@ test('boot sweep, then the daily tick; timers unref’d; stop clears them', asyn
   const lines = sweepLines().length
   fake.scheduled[0].fn()
   await until(() => sweepLines().length === lines + 1, 'the boot sweep')
-  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'boot sweep ran').toEqual({
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), 'boot sweep ran').toEqual({
     n: 1
   })
 
   raw
     .prepare(
-      `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES ('pr-later', 't1', 'claude-code', 'x', ?)`
+      `INSERT INTO chat_queue (id, tab_id, send, original, position, created_at) VALUES ('q-later', 'tab1', 'x', 'x', 2, ?)`
     )
-    .run(Date.now() - 100 * DAY)
+    .run(sqlTime(Date.now() - 100 * DAY))
   fake.scheduled[1].fn()
   await until(() => sweepLines().length === lines + 2, 'the daily sweep')
-  expect(raw.prepare('SELECT count(*) AS n FROM agent_prompts').get(), 'daily sweep ran').toEqual({
+  expect(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), 'daily sweep ran').toEqual({
     n: 1
   })
 
@@ -459,15 +388,15 @@ test('statements stay bounded by the batch size, yielding in between', async () 
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
   const insert = raw.prepare(
-    `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES (?, 't1', 'claude-code', 'x', ?)`
+    `INSERT INTO chat_queue (id, tab_id, send, original, position, created_at) VALUES (?, 'tab1', 'x', 'x', ?, ?)`
   )
-  for (let i = 0; i < 11; i++) insert.run(`bulk-${i}`, now - 95 * DAY)
+  for (let i = 0; i < 11; i++) insert.run(`bulk-${i}`, 10 + i, sqlTime(now - 95 * DAY))
   const changes: number[] = []
   const counting: SlayzoneDb = {
     ...db,
     run: async (sql, params) => {
       const r = await db.run(sql, params)
-      if (/^DELETE FROM agent_prompts/.test(sql)) changes.push(r.changes)
+      if (/^DELETE FROM chat_queue/.test(sql)) changes.push(r.changes)
       return r
     }
   }
@@ -482,7 +411,7 @@ test('statements stay bounded by the batch size, yielding in between', async () 
     }
   })
   expect(changes, 'twelve rows in three statements of at most five').toEqual([5, 5, 2])
-  expect(report.deleted.agent_prompts, 'all of them').toBe(12)
+  expect(report.deleted.chat_queue, 'all of them').toBe(12)
   expect(pauses, `yielded between batches (${pauses})`).toBeGreaterThanOrEqual(2)
 })
 
@@ -501,7 +430,7 @@ test('a failing table is logged and audited; the others run; the next tick retri
   const report = await handle.runNow()
   assert(report, 'the sweep still reports')
   expect(report.failed, 'only chat_queue failed').toEqual(['chat_queue'])
-  expect(report.deleted.agent_prompts, 'the other tables were swept').toBe(1)
+  expect(report.deleted.chat_events, 'the other tables were swept').toBe(3)
   expect(raw.prepare('SELECT count(*) AS n FROM chat_queue').get(), 'queue not swept').toEqual({
     n: 2
   })
@@ -558,14 +487,10 @@ test('one audit line per sweep: counts, cutoff and duration, no content', async 
     null,
     'hub'
   ])
-  expect(line.detail.deleted, 'per-table counts, agent_prompts included').toEqual([
+  expect(line.detail.deleted, 'per-table counts').toEqual([
     { table: 'chat_events', rows: 3 },
-    { table: 'agent_prompts', rows: 1 },
     { table: 'chat_queue', rows: 1 },
     { table: 'chat_tab_state', rows: 1 }
-  ])
-  expect(line.detail.redacted, 'redaction count').toEqual([
-    { table: 'agent_turns', column: 'prompt_preview', rows: 1 }
   ])
   expect(line.detail.days, 'period').toBe(90)
   expect(line.detail.cutoff, 'cutoff').toEqual(report.cutoff)
@@ -591,9 +516,6 @@ function onDisk(file: string, needle: string): number {
 
 /** Content in many pages (splits) and in overflow pages (over a page each). */
 function seedBulk(raw: Database.Database, now: number): void {
-  const prompt = raw.prepare(
-    `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES (?, 't1', 'claude-code', ?, ?)`
-  )
   const event = raw.prepare(
     'INSERT INTO chat_events (tab_id, seq, event, created_at) VALUES (?, ?, ?, ?)'
   )
@@ -601,7 +523,6 @@ function seedBulk(raw: Database.Database, now: number): void {
     const old = i % 2 === 0
     const tag = old ? 'GONE-bulk' : 'KEEP-bulk'
     const pad = 'z'.repeat(i % 10 === 0 ? 9000 : 300)
-    prompt.run(`bulk-${i}`, `${tag}-${i}-${pad}`, now - (old ? 120 : 10) * DAY)
     event.run(
       'tab1',
       100 + i,
@@ -637,7 +558,7 @@ test('control: a plain delete leaves the content in the file', async () => {
   const now = Date.now()
   seed(raw, now, 91 * DAY, 89 * DAY)
   seedBulk(raw, now)
-  raw.prepare(`DELETE FROM agent_prompts WHERE text LIKE 'GONE-%'`).run()
+  raw.prepare(`DELETE FROM chat_events WHERE event LIKE '%GONE-%'`).run()
   raw.pragma('wal_checkpoint(TRUNCATE)')
   expect(
     onDisk(file, 'GONE-bulk-0-'),

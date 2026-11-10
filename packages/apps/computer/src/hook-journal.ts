@@ -27,6 +27,8 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
+import { StructuralFaultError } from '@slayzone/platform/isolation'
+import { readJsonArraySalvage } from '@slayzone/platform/quarantine'
 
 /** A published journal file (not a staging temp): `hooks-<16 hex>.json`. */
 export const HOOK_JOURNAL_FILE = /^hooks-[a-f0-9]{16}\.json$/
@@ -79,17 +81,54 @@ export function adoptHookJournal(runtimeDir: string, hubUrl: string): string {
     syncDir(runtimeDir)
     return path
   }
-  const current: Array<{ id: string }> = JSON.parse(readFileSync(path, 'utf8'))
-  const old: Array<{ id: string }> = JSON.parse(readFileSync(legacy, 'utf8'))
-  if (!Array.isArray(current) || !Array.isArray(old)) throw new Error('Invalid host event journal')
+  const current = readHookJournal(runtimeDir, path)
+  const old = readHookJournal(runtimeDir, legacy)
   const ids = new Set(current.map((event) => event.id))
   const merged = [...current, ...old.filter((event) => !ids.has(event.id))]
-  // The staging name session-host.ts `atomicRuntimeJson` uses, so a crash here leaves
-  // a temp the host's startup and offline erasure both recognize and discard.
-  const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  writeFileSync(temp, JSON.stringify(merged) + '\n', { mode: 0o600, flush: true })
-  renameSync(temp, path)
+  writeHookJournal(path, merged)
   unlinkSync(legacy)
   syncDir(runtimeDir)
   return path
+}
+
+/** One journaled hook event awaiting the hub's acknowledgement. */
+export interface HookJournalEvent {
+  id: string
+  params: unknown
+}
+
+/** Quarantine pass of journal bytes that could not be read (`<runtime>/quarantine/hook-journal`). */
+export const HOOK_JOURNAL_QUARANTINE_PASS = 'hook-journal'
+
+function parseHookEvent(value: unknown): HookJournalEvent {
+  if (!value || typeof value !== 'object' || typeof (value as { id?: unknown }).id !== 'string')
+    throw new StructuralFaultError('Invalid hook journal event')
+  const event = value as { id: string; params?: unknown }
+  return { id: event.id, params: event.params }
+}
+
+/**
+ * Writes a journal durably, via the staging name session-host.ts `atomicRuntimeJson`
+ * uses, so a crash leaves a temp the host's startup and offline erasure both
+ * recognize and discard.
+ */
+export function writeHookJournal(path: string, events: HookJournalEvent[]): void {
+  const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  writeFileSync(temp, JSON.stringify(events) + '\n', { mode: 0o600, flush: true })
+  renameSync(temp, path)
+}
+
+/**
+ * A hub's hook journal. A torn or damaged journal must not stop the computer:
+ * every event that still parses is kept (the journal is rewritten with them) and
+ * the original bytes are quarantined, where erasure and Discard can reach them
+ * (decision 7: salvage the readable part, quarantine the rest).
+ */
+export function readHookJournal(runtimeDir: string, path: string): HookJournalEvent[] {
+  const read = readJsonArraySalvage(path, parseHookEvent, {
+    root: runtimeDir,
+    pass: HOOK_JOURNAL_QUARANTINE_PASS
+  })
+  if (read.status === 'salvaged') writeHookJournal(path, read.items)
+  return read.items
 }

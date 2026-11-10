@@ -119,11 +119,17 @@ const ROUTED: Proc[] = [
     'aiConfig.readProviderInstructions',
     (c, d) => c.aiConfig.readProviderInstructions({ projectPath: d, provider: 'claude' })
   ],
+  // Path-scoped (§9 Phase 7b): they name A's own project; the hub checks only that,
+  // and the computer — none here — would confine the path to it. Never the hub's disk.
   [
     'fileEditor.readFile',
-    (c, d, f) => c.fileEditor.readFile({ rootPath: d, filePath: f.slice(d.length + 1) })
+    (c, d, f) =>
+      c.fileEditor.readFile({ projectId: 'pA', rootPath: d, filePath: f.slice(d.length + 1) })
   ],
-  ['worktrees.getCurrentBranch', (c, d) => c.worktrees.getCurrentBranch({ path: d })],
+  [
+    'worktrees.getCurrentBranch',
+    (c, d) => c.worktrees.getCurrentBranch({ path: d, target: { projectId: 'pA' } })
+  ],
   ['testPanel.scanFiles', (c, d) => c.testPanel.scanFiles({ projectId: 'pA', projectPath: d })]
 ]
 const PROCS = [...HUB_DISK, ...ROUTED]
@@ -145,11 +151,15 @@ describe('N1: hub-local path procedures (login on)', () => {
   for (const [name, call] of ROUTED) {
     test(`${name}: a path in no project root — never read on the hub`, async () => {
       expect(await outcome(() => call(as(A), loose, join(loose, 'loose.txt')))).toMatch(
-        /^(NOT_FOUND|past-gate:FORBIDDEN)$/
+        // A call naming no task or project is refused before routing (§9 7b/7c).
+        /^(NOT_FOUND|past-gate:FORBIDDEN|past-gate:BAD_REQUEST)$/
       )
     })
-    test(`${name}: /dev/fd/<the hub database> — refused`, async () => {
-      expect(await outcome(() => call(as(A), '/dev/fd', `/dev/fd/${dbFd}`))).toBe('NOT_FOUND')
+    test(`${name}: /dev/fd/<the hub database> — never read on the hub`, async () => {
+      expect(await outcome(() => call(as(A), '/dev/fd', `/dev/fd/${dbFd}`))).toMatch(
+        // A call naming no task or project is refused before routing (§9 7b/7c).
+        /^(NOT_FOUND|past-gate:FORBIDDEN|past-gate:BAD_REQUEST)$/
+      )
     })
   }
   test('app.exportImport.testImportFromPath (admin): only inside its own roots', async () => {

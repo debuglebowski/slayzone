@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ChatComputerRequest } from './migration'
 import { z } from 'zod'
+import { isolateItem } from './hub-isolation'
 
 const inventorySchema = z.object({
   rows: z
@@ -60,28 +61,44 @@ export function createChatFolderDeletions(db: SlayzoneDb) {
       if (row && row.task_id !== taskId) throw new Error('Deleted folder belongs to another task')
       return !!row
     },
-    async sync(computerId: string, request: ChatComputerRequest) {
+    async sync(
+      computerId: string,
+      request: ChatComputerRequest,
+      onTaskFailure?: (taskId: string, error: Error) => void
+    ) {
+      // A task whose deletions fail this pass is skipped (and retried next pass).
+      const failed = new Set<string>()
       for (;;) {
         const rows = await db.all<{ sequence: number; folder_id: string; task_id: string }>(
           `SELECT d.* FROM chat_folder_deletions d
           JOIN chat_task_computers c ON c.task_id=d.task_id AND c.computer_id=?
           LEFT JOIN chat_folder_deletion_acks a ON a.task_id=d.task_id AND a.computer_id=c.computer_id
-          WHERE d.sequence>COALESCE(a.sequence,0) ORDER BY d.sequence LIMIT 500`,
-          [computerId]
+          WHERE d.sequence>COALESCE(a.sequence,0) AND d.task_id NOT IN (SELECT value FROM json_each(?))
+          ORDER BY d.sequence LIMIT 500`,
+          [computerId, JSON.stringify([...failed])]
         )
         if (!rows.length) return
         const tasks = new Set(rows.map((r) => r.task_id))
         for (const taskId of tasks) {
           const part = rows.filter((r) => r.task_id === taskId)
-          const result = (await request(computerId, {
-            kind: 'folders.delete',
-            taskId,
-            folderIds: part.map((r) => r.folder_id)
-          })) as { ok?: boolean }
-          if (result?.ok !== true) throw new Error('Invalid folder deletion acknowledgement')
-          await db.run(
-            'INSERT INTO chat_folder_deletion_acks(task_id,computer_id,sequence) VALUES(?,?,?) ON CONFLICT(task_id,computer_id) DO UPDATE SET sequence=MAX(sequence,excluded.sequence)',
-            [taskId, computerId, part.at(-1)!.sequence]
+          await isolateItem(
+            `folder deletions of task ${taskId}`,
+            async () => {
+              const result = (await request(computerId, {
+                kind: 'folders.delete',
+                taskId,
+                folderIds: part.map((r) => r.folder_id)
+              })) as { ok?: boolean }
+              if (result?.ok !== true) throw new Error('Invalid folder deletion acknowledgement')
+              await db.run(
+                'INSERT INTO chat_folder_deletion_acks(task_id,computer_id,sequence) VALUES(?,?,?) ON CONFLICT(task_id,computer_id) DO UPDATE SET sequence=MAX(sequence,excluded.sequence)',
+                [taskId, computerId, part.at(-1)!.sequence]
+              )
+            },
+            (error) => {
+              failed.add(taskId)
+              onTaskFailure?.(taskId, error)
+            }
           )
         }
       }
@@ -107,8 +124,10 @@ export function createChatFolderDeletions(db: SlayzoneDb) {
           throw new Error('Invalid folder deletion inventory cursor')
         for (const row of page.rows) {
           if (!(await db.get('SELECT 1 FROM tasks WHERE id=?', [row.taskId]))) continue
-          await gate?.(computerId, row.taskId)
-          await record(row.taskId, [row.folderId])
+          await isolateItem(`deleted folder ${row.folderId}`, async () => {
+            await gate?.(computerId, row.taskId)
+            await record(row.taskId, [row.folderId])
+          })
         }
         if (!page.hasMore) return
         if (page.nextCursor <= after) throw new Error('Folder deletion inventory did not advance')

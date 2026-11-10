@@ -102,6 +102,11 @@ let onHubRequest:
   | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
   | undefined
 let identity: { directAddress?: () => string | null } | undefined
+// The live session is a project's: it starts in that project's folder (§9 Phase 7c).
+const { placeTestProject } = await import('../project-scope.fixture')
+const slayRoot = fs.mkdtempSync(join(tmpdir(), 'slz-direct-canary-root-'))
+placeTestProject(slayRoot, 'ws://localhost:0/computers', 'p1', allowed)
+vi.stubEnv('SLAYZONE_ROOT', slayRoot)
 const handle = startComputer(
   {
     hubUrl: 'ws://localhost:0/computers',
@@ -153,7 +158,7 @@ for (const [i, resource] of resources.entries()) {
 // A live session to read and type into.
 await onHubRequest?.(
   HubToComputerMethods.ptySpawn,
-  { sessionId: SESSION, command: 'cat', cwd: allowed, relay: false },
+  { sessionId: SESSION, projectId: 'p1', command: 'cat', cwd: allowed, relay: false },
   ACTOR
 )
 const ws = createWSClient({

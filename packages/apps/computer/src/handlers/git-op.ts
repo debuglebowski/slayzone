@@ -66,7 +66,10 @@ export function createGitOpHandlers(
     if (!isGitOpName(op)) throw new Error(`unknown git op '${op}'`)
     const name: GitOpName = op
     const asSent = gitOpsContract[name].input.parse(input) as GitOpInput<typeof name>
-    const repoRaw = gitOpAbsolutePaths(name, asSent)[0]
+    // The repo repo-relative paths stay inside: the op's first absolute path (never
+    // a root it is making).
+    const repoRaw =
+      gitOpsContract[name].repoRelative.length > 0 ? gitOpAbsolutePaths(name, asSent)[0] : undefined
     const repo = repoRaw === undefined ? undefined : allow(repoRaw)
     // Judged, and the op runs on what was judged: each absolute path by the jail;
     // each repo-relative one kept inside the repo (lexically, as git reads a
@@ -74,6 +77,9 @@ export function createGitOpHandlers(
     // the entry it names.
     const parsed = mapGitOpPaths(name, asSent, {
       absolute: allow,
+      // A folder this op makes a root (a new worktree): may lie outside the request's
+      // path scope, never inside another task's or project's folder (path-jail).
+      newRoot: (p) => judgePath(p, ctx.config.allowedRoots, { access: 'write', newRoot: true }),
       repoRelative: (rel) => {
         if (!repo || isAbsolute(rel)) {
           throw new JailViolationError(`path '${rel}' must stay inside the repository`)

@@ -8,6 +8,10 @@ import {
 import type { QueuedChatMessage, UserContentBlock } from '@slayzone/terminal-contracts'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../chat-queue-txns'
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 
 export interface QueueAdmission {
   key: string
@@ -79,20 +83,34 @@ export interface ChatQueueData {
 
 /** Default local-DB implementation — same SQL/txns as the pre-seam code. */
 export function createDbChatQueueData(db: SlayzoneDb): ChatQueueData {
+  // The hub's legacy queue table is dropped once every chat migrated (robustness
+  // plan §9 Phase 8): reads find nothing, writes are refused.
+  const writable = async (what: string) => {
+    if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError(what)
+  }
   return {
     list: (tabId) => listChatQueue(db, tabId),
 
-    push: (tabId, send, original, opts) =>
-      db.namedTxn('chat-queue:push', { tabId, send, original, ...opts }),
+    push: async (tabId, send, original, opts) => {
+      await writable('queued chat message')
+      return db.namedTxn('chat-queue:push', { tabId, send, original, ...opts })
+    },
 
-    pop: (tabId, heldIds) =>
-      db.namedTxn('chat-queue:pop', heldIds && heldIds.length > 0 ? { tabId, heldIds } : { tabId }),
+    pop: async (tabId, heldIds) =>
+      (await legacyChatTables(db))
+        ? db.namedTxn(
+            'chat-queue:pop',
+            heldIds && heldIds.length > 0 ? { tabId, heldIds } : { tabId }
+          )
+        : null,
 
     update: (id, next) => updateChatQueueItem(db, id, next),
 
-    move: (id, toIndex) => db.namedTxn('chat-queue:move', { id, toIndex }),
+    move: async (id, toIndex) =>
+      (await legacyChatTables(db)) ? db.namedTxn('chat-queue:move', { id, toIndex }) : false,
 
     requeue: async (msg) => {
+      await writable('queued chat message')
       await db.namedTxn('chat-queue:requeue', { msg })
     },
 
@@ -101,6 +119,7 @@ export function createDbChatQueueData(db: SlayzoneDb): ChatQueueData {
     clear: (tabId) => clearChatQueue(db, tabId),
 
     getTabIdForItem: async (id) => {
+      if (!(await legacyChatTables(db))) return null
       const row = (await db.prepare('SELECT tab_id FROM chat_queue WHERE id = ?').get(id)) as
         | { tab_id: string }
         | undefined

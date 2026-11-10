@@ -67,6 +67,8 @@ export type ChatDeps = {
         createdAt: number
       }>
     ): Promise<void>
+    /** A tab's (task, mode) configuration as its computer holds it — the only copy. */
+    providerConfig(tabId: string): Promise<Record<string, unknown>>
   }
   ops: AsyncCapable<ReturnType<typeof createChatOps>>
   queueOps: AsyncCapable<ReturnType<typeof createChatQueueOps>>

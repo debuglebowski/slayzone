@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useInsertionEffect, useRef, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import type { DirEntry, GitFileStatus } from '../shared'
 import { STATUS_PRIORITY, compactChildren } from './EditorFileTree.utils'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 export interface VisibleEntry {
   entry: DirEntry
@@ -45,7 +45,7 @@ export function useFileTreeData({
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
   // Map of dirPath -> children entries (lazy loaded)
@@ -83,7 +83,8 @@ export function useFileTreeData({
   const [gitStatus, setGitStatus] = useState<Map<string, GitFileStatus>>(new Map())
 
   const gitStatusQuery = useQuery(
-    trpc.fileEditor.gitStatus.queryOptions({ ...target, rootPath: projectPath })
+    // No scope (outside any task / project panel): wait, never a call naming nobody.
+    trpc.fileEditor.gitStatus.queryOptions(scope ? { ...scope, rootPath: projectPath } : skipToken)
   )
   // refetch is identity-stable (bound once per observer), so the effect below
   // still re-runs only when refreshKey changes.
@@ -144,7 +145,7 @@ export function useFileTreeData({
 
   const loadDir = useCallback(
     async (dirPath: string) => {
-      const input = { ...target, rootPath: projectPath, dirPath }
+      const input = { ...requireScope(scope), rootPath: projectPath, dirPath }
       const items = await trpcClient.fileEditor.readDir.query(input)
       queryClient.setQueryData(trpc.fileEditor.readDir.queryKey(input), items)
       setDirContents((prev) => {
@@ -154,7 +155,7 @@ export function useFileTreeData({
       })
       return items
     },
-    [projectPath, queryClient, trpc, trpcClient, target]
+    [projectPath, queryClient, trpc, trpcClient, scope]
   )
   const loadDirRef = useRef(loadDir)
   useInsertionEffect(() => {
@@ -191,7 +192,7 @@ export function useFileTreeData({
 
   const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { ...target, rootPath: projectPath },
+      scope ? { ...scope, rootPath: projectPath } : skipToken,
       { onData: onWatchEvent }
     )
   )
@@ -230,9 +231,10 @@ export function useFileTreeData({
   const reloadOnRefreshKey = useStableCallback(() => {
     if (!refreshKey) return
     void queryClient.invalidateQueries(trpc.fileEditor.readDir.queryFilter())
-    void queryClient.invalidateQueries(
-      trpc.fileEditor.gitStatus.queryFilter({ ...target, rootPath: projectPath })
-    )
+    if (scope)
+      void queryClient.invalidateQueries(
+        trpc.fileEditor.gitStatus.queryFilter({ ...scope, rootPath: projectPath })
+      )
     loadDir('')
     expandedFolders.forEach((dir) => loadDir(dir))
     setDirContents((prev) => {

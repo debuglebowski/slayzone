@@ -99,11 +99,28 @@ async function withFolders(db: SlayzoneDb, projects: Row[]): Promise<Row[]> {
   return projects.map((p) => ({ ...p, path: folders.get(p.id as string) ?? null }))
 }
 
+/**
+ * A task row as exported: without its computer paths (worktree, custom folder) — they
+ * live on a computer of this hub and mean nothing elsewhere (§9 Phase 7d).
+ */
+function exportedTasks(rows: Row[]): Row[] {
+  return rows.map(
+    ({
+      worktree_path: _w,
+      base_dir: _b,
+      has_worktree: _hw,
+      has_base_dir: _hb,
+      worktree_computer_id: _wc,
+      ...row
+    }) => row
+  )
+}
+
 /** Every row of every exported table: a hub without login. */
 async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
   return {
     projects: await withFolders(db, (await db.all('SELECT * FROM projects')) as Row[]),
-    tasks: (await db.all('SELECT * FROM tasks')) as Row[],
+    tasks: exportedTasks((await db.all('SELECT * FROM tasks')) as Row[]),
     tags: (await db.all('SELECT * FROM tags')) as Row[],
     task_tags: (await db.all('SELECT * FROM task_tags')) as Row[],
     task_dependencies: (await db.all('SELECT * FROM task_dependencies')) as Row[],
@@ -148,7 +165,7 @@ async function ownRows(
     : []
   return {
     projects: await withFolders(db, await all(`SELECT * FROM projects WHERE id IN ${inProjects}`)),
-    tasks: await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`),
+    tasks: exportedTasks(await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`)),
     tags: await all(`SELECT * FROM tags WHERE project_id IN ${inProjects}`),
     task_tags: await all(
       `SELECT * FROM task_tags WHERE task_id IN (${ownTasks}) AND tag_id IN (${ownTags})`,
@@ -178,7 +195,9 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
   if (!row) throw new Error(`Project ${projectId} not found`)
   const [project] = await withFolders(db, [row])
 
-  const tasks = (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[]
+  const tasks = exportedTasks(
+    (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[]
+  )
   const taskIds = tasks.map((t) => t.id as string)
 
   let taskTags: Row[] = []

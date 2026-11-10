@@ -12,18 +12,35 @@ import { useTRPC } from '../trpc'
  * (`AgentPrompt` from @slayzone/agent-turns) — no explicit type import needed.
  */
 export function useAgentPrompts(taskId: string, agentId: string | undefined, enabled: boolean) {
+  return useAgentPromptsState(taskId, agentId, enabled).prompts
+}
+
+/**
+ * The prompts and whether they cannot be read: they live only on the computer
+ * running the task's agents (robustness plan §9), and the list answers
+ * PRECONDITION_FAILED while that computer is offline (the hub keeps no copy).
+ */
+export function useAgentPromptsState(
+  taskId: string,
+  agentId: string | undefined,
+  enabled: boolean
+) {
   const trpc = useTRPC()
 
-  const query = useQuery(trpc.agentPrompts.list.queryOptions({ taskId, agentId }, { enabled }))
+  const { data, error, refetch } = useQuery(
+    trpc.agentPrompts.list.queryOptions({ taskId, agentId }, { enabled })
+  )
 
   useSubscription(
     trpc.agentPrompts.onChanged.subscriptionOptions(undefined, {
       enabled,
       onData: (changedTaskId) => {
-        if (changedTaskId === taskId) void query.refetch()
+        if (changedTaskId === taskId) void refetch()
       }
     })
   )
 
-  return query.data ?? []
+  const offline =
+    (error as { data?: { code?: string } } | null)?.data?.code === 'PRECONDITION_FAILED'
+  return { prompts: data ?? [], offline }
 }

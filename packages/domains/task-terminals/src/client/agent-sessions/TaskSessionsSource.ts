@@ -23,17 +23,37 @@ export interface TaskSessionRow {
   messageCount: number | null
   /** Earliest captured user prompt text — the human-readable session label. */
   firstPrompt: string | null
-  /** True when this conversation is the honored "current" one (reset-aware). */
+  /** True when this conversation is the asking tab's honored "current" one (reset-aware). */
   isCurrent: boolean
+  /** The terminal tab that owns it (sessions are per tab; a pick moves it). */
+  ownerTabId: string
+  /** Another tab's current session — never deletable here. */
+  currentInOtherTab: boolean
 }
 
 export interface TaskSessionsSource {
   /**
-   * Every session tied to a task's main agent (mode `agentId`), newest first.
-   * Must refetch when this task's sessions change. `enabled` gates all work
-   * (query + subscription) so a task whose sidebar/button is hidden costs nothing.
+   * Every session of a task's agent (mode `agentId`), newest first, as terminal
+   * tab `tabId` sees it (`isCurrent` is that tab's; default: the main tab). Must
+   * refetch when this task's sessions change. `enabled` gates all work (query +
+   * subscription) so a task whose sidebar/button is hidden costs nothing.
    */
-  useTaskSessions: (taskId: string, agentId: string, enabled: boolean) => readonly TaskSessionRow[]
+  useTaskSessions: (
+    taskId: string,
+    agentId: string,
+    enabled: boolean,
+    tabId?: string
+  ) => readonly TaskSessionRow[]
+  /**
+   * Whether those sessions cannot be read because the computer holding them is
+   * offline (robustness plan §9: the hub keeps no copy). Same arguments.
+   */
+  useTaskSessionsOffline?: (
+    taskId: string,
+    agentId: string,
+    enabled: boolean,
+    tabId?: string
+  ) => boolean
 }
 
 let registered: TaskSessionsSource | null = null
@@ -68,7 +88,19 @@ function getTaskSessionsSource(): TaskSessionsSource {
 export function useTaskSessions(
   taskId: string,
   agentId: string,
-  enabled: boolean
+  enabled: boolean,
+  tabId?: string
 ): readonly TaskSessionRow[] {
-  return getTaskSessionsSource().useTaskSessions(taskId, agentId, enabled)
+  return getTaskSessionsSource().useTaskSessions(taskId, agentId, enabled, tabId)
+}
+
+/** The injected offline signal (false when the source has none). */
+export function useTaskSessionsOffline(
+  taskId: string,
+  agentId: string,
+  enabled: boolean,
+  tabId?: string
+): boolean {
+  const hook = getTaskSessionsSource().useTaskSessionsOffline
+  return hook ? hook(taskId, agentId, enabled, tabId) : false
 }

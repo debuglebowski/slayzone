@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createChatRecovery } from './hub-recovery'
@@ -27,7 +27,13 @@ test('restored hub adopts committed computer ownership; conflicting active owner
         bootstrapRevision: 8
       }
     ]
-    const recovery = createChatRecovery({ db: h.slayDb, request: async () => inventory })
+    const failures: string[] = []
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => inventory,
+      onConversationFailure: (pc, id, error) => failures.push(`${pc}:${id}:${error.message}`)
+    })
     await recovery.reconcile('pc')
     expect(await owners.forTab('tab')).toMatchObject({
       id: 'actual',
@@ -37,8 +43,13 @@ test('restored hub adopts committed computer ownership; conflicting active owner
       settingsRevision: 8
     })
     await recovery.reconcile('pc')
-    await expect(recovery.reconcile('other')).rejects.toThrow(/conflict|another/i)
+    expect(failures).toEqual([])
+    // Another computer claiming the same tab is fenced for that conversation
+    // only: the pass completes and the committed owner stays.
+    await recovery.reconcile('other')
+    expect(failures).toEqual([expect.stringMatching(/^other:actual:.*(conflict|another)/i)])
     expect(await owners.forTab('tab')).toMatchObject({ computerId: 'pc' })
+    errors.mockRestore()
   } finally {
     h.cleanup()
   }
@@ -92,8 +103,11 @@ test('computer inventory cannot apply lifecycle or deletion before task authoriz
         lifecycle: { state: 'deleted', revision: 99 }
       }
     ]) {
+      const failures: string[] = []
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
       const recovery = createChatRecovery({
         db: h.slayDb,
+        onConversationFailure: (_pc, id, error) => failures.push(`${id}:${error.message}`),
         gate: async () => {
           throw new Error('Not your task')
         },
@@ -113,7 +127,10 @@ test('computer inventory cannot apply lifecycle or deletion before task authoriz
           }
         ]
       })
-      await expect(recovery.reconcile('unrelated-pc')).rejects.toThrow('Not your task')
+      // Refused for that entry alone; nothing of it is applied.
+      await recovery.reconcile('unrelated-pc')
+      expect(failures).toEqual([`${entry.id}:Not your task`])
+      errors.mockRestore()
       expect(h.db.prepare("SELECT state FROM chat_task_lifecycle WHERE task_id='t'").get()).toEqual(
         { state: 'active' }
       )
@@ -227,3 +244,130 @@ test.each(['empty', 'draft', 'native'] as const)(
     }
   }
 )
+
+/** One task 't' with a chat tab 'tab' whose live chat 'live' is held by computer 'pc'. */
+async function liveChatFixture() {
+  const h = await createTestHarness()
+  h.db.exec(
+    "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
+  )
+  const owners = createChatOwnershipStore(h.slayDb)
+  await owners.register({
+    id: 'live',
+    taskId: 't',
+    tabId: 'tab',
+    mode: 'claude-chat',
+    computerId: 'pc',
+    epoch: 1
+  })
+  const deleted = (id: string, epoch = 1, migrationId: string | null = null) => ({
+    identity: { id, taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch },
+    state: 'deleted' as const,
+    migrationId,
+    migrationHash: null,
+    bootstrapRevision: 0
+  })
+  return { h, owners, deleted }
+}
+
+test('a deletion report for a chat the hub does not know never deletes the live chat of its tab', async () => {
+  // Provider switched away and back: the tab's old conversation was deleted on
+  // the computer, then forgotten by the hub. Its tombstone still names the tab.
+  const { h, owners, deleted } = await liveChatFixture()
+  try {
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [deleted('old', 3)]
+    })
+    await recovery.reconcile('pc')
+    await recovery.reconcile('pc')
+    expect(await owners.forTab('tab')).toMatchObject({ id: 'live', state: 'active' })
+    // The tombstone is kept on its own, bound to no tab.
+    expect(await owners.get('old')).toMatchObject({ state: 'deleted', cleanupPending: false })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a computer that does not hold a chat cannot delete it', async () => {
+  const { h, owners, deleted } = await liveChatFixture()
+  try {
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [deleted('live', 1)]
+    })
+    await recovery.reconcile('stale-pc')
+    expect(await owners.forTab('tab')).toMatchObject({ id: 'live', state: 'active' })
+    // Its holder's deletion applies.
+    await recovery.reconcile('pc')
+    expect(await owners.get('live')).toMatchObject({ state: 'deleted' })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a stale migration locator is replaced by the deletion of its migrated copy', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'locator',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: null,
+      epoch: 1
+    })
+    await owners.beginMigration('locator', {
+      expectedComputerId: null,
+      expectedEpoch: 1,
+      migrationId: 'move',
+      destinationComputerId: 'pc'
+    })
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [
+        {
+          identity: { id: 'copy', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 2 },
+          state: 'deleted',
+          migrationId: 'move',
+          migrationHash: null,
+          bootstrapRevision: 0
+        }
+      ]
+    })
+    await recovery.reconcile('pc')
+    expect(await owners.get('locator')).toMatchObject({ state: 'deleted' })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a chat the hub deleted is queued for deletion on a computer that still holds it', async () => {
+  const { h, owners } = await liveChatFixture()
+  try {
+    await owners.deleteConversation('live')
+    await owners.acknowledgeDeletion('live', 'pc', 2)
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [
+        {
+          identity: { id: 'live', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+          state: 'active',
+          migrationId: null,
+          migrationHash: null,
+          bootstrapRevision: 0
+        }
+      ]
+    })
+    await recovery.reconcile('other-pc')
+    expect(await owners.pendingDeletions('other-pc')).toEqual([
+      { conversationId: 'live', epoch: 2 }
+    ])
+  } finally {
+    h.cleanup()
+  }
+})

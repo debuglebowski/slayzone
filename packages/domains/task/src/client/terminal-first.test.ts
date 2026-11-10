@@ -43,7 +43,7 @@ describe('terminal-first registry', () => {
   })
 
   it('accepts only a task whose terminal cwd needs nothing async', () => {
-    expect(markTerminalFirst(task({ worktree_path: '/w' }), project)).toBe(false)
+    expect(markTerminalFirst(task({ has_worktree: true }), project)).toBe(false)
     expect(getTerminalFirst('t1')).toBeNull()
     expect(markTerminalFirst(task(), project)).toBe(true)
     expect(getTerminalFirst('t1')?.cwd).toBe('/p')

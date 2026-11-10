@@ -1461,6 +1461,7 @@ describe('createRoutingPtyBackend', () => {
     })
     await backend.warmSpawn?.('computer-1', {
       warmId: 'warm:1',
+      projectId: 'p1',
       command: 'zsh',
       args: [],
       cwd: '/tmp',
@@ -2209,10 +2210,6 @@ function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeE
     copyIgnoredFiles: vi.fn(async () => {}),
     getCurrentBranch: vi.fn(async () => null),
     isGitRepo: vi.fn(async () => false),
-    getWorktreeColor: vi.fn(() => '#abcdef'),
-    ensureProjectWorktreeColors: vi.fn(
-      async () => new Map([['/wt', '#abcdef']]) as ReadonlyMap<string, string>
-    ),
     pathExists: vi.fn(async () => false),
     hubPathExists: vi.fn(() => false),
     removeArtifactDir: vi.fn(async () => {}),
@@ -2362,26 +2359,6 @@ describe('createRemoteWorktreeAdapters', () => {
     expect(local.pathExists).not.toHaveBeenCalled()
   })
 
-  it('keeps getWorktreeColor + ensureProjectWorktreeColors local (never over the wire)', async () => {
-    const gateway = new FakeGateway()
-    const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({
-      gateway,
-      local,
-      resolveComputerId: () => 'computer-1'
-    })
-
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
-    expect(local.getWorktreeColor).toHaveBeenCalledWith('/proj', '/wt')
-
-    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(
-      new Map([['/wt', '#abcdef']])
-    )
-    expect(local.ensureProjectWorktreeColors).toHaveBeenCalledWith('/proj')
-
-    expect(gateway.calls).toHaveLength(0)
-  })
-
   it('throws for every WORKSPACE method, but keeps hub-owned ops working', async () => {
     const gateway = new FakeGateway()
     const local = makeLocalWorktrees()
@@ -2403,26 +2380,7 @@ describe('createRemoteWorktreeAdapters', () => {
     // and rendering the task list must not require one (docs/exec-boundary.md).
     expect(await adapters.hubPathExists('/storage/artifacts/x')).toBe(false)
     await adapters.removeArtifactDir('/storage/artifacts/x')
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
 
-    expect(gateway.calls).toHaveLength(0)
-  })
-
-  it('serves the color ops locally even with no computer (hub-local UI state)', async () => {
-    const gateway = new FakeGateway()
-    const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({
-      gateway,
-      local,
-      resolveComputerId: () => null
-    })
-
-    // The documented exception to the invariant: colors are hub-local UI state and
-    // `getWorktreeColor` is sync, so it could never be a network call.
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
-    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(
-      new Map([['/wt', '#abcdef']])
-    )
     expect(gateway.calls).toHaveLength(0)
   })
 })

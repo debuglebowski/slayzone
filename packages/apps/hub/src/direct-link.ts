@@ -74,6 +74,11 @@ export interface DirectLinkIssuerDeps {
   ): Promise<{ computerId: string; direct: boolean; taskId: string } | null>
   /** The computer holding an ACTIVE chat tab, its ownership epoch and task, or null. */
   resolveChat(tabId: string): Promise<{ computerId: string; epoch: number; taskId: string } | null>
+  /**
+   * The computer holding a task's computer-only data (robustness plan §9), with every
+   * row the hub still had for it delivered there, or null. Absent: no task grants.
+   */
+  resolveTask?(taskId: string): Promise<{ computerId: string } | null>
   /** The placement gate (computer-placement.ts). Absent on a hub without login. */
   gate?: (computerId: string, work: ComputerWork) => Promise<void>
   /** Wall clock ms, for forgetting expired grants. */
@@ -224,9 +229,14 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
       case 'computer':
         return g.computerId === which.computerId
       case 'target':
-        return which.target.kind === 'pty'
-          ? g.resource.kind === 'pty' && g.resource.sessionId === which.target.sessionId
-          : g.resource.kind === 'chat' && g.resource.tabId === which.target.tabId
+        switch (which.target.kind) {
+          case 'pty':
+            return g.resource.kind === 'pty' && g.resource.sessionId === which.target.sessionId
+          case 'chat':
+            return g.resource.kind === 'chat' && g.resource.tabId === which.target.tabId
+          case 'task':
+            return g.resource.kind === 'task' && g.resource.taskId === which.target.taskId
+        }
     }
   }
 
@@ -245,6 +255,16 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
         resource: { kind: 'pty', sessionId: target.sessionId },
         work: { kind: 'session', id: target.sessionId },
         taskId: held.taskId
+      }
+    }
+    if (target.kind === 'task') {
+      const held = deps.resolveTask ? await deps.resolveTask(target.taskId) : null
+      if (!held) return { unavailable: 'no-computer' }
+      return {
+        computerId: held.computerId,
+        resource: { kind: 'task', taskId: target.taskId },
+        work: { kind: 'task', id: target.taskId },
+        taskId: target.taskId
       }
     }
     const held = await deps.resolveChat(target.tabId)
@@ -380,7 +400,11 @@ export function createDirectLinkIssuer(deps: DirectLinkIssuerDeps): DirectLinkIs
             grantId: params.grantId,
             resource: params.resource.kind,
             resourceId:
-              params.resource.kind === 'pty' ? params.resource.sessionId : params.resource.tabId,
+              params.resource.kind === 'pty'
+                ? params.resource.sessionId
+                : params.resource.kind === 'chat'
+                  ? params.resource.tabId
+                  : params.resource.taskId,
             ttlMs: params.ttlMs
           }
         })

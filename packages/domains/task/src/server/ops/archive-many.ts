@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
-import { cleanupTaskFull, parseTasks, type OpDeps } from './shared.js'
+import { cleanupTaskFull, notifyTaskPaths, parseTasks, type OpDeps } from './shared.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -40,12 +40,16 @@ export async function archiveManyTasksOp(
   const placeholders = allIds.map(() => '?').join(',')
   await db.namedTxn('task:archive', {
     sql: `
-      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, worktree_computer_id = NULL, base_dir = NULL, updated_at = datetime('now')
+      UPDATE tasks SET archived_at = datetime('now'), has_worktree = 0, has_base_dir = 0, updated_at = datetime('now')
       WHERE id IN (${placeholders})
     `,
     params: allIds,
     events: buildTaskArchivedEvents(existingTasks.filter((task) => allIds.includes(task.id)))
   })
+  // Archived: no checkout any more, on the computer either (robustness plan §9, P0).
+  // `worktree_computer_id` stays so the clear reaches the computer holding the
+  // folders; without a folder it no longer decides where work runs.
+  for (const id of allIds) await notifyTaskPaths(id, { op: 'clear' })
   for (const id of allIds) {
     ipcMain?.emit('db:tasks:archive:done', null, id)
     const projectRow = await db.get<{ project_id: string }>(

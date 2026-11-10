@@ -73,13 +73,15 @@ export function tasksCommand(): Command {
   cmd
     .command('reset-conversation [id]')
     .description(
-      'Clear the stored conversation IDs for a task — the next agent spawn starts fresh. ' +
-        'Appends a `manual-reset` row to task_conversations (append-only; never deletes).'
+      "Reset a task's agent session — the next agent spawn in that tab starts fresh. " +
+        'Sessions are per terminal tab; default = the main tab. Append-only (never deletes).'
     )
     .option(
       '--mode <mode>',
-      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a row for this task.'
+      'Limit to one agent (e.g. claude-code, codex). Default: every agent with a session in scope.'
     )
+    .option('--tab <tab>', 'One terminal tab of the task: id, unique id prefix, or label')
+    .option('--all-tabs', 'Every terminal tab of the task')
     .action(resetConversationAction)
 
   // slay tasks update

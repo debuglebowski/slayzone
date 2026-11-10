@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createChatOwnershipStore } from '../../../domains/chat-runtime/src/server/hub-ownership'
 import {
   createLegacyChatSource,
@@ -17,8 +17,7 @@ import { createChatMigration } from '../../../domains/chat-runtime/src/server/mi
 import { createChatRecovery } from '../../../domains/chat-runtime/src/server/hub-recovery'
 import { createComputerChatServices } from './computer-chat'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { deleteTurn } from '../../../domains/agent-turns/src/server/db'
+import { taskSessionStore } from './test-session-store'
 import type { ChatRecord } from '../../../domains/chat-runtime/src/shared'
 import {
   encodeTransfer,
@@ -40,8 +39,8 @@ async function fixture(
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-migration-audit-'))
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', dir)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
   h.db
     .prepare(
       "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
@@ -92,7 +91,8 @@ async function fixture(
       computerId: null
     })
   const openComputer = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'audit',
       computerId: () => 'pc',
@@ -325,28 +325,15 @@ test('restoring pre-migration hub metadata can recover a prepared computer store
   }
 })
 
-test.each([
-  ['claude-code', false],
-  ['claude-code', true],
-  ['codex', false],
-  ['codex', true],
-  ['gemini', false],
-  ['removed-provider', false],
-  ['shell', false]
-] as const)(
-  'idle migration covers old chat rows on a tab now in %s mode, prompts=%s',
-  async (mode, withPrompts) => {
+// Prompts are not legacy chat content any more: v207 hands them to the computer.
+test.each(['claude-code', 'codex', 'gemini', 'removed-provider', 'shell'] as const)(
+  'idle migration covers old chat rows on a tab now in %s mode',
+  async (mode) => {
     const f = await fixture(false, false)
     try {
       // A legitimate pre-upgrade DB after user continued a chat in its native terminal.
       // No ownership rows yet, but the old chat events and draft remain under the tab id.
       f.h.db.prepare("UPDATE terminal_tabs SET mode=? WHERE id='tab'").run(mode)
-      if (withPrompts)
-        f.h.db
-          .prepare(
-            "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('old-prompt','task',?,'native prompt',123)"
-          )
-          .run(mode)
       const services = createComputerChatServices({
         db: f.h.slayDb,
         legacyData: {
@@ -364,15 +351,6 @@ test.each([
       services.invalidateRecovery('pc')
       await services.recoverComputer('pc')
       await services.migrateIdleComputer('pc')
-      if (withPrompts) {
-        expect(
-          f.h.db.prepare("SELECT count(*) AS n FROM agent_prompts WHERE task_id='task'").get()
-        ).toEqual({ n: 0 })
-        expect(await services.ownership.forTab('tab')).toMatchObject({
-          state: 'active',
-          cleanupPending: false
-        })
-      }
       const inventory = (await f.request('pc', { kind: 'inventory' })) as Array<{
         identity: { tabId: string }
       }>
@@ -674,26 +652,20 @@ test('idle migration covers a native parent whose only retained chat content is 
   }
 })
 
-test.each(['chat_attachment_messages', 'agent_turns'] as const)(
+// Turn previews are not legacy chat content any more: v207 hands turns to the computer.
+test.each(['chat_attachment_messages'] as const)(
   'idle migration covers sole task-scoped legacy content in %s',
-  async (table) => {
+  async (_table) => {
     const f = await fixture(false, false)
     try {
       f.h.db.exec(
         "DELETE FROM chat_events; DELETE FROM chat_tab_state; UPDATE terminal_tabs SET mode='codex' WHERE id='tab'"
       )
-      if (table === 'chat_attachment_messages')
-        f.h.db
-          .prepare(
-            "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','orphan-message',?)"
-          )
-          .run(JSON.stringify([f.ref]))
-      else
-        f.h.db
-          .prepare(
-            "INSERT INTO agent_turns(id,task_id,terminal_tab_id,worktree_path,snapshot_sha,prompt_preview,created_at) VALUES('orphan-turn','task','tab',?,'sha','private orphan turn preview',123)"
-          )
-          .run(f.dir)
+      f.h.db
+        .prepare(
+          "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','orphan-message',?)"
+        )
+        .run(JSON.stringify([f.ref]))
       const services = createComputerChatServices({
         db: f.h.slayDb,
         legacyData: {
@@ -719,32 +691,18 @@ test.each(['chat_attachment_messages', 'agent_turns'] as const)(
         { readonly: true }
       )
       try {
-        const key =
-          table === 'chat_attachment_messages'
-            ? 'attachment-message:orphan-message'
-            : 'legacy-turn-preview:orphan-turn'
+        const key = 'attachment-message:orphan-message'
         const record = sqlite
           .prepare("SELECT value FROM records WHERE conversation_id=? AND kind='settings' AND id=?")
           .get(owner!.id, key) as { value: string }
-        if (table === 'chat_attachment_messages') {
-          expect(JSON.parse(record.value)).toMatchObject([
-            { artifactId: f.ref.artifactId, contentHash: hash(originalBytes) }
-          ])
-          expect(
-            f.h.db
-              .prepare("SELECT count(*) AS n FROM chat_attachment_messages WHERE task_id='task'")
-              .get()
-          ).toEqual({ n: 0 })
-        } else {
-          expect(JSON.parse(record.value)).toMatchObject({
-            id: 'orphan-turn',
-            promptPreview: 'private orphan turn preview',
-            createdAt: 123
-          })
-          expect(
-            f.h.db.prepare("SELECT prompt_preview FROM agent_turns WHERE id='orphan-turn'").get()
-          ).toEqual({ prompt_preview: '' })
-        }
+        expect(JSON.parse(record.value)).toMatchObject([
+          { artifactId: f.ref.artifactId, contentHash: hash(originalBytes) }
+        ])
+        expect(
+          f.h.db
+            .prepare("SELECT count(*) AS n FROM chat_attachment_messages WHERE task_id='task'")
+            .get()
+        ).toEqual({ n: 0 })
       } finally {
         sqlite.close()
       }
@@ -826,37 +784,3 @@ test.each(['transfer.finish', 'migration.checkpoint'] as const)(
     }
   }
 )
-
-test('public turn deletion cannot mutate a frozen preview while its migration stream is pending', async () => {
-  const f = await fixture(false, false)
-  try {
-    f.h.db.exec('DELETE FROM chat_events; DELETE FROM chat_tab_state')
-    f.h.db
-      .prepare(
-        "INSERT INTO agent_turns(id,task_id,terminal_tab_id,worktree_path,snapshot_sha,prompt_preview,created_at) VALUES('turn','task','tab',?,'sha','frozen preview',123)"
-      )
-      .run(f.dir)
-    await f.ownership.register({
-      id: 'store',
-      taskId: 'task',
-      tabId: 'tab',
-      mode: 'claude-chat',
-      computerId: null,
-      epoch: 1
-    })
-    f.failReply('transfer.chunk')
-    await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
-      'Lost reply after transfer.chunk'
-    )
-    await expect(deleteTurn(f.h.slayDb, 'turn')).rejects.toThrow(/migrat/i)
-    expect(f.h.db.prepare("SELECT prompt_preview FROM agent_turns WHERE id='turn'").get()).toEqual({
-      prompt_preview: 'frozen preview'
-    })
-    await f.restart()
-    await f.migration().ensure('store', 'pc')
-    // Metadata deletion resumes once the private excerpt has moved and cleared.
-    await expect(deleteTurn(f.h.slayDb, 'turn')).resolves.toBeUndefined()
-  } finally {
-    await f.close()
-  }
-})

@@ -149,9 +149,9 @@ async function worktreeFixture() {
     .run(join(root, 'repo'))
   h.db
     .prepare(
-      "INSERT INTO tasks(id,project_id,title,worktree_path,worktree_computer_id) VALUES(?,?,?,?,'c')"
+      "INSERT INTO tasks(id,project_id,title,has_worktree,worktree_computer_id) VALUES(?,?,?,1,'c')"
     )
-    .run('t', 'p', secret, join(root, secret))
+    .run('t', 'p', secret)
   await h.db.backup(path)
   const raw = new Database(path)
   raw.pragma('journal_mode=WAL')
@@ -168,6 +168,8 @@ test('completed worktree cleanup leaves no private path in SQLite or historical 
       { kind: 'tasks', ids: ['t'] },
       {
         cleanupComputer: ackFrom(raw),
+        // The computer holding the worktree names it (the hub keeps no path, §9 7e).
+        releaseWorktree: async () => ({ worktreePath: join(root, secret), shared: false }),
         cleanupWorktree: async () => {}
       }
     )
@@ -198,6 +200,11 @@ test('a failed final compaction stays incomplete and resumes after restart witho
       { kind: 'tasks', ids: ['t'] },
       {
         cleanupComputer: ackFrom(raw),
+        // The computer holding the worktree names it (the hub keeps no path, §9 7e).
+        releaseWorktree: async () => ({
+          worktreePath: join(fixture.root, fixture.secret),
+          shared: false
+        }),
         cleanupWorktree: async () => {
           removals++
         }

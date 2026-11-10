@@ -1,8 +1,13 @@
 import { isDeepStrictEqual } from 'node:util'
 import Database from 'better-sqlite3'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync, readFileSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+  createSyncFaultLedger,
+  ITEM_FAULTS_DDL,
+  type ItemFaultRow
+} from '@slayzone/platform/isolation'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
 import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
 import type {
@@ -48,7 +53,7 @@ interface OwnerRow {
   migration_hash: string | null
 }
 
-export const CHAT_STORAGE_SCHEMA_VERSION = 5
+export const CHAT_STORAGE_SCHEMA_VERSION = 12
 
 /** One database per authenticated hub namespace. Never accepts a caller-supplied disk path. */
 
@@ -66,6 +71,87 @@ export function bumpTaskStateVersion(task: string): string {
   return `INSERT INTO task_state_versions(task_id,version) SELECT ${task},1 WHERE ${task} IS NOT NULL
     ON CONFLICT(task_id) DO UPDATE SET version=version+1;`
 }
+
+/** The agent-session ledger's tables (session-ledger.ts). Idempotent. */
+export const SESSION_LEDGER_DDL = `
+  CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, tab_id TEXT,
+    conversation_id TEXT, origin TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pooled','bound','dead')),
+    pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER, ended_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS agent_sessions_task_tab ON agent_sessions(task_id, mode, tab_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS agent_sessions_conversation ON agent_sessions(conversation_id);
+  CREATE INDEX IF NOT EXISTS agent_sessions_pool ON agent_sessions(cwd, mode) WHERE status = 'pooled';
+  CREATE TABLE IF NOT EXISTS task_conversations (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT,
+    conversation_id TEXT, origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS task_conversations_lookup ON task_conversations(task_id, mode, created_at);
+  CREATE TABLE IF NOT EXISTS session_turns (
+    conversation_id TEXT PRIMARY KEY, first_turn_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS session_resets (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT,
+    except_chat INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS session_resets_lookup ON session_resets(task_id, mode, tab_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS session_deletions (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL,
+    conversation_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS session_deletions_lookup ON session_deletions(task_id, mode, conversation_id);
+  CREATE TABLE IF NOT EXISTS mode_agents (mode TEXT PRIMARY KEY, agent_type TEXT);
+  CREATE TABLE IF NOT EXISTS legacy_conversation_history (
+    task_id TEXT NOT NULL, mode TEXT NOT NULL, ids TEXT NOT NULL, PRIMARY KEY(task_id, mode)
+  );
+`
+
+/**
+ * Agent-turn snapshots (agent-turns.ts): one row per turn boundary, grouped by the
+ * checkout's canonical path on this computer. Only here since robustness plan §9
+ * (hub migration v207). Idempotent.
+ */
+export const AGENT_TURNS_DDL = `
+  CREATE TABLE IF NOT EXISTS agent_turns (
+    id TEXT PRIMARY KEY, worktree_path TEXT NOT NULL, task_id TEXT, terminal_tab_id TEXT NOT NULL,
+    snapshot_sha TEXT NOT NULL, head_sha_at_snap TEXT, prompt_preview TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_turns_worktree ON agent_turns(worktree_path, created_at);
+  CREATE INDEX IF NOT EXISTS agent_turns_task ON agent_turns(task_id);
+`
+
+/**
+ * v10: this computer's read offsets into its agents' usage logs (robustness plan §9,
+ * P0; hub v209 — the hub keeps none). Moved only after the hub stored the records
+ * (usage-analytics collector.ts). Not task data: no task id, not erased.
+ */
+export const USAGE_CURSORS_DDL = `
+  CREATE TABLE IF NOT EXISTS usage_cursors (
+    file_path TEXT PRIMARY KEY, offset INTEGER NOT NULL, modified_ms REAL NOT NULL
+  );
+`
+
+/**
+ * v12 `task_path_releases`: the worktree of a purged task, kept until the hub has
+ * removed (or kept, shared) the checkout and says `forget` (hub v211: the hub holds
+ * no path to remove it by) — at most {@link TASK_PATH_RELEASE_TTL_MS}.
+ *
+ * v11: a task's worktree path and base dir (task-paths.ts; robustness plan §9, P0,
+ * Phase 7a, hub v210) — only here; the hub hands its rows over once. Task data:
+ * purged with the task.
+ */
+export const TASK_PATHS_DDL = `
+  CREATE TABLE IF NOT EXISTS task_paths (
+    task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT, base_dir TEXT,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS task_path_releases (
+    task_id TEXT PRIMARY KEY, project_id TEXT, worktree_path TEXT NOT NULL,
+    released_at INTEGER NOT NULL
+  );
+`
 
 export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
@@ -130,6 +216,27 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         value TEXT NOT NULL,PRIMARY KEY(task_id,id)
       );
     `)
+    // v6: per-item fault ledger (same DDL as the hub's v203) and the index of
+    // which restored archives hold which task (erasure opens only those).
+    db.exec(ITEM_FAULTS_DDL)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archive_index (archive_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS archive_tasks (
+        archive_id TEXT NOT NULL REFERENCES archive_index(archive_id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL, PRIMARY KEY(archive_id, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS archive_tasks_task ON archive_tasks(task_id);
+    `)
+    // v7: the agent-session ledger (robustness plan §9, P0) — only here, never on
+    // the hub. `session_resets` / `session_deletions` are the hub's intent as
+    // delivered (same names, so the ledger's rules read them as plain tables).
+    db.exec(SESSION_LEDGER_DDL)
+    // v8: agent-turn snapshots (robustness plan §9, P0; hub migration v207).
+    db.exec(AGENT_TURNS_DDL)
+    // v10: usage-log read offsets (usage-cursors.ts).
+    db.exec(USAGE_CURSORS_DDL)
+    // v11: task worktree paths and base dirs (task-paths.ts).
+    db.exec(TASK_PATHS_DDL)
     // Version of the hub-facing metadata state, per task. Triggers are the one
     // choke point, so every writer (bootstrap, retention, migration, future code)
     // bumps it. Fail safe: a record kind counts unless it is known to stay local.
@@ -189,6 +296,14 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       db.prepare(
         "INSERT OR IGNORE INTO task_cleanup_pending SELECT task_id FROM task_lifecycle WHERE state='deleted'"
       ).run()
+    // v9 (hub v208): chat settings, session ids and queued messages are this
+    // computer's alone, so the hub no longer takes `provider-config`,
+    // `conversation` or `queue-item` updates. Any still awaiting delivery go.
+    if (schema < 9)
+      db.prepare(
+        `DELETE FROM records WHERE kind='settings' AND id GLOB 'metadata:*' AND json_valid(value)
+          AND json_extract(value,'$.kind') IN ('provider-config','conversation','queue-item')`
+      ).run()
     // Local index is not part of transfer records. Rebuild from copied ledgers
     // even when their per-conversation initialization marker is already true.
     db.prepare(`INSERT OR IGNORE INTO queue_message_identities
@@ -199,6 +314,17 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     db.pragma(`user_version = ${CHAT_STORAGE_SCHEMA_VERSION}`)
   })()
   if (redactedSideAnswers) db.pragma('wal_checkpoint(TRUNCATE)')
+  // This database's identity, created once. Metadata counters are only
+  // comparable within one database: the hub re-reads a conversation whose
+  // updates arrive from another store (a recreated database restarts at 1).
+  // A copy (backup restore) keeps the id; the hub's receipts catch that rollback.
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS store_identity (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL)'
+  )
+  db.prepare('INSERT OR IGNORE INTO store_identity VALUES(1,?)').run(randomUUID())
+  const storeId = (
+    db.prepare('SELECT store_id FROM store_identity WHERE id=1').get() as { store_id: string }
+  ).store_id
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
   const row = (id: string) =>
@@ -420,6 +546,32 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     onTaskPurge(listener: (taskId: string) => void) {
       purgeListeners.push(listener)
+    },
+    /** This computer's own fault ledger (origin 'computer'). */
+    faults: createSyncFaultLedger(db, { origin: 'computer' }),
+    listFaults(): ItemFaultRow[] {
+      return db
+        .prepare("SELECT * FROM item_faults WHERE origin='computer' ORDER BY last_at DESC")
+        .all() as ItemFaultRow[]
+    },
+    /** Explicit Retry: the next pass runs the item regardless of backoff or quarantine. */
+    retryFault(pass: string, itemKey: string): boolean {
+      return (
+        db
+          .prepare(`UPDATE item_faults SET kind='transient', fingerprint=NULL, next_retry_at=0
+            WHERE origin='computer' AND pass=? AND item_key=?`)
+          .run(pass, itemKey).changes > 0
+      )
+    },
+    deleteFault(pass: string, itemKey: string): boolean {
+      return (
+        db
+          .prepare("DELETE FROM item_faults WHERE origin='computer' AND pass=? AND item_key=?")
+          .run(pass, itemKey).changes > 0
+      )
+    },
+    deleteTaskFaults(taskId: string): void {
+      db.prepare("DELETE FROM item_faults WHERE origin='computer' AND task_id=?").run(taskId)
     },
     pendingTaskCleanup(): string[] {
       return (
@@ -719,6 +871,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     read,
     records,
+    /** See `store_identity`. */
+    storeId: () => storeId,
     nextSeq,
     /** See `task_state_versions`. 0 = nothing written since this table existed. */
     stateVersion(taskId: string): number {
@@ -1148,6 +1302,20 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         )
         return JSON.parse(encoded) as ChatRecord[]
       })()
+    },
+    /** Every task's lifecycle this database holds (the hub's lifecycle inventory). */
+    taskLifecycles(): Array<{
+      taskId: string
+      state: 'active' | 'paused' | 'deleted'
+      revision: number
+    }> {
+      return db
+        .prepare('SELECT task_id AS taskId,state,revision FROM task_lifecycle ORDER BY task_id')
+        .all() as Array<{
+        taskId: string
+        state: 'active' | 'paused' | 'deleted'
+        revision: number
+      }>
     },
     taskLifecycle(taskId: string): { state: 'active' | 'paused' | 'deleted'; revision: number } {
       return (

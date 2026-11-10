@@ -320,6 +320,25 @@ export const artifactsRouter = router({
         (rows) => rows.map((a) => a.task_id)
       )
     ),
+  // Moves entries to another task keeping their ids, versions and links
+  // (`artifact:<id>`). A retry completes a partly applied move.
+  move: publicProcedure
+    .input(
+      z
+        .object({
+          artifactIds: z.array(z.string()).max(1000),
+          folderIds: z.array(z.string()).max(1000),
+          sourceTaskId: z.string(),
+          destTaskId: z.string(),
+          destFolderId: z.string().nullable()
+        })
+        .refine((v) => v.artifactIds.length + v.folderIds.length > 0, 'Nothing to move')
+    )
+    .mutation(async ({ ctx, input }) => {
+      const result = await store(ctx.dataRoot).moveArtifacts(ctx.db, input)
+      signalTasksChanged([input.sourceTaskId, input.destTaskId])
+      return result
+    }),
   pasteFiles: publicProcedure.input(pasteFilesInput).mutation(({ ctx, input }) => {
     assertPasteSourcesAreHubStorage(ctx.dataRoot, input.sourcePaths)
     return creating(

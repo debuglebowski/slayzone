@@ -1,10 +1,9 @@
-import type { SlayzoneDb } from '@slayzone/platform'
 import type { TaskSessionStore } from './task-session-store'
 
-/** One recorded `TaskSessionStore` call: method name, the db it was handed, its args. */
+/** One recorded `TaskSessionStore` call: method name, the computer it named, its args. */
 export interface TaskSessionStoreCall {
   method: keyof TaskSessionStore
-  db: SlayzoneDb
+  computerId: string | null
   args: unknown
 }
 
@@ -12,7 +11,7 @@ export interface TaskSessionStoreCall {
  * TEST DOUBLE for the task-owned `TaskSessionStore` (terminal tests cannot import
  * the task package). Records every call in `calls` and resolves with the
  * neutral result: `prunePendingSpawns` → 0, `bindSessionToTask` → `bindResult`
- * (default true). The real SQL is covered by task's own op tests.
+ * (default true). The real SQL is covered by the chat runtime's ledger tests.
  */
 export function createFakeTaskSessionStore(
   opts: {
@@ -28,32 +27,37 @@ export function createFakeTaskSessionStore(
   const calls: TaskSessionStoreCall[] = []
   return {
     calls,
-    recordConversation: async (db, args) => {
-      calls.push({ method: 'recordConversation', db, args })
+    recordConversation: async (computerId, args) => {
+      calls.push({ method: 'recordConversation', computerId, args })
     },
-    recordPendingSpawn: async (db, args) => {
-      calls.push({ method: 'recordPendingSpawn', db, args })
+    recordPendingSpawn: async (computerId, args) => {
+      calls.push({ method: 'recordPendingSpawn', computerId, args })
+      return `pending-${calls.length}`
     },
-    prunePendingSpawns: async (db, args) => {
-      calls.push({ method: 'prunePendingSpawns', db, args })
+    prunePendingSpawns: async (computerId, args) => {
+      calls.push({ method: 'prunePendingSpawns', computerId, args })
       return 0
     },
-    bindSessionToTask: async (db, args) => {
-      calls.push({ method: 'bindSessionToTask', db, args })
+    bindSessionToTask: async (computerId, args) => {
+      calls.push({ method: 'bindSessionToTask', computerId, args })
       return opts.bindResult ?? true
     },
-    recordSessionSpawn: async (db, args) => {
-      calls.push({ method: 'recordSessionSpawn', db, args })
+    recordSessionSpawn: async (computerId, args) => {
+      calls.push({ method: 'recordSessionSpawn', computerId, args })
     },
-    markSessionDead: async (db, args) => {
-      calls.push({ method: 'markSessionDead', db, args })
+    markSessionDead: async (computerId, args) => {
+      calls.push({ method: 'markSessionDead', computerId, args })
     },
-    isHonoredConversation: async (db, taskId, mode, conversationId) => {
-      calls.push({ method: 'isHonoredConversation', db, args: { taskId, mode, conversationId } })
+    isHonoredConversation: async (computerId, taskId, mode, conversationId) => {
+      calls.push({
+        method: 'isHonoredConversation',
+        computerId,
+        args: { taskId, mode, conversationId }
+      })
       return opts.honored ?? true
     },
-    getCurrentConversationId: async (db, taskId, mode) => {
-      calls.push({ method: 'getCurrentConversationId', db, args: { taskId, mode } })
+    getCurrentConversationId: async (computerId, taskId, mode, tabId) => {
+      calls.push({ method: 'getCurrentConversationId', computerId, args: { taskId, mode, tabId } })
       return opts.current?.[mode] ?? null
     }
   }

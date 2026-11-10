@@ -1,6 +1,7 @@
 import express from 'express'
 import http from 'http'
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+import type { ConversationOrigin } from '@slayzone/task-contracts'
 import { registerAgentHookRoute, evictAgentTree } from './agent-hook'
 
 // Lifecycle spy — captures every event the route emits on deps.agentLifecycle
@@ -10,7 +11,7 @@ const lifecycleSpy = vi.fn()
 
 // PTY state-machine bridge — injected via deps.terminalStateBridge (the route
 // no longer imports @slayzone/terminal/electron; the host wires the live impl).
-const findSessionSpy = vi.fn<(taskId: string, mode: string) => string | null>()
+const findSessionSpy = vi.fn<(taskId: string, mode: string, tabId?: string) => string | null>()
 const transitionSpy = vi.fn<(sessionId: string, state: string, event: string) => boolean>()
 const markActiveSpy = vi.fn<(sessionId: string) => boolean>()
 const noteConversationIdSpy = vi.fn<(sessionId: string, conversationId: string | null) => void>()
@@ -56,51 +57,39 @@ vi.mock('@slayzone/diagnostics/server', () => ({
   recordDiagnosticEvent: () => {}
 }))
 
-// Conversation-id capture goes through the provenance gate: `findPendingSpawn`
-// (spawn-intent lookup) + `recordConversation` (append-only ledger). Mock both
-// so the test never pulls the task domain (+ DB) into vitest.
-const recordConversationSpy = vi.fn()
+// Conversation-id capture: the session ledger lives on the computer running the
+// agent (robustness plan §9), so the route only names that computer and forwards
+// the SessionStart; the provenance gate itself runs there (chat-runtime
+// session-ledger.test). A fake ledger records what the route asked.
+type HookArgs = {
+  taskId: string
+  mode: string
+  sessionId: string
+  source?: string
+  spawnToken?: string
+  ctxTabId?: string
+}
+const recordHookSpy =
+  vi.fn<
+    (
+      computerId: string,
+      args: HookArgs
+    ) => Promise<{ origin: ConversationOrigin; tabId: string } | null>
+  >()
 const confirmSessionConversationSpy = vi.fn()
-const findPendingSpawnSpy = vi.fn<(db: unknown, taskId: string, mode: string) => Promise<unknown>>()
-// In-band `/clear` path: the current honored conversation (the id being rotated
-// away from) + the ownership lookup that proves slay spawned the process holding
-// it. Both default to "nothing known", so every pre-existing test keeps taking
-// the standard id-match gate untouched.
-const getCurrentConversationIdSpy = vi.fn<
-  (db: unknown, taskId: string, mode: string) => Promise<string | null>
->(() => Promise.resolve(null))
-const findOwnedSpawnForConversationSpy = vi.fn<
-  (db: unknown, taskId: string, mode: string, outgoing: string | null) => Promise<string | null>
->(() => Promise.resolve(null))
-// Resumability proof (v158). Must be in this mock even for tests that ignore it:
-// the route calls it on every turn-proof event, so a missing export is not an
-// unasserted spy — it is a TypeError inside the handler and a 500 on the ack.
-const markSessionFirstTurnSpy = vi.fn<(db: unknown, conversationId: string) => Promise<void>>(() =>
-  Promise.resolve()
-)
-// The task's board row, read before and after a conversation write to tell a real
-// change from a no-op re-record. Default: the row reflects the ledger (it changes
-// with every recordConversation), so pre-existing tests see "changed → notify".
-const getTaskOpSpy = vi.fn<(db: unknown, id: string) => Promise<unknown>>((_db, id) =>
-  Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
-)
-vi.mock('@slayzone/task/server', () => ({
-  getTaskOp: (db: unknown, id: string) => getTaskOpSpy(db, id),
-  recordConversation: (...args: unknown[]) => recordConversationSpy(...args),
-  findPendingSpawn: (db: unknown, taskId: string, mode: string) =>
-    findPendingSpawnSpy(db, taskId, mode),
-  findOwnedSpawnForConversation: (
-    db: unknown,
-    taskId: string,
-    mode: string,
-    outgoing: string | null
-  ) => findOwnedSpawnForConversationSpy(db, taskId, mode, outgoing),
-  getCurrentConversationId: (db: unknown, taskId: string, mode: string) =>
-    getCurrentConversationIdSpy(db, taskId, mode),
-  confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
-  markSessionFirstTurn: (db: unknown, conversationId: string) =>
-    markSessionFirstTurnSpy(db, conversationId)
-}))
+const markSessionFirstTurnSpy =
+  vi.fn<(computerId: string, conversationId: string) => Promise<boolean>>()
+const computerForSpy =
+  vi.fn<
+    (
+      hook: { taskId: string; mode: string; tabId?: string },
+      reporter?: string | null
+    ) => Promise<string | null>
+  >()
+/** What each SessionStart asked the computer's ledger (args only). */
+const asked = () => recordHookSpy.mock.calls.map(([, args]) => args)
+/** Terminal tabs the hub knows (`validTab`): `${taskId}/${tabId}`. */
+const knownTabs = new Set<string>()
 
 interface ServerHandle {
   port: number
@@ -112,8 +101,18 @@ function startServer(deps?: {
 }): Promise<ServerHandle> {
   const app = express()
   registerAgentHookRoute(app, {
-    db: { get: async () => undefined } as never,
+    db: {
+      get: async (_sql: string, [tabId, taskId]: string[]) =>
+        knownTabs.has(`${taskId}/${tabId}`) ? { id: tabId } : undefined
+    } as never,
     notifyRenderer: deps?.notifyRenderer ?? (() => {}),
+    agentSessionLedger: {
+      computerFor: (hook, reporter) => computerForSpy(hook, reporter),
+      recordHookConversation: (computerId, args) => recordHookSpy(computerId, args),
+      confirmSessionConversation: async (...args: unknown[]) =>
+        confirmSessionConversationSpy(...args),
+      markSessionFirstTurn: (computerId, id) => markSessionFirstTurnSpy(computerId, id)
+    },
     agentLifecycle: {
       emit: (_channel: string, event: unknown) => {
         lifecycleSpy(event)
@@ -121,7 +120,7 @@ function startServer(deps?: {
       }
     } as never,
     terminalStateBridge: {
-      findSession: (taskId, mode) => findSessionSpy(taskId, mode),
+      findSession: (taskId, mode, tabId) => findSessionSpy(taskId, mode, tabId),
       transition: (sessionId, state, event) => transitionSpy(sessionId, state, event),
       markActive: (sessionId) => markActiveSpy(sessionId),
       noteConversationId: (sessionId, conversationId) =>
@@ -184,25 +183,23 @@ describe('POST /api/agent-hook', () => {
     noteAwaitingInputSpy.mockReset()
     noteBackgroundJobsSpy.mockReset()
     probeBackgroundJobsSpy.mockReset()
-    recordConversationSpy.mockReset()
+    recordHookSpy.mockReset()
+    // Default: the computer accepts it, on the hook's tab (else the main tab).
+    recordHookSpy.mockImplementation(async (_c, args) => ({
+      origin: 'slay-spawned-fresh',
+      tabId: args.ctxTabId ?? args.taskId
+    }))
     confirmSessionConversationSpy.mockReset()
-    findPendingSpawnSpy.mockReset()
     unadoptedWarmAgentSpy.mockReset()
     unadoptedWarmAgentSpy.mockReturnValue(null)
-    getCurrentConversationIdSpy.mockReset()
-    findOwnedSpawnForConversationSpy.mockReset()
     markSessionFirstTurnSpy.mockReset()
-    markSessionFirstTurnSpy.mockResolvedValue(undefined)
-    // Default: no known current conversation and no ownership claim → the
-    // in-band-clear branch can never fire unless a test sets both up.
-    getCurrentConversationIdSpy.mockResolvedValue(null)
-    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
+    markSessionFirstTurnSpy.mockResolvedValue(true)
+    computerForSpy.mockReset()
+    computerForSpy.mockResolvedValue('pc')
+    knownTabs.clear()
     findSessionSpy.mockReturnValue(null)
     transitionSpy.mockReturnValue(true)
     markActiveSpy.mockReturnValue(true)
-    // Default: slay launched the agent without pre-minting a session id → the
-    // first observed id is accepted as fresh ('slay-spawned-fresh').
-    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
   })
 
   test('valid payload → 200 + emits agent lifecycle event', async () => {
@@ -250,7 +247,8 @@ describe('POST /api/agent-hook', () => {
         taskId: 'task-1'
       })
       expect(markSessionFirstTurnSpy).toHaveBeenCalledTimes(1)
-      expect(markSessionFirstTurnSpy.mock.calls[0][1]).toBe('proof-b')
+      // On the computer running the agent (its ledger).
+      expect(markSessionFirstTurnSpy.mock.calls[0]).toEqual(['pc', 'proof-b'])
 
       // Write-once per process: a second turn on the same id issues no further
       // UPDATE. Ids are unique per test because that latch is module-scoped.
@@ -307,7 +305,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'UserPromptSubmit',
         taskId: 'task-1'
       })
-      expect(findSessionSpy).toHaveBeenCalledWith('task-1', 'claude-code')
+      expect(findSessionSpy).toHaveBeenCalledWith('task-1', 'claude-code', undefined)
       expect(transitionSpy).toHaveBeenCalledWith('task-1', 'running', 'UserPromptSubmit')
     } finally {
       await srv.close()
@@ -864,7 +862,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'UserPromptSubmit',
         taskId: 'cx-1'
       })
-      expect(findSessionSpy).toHaveBeenCalledWith('cx-1', 'codex')
+      expect(findSessionSpy).toHaveBeenCalledWith('cx-1', 'codex', undefined)
       expect(transitionSpy).toHaveBeenCalledWith('cx-1', 'running', 'UserPromptSubmit')
     } finally {
       await srv.close()
@@ -929,87 +927,6 @@ describe('POST /api/agent-hook', () => {
 
   // --- Codex conversation-id capture (PRIMARY codex resume-id path) ---------
 
-  test('codex SessionStart with sessionId → persists conversationId to provider_config', async () => {
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-task',
-        sessionId: '11111111-1111-4111-8111-111111111111'
-      })
-      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cx-task', 'codex')
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1]
-      expect(data).toEqual({
-        taskId: 'cx-task',
-        mode: 'codex',
-        conversationId: '11111111-1111-4111-8111-111111111111',
-        origin: 'slay-spawned-fresh'
-      })
-      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('codex delayed first ID is claimed once; later different ID stays foreign', async () => {
-    getCurrentConversationIdSpy
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue('11111111-1111-4111-8111-111111111111')
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-task',
-        sessionId: '11111111-1111-4111-8111-111111111111'
-      })
-      await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-task',
-        sessionId: '22222222-2222-4222-8222-222222222222'
-      })
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'slay-spawned-fresh'
-      })
-      expect(recordConversationSpy.mock.calls[1][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('codex delayed first ID must match the launch token', async () => {
-    findPendingSpawnSpy.mockResolvedValue({
-      expectedSessionId: null,
-      usedResume: false,
-      spawnToken: 'launch-A'
-    })
-    const srv = await startServer()
-    try {
-      for (const spawnToken of ['launch-B', 'launch-A']) {
-        await postJson(srv.port, {
-          agentId: 'codex',
-          ctx: { taskId: 'cx-task', spawnToken },
-          raw: {
-            hook_event_name: 'SessionStart',
-            session_id: '11111111-1111-4111-8111-111111111111'
-          }
-        })
-      }
-      expect(recordConversationSpy.mock.calls.map((call) => call[1].origin)).toEqual([
-        'foreign-observed',
-        'slay-spawned-fresh'
-      ])
-    } finally {
-      await srv.close()
-    }
-  })
-
   // --- Warm agents ---------------------------------------------------------
   // A warm agent boots with the id of a task that is created later, if ever. Until
   // a terminal adopts it, its hooks name a task with no terminal (and maybe no row),
@@ -1029,14 +946,15 @@ describe('POST /api/agent-hook', () => {
         sessionId: '33333333-3333-4333-8333-333333333333'
       })
       expect(confirmSessionConversationSpy).toHaveBeenCalledTimes(1)
+      // On the computer the warm agent runs on (its pool row is there).
+      expect(confirmSessionConversationSpy.mock.calls[0][0]).toBe('computer-1')
       expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
         sessionId: 'pool-sess-1',
         observedConversationId: '33333333-3333-4333-8333-333333333333'
       })
       // The task-keyed ledger is NOT written: the task may not exist, and the
       // adoption bind is what hands this conversation to it.
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1103,77 +1021,11 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('codex SessionStart with only raw.session_id → still persists (envelope fallback)', async () => {
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-task',
-        raw: { session_id: '22222222-2222-4222-8222-222222222222' }
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
-      expect(data.conversationId).toBe('22222222-2222-4222-8222-222222222222')
-    } finally {
-      await srv.close()
-    }
-  })
-
   test('codex SessionStart without any session id → no persist', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, { agentId: 'codex', hookEvent: 'SessionStart', taskId: 'cx-task' })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('codex SessionStart with no pending spawn → recorded foreign-observed, no notify', async () => {
-    // No spawn-intent row: a manual `claude --resume <foreign>` inside a slay
-    // PTY must never bind the foreign session to the task (RC1 clobber fix) —
-    // it's recorded for audit only and the renderer is NOT refreshed.
-    findPendingSpawnSpy.mockResolvedValue(null)
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-task',
-        sessionId: '33333333-3333-4333-8333-333333333333'
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('codex SessionStart with mismatching pending id → recorded foreign-observed', async () => {
-    findPendingSpawnSpy.mockResolvedValue({
-      expectedSessionId: '99999999-9999-4999-8999-999999999999',
-      usedResume: true
-    })
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      const res = await postJson(srv.port, {
-        agentId: 'codex',
-        hookEvent: 'SessionStart',
-        taskId: 'cx-missing',
-        sessionId: '44444444-4444-4444-8444-444444444444'
-      })
-      expect(res.status).toBe(200)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1187,265 +1039,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'SessionStart',
         sessionId: '55555555-5555-4555-8555-555555555555'
       })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('claude-code SessionStart with sessionId → persists conversationId to provider_config', async () => {
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'SessionStart',
-        taskId: 'cc-task',
-        sessionId: '66666666-6666-4666-8666-666666666666'
-      })
-      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cc-task', 'claude-code')
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1]
-      expect(data).toEqual({
-        taskId: 'cc-task',
-        mode: 'claude-code',
-        conversationId: '66666666-6666-4666-8666-666666666666',
-        origin: 'slay-spawned-fresh'
-      })
-      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
-      // Names the one row it changed → the renderer patches just that row.
-      expect(notifyRendererSpy).toHaveBeenCalledWith({ taskIds: ['cc-task'] })
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('claude-code SessionStart re-recording the bound id (resume) → no renderer ping', async () => {
-    // A respawn resumes the conversation the task already shows: the ledger gains a
-    // row but the board row is identical, so no renderer should refetch for it.
-    getTaskOpSpy.mockImplementation((_db, id) =>
-      Promise.resolve({ id, currentConversationByMode: { 'claude-code': 'same' } })
-    )
-    findPendingSpawnSpy.mockResolvedValue({
-      expectedSessionId: '77777777-7777-4777-8777-777777777777',
-      usedResume: true
-    })
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'SessionStart',
-        taskId: 'cc-task',
-        sessionId: '77777777-7777-4777-8777-777777777777'
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'slay-spawned-resume'
-      })
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-      getTaskOpSpy.mockImplementation((_db, id) =>
-        Promise.resolve({ id, ledgerWrites: recordConversationSpy.mock.calls.length })
-      )
-    }
-  })
-
-  test('claude-code SessionStart with only raw.session_id → still persists (envelope fallback)', async () => {
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'SessionStart',
-        taskId: 'cc-task',
-        raw: { session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
-      expect(data.conversationId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
-    } finally {
-      await srv.close()
-    }
-  })
-
-  // --- In-band `/clear` (agent rotates its own session id) ------------------
-  //
-  // `/clear` keeps the agent's process but mints a NEW session id, so the id it
-  // reports can never match the one slay pre-minted — the plain id-match gate
-  // reads it exactly like a hijack and files it `foreign-observed` (audit-only).
-  // The consequence was silent: the task kept resuming the PRE-clear
-  // conversation and the cleared session never showed in the sessions sidebar.
-  //
-  // Honoring it requires BOTH signals, so these tests pin each half failing
-  // independently — that pairing is the entire security argument.
-  const CLEAR_OLD = 'e9a303db-042b-4bf9-97b7-7759b6f859e2'
-  const CLEAR_NEW = 'de675b93-6ec1-4596-a01e-260e5c7a1861'
-
-  /** A Claude `SessionStart` carrying `source`, shaped like the real payload. */
-  function clearHook(
-    port: number,
-    source: string,
-    sessionId: string = CLEAR_NEW
-  ): Promise<{ status: number; body: string }> {
-    return postJson(port, {
-      agentId: 'claude-code',
-      taskId: 'cc-clear',
-      raw: {
-        session_id: sessionId,
-        hook_event_name: 'SessionStart',
-        source,
-        cwd: '/w'
-      }
-    })
-  }
-
-  test("source 'clear' + owned outgoing conversation → honored as in-band-clear", async () => {
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      const res = await clearHook(srv.port, 'clear')
-      expect(res.status).toBe(200)
-      // Ownership is asked about the OUTGOING id — the conversation being
-      // replaced — not the newly minted one.
-      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        'cc-clear',
-        'claude-code',
-        CLEAR_OLD
-      )
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toEqual({
-        taskId: 'cc-clear',
-        mode: 'claude-code',
-        conversationId: CLEAR_NEW,
-        origin: 'in-band-clear'
-      })
-      // Honored → the renderer must refresh so the sidebar shows the new session.
-      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
-      // The standard gate must be bypassed entirely, not merely overruled.
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test("source 'clear' but NO ownership claim → still foreign-observed", async () => {
-    // A `/clear` fired from a process slay never spawned for this task (or whose
-    // outgoing conversation isn't slay's). `source` alone must not be trusted —
-    // it's self-reported by the agent.
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
-    findOwnedSpawnForConversationSpy.mockResolvedValue(null)
-    findPendingSpawnSpy.mockResolvedValue(null)
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await clearHook(srv.port, 'clear')
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test("source 'resume' with a matching owned conversation → NOT honored as clear", async () => {
-    // The hijack the gate exists for: `claude --resume <foreign>` typed inside a
-    // slay PTY inherits the same env and can satisfy ownership, so `source` is
-    // what has to reject it.
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
-    findPendingSpawnSpy.mockResolvedValue(null)
-    const srv = await startServer()
-    try {
-      await clearHook(srv.port, 'resume')
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test("source 'startup' with a matching owned conversation → NOT honored as clear", async () => {
-    // A bare `claude` relaunched in the terminal. Same reasoning as 'resume'.
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
-    findPendingSpawnSpy.mockResolvedValue(null)
-    const srv = await startServer()
-    try {
-      await clearHook(srv.port, 'startup')
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test("repeated 'clear' SessionStart for an already-recorded clear → no duplicate row", async () => {
-    // After the first clear is honored, the new id IS the current conversation.
-    // A replayed SessionStart (Claude re-fires it on compact, and the hook can be
-    // redelivered) must be a no-op rather than appending a row per replay.
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_NEW)
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      const res = await clearHook(srv.port, 'clear', CLEAR_NEW)
-      expect(res.status).toBe(200)
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test("source 'clear' with no prior conversation → falls through to the standard gate", async () => {
-    // Nothing to rotate away from (a fresh task that has never bound an id), so
-    // no ownership claim is possible. The pre-minted-id gate still applies and
-    // can legitimately honor it as a fresh spawn.
-    getCurrentConversationIdSpy.mockResolvedValue(null)
-    findPendingSpawnSpy.mockResolvedValue({ expectedSessionId: null, usedResume: false })
-    const srv = await startServer()
-    try {
-      await clearHook(srv.port, 'clear')
-      // Ownership is never even asked — there is no outgoing id to claim.
-      expect(findOwnedSpawnForConversationSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'slay-spawned-fresh'
-      })
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('SessionStart without source → unchanged id-match gate', async () => {
-    // Codex/older payloads carry no `source`. Must behave exactly as before.
-    getCurrentConversationIdSpy.mockResolvedValue(CLEAR_OLD)
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-session-1')
-    findPendingSpawnSpy.mockResolvedValue({
-      expectedSessionId: CLEAR_NEW,
-      usedResume: true
-    })
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'SessionStart',
-        taskId: 'cc-clear',
-        sessionId: CLEAR_NEW
-      })
-      expect(getCurrentConversationIdSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'slay-spawned-resume'
-      })
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1459,32 +1053,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'SessionStart',
         taskId: 'cc-task'
       })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('claude-code SessionStart with exact pending match → recorded as honored resume', async () => {
-    findPendingSpawnSpy.mockResolvedValue({
-      expectedSessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      usedResume: true
-    })
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'claude-code',
-        hookEvent: 'SessionStart',
-        taskId: 'cc-task',
-        sessionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'slay-spawned-resume'
-      })
-      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1500,56 +1069,13 @@ describe('POST /api/agent-hook', () => {
         taskId: 'cx-task',
         sessionId: '77777777-7777-4777-8777-777777777777'
       })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
   })
 
   // --- Antigravity conversation-id capture (PreInvocation event, conversationId) ---
-
-  test('antigravity PreInvocation with sessionId → persists conversationId to provider_config', async () => {
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'antigravity',
-        hookEvent: 'PreInvocation',
-        taskId: 'ag-task',
-        sessionId: 'a1111111-1111-4111-8111-111111111111'
-      })
-      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'ag-task', 'antigravity')
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1]
-      expect(data).toEqual({
-        taskId: 'ag-task',
-        mode: 'antigravity',
-        conversationId: 'a1111111-1111-4111-8111-111111111111',
-        origin: 'slay-spawned-fresh'
-      })
-      expect(notifyRendererSpy).toHaveBeenCalledTimes(1)
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('antigravity PreInvocation with only raw.conversationId → still persists (envelope fallback)', async () => {
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        agentId: 'antigravity',
-        hookEvent: 'PreInvocation',
-        taskId: 'ag-task',
-        raw: { conversationId: 'a2222222-2222-4222-8222-222222222222' }
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
-      expect(data.conversationId).toBe('a2222222-2222-4222-8222-222222222222')
-    } finally {
-      await srv.close()
-    }
-  })
 
   test('antigravity PreInvocation without any session id → no persist', async () => {
     findSessionSpy.mockReturnValue('ag-noid')
@@ -1560,29 +1086,7 @@ describe('POST /api/agent-hook', () => {
         hookEvent: 'PreInvocation',
         taskId: 'ag-task'
       })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
-    } finally {
-      await srv.close()
-    }
-  })
-
-  test('antigravity PreInvocation with no pending spawn → recorded foreign-observed, no notify', async () => {
-    findPendingSpawnSpy.mockResolvedValue(null)
-    const notifyRendererSpy = vi.fn()
-    const srv = await startServer({ notifyRenderer: notifyRendererSpy })
-    try {
-      await postJson(srv.port, {
-        agentId: 'antigravity',
-        hookEvent: 'PreInvocation',
-        taskId: 'ag-task',
-        sessionId: 'a3333333-3333-4333-8333-333333333333'
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        origin: 'foreign-observed'
-      })
-      expect(notifyRendererSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1598,8 +1102,7 @@ describe('POST /api/agent-hook', () => {
         taskId: 'ag-task',
         sessionId: 'a4444444-4444-4444-8444-444444444444'
       })
-      expect(findPendingSpawnSpy).not.toHaveBeenCalled()
-      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1720,7 +1223,7 @@ describe('POST /api/agent-hook', () => {
         sessionId: 'pool-ctx-1',
         observedConversationId: '44444444-4444-4444-8444-444444444444'
       })
-      expect(recordConversationSpy).not.toHaveBeenCalled()
+      expect(recordHookSpy).not.toHaveBeenCalled()
     } finally {
       await srv.close()
     }
@@ -1768,64 +1271,11 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('ctx envelope: codex SessionStart → conversation id from raw.session_id persists', async () => {
-    const srv = await startServer()
-    try {
-      await postJson(srv.port, {
-        ctx: { v: 1, taskId: 'cx-ctx', agentId: 'codex' },
-        raw: {
-          hook_event_name: 'SessionStart',
-          session_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
-        }
-      })
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      const data = recordConversationSpy.mock.calls[0][1] as { conversationId: string }
-      expect(data.conversationId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc')
-    } finally {
-      await srv.close()
-    }
-  })
-
   // ── User-defined provider: `ctx.mode` ≠ `agentId` ─────────────────────────
   // A provider wrapping claude-code posts as agent `claude-code` (the only value
   // `isAgentId` accepts) and names its OWN mode in `ctx.mode`. Every lookup keyed
   // by mode — the ledger and the PTY registry — must use that mode, or the
   // provider's conversation lands on the built-in claude-code row of the task.
-
-  test('ctx.mode: SessionStart is gated + recorded under the provider mode, not the agent', async () => {
-    findSessionSpy.mockReturnValue('pty-my-claude')
-    const srv = await startServer()
-    try {
-      const res = await postJson(srv.port, {
-        ctx: { v: 1, taskId: 'cp-task', agentId: 'claude-code', mode: 'my-claude' },
-        raw: {
-          hook_event_name: 'SessionStart',
-          session_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
-        },
-        agentId: 'claude-code'
-      })
-      expect(res.status).toBe(200)
-      expect(findPendingSpawnSpy).toHaveBeenCalledWith(expect.anything(), 'cp-task', 'my-claude')
-      expect(recordConversationSpy).toHaveBeenCalledTimes(1)
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        taskId: 'cp-task',
-        mode: 'my-claude',
-        conversationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-        origin: 'slay-spawned-fresh'
-      })
-      // Both PTY lookups (idle-close conversation mirror + state machine).
-      expect(findSessionSpy.mock.calls.every(([, mode]) => mode === 'my-claude')).toBe(true)
-      expect(findSessionSpy).toHaveBeenCalledTimes(2)
-      expect(noteConversationIdSpy).toHaveBeenCalledWith(
-        'pty-my-claude',
-        'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
-      )
-      // Agent-scoped decisions still read the AGENT.
-      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ agentId: 'claude-code' })
-    } finally {
-      await srv.close()
-    }
-  })
 
   test('ctx.mode: a turn drives the provider PTY state machine', async () => {
     findSessionSpy.mockImplementation((_taskId, mode) => (mode === 'my-claude' ? 'pty-mc' : null))
@@ -1842,32 +1292,195 @@ describe('POST /api/agent-hook', () => {
     }
   })
 
-  test('ctx.mode: in-band /clear checks ownership under the provider mode', async () => {
-    getCurrentConversationIdSpy.mockResolvedValue('old-conv')
-    findOwnedSpawnForConversationSpy.mockResolvedValue('pty-owner')
+  // --- Conversation-id capture → the agent's computer ledger -------------------
+
+  test('a capture event asks the computer running the agent; the gate runs there', async () => {
+    const srv = await startServer()
+    try {
+      for (const [agentId, hookEvent] of [
+        ['codex', 'SessionStart'],
+        ['claude-code', 'SessionStart'],
+        ['antigravity', 'PreInvocation']
+      ]) {
+        await postJson(srv.port, {
+          agentId,
+          hookEvent,
+          taskId: `${agentId}-task`,
+          sessionId: '11111111-1111-4111-8111-111111111111'
+        })
+      }
+      expect(recordHookSpy.mock.calls.map(([computerId]) => computerId)).toEqual(['pc', 'pc', 'pc'])
+      expect(asked()).toEqual([
+        { taskId: 'codex-task', mode: 'codex', sessionId: '11111111-1111-4111-8111-111111111111' },
+        {
+          taskId: 'claude-code-task',
+          mode: 'claude-code',
+          sessionId: '11111111-1111-4111-8111-111111111111'
+        },
+        {
+          taskId: 'antigravity-task',
+          mode: 'antigravity',
+          sessionId: '11111111-1111-4111-8111-111111111111'
+        }
+      ])
+      // The hub's board row holds no session id: nothing task-row-scoped is pinged
+      // (the sessions list refreshes from the ledger's change event).
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('the session id comes from the envelope fallbacks (raw.session_id, raw.conversationId, ctx)', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, {
-        ctx: { v: 1, taskId: 'cp-clear', agentId: 'claude-code', mode: 'my-claude' },
-        raw: { hook_event_name: 'SessionStart', session_id: 'new-conv', source: 'clear' },
+        agentId: 'codex',
+        hookEvent: 'SessionStart',
+        taskId: 'cx',
+        raw: { session_id: 'a-raw' }
+      })
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'cc',
+        raw: { session_id: 'b-raw' }
+      })
+      await postJson(srv.port, {
+        agentId: 'antigravity',
+        hookEvent: 'PreInvocation',
+        taskId: 'ag',
+        raw: { conversationId: 'c-raw' }
+      })
+      await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cx-ctx', agentId: 'codex' },
+        raw: { hook_event_name: 'SessionStart', session_id: 'd-ctx' }
+      })
+      expect(asked().map((a) => [a.taskId, a.sessionId])).toEqual([
+        ['cx', 'a-raw'],
+        ['cc', 'b-raw'],
+        ['ag', 'c-raw'],
+        ['cx-ctx', 'd-ctx']
+      ])
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('source, launch token and the hook tab (only a real tab of the task) reach the computer', async () => {
+    knownTabs.add('cc-tabs/deploy')
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        ctx: {
+          agentId: 'claude-code',
+          taskId: 'cc-tabs',
+          spawnToken: 'tok-deploy',
+          tabId: 'deploy'
+        },
+        raw: { session_id: 'dep-conv', hook_event_name: 'SessionStart', source: 'clear' }
+      })
+      // An agent-supplied tab that is not one of the task's is dropped.
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        ctx: { agentId: 'claude-code', taskId: 'cc-tabs', tabId: 'other-task-tab' },
+        raw: { session_id: 'x-conv', hook_event_name: 'SessionStart' }
+      })
+      expect(asked()).toEqual([
+        {
+          taskId: 'cc-tabs',
+          mode: 'claude-code',
+          sessionId: 'dep-conv',
+          source: 'clear',
+          spawnToken: 'tok-deploy',
+          ctxTabId: 'deploy'
+        },
+        { taskId: 'cc-tabs', mode: 'claude-code', sessionId: 'x-conv' }
+      ])
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test("the conversation id lands on the PTY of the tab the computer's ledger names", async () => {
+    // The spawn row names the tab (the launch token picked it), not the hook's ctx.
+    recordHookSpy.mockResolvedValue({ origin: 'slay-spawned-fresh', tabId: 'deploy' })
+    findSessionSpy.mockImplementation((t, _m, tabId) => (tabId ? `${t}:${tabId}` : null))
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        ctx: { agentId: 'claude-code', taskId: 'cc-tabs', spawnToken: 'tok-deploy' },
+        raw: { session_id: 'dep-conv', hook_event_name: 'SessionStart', source: 'startup' }
+      })
+      expect(noteConversationIdSpy).toHaveBeenCalledWith('cc-tabs:deploy', 'dep-conv')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('the computer is named by the reporter, the live terminal or the task; none → nothing recorded', async () => {
+    computerForSpy.mockResolvedValue(null)
+    const srv = await startServer()
+    try {
+      await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'no-computer',
+        sessionId: 'lost'
+      })
+      expect(computerForSpy).toHaveBeenCalledWith(
+        { taskId: 'no-computer', mode: 'claude-code' },
+        null
+      )
+      expect(recordHookSpy).not.toHaveBeenCalled()
+    } finally {
+      await srv.close()
+    }
+  })
+
+  test('a ledger that cannot be reached never fails the hook ack', async () => {
+    recordHookSpy.mockRejectedValue(new Error('Computer is offline'))
+    findSessionSpy.mockReturnValue('pty-1')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        agentId: 'claude-code',
+        hookEvent: 'SessionStart',
+        taskId: 'offline',
+        sessionId: 'id-1'
+      })
+      expect(res.status).toBe(200)
+      expect(markActiveSpy).toHaveBeenCalledWith('pty-1')
+    } finally {
+      await srv.close()
+    }
+  })
+
+  // A provider wrapping claude-code posts as agent `claude-code` (the only value
+  // `isAgentId` accepts) and names its OWN mode in `ctx.mode`. Every lookup keyed
+  // by mode — the ledger and the PTY registry — must use that mode, or the
+  // provider's conversation lands on the built-in claude-code row of the task.
+  test('ctx.mode: SessionStart is recorded under the provider mode, not the agent', async () => {
+    findSessionSpy.mockReturnValue('pty-my-claude')
+    const srv = await startServer()
+    try {
+      const res = await postJson(srv.port, {
+        ctx: { v: 1, taskId: 'cp-task', agentId: 'claude-code', mode: 'my-claude' },
+        raw: { hook_event_name: 'SessionStart', session_id: 'dddd', source: 'clear' },
         agentId: 'claude-code'
       })
-      expect(getCurrentConversationIdSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        'cp-clear',
-        'my-claude'
-      )
-      expect(findOwnedSpawnForConversationSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        'cp-clear',
-        'my-claude',
-        'old-conv'
-      )
-      expect(recordConversationSpy.mock.calls[0][1]).toMatchObject({
-        mode: 'my-claude',
-        conversationId: 'new-conv',
-        origin: 'in-band-clear'
-      })
+      expect(res.status).toBe(200)
+      expect(asked()).toEqual([
+        { taskId: 'cp-task', mode: 'my-claude', sessionId: 'dddd', source: 'clear' }
+      ])
+      expect(computerForSpy.mock.calls[0][0]).toEqual({ taskId: 'cp-task', mode: 'my-claude' })
+      // Both PTY lookups (idle-close conversation mirror + state machine).
+      expect(findSessionSpy.mock.calls.every(([, mode]) => mode === 'my-claude')).toBe(true)
+      expect(findSessionSpy).toHaveBeenCalledTimes(2)
+      expect(noteConversationIdSpy).toHaveBeenCalledWith('pty-my-claude', 'dddd')
+      // Agent-scoped decisions still read the AGENT.
+      expect(lifecycleSpy.mock.calls[0][0]).toMatchObject({ agentId: 'claude-code' })
     } finally {
       await srv.close()
     }

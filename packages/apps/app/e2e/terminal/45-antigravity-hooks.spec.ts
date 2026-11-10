@@ -6,7 +6,7 @@ import {
   TEST_PROJECT_PATH,
   notifyScriptPath
 } from '../fixtures/electron'
-import { subscribeAgentLifecycle } from '../fixtures/terminal'
+import { subscribeAgentLifecycle, currentSession } from '../fixtures/terminal'
 import fs from 'fs'
 import http from 'http'
 
@@ -145,7 +145,7 @@ test.describe('Antigravity agent hooks', () => {
     })
   })
 
-  test('PreInvocation with sessionId persists provider_config.antigravity.conversationId', async ({
+  test('PreInvocation with sessionId records the antigravity session on the task computer', async ({
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
@@ -200,11 +200,7 @@ test.describe('Antigravity agent hooks', () => {
     await expect
       .poll(
         async () => {
-          const t = await mainWindow.evaluate(
-            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-            task.id
-          )
-          return t?.provider_config?.antigravity?.conversationId ?? null
+          return currentSession(mainWindow, task.id, 'antigravity')
         },
         { timeout: 3000 }
       )

@@ -3,11 +3,11 @@ import Database from 'better-sqlite3'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
@@ -21,10 +21,11 @@ async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
   const fakeClaude = createFakeClaude({ root: join(dir, 'fake-claude') })
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', dir)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
   const openComputer = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',
@@ -129,12 +130,16 @@ test('audit: native-only prompt history must not add a visible chat terminal on 
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('native-tab','task','codex',0)"
       )
       .run()
-    f.db
-      .prepare(
-        "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','codex','native prompt',123)"
-      )
-      .run()
     const before = f.services()
+    // A native terminal's prompt, captured on the task's computer (prompts live
+    // only there since v207, robustness plan §9).
+    await before.captureHook({
+      agentId: 'codex',
+      mode: 'codex',
+      hookEvent: 'UserPromptSubmit',
+      taskId: 'task',
+      raw: { prompt: 'native prompt' }
+    })
     expect(await before.prompts('task', 'codex')).toMatchObject([{ text: 'native prompt' }])
     const tabs = f.db
       .prepare('SELECT id,mode FROM terminal_tabs WHERE task_id=? ORDER BY id')
@@ -222,7 +227,7 @@ test('audit: interrupted activation must not disable a different healthy task on
   try {
     f.db
       .prepare(
-        "INSERT INTO tasks(id,project_id,title,worktree_path) SELECT 'other-task',project_id,'Other Task',worktree_path FROM tasks WHERE id='task'"
+        "INSERT INTO tasks(id,project_id,title,has_worktree) SELECT 'other-task',project_id,'Other Task',has_worktree FROM tasks WHERE id='task'"
       )
       .run()
     f.db
@@ -307,9 +312,11 @@ test('audit control: re-enrollment with a new computer identity cannot appropria
     const original = await before.ownership.forTab('tab')
     await f.restartComputer()
     const after = f.services('new-computer-id')
-    await expect(after.recoverComputer('new-computer-id')).rejects.toThrow(
-      'Chat tab has another active owner'
-    )
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Refused for that conversation alone; the new computer's recovery completes.
+    await expect(after.recoverComputer('new-computer-id')).resolves.toBeUndefined()
+    expect(String(errors.mock.calls.flat().join(' '))).toMatch('Chat tab has another active owner')
+    errors.mockRestore()
     expect(await after.ownership.forTab('tab')).toMatchObject({
       id: original!.id,
       computerId: 'pc',
@@ -398,7 +405,9 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
     })
     const pendingMetadata = () => f.request({ kind: 'pendingMetadata' })
     const baseline = await recordsReads(pendingMetadata)
-    expect(baseline.result, 'the pending metadata').toEqual(pending)
+    // Stamped with the chat database they count in when sent.
+    const stamped = pending.map((value) => ({ ...value, storeId: raw!.storeId() }))
+    expect(baseline.result, 'the pending metadata').toEqual(stamped)
 
     // 32 MiB of retained diagnostics beside it.
     const payload = 'x'.repeat(128 * 1024)
@@ -412,7 +421,7 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
         })
     })
     const retained = await recordsReads(pendingMetadata)
-    expect(retained.result, 'the same pending metadata').toEqual(pending)
+    expect(retained.result, 'the same pending metadata').toEqual(stamped)
 
     expect(retained.reads.length, 'the read goes through chat storage').toBeGreaterThan(0)
     // The same statements, the same rows reaching JavaScript: none of the diagnostics.
@@ -456,12 +465,16 @@ test.each([false, true])(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('native-tab','task','codex',0)"
         )
         .run()
-      f.db
-        .prepare(
-          "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','codex','preserved prompt',123)"
-        )
-        .run()
       const before = f.services()
+      // A native terminal's prompt, captured on the task's computer (prompts live
+      // only there since v207, robustness plan §9).
+      await before.captureHook({
+        agentId: 'codex',
+        mode: 'codex',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task',
+        raw: { prompt: 'preserved prompt' }
+      })
       expect(await before.prompts('task', 'codex')).toMatchObject([{ text: 'preserved prompt' }])
       // Reproduce the UI row made by older reconnect code without altering ownership.
       f.db
@@ -486,15 +499,11 @@ test.each([false, true])(
           draft: { text: 'user kept this chat' }
         })
       } else expect(visible).toBeUndefined()
-      expect(await after.ownership.forTab('task-content:task')).toMatchObject({
-        state: 'active',
-        cleanupPending: false
+      // The prompt history's storage owner stays either way (prompts are read from
+      // it since v207); only the visible row was the phantom.
+      expect(await after.ownership.forTab('prompt-history:task')).toMatchObject({
+        state: 'active'
       })
-      if (hasActivity)
-        expect(await after.ownership.forTab('prompt-history:task')).toMatchObject({
-          state: 'active'
-        })
-      else expect(await after.ownership.forTab('prompt-history:task')).toBeNull()
       expect(await after.prompts('task', 'codex')).toMatchObject([{ text: 'preserved prompt' }])
     } finally {
       await f.close()
@@ -514,12 +523,16 @@ test.each([false, true])(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('native-tab','task','codex',0)"
         )
         .run()
-      f.db
-        .prepare(
-          "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','codex','preserved pre-fix prompt',123)"
-        )
-        .run()
       const before = f.services()
+      // A native terminal's prompt, captured on the task's computer (prompts live
+      // only there since v207, robustness plan §9).
+      await before.captureHook({
+        agentId: 'codex',
+        mode: 'codex',
+        hookEvent: 'UserPromptSubmit',
+        taskId: 'task',
+        raw: { prompt: 'preserved pre-fix prompt' }
+      })
       // Recreate a real pre-fix storage identity, before the independent task
       // authority existed, using the real source/transfer/activation path.
       await before.ownership.register({
@@ -647,6 +660,7 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
     await firstProviderStart
     expect(providerStarts.map((start) => start.model)).toEqual(['opus'])
     expect(providerStarts[0]?.pid, 'the provider really launched').toBeTypeOf('number')
+    // The computer holds the only copy (decision 2): the hub's starting value is gone.
     expect(
       JSON.parse(
         (
@@ -654,8 +668,8 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
             provider_config: string
           }
         ).provider_config
-      )['claude-chat'].chatModel
-    ).toBe('opus')
+      )['claude-chat']?.chatModel
+    ).toBeUndefined()
   } finally {
     await f.close()
   }

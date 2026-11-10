@@ -9,29 +9,44 @@ import type { ReactNode } from 'react'
 
 let fetches: string[] = []
 let turnsByPath: Record<string, Array<{ id: string }>> = {}
-let onChanged: ((path: string) => void) | null = null
+let onChanged: ((change: { worktreePath: string; taskId: string }) => void) | null = null
 
 // One stable proxy, as the tRPC adapter returns.
 const trpc = {
   agentTurns: {
     list: {
-      queryOptions: (input: { worktreePath: string }, opts: { enabled: boolean }) => ({
-        queryKey: ['agentTurns.list', input.worktreePath],
-        queryFn: async () => {
-          fetches.push(input.worktreePath)
-          return turnsByPath[input.worktreePath] ?? []
-        },
-        ...opts
-      })
+      // §9 7d: the list names only the task (its computer resolves the checkout); the
+      // hook keys the query by the checkout it watches, which the fake serves by.
+      queryOptions: (
+        input: { taskId: string } & Record<string, unknown>,
+        opts: { enabled: boolean }
+      ) => {
+        if ('worktreePath' in input) throw new Error('a client path was sent')
+        return {
+          queryKey: ['agentTurns.list', input.taskId],
+          queryFn: async ({ queryKey }: { queryKey: unknown[] }) => {
+            const path = String(queryKey.at(-1))
+            fetches.push(path)
+            return turnsByPath[path] ?? []
+          },
+          ...opts
+        }
+      }
     },
     onChanged: {
-      subscriptionOptions: (_i: unknown, o: { enabled: boolean; onData: (p: string) => void }) => o
+      subscriptionOptions: (
+        _i: unknown,
+        o: { enabled: boolean; onData: (c: { worktreePath: string; taskId: string }) => void }
+      ) => o
     }
   }
 }
 vi.mock('@slayzone/transport/client', () => ({
   typedTrpc: () => ({ useTRPC: () => trpc }),
-  useSubscription: (o: { enabled: boolean; onData: (p: string) => void }) => {
+  useSubscription: (o: {
+    enabled: boolean
+    onData: (c: { worktreePath: string; taskId: string }) => void
+  }) => {
     onChanged = o.enabled ? o.onData : null
   }
 }))
@@ -52,7 +67,7 @@ function setup(initial: Partial<P> = {}) {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
   // `tick` forces a re-render with otherwise identical inputs.
-  return renderHook((p: P) => useAgentTurns(p.path, p.refreshKey), {
+  return renderHook((p: P) => useAgentTurns('t1', p.path, p.refreshKey), {
     wrapper,
     initialProps: { path: '/wt', refreshKey: 0, tick: 0, ...initial }
   })
@@ -91,12 +106,12 @@ describe('useAgentTurns', () => {
   it('refetches on onChanged for the same path (trailing slash ignored), not another', async () => {
     const { result } = setup()
     await flush()
-    act(() => onChanged?.('/wt-other'))
+    act(() => onChanged?.({ worktreePath: '/wt-other', taskId: 't1' }))
     await flush()
     expect(fetches).toEqual(['/wt'])
 
     turnsByPath['/wt'] = [{ id: 't3' }]
-    act(() => onChanged?.('/wt/'))
+    act(() => onChanged?.({ worktreePath: '/wt/', taskId: 't1' }))
     await flush()
     expect(fetches).toEqual(['/wt', '/wt'])
     expect(result.current).toEqual([{ id: 't3' }])
@@ -119,7 +134,7 @@ describe('useAgentTurns', () => {
     rerender({ path: '/b', refreshKey: 0, tick: 0 })
     await flush()
     expect(result.current).toEqual([{ id: 'b1' }])
-    act(() => onChanged?.('/b'))
+    act(() => onChanged?.({ worktreePath: '/b', taskId: 't1' }))
     await flush()
     expect(fetches).toEqual(['/wt', '/b', '/b'])
   })

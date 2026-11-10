@@ -22,11 +22,18 @@ import { mainTerminalCwd, mainTerminalCwdNeedsRepos } from '@slayzone/task/main-
 /** A child repo `worktrees.detectChildRepos` found (projects-contracts' `DetectedRepo`). */
 type DetectedRepo = { name: string; path: string }
 type CwdTask = {
-  worktree_path: string | null
-  base_dir: string | null
+  has_worktree: boolean
+  has_base_dir: boolean
   repo_name: string | null
   computer_id?: string | null
 }
+/**
+ * The task's own folders as its computer answered (`task.paths`; robustness plan §9,
+ * P0: the hub keeps no copy). Null: not asked / not in yet.
+ */
+type CwdPaths =
+  | { state: 'ok'; worktreePath: string | null; baseDir: string | null }
+  | { state: 'offline'; computerId: string | null }
 /**
  * A project as `projects.list` returns it: its folder on each computer and the computer
  * the hub uses for it. An older hub sends neither, only its one `path`
@@ -62,17 +69,20 @@ export function chosenFolder(task: CwdTask, project: CwdProject | null | undefin
  * The folder desktop starts the task's tabs in. `detectedRepos` null = not asked
  * yet: answers `needsRepos` (the project's folder on the task's computer, to scan)
  * when a bound child repo decides it, else the folder. `cwd: null` = the task has no
- * folder to run in (no folder on its computer, no base dir).
+ * folder to run in (no folder on its computer, no base dir). A task with a worktree or
+ * base dir needs `paths` from its computer: `{ needsPaths: true }` until they are in.
  */
 export function chatCwdFromTask(
   task: CwdTask,
   project: CwdProject | null | undefined,
-  detectedRepos: readonly DetectedRepo[] | null
-): { cwd: string | null } | { needsRepos: string } {
+  detectedRepos: readonly DetectedRepo[] | null,
+  paths: CwdPaths | null = null
+): { cwd: string | null } | { needsRepos: string } | { needsPaths: true } {
+  if ((task.has_worktree || task.has_base_dir) && paths?.state !== 'ok') return { needsPaths: true }
   // `placementOn` reads an older hub's `path` when `placements` is absent.
   const root = taskProjectRoot(task, project as Parameters<typeof taskProjectRoot>[1])
   if (detectedRepos === null && root && mainTerminalCwdNeedsRepos(task, project, root)) {
     return { needsRepos: root }
   }
-  return { cwd: mainTerminalCwd(task, project, root, detectedRepos ?? []) }
+  return { cwd: mainTerminalCwd(task, project, root, detectedRepos ?? [], paths) }
 }

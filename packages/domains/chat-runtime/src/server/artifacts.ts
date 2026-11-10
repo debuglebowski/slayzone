@@ -9,6 +9,8 @@ import {
   fsyncSync
 } from 'node:fs'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
+import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import { z } from 'zod'
 import { startErasureRetries, resumeErasure } from '@slayzone/content-erasure/server'
 import type { ErasureManifest } from '@slayzone/content-erasure/server'
@@ -117,6 +119,15 @@ export const artifactMethodSchemas = {
       author: author.optional()
     })
   ]),
+  /** On the DESTINATION task's route: re-owns entries of `sourceTaskId` here. */
+  moveToTask: z.tuple([
+    z.object({
+      sourceTaskId: id,
+      artifactIds: z.array(id).max(10000),
+      folderIds: z.array(id).max(10000),
+      destFolderId: id.nullable()
+    })
+  ]),
   readBytes: z.tuple([id, ref.optional()]),
   seal: z.tuple([chatAttachmentSchema]),
   searchArtifacts: z.tuple([
@@ -193,34 +204,56 @@ export function createLocalArtifacts(
     }, 5000)
     cleanupTimer.unref()
   }
-  function cleanupDeletedTasks() {
+  function cleanupTaskFiles(taskId: string) {
+    try {
+      store.cleanupTaskArtifacts(taskId)
+    } catch (error) {
+      // An id that cannot name a folder never had files on disk: nothing to remove.
+      if (!isUnsafePathError(error)) throw error
+    }
+    // Persist directory-entry removal before clearing the durable intent.
+    // Otherwise a power loss could resurrect bytes after a successful ACK.
+    if (process.platform !== 'win32')
+      // isolation: fatal — both directories must be durable before the cleanup intent is cleared
+      for (const dir of [store.artifactsDir, join(store.artifactsDir, '.transactions')])
+        if (existsSync(dir)) {
+          const fd = openSync(dir, 'r')
+          try {
+            fsyncSync(fd)
+          } finally {
+            closeSync(fd)
+          }
+        }
+    storage.completeTaskCleanup(taskId)
+  }
+  /**
+   * Removes the files of every deleted task, one task at a time: a task whose
+   * files cannot be removed is recorded (item_faults) and retried on its backoff,
+   * never blocking the others. Only `ownTask` (the task the caller is deleting
+   * or erasing) is run regardless of backoff, and only ITS failure is thrown.
+   */
+  function cleanupDeletedTasks(ownTask?: string) {
     if (storage.compose((raw) => raw.inTransaction))
       throw new Error('Task file cleanup requires a committed tombstone')
-    let failure: unknown
-    for (const taskId of storage.pendingTaskCleanup()) {
-      try {
-        store.cleanupTaskArtifacts(taskId)
-        // Persist directory-entry removal before clearing the durable intent.
-        // Otherwise a power loss could resurrect bytes after a successful ACK.
-        if (process.platform !== 'win32')
-          for (const dir of [store.artifactsDir, join(store.artifactsDir, '.transactions')])
-            if (existsSync(dir)) {
-              const fd = openSync(dir, 'r')
-              try {
-                fsyncSync(fd)
-              } finally {
-                closeSync(fd)
-              }
-            }
-        storage.completeTaskCleanup(taskId)
-      } catch (error) {
-        failure ??= error
-      }
+    const pending = storage.pendingTaskCleanup()
+    const opts = {
+      pass: 'computer.task-file-cleanup',
+      key: (taskId: string) => taskId,
+      taskId: (taskId: string) => taskId,
+      ledger: storage.faults,
+      isFatal: isStorageFatal
     }
-    if (failure) {
-      retryTaskCleanup()
-      throw failure
-    }
+    const own =
+      ownTask && pending.includes(ownTask)
+        ? forEachIsolatedSync([ownTask], { ...opts, ignoreGate: true }, cleanupTaskFiles)
+        : undefined
+    const rest = forEachIsolatedSync(
+      pending.filter((taskId) => taskId !== ownTask),
+      opts,
+      cleanupTaskFiles
+    )
+    if (own?.failed.length || rest.failed.length || rest.skipped.length) retryTaskCleanup()
+    if (own?.failed.length) throw own.failed[0].error
   }
   storage.compose((raw) => {
     raw.function('computer_chat_artifact_owner', () => context.getStore()?.id ?? '')
@@ -231,6 +264,14 @@ export function createLocalArtifacts(
     CREATE TRIGGER IF NOT EXISTS chat_folder_owner AFTER INSERT ON artifact_folders BEGIN INSERT INTO artifact_owners VALUES(NEW.id,'folder',computer_chat_artifact_owner()); END;
     CREATE TRIGGER IF NOT EXISTS chat_artifact_owner_delete AFTER DELETE ON task_artifacts BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END;
     CREATE TRIGGER IF NOT EXISTS chat_folder_owner_delete AFTER DELETE ON artifact_folders BEGIN DELETE FROM artifact_owners WHERE id=OLD.id; END;
+    CREATE TRIGGER IF NOT EXISTS chat_artifact_owner_move AFTER UPDATE OF task_id ON task_artifacts WHEN OLD.task_id<>NEW.task_id
+    BEGIN SELECT RAISE(ABORT,'Artifact move requires an owning conversation') WHERE computer_chat_artifact_owner()='';
+    UPDATE artifact_owners SET conversation_id=computer_chat_artifact_owner() WHERE id=NEW.id;
+    ${bumpTaskStateVersion('OLD.task_id')} END;
+    CREATE TRIGGER IF NOT EXISTS chat_folder_owner_move AFTER UPDATE OF task_id ON artifact_folders WHEN OLD.task_id<>NEW.task_id
+    BEGIN SELECT RAISE(ABORT,'Folder move requires an owning conversation') WHERE computer_chat_artifact_owner()='';
+    UPDATE artifact_owners SET conversation_id=computer_chat_artifact_owner() WHERE id=NEW.id;
+    ${bumpTaskStateVersion('OLD.task_id')} END;
     ${['INSERT', 'UPDATE', 'DELETE']
       .map((op) => {
         const r = op === 'DELETE' ? 'OLD' : 'NEW'
@@ -254,11 +295,15 @@ export function createLocalArtifacts(
           : blobs.collectDeleted(referencedArtifactBlobHashes(raw))
       )
     )
-  try {
-    cleanupDeletedTasks()
-  } catch {
-    // A damaged deleted task must not make unrelated live history unavailable.
-  }
+  // Boot: one damaged deleted task is recorded and retried, and even a failure no
+  // task could survive (disk I/O) must not make unrelated live history unavailable.
+  if (!storage.compose((raw) => raw.inTransaction))
+    try {
+      cleanupDeletedTasks()
+    } catch (error) {
+      console.error('[chat] deleted-task file cleanup failed at startup; retrying:', error)
+      retryTaskCleanup()
+    }
   const erasureRetries = startErasureRetries(db, storage.dir)
   async function checkArtifact(id: string, taskId: string) {
     const a = await store.getArtifact(db, id)
@@ -335,6 +380,7 @@ export function createLocalArtifacts(
       args = artifactMethodSchemas[req.method].parse(req.args) as any[],
       first = args[0]
     const read = reads.has(req.method)
+    let moveSelection: { artifactIds: string[]; folderIds: string[] } | undefined
     if (!read && storage.taskLifecycle(taskId).state !== 'active')
       throw new Error('Task chat is paused or deleted')
     if (!read && !req.operationId) throw new Error('Artifact mutation requires an operation id')
@@ -381,7 +427,28 @@ export function createLocalArtifacts(
       await checkFolder(typeof first === 'string' ? first : first.id, taskId)
       if (typeof first !== 'string') await checkFolder(first.parentId, taskId)
     } else if (req.method === 'seal') await checkArtifact(first.artifactId, taskId)
-    else {
+    else if (req.method === 'moveToTask') {
+      await checkFolder(first.destFolderId, taskId)
+      // The hub names the whole selection; this computer moves the entries it
+      // holds. Entries already here were moved by an earlier attempt.
+      const held = async (table: string, ids: string[]) => {
+        const kept: string[] = []
+        for (const entryId of ids) {
+          const row = await db.get<{ task_id: string }>(`SELECT task_id FROM ${table} WHERE id=?`, [
+            entryId
+          ])
+          if (!row) continue
+          if (row.task_id !== taskId && row.task_id !== first.sourceTaskId)
+            throw new Error('Artifact is outside the source task')
+          kept.push(entryId)
+        }
+        return kept
+      }
+      moveSelection = {
+        artifactIds: await held('task_artifacts', first.artifactIds),
+        folderIds: await held('artifact_folders', first.folderIds)
+      }
+    } else {
       await checkArtifact(
         typeof first === 'string' ? first : (first.artifactId ?? first.id),
         taskId
@@ -464,7 +531,37 @@ export function createLocalArtifacts(
           result = { version, data: blobs.read(version.content_hash).toString('base64') }
         }
       } else if (req.method === 'seal') result = await seal(tabId, first)
-      else {
+      else if (req.method === 'moveToTask') {
+        const moved = await store.moveArtifacts(db, {
+          ...moveSelection!,
+          sourceTaskId: first.sourceTaskId,
+          destTaskId: taskId,
+          destFolderId: first.destFolderId
+        })
+        // The task_id triggers re-owned them to this route's conversation in the
+        // move's own transaction: the source task's snapshots no longer list
+        // them, and this one reports their new task to the hub.
+        const owned = new Set<string>()
+        for (const f of moved.folders)
+          if (await db.get("SELECT 1 FROM artifact_owners WHERE id=? AND kind='folder'", [f.id])) {
+            owned.add(f.id)
+            local.metadata(tabId, 'folder-changed', {
+              id: f.id,
+              parentId: f.parent_id,
+              order: f.order
+            })
+          }
+        for (const a of moved.artifacts)
+          local.metadata(tabId, 'artifact-changed', {
+            id: a.id,
+            folderId: a.folder_id,
+            order: a.order
+          })
+        result = {
+          artifactIds: moved.artifacts.map((a) => a.id),
+          folderIds: [...owned]
+        }
+      } else {
         if (req.method === 'pruneArtifactVersions' && storage.hasBlobLeases())
           throw new Error('A chat backup is copying files; retry pruning when it finishes')
         const method = store[req.method as keyof typeof store]
@@ -578,11 +675,20 @@ export function createLocalArtifacts(
       await erasureRetries.close()
     },
     async retryErasures(taskId: string) {
+      // isolation: fatal — only this task's own erasure jobs: any unfinished one means its erasure is not done
       for (const row of await db.all<{ id: string; manifest: string }>(
         "SELECT id,manifest FROM content_erasure_jobs WHERE state='incomplete'"
       )) {
-        const manifest = JSON.parse(row.manifest) as ErasureManifest
+        // Another job's unreadable manifest must not fail this task's erasure: it
+        // can only belong here if its raw text names the task.
+        let manifest: ErasureManifest | null = null
+        try {
+          manifest = JSON.parse(row.manifest) as ErasureManifest
+        } catch {
+          if (!row.manifest.includes(taskId)) continue
+        }
         if (
+          manifest &&
           !manifest.taskIds.includes(taskId) &&
           !manifest.artifactTasks.some((a) => a.taskId === taskId)
         )

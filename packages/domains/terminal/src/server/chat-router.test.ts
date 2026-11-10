@@ -127,6 +127,10 @@ describe('chat router', () => {
           got.push(args)
           return { checkpoint: null, lastSeq: -1 }
         },
+        providerConfig: async (...args) => {
+          got.push(args)
+          return {}
+        },
         seedPrompts: async (...args) => {
           got.push(args)
         }

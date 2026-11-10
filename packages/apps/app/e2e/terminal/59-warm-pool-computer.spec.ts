@@ -12,10 +12,15 @@
  * spawned through the computer, and a task created to be opened takes the id the
  * agent booted with, so its first spawn adopts it.
  */
-// `node:sqlite`, not better-sqlite3: the latter's native binding is compiled for
-// Electron's ABI and will not load in the Playwright computer's plain node.
-import { DatabaseSync } from 'node:sqlite'
-import { test, expect, seed, resetApp, TEST_PROJECT_PATH, cliDbPath } from '../fixtures/electron'
+import type { Page } from '@playwright/test'
+import {
+  test,
+  expect,
+  seed,
+  resetApp,
+  TEST_PROJECT_PATH,
+  ledgerAgentSessions
+} from '../fixtures/electron'
 
 test.describe('Warm pool (computer-hosted)', () => {
   test.beforeAll(async ({ mainWindow }) => {
@@ -32,16 +37,14 @@ test.describe('Warm pool (computer-hosted)', () => {
     )
   })
 
-  test('warm agent is spawned on a computer, never in the hub process', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('warm agent is spawned on a computer, never in the hub process', async ({ mainWindow }) => {
     const project = (await seed(mainWindow).createProject({
       name: 'WarmPool',
       color: '#22c55e',
       path: TEST_PROJECT_PATH
     })) as { id: string }
     const projectId = project.id
+    const probe = await probeTask(mainWindow, projectId)
 
     await mainWindow.evaluate(() =>
       window
@@ -66,7 +69,7 @@ test.describe('Warm pool (computer-hosted)', () => {
         projectId
       )
 
-    // A pooled agent_sessions row with no task bound is the pool's footprint. It is
+    // A pooled session row with no task bound is the pool's footprint. It is
     // written SYNCHRONOUSLY through the data seam, unlike the `warm.agent_spawned`
     // diagnostic — diagnostics are batched before flush, so that table lags and
     // asserting on it reads as "the pool never ran" when it merely has not flushed.
@@ -80,11 +83,8 @@ test.describe('Warm pool (computer-hosted)', () => {
       .poll(
         async () => {
           await reportTabOpen()
-          const rows = await querySidecarDb<{ id: string; task_id: string | null }>(
-            electronApp,
-            `SELECT id, task_id FROM agent_sessions WHERE status = 'pooled' LIMIT 5`
-          )
-          return rows.length > 0 && rows[0].task_id === null
+          const rows = await ledgerAgentSessions(mainWindow, probe, { status: 'pooled' })
+          return rows.length > 0 && rows[0].taskId === null
         },
         { timeout: 30_000, intervals: [500, 1_000] }
       )
@@ -92,8 +92,7 @@ test.describe('Warm pool (computer-hosted)', () => {
   })
 
   test('a task created to be opened takes the warm agent’s task id, and its first spawn adopts it', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     const project = await seed(mainWindow).createProject({
       name: 'WarmAdopt',
@@ -101,6 +100,7 @@ test.describe('Warm pool (computer-hosted)', () => {
       path: TEST_PROJECT_PATH
     })
     const projectId = project.id
+    const probe = await probeTask(mainWindow, projectId)
     // The folder as the computer recorded it (its real path), which is the folder
     // the warm agent booted in.
     const projectFolder = project.placements[0]?.path ?? TEST_PROJECT_PATH
@@ -110,12 +110,7 @@ test.describe('Warm pool (computer-hosted)', () => {
         .settings.set.mutate({ key: 'terminal_agent_startup', value: 'auto' })
     )
     const pooledIds = async (): Promise<string[]> =>
-      (
-        await querySidecarDb<{ id: string }>(
-          electronApp,
-          `SELECT id FROM agent_sessions WHERE status = 'pooled'`
-        )
-      ).map((r) => r.id)
+      (await ledgerAgentSessions(mainWindow, probe, { status: 'pooled' })).map((r) => r.id)
     // The gate is a synthetic "this project has an open tab" report. The renderer
     // re-reports its REAL tabs whenever they change (the create below does), which
     // drops this project again — so, as in the first test, every poll re-reports.
@@ -191,16 +186,13 @@ test.describe('Warm pool (computer-hosted)', () => {
     // id, so nothing else could have claimed it.
     await expect
       .poll(
-        async () =>
-          (
-            await querySidecarDb<{ status: string; task_id: string | null }>(
-              electronApp,
-              `SELECT status, task_id FROM agent_sessions WHERE id = '${warmSessionId}'`
-            )
-          )[0],
+        async () => {
+          const row = (await ledgerAgentSessions(mainWindow, probe, { id: warmSessionId }))[0]
+          return row ? { status: row.status, taskId: row.taskId } : null
+        },
         { timeout: 10_000, intervals: [250, 500] }
       )
-      .toEqual({ status: 'bound', task_id: task.id })
+      .toEqual({ status: 'bound', taskId: task.id })
 
     // And the project got a fresh warm agent for the next task.
     await expect
@@ -219,7 +211,7 @@ test.describe('Warm pool (computer-hosted)', () => {
     )
   })
 
-  test('manual startup mode (pool off) spawns nothing', async ({ mainWindow, electronApp }) => {
+  test('manual startup mode (pool off) spawns nothing', async ({ mainWindow }) => {
     await mainWindow.evaluate(() =>
       window
         .getTrpcVanillaClient()
@@ -231,6 +223,7 @@ test.describe('Warm pool (computer-hosted)', () => {
       path: TEST_PROJECT_PATH
     })) as { id: string }
     const projectId = project.id
+    const probe = await probeTask(mainWindow, projectId)
 
     // Turning the pool off does not merely stop NEW warms — the next reconcile
     // tears down every live one and marks its pooled session dead, so the pooled
@@ -247,7 +240,7 @@ test.describe('Warm pool (computer-hosted)', () => {
                 .pty.warmSetProjectTabCounts.mutate({ counts: { [pid]: 1 } }),
             projectId
           )
-          return countWarmSpawns(electronApp)
+          return (await ledgerAgentSessions(mainWindow, probe, { status: 'pooled' })).length
         },
         { timeout: 20_000, intervals: [500, 1_000] }
       )
@@ -256,40 +249,11 @@ test.describe('Warm pool (computer-hosted)', () => {
 })
 
 /**
- * Read the SIDECAR's sqlite file directly.
- *
- * NOT `window.__db`: that is the MAIN process's `userdata/slayzone.dev.diagnostics.sqlite`,
- * while the warm pool runs in the SIDECAR and writes the app's real DB under its
- * channel-scoped hub root — two different files with the same basename.
- * Diagnostics are a third file again. Querying the wrong one silently returns
- * nothing, which reads as "the pool never ran".
- *
- * The path comes from the shared `cliDbPath` helper rather than a local literal:
- * this spec previously hardcoded its own `storage/…` fragment, so it was one of
- * the files the channel-scoping change would have silently broken into exactly
- * that false "pool never ran" reading.
+ * A plain task of the project, never opened: its id routes ledger reads to the
+ * computer that runs the pool. Session rows live on that computer, not in any hub
+ * database (robustness plan §9), and a pooled row has no task of its own yet.
  */
-async function querySidecarDb<T>(
-  electronApp: import('@playwright/test').ElectronApplication,
-  sql: string
-): Promise<T[]> {
-  const userData = (await electronApp.evaluate(async ({ app }) =>
-    app.getPath('userData')
-  )) as string
-  const db = new DatabaseSync(cliDbPath(userData), { readOnly: true })
-  try {
-    return db.prepare(sql).all() as T[]
-  } finally {
-    db.close()
-  }
-}
-
-async function countWarmSpawns(
-  electronApp: import('@playwright/test').ElectronApplication
-): Promise<number> {
-  const rows = await querySidecarDb<{ n: number }>(
-    electronApp,
-    `SELECT COUNT(*) AS n FROM agent_sessions WHERE status = 'pooled'`
-  )
-  return rows[0]?.n ?? 0
+async function probeTask(page: Page, projectId: string): Promise<string> {
+  const task = await seed(page).createTask({ projectId, title: 'Warm probe', status: 'todo' })
+  return task.id
 }

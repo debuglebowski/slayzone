@@ -69,7 +69,19 @@ export interface TaskLookupTask {
   parent_id?: string | null
   is_temporary?: boolean | number | null
   project_id?: string
-  worktree_path?: string | null
+  has_worktree?: boolean
+}
+
+/**
+ * A task's worktree path as the client has it (§9 Phase 7d: read from the task's
+ * computer; the board row carries none). Undefined = not known. Installed by the app
+ * (from its path cache); only used to place a new tab next to its checkout siblings.
+ */
+let worktreePathOf: (task: TaskLookupTask) => string | null | undefined = () => undefined
+export function setTabWorktreePathResolver(
+  resolver: (task: TaskLookupTask) => string | null | undefined
+): void {
+  worktreePathOf = resolver
 }
 
 export interface TaskLookupProject {
@@ -137,7 +149,7 @@ interface TabState {
   // Tree-view: bypass status filter — include every task that is not in a
   // terminal (done/canceled) status.
   treeShowAllOpen: boolean
-  // Tree-view: show worktree pill on tasks that have a worktree_path.
+  // Tree-view: show worktree pill on tasks that have a worktree.
   treeShowWorktree: boolean
   treeShowTags: boolean
   // Tree-view: "Blocked" icon on tasks that are flagged blocked or have open blockers.
@@ -297,7 +309,9 @@ function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup
   const task = lookup.tasks.find((t) => t.id === taskId)
   if (!task?.project_id) return tabs.length
   const project = lookup.projects.find((p) => p.id === task.project_id)
-  const effectivePath = task.worktree_path || project?.path
+  const checkoutOf = (t: TaskLookupTask, p: TaskLookupProject | undefined) =>
+    t.has_worktree ? worktreePathOf(t) : p?.path
+  const effectivePath = checkoutOf(task, project)
   if (!effectivePath) return tabs.length
   let lastSibling = -1
   for (let i = tabs.length - 1; i >= 0; i--) {
@@ -306,7 +320,7 @@ function findWorktreeInsertIndex(taskId: string, tabs: Tab[], lookup: TaskLookup
     const t = lookup.tasks.find((x) => x.id === tab.taskId)
     if (!t?.project_id) continue
     const p = lookup.projects.find((pr) => pr.id === t.project_id)
-    const otherPath = t.worktree_path || p?.path
+    const otherPath = checkoutOf(t, p)
     if (otherPath === effectivePath) {
       lastSibling = i
       break

@@ -57,8 +57,7 @@
     "usePromptsSidebarOpen"
   ],
   "packages/domains/task-terminals/src/client/agent-sessions/SessionsSidebar.tsx": [
-    "useSessionsSidebarOpen",
-    "SessionsSidebar"
+    "useSessionsSidebarOpen"
   ],
   "packages/domains/task/src/client/CreateTaskDialog.tsx": ["CreateTaskDialog"],
   "packages/domains/task/src/client/ProcessDialog.tsx": ["ProcessDialog"],
@@ -74,8 +73,6 @@
   "packages/domains/worktrees/src/client/ConflictPhaseContent.tsx": ["ConflictPhaseContent"],
   "packages/domains/worktrees/src/client/CopyFilesDialog.tsx": ["CopyFilesDialog"],
   "packages/domains/worktrees/src/client/CreateWorktreeDialog.tsx": ["CreateWorktreeDialog"],
-  "packages/shared/diff-view/src/DiffView.tsx": ["DiffView"],
-  "packages/shared/diff-view/src/DiffView.virtual.tsx": ["VirtualRowList"],
   "packages/domains/worktrees/src/client/GeneralTabContent.tsx": ["GeneralTabContent"],
   "packages/domains/worktrees/src/client/GitDiffPanel.tsx": ["GitDiffPanel"],
   "packages/domains/worktrees/src/client/pr-dialogs.tsx": ["CreatePrDialog"],
@@ -89,6 +86,8 @@
   "packages/domains/worktrees/src/client/useGitDiffCommit.ts": ["useGitDiffCommit"],
   "packages/domains/worktrees/src/client/useGitDiffFlow.ts": ["useGitDiffFlow"],
   "packages/domains/worktrees/src/client/WorktreesTab.tsx": ["WorktreesTab"],
+  "packages/shared/diff-view/src/DiffView.tsx": ["DiffView"],
+  "packages/shared/diff-view/src/DiffView.virtual.tsx": ["VirtualRowList"],
   "packages/shared/editor/src/use-click-to-focus.ts": ["useClickToFocus"],
   "packages/shared/editor/src/use-image-paste-drop.ts": ["useImagePasteDrop"],
   "packages/shared/markdown/src/client/MermaidBlock.tsx": ["MermaidBlock"],

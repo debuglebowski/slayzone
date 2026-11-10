@@ -7,7 +7,7 @@ import { isSyntheticChatPrompt, type ChatAttachment } from '@slayzone/terminal-c
 
 /**
  * The task's prompts, newest first: this composer's sends since mount, then the
- * stored prompts (`agent_prompts`, oldest first — chat + terminal agents). A
+ * stored prompts (`agentPrompts.list`, oldest first — chat + terminal agents). A
  * repeated prompt keeps only its most recent position; blank and synthetic
  * control texts are left out.
  */

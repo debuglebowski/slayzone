@@ -73,3 +73,40 @@ test('content removed by another path between preparation and finish is still co
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('erasing a task removes its session ledger; a proof another task still names stays', async () => {
+  const { SESSION_LEDGER_DDL } = await import('./storage')
+  const { root, db } = store()
+  try {
+    db.exec(SESSION_LEDGER_DDL)
+    const session = db.prepare(
+      `INSERT INTO agent_sessions(id,mode,task_id,tab_id,conversation_id,origin,status,created_at)
+       VALUES(?,'claude-code',?,?,?,'slay-spawned-resume','dead',1)`
+    )
+    session.run('s-alice', 'alice', 'alice', 'shared')
+    session.run('s-alice-own', 'alice', 'alice', 'alice-only')
+    session.run('s-bob', 'bob', 'bob', 'shared')
+    db.exec(`INSERT INTO session_turns VALUES('shared',1),('alice-only',1);
+      INSERT INTO session_resets(id,task_id,mode,tab_id,created_at) VALUES('r','alice','*',NULL,2);
+      INSERT INTO session_deletions VALUES('d','alice','claude-code','x',3);
+      INSERT INTO legacy_conversation_history VALUES('alice','claude-code','["old"]');`)
+    prepareStoredTaskErasure(db, 'alice')
+    finishStoredTaskErasure(db, root, 'alice')
+    for (const table of [
+      'agent_sessions',
+      'session_resets',
+      'session_deletions',
+      'legacy_conversation_history'
+    ])
+      expect(
+        db.prepare(`SELECT count(*) AS n FROM ${table} WHERE task_id='alice'`).get(),
+        table
+      ).toEqual({ n: 0 })
+    expect(db.prepare('SELECT conversation_id FROM session_turns').all()).toEqual([
+      { conversation_id: 'shared' }
+    ])
+  } finally {
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})

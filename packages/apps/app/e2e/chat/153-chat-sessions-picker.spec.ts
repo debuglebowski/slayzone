@@ -7,7 +7,13 @@
  * Picking a terminal conversation is a hand-off. Against the scripted fake CLI.
  */
 import fs from 'node:fs'
-import { resetApp, seed, TEST_PROJECT_PATH } from '../fixtures/electron'
+import {
+  lastLedgerConversation,
+  resetApp,
+  seed,
+  seedLedgerSession,
+  TEST_PROJECT_PATH
+} from '../fixtures/electron'
 import { closeAllTaskTabs, openTaskTerminal, startAgentTerminal } from '../fixtures/terminal'
 import { echoTurn, expect, test, writeSessionFile } from '../fixtures/chat'
 
@@ -19,8 +25,7 @@ test.describe('Chat sessions picker', () => {
   })
 
   test('lists chat and terminal sessions; picking the terminal one hands it over with its history', async ({
-    chat,
-    electronApp
+    chat
   }) => {
     const t = await chat.openTask({
       title: 'Sessions picker',
@@ -34,23 +39,11 @@ test.describe('Chat sessions picker', () => {
     // An older terminal conversation of the same task: its ledger row, its two
     // prompts, and the CLI's session file in the task's repo.
     const olderAt = Date.now() - 60 * 60 * 1000
-    await electronApp.evaluate(
-      async ({}, r) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        await db.run(
-          `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
-           VALUES (?, 'claude-code', ?, ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`,
-          [`seed-${r.conv}`, r.cwd, r.taskId, r.conv, r.at, r.at]
-        )
-        await db.run(
-          `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
-          [r.conv, r.at]
-        )
-      },
-      { taskId: t.taskId, conv: TERMINAL_CONV, cwd: t.cwd, at: olderAt }
-    )
+    await seedLedgerSession(t.page, t.taskId, {
+      mode: 'claude-code',
+      conversationId: TERMINAL_CONV,
+      createdAt: olderAt
+    })
     await t.page.evaluate(
       (input) => window.getTrpcVanillaClient().chat.testSeedPrompts.mutate(input),
       {
@@ -107,21 +100,7 @@ test.describe('Chat sessions picker', () => {
 
     // A hand-off in the ledger, and the conversation goes on.
     await expect
-      .poll(async () =>
-        electronApp.evaluate(async ({}, taskId) => {
-          const db = (globalThis as Record<string, unknown>).__db as {
-            get: (
-              sql: string,
-              params?: unknown[]
-            ) => Promise<{ origin: string; conv: string } | undefined>
-          }
-          return db.get(
-            `SELECT origin, conversation_id AS conv FROM task_conversations
-              WHERE task_id = ? AND mode = 'claude-chat' ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-            [taskId]
-          )
-        }, t.taskId)
-      )
+      .poll(() => lastLedgerConversation(t.page, t.taskId, 'claude-chat'))
       .toEqual({ origin: 'handoff', conv: TERMINAL_CONV })
     await t.send('next')
     await expect(t.panel.getByText('echo: next')).toBeVisible()
@@ -139,8 +118,7 @@ test.describe('Chat sessions picker', () => {
   })
 
   test('the terminal lists chat sessions too; picking one hands it into the terminal', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     const s = seed(mainWindow)
     const project = await s.createProject({
@@ -158,25 +136,12 @@ test.describe('Chat sessions picker', () => {
       { conv: 'TP-CHAT', mode: 'claude-chat', text: 'asked in chat', at: 1000 },
       { conv: 'TP-TUI', mode: 'claude-code', text: 'asked in terminal', at: 2000 }
     ]
-    await electronApp.evaluate(
-      async ({}, r) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const row of r.rows) {
-          await db.run(
-            `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
-             VALUES (?, ?, '/p', ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`,
-            [`tp-${row.conv}`, row.mode, r.taskId, row.conv, row.at, row.at]
-          )
-          await db.run(
-            `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
-            [row.conv, row.at]
-          )
-        }
-      },
-      { taskId: task.id, rows }
-    )
+    for (const row of rows)
+      await seedLedgerSession(mainWindow, task.id, {
+        mode: row.mode,
+        conversationId: row.conv,
+        createdAt: row.at
+      })
     await mainWindow.evaluate(
       (input) => window.getTrpcVanillaClient().chat.testSeedPrompts.mutate(input),
       {
@@ -196,12 +161,12 @@ test.describe('Chat sessions picker', () => {
     await mainWindow.evaluate(() =>
       window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: true })
     )
-    const lastOpts = (): Promise<{ existingConversationId?: string | null } | null> =>
+    const lastOpts = (): Promise<{ resumeConversationId?: string | null } | null> =>
       mainWindow.evaluate(async () => {
         const all = (await window
           .getTrpcVanillaClient()
           .pty.testTakePtyCreateOpts.query()) as unknown[]
-        return (all[all.length - 1] ?? null) as { existingConversationId?: string | null } | null
+        return (all[all.length - 1] ?? null) as { resumeConversationId?: string | null } | null
       })
 
     await openTaskTerminal(mainWindow, {
@@ -220,24 +185,13 @@ test.describe('Chat sessions picker', () => {
     await sidebar.locator('[aria-label="Switch to session: asked in chat"]').click()
     await mainWindow.locator('[data-testid="agent-session-confirm"]').click()
 
-    // The respawned terminal resumes the chat's conversation…
+    // The respawned terminal resumes the chat's conversation (as the computer's
+    // ledger resolves it — the renderer no longer passes a hint)…
     await expect
-      .poll(async () => (await lastOpts())?.existingConversationId, { timeout: 20_000 })
+      .poll(async () => (await lastOpts())?.resumeConversationId, { timeout: 20_000 })
       .toBe('TP-CHAT')
     // …recorded as a hand-off into the terminal.
-    const last = await electronApp.evaluate(async ({}, taskId) => {
-      const db = (globalThis as Record<string, unknown>).__db as {
-        get: (
-          sql: string,
-          params?: unknown[]
-        ) => Promise<{ origin: string; conv: string } | undefined>
-      }
-      return db.get(
-        `SELECT origin, conversation_id AS conv FROM task_conversations
-          WHERE task_id = ? AND mode = 'claude-code' ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-        [taskId]
-      )
-    }, task.id)
+    const last = await lastLedgerConversation(mainWindow, task.id, 'claude-code')
     expect(last).toEqual({ origin: 'handoff', conv: 'TP-CHAT' })
 
     await mainWindow.evaluate(() =>

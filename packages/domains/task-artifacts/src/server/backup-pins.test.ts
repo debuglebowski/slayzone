@@ -55,7 +55,7 @@ async function fixture(versions: string[]) {
     h.db.exec(`INSERT INTO content_erasure_jobs(id,scope,manifest,db_erased) VALUES('j','{}','{}',1);
       INSERT INTO content_erasure_tasks(task_id,job_id) VALUES('t','j');
       DELETE FROM artifact_versions; DELETE FROM task_artifacts; DELETE FROM tasks WHERE id='t';`)
-  return { h, protect, pins, recoveryGuards, erase }
+  return { h, root, protect, pins, recoveryGuards, erase }
 }
 
 test('a backup taken before an erasure is re-pinned after a hub restart', async () => {
@@ -86,4 +86,23 @@ test('a failed re-pin keeps the backup’s previous pins', async () => {
   expect(f.pins(), 'never a retained backup with zero pins').toEqual([hash('A'), hash('B')].sort())
   // Inspection failed, so the guard keeps deferring GC (existing behavior).
   expect(f.recoveryGuards()).toHaveLength(1)
+})
+
+test('an unreadable backup is quarantined: the other backups are pinned and blob cleanup is unblocked', async () => {
+  const f = await fixture(['A'])
+  const { writeFileSync } = await import('node:fs')
+  const { listQuarantine } = await import('@slayzone/platform/quarantine')
+  // A damaged snapshot sorted BEFORE the good one.
+  writeFileSync(join(f.root, 'backups', 'a-broken.sqlite'), 'this is not a database')
+  const errors: unknown[] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => void errors.push(args)
+  try {
+    await f.protect().prepare()
+  } finally {
+    console.error = original
+  }
+  expect(f.pins()).toEqual([hash('A')])
+  expect(f.recoveryGuards(), 'GC no longer blocked').toEqual([])
+  expect(listQuarantine(f.root)).toMatchObject([{ pass: 'hub-backup' }])
 })

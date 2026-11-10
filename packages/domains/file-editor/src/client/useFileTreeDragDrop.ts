@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { DirEntry } from '../shared'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 interface UseFileTreeDragDropArgs {
   projectPath: string
@@ -23,7 +23,7 @@ export function useFileTreeDragDrop({
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   // mutateAsync is identity-stable across renders (the mutation object is not).
   const { mutateAsync: renamePath } = useMutation(trpc.fileEditor.rename.mutationOptions())
   // --- Drag and drop state ---
@@ -126,7 +126,7 @@ export function useFileTreeDragDrop({
 
       try {
         await renamePath({
-          ...target,
+          ...requireScope(scope),
           rootPath: projectPath,
           oldPath: srcPath,
           newPath
@@ -160,7 +160,7 @@ export function useFileTreeDragDrop({
         console.error('Move failed:', err)
       }
     },
-    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders, renamePath, target]
+    [projectPath, loadDir, isValidDropTarget, onFileRenamed, setExpandedFolders, renamePath, scope]
   )
 
   return {

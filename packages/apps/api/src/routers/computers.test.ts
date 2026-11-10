@@ -24,7 +24,7 @@ import {
   resolveTaskComputerId
 } from '@slayzone/computers/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import type { TaskSessionStore } from '@slayzone/terminal/runtime'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 
 const h = await createTestHarness()
@@ -275,7 +275,7 @@ test('pty and chat resolve a task to the SAME computer at every precedence step'
 
   const both = async (taskId: string): Promise<[string | null, string | null]> => [
     await resolveTaskComputerId(h.slayDb, taskId),
-    await createDbChatDataOps(h.slayDb, taskSessionStore).resolveComputerId(taskId)
+    await createDbChatDataOps(h.slayDb, {} as TaskSessionStore).resolveComputerId(taskId)
   ]
 
   // The task's own pin wins over the project default.

@@ -48,8 +48,8 @@ export function fakeHub(opts: {
         ? {
             id: opts.taskId,
             project_id: 'p1',
-            worktree_path: null,
-            base_dir: null,
+            has_worktree: false,
+            has_base_dir: false,
             repo_name: null
           }
         : opts.task,

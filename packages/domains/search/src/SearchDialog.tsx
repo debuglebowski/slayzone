@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { skipToken, useQuery } from '@tanstack/react-query'
 import {
   Command,
   CommandInput,
@@ -100,11 +100,9 @@ function SearchPalette({
   // acts on it yet.
   const { data: filesData } = useQuery({
     // Listed on the machine that holds the project's folder, not the caller's default.
-    ...trpc.fileEditor.listAllFiles.queryOptions({
-      rootPath: fileContext?.projectPath ?? '',
-      ...fileContext?.target
-    }),
-    enabled: fileContext != null,
+    ...trpc.fileEditor.listAllFiles.queryOptions(
+      fileContext ? { rootPath: fileContext.projectPath, ...fileContext.target } : skipToken
+    ),
     staleTime: Infinity,
     gcTime: Infinity
   })

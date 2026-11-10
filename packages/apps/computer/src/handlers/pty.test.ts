@@ -50,7 +50,12 @@ describe('remote session ownership', () => {
         if (paused) throw new Error('Task paused')
       }
     })
-    await pty.handlers['pty.warmSpawn']({ warmId: 'warm', command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId: 'warm',
+      command: 'cat',
+      cwd: process.cwd()
+    })
     expect(() =>
       pty.handlers['pty.warmAdopt']({ warmId: 'warm', sessionId: 'opaque', taskId: 'task' })
     ).toThrow('Task paused')
@@ -161,7 +166,12 @@ describe('remote session ownership', () => {
     const pty = createPtyHandlers(ctx, undefined, {
       spawnPty: (() => child.proc) as typeof nodePty.spawn
     })
-    await pty.handlers['pty.warmSpawn']({ warmId: 'warm-one', command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId: 'warm-one',
+      command: 'cat',
+      cwd: process.cwd()
+    })
     let acknowledged = false
     const killed = Promise.resolve(pty.handlers['pty.warmKill']({ warmId: 'warm-one' })).then(
       () => {
@@ -183,6 +193,7 @@ describe('remote session ownership', () => {
     })
     try {
       await pty.handlers['pty.warmSpawn']({
+        projectId: 'p1',
         warmId: 'warm-upgrade',
         command: 'cat',
         cwd: process.cwd()
@@ -396,6 +407,7 @@ describe('createPtyHandlers', () => {
     const pty = createPtyHandlers(ctx)
 
     const warm = (await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
       warmId: 'warm-1',
       command: 'cat',
       cwd: process.cwd()
@@ -470,6 +482,7 @@ describe('createPtyHandlers', () => {
     await waitFor(() => dataParams(notifies).some((f) => f.data.includes('COMPUTER_SHELL_OK')))
 
     const warm = (await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
       warmId: 'warm-kill',
       command: '/usr/sbin/nologin',
       computerShell: true,
@@ -498,6 +511,7 @@ describe('createPtyHandlers', () => {
     const pty = createPtyHandlers(ctx)
 
     await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
       warmId: 'warm-dies',
       command: 'sh',
       args: ['-c', 'exit 0'],
@@ -522,6 +536,7 @@ describe('createPtyHandlers', () => {
     const pty = createPtyHandlers(ctx)
 
     await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
       warmId: 'warm-orphan',
       command: 'cat',
       cwd: process.cwd()
@@ -1644,6 +1659,7 @@ describe('agent-start admission', () => {
     void pty.handlers['pty.spawn'](holder('agent', 0.3))
     const warm = settled(
       pty.handlers['pty.warmSpawn']({
+        projectId: 'p1',
         warmId: 'warm-1',
         command: 'cat',
         cwd
@@ -1671,6 +1687,7 @@ describe('agent-start admission', () => {
     const pty = createPtyHandlers(ctx, undefined, { admission })
     const spec = (warmId: string) => ({
       warmId,
+      projectId: 'p1',
       command: 'sh',
       args: ['-c', 'printf prompt; exec cat'],
       cwd
@@ -1688,6 +1705,7 @@ describe('agent-start admission', () => {
     void pty.handlers['pty.spawn'](holder('agent', 0.2))
     const warm = settled(
       pty.handlers['pty.warmSpawn']({
+        projectId: 'p1',
         warmId: 'warm-x',
         command: 'cat',
         cwd
@@ -1757,6 +1775,7 @@ describe('a spawn node-pty cannot start', () => {
     })
     await expect(
       pty.handlers['pty.warmSpawn']({
+        projectId: 'p1',
         warmId: 'w-refused',
         command: 'cat',
         cwd: process.cwd()

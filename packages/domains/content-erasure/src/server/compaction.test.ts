@@ -324,3 +324,27 @@ test('periodic retries back off exponentially for a job that keeps failing; a ma
     await retries.close()
   }
 })
+
+test('a computer that already deleted the task at a newer revision confirms it (hub restored from a backup)', async () => {
+  const { h, root } = await fixture()
+  computer(h, 'c1', ['task-alice'])
+  const options = {
+    // The computer's deletion is newer than anything this hub issued.
+    cleanupComputer: async (request: { taskIds: string[] }) =>
+      request.taskIds.map((taskId) => ({
+        taskId,
+        revision: revisionOf(h, taskId) + 4,
+        erased: true as const
+      }))
+  }
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['task-alice'] }, options)
+  expect(report.computers).toEqual([expect.objectContaining({ id: 'c1', deleted: true })])
+  // The hub's deletion fence moves to the computer's revision.
+  expect(
+    h.db
+      .prepare(
+        "SELECT a.revision=l.revision AS same FROM content_erasure_computer_acks a JOIN chat_task_lifecycle l ON l.task_id=a.task_id WHERE a.task_id='task-alice'"
+      )
+      .get()
+  ).toEqual({ same: 1 })
+})

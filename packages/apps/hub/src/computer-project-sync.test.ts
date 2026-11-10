@@ -74,6 +74,8 @@ class FakeComputer {
   roots: string[]
   disk: Set<string>
   map = new Map<string, string>()
+  /** The task folders it holds (the hub keeps no task path, §9 7e). */
+  taskFolders = new Map<string, string>()
   /** Make every call fail like a dropped connection. */
   offline = false
   /** How long `listProjectPaths` takes to answer, to expose interleaving. */
@@ -122,7 +124,22 @@ const ops: ComputerFolderOps = {
     const snapshot = [...c.map].map(([projectId, path]) => ({ projectId, path }))
     if (c.reportDelayMs) await new Promise((r) => setTimeout(r, c.reportDelayMs))
     return snapshot
+  },
+  async listTaskFolders(id, taskIds) {
+    const c = computers.get(id)!
+    if (c.offline) throw new Error('computer is not connected')
+    return taskIds.flatMap((t) => (c.taskFolders.has(t) ? [c.taskFolders.get(t)!] : []))
   }
+}
+
+/** A task with a worktree the local computer holds. */
+function taskWithWorktree(id: string, path: string): void {
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, has_worktree, computer_id, worktree_computer_id) VALUES (?, 'p1', 't', 1, ?, ?)`
+    )
+    .run(id, LOCAL, LOCAL)
+  computers.get(LOCAL)!.taskFolders.set(id, path)
 }
 
 function makeSync(served: (computerId: string, projectId: string) => boolean = () => true) {
@@ -493,11 +510,7 @@ test('R3-1: changing the worktree base keeps the old base while a worktree lives
     .run('/Volumes/wt/{project-folder-name}')
   const { sync } = makeSync()
   await sync.onConnect(LOCAL)
-  raw
-    .prepare(
-      `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('t-r31', 'p1', 't', ?, ?)`
-    )
-    .run('/Volumes/wt/app/task-1', LOCAL)
+  taskWithWorktree('t-r31', '/Volumes/wt/app/task-1')
   expect(isCoveredByRoots('/Volumes/wt/app/task-1', computers.get(LOCAL)!.roots)).toBe(true)
 
   raw
@@ -527,11 +540,7 @@ test('R4-1: a soft-deleted task restored after a relaunch keeps its worktree roo
     .run('/Volumes/wt/{project-folder-name}')
   const { sync } = makeSync()
   await sync.onConnect(LOCAL)
-  raw
-    .prepare(
-      `INSERT INTO tasks (id, project_id, title, worktree_path, computer_id) VALUES ('t-r41', 'p1', 't', ?, ?)`
-    )
-    .run('/Volumes/wt/app/task-1', LOCAL)
+  taskWithWorktree('t-r41', '/Volumes/wt/app/task-1')
   raw
     .prepare(`UPDATE settings SET value = ? WHERE key = 'worktree_base_path'`)
     .run('/Volumes/wt2/{project-folder-name}')
@@ -611,4 +620,32 @@ test('a background process folder becomes a local root, and goes with the proces
   expect(isCoveredByRoots('/opt/later', roots)).toBe(false)
   expect(roots).toContain('/Users/k')
   expect(computers.get(remote)!.roots).toEqual(['/srv'])
+})
+
+test('one project whose folder cannot be recorded does not stop delivery to the others', async () => {
+  const local = new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/a', '/Users/k/b'] })
+  computers.set(LOCAL, local)
+  project('p-bad', null)
+  project('p-good', null)
+  for (const [projectId, path] of [
+    ['p-bad', '/Users/k/a'],
+    ['p-good', '/Users/k/b']
+  ])
+    await setPlacement(db, { computerId: LOCAL, projectId, path, status: 'pending' })
+  // A damaged row: recording its delivery fails.
+  raw.exec(`CREATE TRIGGER broken BEFORE UPDATE ON project_placements
+    WHEN NEW.project_id = 'p-bad' AND NEW.status = 'ready'
+    BEGIN SELECT RAISE(ABORT, 'disk image row damaged'); END`)
+  const errors = console.error
+  console.error = () => undefined
+  try {
+    await makeSync().sync.onConnect(LOCAL)
+  } finally {
+    console.error = errors
+  }
+  expect((await row('p-good', LOCAL))!.status).toBe('ready')
+  expect((await row('p-bad', LOCAL))!.status).toBe('pending')
+  expect(raw.prepare("SELECT pass,item_key FROM item_faults WHERE origin='hub'").all()).toEqual([
+    { pass: 'hub-project-sync', item_key: 'p-bad' }
+  ])
 })

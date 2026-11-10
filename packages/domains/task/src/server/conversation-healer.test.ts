@@ -1,32 +1,21 @@
 /**
- * The registered conversation healer, against the real transcript locator.
- *
- * Regression (2026-11-03, task 5c34ebb9): a session that used EnterWorktree keeps
- * its transcript ONLY under the worktree's project dir. The healer looked in the
- * task folder alone, read "never written", answered `fresh`, and createPty
- * started `claude --session-id <same id>` over a 10 MB live conversation. The
- * lookup must find it wherever it moved, on the disk of the computer the agent
- * runs on, and an unknown answer must never become `fresh`.
- *
- * DB ops are stubbed (the decision inputs); the locator is real (hub-local disk)
- * or the wired computer locator.
+ * The hub's conversation healer only FORWARDS (robustness plan §9, P0): the heal is
+ * decided on the agent's computer (`ledger` op `healConversation`; its decisions
+ * are tested in chat-runtime/server/conversation-heal.test.ts against real
+ * transcripts). Here: what the hub sends, what it records, and that every failure
+ * keeps the stored id — never fresh.
  */
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ConversationHealer } from '@slayzone/terminal/server'
 
 const state = vi.hoisted(() => ({
   healer: null as unknown as ConversationHealer,
-  owned: [] as string[],
-  /** Pre-ledger `provider_config.claude-code.conversationHistory`. */
-  legacyHistory: [] as string[],
-  /** Ids another task owns (`claimedByOtherTasks`). */
-  foreign: new Set<string>(),
-  firstSeenAtMs: null as number | null,
-  recorded: [] as Array<{ conversationId: string }>
+  calls: [] as Array<{ computerId: string; op: string; args: unknown }>,
+  answer: null as unknown,
+  fail: false,
+  diagnostics: [] as Array<{ event: string; message: string }>,
+  notified: [] as unknown[]
 }))
 
 vi.mock('@slayzone/terminal/hub', async (importOriginal) => {
@@ -38,155 +27,90 @@ vi.mock('@slayzone/terminal/hub', async (importOriginal) => {
     }
   }
 })
-vi.mock('@slayzone/diagnostics/server', () => ({ recordDiagnosticEvent: () => undefined }))
+vi.mock('@slayzone/diagnostics/server', () => ({
+  recordDiagnosticEvent: (e: { event: string; message: string }) => state.diagnostics.push(e)
+}))
 vi.mock('./ops/index.js', () => ({
-  // Created after the legacy cutoff → history-only path (no orphan disk scan).
-  getTaskOp: async () => ({
-    id: 't1',
-    created_at: '2026-10-01 00:00:00',
-    provider_config: { 'claude-code': { conversationHistory: state.legacyHistory } }
-  }),
-  collectReferencedConversationIds: async () => new Set<string>(),
-  recordConversation: async (_db: unknown, row: { conversationId: string }) => {
-    state.recorded.push(row)
-  },
-  getCurrentConversationId: async () => null,
-  getConversationFirstSeenAt: async () => state.firstSeenAtMs,
-  listResumeCandidates: async () => state.owned,
-  claimedByOtherTasks: async (_db: unknown, _taskId: string, ids: string[]) =>
-    new Set(ids.filter((id) => state.foreign.has(id)))
+  getTaskOp: async (_db: unknown, id: string) =>
+    id === 'gone' ? null : { id, created_at: '2026-10-01 00:00:00' },
+  taskSessionLedger: () => ({
+    call: async (computerId: string, op: string, args: unknown) => {
+      state.calls.push({ computerId, op, args })
+      if (state.fail) throw new Error('Computer is offline')
+      return state.answer
+    }
+  })
 }))
 
 const { registerConversationHealer } = await import('./conversation-healer')
-const { encodeClaudeProjectDir, setClaudeTranscriptLocator } = await import(
-  '@slayzone/terminal/server'
-)
+registerConversationHealer({} as SlayzoneDb, (change) => state.notified.push(change))
 
-const configDir = mkdtempSync(join(tmpdir(), 'healer-config-'))
-const work = realpathSync(mkdtempSync(join(tmpdir(), 'healer-work-')))
-const repo = join(work, 'repo')
-const worktree = join(repo, '.claude', 'worktrees', 'move-to-computer')
-const prevConfig = process.env.CLAUDE_CONFIG_DIR
-const MOVED = 'f8326ae8-3b82-4e5a-b7b8-ecd17ec26c19'
-const MISSING = '0b5e0d9a-0000-4000-8000-000000000001'
-const SIBLING = '0b5e0d9a-0000-4000-8000-000000000002'
-
-function writeTranscript(cwd: string, id: string, records: object[], name = `${id}.jsonl`): void {
-  const dir = join(configDir, 'projects', encodeClaudeProjectDir(cwd))
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, name), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`)
-}
-
-beforeAll(() => {
-  process.env.CLAUDE_CONFIG_DIR = configDir
-  // A 90-day retention, like the user's settings.json at the time.
-  writeFileSync(join(configDir, 'settings.json'), '{"cleanupPeriodDays": 90}')
-  mkdirSync(worktree, { recursive: true })
-  writeTranscript(worktree, MOVED, [
-    { type: 'user', cwd: repo, message: { content: 'enter a worktree' } },
-    { type: 'relocated', relocatedCwd: worktree },
-    { type: 'assistant', cwd: worktree, message: { content: [] } }
-  ])
-  // What the CLI left behind after the clobber: only a superseded copy counts as gone.
-  writeTranscript(
-    worktree,
-    MISSING,
-    [{ type: 'user', cwd: worktree }],
-    `${MISSING}.jsonl.superseded-1`
-  )
-  writeTranscript(repo, SIBLING, [{ type: 'user', cwd: repo, message: { content: 'hi' } }])
-  registerConversationHealer({} as SlayzoneDb, () => undefined, {
-    getCurrentBranch: async () => 'main'
-  })
-})
-afterAll(() => {
-  if (prevConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR
-  else process.env.CLAUDE_CONFIG_DIR = prevConfig
-})
 beforeEach(() => {
-  state.owned = []
-  state.legacyHistory = []
-  state.foreign = new Set()
-  state.recorded = []
-  // First seen 2.6h ago: inside one retention period, so a truly missing
-  // transcript reads as "never written" (→ fresh).
-  state.firstSeenAtMs = Date.now() - 9_258_849
-})
-afterEach(() => setClaudeTranscriptLocator(null))
-
-const heal = (storedId: string, over: Record<string, unknown> = {}) =>
-  state.healer({ taskId: 't1', mode: 'claude-code', cwd: repo, storedId, ...over })
-
-describe('conversation healer: transcript that moved folders', () => {
-  test('moved into a worktree (hub-local disk): keep and resume, never fresh', async () => {
-    const res = await heal(MOVED)
-    expect(res).toEqual({ id: MOVED, healed: false })
-  })
-
-  test('on a computer: asks the computer, which finds it → keep', async () => {
-    setClaudeTranscriptLocator(async (req) =>
-      req.sessionIds.map((sessionId) => ({
-        sessionId,
-        found: sessionId === 'remote-only',
-        resumeCwd: null
-      }))
-    )
-    const res = await heal('remote-only', { computerId: 'pc', projectId: 'p1' })
-    expect(res).toEqual({ id: 'remote-only', healed: false })
-  })
-
-  test('on a computer that cannot answer (old computer, dropped socket): keep, never fresh', async () => {
-    setClaudeTranscriptLocator(async () => {
-      throw new Error('method not found')
-    })
-    const res = await heal(MISSING, { computerId: 'pc', projectId: 'p1' })
-    expect(res).toEqual({ id: MISSING, healed: false })
-  })
-
-  test('on a computer, the hub disk is never consulted', async () => {
-    // MOVED exists on THIS disk, but the computer says it has no such file.
-    setClaudeTranscriptLocator(async (req) =>
-      req.sessionIds.map((sessionId) => ({ sessionId, found: false, resumeCwd: null }))
-    )
-    const res = await heal(MOVED, { computerId: 'pc', projectId: 'p1' })
-    expect(res).toEqual({ id: MOVED, healed: false, fresh: true })
-  })
+  state.calls = []
+  state.answer = { id: 'S', healed: false }
+  state.fail = false
+  state.diagnostics = []
+  state.notified = []
 })
 
-describe('conversation healer: behaviour kept', () => {
-  test('truly missing (only a superseded copy), first seen recently: fresh', async () => {
-    expect(await heal(MISSING)).toEqual({ id: MISSING, healed: false, fresh: true })
+const heal = (over: Record<string, unknown> = {}) =>
+  state.healer({
+    taskId: 't1',
+    mode: 'claude-code',
+    tabId: 'deploy',
+    cwd: '/repo',
+    storedId: 'S',
+    computerId: 'pc',
+    projectId: 'p1',
+    ...over
   })
 
-  test('truly missing, first seen beyond retention: overlay (unchanged id, not fresh)', async () => {
-    state.firstSeenAtMs = Date.now() - 200 * 24 * 60 * 60 * 1000
-    expect(await heal(MISSING)).toEqual({ id: MISSING, healed: false })
+describe('hub conversation healer: a forwarder', () => {
+  test('asks the computer, with the tab, folder, project and task creation time', async () => {
+    expect(await heal()).toEqual({ id: 'S', healed: false })
+    expect(state.calls).toEqual([
+      {
+        computerId: 'pc',
+        op: 'healConversation',
+        args: {
+          taskId: 't1',
+          mode: 'claude-code',
+          tabId: 'deploy',
+          cwd: '/repo',
+          projectId: 'p1',
+          storedId: 'S',
+          taskCreatedAtMs: Date.parse('2026-10-01T00:00:00Z')
+        }
+      }
+    ])
   })
 
-  test('missing, but a recorded sibling survives: repoint to it', async () => {
-    state.owned = [SIBLING, MISSING]
-    expect(await heal(MISSING)).toEqual({ id: SIBLING, healed: true })
-    expect(state.recorded.map((r) => r.conversationId)).toEqual([SIBLING])
-  })
-})
-
-describe('conversation healer: one task per provider session (#172 follow-up #4)', () => {
-  // Pre-ledger SessionStart hooks appended whatever `/resume` picked in a shared cwd
-  // to conversationHistory — a parent's or sibling's session (task 735ba25d holds
-  // three). A `history` repoint to one would make two tasks drive one transcript.
-  test('a pre-ledger history id that another task owns is never a repoint target', async () => {
-    state.owned = [MISSING]
-    state.legacyHistory = [SIBLING]
-    state.foreign = new Set([SIBLING])
-    const res = await heal(MISSING)
-    expect(res.id).toBe(MISSING)
-    expect(res.healed).toBe(false)
-    expect(state.recorded).toEqual([])
+  test('a repoint: returned, its diagnostic recorded, the task row refreshed', async () => {
+    state.answer = {
+      id: 'SIB',
+      healed: true,
+      diagnostic: { event: 'conv_id.heal', message: 'S -> SIB', payload: { via: 'history' } }
+    }
+    expect(await heal()).toEqual({ id: 'SIB', healed: true })
+    expect(state.diagnostics).toEqual([expect.objectContaining({ event: 'conv_id.heal' })])
+    expect(state.notified).toEqual([{ taskIds: ['t1'] }])
   })
 
-  test('a pre-ledger history id nobody else owns still repoints', async () => {
-    state.owned = [MISSING]
-    state.legacyHistory = [SIBLING]
-    expect(await heal(MISSING)).toEqual({ id: SIBLING, healed: true })
+  test('fresh is passed through', async () => {
+    state.answer = { id: 'S', healed: false, fresh: true }
+    expect(await heal()).toEqual({ id: 'S', healed: false, fresh: true })
+    expect(state.notified).toEqual([])
+  })
+
+  test('the computer cannot answer: keep the stored id, never fresh', async () => {
+    state.fail = true
+    expect(await heal()).toEqual({ id: 'S', healed: false })
+  })
+
+  test('nothing to ask: no computer, another mode, a task that is gone', async () => {
+    expect(await heal({ computerId: null })).toEqual({ id: 'S', healed: false })
+    expect(await heal({ mode: 'codex' })).toEqual({ id: 'S', healed: false })
+    expect(await heal({ taskId: 'gone' })).toEqual({ id: 'S', healed: false })
+    expect(state.calls).toEqual([])
   })
 })

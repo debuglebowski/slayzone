@@ -47,7 +47,8 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const removeWorktreeMutation = useMutation(trpc.worktrees.removeWorktree.mutationOptions())
-  const { projectPath, tasks, activeTask, onUpdateTask } = useGitPanelContext()
+  const { projectPath, tasks, activeTask, onUpdateTask, worktreeOf } = useGitPanelContext()
+  const activeWorktreePath = activeTask ? worktreeOf(activeTask) : undefined
 
   const [worktrees, setWorktrees] = useState<DetectedWorktree[]>([])
   const [dirtyStatuses, setDirtyStatuses] = useState<Record<string, boolean>>({})
@@ -103,7 +104,8 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   // hash so the hook can detect identical results across ticks.
   const pollDirty = useCallback(async () => {
     if (worktrees.length === 0) return null
-    const activePath = activeTask?.worktree_path || worktrees.find((wt) => wt.isMain)?.path
+    // A worktree not read from its computer yet: poll the main checkout meanwhile.
+    const activePath = activeWorktreePath || worktrees.find((wt) => wt.isMain)?.path
     let activeDirty: boolean | null = null
     if (activePath) {
       activeDirty = await queryClient.fetchQuery(
@@ -129,18 +131,21 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
       })
     }
     return JSON.stringify({ activePath, activeDirty, bgKey, bgDirty })
-  }, [worktrees, activeTask?.worktree_path, queryClient, trpc])
+  }, [worktrees, activeWorktreePath, queryClient, trpc])
 
   useStablePoll(pollDirty, { enabled: visible && worktrees.length > 0, baseDelayMs: 10_000 })
 
   // Build hierarchical tree structure
-  const tree = useMemo(() => buildWorktreeTree(worktrees, tasks), [worktrees, tasks])
+  const tree = useMemo(
+    () => buildWorktreeTree(worktrees, tasks, worktreeOf),
+    [worktrees, tasks, worktreeOf]
+  )
 
   const handleRemoveWorktree = async (path: string) => {
     if (!projectPath) return
     try {
       await removeWorktreeMutation.mutateAsync({ repoPath: projectPath, worktreePath: path })
-      const task = tasks.find((t) => t.worktree_path === path)
+      const task = tasks.find((t) => worktreeOf(t) === path)
       if (task && onUpdateTask) {
         await onUpdateTask({ id: task.id, worktreePath: null })
       }
@@ -264,23 +269,23 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
           <div className="flex-1 overflow-y-auto py-2 space-y-2 pr-1 min-h-0">
             <GroupedTaskList
               tasks={tasks
-                .filter((t) => !t.archived_at && !t.worktree_path)
+                .filter((t) => !t.archived_at && !t.has_worktree)
                 .filter((t) => t.title.toLowerCase().includes(assignSearch.toLowerCase()))}
               onTaskClick={(task) => {
                 void handleAssignToTask(task.id)
               }}
               tooltip="Assign to this task"
             />
-            {tasks.filter((t) => !t.archived_at && !t.worktree_path).length > 0 &&
+            {tasks.filter((t) => !t.archived_at && !t.has_worktree).length > 0 &&
               tasks
-                .filter((t) => !t.archived_at && !t.worktree_path)
+                .filter((t) => !t.archived_at && !t.has_worktree)
                 .filter((t) => t.title.toLowerCase().includes(assignSearch.toLowerCase()))
                 .length === 0 && (
                 <p className="text-sm text-muted-foreground italic text-center py-8">
                   No matching tasks found.
                 </p>
               )}
-            {tasks.filter((t) => !t.archived_at && !t.worktree_path).length === 0 && (
+            {tasks.filter((t) => !t.archived_at && !t.has_worktree).length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 text-center space-y-2">
                 <p className="text-sm text-muted-foreground italic">No available tasks to link.</p>
                 <p className="text-xs text-muted-foreground/60">

@@ -23,11 +23,13 @@
     "@slayzone/projects-contracts": "workspace:*",
     "@slayzone/tabs-state": "workspace:*",
     "@slayzone/tags": "workspace:*",
+    "@slayzone/task": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/tasks": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/transport": "workspace:*",
     "@slayzone/ui": "workspace:*",
+    "@slayzone/worktrees": "workspace:*",
     "lucide-react": "^1.61.0"
   },
   "peerDependencies": {

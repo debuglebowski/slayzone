@@ -19,6 +19,12 @@ import type {
 } from '@slayzone/ai-config/shared'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import { aiConfigOpsForComputer, aiConfigOpsForProject } from './ai-config-fs-routing'
+import {
+  inPathScopeOf,
+  PathScopeRequiredError,
+  pathScopeFor,
+  runInPathScope
+} from '@slayzone/platform/path-scope'
 
 // Mirrors the 54 `ai-config:*` + 12 `ai-config:marketplace:*` IPC handlers
 // (ai-config/src/main/handlers.ts + handlers-marketplace.ts). Both call the same
@@ -30,23 +36,35 @@ import { aiConfigOpsForComputer, aiConfigOpsForProject } from './ai-config-fs-ro
 // (the still-live IPC path is validated by TypeScript only). superjson handles
 // serialization end-to-end.
 const anyInput = z.unknown()
+/** Passed through unchecked like `anyInput`, but TYPED for callers (its scope required). */
+const typed = <T>() => anyInput as unknown as z.ZodType<T, T>
 
-// Instruction files, skills and MCP config live on a computer: a project's on the
-// project's computer (by the checkout path the client names), the computer-level ones
-// (`~/.claude`, …) on an explicit `computerId`, else the caller's own. Each procedure
-// gets ops over THAT computer's fs (./ai-config-fs-routing.ts); with no computer they
-// run on the hub's own disk, refused on a hub with processes off (T-06). DB-only
-// procedures (library, selections, providers, marketplace) stay `publicProcedure`.
+// Instruction files, skills and MCP config live on a computer. A project's are reached
+// under its PATH SCOPE (§9 Phase 7c): the call names its project (or task); the hub
+// authorizes that, routes to its computer, and the computer confines every path the
+// ops touch to the scope's folders (its provider dirs under home — `~/.claude`, … —
+// stay reachable: computer-level files every project op may also read). A call that
+// names a project folder but no scope is refused: the hub no longer knows whose a
+// path is. One naming neither (`projectPath: ''`) is about the computer-level files:
+// the caller's own computer, unscoped. DB-only procedures stay `publicProcedure`.
+const COMPUTER_LEVEL_FILE_OPS = new Set(['readContextFile', 'writeContextFile'])
+/** The scope fields a disk procedure's input may carry (one of them required). */
+const scopeFields = { projectId: z.string().optional(), taskId: z.string().optional() }
 const projectDiskProcedure = publicProcedure.use(async ({ ctx, path, getRawInput, next }) => {
   const raw = await getRawInput()
   const first = (Array.isArray(raw) ? raw[0] : raw) as Record<string, unknown> | undefined
   const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined)
-  const aiConfig = await aiConfigOpsForProject(
-    ctx.db,
-    { projectPath: str(first?.projectPath), projectId: str(first?.projectId) },
-    path
-  )
-  return next({ ctx: { aiConfig } })
+  const target = { taskId: str(first?.taskId), projectId: str(first?.projectId) }
+  const scope = await pathScopeFor(ctx.db, target)
+  if (!scope) {
+    // Only the context-file read / write also serve the computer-level files.
+    if (str(first?.projectPath) || !COMPUTER_LEVEL_FILE_OPS.has(path.split('.').at(-1) ?? ''))
+      throw new PathScopeRequiredError(path)
+    const aiConfig = await aiConfigOpsForComputer(ctx.db, null, path)
+    return next({ ctx: { aiConfig } })
+  }
+  const aiConfig = await aiConfigOpsForProject(ctx.db, target, path)
+  return runInPathScope(scope, () => next({ ctx: { aiConfig } }))
 })
 const computerDiskProcedure = publicProcedure.use(async ({ ctx, path, getRawInput, next }) => {
   const raw = (await getRawInput()) as Record<string, unknown> | undefined
@@ -92,16 +110,23 @@ export const aiConfigRouter = router({
 
   // Context files
   discoverContextFiles: projectDiskProcedure
-    .input(z.object({ projectPath: z.string() }))
+    .input(z.object({ projectPath: z.string(), ...scopeFields }))
     .query(({ ctx, input }) => ctx.aiConfig.discoverContextFiles(input.projectPath)),
   getComputerFiles: computerDiskProcedure
     .input(computerInput)
     .query(({ ctx }) => ctx.aiConfig.getComputerFiles()),
   readContextFile: projectDiskProcedure
-    .input(z.object({ filePath: z.string(), projectPath: z.string() }))
+    .input(z.object({ filePath: z.string(), projectPath: z.string(), ...scopeFields }))
     .query(({ ctx, input }) => ctx.aiConfig.readContextFile(input.filePath, input.projectPath)),
   writeContextFile: projectDiskProcedure
-    .input(z.object({ filePath: z.string(), content: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({
+        filePath: z.string(),
+        content: z.string(),
+        projectPath: z.string(),
+        ...scopeFields
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.writeContextFile(input.filePath, input.content, input.projectPath)
     ),
@@ -117,12 +142,14 @@ export const aiConfigRouter = router({
     return ctx.aiConfig.writeComputerSkill(i.provider, i.slug, i.content)
   }),
   getContextTree: projectDiskProcedure
-    .input(z.object({ projectPath: z.string(), projectId: z.string() }))
+    .input(
+      z.object({ projectPath: z.string(), projectId: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) => ctx.aiConfig.getContextTree(input.projectPath, input.projectId)),
 
   // Library
   loadLibraryItem: projectDiskProcedure
-    .input(anyInput)
+    .input(typed<LoadLibraryItemInput>())
     .mutation(({ ctx, input }) => ctx.aiConfig.loadLibraryItem(input as LoadLibraryItemInput)),
 
   // Sync
@@ -130,6 +157,7 @@ export const aiConfigRouter = router({
     .input(
       z.object({
         projectId: z.string(),
+        taskId: z.string().optional(),
         projectPath: z.string(),
         itemId: z.string(),
         provider: z.string().optional()
@@ -147,19 +175,35 @@ export const aiConfigRouter = router({
     .input(z.object({ projectId: z.string(), itemId: z.string() }))
     .mutation(({ input }) => getAiConfigOps().unlinkFile(input.projectId, input.itemId)),
   renameContextFile: projectDiskProcedure
-    .input(z.object({ oldPath: z.string(), newPath: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({
+        oldPath: z.string(),
+        newPath: z.string(),
+        projectPath: z.string(),
+        ...scopeFields
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.renameContextFile(input.oldPath, input.newPath, input.projectPath)
     ),
   deleteContextFile: projectDiskProcedure
-    .input(z.object({ filePath: z.string(), projectPath: z.string(), projectId: z.string() }))
+    .input(
+      z.object({
+        filePath: z.string(),
+        projectPath: z.string(),
+        projectId: z.string(),
+        taskId: z.string().optional()
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.deleteContextFile(input.filePath, input.projectPath, input.projectId)
     ),
 
   // Root instructions
   getRootInstructions: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) =>
       ctx.aiConfig.getRootInstructions(input.projectId, input.projectPath)
     ),
@@ -179,37 +223,56 @@ export const aiConfigRouter = router({
     .input(
       z.object({
         projectId: z.string(),
+        taskId: z.string().optional(),
         variantItemId: z.string().nullable(),
         projectPath: z.string().optional()
       })
     )
     .mutation(async ({ ctx, input, path }) => {
       // Setting a variant WITH a project path also writes it to the provider files —
-      // on the project's computer.
-      const ops =
-        input.projectPath && input.variantItemId !== null
-          ? await aiConfigOpsForProject(ctx.db, input, path)
-          : getAiConfigOps()
-      return ops.setProjectInstructionVariant(
+      // on the project's computer, inside that project's (or task's) own folders.
+      if (input.projectPath && input.variantItemId !== null)
+        return inPathScopeOf(ctx.db, input, path, async () =>
+          (await aiConfigOpsForProject(ctx.db, input, path)).setProjectInstructionVariant(
+            input.projectId,
+            input.variantItemId,
+            input.projectPath
+          )
+        )
+      return getAiConfigOps().setProjectInstructionVariant(
         input.projectId,
         input.variantItemId,
         input.projectPath
       )
     }),
   saveInstructionsContent: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string(), content: z.string() }))
+    .input(
+      z.object({
+        projectId: z.string(),
+        projectPath: z.string(),
+        content: z.string(),
+        taskId: z.string().optional()
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.saveInstructionsContent(input.projectId, input.projectPath, input.content)
     ),
   saveRootInstructions: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string(), content: z.string() }))
+    .input(
+      z.object({
+        projectId: z.string(),
+        projectPath: z.string(),
+        content: z.string(),
+        taskId: z.string().optional()
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.saveRootInstructions(input.projectId, input.projectPath, input.content)
     ),
 
   // Provider instructions/skills
   readProviderInstructions: projectDiskProcedure
-    .input(z.object({ projectPath: z.string(), provider: z.string() }))
+    .input(z.object({ projectPath: z.string(), provider: z.string(), ...scopeFields }))
     .query(({ ctx, input }) =>
       ctx.aiConfig.readProviderInstructions(input.projectPath, input.provider as CliProvider)
     ),
@@ -217,6 +280,7 @@ export const aiConfigRouter = router({
     .input(
       z.object({
         projectId: z.string(),
+        taskId: z.string().optional(),
         projectPath: z.string(),
         provider: z.string(),
         content: z.string()
@@ -231,7 +295,14 @@ export const aiConfigRouter = router({
       )
     ),
   pullProviderInstructions: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string(), provider: z.string() }))
+    .input(
+      z.object({
+        projectId: z.string(),
+        projectPath: z.string(),
+        provider: z.string(),
+        taskId: z.string().optional()
+      })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.pullProviderInstructions(
         input.projectId,
@@ -240,12 +311,21 @@ export const aiConfigRouter = router({
       )
     ),
   getProjectSkillsStatus: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) =>
       ctx.aiConfig.getProjectSkillsStatus(input.projectId, input.projectPath)
     ),
   readProviderSkill: projectDiskProcedure
-    .input(z.object({ projectPath: z.string(), provider: z.string(), itemId: z.string() }))
+    .input(
+      z.object({
+        projectPath: z.string(),
+        provider: z.string(),
+        itemId: z.string(),
+        ...scopeFields
+      })
+    )
     .query(({ ctx, input }) =>
       ctx.aiConfig.readProviderSkill(input.projectPath, input.provider as CliProvider, input.itemId)
     ),
@@ -262,6 +342,7 @@ export const aiConfigRouter = router({
     .input(
       z.object({
         projectId: z.string(),
+        taskId: z.string().optional(),
         projectPath: z.string(),
         provider: z.string(),
         itemId: z.string()
@@ -282,7 +363,9 @@ export const aiConfigRouter = router({
     .input(z.object({ id: z.string(), enabled: z.boolean() }))
     .mutation(({ input }) => getAiConfigOps().toggleProvider(input.id, input.enabled)),
   reconcileProjectSkills: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .mutation(({ ctx, input }) =>
       ctx.aiConfig.reconcileProjectSkills(input.projectId, input.projectPath)
     ),
@@ -297,10 +380,14 @@ export const aiConfigRouter = router({
 
   // Sync status
   needsSync: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) => ctx.aiConfig.needsSync(input.projectId, input.projectPath)),
   getProjectStaleSkillCount: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) =>
       ctx.aiConfig.getProjectStaleSkillCount(input.projectId, input.projectPath)
     ),
@@ -312,27 +399,35 @@ export const aiConfigRouter = router({
     .query(async ({ ctx, input, path }) => {
       const out: Record<string, number> = {}
       for (const project of input) {
-        const ops = await aiConfigOpsForProject(ctx.db, project, path)
-        Object.assign(out, await ops.getProjectsStaleSkillCounts([project]))
+        // Each under its own project's path scope, on its own computer.
+        const scope = await pathScopeFor(ctx.db, { projectId: project.projectId })
+        if (!scope) throw new PathScopeRequiredError(path)
+        const ops = await aiConfigOpsForProject(ctx.db, { projectId: project.projectId }, path)
+        Object.assign(
+          out,
+          await runInPathScope(scope, () => ops.getProjectsStaleSkillCounts([project]))
+        )
       }
       return out
     }),
   syncAll: projectDiskProcedure
-    .input(anyInput)
+    .input(typed<SyncAllInput>())
     .mutation(({ ctx, input }) => ctx.aiConfig.syncAll(input as SyncAllInput)),
   checkSyncStatus: projectDiskProcedure
-    .input(z.object({ projectId: z.string(), projectPath: z.string() }))
+    .input(
+      z.object({ projectId: z.string(), projectPath: z.string(), taskId: z.string().optional() })
+    )
     .query(({ ctx, input }) => ctx.aiConfig.checkSyncStatus(input.projectId, input.projectPath)),
 
   // MCP
   discoverMcpConfigs: projectDiskProcedure
-    .input(z.object({ projectPath: z.string() }))
+    .input(z.object({ projectPath: z.string(), ...scopeFields }))
     .query(({ ctx, input }) => ctx.aiConfig.discoverMcpConfigs(input.projectPath)),
   writeMcpServer: projectDiskProcedure
-    .input(anyInput)
+    .input(typed<WriteMcpServerInput>())
     .mutation(({ ctx, input }) => ctx.aiConfig.writeMcpServer(input as WriteMcpServerInput)),
   removeMcpServer: projectDiskProcedure
-    .input(anyInput)
+    .input(typed<RemoveMcpServerInput>())
     .mutation(({ ctx, input }) => ctx.aiConfig.removeMcpServer(input as RemoveMcpServerInput)),
   discoverComputerMcpConfigs: computerDiskProcedure
     .input(computerInput)
@@ -357,7 +452,11 @@ export const aiConfigRouter = router({
         taskId: z.string().optional()
       })
     )
-    .query(({ input }) => getSlayExecutor().checkConfigured(input)),
+    // On the task's / project's computer, its folder judged against that scope's own
+    // folders there (§9 Phase 7c): a call naming neither is refused.
+    .query(({ ctx, input, path }) =>
+      inPathScopeOf(ctx.db, input, path, async () => getSlayExecutor().checkConfigured(input))
+    ),
   setupSlay: publicProcedure
     .input(
       z.object({
@@ -366,7 +465,9 @@ export const aiConfigRouter = router({
         taskId: z.string().optional()
       })
     )
-    .mutation(({ input }) => getSlayExecutor().setup(input)),
+    .mutation(({ ctx, input, path }) =>
+      inPathScopeOf(ctx.db, input, path, async () => getSlayExecutor().setup(input))
+    ),
 
   // Marketplace
   marketplace: router({

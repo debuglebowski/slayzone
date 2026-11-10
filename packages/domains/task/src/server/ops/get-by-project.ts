@@ -1,6 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
-import { parseAndColorTasks, TASK_ORDER_BY } from './shared.js'
+import { parseTasks, TASK_ORDER_BY } from './shared.js'
 
 export async function getByProjectOp(db: SlayzoneDb, projectId: string): Promise<Task[]> {
   const rows = await db.all<Record<string, unknown>>(
@@ -11,7 +11,7 @@ export async function getByProjectOp(db: SlayzoneDb, projectId: string): Promise
       ${TASK_ORDER_BY}`,
     [projectId]
   )
-  return parseAndColorTasks(db, rows)
+  return parseTasks(rows)
 }
 
 /** Compatibility endpoint: permanent deletion has no recoverable Trash. */

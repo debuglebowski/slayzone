@@ -22,6 +22,9 @@ export {
   setProjectDefaultComputer,
   setComputerOwner,
   resolveTaskComputerId,
+  TASK_COMPUTER_SQL,
+  assertTaskMovable,
+  TaskFoldersElsewhereError,
   resolveTaskComputerIdOrDefault,
   type RegisterComputerInput
 } from './store'

@@ -284,11 +284,18 @@ function TaskRowView({
             Unread
           </span>
         )}
-        {ctx.treeShowWorktree && task.worktree_path && (
+        {ctx.treeShowWorktree && task.has_worktree && (
           <GitBranch
             aria-label="Worktree"
-            className={cn('size-3.5 shrink-0', !task.worktree_color && 'text-muted-foreground/60')}
-            style={task.worktree_color ? { color: task.worktree_color } : undefined}
+            className={cn(
+              'size-3.5 shrink-0',
+              !ctx.worktreeColors.get(task.id) && 'text-muted-foreground/60'
+            )}
+            style={
+              ctx.worktreeColors.get(task.id)
+                ? { color: ctx.worktreeColors.get(task.id) }
+                : undefined
+            }
           />
         )}
         {ctx.pinnedSet.has(task.id) && (

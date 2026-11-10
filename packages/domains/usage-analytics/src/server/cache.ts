@@ -1,45 +1,47 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { UsageRecord, AnalyticsSummary, DateRange } from '../shared/types'
-import { collectUsage, type ParseResult, type UsageCursors } from './collect'
+import type { ParseResult, UsageCursors } from './collect'
 
-interface ParseState {
-  file_path: string
-  last_offset: number
-  last_modified_ms: number
-}
-
-/** The hub's own disk, in `usage_parse_state.computer_id`. */
+/** Hub v209: the hub's former cursors, handed to each computer once, then dropped. */
+const HANDOFF = 'usage_cursor_handoff'
+/** The hub's own disk in the handoff (`computer_id` ''): the hub machine's computer reads it. */
 const HUB_DISK = ''
 
-/**
- * Where usage logs are parsed: on each connected computer (`usage.collect`), wired
- * by the hub's composition. Unwired: the hub parses its own disk, as before.
- */
-/** Where a paged collect continues (`usage.collect` `next`). */
+/** Where a paged collect continues, or which page an `ack` confirms. */
 export interface UsageCollectPage {
   token: string
   index: number
+}
+
+/** One request: the first (optionally seeding), a further `page`, and/or an `ack`. */
+export interface UsageCollectRequest {
+  page?: UsageCollectPage
+  ack?: UsageCollectPage
+  seed?: UsageCursors
 }
 
 /** One page of a collect: `complete: false` = more of that file follows. */
 export interface UsageCollectReply {
   results: Array<ParseResult & { complete?: boolean }>
   next?: UsageCollectPage
+  /** Send back as `ack` once this page is stored: only then do its cursors move. */
+  receipt?: UsageCollectPage
 }
 
+/**
+ * Where usage logs are parsed: on each connected computer (`usage.collect`), wired by
+ * the hub's composition. Each computer keeps its own read offsets (robustness plan
+ * §9, P0; v209); the hub stores the records and acknowledges each page. Unwired: no
+ * computer, nothing to collect.
+ */
 export interface UsageCollectRouting {
   /** The computers to ask this refresh (connected ones). */
   computers(): readonly string[]
-  /** One page: the first (from `cursors`), or the one `page` names. */
-  collect(
-    computerId: string,
-    cursors: UsageCursors,
-    page?: UsageCollectPage
-  ): Promise<UsageCollectReply>
+  collect(computerId: string, request: UsageCollectRequest): Promise<UsageCollectReply>
   /**
    * The computer on this hub's own machine (the desktop's local computer): it reads
-   * the files the hub's old cursors (computer_id '') point into, so it takes them
-   * over instead of re-parsing every log.
+   * the files the hub's old hub-disk cursors (computer_id '') point into, so it is
+   * handed those too instead of re-parsing every log.
    */
   localComputerId?(): string | null
 }
@@ -50,55 +52,50 @@ export function setUsageCollectRouting(next: UsageCollectRouting | null): void {
   routing = next
 }
 
+async function handoffExists(db: SlayzoneDb): Promise<boolean> {
+  return Boolean(
+    await db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [HANDOFF])
+  )
+}
+
 /**
- * Load all incremental-parse offsets up front into a Map. The file parsers take
- * a SYNCHRONOUS `getOffset(filePath)` callback (they call it inline while
- * walking files), so we can't hand them an async DB lookup. One query + a Map
- * is both contract-correct and cheaper than a per-file round-trip to the worker.
+ * The hub's former cursors this computer is still owed (v209): its own rows, plus the
+ * hub-disk rows for the hub machine's own computer. Null when nothing is owed.
  */
-async function loadCursors(db: SlayzoneDb, computerId: string): Promise<UsageCursors> {
+async function owedCursors(
+  db: SlayzoneDb,
+  computerId: string,
+  isLocal: boolean
+): Promise<UsageCursors | null> {
+  if (!(await handoffExists(db))) return null
   const rows = (await db.all(
-    'SELECT file_path, last_offset, last_modified_ms FROM usage_parse_state WHERE computer_id = ?',
-    [computerId]
-  )) as ParseState[]
+    `SELECT computer_id, file_path, last_offset, last_modified_ms FROM ${HANDOFF}
+      WHERE computer_id = ? OR (? AND computer_id = ?)`,
+    [computerId, isLocal ? 1 : 0, HUB_DISK]
+  )) as Array<{
+    computer_id: string
+    file_path: string
+    last_offset: number
+    last_modified_ms: number
+  }>
+  if (!rows.length) return null
   const out: UsageCursors = {}
-  for (const r of rows) out[r.file_path] = { offset: r.last_offset, modifiedMs: r.last_modified_ms }
+  // The computer's own row wins over a hub-disk row for the same file: hub-disk first.
+  for (const own of [false, true])
+    for (const r of rows)
+      if ((r.computer_id !== HUB_DISK) === own)
+        out[r.file_path] = { offset: r.last_offset, modifiedMs: r.last_modified_ms }
   return out
 }
 
-/**
- * Hand the hub's own cursors (computer_id '', what v195 kept from the hub-disk
- * parse) to the computer on the hub's machine, once: moved, not copied, so they are
- * never adopted twice. A cursor the computer already has wins.
- */
-async function adoptHubDiskCursors(db: SlayzoneDb, computerId: string): Promise<void> {
-  await db.batchTxn([
-    {
-      type: 'run' as const,
-      sql: `INSERT OR IGNORE INTO usage_parse_state (computer_id, file_path, last_offset, last_modified_ms)
-        SELECT ?, file_path, last_offset, last_modified_ms FROM usage_parse_state WHERE computer_id = ?`,
-      params: [computerId, HUB_DISK]
-    },
-    {
-      type: 'run' as const,
-      sql: 'DELETE FROM usage_parse_state WHERE computer_id = ?',
-      params: [HUB_DISK]
-    }
+/** The computer took them (it answered the seeding request): forget them; drop the table once empty. */
+async function handedOver(db: SlayzoneDb, computerId: string, isLocal: boolean): Promise<void> {
+  await db.run(`DELETE FROM ${HANDOFF} WHERE computer_id = ? OR (? AND computer_id = ?)`, [
+    computerId,
+    isLocal ? 1 : 0,
+    HUB_DISK
   ])
-}
-
-async function saveParseState(
-  db: SlayzoneDb,
-  computerId: string,
-  filePath: string,
-  mtimeMs: number,
-  endOffset: number
-): Promise<void> {
-  await db
-    .prepare(
-      'INSERT OR REPLACE INTO usage_parse_state (computer_id, file_path, last_modified_ms, last_offset) VALUES (?, ?, ?, ?)'
-    )
-    .run(computerId, filePath, mtimeMs, endOffset)
+  if (!(await db.get(`SELECT 1 FROM ${HANDOFF} LIMIT 1`))) await db.run(`DROP TABLE ${HANDOFF}`)
 }
 
 async function upsertRecords(
@@ -156,94 +153,40 @@ export function refreshUsageData(db: SlayzoneDb): Promise<void> {
 }
 
 async function refresh(db: SlayzoneDb): Promise<void> {
-  // Each computer parses its own logs; the hub's disk only without routing (on the
-  // desktop the local computer reads the very same logs).
-  const sources: Array<{
-    computerId: string
-    collect: (c: UsageCursors, page?: UsageCollectPage) => Promise<UsageCollectReply>
-  }> = routing
-    ? routing.computers().map((id) => ({
-        computerId: id,
-        collect: (c, page) => (routing as UsageCollectRouting).collect(id, c, page)
-      }))
-    : [{ computerId: HUB_DISK, collect: async (c) => ({ results: await collectUsage(c) }) }]
+  // Each computer parses its own logs from the read offsets it keeps (v209).
+  const r = routing
+  if (!r) return
+  const local = r.localComputerId?.() ?? null
 
-  const local = routing?.localComputerId?.() ?? null
-  if (local && sources.some((source) => source.computerId === local)) {
-    await adoptHubDiskCursors(db, local)
-  }
-
-  let totalInserted = 0
-  for (const source of sources) {
-    const cursors = await loadCursors(db, source.computerId)
-    let page: UsageCollectPage | undefined
-    // Page by page: each page is stored (records, and the cursors of files it
-    // completes) before the next is asked for, so a lost page loses nothing earlier.
-    do {
+  for (const computerId of r.computers()) {
+    const isLocal = computerId === local
+    const seed = await owedCursors(db, computerId, isLocal)
+    let request: UsageCollectRequest = seed ? { seed } : {}
+    // Page by page: each page is stored, then acknowledged (with the next request,
+    // or alone after the last), so its cursors move only once its records are here.
+    for (;;) {
       let reply: UsageCollectReply
       try {
-        reply = await source.collect(cursors, page)
+        reply = await r.collect(computerId, request)
       } catch {
-        break // unreachable now: its saved cursors stand, the next refresh resumes
+        break // unreachable now: its cursors did not move, the next refresh resumes
       }
-      for (const result of reply.results) {
-        totalInserted += await upsertRecords(db, result.records, result.sourceFile)
-        // A file split across pages: its cursor moves only with its last chunk.
-        if (result.complete === false) continue
-        await saveParseState(
-          db,
-          source.computerId,
-          result.sourceFile,
-          result.fileMtimeMs,
-          result.endOffset
-        )
+      if (request.seed) await handedOver(db, computerId, isLocal)
+      for (const result of reply.results) await upsertRecords(db, result.records, result.sourceFile)
+      const ack = reply.receipt
+      if (reply.next) {
+        request = { page: reply.next, ...(ack ? { ack } : {}) }
+        continue
       }
-      page = reply.next
-    } while (page)
-  }
-
-  // Only correlate if new records were inserted
-  if (totalInserted > 0) {
-    await correlateNewRecords(db)
+      if (ack) await r.collect(computerId, { ack }).catch(() => undefined)
+      break
+    }
   }
 }
 
-async function correlateNewRecords(db: SlayzoneDb): Promise<void> {
-  const tasks = (await db
-    .prepare(
-      "SELECT id, provider_config, worktree_path FROM tasks WHERE provider_config IS NOT NULL AND provider_config != '{}'"
-    )
-    .all()) as Array<{ id: string; provider_config: string; worktree_path: string | null }>
-
-  const updateBySession = db.prepare(
-    'UPDATE usage_records SET task_id = ? WHERE session_id = ? AND task_id IS NULL'
-  )
-
-  for (const task of tasks) {
-    let config: Record<string, { conversationId?: string }>
-    try {
-      config = JSON.parse(task.provider_config)
-    } catch {
-      continue
-    }
-    for (const mode of Object.values(config)) {
-      if (mode.conversationId) {
-        await updateBySession.run(task.id, mode.conversationId)
-      }
-    }
-  }
-
-  const tasksWithPaths = (await db
-    .prepare('SELECT id, worktree_path FROM tasks WHERE worktree_path IS NOT NULL')
-    .all()) as Array<{ id: string; worktree_path: string }>
-
-  const updateByCwd = db.prepare(
-    'UPDATE usage_records SET task_id = ? WHERE cwd = ? AND task_id IS NULL'
-  )
-  for (const task of tasksWithPaths) {
-    await updateByCwd.run(task.id, task.worktree_path)
-  }
-}
+// Records arrive attributed: the computer that ran them tags each with its task,
+// by its session ledger, else by the worktree the session ran in (§9 Phase 7c —
+// the hub keeps neither sessions nor task paths).
 
 function dateRangeToSql(range: DateRange): string {
   switch (range) {

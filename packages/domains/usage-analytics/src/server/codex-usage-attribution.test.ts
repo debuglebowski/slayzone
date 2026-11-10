@@ -1,8 +1,10 @@
 /**
- * A Codex task's usage is attributed to it: the session id its SessionStart hook
- * captured (`provider_config.codex.conversationId`, which the codex `--no-daemon`
- * fix makes arrive) matches the session id of the rollout's token records — on the
- * first parse AND on a later one that resumes the file mid-way.
+ * A Codex task's usage is attributed to it: its computer's session ledger names the
+ * task of the session id its SessionStart hook captured (which the codex
+ * `--no-daemon` fix makes arrive), and that id matches the session id of the
+ * rollout's token records — on the first parse AND on a later one that resumes the
+ * file mid-way. The computer tags each record before it reaches the hub
+ * (robustness plan §9: the ledger is only there); this routing mirrors it.
  *
  * Regression (QA 2026-11-06, task 964073b0 "usage: QA task attribution" → 5decc957):
  * `usageAnalytics.taskCost` was 0. The resumed parse started at the saved offset,
@@ -15,6 +17,8 @@ import * as path from 'node:path'
 import { afterAll, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { queryTaskCost, refreshUsageData, setUsageCollectRouting } from './cache'
+import { collectUsage, type UsageCursors } from './collect'
+import { createUsageCollector } from './collector'
 
 const SESSION = '01a1b277-b4d0-7052-a200-eb63b10c21d2'
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'slz-codex-usage-')))
@@ -50,8 +54,32 @@ const taskId = crypto.randomUUID()
 h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run(projectId, 'P', '#000')
 h.db
   .prepare('INSERT INTO tasks (id, project_id, title, provider_config) VALUES (?, ?, ?, ?)')
-  .run(taskId, projectId, 'Codex task', JSON.stringify({ codex: { conversationId: SESSION } }))
-setUsageCollectRouting(null)
+  .run(taskId, projectId, 'Codex task', '{}')
+/**
+ * The computer: parses its logs from the cursors it keeps (v209) and tags records of
+ * sessions its ledger names.
+ */
+const cursors: UsageCursors = {}
+const computer = createUsageCollector({
+  store: () => ({
+    all: () => ({ ...cursors }),
+    seed: (c) => Object.assign(cursors, { ...c, ...cursors }),
+    commit: (entries) => {
+      for (const e of entries)
+        cursors[e.sourceFile] = { offset: e.offset, modifiedMs: e.modifiedMs }
+    }
+  }),
+  collect: async (from) => {
+    const results = await collectUsage(from)
+    for (const r of results)
+      for (const rec of r.records) if (rec.sessionId === SESSION) rec.taskId = taskId
+    return results
+  }
+})
+setUsageCollectRouting({
+  computers: () => ['pc'],
+  collect: (_id, request) => computer.handle(request)
+})
 
 afterAll(() => {
   process.env.HOME = realHome

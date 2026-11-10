@@ -298,6 +298,28 @@ export function createArtifactStore(dataDir: string) {
       return result
     },
 
+    /**
+     * Moves entries (artifacts, and folders with their subtrees) from
+     * `sourceTaskId` to `destTaskId`, keeping ids, versions and working copies.
+     * Retrying a partly applied move completes it. Returns the entries moved now.
+     */
+    async moveArtifacts(
+      db: SlayzoneDb,
+      data: {
+        artifactIds: string[]
+        folderIds: string[]
+        sourceTaskId: string
+        destTaskId: string
+        destFolderId: string | null
+      }
+    ): Promise<{ artifacts: TaskArtifact[]; folders: ArtifactFolder[] }> {
+      const result = await db.namedTxn('task-artifacts:move', { dataDir, ...data })
+      return {
+        artifacts: result.artifacts.map(parseArtifact).filter(Boolean) as TaskArtifact[],
+        folders: result.folders.map(parseFolder).filter(Boolean) as ArtifactFolder[]
+      }
+    },
+
     async pasteArtifactFiles(
       db: SlayzoneDb,
       data: { sourcePaths: string[]; destTaskId: string; destFolderId: string | null }

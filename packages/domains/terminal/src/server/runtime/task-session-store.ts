@@ -1,62 +1,63 @@
-import type { SlayzoneDb } from '@slayzone/platform'
 import type { ConversationOrigin } from '@slayzone/terminal-contracts'
 
 /**
- * Task-side session/conversation ledger writes the terminal runtime makes
- * (`task_conversations` + `agent_sessions` rows). Terminal owns this interface;
- * the task package owns the implementation (`taskSessionStore` in its server
- * barrel) and the composition root passes it in. This keeps the
- * dependency one-way (task → terminal) while the `createDb*` default ops below run
- * the exact same task functions they always called.
+ * The agent-session ledger as the terminal runtime reaches it (robustness plan §9,
+ * P0). The ledger (`agent_sessions`, `task_conversations`, `session_turns`) lives
+ * ONLY on the computer that runs a task's agents; the hub keeps no copy. Every call
+ * therefore names the computer holding the sessions. The hub's composition root
+ * implements this over the computer link (`apps/hub/src/computer-session-ledger.ts`);
+ * terminal tests pass `createFakeTaskSessionStore`.
  *
- * Every method takes the db handle first, mirroring the task functions' own
- * signatures, so the implementation is the task functions themselves.
+ * `computerId: null` is a hub-local spawn (tests only): there is no computer to hold
+ * its sessions, so the hub's implementation records nothing and resolves nothing.
  */
 export interface TaskSessionStore {
-  /** Append a `task_conversations` ledger row (task's `recordConversation`). */
-  recordConversation(db: SlayzoneDb, input: RecordConversationInput): Promise<void>
-  /** Spawn-intent anchor (task's `recordPendingSpawn`). */
-  recordPendingSpawn(db: SlayzoneDb, args: PendingSpawnInput): Promise<void>
-  /** Drop pending-spawn rows (task's `prunePendingSpawns`). */
-  prunePendingSpawns(db: SlayzoneDb, scope?: { taskId: string; mode: string }): Promise<number>
-  /** Bind a pooled agent session to a task+tab, set-once (task's `bindSessionToTask`). */
+  /** Append a ledger row (task_conversations + agent_sessions). */
+  recordConversation(computerId: string | null, input: RecordConversationInput): Promise<void>
+  /** Spawn-intent anchor. Returns the row id. */
+  recordPendingSpawn(computerId: string | null, args: PendingSpawnInput): Promise<string>
+  /** Drop pending-spawn rows by id, or sweep stale ones. */
+  prunePendingSpawns(computerId: string | null, scope?: { ids: string[] }): Promise<number>
+  /** Bind a pooled agent session to a task+tab, set-once. */
   bindSessionToTask(
-    db: SlayzoneDb,
+    computerId: string | null,
     args: { sessionId: string; taskId: string; tabId: string }
   ): Promise<boolean>
-  /** Record an `agent_sessions` spawn row (task's `recordSessionSpawn`). */
-  recordSessionSpawn(db: SlayzoneDb, input: SessionSpawnInput): Promise<void>
-  /** Mark a session's process dead (task's `markSessionDead`). */
-  markSessionDead(db: SlayzoneDb, sessionId: string): Promise<void>
-  /**
-   * Did this task really run `conversationId` in `mode` (an honored, not deleted
-   * ledger row)? Task's `isHonoredConversation` — the guard before a switch.
-   */
+  /** Record an `agent_sessions` spawn row. */
+  recordSessionSpawn(computerId: string | null, input: SessionSpawnInput): Promise<void>
+  /** Mark a session's process dead. */
+  markSessionDead(computerId: string | null, sessionId: string): Promise<void>
+  /** Did this task really run `conversationId` in `mode`? (the guard before a switch) */
   isHonoredConversation(
-    db: SlayzoneDb,
+    computerId: string | null,
     taskId: string,
     mode: string,
     conversationId: string
   ): Promise<boolean>
-  /** The conversation `mode` resumes next for this task (task's `getCurrentConversationId`). */
-  getCurrentConversationId(db: SlayzoneDb, taskId: string, mode: string): Promise<string | null>
+  /** The conversation `mode` resumes next for this task's tab (omitted = main tab). */
+  getCurrentConversationId(
+    computerId: string | null,
+    taskId: string,
+    mode: string,
+    tabId?: string
+  ): Promise<string | null>
 }
 
 /** Input of `TaskSessionStore.recordConversation` (task-conversations ledger append). */
 export interface RecordConversationInput {
-  /** Stable metadata identity and original time when replaying a computer ledger. */
+  /** Stable identity and original time when replaying a row. */
   id?: string
   createdAt?: number
-  mirrorProviderConfig?: boolean
   taskId: string
   mode: string
+  /** The tab whose session this is; omitted = the main tab (id = task id). */
+  tabId?: string
   conversationId: string | null
   origin: ConversationOrigin
   pendingMeta?: { usedResume: boolean; spawnedAt: number; spawnToken?: string }
   /**
-   * Which JSON key inside `provider_config.{mode}` to mirror to during the
-   * transition slice. Defaults to `'conversationId'`; chat-mode callers pass
-   * `'chatConversationId'`.
+   * Which key of the CHAT runtime's own provider configuration (on the computer)
+   * also takes the id: `'chatConversationId'` for a chat mode. Not a hub field.
    */
   legacyJsonField?: 'conversationId' | 'chatConversationId'
 }
@@ -65,6 +66,8 @@ export interface RecordConversationInput {
 export interface PendingSpawnInput {
   taskId: string
   mode: string
+  /** The spawning tab; omitted = the main tab. */
+  tabId?: string
   /** `null` = fresh spawn without a pre-minted id (agent mints its own). */
   expectedSessionId: string | null
   usedResume: boolean

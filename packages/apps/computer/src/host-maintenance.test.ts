@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { expect, it, vi } from 'vitest'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+import { placeTestProject } from './project-scope.fixture'
 
 it('discards an incompatible release canceled by the hub before idle maintenance', async () => {
   vi.stubGlobal('__SLAYZONE_COMPUTER_VERSION__', '1.0.0')
@@ -55,6 +56,7 @@ it('discards an incompatible release canceled by the hub before idle maintenance
   )
   const oldRoot = process.env.SLAYZONE_ROOT
   process.env.SLAYZONE_ROOT = root
+  placeTestProject(root, config.hubUrl, 'p1', root)
   const host = await startSessionHost(root, config),
     control = await hostControl(root)
   const grant = await control.rpc.request<import('./session-host').ConnectorGrant>('reserve', {
@@ -66,6 +68,7 @@ it('discards an incompatible release canceled by the hub before idle maintenance
     actor: { userId: null, route: null },
     params: {
       sessionId: 'active',
+      projectId: 'p1',
       command: process.execPath,
       args: ['-e', 'setInterval(()=>{},1000)'],
       cwd: root

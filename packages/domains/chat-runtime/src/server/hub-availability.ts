@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { ChatAvailability } from '@slayzone/terminal-contracts'
 import type { ChatOwnershipStore } from './hub-ownership'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 
 /**
  * A client's loaded history is stale when this changes: a recovery that found
@@ -28,8 +29,9 @@ export function createChatAvailability(opts: {
     )
     if (!tab) throw new Error('Unknown chat tab')
     const owner = await opts.ownership.forTab(tabId)
+    // Where a hub-era tab's agent ran (v196), while this install still has the record.
     const recorded =
-      !owner?.computerId && !owner?.destinationComputerId
+      !owner?.computerId && !owner?.destinationComputerId && (await legacyChatTables(opts.db))
         ? await opts.db.get<{ computer_id: string }>(
             'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
             [tabId]

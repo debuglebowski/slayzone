@@ -1,8 +1,17 @@
 import { TypedEmitter } from '@slayzone/platform/events'
 
+/** One recorded turn boundary, as subscribers see it. */
+export interface AgentTurnsChange {
+  worktreePath: string
+  taskId: string
+}
+
 export type AgentTurnsEventMap = {
-  /** Emitted on every recorded turn boundary; payload is the worktree path. */
-  'agent-turns:changed': [worktreePath: string]
+  /**
+   * Emitted on every recorded turn boundary: the checkout and the task that recorded
+   * it (the event's owner check: §9 Phase 7b, never a path).
+   */
+  'agent-turns:changed': [change: AgentTurnsChange]
 }
 
 /**
@@ -21,7 +30,8 @@ export type AgentPromptsEventMap = {
 }
 
 /**
- * Domain event bus for captured user prompts. `capturePrompt` emits
+ * Domain event bus for captured user prompts. The agent-hook route (a prompt the
+ * computer captured) and the hub's chat relay (a chat prompt saved) emit
  * `agent-prompts:changed` here; the tRPC `agentPrompts.onChanged` subscription
  * wraps it so each renderer refetches the affected task's prompt list.
  */

@@ -84,6 +84,10 @@ export async function startConnector(
             if (!dialer.notify('event', event.params)) throw new Error('hub offline')
             return { ok: true }
           }
+          // The hub refused the event itself as invalid (hub-gateway.ts): a typed
+          // rejection, so the host quarantines it instead of retrying it forever.
+          if ((err as { code?: number }).code === -32602)
+            return { ok: false, rejected: (err as Error).message || 'invalid event delivery' }
           throw err
         }
       }

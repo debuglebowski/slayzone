@@ -54,7 +54,12 @@ export const directResourceSchema = z.discriminatedUnion('kind', [
     kind: z.literal('chat'),
     tabId: idField,
     epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-  })
+  }),
+  /**
+   * One task's computer-only data (robustness plan §9): the reads the hub would
+   * otherwise relay to this computer (`taskData`).
+   */
+  z.object({ kind: z.literal('task'), taskId: idField })
 ])
 export type DirectResource = z.infer<typeof directResourceSchema>
 
@@ -91,7 +96,8 @@ export const directRevokeParamsSchema = z.discriminatedUnion('by', [
     by: z.literal('resource'),
     resource: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('pty'), sessionId: idField }),
-      z.object({ kind: z.literal('chat'), tabId: idField })
+      z.object({ kind: z.literal('chat'), tabId: idField }),
+      z.object({ kind: z.literal('task'), taskId: idField })
     ])
   }),
   /** Every grant from this hub (computer revoked, hub shutting down). */

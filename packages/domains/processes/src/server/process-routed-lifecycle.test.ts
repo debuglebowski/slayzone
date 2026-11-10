@@ -27,10 +27,6 @@ const persistence = {
   loadAll: async () => [],
   insert: async () => undefined,
   update: async () => undefined,
-  updatePid: async () => undefined,
-  recordPid: async () => undefined,
-  listPidHistory: async () => [],
-  removePidHistory: async () => undefined,
   remove: async () => undefined
 } as unknown as ProcessPersistence
 

@@ -12,7 +12,12 @@ import {
   __ipcEmitCalls,
   __resetIpcEmitCalls
 } from '../../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  taskEvents,
+  configureTaskRuntimeAdapters,
+  setTaskSessionLedger
+} from '@slayzone/task/server'
+import { createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
 import { tmpdir } from 'node:os'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { setChatDeps, setPtyDeps, type ChatDeps, type PtyDeps } from '@slayzone/terminal/server'
@@ -21,6 +26,9 @@ import { registerUpdateTaskRoute } from './update.js'
 const h = await createTestHarness()
 // archive/cleanup ops resolve the data root via the task runtime adapter.
 configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
+// The session ledger lives on the task's computer (robustness plan §9).
+const computer = createSessionLedgerHarness({ db: h.slayDb })
+setTaskSessionLedger(computer.ledger)
 const projectId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
@@ -279,9 +287,11 @@ describe('PATCH /api/tasks/:id', () => {
 
   test('agentId: a mode switch — stops the main agent, clears conversations', async () => {
     const id = seedTask()
-    h.db
-      .prepare('UPDATE tasks SET agent_id = ?, provider_config = ? WHERE id = ?')
-      .run('claude-code', JSON.stringify({ 'claude-code': { conversationId: 'c1' } }), id)
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    await computer.service.handle({
+      op: 'recordConversation',
+      args: { taskId: id, mode: 'claude-code', conversationId: 'c1', origin: 'slay-spawned-resume' }
+    })
     killed = []
     const res = await rest.request<{ ok: boolean; data: { agent_id: string; title: string } }>(
       'PATCH',
@@ -291,10 +301,9 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ agent_id: 'codex', title: 'Both' })
     expect(killed).toEqual([`pty:${id}:${id}`])
-    const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
-      provider_config: string
-    }
-    expect(JSON.parse(row.provider_config)['claude-code'].conversationId).toBeNull()
+    expect(
+      await computer.ledger.store.getCurrentConversationId(computer.computerId, id, 'claude-code')
+    ).toBeNull()
   })
 
   test('terminalMode: deprecated alias of agentId still switches the agent', async () => {
@@ -359,6 +368,22 @@ describe('PATCH /api/tasks/:id', () => {
     expect(killed).toEqual([])
   })
 
+  test('409: a path set while no computer holds the task folders is refused, nothing written', async () => {
+    // The hub keeps no path (§9 7e): with no computer to hold it, setting one is a
+    // precondition the caller can fix (connect a computer), never a server error.
+    const id = seedTask()
+    const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+      worktreePath: '/tmp/p-wt'
+    })
+    expect(res.status).toBe(409)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.error).toMatch(/computer/i)
+    const row = h.db.prepare('SELECT has_worktree FROM tasks WHERE id = ?').get(id) as {
+      has_worktree: number
+    }
+    expect(row.has_worktree).toBe(0)
+  })
+
   test('500: invalid reparent throws (cyclic)', async () => {
     const id = seedTask()
     const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
@@ -372,4 +397,5 @@ describe('PATCH /api/tasks/:id', () => {
 afterAll(async () => {
   await rest.close()
   h.cleanup()
+  computer.close()
 })

@@ -25,6 +25,16 @@ export interface AutomationCommandRouting {
   /** Whether `computerId` is connected and can take work now. Absent = assume so. */
   isReachable?(computerId: string): boolean
   run(computerId: string, command: AutomationCommand): Promise<AutomationCommandResult>
+  /**
+   * The task's worktree path and custom folder as `computerId` (where its actions run)
+   * holds them — `{{task.worktree_path}}` and path conditions (§9 Phase 7c/7d: the hub
+   * keeps no task path). Null: the task has none there. Throws when the computer
+   * cannot answer — the run then fails rather than use an empty / guessed path.
+   */
+  taskPaths?(
+    computerId: string,
+    taskId: string
+  ): Promise<{ worktreePath: string | null; baseDir: string | null } | null>
 }
 
 let routing: AutomationCommandRouting | null = null

@@ -5,6 +5,7 @@ import type {
   DirectRtcConnectResult
 } from '../shared/direct-link'
 import type { FindJoinTokenAccount } from './join-token-policy'
+import type { ItemFaultRef, ItemFaultView } from '../shared/item-faults'
 
 // Computers / computer deps — the hub/computer-split surface the `computersRouter`
 // reads from its host: the live computer gateway (computer-WS connection
@@ -59,6 +60,16 @@ export type ComputersDeps = {
   subscribeComputerStatus?: (
     listener: (change: { computerId: string; connected: boolean }) => void
   ) => () => void
+  /**
+   * Needs-attention faults (hub `item-faults.ts`): the hub's own and each computer's.
+   * Absent: this host lists none.
+   */
+  itemFaults?: {
+    list(scope: { computerId: string | null; dataRoot: string }): Promise<ItemFaultView[]>
+    byTask(): Promise<Array<{ taskId: string; computerId: string | null }>>
+    retry(ref: ItemFaultRef, dataRoot: string): Promise<void>
+    discard(ref: ItemFaultRef, dataRoot: string): Promise<void>
+  }
   /** Live computer gateway, or null until the async computer init resolves. */
   getGateway: () => ComputerGateway | null
   /** ws(s)://host:port/computers URL a join token embeds for the computer to dial.

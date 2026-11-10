@@ -31,7 +31,13 @@ export function useChatCwd(taskId: string, tabId: string): ChatCwdState {
 
   const task = taskQ.data ?? null
   const project = task ? (projectsQ.data?.find((p) => p.id === task.project_id) ?? null) : null
-  const first = task && projectsQ.isSuccess ? chatCwdFromTask(task, project, null) : null
+  // A worktree / base dir lives on the task's computer (§9 Phase 7d): read it there.
+  const ownFolder = !!task && (task.has_worktree || task.has_base_dir)
+  const pathsQ = useQuery(
+    trpc.task.paths.queryOptions({ taskIds: [taskId] }, { enabled: ownFolder })
+  )
+  const paths = pathsQ.data?.[taskId] ?? null
+  const first = task && projectsQ.isSuccess ? chatCwdFromTask(task, project, null, paths) : null
   const projectPath = first && 'needsRepos' in first ? first.needsRepos : null
   const reposQ = useQuery(
     trpc.worktrees.detectChildRepos.queryOptions(
@@ -45,8 +51,14 @@ export function useChatCwd(taskId: string, tabId: string): ChatCwdState {
   if (sessionCwd !== null) computed = { status: 'ready', cwd: sessionCwd }
   else if (first && 'cwd' in first) {
     computed = first.cwd ? { status: 'ready', cwd: first.cwd } : none
+  } else if (paths?.state === 'offline') {
+    computed = {
+      status: 'error',
+      message: "This task's folder is on a computer that is not connected.",
+      retry: () => void pathsQ.refetch()
+    }
   } else if (first && reposQ.isSuccess && task) {
-    const resolved = chatCwdFromTask(task, project, reposQ.data)
+    const resolved = chatCwdFromTask(task, project, reposQ.data, paths)
     if ('cwd' in resolved) {
       computed = resolved.cwd ? { status: 'ready', cwd: resolved.cwd } : none
     }
@@ -57,13 +69,13 @@ export function useChatCwd(taskId: string, tabId: string): ChatCwdState {
       retry: () => void taskQ.refetch()
     }
   }
-  const failed = [infoQ, taskQ, projectsQ, reposQ].find((q) => q.isError)
+  const failed = [infoQ, taskQ, projectsQ, reposQ, pathsQ].find((q) => q.isError)
   if (computed.status === 'loading' && failed) {
     computed = {
       status: 'error',
       message: failed.error?.message ?? 'Could not load the chat',
       retry: () => {
-        for (const q of [infoQ, taskQ, projectsQ, reposQ]) if (q.isError) void q.refetch()
+        for (const q of [infoQ, taskQ, projectsQ, reposQ, pathsQ]) if (q.isError) void q.refetch()
       }
     }
   }

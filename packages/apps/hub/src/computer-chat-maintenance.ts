@@ -24,7 +24,8 @@ const controls = new Set<string>([
 /**
  * Native commands (pty/proc/fs/git) wait only for task lifecycle fences: a
  * paused or deleted task's work must be stopped on the computer before new work
- * is admitted. They deliberately do NOT wait for chat recovery. Chat history is
+ * is admitted. Delivery is per task: a task whose pause/delete cannot be
+ * delivered refuses its own agents (`resolvePtyComputer`), not every task's. They deliberately do NOT wait for chat recovery. Chat history is
  * per conversation; one damaged conversation, or chat storage that cannot open,
  * must not take terminals, files and git down for every task on the computer.
  * Chat operations and agent placement (`resolvePtyComputer`) enforce recovery
@@ -53,8 +54,18 @@ export function createComputerChatMaintenance(opts: {
   projects(computerId: string): Promise<void>
   recover(computerId: string, force: boolean): Promise<void>
   lifecycle(computerId: string): Promise<void>
+  /**
+   * Hand the computer what the hub still holds of its tasks' computer-only data
+   * (robustness plan §9). After lifecycle: a deleted task's rows are skipped there.
+   */
+  handoff?(computerId: string): Promise<void>
   sessions(computerId: string): Promise<void>
   migrate(computerId: string): Promise<void>
+  /**
+   * Mirror the computer's Needs-attention faults. Independent of the stages above:
+   * it runs even when one of them failed (that failure may be exactly what to show).
+   */
+  faults?(computerId: string): Promise<void>
 }) {
   const pending = new Map<string, Promise<void>>()
   return {
@@ -65,11 +76,21 @@ export function createComputerChatMaintenance(opts: {
       const work = (existing ? existing.catch(() => undefined) : Promise.resolve())
         .then(() =>
           opts.asOwner(computerId, async () => {
-            await opts.projects(computerId)
-            await opts.recover(computerId, reconnect)
-            await opts.lifecycle(computerId)
-            await opts.sessions(computerId)
-            await opts.migrate(computerId)
+            try {
+              await opts.projects(computerId)
+              await opts.recover(computerId, reconnect)
+              await opts.lifecycle(computerId)
+              await opts.handoff?.(computerId)
+              await opts.sessions(computerId)
+              await opts.migrate(computerId)
+            } finally {
+              await opts.faults?.(computerId).catch((error: unknown) => {
+                console.error(
+                  '[chat] could not refresh the computer’s Needs-attention list:',
+                  error
+                )
+              })
+            }
           })
         )
         .finally(() => {

@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { electronBootstrap } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 export interface FileDropZoneHandlers {
   onDragOver: (e: React.DragEvent) => void
@@ -24,7 +24,7 @@ export function useFileDropZone(
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   // mutateAsync is identity-stable across renders (the mutation object is not).
   const { mutateAsync: copyIn } = useMutation(trpc.fileEditor.copyIn.mutationOptions())
   const [isFileDragOver, setIsFileDragOver] = useState(false)
@@ -78,7 +78,7 @@ export function useFileDropZone(
           // External file — copy into project root
           try {
             const relPath = await copyIn({
-              ...target,
+              ...requireScope(scope),
               rootPath: projectPath,
               absoluteSrc: absPath
             })
@@ -89,7 +89,7 @@ export function useFileDropZone(
         }
       }
     },
-    [projectPath, openFile, copyIn, target]
+    [projectPath, openFile, copyIn, scope]
   )
 
   return {

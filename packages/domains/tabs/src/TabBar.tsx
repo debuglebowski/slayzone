@@ -42,7 +42,7 @@ interface TabBarProps {
   activeIndex: number
   activeView?: string
   projectColors?: Map<string, string>
-  worktreeColors?: Map<string, string>
+  worktreeColors?: ReadonlyMap<string, string>
   taskProgress?: Map<string, number>
   doneTaskIds?: Set<string>
   attentionTaskIds?: Set<string>

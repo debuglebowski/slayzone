@@ -6,7 +6,7 @@ import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createComputerChatServices } from './computer-chat'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { deleteTab } from '@slayzone/task-terminals/server'
 
 test.each(['before-snapshot', 'after-prepare', 'after-commit'] as const)(
@@ -33,8 +33,8 @@ test.each(['before-snapshot', 'after-prepare', 'after-commit'] as const)(
     try {
       h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
       h.db
-        .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('task','p','Task',?)")
-        .run(dir)
+        .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('task','p','Task',1)")
+        .run()
       h.db
         .prepare(
           "INSERT INTO terminal_tabs(id,task_id,mode,position,created_at) VALUES('a','task','claude-chat',0,'2020-01-01')"
@@ -45,9 +45,10 @@ test.each(['before-snapshot', 'after-prepare', 'after-commit'] as const)(
           "INSERT INTO terminal_tabs(id,task_id,mode,position,created_at) VALUES('b','task','codex-chat',1,'2020-01-02')"
         )
         .run()
+      // Task-wide legacy content (prompts left it in v207: handed off directly).
       h.db
         .prepare(
-          "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','claude-code','retained task-wide prompt',1)"
+          "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','retained','[]')"
         )
         .run()
       let closed = false
@@ -124,13 +125,10 @@ test.each(['before-snapshot', 'after-prepare', 'after-commit'] as const)(
         state: 'active',
         cleanupPending: false
       })
-      expect(await pc.request({ kind: 'prompts', taskId: 'task' })).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: 'prompt', text: 'retained task-wide prompt' })
-        ])
-      )
       expect(
-        h.db.prepare("SELECT COUNT(*) AS n FROM agent_prompts WHERE task_id='task'").get()
+        h.db
+          .prepare("SELECT COUNT(*) AS n FROM chat_attachment_messages WHERE task_id='task'")
+          .get()
       ).toEqual({ n: 0 })
       expect(
         h.db.prepare("SELECT id FROM terminal_tabs WHERE id='task-content:task'").get()

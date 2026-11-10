@@ -285,6 +285,8 @@ export interface PtyBackend {
     computerId: string,
     spec: {
       warmId: string
+      /** The project it is pre-started for: its cwd lies in that project's folder. */
+      projectId: string
       command: string
       args: string[]
       cwd: string

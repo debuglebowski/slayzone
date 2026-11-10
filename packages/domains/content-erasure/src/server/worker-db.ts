@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import { assertPathSafeId } from '@slayzone/platform/safe-path'
 import type { ErasureScope } from '../shared'
-import { SHARED_WORKTREE_SQL, addComputerTask } from './manifest'
+import { addComputerTask } from './manifest'
 import type { ErasureJob, ErasureManifest } from './manifest'
 import { closeSync, existsSync, fsyncSync, openSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -166,25 +166,22 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
     // The computer holding each worktree: recorded where it was made, else the task's
     // or its project's computer. An unbound task's is the hub's default computer —
     // only the hub knows which are connected; it picks after planning (index.ts).
+    // The hub keeps no path (robustness plan §9, 7e): that computer names the
+    // worktree, and whether a live task still shares it, at cleanup (`release`).
     const worktrees = rows<{
       id: string
       computer_id: string | null
       project_id: string
       owner_user_id: string | null
-      worktree_path: string
     }>(
       db,
       `SELECT t.id,coalesce(t.worktree_computer_id,t.computer_id,p.default_computer_id) AS computer_id,
-        t.project_id,p.owner_user_id,t.worktree_path
+        t.project_id,p.owner_user_id
        FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
-       WHERE t.id IN ${inJson} AND t.worktree_path IS NOT NULL`,
+       WHERE t.id IN ${inJson} AND t.has_worktree=1`,
       tasks
     )
     for (const w of worktrees) {
-      const shared = db
-        .prepare(SHARED_WORKTREE_SQL)
-        .get(w.worktree_path, tasks, w.computer_id, w.computer_id)
-      if (shared) continue
       // Captured now: a project's erasure removes its placements before cleanup.
       const repoPaths = rows<{ computerId: string; path: string }>(
         db,
@@ -198,7 +195,7 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
         computerId: w.computer_id,
         repoPath: repoPaths.find((r) => r.computerId === w.computer_id)?.path ?? null,
         repoPaths,
-        path: w.worktree_path,
+        path: null,
         deleted: false
       })
     }
@@ -210,15 +207,8 @@ function readManifest(db: Database, scope: ErasureScope): ErasureManifest {
       )
     )
     manifest.tabIds = unique(manifest.tabTasks.map((t) => t.tabId))
-    for (const table of ['task_conversations', 'agent_sessions']) {
-      manifest.conversationIds.push(
-        ...rows<{ conversation_id: string }>(
-          db,
-          `SELECT conversation_id FROM ${table} WHERE task_id IN ${inJson} AND conversation_id IS NOT NULL`,
-          tasks
-        ).map((r) => r.conversation_id)
-      )
-    }
+    // The session ledger is on the computers (robustness plan §9): each erases its
+    // own rows of the task when the erasure reaches it (`task.erase`).
     const owners = rows<{
       id: string
       task_id: string
@@ -335,7 +325,6 @@ const DELIVERY_TABLES = new Set([
   'chat_lifecycle_acks',
   'chat_ownership',
   'chat_deletion_targets',
-  'chat_provider_bindings',
   'chat_tab_bindings',
   'chat_metadata_progress',
   'chat_bootstrap_reservations',
@@ -478,14 +467,6 @@ function commit(db: Database, p: { id: string }): ErasureManifest {
     )
     // Durable consumers (including backups and independently owned copies) own
     // their pins. Deleting a source artifact must never release another consumer.
-    // This table has no task FK. Never erase a session still bound elsewhere.
-    for (const conversation of m.conversationIds) {
-      const shared = db
-        .prepare(`SELECT 1 FROM task_conversations WHERE conversation_id=?
-        UNION SELECT 1 FROM agent_sessions WHERE conversation_id=? LIMIT 1`)
-        .get(conversation, conversation)
-      if (!shared) db.prepare('DELETE FROM session_turns WHERE conversation_id=?').run(conversation)
-    }
     if (m.scope.kind === 'user')
       db.prepare('DELETE FROM user_settings WHERE user_id=?').run(m.scope.userId)
     const removed = new Set([...m.taskIds, ...m.projectIds])

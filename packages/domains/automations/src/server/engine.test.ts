@@ -262,7 +262,7 @@ describe('condition evaluation', () => {
   test('exists operator + field present → passes', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
-    h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt', taskId)
+    h.db.prepare('UPDATE tasks SET has_worktree = 1 WHERE id = ?').run(taskId)
     const id = createAutomation({
       conditions: [
         { type: 'task_property', params: { field: 'worktree_path', operator: 'exists' } }
@@ -272,9 +272,7 @@ describe('condition evaluation', () => {
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise((r) => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
-    h.db
-      .prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?')
-      .run('todo', taskId)
+    h.db.prepare('UPDATE tasks SET status = ?, has_worktree = 0 WHERE id = ?').run('todo', taskId)
   })
 
   test('exists operator + field null → fails', async () => {
@@ -356,7 +354,7 @@ describe('condition evaluation', () => {
   test('not_exists operator + field present → fails', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
-    h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt', taskId)
+    h.db.prepare('UPDATE tasks SET has_worktree = 1 WHERE id = ?').run(taskId)
     const id = createAutomation({
       conditions: [
         { type: 'task_property', params: { field: 'worktree_path', operator: 'not_exists' } }
@@ -366,9 +364,7 @@ describe('condition evaluation', () => {
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise((r) => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
-    h.db
-      .prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?')
-      .run('todo', taskId)
+    h.db.prepare('UPDATE tasks SET status = ?, has_worktree = 0 WHERE id = ?').run('todo', taskId)
   })
 
   test('not_equals operator + different value → passes', async () => {
@@ -864,41 +860,36 @@ describe('in condition on regular field', () => {
 
 // --- EXISTS / NOT_EXISTS WITH EMPTY STRING ---
 
+// A string field (a task's paths are only flags on the hub, §9 7e).
 describe('exists/not_exists with empty string', () => {
   test('exists + empty string → fails (treated as non-existent)', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
-    h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('', taskId)
+    h.db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run('', taskId)
     const id = createAutomation({
-      conditions: [
-        { type: 'task_property', params: { field: 'worktree_path', operator: 'exists' } }
-      ]
+      conditions: [{ type: 'task_property', params: { field: 'description', operator: 'exists' } }]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise((r) => setTimeout(r, 200))
     expect(getRuns(id)).toHaveLength(0)
-    h.db
-      .prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?')
-      .run('todo', taskId)
+    h.db.prepare('UPDATE tasks SET status = ?, description = NULL WHERE id = ?').run('todo', taskId)
   })
 
   test('not_exists + empty string → passes', async () => {
     h.db.prepare('DELETE FROM automations').run()
     h.db.prepare('DELETE FROM automation_runs').run()
-    h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('', taskId)
+    h.db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run('', taskId)
     const id = createAutomation({
       conditions: [
-        { type: 'task_property', params: { field: 'worktree_path', operator: 'not_exists' } }
+        { type: 'task_property', params: { field: 'description', operator: 'not_exists' } }
       ]
     })
     h.db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', taskId)
     taskEvents.emit('task:updated', { taskId, projectId, oldStatus: 'todo' })
     await new Promise((r) => setTimeout(r, 200))
     expect(getRuns(id).length).toBeGreaterThan(0)
-    h.db
-      .prepare('UPDATE tasks SET status = ?, worktree_path = NULL WHERE id = ?')
-      .run('todo', taskId)
+    h.db.prepare('UPDATE tasks SET status = ?, description = NULL WHERE id = ?').run('todo', taskId)
   })
 })
 

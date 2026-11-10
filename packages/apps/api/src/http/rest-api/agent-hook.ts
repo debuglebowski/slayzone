@@ -16,17 +16,7 @@ import {
   unadoptedWarmAgent,
   type AgentTree
 } from '@slayzone/terminal/hub'
-import {
-  recordConversation,
-  findPendingSpawn,
-  findOwnedSpawnForConversation,
-  getCurrentConversationId,
-  confirmSessionConversation,
-  markSessionFirstTurn,
-  getTaskOp
-} from '@slayzone/task/server'
-import { agentPromptsEvents, capturePrompt } from '@slayzone/agent-turns/server'
-import type { ConversationOrigin } from '@slayzone/task-contracts'
+import { agentPromptsEvents } from '@slayzone/agent-turns/server'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import type { RestApiDeps, TerminalStateBridge } from './types'
 import { getAuthGate } from '@slayzone/trpc-server'
@@ -366,166 +356,68 @@ const PayloadSchema = z.object({
 })
 
 /**
- * Persist a CLI's session_id (carried by its `SessionStart` hook) to the task's
- * `provider_config[mode].conversationId` so the session can be resumed
- * deterministically by id, AND append it to `conversationHistory`.
+ * Record a CLI's session id (carried by its `SessionStart` hook) on the agent-session
+ * ledger of the computer running the agent (robustness plan §9, P0) — the SINGLE
+ * authority for "a conversation exists": committed only after the agent's real
+ * SessionStart proves it, never eagerly by a client.
  *
- * Applies to the agents in `CONVERSATION_ID_CAPTURE_EVENT` (claude-code, codex,
- * antigravity) — their SessionStart hook carries the id directly. Codex
- * additionally has `/status` + disk-scan detection (`codex-adapter.ts`) as
- * untouched fallbacks.
+ * The provenance rules (which spawn — and so which TAB — reported it, an in-band
+ * `/clear` rotation, a foreign `--resume`) run on that computer, next to the ledger
+ * (`recordHookConversation`). The hub only names the computer and the hook's tab
+ * (validated: a hook context is agent-supplied).
  *
- * This is the SINGLE authority for "a conversation exists" for claude-code: the
- * id is committed here — only after the agent's real SessionStart proves the
- * conversation was created — never eagerly on the client. That closes the
- * phantom-id path that produced false "session expired" overlays (the old
- * client-side eager commit wrote an unconfirmed minted UUID; a session dying
- * before SessionStart left a pointer to a transcript Claude never wrote). See
- * plans/conv-id-robustness-v2.md.
+ * Keyed by `mode` (`ResolvedHook.mode`), never the agent id: they differ for a
+ * user-defined provider wrapping a capture agent. Best-effort — on any failure the
+ * adapter detection fallbacks still capture the id.
  *
- * The CLI session_id is a UUID — distinct from the SlayZone PTY session id
- * resolved via `bridge.findSession`. Keyed by `mode` (`ResolvedHook.mode`), never
- * the agent id: they differ for a user-defined provider wrapping a capture agent.
- *
- * Reads through the task domain (`getTaskOp` + `getProviderConversationId`)
- * rather than raw SQL so the `provider_config` schema stays owned by that
- * domain. Uses the pure `updateTask` (not `updateTaskOp`) deliberately:
- * `updateTaskOp` emits `db:tasks:update:done`, which triggers a GitHub/Linear
- * push — wrong for a machine-written conversation id. `notifyRenderer()` still
- * refreshes the renderer via `tasks:changed`. The per-mode deep-merge inside
- * `updateTask` preserves existing `flags`. Always overwrites
- * `conversationId`: the CLI mints a fresh id on resume, so the latest is right.
- *
- * Best-effort — on any failure the adapter detection fallbacks still capture
- * the id.
+ * Returns the tab the ledger recorded it on (the reporting spawn's), or null when
+ * nothing was recorded.
  */
 async function persistConversationId(
   deps: RestApiDeps,
+  computerId: string,
   mode: string,
   taskId: string,
   sessionId: string,
-  /** `SessionStart.source` — see `ResolvedHook.source`. Only `'clear'` alters
-   *  the decision below; every other value falls through to the id-match gate. */
+  /** `SessionStart.source` — only `'clear'` alters the decision. */
   source?: string,
-  spawnToken?: string
-): Promise<void> {
+  spawnToken?: string,
+  /** The hook context's tab — a fallback only; the spawn row names the tab. */
+  ctxTabId?: string
+): Promise<string | null> {
+  const ledger = deps.agentSessionLedger
+  if (!ledger) return null
   try {
-    // The task's board row as the renderer sees it (`provider_config` legacy
-    // mirror + `currentConversationByMode`), captured before the write so the
-    // refresh below fires only when the row actually changed. Every resume of a
-    // conversation already bound — each agent respawn, ~60 at a hub boot —
-    // re-records the same id and changes nothing on the board; pinging every
-    // renderer for those was pure refetch traffic.
-    const rowBefore = await boardRowSnapshot(deps, taskId)
-    const notifyIfRowChanged = async (): Promise<void> => {
-      const rowAfter = await boardRowSnapshot(deps, taskId)
-      // Unreadable either side → can't prove "unchanged": notify.
-      if (rowAfter !== null && rowAfter === rowBefore) return
-      deps.notifyRenderer({ taskIds: [taskId] })
-    }
-    // ── In-band id rotation (`/clear`) ────────────────────────────────────────
-    // The agent dropped its conversation and minted a NEW session id without
-    // restarting its process. The id-match gate below cannot classify this: the
-    // reported id necessarily differs from the one slay pre-minted, which reads
-    // identically to a hijack (`claude --resume <foreign>`), so a `/clear` was
-    // recorded `foreign-observed` — audit-only. The user-visible damage was that
-    // the task kept resuming the PRE-clear conversation and the cleared session
-    // never appeared in the sessions sidebar.
-    //
-    // What makes honoring it safe is that `source` and ownership are checked
-    // TOGETHER. `source === 'clear'` is self-reported by the agent, so on its own
-    // it would let any process claiming `clear` rebind the task; ownership alone
-    // is too weak because a manual `--resume` typed in the same terminal inherits
-    // the same environment. So we additionally require that slay recorded a spawn
-    // for this (task, mode) whose id is the conversation being REPLACED — a
-    // pre-minted id only slay's own command line could have introduced. A hijack
-    // fails on `source` (`resume`/`startup`), and a `clear` from an unrelated
-    // terminal fails on ownership.
-    //
-    // Scoped to `clear` on purpose: `compact` and `fork` also fire SessionStart,
-    // but `compact` keeps the same id (already honored, nothing to fix) and
-    // `fork`'s id semantics are unverified — left on the existing gate.
-    if (source === 'clear') {
-      const outgoing = await getCurrentConversationId(deps.db, taskId, mode)
-      // Idempotence: a repeated SessionStart for a clear we already recorded
-      // makes the new id the current one, so `outgoing === sessionId`. Nothing to
-      // do — falling through would record a duplicate row every replay.
-      if (outgoing === sessionId) return
-      // No outgoing conversation (a task that never bound an id) → there is
-      // nothing to claim ownership OF, so skip the lookup and let the standard
-      // gate handle it as an ordinary first spawn.
-      const ownedSpawn = outgoing
-        ? await findOwnedSpawnForConversation(deps.db, taskId, mode, outgoing)
-        : null
-      if (ownedSpawn) {
-        await recordConversation(deps.db, {
-          taskId,
-          mode,
-          conversationId: sessionId,
-          origin: 'in-band-clear'
-        })
-        await notifyIfRowChanged()
-        return
-      }
-      // No ownership claim → fall through to the standard gate, which will
-      // classify it `foreign-observed` exactly as before.
-    }
-
-    // Provenance gate: look up the `pending-spawn` row slay wrote when it
-    // launched the agent. If the CLI session id matches that row's expected
-    // id, record it as honored (`slay-spawned-*`). If it doesn't — or no
-    // pending row exists — record as `foreign-observed` (audit only, never
-    // honored on read). This closes the RC1 eager-persist clobber: a manual
-    // `claude --resume <foreign>` inside a slay PTY can no longer bind the
-    // foreign session to the task.
-    const pending = await findPendingSpawn(deps.db, taskId, mode)
-    // No pending → no spawn-intent record: definitely foreign.
-    // Pending w/ expectedSessionId === null → fresh PTY spawn where slay did
-    // NOT pre-mint a UUID. Accept a delayed hook only when its per-launch token
-    // matches. Older launches without tokens retain the short lookup window.
-    // Pending w/ exact match → honored.
-    // Pending w/ mismatch → foreign (e.g. user typed `claude --resume X`).
-    const currentId =
-      pending?.expectedSessionId === null
-        ? await getCurrentConversationId(deps.db, taskId, mode)
-        : null
-    if (currentId === sessionId) return
-    const freshSpawnMatches =
-      pending?.expectedSessionId === null &&
-      (!pending.spawnToken || pending.spawnToken === spawnToken)
-    const origin: ConversationOrigin = !pending
-      ? 'foreign-observed'
-      : pending.expectedSessionId === null
-        ? currentId || !freshSpawnMatches
-          ? 'foreign-observed'
-          : 'slay-spawned-fresh'
-        : sessionId === pending.expectedSessionId
-          ? pending.usedResume
-            ? 'slay-spawned-resume'
-            : 'slay-spawned-fresh'
-          : 'foreign-observed'
-    await recordConversation(deps.db, {
+    const tabId = (await validTab(deps, taskId, ctxTabId)) ?? undefined
+    // The board row is not touched (the hub holds no session id); the sessions list
+    // refreshes from the ledger's change event.
+    const recorded = await ledger.recordHookConversation(computerId, {
       taskId,
       mode,
-      conversationId: sessionId,
-      origin
+      sessionId,
+      ...(source ? { source } : {}),
+      ...(spawnToken ? { spawnToken } : {}),
+      ...(tabId ? { ctxTabId: tabId } : {})
     })
-    // Pending row stays — repeated SessionStart payloads on the same spawn
-    // are idempotent (we just append another row with the same origin).
-    // The row is pruned by the PTY-exit hook OR the periodic TTL sweep.
-    if (origin !== 'foreign-observed') await notifyIfRowChanged()
+    return recorded?.tabId ?? null
   } catch {
     // Best-effort — adapter `/status` + disk-scan fallbacks still cover capture.
+    return null
   }
 }
 
-/** Serialized board row of a task (null when it does not exist / cannot be read). */
-async function boardRowSnapshot(deps: RestApiDeps, taskId: string): Promise<string | null> {
-  try {
-    return JSON.stringify(await getTaskOp(deps.db, taskId))
-  } catch {
-    return null
-  }
+/** `tabId` when it is a terminal tab of `taskId` (a hook context is agent-supplied). */
+async function validTab(
+  deps: RestApiDeps,
+  taskId: string,
+  tabId: string | undefined
+): Promise<string | null> {
+  if (!tabId) return null
+  const row = await deps.db.get<{ id: string }>(
+    'SELECT id FROM terminal_tabs WHERE id = ? AND task_id = ?',
+    [tabId, taskId]
+  )
+  return row?.id ?? null
 }
 
 /**
@@ -591,7 +483,7 @@ export async function processAgentHook(
     // that session to the task, which makes the conversation the task's resume target.
     if (CONVERSATION_ID_CAPTURE_EVENT[hook.agentId] === hook.hookEvent && hook.sessionId) {
       try {
-        await confirmSessionConversation(deps.db, {
+        await deps.agentSessionLedger?.confirmSessionConversation(warmAgent.computerId, {
           sessionId: warmAgent.sessionId,
           observedConversationId: hook.sessionId
         })
@@ -614,27 +506,16 @@ export async function processAgentHook(
   }
   deps.agentLifecycle?.emit('event', event)
 
-  // Capture the user's prompt text (UserPromptSubmit) into agent_prompts for
-  // the agent-terminal "messages" sidebar. capturePrompt self-gates to
-  // capture-capable modes + the UserPromptSubmit event (once per turn → off
-  // the per-tool hot path) and is best-effort: fire-and-forget so a DB hiccup
-  // never blocks the hook ack.
-  if (hook.taskId) {
-    if (deps.captureAgentPrompt) {
-      try {
-        await deps.captureAgentPrompt(hook, reporter?.computerId)
-      } catch {
-        return 'unavailable'
-      }
-    } else {
-      // Legacy/test-only host. Production composition always supplies computer capture.
-      await capturePrompt(deps.db, {
-        agentId: hook.agentId,
-        hookEvent: hook.hookEvent,
-        taskId: hook.taskId,
-        sessionId: hook.sessionId,
-        raw: hook.raw
-      })
+  // Capture the user's prompt text (UserPromptSubmit) for the agent-terminal
+  // "messages" sidebar, on the computer that keeps the task's prompt history (the
+  // hub keeps none: robustness plan §9, v207). The capture self-gates to
+  // capture-capable modes + the UserPromptSubmit event (once per turn → off the
+  // per-tool hot path). A host without computers keeps no prompt history.
+  if (hook.taskId && deps.captureAgentPrompt) {
+    try {
+      await deps.captureAgentPrompt(hook, reporter?.computerId)
+    } catch {
+      return 'unavailable'
     }
   }
 
@@ -646,14 +527,25 @@ export async function processAgentHook(
   // Keyed by CONVERSATION id, not task: it marks the conversation itself, whichever
   // task holds it. Fire-and-forget: a DB hiccup must never block the ack, and the
   // next turn re-attempts.
+  // The computer running this agent holds its session ledger (robustness plan §9).
+  const ledgerComputer =
+    hook.taskId && deps.agentSessionLedger
+      ? await deps.agentSessionLedger
+          .computerFor(
+            { taskId: hook.taskId, mode: hook.mode, ...(hook.tabId ? { tabId: hook.tabId } : {}) },
+            reporter?.computerId ?? null
+          )
+          .catch(() => null)
+      : null
   if (
+    ledgerComputer &&
     hook.sessionId &&
     TURN_PROOF_EVENTS.has(hook.hookEvent) &&
     !firstTurnMarked.has(hook.sessionId)
   ) {
     const provenId = hook.sessionId
     firstTurnMarked.add(provenId)
-    void markSessionFirstTurn(deps.db, provenId).catch(() => {
+    void deps.agentSessionLedger!.markSessionFirstTurn(ledgerComputer, provenId).catch(() => {
       // Let a later turn retry rather than leaving the session unresumable.
       firstTurnMarked.delete(provenId)
     })
@@ -666,20 +558,27 @@ export async function processAgentHook(
   // raw.conversationId fallbacks during identity resolution.
   if (CONVERSATION_ID_CAPTURE_EVENT[hook.agentId] === hook.hookEvent) {
     const cliSessionId = hook.sessionId
-    if (hook.taskId && cliSessionId) {
+    if (hook.taskId && cliSessionId && ledgerComputer) {
       // Awaited: a single indexed SELECT + UPDATE on local SQLite is sub-ms,
       // and the capture event is low-frequency (repeats short-circuit in the
       // helper) — keeping it deterministic beats a fire-and-forget race.
-      await persistConversationId(
+      const recordedTab = await persistConversationId(
         deps,
+        ledgerComputer,
         hook.mode,
         hook.taskId,
         cliSessionId,
         hook.source,
-        hook.spawnToken
+        hook.spawnToken,
+        hook.tabId
       )
-      // Mirror onto the live PTY session for the idle-close gate.
-      const ptySessionId = bridge?.findSession(hook.taskId, hook.mode as AgentId)
+      // Mirror onto the live PTY session for the idle-close gate: the tab of the
+      // spawn that reported it (the ledger's answer), else the hook's own.
+      const ptySessionId = bridge?.findSession(
+        hook.taskId,
+        hook.mode as AgentId,
+        recordedTab ?? hook.tabId
+      )
       if (ptySessionId) bridge?.noteConversationId?.(ptySessionId, cliSessionId)
     }
   }
@@ -689,7 +588,7 @@ export async function processAgentHook(
   // regex). gemini/opencode still rely on adapter detection.
   // Hook-driven is a property of the AGENT; the PTY is found by its MODE.
   if (bridge && isHookDrivenMode(hook.agentId) && hook.taskId) {
-    const sessionId = bridge.findSession(hook.taskId, hook.mode as AgentId)
+    const sessionId = bridge.findSession(hook.taskId, hook.mode as AgentId, hook.tabId)
     if (sessionId) {
       const newState = hookToTerminalState(hook.agentId, sessionId, hook.hookEvent, hook.raw)
       const subagentId = subagentIdOf(hook.raw)

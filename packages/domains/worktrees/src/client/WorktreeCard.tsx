@@ -43,19 +43,19 @@ export function WorktreeCard({
 }) {
   const trpc = useTRPC()
   const revealInFinderMutation = useMutation(trpc.worktrees.revealInFinder.mutationOptions())
-  const { tasks, activeTask } = useGitPanelContext()
+  const { tasks, activeTask, worktreeOf } = useGitPanelContext()
   const displayTitle = node.isMain ? 'Main Repository' : node.branch || 'detached HEAD'
   const isActive =
-    activeTask?.worktree_path === node.path ||
-    (node.isMain && !activeTask?.worktree_path && activeTask)
+    (!!activeTask && worktreeOf(activeTask) === node.path) ||
+    (node.isMain && !activeTask?.has_worktree && activeTask)
 
   const associatedTasks = useMemo(() => {
     return tasks.filter((t) => {
       if (t.archived_at) return false
-      if (node.isMain) return !t.worktree_path
-      return t.worktree_path === node.path
+      if (node.isMain) return !t.has_worktree
+      return worktreeOf(t) === node.path
     })
-  }, [tasks, node.path, node.isMain])
+  }, [tasks, node.path, node.isMain, worktreeOf])
 
   return (
     <div className="group relative">

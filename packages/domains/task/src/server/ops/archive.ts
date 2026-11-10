@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
 import { buildTaskArchivedEvents } from '../history.js'
-import { cleanupTaskFull, parseTask, parseTasks, type OpDeps } from './shared.js'
+import { cleanupTaskFull, notifyTaskPaths, parseTask, parseTasks, type OpDeps } from './shared.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -34,12 +34,16 @@ export async function archiveTaskOp(
   }
   await db.namedTxn('task:archive', {
     sql: `
-      UPDATE tasks SET archived_at = datetime('now'), worktree_path = NULL, worktree_computer_id = NULL, base_dir = NULL, updated_at = datetime('now')
+      UPDATE tasks SET archived_at = datetime('now'), has_worktree = 0, has_base_dir = 0, updated_at = datetime('now')
       WHERE id = ? OR parent_id = ?
     `,
     params: [id, id],
     events: buildTaskArchivedEvents(toArchiveTasks)
   })
+  // Archived: no checkout any more, on the computer either (robustness plan §9, P0).
+  // `worktree_computer_id` stays so the clear reaches the computer holding the
+  // folders; without a folder it no longer decides where work runs.
+  for (const taskId of batch) await notifyTaskPaths(taskId, { op: 'clear' })
   const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [id])
   const archivedTask = parseTask(row)
   ipcMain?.emit('db:tasks:archive:done', null, id)

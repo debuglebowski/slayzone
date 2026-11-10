@@ -111,6 +111,7 @@ describe('desktop hub to remote computer PTY', () => {
     try {
       const warm = await backend.warmSpawn!(computerId, {
         warmId: 'warm-1',
+        projectId: 'p1',
         command: '/usr/sbin/nologin',
         args: [],
         cwd: process.cwd(),

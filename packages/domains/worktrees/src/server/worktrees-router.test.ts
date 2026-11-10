@@ -126,7 +126,7 @@ function git(cmd: string, cwd = repoPath): string {
 
 // --- init ---
 
-await caller.init({ path: repoPath })
+await caller.init({ target: { projectId: 'p-test' }, path: repoPath })
 
 describe('init', () => {
   test('repo was initialized', () => {
@@ -151,13 +151,13 @@ describe('isGitRepo', () => {
   })
 
   test('returns true for git repo', async () => {
-    expect(await caller.isGitRepo({ path: repoPath })).toBe(true)
+    expect(await caller.isGitRepo({ target: { projectId: 'p-test' }, path: repoPath })).toBe(true)
   })
 
   test('returns false for non-repo', async () => {
     const noRepo = path.join(root, 'not-a-repo')
     fs.mkdirSync(noRepo)
-    expect(await caller.isGitRepo({ path: noRepo })).toBe(false)
+    expect(await caller.isGitRepo({ target: { projectId: 'p-test' }, path: noRepo })).toBe(false)
   })
 })
 
@@ -165,7 +165,10 @@ describe('isGitRepo', () => {
 
 describe('getCurrentBranch', () => {
   test('returns current branch name', async () => {
-    const branch = await caller.getCurrentBranch({ path: repoPath })
+    const branch = await caller.getCurrentBranch({
+      target: { projectId: 'p-test' },
+      path: repoPath
+    })
     expect(branch).toBeTruthy()
   })
 })
@@ -174,12 +177,16 @@ describe('getCurrentBranch', () => {
 
 describe('hasUncommittedChanges', () => {
   test('returns false when clean', async () => {
-    expect(await caller.hasUncommittedChanges({ path: repoPath })).toBe(false)
+    expect(
+      await caller.hasUncommittedChanges({ target: { projectId: 'p-test' }, path: repoPath })
+    ).toBe(false)
   })
 
   test('returns true when tracked file modified', async () => {
     fs.writeFileSync(path.join(repoPath, 'README.md'), '# Modified')
-    expect(await caller.hasUncommittedChanges({ path: repoPath })).toBe(true)
+    expect(
+      await caller.hasUncommittedChanges({ target: { projectId: 'p-test' }, path: repoPath })
+    ).toBe(true)
     git('git checkout -- README.md') // restore
   })
 })
@@ -188,7 +195,10 @@ describe('hasUncommittedChanges', () => {
 
 describe('detectWorktrees', () => {
   test('detects main worktree', async () => {
-    const worktrees = (await caller.detectWorktrees({ repoPath })) as {
+    const worktrees = (await caller.detectWorktrees({
+      target: { projectId: 'p-test' },
+      repoPath
+    })) as {
       path: string
       branch: string | null
       isMain: boolean
@@ -222,7 +232,7 @@ describe('createWorktree', () => {
     expect(fs.existsSync(wtPath)).toBe(true)
     expect(fs.existsSync(path.join(wtPath, 'release.txt'))).toBe(true)
     // Clean up
-    await caller.removeWorktree({ repoPath, worktreePath: wtPath })
+    await caller.removeWorktree({ target: { projectId: 'p-test' }, repoPath, worktreePath: wtPath })
   })
 })
 
@@ -248,7 +258,7 @@ describe('worktree setup script', () => {
     expect(marker.includes(`WORKTREE=${wtPath}`)).toBe(true)
     expect(marker.includes(`REPO=${repoPath}`)).toBe(true)
     // Clean up
-    await caller.removeWorktree({ repoPath, worktreePath: wtPath })
+    await caller.removeWorktree({ target: { projectId: 'p-test' }, repoPath, worktreePath: wtPath })
   })
 
   test('returns ran=false when no setup script', async () => {
@@ -262,14 +272,14 @@ describe('worktree setup script', () => {
     const result = runWorktreeSetupScriptSync(wtPath, repoPath)
     expect(result.ran).toBe(false)
     // Clean up
-    await caller.removeWorktree({ repoPath, worktreePath: wtPath })
+    await caller.removeWorktree({ target: { projectId: 'p-test' }, repoPath, worktreePath: wtPath })
   })
 })
 
 describe('removeWorktree', () => {
   test('removes worktree', async () => {
     const wtPath = path.join(root, 'wt-1')
-    await caller.removeWorktree({ repoPath, worktreePath: wtPath })
+    await caller.removeWorktree({ target: { projectId: 'p-test' }, repoPath, worktreePath: wtPath })
     expect(fs.existsSync(path.join(wtPath, '.git'))).toBe(false)
   })
 })
@@ -346,7 +356,7 @@ describe('initSubmodules', () => {
     expect(result.success).toBe(true)
     expect(fs.existsSync(path.join(wtPath, 'vendor', 'foo', 'lib.txt'))).toBe(true)
 
-    await caller.removeWorktree({ repoPath, worktreePath: wtPath })
+    await caller.removeWorktree({ target: { projectId: 'p-test' }, repoPath, worktreePath: wtPath })
     delete process.env.GIT_CONFIG_PARAMETERS
   })
 })
@@ -362,7 +372,11 @@ describe('stageFile', () => {
   })
 
   test('stages a file', async () => {
-    await caller.stageFile({ path: repoPath, filePath: 'staged.txt' })
+    await caller.stageFile({
+      target: { projectId: 'p-test' },
+      path: repoPath,
+      filePath: 'staged.txt'
+    })
     const status = git('git status --porcelain')
     expect(status.includes('A  staged.txt')).toBe(true)
   })
@@ -370,7 +384,11 @@ describe('stageFile', () => {
 
 describe('unstageFile', () => {
   test('unstages a file', async () => {
-    await caller.unstageFile({ path: repoPath, filePath: 'staged.txt' })
+    await caller.unstageFile({
+      target: { projectId: 'p-test' },
+      path: repoPath,
+      filePath: 'staged.txt'
+    })
     const status = git('git status --porcelain')
     expect(status.includes('?? staged.txt')).toBe(true)
   })
@@ -378,7 +396,7 @@ describe('unstageFile', () => {
 
 describe('stageAll', () => {
   test('stages all files', async () => {
-    await caller.stageAll({ path: repoPath })
+    await caller.stageAll({ target: { projectId: 'p-test' }, path: repoPath })
     const status = git('git status --porcelain')
     // Both files staged
     expect(status.includes('A  staged.txt')).toBe(true)
@@ -388,7 +406,7 @@ describe('stageAll', () => {
 
 describe('unstageAll', () => {
   test('unstages all files', async () => {
-    await caller.unstageAll({ path: repoPath })
+    await caller.unstageAll({ target: { projectId: 'p-test' }, path: repoPath })
     const status = git('git status --porcelain')
     expect(status.includes('?? staged.txt')).toBe(true)
   })
@@ -400,7 +418,11 @@ describe('discardFile', () => {
     git('git add staged.txt unstaged.txt')
     git('git commit -m "add files"')
     fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'MODIFIED')
-    await caller.discardFile({ path: repoPath, filePath: 'staged.txt' })
+    await caller.discardFile({
+      target: { projectId: 'p-test' },
+      path: repoPath,
+      filePath: 'staged.txt'
+    })
     const content = fs.readFileSync(path.join(repoPath, 'staged.txt'), 'utf-8')
     expect(content).toBe('staged content')
   })
@@ -412,7 +434,10 @@ describe('getWorkingDiff', () => {
   test('returns diff snapshot', async () => {
     // Make a change
     fs.writeFileSync(path.join(repoPath, 'staged.txt'), 'diff test')
-    const diff = (await caller.getWorkingDiff({ path: repoPath })) as {
+    const diff = (await caller.getWorkingDiff({
+      target: { projectId: 'p-test' },
+      path: repoPath
+    })) as {
       targetPath: string
       files: string[]
       stagedFiles: string[]
@@ -430,7 +455,10 @@ describe('getWorkingDiff', () => {
   test('lists untracked files with unicode names', async () => {
     const name = 'ändringar.txt'
     fs.writeFileSync(path.join(repoPath, name), 'swedish chars')
-    const diff = (await caller.getWorkingDiff({ path: repoPath })) as {
+    const diff = (await caller.getWorkingDiff({
+      target: { projectId: 'p-test' },
+      path: repoPath
+    })) as {
       untrackedFiles: string[]
       files: string[]
     }
@@ -444,6 +472,7 @@ describe('getUntrackedFileDiff', () => {
   test('returns diff for untracked file', async () => {
     fs.writeFileSync(path.join(repoPath, 'new-untracked.txt'), 'hello')
     const diff = (await caller.getUntrackedFileDiff({
+      target: { projectId: 'p-test' },
       repoPath,
       filePath: 'new-untracked.txt'
     })) as string
@@ -457,7 +486,11 @@ describe('getUntrackedFileDiff', () => {
   // falsy-guard with the narrowest zod-valid falsy value (empty string), which the
   // op treats identically (returns '').
   test('returns empty string for empty filePath (op falsy-guard via narrowest valid input)', async () => {
-    const diff = (await caller.getUntrackedFileDiff({ repoPath, filePath: '' })) as string
+    const diff = (await caller.getUntrackedFileDiff({
+      target: { projectId: 'p-test' },
+      repoPath,
+      filePath: ''
+    })) as string
     expect(diff).toBe('')
   })
 
@@ -465,7 +498,11 @@ describe('getUntrackedFileDiff', () => {
   test('rejects null filePath (zod stricter than legacy handler)', async () => {
     expect(
       await didThrow(() =>
-        caller.getUntrackedFileDiff({ repoPath, filePath: null as unknown as string })
+        caller.getUntrackedFileDiff({
+          target: { projectId: 'p-test' },
+          repoPath,
+          filePath: null as unknown as string
+        })
       )
     ).toBe(true)
   })
@@ -473,7 +510,11 @@ describe('getUntrackedFileDiff', () => {
   test('returns diff for file with unicode name', async () => {
     const name = 'protokoll från möte.txt'
     fs.writeFileSync(path.join(repoPath, name), 'unicode content')
-    const diff = (await caller.getUntrackedFileDiff({ repoPath, filePath: name })) as string
+    const diff = (await caller.getUntrackedFileDiff({
+      target: { projectId: 'p-test' },
+      repoPath,
+      filePath: name
+    })) as string
     expect(diff.includes('unicode content')).toBe(true)
     fs.unlinkSync(path.join(repoPath, name))
   })
@@ -484,6 +525,7 @@ describe('getUntrackedFileDiffs', () => {
     fs.writeFileSync(path.join(repoPath, 'batch-a.txt'), 'alpha')
     fs.writeFileSync(path.join(repoPath, 'batch-b.txt'), 'beta')
     const diffs = (await caller.getUntrackedFileDiffs({
+      target: { projectId: 'p-test' },
       repoPath,
       filePaths: ['batch-a.txt', 'batch-b.txt', 'batch-missing.txt']
     })) as Record<string, string>
@@ -501,7 +543,11 @@ describe('commitFiles', () => {
   test('creates a commit', async () => {
     fs.writeFileSync(path.join(repoPath, 'commit-test.txt'), 'commit me')
     git('git add commit-test.txt')
-    await caller.commitFiles({ repoPath, message: 'test commit message' })
+    await caller.commitFiles({
+      target: { projectId: 'p-test' },
+      repoPath,
+      message: 'test commit message'
+    })
     const log = git('git log --oneline -1')
     expect(log.includes('test commit message')).toBe(true)
   })
@@ -511,7 +557,9 @@ describe('commitFiles', () => {
 
 describe('isMergeInProgress', () => {
   test('returns false when no merge', async () => {
-    expect(await caller.isMergeInProgress({ path: repoPath })).toBe(false)
+    expect(
+      await caller.isMergeInProgress({ target: { projectId: 'p-test' }, path: repoPath })
+    ).toBe(false)
   })
 })
 
@@ -531,6 +579,7 @@ describe('mergeIntoParent', () => {
 
   test('merges clean branch', async () => {
     const result = (await caller.mergeIntoParent({
+      target: { projectId: 'p-test' },
       projectPath: repoPath,
       parentBranch: mainBranch,
       sourceBranch: 'merge-source'
@@ -564,6 +613,7 @@ describe('mergeIntoParent (conflict)', () => {
 
   test('detects merge conflicts', async () => {
     const result = (await caller.mergeIntoParent({
+      target: { projectId: 'p-test' },
       projectPath: repoPath,
       parentBranch: 'conflict-a',
       sourceBranch: 'conflict-b'
@@ -579,7 +629,10 @@ describe('mergeIntoParent (conflict)', () => {
 
 describe('getConflictedFiles', () => {
   test('lists conflicted files', async () => {
-    const files = (await caller.getConflictedFiles({ path: repoPath })) as string[]
+    const files = (await caller.getConflictedFiles({
+      target: { projectId: 'p-test' },
+      path: repoPath
+    })) as string[]
     expect(files).toContain('conflict.txt')
   })
 })
@@ -587,6 +640,7 @@ describe('getConflictedFiles', () => {
 describe('getConflictContent', () => {
   test('returns base/ours/theirs/merged', async () => {
     const content = (await caller.getConflictContent({
+      target: { projectId: 'p-test' },
       repoPath,
       filePath: 'conflict.txt'
     })) as {
@@ -606,6 +660,7 @@ describe('getConflictContent', () => {
 describe('writeResolvedFile', () => {
   test('writes resolved content', async () => {
     await caller.writeResolvedFile({
+      target: { projectId: 'p-test' },
       repoPath,
       filePath: 'conflict.txt',
       content: 'resolved content'
@@ -617,8 +672,10 @@ describe('writeResolvedFile', () => {
 
 describe('abortMerge', () => {
   test('aborts merge in progress', async () => {
-    await caller.abortMerge({ path: repoPath })
-    expect(await caller.isMergeInProgress({ path: repoPath })).toBe(false)
+    await caller.abortMerge({ target: { projectId: 'p-test' }, path: repoPath })
+    expect(
+      await caller.isMergeInProgress({ target: { projectId: 'p-test' }, path: repoPath })
+    ).toBe(false)
   })
 })
 
@@ -635,6 +692,7 @@ describe('mergeWithAI', () => {
     git(`git checkout ${mainBranch}`)
 
     const result = (await caller.mergeWithAI({
+      target: { projectId: 'p-test' },
       projectPath: repoPath,
       worktreePath: repoPath,
       parentBranch: mainBranch,
@@ -662,6 +720,7 @@ describe('mergeWithAI', () => {
     git('git commit -m "ai mine"')
 
     const result = (await caller.mergeWithAI({
+      target: { projectId: 'p-test' },
       projectPath: repoPath,
       worktreePath: repoPath,
       parentBranch: 'ai-base',
@@ -691,6 +750,7 @@ describe('getWorkingDiff range mode', () => {
     const sha2 = git('git rev-parse HEAD')
 
     const snap = (await caller.getWorkingDiff({
+      target: { projectId: 'p-test' },
       path: repoPath,
       opts: { contextLines: 'all', fromSha: sha1, toSha: sha2 }
     })) as {
@@ -712,6 +772,7 @@ describe('getWorkingDiff range mode', () => {
   test('diff between identical SHAs returns empty', async () => {
     const sha = git('git rev-parse HEAD')
     const snap = (await caller.getWorkingDiff({
+      target: { projectId: 'p-test' },
       path: repoPath,
       opts: { fromSha: sha, toSha: sha }
     })) as { files: string[]; unstagedPatch: string }
@@ -722,6 +783,7 @@ describe('getWorkingDiff range mode', () => {
   test('without fromSha/toSha falls back to HEAD-based working diff', async () => {
     fs.writeFileSync(path.join(repoPath, 'unstaged-edit.txt'), 'live change')
     const snap = (await caller.getWorkingDiff({
+      target: { projectId: 'p-test' },
       path: repoPath,
       opts: { contextLines: 'all' }
     })) as { untrackedFiles: string[] }
@@ -1165,7 +1227,10 @@ describe('resolveCopyBehavior', () => {
 
 describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
   test('getIgnoredFileTree proc', async () => {
-    const tree = (await caller.getIgnoredFileTree({ repoPath: cfRepo })) as {
+    const tree = (await caller.getIgnoredFileTree({
+      target: { projectId: 'p-test' },
+      repoPath: cfRepo
+    })) as {
       name: string
       children: unknown[]
     }[]
@@ -1180,6 +1245,7 @@ describe('getIgnoredFileTree / copyIgnoredFiles via router', () => {
     await createWorktree(cfRepo, wtPath, 'proc-copy-test')
 
     await caller.copyIgnoredFiles({
+      target: { projectId: 'p-test' },
       repoPath: cfRepo,
       worktreePath: wtPath,
       paths: ['dist', 'app.log']

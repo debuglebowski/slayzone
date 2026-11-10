@@ -18,7 +18,6 @@ import type {
   ChatCatalog,
   ChatCatalogOperation,
   ChatCatalogContext,
-  ChatDataOps,
   QueueAdmission,
   ChatQueuePushOptions
 } from '@slayzone/terminal/runtime'
@@ -27,19 +26,25 @@ import {
   chatQueueOperationSchemas,
   parseChatInvocation,
   CHAT_READ_OPERATIONS,
+  COMPUTER_OWNED_CHAT_KEYS,
   type ChatOperation,
   type ChatQueueOperation
 } from '../shared'
 import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
-import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
+import { retiredComputerSql, type ChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 import { createHistoryProgress } from './hub-history-progress'
 import { createChatFolderDeletions } from './hub-folders'
-import { createHubProviderConfigStore } from './hub-provider-config'
-import { chatStorageMode } from './storage-mode'
+import { chatStorageMode, isStorageOnlyChatOwner } from './storage-mode'
 import { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
-import { legacySessionAuthority } from './legacy-session-authority'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { createHubProviderTransitions } from './hub-provider-transition'
+import { isComputerUnreachable, isolateItem } from './hub-isolation'
+import {
+  createAsyncFaultLedger,
+  forEachIsolated,
+  StructuralFaultError
+} from '@slayzone/platform/isolation'
 
 const trimUnsetArgs = (args: unknown[]) => {
   let end = args.length
@@ -81,6 +86,8 @@ const historyReadMethods = new Set([
 ])
 
 /** Calls that open a tab's session on the computer: a send behind one waits for it. */
+/** Queue operations on one queued message: `[itemId, …, tabId]`. */
+const QUEUE_ITEM_METHODS = new Set(['update', 'move', 'hold', 'release', 'steer', 'remove'])
 const SESSION_OPENING_OPS = new Set(['hydrate', 'start', 'reset', 'refuseStart'])
 
 /** The tab a call names: its first argument, or that argument's `tabId`. */
@@ -104,12 +111,30 @@ export function createHubChatRelay(opts: {
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   recoverComputer?(computerId: string, force?: boolean): Promise<void>
+  /** A conversation's state could not be applied; the pass went on without it. */
+  onConversationFailure?(computerId: string, conversationId: string, error: Error): void
+  /**
+   * Why this conversation is fenced (its last recovery or metadata pass failed),
+   * if it is. Its chat refuses with this error; opening it again retries recovery.
+   */
+  conversationFence?(conversationId: string): Error | undefined
   bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap>
   migrate(id: string, computerId: string): Promise<HubChatOwnership>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   quiesceProvider?(owner: HubChatOwnership): Promise<void>
+  /** A reserved provider switch was superseded (logged; never shown to the user). */
+  onProviderTransitionSuperseded?(info: {
+    id: string
+    conversationId: string
+    taskId: string
+    reason: string
+  }): void
   onTasksChanged?(taskId: string): void
-  recordConversation: ChatDataOps['recordConversation']
+  /**
+   * A task's sessions changed on its computer (a chat recorded a conversation in
+   * its ledger): the sessions list refreshes. The hub keeps no copy (§9).
+   */
+  onSessionsChanged?(taskId: string): void
   onState?(
     sessionId: string,
     state: ChatTerminalState,
@@ -122,17 +147,17 @@ export function createHubChatRelay(opts: {
   const { db, ownership } = opts
   const providerTransitions = createHubProviderTransitions({
     ...opts,
-    quiesce: opts.quiesceProvider
+    quiesce: opts.quiesceProvider,
+    onSuperseded: opts.onProviderTransitionSuperseded
   })
   const folderDeletions = createChatFolderDeletions(db)
-  const providerConfig = createHubProviderConfigStore(db)
   const events = new TypedEmitter<ChatEventMap>(),
     queueEvents = new TypedEmitter<ChatQueueEventMap>()
   const sessionMirror = new Map<
     string,
     ChatSessionStateEntry & { computerId: string; providerSessionId?: string | null }
   >()
-  const taskMigrations = new Map<string, Promise<void>>()
+  const taskMigrations = new Map<string, Promise<Map<string, Error>>>()
   const registrations = new Map<string, Promise<HubChatOwnership>>()
   const queueIngress = new Map<string, Promise<void>>()
   /**
@@ -211,16 +236,62 @@ export function createHubChatRelay(opts: {
       )
     )
       throw new Error('Invalid chat initialization acknowledgement')
-    return ownership.activateBootstrap(owner.id, reservation.computerId, reservation.epoch)
+    const active = await ownership.activateBootstrap(
+      owner.id,
+      reservation.computerId,
+      reservation.epoch
+    )
+    await releaseStartingValues(active, value)
+    return active
+  }
+  /**
+   * The computer acknowledged a bootstrap: it holds its own chat settings for the
+   * owner's (task, mode) now, seeded from the hub's starting values if it had none.
+   * The hub's copy goes (decision 2: no copy, nothing to drift) — each key only if
+   * it still holds the value that bootstrap carried: a starting value written since
+   * (a template applied meanwhile) stays for the next bootstrap. A storage-only
+   * owner never seeds settings, so it keeps them for the chat that will.
+   */
+  async function releaseStartingValues(owner: HubChatOwnership, sent: ChatBootstrap) {
+    if (owner.state !== 'active' || isStorageOnlyChatOwner(owner)) return
+    const seeded = sent.providerConfig as Record<string, unknown>
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const row = await db.get<{ provider_config: string | null }>(
+        'SELECT provider_config FROM tasks WHERE id=?',
+        [owner.taskId]
+      )
+      if (!row?.provider_config) return
+      let config: Record<string, Record<string, unknown>>
+      try {
+        config = JSON.parse(row.provider_config)
+      } catch {
+        return
+      }
+      const entry = config?.[owner.mode]
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+      const keys = COMPUTER_OWNED_CHAT_KEYS.filter(
+        (key) =>
+          Object.hasOwn(entry, key) && JSON.stringify(entry[key]) === JSON.stringify(seeded[key])
+      )
+      if (!keys.length) return
+      const next = { ...entry }
+      for (const key of keys) delete next[key]
+      const result = await db.run(
+        'UPDATE tasks SET provider_config=? WHERE id=? AND provider_config=?',
+        [JSON.stringify({ ...config, [owner.mode]: next }), owner.taskId, row.provider_config]
+      )
+      if (result.changes) return
+    }
   }
   async function createTab(tab: TabRow) {
     const existing = await ownership.forTab(tab.id)
     if (existing)
       return (await ownership.bootstrapReservation(existing.id)) ? initialize(existing) : existing
+    const tables = await legacyChatTables(db)
     const legacy =
       (await db.get(
         `SELECT 1 FROM terminal_tabs t JOIN tasks task ON task.id=t.task_id WHERE t.id=? AND
-          (${legacyChatTabContentSql()} OR ${legacyChatTaskContentSql()} OR EXISTS(
+          (${legacyChatTabContentSql(tables)} OR ${legacyChatTaskContentSql(tables)} OR EXISTS(
             SELECT 1 FROM chat_cli_snapshots WHERE project_id=task.project_id AND mode=?))`,
         [tab.id, chatStorageMode(tab.mode)]
       )) || (await opts.hasLegacyTaskContent?.(tab.task_id))
@@ -249,22 +320,36 @@ export function createHubChatRelay(opts: {
     registrations.set(tab.id, work)
     return work
   }
-  async function migrateTask(taskId: string) {
+  /**
+   * Migrates every chat of a task that still needs it, each on its own: one
+   * stuck chat (or the task-wide authority) fails alone and never stops the
+   * others. Resolves with the failures by conversation id (`tab:<id>` for a tab
+   * whose chat could not even be registered); never rejects, except when the
+   * computer is unreachable (then no item can succeed).
+   */
+  function migrateTask(taskId: string): Promise<Map<string, Error>> {
     const existing = taskMigrations.get(taskId)
     if (existing) return existing
     const work = (async () => {
+      const failures = new Map<string, Error>()
+      const tables = await legacyChatTables(db)
       const tabs = await db.all<TabRow>(
         `SELECT t.id,t.task_id,t.mode FROM terminal_tabs t WHERE t.task_id=? AND (
-          t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+          t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql(tables)})
           ORDER BY CASE WHEN EXISTS(SELECT 1 FROM chat_threads WHERE id=t.id) THEN 1 ELSE 0 END,t.created_at,t.id`,
         [taskId]
       )
-      for (const tab of tabs) await registerTab(tab)
+      for (const tab of tabs)
+        await isolateItem(
+          `registration of chat tab ${tab.id}`,
+          () => registerTab(tab),
+          (error) => failures.set(`tab:${tab.id}`, error)
+        )
       // Task-wide prompts/diagnostics outlive every closable terminal tab. Give
       // them their own durable authority before freezing any new tab snapshot.
       if (
         (await db.get(
-          `SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql()}`,
+          `SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql(tables)}`,
           [taskId]
         )) ||
         (await opts.hasLegacyTaskContent?.(taskId))
@@ -287,26 +372,38 @@ export function createHubChatRelay(opts: {
       }
       for (const owner of await ownership.forTask(taskId)) {
         if (owner.state === 'deleted') continue
-        if (await ownership.bootstrapReservation(owner.id)) {
-          await initialize(owner)
-          continue
-        }
-        if (owner.state === 'active' && !owner.cleanupPending) continue
-        const pc =
-          owner.destinationComputerId ??
-          (await (opts.resolveMigrationComputer
-            ? opts.resolveMigrationComputer(owner)
-            : opts.resolveComputer(taskId)))
-        if (!pc)
-          throw new Error('Chat computer unavailable. Connect its computer to migrate history.')
-        await opts.gate?.(pc, taskId)
-        await opts.migrate(owner.id, pc)
+        await isolateItem(
+          `migration of conversation ${owner.id}`,
+          async () => {
+            if (await ownership.bootstrapReservation(owner.id)) {
+              await initialize(owner)
+              return
+            }
+            if (owner.state === 'active' && !owner.cleanupPending) return
+            const pc =
+              owner.destinationComputerId ??
+              (await (opts.resolveMigrationComputer
+                ? opts.resolveMigrationComputer(owner)
+                : opts.resolveComputer(taskId)))
+            if (!pc)
+              throw new Error('Chat computer unavailable. Connect its computer to migrate history.')
+            await opts.gate?.(pc, taskId)
+            await opts.migrate(owner.id, pc)
+          },
+          (error) => failures.set(owner.id, error)
+        )
       }
+      return failures
     })().finally(() => {
       taskMigrations.delete(taskId)
     })
     taskMigrations.set(taskId, work)
     return work
+  }
+  /** Every chat of the task migrated (prompt history spans all of them). */
+  async function migrateWholeTask(taskId: string) {
+    const [first] = (await migrateTask(taskId)).values()
+    if (first) throw first
   }
   const tabEnsures = new Map<string, Promise<HubChatOwnership>>()
   function ensureTab(tabId: string) {
@@ -328,7 +425,14 @@ export function createHubChatRelay(opts: {
         owner?.computerId ??
         owner?.destinationComputerId ??
         (taskId ? await opts.resolveComputer(taskId) : null)
-      if (pc) await opts.recoverComputer(pc, !!(owner && (await ownership.unavailable(owner.id))))
+      if (pc)
+        await opts.recoverComputer(
+          pc,
+          !!(
+            owner &&
+            ((await ownership.unavailable(owner.id)) || opts.conversationFence?.(owner.id))
+          )
+        )
       owner = await ownership.forTab(tabId)
     }
     if (!owner) {
@@ -339,7 +443,7 @@ export function createHubChatRelay(opts: {
         !tab ||
         (!isChatSupported(chatStorageMode(tab.mode)) &&
           !(await db.get(
-            `SELECT 1 FROM terminal_tabs t WHERE t.id=? AND ${legacyChatTabContentSql()}`,
+            `SELECT 1 FROM terminal_tabs t WHERE t.id=? AND ${legacyChatTabContentSql(await legacyChatTables(db))}`,
             [tab.id]
           )))
       )
@@ -349,17 +453,25 @@ export function createHubChatRelay(opts: {
     if (owner.state === 'deleted') throw new Error('Chat conversation deleted')
     const unavailable = await ownership.unavailable(owner.id)
     if (unavailable) throw new Error(unavailable.reason)
-    if (
-      owner.state !== 'active' ||
-      owner.cleanupPending ||
-      (await db.get(
-        `SELECT 1 FROM chat_legacy_task_authority a JOIN chat_ownership o ON o.id=a.conversation_id WHERE a.task_id=? AND (o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1)`,
-        [owner.taskId]
-      ))
-    ) {
-      await migrateTask(owner.taskId)
+    const fence = opts.conversationFence?.(owner.id)
+    if (fence) throw fence
+    if (owner.state !== 'active' || owner.cleanupPending) {
+      const failure = (await migrateTask(owner.taskId)).get(owner.id)
+      if (failure) throw failure
       owner = (await ownership.get(owner.id))!
-    }
+    } else if (
+      // The task-wide authority still migrating (a deleted one only delivers
+      // its removal: not migration work). A clean chat never waits on it: the
+      // migration runs on, and a failure shows on the authority's own reads.
+      await db.get(
+        `SELECT 1 FROM chat_legacy_task_authority a JOIN chat_ownership o ON o.id=a.conversation_id WHERE a.task_id=?
+        AND (o.state IN ('legacy','copying','verified') OR (o.state='active' AND o.cleanup_pending=1))`,
+        [owner.taskId]
+      )
+    )
+      void migrateTask(owner.taskId).catch(() => {
+        /* Unreachable computer: the next open or recovery retries. */
+      })
     if (!owner.computerId || owner.state !== 'active')
       throw new Error('Chat history migration is incomplete')
     for (;;) {
@@ -408,18 +520,19 @@ export function createHubChatRelay(opts: {
       const unavailable = await ownership.unavailable(owner.id)
       if (unavailable) throw new Error(unavailable.reason)
     }
+    const tables = await legacyChatTables(db)
     if (owners.length) {
       if (
         (await db.get(
-          `SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql()}`,
+          `SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql(tables)}`,
           [taskId]
         )) ||
         (await opts.hasLegacyTaskContent?.(taskId))
       )
-        await migrateTask(taskId)
+        await migrateWholeTask(taskId)
       for (const owner of owners)
         if (owner.state !== 'active' || owner.cleanupPending) {
-          await migrateTask(taskId)
+          await migrateWholeTask(taskId)
           break
         }
       return (await ownership.forTask(taskId)).filter((o) => o.state === 'active')
@@ -428,9 +541,10 @@ export function createHubChatRelay(opts: {
     if (!computerId) throw new Error('Prompt history computer unavailable')
     await opts.gate?.(computerId, taskId)
     const legacy =
-      (await db.get(`SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql()}`, [
-        taskId
-      ])) || (await opts.hasLegacyTaskContent?.(taskId))
+      (await db.get(
+        `SELECT 1 FROM tasks task WHERE task.id=? AND ${legacyChatTaskContentSql(tables)}`,
+        [taskId]
+      )) || (await opts.hasLegacyTaskContent?.(taskId))
     const owner = legacy
       ? await ownership.register({
           id: randomUUID(),
@@ -442,7 +556,7 @@ export function createHubChatRelay(opts: {
         })
       : await registerTab({ id: `prompt-history:${taskId}`, task_id: taskId, mode: 'claude-chat' })
     if (legacy) {
-      await migrateTask(taskId)
+      await migrateWholeTask(taskId)
       return (await ownership.forTask(taskId)).filter((o) => o.state === 'active')
     }
     await sync(owner)
@@ -450,20 +564,17 @@ export function createHubChatRelay(opts: {
   }
   async function sync(owner: HubChatOwnership) {
     if (!owner.computerId) throw new Error('Chat computer unavailable')
-    await opts.request(owner.computerId, { kind: 'bootstrap', value: await opts.bootstrap(owner) })
+    const value = await opts.bootstrap(owner)
+    await opts.request(owner.computerId, { kind: 'bootstrap', value })
+    await releaseStartingValues(owner, value)
   }
   async function route(target: 'ops' | 'queue', method: string, args: unknown[]) {
     const first = args[0]
-    if (
-      target === 'queue' &&
-      !['list', 'push', 'clear', 'reserve', 'renewReservation', 'cancelReservation'].includes(
-        method
-      )
-    ) {
-      const owner = await ownership.forQueueItem(String(first))
-      if (!owner) throw new Error('Unknown queued message')
-      return ensureTab(owner.tabId)
-    }
+    // A queued message is reached through its tab (its last argument): the hub keeps
+    // no per-message routes (robustness plan §9, v208); the computer refuses an item
+    // the named tab does not hold.
+    if (target === 'queue' && QUEUE_ITEM_METHODS.has(method))
+      return ensureTab(String(args[args.length - 1]))
     if (first && typeof first === 'object' && 'tabId' in first)
       return ensureTab(String(first.tabId))
     if (target === 'ops' && taskMethods.has(method))
@@ -576,82 +687,9 @@ export function createHubChatRelay(opts: {
       throw new Error('Chat metadata ownership mismatch')
     await opts.gate?.(computerId, current.taskId)
     const value = raw.value as Record<string, unknown>
-    if (raw.kind === 'provider-config') {
-      const allowed = new Set([
-        'chatMode',
-        'chatModel',
-        'chatEffort',
-        'chatCollaboration',
-        'chatFastMode',
-        'chatConversationId',
-        'conversationId'
-      ])
-      const mode = String(value.mode),
-        key = String(value.key)
-      if (
-        !allowed.has(key) ||
-        (!['claude-chat', 'claude-code', 'codex-chat', 'codex'].includes(mode) &&
-          mode !== current.mode)
-      )
-        throw new Error('Invalid provider metadata')
-      await providerConfig.apply(
-        current.taskId,
-        mode,
-        key,
-        value.value,
-        value.revision === undefined ? 0 : Number(value.revision)
-      )
-    } else if (raw.kind === 'conversation') {
-      const input = value as unknown as {
-        mode: string
-        conversationId: string | null
-        origin: string
-        legacyJsonField?: string
-        createdAt?: number
-        ownershipClaim?: boolean
-      }
-      if (
-        typeof input.mode !== 'string' ||
-        !input.mode ||
-        input.mode.length > 200 ||
-        (input.legacyJsonField &&
-          !['conversationId', 'chatConversationId'].includes(input.legacyJsonField))
-      )
-        throw new Error('Invalid conversation metadata')
-      await opts.recordConversation({
-        id: `chat:${current.id}:${raw.operationId}:${input.createdAt ?? 0}`,
-        taskId: current.taskId,
-        mode: input.mode,
-        conversationId: input.conversationId,
-        origin: input.origin as Parameters<ChatDataOps['recordConversation']>[0]['origin'],
-        ...(input.createdAt !== undefined ? { createdAt: input.createdAt } : {}),
-        legacyJsonField: input.legacyJsonField as
-          | 'conversationId'
-          | 'chatConversationId'
-          | undefined,
-        // Current provider settings have their own task/provider revision.
-        // Session history replay must never bypass that authority.
-        mirrorProviderConfig: false
-      })
-      if (input.conversationId && input.ownershipClaim !== false) {
-        const historical =
-          input.ownershipClaim !== undefined || raw.operationId.startsWith('snapshot:')
-        const authority = historical
-          ? await legacySessionAuthority(
-              db,
-              current.taskId,
-              input.mode,
-              input.conversationId,
-              (owner) =>
-                opts.resolveMigrationComputer
-                  ? opts.resolveMigrationComputer(owner)
-                  : opts.resolveComputer(owner.taskId)
-            )
-          : current.id
-        if (authority === current.id)
-          await ownership.bindProvider(current.id, input.conversationId, input.mode)
-      }
-    } else if (raw.kind === 'activity') {
+    // Chat settings, session ids and queued messages are the computer's alone
+    // (robustness plan §9, v208): only what feeds hub-owned state is reported.
+    if (raw.kind === 'activity') {
       const at = Number(value.at)
       if (!Number.isSafeInteger(at)) throw new Error('Invalid activity metadata')
       await db.run(
@@ -671,15 +709,25 @@ export function createHubChatRelay(opts: {
       )
     ) {
       await reconcileFileLocation(current, computerId, raw.kind, value)
-    } else if (raw.kind === 'queue-item') {
-      await ownership.setQueueRoute(String(value.id), current.id, value.removed === true)
     } else if (raw.kind !== 'thread-created') throw new Error('Unknown chat metadata kind')
     opts.onTasksChanged?.(current.taskId)
+    // The position and its receipt commit together: until the computer confirms
+    // the ack, a redelivery of this very update is recognized as applied.
     if (advance)
-      await db.run(
-        'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
-        [current.id, raw.sequence]
-      )
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `INSERT INTO chat_metadata_progress(conversation_id,sequence,store_id) VALUES(?,?,?)
+            ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence),
+            store_id=COALESCE(chat_metadata_progress.store_id,excluded.store_id)`,
+          params: [current.id, raw.sequence, raw.storeId ?? null]
+        },
+        {
+          type: 'run',
+          sql: 'INSERT INTO chat_metadata_receipts(conversation_id,operation_id,sequence) VALUES(?,?,?) ON CONFLICT DO NOTHING',
+          params: [current.id, raw.operationId, raw.sequence]
+        }
+      ])
   }
   async function reconcileFileLocation(
     current: HubChatOwnership,
@@ -706,11 +754,33 @@ export function createHubChatRelay(opts: {
         id,
         current.taskId
       ]))
+    // The computer holding an entry is its authority: it may report the entry
+    // under another of its tasks (a move). No other computer may claim it.
+    const moved = !!previous && previous.task_id !== current.taskId
     if (
       previous &&
-      (previous.task_id !== current.taskId || (previous.computer_id !== computerId && !provisional))
+      ((moved && previous.computer_id !== computerId) ||
+        (previous.computer_id !== computerId && !provisional))
     )
       throw new Error('Artifact locator belongs to another owner')
+    if (moved && !kind.endsWith('deleted')) {
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `UPDATE ${table} SET task_id=? WHERE id=?`,
+          params: [current.taskId, id]
+        },
+        ...(isFolder
+          ? []
+          : [
+              {
+                type: 'run' as const,
+                sql: 'UPDATE tasks SET active_artifact_id=NULL WHERE id=? AND active_artifact_id=?',
+                params: [previous.task_id, id]
+              }
+            ])
+      ])
+    }
     if (kind.endsWith('deleted')) {
       if (isFolder) await folderDeletions.record(current.taskId, [id])
       else await db.run('DELETE FROM task_artifacts WHERE id=?', [id])
@@ -744,6 +814,12 @@ export function createHubChatRelay(opts: {
             type: 'run',
             sql: 'INSERT INTO chat_folder_placeholders(folder_id,task_id) SELECT ?,? WHERE changes()=1 ON CONFLICT(folder_id) DO NOTHING',
             params: [parent, current.taskId]
+          },
+          {
+            type: 'run',
+            sql: `INSERT INTO chat_folder_placeholder_waits(folder_id,conversation_id) SELECT ?,?
+              WHERE EXISTS(SELECT 1 FROM chat_folder_placeholders WHERE folder_id=?) ON CONFLICT DO NOTHING`,
+            params: [parent, current.id, parent]
           }
         ])
     }
@@ -763,10 +839,47 @@ export function createHubChatRelay(opts: {
         [id, current.taskId, parent, parent, order]
       )
     await db.run(
-      `INSERT INTO ${locations}(${idColumn},conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM ${table} WHERE id=? AND task_id=?) ON CONFLICT(${idColumn}) DO NOTHING`,
+      // Reported by its computer: no longer "unavailable on computer".
+      `INSERT INTO ${locations}(${idColumn},conversation_id) SELECT ?,? WHERE EXISTS(SELECT 1 FROM ${table} WHERE id=? AND task_id=?)
+        ON CONFLICT(${idColumn}) DO UPDATE SET conversation_id=excluded.conversation_id,unavailable_reason=NULL,unavailable_since=NULL`,
       [id, current.id, id, current.taskId]
     )
-    if (isFolder) await db.run('DELETE FROM chat_folder_placeholders WHERE folder_id=?', [id])
+    if (isFolder)
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: 'DELETE FROM chat_folder_placeholders WHERE folder_id=?',
+          params: [id]
+        },
+        {
+          type: 'run',
+          sql: 'DELETE FROM chat_folder_placeholder_waits WHERE folder_id=?',
+          params: [id]
+        }
+      ])
+    // This conversation holds an entry inside a placeholder: the placeholder
+    // waits on it until it is re-read without the folder's own record.
+    if (parent)
+      await db.run(
+        `INSERT INTO chat_folder_placeholder_waits(folder_id,conversation_id) SELECT ?,?
+        WHERE EXISTS(SELECT 1 FROM chat_folder_placeholders WHERE folder_id=?) ON CONFLICT DO NOTHING`,
+        [parent, current.id, parent]
+      )
+  }
+  /**
+   * Placeholders no live conversation can still supply resolve to normal
+   * folders: every holder was re-read without the folder's own record, or is
+   * deleted or on a computer removed for good. Otherwise they would stay
+   * "awaiting computer" forever.
+   */
+  async function resolvePlaceholders(taskId: string) {
+    await db.run(
+      `DELETE FROM chat_folder_placeholders WHERE task_id=? AND NOT EXISTS(
+        SELECT 1 FROM chat_folder_placeholder_waits w JOIN chat_ownership o ON o.id=w.conversation_id
+        WHERE w.folder_id=chat_folder_placeholders.folder_id AND o.state<>'deleted'
+          AND NOT (o.computer_id IS NOT NULL AND ${retiredComputerSql('o.computer_id')}))`,
+      [taskId]
+    )
   }
   const metadataChains = new Map<string, Promise<void>>()
   /** Per conversation: saved events relayed to clients without a gap. */
@@ -777,7 +890,27 @@ export function createHubChatRelay(opts: {
    * updates never set it: one cannot vouch for writes that sent no update.
    */
   const appliedStateVersions = new Map<string, number>()
-  async function recoverMetadataNow(computerId: string, id: string) {
+  /** Confirmed receipts kept per conversation to recognize late duplicates. */
+  const ACKED_RECEIPTS_KEPT = 256
+  const metadataProgress = (id: string) =>
+    db.get<{ sequence: number; store_id: string | null }>(
+      'SELECT sequence,store_id FROM chat_metadata_progress WHERE conversation_id=?',
+      [id]
+    )
+  const hasReceipt = async (id: string, operationId: string) =>
+    !!(await db.get(
+      'SELECT 1 FROM chat_metadata_receipts WHERE conversation_id=? AND operation_id=?',
+      [id, operationId]
+    ))
+  /**
+   * Re-read one conversation's metadata in full: the computer is its authority.
+   * `rollback`: the computer's counter went back (restored from a backup) or
+   * it counts in another database. The cursor then moves to the computer's
+   * counter even when that is behind the hub's, and files the hub knows but the
+   * computer no longer lists are kept, marked "unavailable on computer"
+   * (decision 4: they may still be wanted; the hub cannot tell).
+   */
+  async function recoverMetadataNow(computerId: string, id: string, rollback = false) {
     const snapshot = (await opts.request(computerId, {
       kind: 'metadata.snapshot',
       id
@@ -792,19 +925,26 @@ export function createHubChatRelay(opts: {
       snapshot.identity.tabId !== owner.tabId ||
       snapshot.identity.epoch !== owner.epoch ||
       !Number.isSafeInteger(snapshot.counter) ||
-      snapshot.counter < 0
+      snapshot.counter < 0 ||
+      typeof snapshot.storeId !== 'string' ||
+      !snapshot.storeId ||
+      !Array.isArray(snapshot.pending) ||
+      snapshot.pending.some((op) => typeof op !== 'string' || !op)
     )
       throw new Error('Invalid metadata snapshot ownership')
     await opts.gate?.(computerId, owner.taskId)
-    const consumed =
-      (
-        await db.get<{ sequence: number }>(
-          'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
-          [id]
-        )
-      )?.sequence ?? 0
-    if (snapshot.counter < consumed) throw new Error('Computer metadata is behind the hub')
-    await db.run('DELETE FROM chat_queue_routes WHERE conversation_id=?', [id])
+    const progress = await metadataProgress(id)
+    const consumed = progress?.sequence ?? 0
+    // Behind the hub, or counted in another database: never proof of anything
+    // the hub applied. The computer's state wins.
+    rollback ||=
+      snapshot.counter < consumed ||
+      (!!progress?.store_id && progress.store_id !== snapshot.storeId)
+    // Placeholders this conversation was holding before this full re-read.
+    const waited = await db.all<{ folder_id: string }>(
+      'SELECT folder_id FROM chat_folder_placeholder_waits WHERE conversation_id=?',
+      [id]
+    )
     // Idempotent metadata writes precede the high-water mark. A crash replays them.
     for (const update of snapshot.updates) {
       if (
@@ -826,21 +966,66 @@ export function createHubChatRelay(opts: {
           .filter((u) => u.kind === kind)
           .map((u) => String((u.value as { id: string }).id))
       )
-      const previous = await db.all<{ id: string }>(
-        `SELECT ${column} AS id FROM ${locations} WHERE conversation_id=?`,
+      const previous = await db.all<{ id: string; unavailable_reason: string | null }>(
+        `SELECT ${column} AS id,unavailable_reason FROM ${locations} WHERE conversation_id=?`,
         [id]
       )
-      for (const row of previous)
-        if (!ids.has(row.id)) await db.run(`DELETE FROM ${table} WHERE id=?`, [row.id])
+      for (const row of previous) {
+        if (ids.has(row.id)) continue
+        // An entry already known missing stays marked: a later normal re-read
+        // does not turn "unavailable" into a silent delete.
+        if (rollback || row.unavailable_reason !== null)
+          await db.run(
+            `UPDATE ${locations} SET unavailable_reason=COALESCE(unavailable_reason,'missing-on-computer'),
+              unavailable_since=COALESCE(unavailable_since,?) WHERE ${column}=?`,
+            [Date.now(), row.id]
+          )
+        else await db.run(`DELETE FROM ${table} WHERE id=?`, [row.id])
+      }
     }
-    await db.run(
-      'INSERT INTO chat_metadata_progress(conversation_id,sequence) VALUES(?,?) ON CONFLICT(conversation_id) DO UPDATE SET sequence=MAX(chat_metadata_progress.sequence,excluded.sequence)',
-      [id, snapshot.counter]
-    )
+    // Cursor, store and receipts together. The snapshot already holds the effect
+    // of every update still pending on the computer: those are receipts now (a
+    // delivery acks them, never applies them again). Receipts it does not list
+    // were acknowledged already.
+    await db.batchTxn([
+      {
+        type: 'run',
+        sql: `INSERT INTO chat_metadata_progress(conversation_id,sequence,store_id) VALUES(?,?,?)
+          ON CONFLICT(conversation_id) DO UPDATE SET store_id=excluded.store_id,sequence=${
+            rollback
+              ? 'excluded.sequence'
+              : 'MAX(chat_metadata_progress.sequence,excluded.sequence)'
+          }`,
+        params: [id, snapshot.counter, snapshot.storeId]
+      },
+      // Unconfirmed receipts are exactly the snapshot's pending updates now.
+      // Confirmed ones stay (late duplicates); a rollback's new operations
+      // have new ids, so they never match.
+      {
+        type: 'run',
+        sql: 'DELETE FROM chat_metadata_receipts WHERE conversation_id=? AND acked=0',
+        params: [id]
+      },
+      ...snapshot.pending.map((operationId) => ({
+        type: 'run' as const,
+        sql: 'INSERT INTO chat_metadata_receipts(conversation_id,operation_id,sequence) VALUES(?,?,?) ON CONFLICT DO UPDATE SET acked=0',
+        params: [id, operationId, snapshot.counter]
+      }))
+    ])
+    // Re-read in full without those folders' own records: it cannot supply them.
+    // (A placeholder this very read created keeps waiting until the next one.)
+    for (const { folder_id } of waited)
+      await db.run(
+        'DELETE FROM chat_folder_placeholder_waits WHERE folder_id=? AND conversation_id=?',
+        [folder_id, id]
+      )
+    await resolvePlaceholders(owner.taskId)
     if (Number.isSafeInteger(snapshot.stateVersion))
       appliedStateVersions.set(
         id,
-        Math.max(appliedStateVersions.get(id) ?? 0, snapshot.stateVersion as number)
+        rollback
+          ? (snapshot.stateVersion as number)
+          : Math.max(appliedStateVersions.get(id) ?? 0, snapshot.stateVersion as number)
       )
   }
   function recoverMetadata(computerId: string, id: string) {
@@ -866,24 +1051,18 @@ export function createHubChatRelay(opts: {
       .then(async () => {
         if (!Number.isSafeInteger(update.sequence) || update.sequence < 1)
           throw new Error('Invalid chat metadata sequence')
-        let consumed =
-          (
-            await db.get<{ sequence: number }>(
-              'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
-              [key]
-            )
-          )?.sequence ?? 0
-        if (update.sequence > consumed + 1) {
+        if (typeof update.storeId !== 'string' || !update.storeId)
+          throw new Error('Chat metadata update names no store')
+        let progress = await metadataProgress(key)
+        // Counted in another database: positions are not comparable. Re-read.
+        if (progress?.store_id && progress.store_id !== update.storeId) {
+          await recoverMetadataNow(computerId, key, true)
+          progress = await metadataProgress(key)
+        } else if (update.sequence > (progress?.sequence ?? 0) + 1) {
           await recoverMetadataNow(computerId, key)
-          consumed =
-            (
-              await db.get<{ sequence: number }>(
-                'SELECT sequence FROM chat_metadata_progress WHERE conversation_id=?',
-                [key]
-              )
-            )?.sequence ?? 0
+          progress = await metadataProgress(key)
         }
-        if (update.sequence > consumed) await applyMetadata(computerId, update)
+        if (update.sequence > (progress?.sequence ?? 0)) await applyMetadata(computerId, update)
         else {
           const owner = await ownership.get(key)
           if (
@@ -892,12 +1071,37 @@ export function createHubChatRelay(opts: {
             owner.state !== 'active'
           )
             throw new Error('Stale metadata owner')
+          // A consumed position is proof of nothing by itself. With a receipt
+          // the hub applied this very update (its ack was lost). Without one,
+          // the computer's counter went back (restored from a backup): this is
+          // a different update, never acked and dropped — re-read in full.
+          // The re-read holds the computer's whole current state, so the
+          // update is covered either way (still pending, or already gone).
+          if (!(await hasReceipt(key, update.operationId)))
+            await recoverMetadataNow(computerId, key, true)
         }
         await opts.request(computerId, {
           kind: 'ackMetadata',
           id: key,
           operationId: update.operationId
         })
+        // Kept (bounded) once confirmed: a late duplicate of this update — a live
+        // notification racing a drain that already acked it — is recognized
+        // instead of read as a rollback.
+        await db.batchTxn([
+          {
+            type: 'run',
+            sql: 'UPDATE chat_metadata_receipts SET acked=1 WHERE conversation_id=? AND operation_id=?',
+            params: [key, update.operationId]
+          },
+          {
+            type: 'run',
+            sql: `DELETE FROM chat_metadata_receipts WHERE conversation_id=? AND acked=1 AND operation_id NOT IN(
+              SELECT operation_id FROM chat_metadata_receipts WHERE conversation_id=? AND acked=1
+              ORDER BY sequence DESC,rowid DESC LIMIT ${ACKED_RECEIPTS_KEPT})`,
+            params: [key, key]
+          }
+        ])
       })
       .finally(() => {
         if (metadataChains.get(key) === next) metadataChains.delete(key)
@@ -922,12 +1126,27 @@ export function createHubChatRelay(opts: {
      * a snapshot. Returns the re-read conversations: a client may show stale
      * metadata for those.
      */
-    inventory?: ReadonlyMap<string, { metadataCounter?: number; stateVersion?: number }>
+    inventory?: ReadonlyMap<
+      string,
+      { metadataCounter?: number; stateVersion?: number; storeId?: string }
+    >,
+    /**
+     * The conversation whose write triggered this drain: its own failure still
+     * fails that write. Any other conversation's failure is logged and its
+     * update stays pending for the next drain.
+     */
+    own?: string
   ): Promise<Set<string>> {
-    const restored = new Set<string>()
+    const restored = new Set<string>(),
+      failed = new Set<string>()
+    let ownFailure: Error | undefined
     if (restore) {
-      const owners = await db.all<{ id: string; consumed: number | null }>(
-        `SELECT o.id,p.sequence AS consumed FROM chat_ownership o
+      const owners = await db.all<{
+        id: string
+        consumed: number | null
+        store_id: string | null
+      }>(
+        `SELECT o.id,p.sequence AS consumed,p.store_id FROM chat_ownership o
           LEFT JOIN chat_metadata_progress p ON p.conversation_id=o.id
           WHERE o.computer_id=? AND o.state='active' AND NOT EXISTS(
           SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY o.id`,
@@ -941,12 +1160,25 @@ export function createHubChatRelay(opts: {
           reported?.metadataCounter !== undefined &&
           owner.consumed !== null &&
           reported.metadataCounter === owner.consumed &&
+          reported.storeId !== undefined &&
+          reported.storeId === owner.store_id &&
           applied !== undefined &&
           reported.stateVersion === applied
         )
           continue
-        await recoverMetadata(computerId, owner.id)
-        restored.add(owner.id)
+        // Isolated like an unfinished migration: one conversation whose
+        // metadata the hub rejects must not fail the computer's recovery.
+        if (
+          await isolateItem(
+            `metadata recovery of conversation ${owner.id}`,
+            () => recoverMetadata(computerId, owner.id),
+            (error) => {
+              failed.add(owner.id)
+              opts.onConversationFailure?.(computerId, owner.id, error)
+            }
+          )
+        )
+          restored.add(owner.id)
       }
     }
     for (;;) {
@@ -956,8 +1188,32 @@ export function createHubChatRelay(opts: {
       updates.sort(
         (a, b) => a.conversationId.localeCompare(b.conversationId) || a.sequence - b.sequence
       )
-      for (const update of updates) await reconcileMetadata(computerId, update)
-      if (updates.length < 500) return restored
+      let applied = 0
+      for (const update of updates) {
+        // A failed conversation's later updates stay pending (in order) for its
+        // next drain instead of failing every other conversation's.
+        if (failed.has(update.conversationId)) continue
+        if (
+          await isolateItem(
+            `metadata update of conversation ${update.conversationId}`,
+            () => reconcileMetadata(computerId, update),
+            (error) => {
+              failed.add(update.conversationId)
+              restored.delete(update.conversationId)
+              if (update.conversationId === own) ownFailure ??= error
+              // Restore re-reads metadata: a conversation it cannot apply is
+              // fenced. A live update simply stays pending and is retried.
+              if (restore) opts.onConversationFailure?.(computerId, update.conversationId, error)
+            }
+          )
+        )
+          applied++
+      }
+      // A full page made of skipped updates would be re-served forever.
+      if (updates.length < 500 || applied === 0) {
+        if (ownFailure) throw ownFailure
+        return restored
+      }
     }
   }
   function invoke(
@@ -1142,9 +1398,13 @@ export function createHubChatRelay(opts: {
         }
       })
       if (!read) {
-        await drainMetadata(owner.computerId!)
+        await drainMetadata(owner.computerId!, false, undefined, undefined, owner.id)
         if (['continueInTerminal', 'releaseConversation', 'remove', 'kill'].includes(method))
-          await refreshSessions(owner.computerId!)
+          // The operation already succeeded on the computer: a failed mirror refresh
+          // never fails it. The next maintenance pass (reconnect, 60 s) refreshes again.
+          await refreshSessions(owner.computerId!).catch((error: unknown) => {
+            console.error('[chat] session list refresh failed after', method, error)
+          })
       }
       return result
     } catch (error) {
@@ -1179,30 +1439,61 @@ export function createHubChatRelay(opts: {
     const computerId = owner?.computerId ?? (await opts.defaultComputer())
     if (!computerId) throw new Error('Chat computer unavailable. Connect a computer.')
     if (owner) await sync(owner)
+    // A folder list runs inside one task's own folders on the computer (§9 Phase
+    // 7c): with no chat of the task open yet, name the task (and its project).
+    const taskId = owner?.taskId ?? context.taskId
+    const project =
+      !owner && taskId
+        ? await db.get<{ project_id: string | null }>('SELECT project_id FROM tasks WHERE id=?', [
+            taskId
+          ])
+        : undefined
     return opts.request(computerId, {
       kind: 'catalog',
       method,
       args: trimUnsetArgs(args),
       operationId: randomUUID(),
-      ...(owner ? { route: { id: owner.id, epoch: owner.epoch } } : {})
+      ...(owner ? { route: { id: owner.id, epoch: owner.epoch } } : {}),
+      ...(project ? { scope: { taskId: taskId!, projectId: project.project_id } } : {})
     })
   }
   async function refreshSessions(computerId: string) {
     const rows = (await opts.request(computerId, { kind: 'sessions' })) as Array<
       ChatSessionStateEntry & { providerSessionId?: string | null }
     >
+    if (!Array.isArray(rows)) throw new Error('Invalid computer session list')
     const accepted: Array<ChatSessionStateEntry & { providerSessionId?: string | null }> = []
-    for (const row of rows) {
-      const tabId = row.sessionId.slice(row.taskId.length + 1),
-        owner = await ownership.forTab(tabId)
-      if (
-        owner?.computerId !== computerId ||
-        owner.taskId !== row.taskId ||
-        owner.state !== 'active'
-      )
-        continue
-      accepted.push(row)
-    }
+    // One row the hub cannot place (malformed, or its ownership lookup fails) is
+    // left out of the mirror on its own; every other session is still listed.
+    await forEachIsolated(
+      rows,
+      {
+        pass: 'hub-session-refresh',
+        key: (row) => String(row?.sessionId),
+        ledger: createAsyncFaultLedger(db, { origin: 'hub', computerId }),
+        ignoreGate: true,
+        isFatal: isComputerUnreachable
+      },
+      async (row) => {
+        if (
+          !row ||
+          typeof row.sessionId !== 'string' ||
+          typeof row.taskId !== 'string' ||
+          !row.sessionId.startsWith(row.taskId) ||
+          row.sessionId.length <= row.taskId.length + 1
+        )
+          throw new StructuralFaultError('Invalid computer session entry')
+        const tabId = row.sessionId.slice(row.taskId.length + 1),
+          owner = await ownership.forTab(tabId)
+        if (
+          owner?.computerId !== computerId ||
+          owner.taskId !== row.taskId ||
+          owner.state !== 'active'
+        )
+          return
+        accepted.push(row)
+      }
+    )
     for (const [id, row] of sessionMirror)
       if (row.computerId === computerId) sessionMirror.delete(id)
     for (const row of accepted) sessionMirror.set(row.sessionId, { ...row, computerId })
@@ -1297,7 +1588,36 @@ export function createHubChatRelay(opts: {
     resumeProviderTransitions: providerTransitions.resume,
     recoverProviderTransitions: providerTransitions.recover,
     async resumeInitializations(computerId: string) {
-      for (const owner of await ownership.pendingBootstraps(computerId)) await initialize(owner)
+      // An initialization that fails stays reserved: opening its chat retries it
+      // and shows the error there.
+      for (const owner of await ownership.pendingBootstraps(computerId))
+        await isolateItem(`initialization of conversation ${owner.id}`, () => initialize(owner))
+    },
+    /**
+     * Chats on this computer whose task still carries hub starting values for
+     * their mode (one migrated, or seeded while it was initializing): bootstrap
+     * them again, so the computer holds its own values and the hub copy goes.
+     */
+    async settleStartingValues(computerId: string) {
+      const keys = COMPUTER_OWNED_CHAT_KEYS.map(
+        (key) => `json_type(t.provider_config,'$.'||json_quote(o.mode)||'.${key}') IS NOT NULL`
+      ).join(' OR ')
+      const owners = await db.all<{ id: string }>(
+        `SELECT o.id FROM chat_ownership o JOIN tasks t ON t.id=o.task_id
+          WHERE o.computer_id=? AND o.state='active' AND json_valid(t.provider_config) AND (${keys})
+          ORDER BY o.id`,
+        [computerId]
+      )
+      for (const { id } of owners)
+        await isolateItem(`chat starting values of conversation ${id}`, async () => {
+          const owner = await ownership.get(id)
+          if (
+            owner?.state === 'active' &&
+            owner.computerId === computerId &&
+            !isStorageOnlyChatOwner(owner)
+          )
+            await sync(owner)
+        })
     },
     drainMetadata,
     reconcileMetadata,
@@ -1349,6 +1669,11 @@ export function createHubChatRelay(opts: {
           break
         case 'threads-changed':
           events.emit('threads-changed', owner.tabId)
+          break
+        case 'sessions-changed':
+          // The computer's ledger recorded a session: the hub holds none (§9), it
+          // only tells its clients to re-read.
+          opts.onSessionsChanged?.(owner.taskId)
           break
         case 'pinned-messages-changed':
           events.emit('pinned-messages-changed', owner.tabId)

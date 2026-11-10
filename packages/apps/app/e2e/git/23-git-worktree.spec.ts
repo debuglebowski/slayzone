@@ -6,7 +6,8 @@ import {
   clickProject,
   resetApp,
   createIsolatedGitRepo,
-  openTaskById
+  openTaskById,
+  taskWithPaths
 } from '../fixtures/electron'
 import { execSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -14,7 +15,6 @@ import path from 'path'
 
 /** `deleted_at` is a real tasks column (soft delete) that the `Task` type omits;
  *  task.get returns the raw row, so the timestamp is there at runtime. */
-type SoftDeletedRow = { deleted_at?: string | null }
 
 test.describe('Git worktree operations', () => {
   let projectAbbrev: string
@@ -26,8 +26,8 @@ test.describe('Git worktree operations', () => {
   let repoDir: string
   const branchName = 'worktree-task' // slugify('Worktree task')
 
-  const getTask = async (page: import('@playwright/test').Page, id: string) =>
-    page.evaluate((taskId) => window.getTrpcVanillaClient().task.get.query({ id: taskId }), id)
+  // The row plus its paths as the task's computer holds them (§9 7d).
+  const getTask = (page: import('@playwright/test').Page, id: string) => taskWithPaths(page, id)
 
   const execGit = (command: string) => execSync(command, { cwd: repoDir, stdio: 'pipe' }).toString()
 
@@ -211,7 +211,7 @@ test.describe('Git worktree operations', () => {
         async ({ repoPath, worktreePath, id }) => {
           await window
             .getTrpcVanillaClient()
-            .worktrees.removeWorktree.mutate({ repoPath, worktreePath })
+            .worktrees.removeWorktree.mutate({ repoPath, worktreePath, target: { taskId: id } })
             .catch(() => {})
           await window.getTrpcVanillaClient().task.update.mutate({ id, worktreePath: null })
         },
@@ -246,7 +246,7 @@ test.describe('Git worktree operations', () => {
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
         await window
           .getTrpcVanillaClient()
-          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch, target: { taskId } })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
@@ -295,7 +295,7 @@ test.describe('Git worktree operations', () => {
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
         await window
           .getTrpcVanillaClient()
-          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch, target: { taskId } })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
@@ -333,9 +333,7 @@ test.describe('Git worktree operations', () => {
     await expect.poll(() => existsSync(worktreePath)).toBe(false)
   })
 
-  test('deleting a task soft-deletes it and removes it from active lists', async ({
-    mainWindow
-  }) => {
+  test('deleting a task erases it and removes its worktree', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const projects = await s.getProjects()
     const project = projects.find((p: { name: string }) => p.name === 'Worktree Test')
@@ -352,7 +350,7 @@ test.describe('Git worktree operations', () => {
       async ({ repoPath, targetPath, branch, taskId, parentBranch }) => {
         await window
           .getTrpcVanillaClient()
-          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch })
+          .worktrees.createWorktree.mutate({ repoPath, targetPath, branch, target: { taskId } })
         await window.getTrpcVanillaClient().task.update.mutate({
           id: taskId,
           worktreePath: targetPath,
@@ -373,12 +371,9 @@ test.describe('Git worktree operations', () => {
 
     await s.deleteTask(created.id)
 
-    await expect
-      .poll(async () => {
-        const deleted = (await getTask(mainWindow, created.id)) as SoftDeletedRow | null | undefined
-        return deleted?.deleted_at ?? null
-      })
-      .toEqual(expect.any(String))
+    // Deletion is a content erasure (76700b05f): the row is gone, not soft-deleted,
+    // and the erasure removes the task's worktree (f513696d7).
+    await expect.poll(async () => (await getTask(mainWindow, created.id)) ?? null).toBeNull()
 
     await expect
       .poll(async () => {
@@ -389,6 +384,7 @@ test.describe('Git worktree operations', () => {
       })
       .toBe(false)
 
-    await expect.poll(() => existsSync(worktreePath)).toBe(true)
+    await expect.poll(() => execGit('git worktree list --porcelain')).not.toContain(worktreePath)
+    await expect.poll(() => existsSync(worktreePath)).toBe(false)
   })
 })

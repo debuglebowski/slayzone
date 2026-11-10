@@ -156,7 +156,12 @@ describe('output detection on the computer (pty-signal)', () => {
 
   it('warm adopt: the seed is replay-filtered and what it said comes back as a snapshot', async () => {
     const { child, pty } = setup(9107)
-    await pty.handlers['pty.warmSpawn']({ warmId: 'w', command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId: 'w',
+      command: 'cat',
+      cwd: process.cwd()
+    })
     child.say('\x1b]0;warm title\x07ready on http://localhost:5173')
     const adopted = pty.handlers['pty.warmAdopt']({
       warmId: 'w',
@@ -224,7 +229,12 @@ describe('output detection on the computer (pty-signal)', () => {
 
   it('warm adopt with `detection` starts detection under the real session id', async () => {
     const { notifies, child, pty } = setup(9104)
-    await pty.handlers['pty.warmSpawn']({ warmId: 'w', command: 'cat', cwd: process.cwd() })
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId: 'w',
+      command: 'cat',
+      cwd: process.cwd()
+    })
     child.say('\x1b]0;before adopt\x07')
     const adopted = pty.handlers['pty.warmAdopt']({
       warmId: 'w',

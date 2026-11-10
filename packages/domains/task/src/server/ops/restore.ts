@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import { buildTaskRestoredEvents } from '../history.js'
 import { taskEvents } from '../events.js'
-import { colorOne, parseTask, type OpDeps } from './shared.js'
+import { parseTask, type OpDeps } from './shared.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -36,5 +36,5 @@ export async function restoreTaskOp(
     taskEvents.emit('task:restored', { taskId: id, projectId })
     ipcMain?.emit('db:tasks:restore:done', null, id, projectId)
   }
-  return colorOne(db, task)
+  return task
 }

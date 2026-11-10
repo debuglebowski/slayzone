@@ -4,18 +4,19 @@
  * must show the history once, exactly as a fresh open does, not replay it on top
  * of the messages already on screen.
  *
- * No agent subprocess: the history is seeded straight into `chat_events`, which
+ * No agent subprocess: the history is seeded straight into the chat's event log on its computer (`chat.testSeedEvents`), which
  * chat.hydrate loads into a session skeleton without spawning (startup = manual).
  */
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { seedChatEvents } from '../fixtures/chat-seed'
 
 const MESSAGES = ['seeded-alpha-message', 'seeded-beta-message']
 
 test.describe('Chat reload', () => {
   let taskId = ''
 
-  test.beforeAll(async ({ mainWindow, electronApp }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     await mainWindow.evaluate(() =>
       window
@@ -67,21 +68,9 @@ test.describe('Chat reload', () => {
         permissionDenials: []
       }
     ])
-    await electronApp.evaluate(
-      async ({}, { tab, evs }) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const [seq, ev] of evs.entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tab,
-            seq,
-            JSON.stringify(ev)
-          ])
-        }
-      },
-      { tab: tabId, evs: events }
-    )
+    // Seeded on the chat's computer, where chat history lives (robustness plan §9;
+    // the hub's legacy chat tables are gone once nothing is left to migrate).
+    await seedChatEvents(mainWindow, tabId, events)
     await s.refreshData()
     await openTaskViaSearch(mainWindow, 'Chat reload task')
   })

@@ -781,6 +781,62 @@ export function artifactsSubcommand(): Command {
       }
     })
 
+  // slay tasks artifacts move-to-task <destTaskId> [entryIds...]
+  cmd
+    .command('move-to-task <destTaskId> [entryIds...]')
+    .addHelpText(
+      'after',
+      `
+Entry IDs are artifact or folder IDs (prefixes ok); a folder moves with everything in it.
+Examples:
+  slay tasks artifacts move-to-task <dest> --all --from <src>
+  slay tasks artifacts move-to-task <dest> <artifactId> <folderId> --into <destFolderId>`
+    )
+    .description(
+      'Move artifacts and folders (with their contents) to another task, keeping ids, versions and artifact: links'
+    )
+    .option('--all', 'Move every top-level artifact and folder of the source task')
+    .option(
+      '--from <taskId>',
+      "Source task (default: the entries' task, or $SLAYZONE_TASK_ID with --all)"
+    )
+    .option('--into <folderId>', 'Destination folder in the target task (default: top level)')
+    .option('--json', 'Output as JSON')
+    .action(async (destTaskId: string, entryIds: string[], opts) => {
+      const sourceTaskId: string | undefined =
+        opts.from ?? (opts.all ? process.env.SLAYZONE_TASK_ID : undefined)
+      if (opts.all && !sourceTaskId) {
+        console.error('--all needs --from <taskId> (or $SLAYZONE_TASK_ID)')
+        process.exit(1)
+      }
+      if (!opts.all && entryIds.length === 0) {
+        console.error('Name artifact/folder IDs to move, or pass --all')
+        process.exit(1)
+      }
+      const { data } = await apiPost<{
+        ok: true
+        data: {
+          artifacts: ArtifactRow[]
+          folders: ArtifactFolderRow[]
+          destTaskId: string
+          destTaskTitle: string
+        }
+      }>('/api/artifacts/move', {
+        destTaskId,
+        ...(sourceTaskId ? { sourceTaskId } : {}),
+        entryIds,
+        destFolderId: opts.into ?? null,
+        all: opts.all === true
+      })
+      if (opts.json) {
+        console.log(JSON.stringify(data))
+      } else {
+        console.log(
+          `Moved ${data.artifacts.length} artifact(s), ${data.folders.length} folder(s) -> ${data.destTaskId.slice(0, 8)}  ${data.destTaskTitle}`
+        )
+      }
+    })
+
   // slay tasks artifacts download [artifactId]
   cmd
     .command('download [artifactId]')

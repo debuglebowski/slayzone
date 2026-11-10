@@ -232,6 +232,15 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
     taskPrefix('query.taskId'),
     folderPrefix('query.folderId', ['root'])
   ),
+  'POST /api/artifacts/move': checked(
+    taskPrefix('body.destTaskId'),
+    taskPrefix('body.sourceTaskId'),
+    artifactPrefix('body.artifactIds[]'),
+    folderPrefix('body.folderIds[]'),
+    folderPrefix('body.destFolderId', ['root'])
+    // body.entryIds[] (artifact OR folder prefixes) are checked in the handler:
+    // each resolves through resolveByIdPrefix, which sees only the caller's rows.
+  ),
   'DELETE /api/artifacts/:id': checked(artifactPrefix('params.id')),
   'GET /api/artifacts/:id': checked(artifactPrefix('params.id')),
   'PATCH /api/artifacts/:id': checked(

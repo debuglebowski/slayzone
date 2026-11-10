@@ -34,6 +34,8 @@ import { LOCAL_COMPUTER_WORK_ROOTS_KEY } from '@slayzone/settings-core/server'
 import { isAbsolute } from 'node:path'
 import { resolveWorktreeBasePathTemplate } from '@slayzone/worktrees/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { createAsyncFaultLedger, forEachIsolated } from '@slayzone/platform/isolation'
+import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
 import {
   deletePlacement,
   getPlacement,
@@ -62,6 +64,11 @@ export interface ComputerFolderOps {
   forgetProjectPath(computerId: string, projectId: string): Promise<void>
   /** The computer's own report: every folder it has recorded for this hub. */
   listProjectPaths(computerId: string): Promise<ReadonlyArray<{ projectId: string; path: string }>>
+  /**
+   * The worktrees and base dirs of the given tasks, as that computer holds them (the
+   * hub keeps no task path, §9 7e). Throws when it cannot answer.
+   */
+  listTaskFolders(computerId: string, taskIds: readonly string[]): Promise<string[]>
 }
 
 export interface ComputerProjectSyncDeps {
@@ -252,20 +259,21 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
    * so the root is released only once the row is purged (round 4, R4-1).
    */
   async function foldersInUse(computerId: string): Promise<string[]> {
-    const rows = await db.all<{ worktree_path: string | null; base_dir: string | null }>(
-      `SELECT worktree_path, base_dir FROM tasks t
-        WHERE (t.computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
+    const tasks = await db.all<{ id: string }>(
+      `SELECT id FROM tasks t
+        WHERE (t.has_worktree = 1 OR t.has_base_dir = 1)
+          AND (t.computer_id = ? OR t.worktree_computer_id = ? OR (t.computer_id IS NULL AND EXISTS (
             SELECT 1 FROM project_placements pp
              WHERE pp.project_id = t.project_id AND pp.computer_id = ?)))`,
-      [computerId, computerId]
+      [computerId, computerId, computerId]
     )
-    const folders: string[] = []
-    for (const r of rows) {
-      for (const f of [r.worktree_path, r.base_dir]) {
-        if (f && isAbsolute(f)) folders.push(f)
-      }
-    }
-    return folders
+    if (tasks.length === 0) return []
+    // The folders live on that computer only (§9 7e): it names them.
+    const folders = await ops.listTaskFolders(
+      computerId,
+      tasks.map((t) => t.id)
+    )
+    return folders.filter((f) => isAbsolute(f))
   }
 
   /**
@@ -288,14 +296,13 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     if (workFolders) {
       // Folders in use keep their root too (R3-1): a task worktree created under an
       // earlier worktree base still lives there after the setting changes.
-      const needed = missingRootsForFolders(
-        [...workFolders, ...(await foldersInUse(computerId))],
-        []
-      )
+      // Unknown (the computer could not name them): nothing is in doubt, nothing goes.
+      const inUse = await foldersInUse(computerId).catch(() => null)
+      const needed = missingRootsForFolders([...workFolders, ...(inUse ?? [])], [])
       // Only roots this sync added (a root the user already had covered the folder,
       // so it was never added or tracked) and the computer still has.
       const tracked = (await trackedWorkRoots(computerId)).filter((r) => roots.includes(r))
-      stale = tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r])))
+      stale = inUse ? tracked.filter((r) => !needed.some((n) => isCoveredByRoots(n, [r]))) : []
       keptTracked = tracked.filter((r) => !stale.includes(r))
       base = roots.filter((r) => !stale.includes(r))
     }
@@ -431,21 +438,38 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
             )
           )
           const unconfirmed = rows.filter((r) => served.has(r.project_id))
-          for (const row of unconfirmed) {
-            const answer = await ask(computerId, row.project_id, row.path)
-            if (answer) await setPlacement(db, { computerId, projectId: row.project_id, ...answer })
+          // One project at a time: a project whose folder cannot be recorded is
+          // recorded as a fault and retried next connect; the others still deliver.
+          const isolation = {
+            key: (r: { project_id: string }) => r.project_id,
+            ledger: createAsyncFaultLedger(db, { origin: 'hub', computerId }),
+            ignoreGate: true,
+            isFatal: isComputerUnreachable
           }
+          await forEachIsolated(
+            unconfirmed,
+            { ...isolation, pass: 'hub-project-sync' },
+            async (row) => {
+              const answer = await ask(computerId, row.project_id, row.path)
+              if (answer)
+                await setPlacement(db, { computerId, projectId: row.project_id, ...answer })
+            }
+          )
           // Folders cleared while the computer was unreachable: tell it now.
           const forgotten = (await listPlacements(db)).filter(
             (r) => r.computer_id === computerId && r.status === 'forgotten'
           )
-          for (const row of forgotten) {
-            const told = await ops.forgetProjectPath(computerId, row.project_id).then(
-              () => true,
-              () => false
-            )
-            if (told) await deletePlacement(db, computerId, row.project_id)
-          }
+          await forEachIsolated(
+            forgotten,
+            { ...isolation, pass: 'hub-project-forget' },
+            async (row) => {
+              const told = await ops.forgetProjectPath(computerId, row.project_id).then(
+                () => true,
+                () => false
+              )
+              if (told) await deletePlacement(db, computerId, row.project_id)
+            }
+          )
         })
         defaultsChanged =
           (await step(computerId, 'backfill', () => backfillDefaults(computerId))) ?? 0

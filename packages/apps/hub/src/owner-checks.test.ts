@@ -38,6 +38,7 @@ import {
 } from '@slayzone/api'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness.js'
 import { getChatDeps, setChatDeps, getPtyDeps, setPtyDeps } from '@slayzone/terminal/server'
+import { getTaskPathsDelegate, setTaskPathsDelegate } from '@slayzone/task/server'
 import { mintWebSession, DEFAULT_WEB_LOGIN_SCOPES } from './web-sessions'
 import {
   BY_MUTATION,
@@ -255,6 +256,22 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
       }
     })
     raw.prepare("UPDATE terminal_tabs SET mode='claude-chat' WHERE id=?").run(A.tab)
+    // The task's folder is read from its computer (§9 Phase 7d); this hub has none
+    // connected, so a stand-in computer answers with A's stored worktree.
+    const pathsDelegate = getTaskPathsDelegate()
+    setTaskPathsDelegate({
+      changed: async () => {},
+      apply: async () => {},
+      release: async () => ({ worktreePath: null, shared: false, computerId: 'pc' }),
+      forget: async () => {},
+      read: async (ids) =>
+        Object.fromEntries(
+          ids.map((id) => [
+            id,
+            { state: 'ok', worktreePath: id === A.task ? A.path : null, baseDir: null }
+          ])
+        )
+    })
     const input = {
       taskId: A.task,
       tabId: A.tab,
@@ -287,6 +304,7 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
       web.close()
       setChatDeps(chat)
       setPtyDeps(pty)
+      setTaskPathsDelegate(pathsDelegate)
       raw.prepare("UPDATE terminal_tabs SET mode='claude-code' WHERE id=?").run(A.tab)
     }
   })

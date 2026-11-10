@@ -37,3 +37,4 @@ export type {
   IsMountedSlice,
   AssertSlice
 } from './mounted-router'
+export type { WithAmbientTarget } from './ambient-target'

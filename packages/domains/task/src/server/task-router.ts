@@ -3,23 +3,55 @@ import { observable } from '@trpc/server/observable'
 import { TRPCError } from '@trpc/server'
 import { taskEvents, type TaskEventMap } from './events'
 import {
-  recordPendingSpawn,
-  recordConversation,
+  resetConversation,
   switchConversation,
-  isHonoredConversation,
-  deleteSession
+  deleteSession,
+  SessionsOfflineError,
+  taskSessionLedger
 } from './ops'
-import { InvalidTaskUpdateError, type OpDeps } from './ops/shared'
+import {
+  InvalidTaskUpdateError,
+  readTaskPaths,
+  TaskFoldersUnavailableError,
+  type OpDeps
+} from './ops/shared'
 import { startMainAgent, switchMainAgentMode } from './main-agent'
-import type { CreateTaskInput, UpdateTaskInput } from '@slayzone/task-contracts'
+import {
+  TASK_PATHS_MAX,
+  type CreateTaskInput,
+  type UpdateTaskInput
+} from '@slayzone/task-contracts'
 import { router, publicProcedure } from '@slayzone/trpc-server'
-import { releaseConversation } from '@slayzone/terminal/hub'
+import {
+  conversationInOtherTabMessage,
+  liveConversationSession,
+  releaseConversation
+} from '@slayzone/terminal/hub'
 import {
   getTaskBus,
   getTaskOps,
   getTaskOnMutation,
   getTaskReserveWarmTaskId
 } from './task-router-deps'
+
+/** The computer holding a task's sessions is offline: a precondition, named so. */
+function offline(): TRPCError {
+  return new TRPCError({ code: 'PRECONDITION_FAILED', message: new SessionsOfflineError().message })
+}
+
+/** Run a session operation; the computer being offline answers as {@link offline}. */
+async function asOffline<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    if (
+      error instanceof SessionsOfflineError ||
+      (error as { code?: string })?.code === 'computer-offline'
+    )
+      throw offline()
+    throw error
+  }
+}
 
 // Mirrors the 16 `db:tasks:*` + 6 `db:taskDependencies:*` + `db:loadBoardData` IPC
 // handlers (task/src/main/handlers.ts) plus the `taskEvents` broadcast. The ops are
@@ -57,6 +89,9 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
     if (err instanceof InvalidTaskUpdateError) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err })
     }
+    if (err instanceof TaskFoldersUnavailableError) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err })
+    }
     throw err
   }
 }
@@ -80,6 +115,12 @@ export const taskRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => ops().getTaskOp(ctx.db, input.id)),
 
+  // A task's worktree path and custom folder live on its computer (§9 Phase 7d):
+  // read there, never from the hub. A task whose computer is away answers `offline`.
+  paths: publicProcedure
+    .input(z.object({ taskIds: z.array(z.string().min(1)).min(1).max(TASK_PATHS_MAX) }))
+    .query(({ input }) => readTaskPaths([...new Set(input.taskIds)])),
+
   getDeleted: publicProcedure
     .input(z.object({ projectId: z.string() }))
     .query(({ ctx, input }) => ops().getDeletedTasksOp(ctx.db, input.projectId)),
@@ -96,14 +137,20 @@ export const taskRouter = router({
         taskId: z.string(),
         mode: z.string(),
         expectedSessionId: z.string().nullable(),
-        usedResume: z.boolean().optional()
+        usedResume: z.boolean().optional(),
+        tabId: z.string().optional()
       })
     )
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ input }) => {
       if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
-      await recordPendingSpawn(ctx.db, {
+      // On the computer holding the task's sessions (robustness plan §9).
+      const ledger = taskSessionLedger()
+      const computerId = await ledger.forTask(input.taskId)
+      if (!computerId) throw offline()
+      await ledger.store.recordPendingSpawn(computerId, {
         taskId: input.taskId,
         mode: input.mode,
+        tabId: input.tabId,
         expectedSessionId: input.expectedSessionId,
         usedResume: input.usedResume ?? false
       })
@@ -139,24 +186,22 @@ export const taskRouter = router({
     return r
   }),
 
-  // "Start fresh" / reset conversation. Appends a `manual-reset` sentinel to the
-  // append-only ledger, which (a) writes a `session_resets` cutoff so the
-  // authoritative `currentConversationByMode` / resolver read returns NULL, and
-  // (b) clears the legacy `provider_config.{mode}.conversationId` + column. The
-  // old renderer path only nulled provider_config, which the ledger-backed read
-  // ignored — so a phantom/stale conversation id survived "Start fresh" and came
-  // back on reopen. Routing through `recordConversation('manual-reset')` is the
-  // one write that actually clears the honored binding. Returns the refreshed task.
+  // "Start fresh" / reset conversation: a reset intent (`session_resets`) the hub
+  // delivers to the task's computers, whose session ledger then resolves no earlier
+  // session for the tab (robustness plan §9). Works with the computer offline.
+  // Returns the task.
+  //
+  // Per tab (v201): `tabId` names the terminal tab whose session resets; omitted =
+  // the main tab. Other tabs keep theirs.
   resetConversation: publicProcedure
-    .input(z.object({ id: z.string(), mode: z.string() }))
+    .input(z.object({ id: z.string(), mode: z.string(), tabId: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ops().getTaskOp(ctx.db, input.id)
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      await recordConversation(ctx.db, {
+      await resetConversation(ctx.db, {
         taskId: input.id,
         mode: input.mode,
-        conversationId: null,
-        origin: 'manual-reset'
+        scope: { tabId: input.tabId ?? input.id }
       })
       getTaskOnMutation()?.()
       const r = await ops().getTaskOp(ctx.db, input.id)
@@ -165,9 +210,9 @@ export const taskRouter = router({
     }),
 
   // Switch the task's agent back to an EARLIER session (sessions sidebar).
-  // Appends a `user-selected` row to the append-only ledger, which becomes the
-  // newest honored row → `currentConversationByMode` → the renderer's
-  // `existingConversationId` → `--resume <picked>` on the next spawn. Durable by
+  // Appends a `user-selected` row to the computer's session ledger, which becomes
+  // the newest honored row → the spawn-time resolver → `--resume <picked>` on the
+  // next spawn. Durable by
   // construction: it survives a reopen even if the respawn never confirms (a
   // provider without hooks never does). The caller restarts the terminal after
   // this returns. `isHonoredConversation` is the anti-laundering guard — only a
@@ -181,24 +226,51 @@ export const taskRouter = router({
         conversationId: z.string(),
         // The mode that ran it. The chat ↔ terminal partner: the conversation
         // moves over (a hand-off, chat A); absent = `mode` itself.
-        sourceMode: z.string().optional()
+        sourceMode: z.string().optional(),
+        // The terminal tab picking it (omitted = the main tab). A session of
+        // another tab MOVES here (that tab no longer resumes it).
+        tabId: z.string().optional()
       })
     )
     .mutation(async ({ ctx, input }) => {
       const existing = await ops().getTaskOp(ctx.db, input.id)
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      const outcome = await switchConversation(
-        ctx.db,
-        {
-          taskId: input.id,
-          mode: input.mode,
-          conversationId: input.conversationId,
-          ...(input.sourceMode ? { sourceMode: input.sourceMode } : {})
-        },
-        // Never two processes on one conversation: a chat still running it — on
-        // its computer — stops (and has exited) before the terminal resumes it.
-        { release: (taskId, conversationId) => releaseConversation('chat', taskId, conversationId) }
+      const outcome = await asOffline(() =>
+        switchConversation(
+          ctx.db,
+          {
+            taskId: input.id,
+            mode: input.mode,
+            conversationId: input.conversationId,
+            ...(input.sourceMode ? { sourceMode: input.sourceMode } : {}),
+            ...(input.tabId ? { tabId: input.tabId } : {})
+          },
+          {
+            // Never two processes on one conversation: a chat still running it — on
+            // its computer — stops (and has exited) before the terminal resumes it.
+            release: (taskId, conversationId) =>
+              releaseConversation('chat', taskId, conversationId),
+            // …and a terminal tab running it keeps it: the pick is refused, naming
+            // that tab (never a silent stop of the user's live agent).
+            liveInOtherTab: async (taskId, conversationId, tabId) => {
+              const live = liveConversationSession('terminal', taskId, conversationId)
+              const holderTab = live ? live.slice(live.indexOf(':') + 1) : null
+              if (!holderTab || holderTab === tabId) return null
+              const row = await ctx.db.get<{ label: string | null; is_main: number }>(
+                'SELECT label, is_main FROM terminal_tabs WHERE id = ?',
+                [holderTab]
+              )
+              return row?.label || (row?.is_main || holderTab === taskId ? 'Main' : holderTab)
+            }
+          }
+        )
       )
+      if (typeof outcome === 'object') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: conversationInOtherTabMessage(outcome.inUseBy)
+        })
+      }
       if (outcome !== 'switched') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -226,18 +298,16 @@ export const taskRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await ops().getTaskOp(ctx.db, input.id)
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
-      if (!(await isHonoredConversation(ctx.db, input.id, input.mode, input.conversationId))) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Not a session of this task'
-        })
-      }
-      if (!(await deleteSession(ctx.db, input.id, input.mode, input.conversationId))) {
+      const outcome = await asOffline(() =>
+        deleteSession(ctx.db, input.id, input.mode, input.conversationId)
+      )
+      if (outcome === 'not-honored')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Not a session of this task' })
+      if (outcome === 'current')
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Switch to another session before deleting the current one'
         })
-      }
       getTaskOnMutation()?.()
       const r = await ops().getTaskOp(ctx.db, input.id)
       if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })

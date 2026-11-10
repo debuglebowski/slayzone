@@ -25,7 +25,14 @@ export async function hasUnattributedFiles(db: SlayzoneDb, root: string): Promis
   for (const row of await db.all<{ manifest: string }>(
     'SELECT manifest FROM content_erasure_jobs'
   )) {
-    const m = JSON.parse(row.manifest) as ErasureManifest
+    // One unreadable job manifest only loses its own ids: the check stays
+    // conservative (more files look unattributed), never fails outright.
+    let m: ErasureManifest
+    try {
+      m = JSON.parse(row.manifest) as ErasureManifest
+    } catch {
+      continue
+    }
     for (const id of m.projectIds) projects.add(id)
     for (const hash of m.blobHashes) hashes.add(hash)
   }
@@ -41,8 +48,14 @@ export async function hasUnattributedFiles(db: SlayzoneDb, root: string): Promis
     for (const entry of readdirSync(journals, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const path = join(journals, entry.name, 'manifest.json')
-      if (!existsSync(path) || !tasks.has(JSON.parse(readFileSync(path, 'utf8')).taskId))
-        return true
+      if (!existsSync(path)) return true
+      let taskId: unknown
+      try {
+        taskId = (JSON.parse(readFileSync(path, 'utf8')) as { taskId?: unknown })?.taskId
+      } catch {
+        return true // Unreadable: its owner is unknown, which is exactly "unattributed".
+      }
+      if (!tasks.has(String(taskId))) return true
     }
   const icons = join(root, 'project-icons')
   if (existsSync(icons))

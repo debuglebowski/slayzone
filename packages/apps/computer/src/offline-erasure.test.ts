@@ -293,3 +293,34 @@ test('adopting merges a journal both an older and a newer host wrote, by event i
     rmSync(runtime, { recursive: true, force: true })
   }
 })
+
+test('torn hook journals never block offline cleanup; their quarantined bytes naming the task are erased', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'offline-erasure-torn-'))
+  try {
+    await liveComputer(root)
+    const runtime = join(root, 'computer-runtime')
+    const hook = (taskId: string) => ({
+      id: `hook-${taskId}`,
+      params: { name: 'agent-hook', payload: { taskId, text: `private ${taskId} hook` } }
+    })
+    // Another hub's journal, torn, holding none of the erased tasks.
+    writeFileSync(join(runtime, `hooks-${'b'.repeat(16)}.json`), '[{"id":"x","params":{"pay')
+    // This hub's journal, torn after alice's and bob's events.
+    const own = hookJournalPath(runtime, baseRequest.hubUrl)
+    writeFileSync(own, JSON.stringify([hook('alice'), hook('bob')]).slice(0, -3))
+    const receipt = await eraseComputerOffline(root, baseRequest)
+    expect(receipt.managedContentErased).toBe(true)
+    const left = readFileSync(own, 'utf8')
+    expect(left).not.toContain('private alice hook')
+    // No quarantined copy of alice's hook survives the erasure.
+    const quarantine = join(runtime, 'quarantine')
+    const remaining = existsSync(quarantine)
+      ? readdirSync(quarantine, { recursive: true, withFileTypes: true })
+          .filter((d) => d.isFile() && d.name === 'payload')
+          .map((d) => readFileSync(join(d.parentPath, d.name), 'utf8'))
+      : []
+    expect(remaining.some((text) => text.includes('private alice hook'))).toBe(false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

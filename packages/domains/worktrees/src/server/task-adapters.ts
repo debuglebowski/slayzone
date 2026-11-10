@@ -7,13 +7,8 @@ import {
   runWorktreeSetupScript,
   getCurrentBranch,
   isGitRepo,
-  copyIgnoredFiles,
-  detectWorktrees
+  copyIgnoredFiles
 } from './git-worktree'
-import {
-  getColor as getWorktreeColor,
-  ensureProjectColors as ensureProjectWorktreeColors
-} from './color-registry'
 
 // In-process implementations of the task-owned worktree seams
 // (`TaskRuntimeAdapters.worktrees` / `.worktreePolicy` in `@slayzone/task/server`).
@@ -24,7 +19,7 @@ import {
  * The workspace ops below run on the hub's own disk, so each refuses first (as a
  * rejection) on a hub with `SLAYZONE_HUB_ENABLE_PROCESSES=0` (T-06) — this default is
  * live before the hub installs the routing adapter, and stays live if that init
- * fails. Colors and the two hub-storage ops are hub-owned and stay.
+ * fails. The two hub-storage ops are hub-owned and stay.
  */
 const onHubDisk =
   <A extends unknown[], R>(op: string, fn: (...args: A) => R | Promise<R>) =>
@@ -62,10 +57,6 @@ export const defaultWorktreeExecAdapters: WorktreeExecAdapters = {
   ),
   getCurrentBranch: onHubDisk('branch', (_taskId, repoPath) => getCurrentBranch(repoPath)),
   isGitRepo: onHubDisk('is_git_repo', (_taskId, path) => isGitRepo(path)),
-  getWorktreeColor,
-  // This host's own disk, detected here (the hub's set lives in hub-task-adapters).
-  ensureProjectWorktreeColors: (projectPath) =>
-    ensureProjectWorktreeColors(projectPath, detectWorktrees),
   pathExists: onHubDisk('path_exists', (_taskId, p) => existsSync(p)),
   hubPathExists: (p) => existsSync(p),
   removeArtifactDir: (absDir) => rmSync(absDir, { recursive: true, force: true })

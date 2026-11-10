@@ -5,6 +5,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent
 } from 'react'
+import { useWorktreeColors } from '@slayzone/worktrees/client/useWorktreeColors'
 import {
   BookOpen,
   ChevronDown,
@@ -90,6 +91,8 @@ type RowItem =
 const EMPTY_SESSION_TASK_IDS = new Set<string>()
 const EMPTY_BLOCKED_IDS: ReadonlySet<string> = new Set<string>()
 
+const NO_TASKS: Task[] = []
+
 export function TreeView({
   projects,
   tasks,
@@ -148,6 +151,8 @@ export function TreeView({
   const treeShowSnoozed = useTabStore((s) => s.treeShowSnoozed)
   const treeShowAllOpen = useTabStore((s) => s.treeShowAllOpen)
   const treeShowWorktree = useTabStore((s) => s.treeShowWorktree)
+  // Worktree pill colours, matched in the client (§9 Phase 7d): read only while shown.
+  const worktreeColors = useWorktreeColors(treeShowWorktree ? tasks : NO_TASKS, projects)
   const treeShowTags = useTabStore((s) => s.treeShowTags)
   const treeShowBlockedBadge = useTabStore((s) => s.treeShowBlockedBadge)
   const hubBadges = useHubBadges()
@@ -1245,6 +1250,7 @@ export function TreeView({
       treeShowStatus,
       treeShowPriority,
       treeShowWorktree,
+      worktreeColors,
       tagsByTaskId,
       blockedBadgeTaskIds: (treeShowBlockedBadge && blockedTaskIds) || EMPTY_BLOCKED_IDS,
       treeCrossOutDone,

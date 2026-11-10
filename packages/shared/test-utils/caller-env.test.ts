@@ -296,6 +296,8 @@ describe('every test runner config isolates from the caller', () => {
   const tracked = execFileSync('git', ['ls-files'], { cwd: rootDir, encoding: 'utf8' })
     .split('\n')
     .filter((f) => f.startsWith('packages/') && !f.includes('/node_modules/'))
+    // A tracked file deleted in the working tree (not committed yet) has no source.
+    .filter((f) => existsSync(join(rootDir, f)))
 
   const vitestConfigs = tracked.filter((f) => /(^|\/)vitest(\.[\w-]+)?\.config\.ts$/.test(f))
   const playwrightConfigs = tracked.filter((f) =>

@@ -36,6 +36,7 @@
     "./service-unit": "./src/service-unit.ts",
     "./join-token": "./src/join-token.ts",
     "./security-log": "./src/security-log.ts",
+    "./path-scope": "./src/path-scope.ts",
     "./agent-hooks": "./src/agent-hooks/index.ts",
     "./client-address": "./src/client-address.ts",
     "./hub-convex": "./src/hub-convex.ts",
@@ -48,7 +49,10 @@
     "./node-pty-install": "./src/node-pty-install.ts",
     "./computer-launcher": "./src/computer-launcher.ts",
     "./suspend-clock": "./src/suspend-clock.ts",
-    "./resolve-command": "./src/resolve-command.ts"
+    "./resolve-command": "./src/resolve-command.ts",
+    "./isolation": "./src/isolation.ts",
+    "./quarantine": "./src/quarantine.ts",
+    "./legacy-chat-tables": "./src/legacy-chat-tables.ts"
   },
   "scripts": {
     "test": "vitest run",

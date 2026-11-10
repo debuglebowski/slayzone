@@ -121,7 +121,7 @@ const worktrees = await import('@slayzone/worktrees/server')
 const { execGit } = await import('../../../domains/worktrees/src/server/exec-async.js')
 // By path, not `./merge-ai`: the test loader redirects that specifier to a mock.
 const { runAiCommand } = await import('../../../domains/worktrees/src/server/merge-ai.js')
-const { taskSessionStore } = await import('@slayzone/task/server')
+const { taskSessionStore } = await import('./test-session-store')
 const { defaultWorktreeExecAdapters } = worktrees
 const terminal = await import('@slayzone/terminal/server')
 const { listProjectFiles } = await import('../../../domains/terminal/src/server/files-scan.js')
@@ -315,19 +315,22 @@ describe('processes off, zero computers: every hub-local call refuses (exec laye
   })
 })
 
+/** Path-taking calls name their path scope (§9 Phase 7b): here a project. */
+const SCOPE = { projectId: 'p-1' }
+
 describe('processes off, zero computers: the wire shape (tRPC)', () => {
   for (const [path, input] of [
-    ['worktrees.getCurrentBranch', { path: OUTSIDE }],
+    ['worktrees.getCurrentBranch', { path: OUTSIDE, target: SCOPE }],
     // Swallows a git error into `false` — the router gate refuses before that.
-    ['worktrees.isGitRepo', { path: OUTSIDE }],
-    ['worktrees.getConflictContent', { repoPath: OUTSIDE, filePath: 'secret.txt' }],
+    ['worktrees.isGitRepo', { path: OUTSIDE, target: SCOPE }],
+    ['worktrees.getConflictContent', { repoPath: OUTSIDE, filePath: 'secret.txt', target: SCOPE }],
     // Routed like every gh call: no computer → the local executor → refused deep down.
-    ['worktrees.checkGhInstalled', { repoPath: OUTSIDE }],
+    ['worktrees.checkGhInstalled', { repoPath: OUTSIDE, target: SCOPE }],
     // A routed `gh` call: no computer → the local executor → refused deep down.
-    ['worktrees.listOpenPrs', { repoPath: OUTSIDE }],
+    ['worktrees.listOpenPrs', { repoPath: OUTSIDE, target: SCOPE }],
     ['workspace.listDir', { path: OUTSIDE }],
-    ['fileEditor.readFile', { rootPath: OUTSIDE, filePath: 'secret.txt' }],
-    ['agentTurns.list', { worktreePath: OUTSIDE }],
+    ['fileEditor.readFile', { projectId: 'p-1', rootPath: OUTSIDE, filePath: 'secret.txt' }],
+    ['agentTurns.list', { taskId: 't-1', worktreePath: OUTSIDE }],
     ['app.files.pathExists', { filePath: OUTSIDE }]
   ] as const) {
     test(`${path}: FORBIDDEN + NO_COMPUTER_CONNECTED, audited as the caller`, async () => {
@@ -351,31 +354,27 @@ describe('processes off, zero computers: the wire shape (tRPC)', () => {
   const P = { projectPath: OUTSIDE, projectId: 'p-1' }
   const F = join(OUTSIDE, 'CLAUDE.md')
   for (const [path, input, method] of [
-    ['aiConfig.discoverContextFiles', { projectPath: OUTSIDE }, 'GET'],
+    ['aiConfig.discoverContextFiles', P, 'GET'],
     ['aiConfig.getComputerFiles', undefined, 'GET'],
-    ['aiConfig.readContextFile', { filePath: F, projectPath: OUTSIDE }, 'GET'],
-    ['aiConfig.writeContextFile', { filePath: F, content: 'x', projectPath: OUTSIDE }, 'POST'],
+    ['aiConfig.readContextFile', { ...P, filePath: F }, 'GET'],
+    ['aiConfig.writeContextFile', { ...P, filePath: F, content: 'x' }, 'POST'],
     ['aiConfig.deleteComputerFile', { filePath: F }, 'POST'],
     ['aiConfig.createComputerFile', { provider: 'claude', category: 'skill', slug: 's' }, 'POST'],
     ['aiConfig.writeComputerSkill', { provider: 'claude', slug: 's', content: 'x' }, 'POST'],
     ['aiConfig.getContextTree', P, 'GET'],
     ['aiConfig.loadLibraryItem', { ...P, itemId: 'i', providers: ['claude'] }, 'POST'],
     ['aiConfig.syncLinkedFile', { ...P, itemId: 'i' }, 'POST'],
-    ['aiConfig.renameContextFile', { oldPath: F, newPath: F, projectPath: OUTSIDE }, 'POST'],
+    ['aiConfig.renameContextFile', { ...P, oldPath: F, newPath: F }, 'POST'],
     ['aiConfig.deleteContextFile', { ...P, filePath: F }, 'POST'],
     ['aiConfig.getRootInstructions', P, 'GET'],
     ['aiConfig.setProjectInstructionVariant', { ...P, variantItemId: 'v' }, 'POST'],
     ['aiConfig.saveInstructionsContent', { ...P, content: 'x' }, 'POST'],
     ['aiConfig.saveRootInstructions', { ...P, content: 'x' }, 'POST'],
-    ['aiConfig.readProviderInstructions', { projectPath: OUTSIDE, provider: 'claude' }, 'GET'],
+    ['aiConfig.readProviderInstructions', { ...P, provider: 'claude' }, 'GET'],
     ['aiConfig.pushProviderInstructions', { ...P, provider: 'claude', content: 'x' }, 'POST'],
     ['aiConfig.pullProviderInstructions', { ...P, provider: 'claude' }, 'POST'],
     ['aiConfig.getProjectSkillsStatus', P, 'GET'],
-    [
-      'aiConfig.readProviderSkill',
-      { projectPath: OUTSIDE, provider: 'claude', itemId: 'i' },
-      'GET'
-    ],
+    ['aiConfig.readProviderSkill', { ...P, provider: 'claude', itemId: 'i' }, 'GET'],
     ['aiConfig.pullProviderSkill', { ...P, provider: 'claude', itemId: 'i' }, 'POST'],
     ['aiConfig.reconcileProjectSkills', P, 'POST'],
     ['aiConfig.needsSync', P, 'GET'],
@@ -383,13 +382,13 @@ describe('processes off, zero computers: the wire shape (tRPC)', () => {
     ['aiConfig.getProjectsStaleSkillCounts', [P], 'GET'],
     ['aiConfig.syncAll', P, 'POST'],
     ['aiConfig.checkSyncStatus', P, 'GET'],
-    ['aiConfig.discoverMcpConfigs', { projectPath: OUTSIDE }, 'GET'],
-    ['aiConfig.writeMcpServer', { projectPath: OUTSIDE, provider: 'claude' }, 'POST'],
-    ['aiConfig.removeMcpServer', { projectPath: OUTSIDE, provider: 'claude' }, 'POST'],
+    ['aiConfig.discoverMcpConfigs', P, 'GET'],
+    ['aiConfig.writeMcpServer', { ...P, provider: 'claude' }, 'POST'],
+    ['aiConfig.removeMcpServer', { ...P, provider: 'claude' }, 'POST'],
     ['aiConfig.discoverComputerMcpConfigs', undefined, 'GET'],
     ['aiConfig.writeComputerMcpServer', { provider: 'claude' }, 'POST'],
     ['aiConfig.removeComputerMcpServer', { provider: 'claude' }, 'POST'],
-    ['aiConfig.checkSlayConfigured', { projectPath: OUTSIDE }, 'GET']
+    ['aiConfig.checkSlayConfigured', P, 'GET']
   ] as const) {
     test(`${path}: FORBIDDEN + NO_COMPUTER_CONNECTED, nothing read or written`, async () => {
       const before = { lines: lines.length, exec: execCalls.length, touched: touched.length }
@@ -399,6 +398,21 @@ describe('processes off, zero computers: the wire shape (tRPC)', () => {
       expect(res.error?.message.startsWith('Connect a computer')).toBe(true)
       expect(lines.length).toBe(before.lines + 1)
       expect(lines[before.lines].event).toBe('hub.local_exec')
+      expect(execCalls.slice(before.exec)).toEqual([])
+      expect(touched.slice(before.touched)).toEqual([])
+    })
+  }
+  // A project-folder call naming no task or project: refused before routing (§9 7b/7c).
+  for (const [path, method] of [
+    ['aiConfig.discoverContextFiles', 'GET'],
+    ['aiConfig.checkSlayConfigured', 'GET'],
+    ['aiConfig.setupSlay', 'POST']
+  ] as const) {
+    test(`${path} naming no task or project: BAD_REQUEST, nothing run`, async () => {
+      const before = { exec: execCalls.length, touched: touched.length }
+      const res = await call(path, { projectPath: OUTSIDE }, method)
+      expect(res.status).toBe(400)
+      expect(res.error?.message).toMatch(/must name the task or project/)
       expect(execCalls.slice(before.exec)).toEqual([])
       expect(touched.slice(before.touched)).toEqual([])
     })
@@ -421,7 +435,7 @@ describe('processes off, zero computers: the wire shape (tRPC)', () => {
   })
   test('aiConfig.setupSlay: FORBIDDEN, `slay init` never runs', async () => {
     const before = execCalls.length
-    const res = await call('aiConfig.setupSlay', { projectPath: OUTSIDE }, 'POST')
+    const res = await call('aiConfig.setupSlay', P, 'POST')
     expect(res.status).toBe(403)
     expect(res.error?.data.appCode).toBe('NO_COMPUTER_CONNECTED')
     expect(execCalls.length).toBe(before)
@@ -488,7 +502,7 @@ describe('defaults (switch unset): local, exactly as before', () => {
   // "connect a computer" and runs nothing here.
   test('worktrees.isGitRepo with no computer: "connect a computer", no local git', async () => {
     const before = { exec: execCalls.length }
-    const res = await call('worktrees.isGitRepo', { path: OUTSIDE })
+    const res = await call('worktrees.isGitRepo', { path: OUTSIDE, target: SCOPE })
     expect(res.status).toBe(403)
     expect(JSON.stringify(res.error)).toMatch(/Connect a computer/)
     expect(execCalls.length).toBe(before.exec)

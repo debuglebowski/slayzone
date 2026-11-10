@@ -17,7 +17,9 @@ import {
   deleteComputer,
   setComputerDisabled,
   listDisabledComputerIds,
-  setComputerRemovedListener
+  setComputerRemovedListener,
+  assertTaskMovable,
+  TaskFoldersElsewhereError
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { listPlacements, setPlacement } from './project-paths'
@@ -424,6 +426,52 @@ describe('task/project computer binding', () => {
   it('unknown task resolves to null', async () => {
     expect(await resolveTaskComputerId(t.db, 'nope')).toBeNull()
   })
+
+  // §9 Phase 7e: a task's folder exists only on the computer holding it.
+  describe('the folder computer', () => {
+    const folderOn = (computerId: string, flags = 'has_worktree = 1') =>
+      t.raw
+        .prepare(`UPDATE tasks SET ${flags}, worktree_computer_id = ? WHERE id = ?`)
+        .run(computerId, taskId)
+
+    it('a task with a folder runs on the computer holding it, over its pin', async () => {
+      await setTaskComputer(t.db, taskId, 'computer-pinned')
+      folderOn('computer-folders')
+      expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-folders')
+      folderOn('computer-folders', 'has_worktree = 0, has_base_dir = 1')
+      expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-folders')
+    })
+
+    it('without a folder the recorded holder decides nothing', async () => {
+      await setTaskComputer(t.db, taskId, 'computer-pinned')
+      folderOn('computer-folders', 'has_worktree = 0, has_base_dir = 0')
+      expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-pinned')
+    })
+
+    it('a holder removed for good (no successor) decides nothing', async () => {
+      await setProjectDefaultComputer(t.db, projectId, 'computer-default')
+      folderOn('computer-gone')
+      t.raw
+        .prepare(
+          "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('computer-gone',NULL,'deleted',0)"
+        )
+        .run()
+      expect(await resolveTaskComputerId(t.db, taskId)).toBe('computer-default')
+    })
+
+    it('re-pinning a task whose folder is on another computer is refused', async () => {
+      folderOn('computer-folders')
+      await expect(assertTaskMovable(t.db, taskId, 'computer-other')).rejects.toThrow(
+        TaskFoldersElsewhereError
+      )
+      // Its own holder, or unpinning (the holder still decides): fine.
+      await assertTaskMovable(t.db, taskId, 'computer-folders')
+      await assertTaskMovable(t.db, taskId, null)
+      // No folder: any computer.
+      folderOn('computer-folders', 'has_worktree = 0')
+      await assertTaskMovable(t.db, taskId, 'computer-other')
+    })
+  })
 })
 
 describe('deleteComputer', () => {
@@ -539,5 +587,43 @@ describe('onComputerRemoved: every delete and revoke is heard', () => {
     }
     await revokeComputer(t.db, (await mkComputer({ name: 'three' })).id)
     expect(heard, 'cleared').toHaveLength(2)
+  })
+})
+
+describe('computer retirements (chat work repoints or retires with them)', () => {
+  const retirements = () =>
+    t.db.all(
+      'SELECT computer_id,successor_id,reason FROM computer_retirements ORDER BY computer_id'
+    )
+
+  it('re-enrolling the local computer records each stale id with its successor', async () => {
+    const keep = deterministicLocalComputerId('local-computer')
+    await registerOrReplaceComputer(t.db, {
+      id: keep,
+      name: 'local-computer',
+      platform: 'p',
+      version: 'v',
+      now: 3
+    })
+    const stale = await registerComputer(t.db, {
+      name: 'local-computer',
+      platform: 'p',
+      version: 'v',
+      now: 1
+    })
+    await retireStaleLocalComputers(t.db, { name: 'local-computer', keepComputerId: keep })
+    expect(await retirements()).toEqual([
+      { computer_id: stale.id, successor_id: keep, reason: 're-enrolled' }
+    ])
+  })
+
+  it('deleting a computer records it with no successor; revoking records nothing', async () => {
+    const gone = await mkComputer({ name: 'gone' })
+    const revoked = await mkComputer({ name: 'revoked' })
+    await deleteComputer(t.db, gone.id)
+    await revokeComputer(t.db, revoked.id, 5)
+    expect(await retirements()).toEqual([
+      { computer_id: gone.id, successor_id: null, reason: 'deleted' }
+    ])
   })
 })

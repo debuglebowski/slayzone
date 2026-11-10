@@ -4,14 +4,15 @@ import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 
 test('first chat read migrates legacy history then all writes stay on its computer', async () => {
   const h = await createTestHarness(),
     dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-services-'))
-  const pc = createChatRuntimeHandlers({
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
     stateDir: dir,
     hubScope: 'hub',
     computerId: () => 'pc',
@@ -30,8 +31,8 @@ test('first chat read migrates legacy history then all writes stay on its comput
   try {
     h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
     h.db
-      .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-      .run('task', 'p', 'Task', dir)
+      .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+      .run('task', 'p', 'Task')
     h.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
@@ -131,7 +132,6 @@ test('first chat read migrates legacy history then all writes stay on its comput
     expect(await pc.request({ kind: 'prompts', taskId: 'task' })).toMatchObject([
       { text: 'computer-only hook marker' }
     ])
-    expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
     try {
       vi.stubEnv('PLAYWRIGHT', 'true')
       await expect(services.testing.seedEvents('tab', 0, [])).rejects.toThrow(/test-only/i)
@@ -153,7 +153,12 @@ test('first chat read migrates legacy history then all writes stay on its comput
         }
       ])
       expect(h.db.prepare('SELECT count(*) AS n FROM chat_events').get()).toEqual({ n: 0 })
-      expect(h.db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
+      // The hub keeps no prompt table at all (robustness plan §9, v207).
+      expect(
+        h.db
+          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_prompts'")
+          .get()
+      ).toBeUndefined()
     } finally {
       vi.unstubAllEnvs()
     }
@@ -194,7 +199,7 @@ test('durable ownership gates reject legacy writes and retention deletes during 
     expect(() =>
       h.db
         .prepare(
-          "INSERT INTO agent_prompts(id,task_id,agent_id,text,created_at) VALUES('prompt','task','claude-chat','late prompt',1)"
+          "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','late','[]')"
         )
         .run()
     ).toThrow(/owned|migrat/i)
@@ -208,7 +213,8 @@ test('durable ownership gates reject legacy writes and retention deletes during 
 test('existing task artifacts are sealed onto the computer before saving a draft', async () => {
   const h = await createTestHarness(),
     dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-sealed-'))
-  const pc = createChatRuntimeHandlers({
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
     stateDir: dir,
     hubScope: 'hub',
     computerId: () => 'pc',
@@ -227,8 +233,8 @@ test('existing task artifacts are sealed onto the computer before saving a draft
   try {
     h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
     h.db
-      .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-      .run('task', 'p', 'Task', dir)
+      .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+      .run('task', 'p', 'Task')
     h.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"

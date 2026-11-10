@@ -29,6 +29,7 @@ import {
   defaultWorktreePolicyAdapters
 } from '../../../domains/worktrees/src/server/task-adapters.js'
 import { mountRestApp } from '../../../shared/test-utils/rest-harness.js'
+import { installTaskPathsComputer } from '../../../shared/test-utils/task-paths-computer.js'
 import { spyTaskEvents } from '../../../shared/test-utils/event-spy.js'
 import { __ipcEmitCalls, __resetIpcEmitCalls } from '../../../shared/test-utils/mock-electron.js'
 import { DEFAULT_HUB_PORT_BLOCK } from '../../../shared/platform/src/paths.js'
@@ -101,6 +102,8 @@ configureTaskRuntimeAdapters({
   worktrees: defaultWorktreeExecAdapters,
   worktreePolicy: defaultWorktreePolicyAdapters
 })
+// The computer holding task folders (§9 7e): a path the CLI sets is written there.
+const folders = installTaskPathsComputer()
 
 const projectId = crypto.randomUUID()
 db.prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)').run(
@@ -381,13 +384,14 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks update --worktree-path', () => {
     expect(r.exitCode).toBe(0)
 
     const row = db
-      .prepare('SELECT worktree_path, worktree_parent_branch, repo_name FROM tasks WHERE id = ?')
+      .prepare('SELECT has_worktree, worktree_parent_branch, repo_name FROM tasks WHERE id = ?')
       .get(taskId) as {
-      worktree_path: string
+      has_worktree: number
       worktree_parent_branch: string
       repo_name: string | null
     }
-    expect(row.worktree_path).toBe(path.resolve(wtPath))
+    expect(row.has_worktree).toBe(1)
+    expect(folders.get(taskId).worktreePath).toBe(path.resolve(wtPath))
     expect(row.worktree_parent_branch).toBe('main')
     expect(row.repo_name).toBeNull()
 
@@ -424,13 +428,14 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI tasks update --worktree-path', () => {
     expect(r.exitCode).toBe(0)
 
     const row = db
-      .prepare('SELECT worktree_path, worktree_parent_branch, repo_name FROM tasks WHERE id = ?')
+      .prepare('SELECT has_worktree, worktree_parent_branch, repo_name FROM tasks WHERE id = ?')
       .get(taskId) as {
-      worktree_path: string
+      has_worktree: number
       worktree_parent_branch: string
       repo_name: string | null
     }
-    expect(row.worktree_path).toBe(path.resolve(wtPath))
+    expect(row.has_worktree).toBe(1)
+    expect(folders.get(taskId).worktreePath).toBe(path.resolve(wtPath))
     expect(row.worktree_parent_branch).toBe('main')
     expect(row.repo_name).toBe('svc-a')
 

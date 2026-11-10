@@ -298,10 +298,11 @@ test('adopt preWarmedAgent: no double-exec, sends prompt, binds the pooled sessi
     )
     // The task's initial prompt is sent to the live agent.
     expect(cmd, `initial prompt not sent: ${JSON.stringify(cmd)}`).toContain('HELLO-PROMPT')
-    // The pooled session entity was bound to the task (set-once), on the ledger db.
+    // The pooled session entity was bound to the task (set-once), on the warm agent's
+    // computer (it holds the session ledger).
     const binds = taskStore.calls.filter((c) => c.method === 'bindSessionToTask')
     expect(binds.length, `pooled session not bound: ${JSON.stringify(binds)}`).toBe(1)
-    expect(binds[0].db).toBe(realDb)
+    expect(binds[0].computerId).toBe('computer-1')
     expect(binds[0].args).toEqual({ sessionId: 'poolS', taskId: 'taskD', tabId: 'taskD' })
     killPty(sessionId)
   } finally {

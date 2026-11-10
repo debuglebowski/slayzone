@@ -22,7 +22,7 @@ let wired = false
 export function initAgentTurnsBroadcast(): void {
   if (wired) return
   wired = true
-  agentTurnsEvents.on('agent-turns:changed', (worktreePath) => {
+  agentTurnsEvents.on('agent-turns:changed', ({ worktreePath }) => {
     for (const w of BrowserWindow.getAllWindows()) {
       if (w.isDestroyed()) continue
       w.webContents.send('agent-turns:changed', worktreePath)

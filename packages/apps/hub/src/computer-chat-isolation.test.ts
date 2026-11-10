@@ -1,11 +1,11 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
@@ -20,10 +20,11 @@ async function fixture() {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-isolation-'))
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', dir)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
   h.db.prepare("INSERT INTO tasks(id,project_id,title) VALUES('other','p','Other task')").run()
-  const pc = createChatRuntimeHandlers({
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
     stateDir: dir,
     hubScope: 'hub',
     computerId: () => 'pc',
@@ -43,7 +44,7 @@ async function fixture() {
   let live = false
   let intercept: ((raw: { kind?: string }) => Promise<void> | undefined) | null = null
   const sent: unknown[] = []
-  const services = () =>
+  const services = (extra: Record<string, unknown> = {}) =>
     createComputerChatServices({
       db: h.slayDb,
       legacyData: {
@@ -60,7 +61,8 @@ async function fixture() {
       },
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
-      hasLiveTask: async () => live
+      hasLiveTask: async () => live,
+      ...extra
     } as never)
   return {
     ...h,
@@ -235,7 +237,7 @@ test('native work is not gated on chat recovery when chat storage cannot open', 
   }
 })
 
-test('a pending task pause/delete still fences native commands', async () => {
+test('an undeliverable task pause/delete fences that task, not every task', async () => {
   const f = await fixture()
   try {
     const s = f.services()
@@ -247,9 +249,16 @@ test('a pending task pause/delete still fences native commands', async () => {
       )
       .run()
     f.breakChat()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const barrier = createComputerChatCommandBarrier({ lifecycle: s.lifecycle.syncNative })
-    await expect(barrier('pc', 'pty.spawn')).rejects.toThrow(/malformed/)
+    await expect(barrier('pc', 'pty.spawn')).resolves.toBeUndefined()
     await expect(barrier('pc', 'pty.kill')).resolves.toBeUndefined()
+    // The undelivered delete is recorded against that task alone.
+    expect(s.lifecycle.taskFailure('pc', 'task', true)?.message).toMatch(/malformed/)
+    expect(s.lifecycle.taskFailure('pc', 'other', true)).toBeUndefined()
+    await expect(s.resolvePtyComputer('task', { mode: 'terminal' })).rejects.toThrow()
+    await expect(s.resolvePtyComputer('other', { mode: 'terminal' })).resolves.toBe('pc')
+    errors.mockRestore()
   } finally {
     await f.close()
   }
@@ -269,16 +278,14 @@ function seedTerminalClaudeTask(f: Awaited<ReturnType<typeof fixture>>) {
       "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-code',0)"
     )
     .run()
+  // Storage-only legacy chat content of the task (prompts left it in v207).
   f.db
     .prepare(
-      "INSERT INTO agent_prompts(id,task_id,agent_id,cli_session_id,text,created_at) VALUES('p1','task','claude-code','session-1','hello',1)"
+      "INSERT INTO chat_attachment_messages(task_id,message_id,attachments) VALUES('task','seed','[]')"
     )
     .run()
-  f.db
-    .prepare(
-      "INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES('c1','task','claude-code','session-1','slay-spawned-fresh',1)"
-    )
-    .run()
+  // Its session ledger is on the computer (robustness plan §9): not seeded here; the
+  // resumes below name the session explicitly.
 }
 
 const authorityRows = (f: Awaited<ReturnType<typeof fixture>>) =>
@@ -486,14 +493,6 @@ test('#172: a genuine cross-computer ambiguity still fences the terminal resume'
   }
 })
 
-const insertTurn = (f: Awaited<ReturnType<typeof fixture>>, id: string, preview: string) =>
-  f.db
-    .prepare(
-      "INSERT INTO agent_turns(id,worktree_path,task_id,terminal_tab_id,snapshot_sha,prompt_preview,created_at) VALUES(?,'/w','task','tab','sha',?,?)"
-    )
-    .run(id, preview, Date.now())
-const turnPreviews = (f: Awaited<ReturnType<typeof fixture>>) =>
-  f.db.prepare("SELECT id,prompt_preview FROM agent_turns WHERE task_id='task' ORDER BY id").all()
 const killRequests = (f: Awaited<ReturnType<typeof fixture>>) =>
   f.sent.filter((r) => /"(kill|pty\.kill|stop[A-Za-z]*|release[A-Za-z]*)"/.test(JSON.stringify(r)))
 
@@ -501,7 +500,6 @@ test('a terminal agent starting during a healthy task-content copy leaves the mi
   const f = await fixture()
   try {
     seedTerminalClaudeTask(f)
-    insertTurn(f, 'turn-before', 'before copy')
     const s = f.services()
     const pause = f.pauseAt('transfer.begin')
     const migrating = s.migrateIdleComputer('pc')
@@ -518,58 +516,26 @@ test('a terminal agent starting during a healthy task-content copy leaves the mi
     // Every copied legacy row reached the computer before the hub dropped it.
     const local = f.storage()
     try {
-      expect(local.records(owner!.id, 'prompt').map((r) => r.id)).toEqual(['p1'])
       expect(
         local
           .records(owner!.id, 'settings')
-          .filter((r) => r.id.startsWith('legacy-turn-preview:'))
-          .map((r) => [r.id, (r.value as { promptPreview: string }).promptPreview])
-      ).toEqual([['legacy-turn-preview:turn-before', 'before copy']])
+          .filter((r) => r.id.startsWith('attachment-message:'))
+          .map((r) => r.id)
+      ).toEqual(['attachment-message:seed'])
     } finally {
       local.close()
     }
-    expect(f.db.prepare("SELECT id FROM agent_prompts WHERE task_id='task'").all()).toEqual([])
-    expect(turnPreviews(f)).toEqual([{ id: 'turn-before', prompt_preview: '' }])
+    expect(
+      f.db.prepare("SELECT message_id FROM chat_attachment_messages WHERE task_id='task'").all()
+    ).toEqual([])
     // The running agent was never stopped by the migration.
     expect(killRequests(f)).toEqual([])
-    expect((await s.prompts('task')).map((p) => [p.id, p.text])).toEqual([['p1', 'hello']])
   } finally {
     await f.close()
   }
 })
 
-test('a terminal turn cannot write a legacy prompt preview during the copy, same as after activation', async () => {
-  const f = await fixture()
-  try {
-    seedTerminalClaudeTask(f)
-    const s = f.services()
-    const pause = f.pauseAt('transfer.begin')
-    const migrating = s.migrateIdleComputer('pc')
-    await pause.arrived
-    await expect(
-      s.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
-    ).resolves.toBe('pc')
-    f.setLive(true)
-    // The hub refuses legacy preview text once any owner of the task left
-    // `legacy` (migration v187 trigger): nothing can slip in behind the frozen
-    // copy. The turn boundary itself still records.
-    expect(() => insertTurn(f, 'turn-during', 'during copy')).toThrow(
-      /Prompt previews are computer-owned/
-    )
-    insertTurn(f, 'turn-during', '')
-    pause.release()
-    await migrating
-    expect((await s.ownership.forTab('task-content:task'))?.state).toBe('active')
-    expect(() => insertTurn(f, 'turn-after', 'after activation')).toThrow(
-      /Prompt previews are computer-owned/
-    )
-    expect(turnPreviews(f)).toEqual([{ id: 'turn-during', prompt_preview: '' }])
-    expect(killRequests(f)).toEqual([])
-    expect((await s.prompts('task')).map((p) => p.text)).toEqual(['hello'])
-  } finally {
-    await f.close()
-  }
-})
+// (Turn previews left the hub with its turns in v207: nothing to fence there.)
 
 test('an unavailable storage-only owner does not fence terminal agent starts', async () => {
   const f = await fixture()
@@ -634,6 +600,33 @@ test('a chat deletion awaiting its computer fences agent starts with its own mes
     await expect(s.resolvePtyComputer('task', { mode: 'claude-code' })).rejects.toThrow(
       'A deleted chat is still being removed from its computer. Reconnect that computer, then start this agent.'
     )
+  } finally {
+    await f.close()
+  }
+})
+
+test('one task whose legacy diagnostics cannot be cleaned does not stop the idle migration', async () => {
+  const f = await fixture()
+  try {
+    f.db.exec(`INSERT INTO tasks(id,project_id,title) VALUES('gone','p','Gone'),('bad','p','Bad');
+      UPDATE chat_task_lifecycle SET state='deleted' WHERE task_id IN ('gone','bad')`)
+    const cleaned: string[] = []
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const services = f.services({
+      diagnostics: {
+        tasks: async () => ['bad', 'gone'],
+        freeze: async () => 1,
+        cleanup: async (taskId: string) => {
+          if (taskId === 'bad') throw new Error('Diagnostic cleanup checkpoint is busy')
+          cleaned.push(taskId)
+        }
+      }
+    })
+    await expect(services.migrateIdleComputer('pc')).resolves.toBeUndefined()
+    expect(cleaned).toEqual(['gone'])
+    expect(
+      f.db.prepare("SELECT pass,item_key,computer_id FROM item_faults WHERE origin='hub'").all()
+    ).toEqual([{ pass: 'hub-legacy-diagnostics-cleanup', item_key: 'bad', computer_id: 'pc' }])
   } finally {
     await f.close()
   }

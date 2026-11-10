@@ -1,6 +1,12 @@
 import { test, expect, seed, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, waitForPtySession, startAgentTerminal } from '../fixtures/terminal'
+import {
+  openTaskTerminal,
+  waitForPtySession,
+  startAgentTerminal,
+  currentSession,
+  seedSession
+} from '../fixtures/terminal'
 
 // Migrated 2026-06-22: codex (an AI mode) is idle-gated now — it does not spawn on
 // open; click the "Open Codex" starter (startAgentTerminal) to start the real CLI.
@@ -23,15 +29,10 @@ test.describe('Codex resume', () => {
     taskId = t.id
 
     await mainWindow.evaluate(
-      ({ id, conversationId }) => {
-        return window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          agentId: 'codex',
-          codexConversationId: conversationId
-        })
-      },
-      { id: taskId, conversationId: codexConversationId }
+      (id) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: 'codex' }),
+      taskId
     )
+    await seedSession(mainWindow, taskId, 'codex', codexConversationId)
 
     await s.refreshData()
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Codex resume task' })
@@ -49,6 +50,6 @@ test.describe('Codex resume', () => {
       taskId
     )
     expect(task?.agent_id).toBe('codex')
-    expect(task?.codex_conversation_id).toBe(codexConversationId)
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBe(codexConversationId)
   })
 })

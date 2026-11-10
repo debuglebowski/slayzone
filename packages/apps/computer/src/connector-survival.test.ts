@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { startSessionHost, hostControl, type ConnectorGrant } from './session-host'
 import { startConnector } from './connector'
+import { placeTestProject } from './project-scope.fixture'
 import { RpcError, ComputerTransportErrorCodes } from '@slayzone/computer-transport/shared'
 
 it('replaces connector while idle terminal and running job keep their PIDs', async () => {
@@ -27,6 +28,7 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     capabilities: ['pty', 'proc'],
     joinToken: 'jt-valid'
   }
+  placeTestProject(root, hub.url, 'p1', root)
   const host = await startSessionHost(root, config)
   const control = await hostControl(root)
   let connector: Awaited<ReturnType<typeof startConnector>> | undefined
@@ -49,7 +51,7 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
           mode: 'claude-chat',
           epoch: 1
         },
-        projectId: null,
+        projectId: 'p1',
         cwd: root,
         revision: 1,
         providerConfig: {},
@@ -59,11 +61,13 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
     })
     await hub.gateway.request(id, 'pty.spawn', {
       sessionId: 'shell',
+      projectId: 'p1',
       command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
       cwd: root
     })
     await hub.gateway.request(id, 'proc.spawn', {
       sessionId: 'job',
+      projectId: 'p1',
       command: process.execPath,
       args: [
         '-e',

@@ -6,13 +6,14 @@
  * terminal-panel override theme (TerminalContainer sets chrome vars on the chat
  * subtree).
  *
- * No agent subprocess: the history is seeded straight into `chat_events`, which
+ * No agent subprocess: the history is seeded straight into the chat's event log on its computer (`chat.testSeedEvents`), which
  * chat.hydrate loads without spawning (startup = manual). The render test also
  * attaches screenshots of every coloured row kind in light + dark.
  */
 import type { Locator, Page, TestInfo } from '@playwright/test'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { seedChatEvents } from '../fixtures/chat-seed'
 import { expandActivities } from '../fixtures/chat-activity'
 
 const TASK = 'Chat theme tokens task'
@@ -346,7 +347,7 @@ test.describe('Chat theme tokens', () => {
   let projectId = ''
   let startedDark = false
 
-  test.beforeAll(async ({ mainWindow, electronApp }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     startedDark = await mainWindow.evaluate(() =>
       document.documentElement.classList.contains('dark')
@@ -365,21 +366,9 @@ test.describe('Chat theme tokens', () => {
     projectId = p.id
     const tabId = await createChatTask(mainWindow, projectId, TASK)
     await createChatTask(mainWindow, projectId, EMPTY_TASK)
-    await electronApp.evaluate(
-      async ({}, { tab, evs }) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const [seq, ev] of evs.entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tab,
-            seq,
-            JSON.stringify(ev)
-          ])
-        }
-      },
-      { tab: tabId, evs: EVENTS }
-    )
+    // Seeded on the chat's computer, where chat history lives (robustness plan §9;
+    // the hub's legacy chat tables are gone once nothing is left to migrate).
+    await seedChatEvents(mainWindow, tabId, EVENTS)
     await seed(mainWindow).refreshData()
   })
 

@@ -51,8 +51,8 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  * The kinds of user content a request can name.
  *
  *   project · task · tab (terminal/chat tab) · session (pty or agent runtime key)
- *   prompt · turn · artifact · artifactFolder · process · tag · template
- *   testCategory · testLabel · chatQueueItem · automationRun · automation — each
+ *   artifact · artifactFolder · process · tag · template
+ *   testCategory · testLabel · automationRun · automation — each
  *   resolves to exactly one project through its row.
  *
  *   aiConfigItem   a project-scoped item → its project; a global library item is
@@ -60,8 +60,8 @@ import { tabsEvents } from '@slayzone/task-terminals/server'
  *   projectGroup   the projects in it; an empty folder is hub-wide (it has no owner
  *                  column, and a folder created empty must stay usable by its creator).
  *   path           a filesystem path: the project(s) whose root holds it most
- *                  specifically (a task's worktree or base dir, a project's path, a
- *                  computer placement). Inside the hub's own state directory it is
+ *                  specifically (a project's path, a computer placement; a task's
+ *                  folders are the computer's to judge, §9 7e). Inside the hub's own state directory it is
  *                  refused (the database, auth store and owner token live there) unless
  *                  a project root there is more specific — and an artifact file is its
  *                  task's. Under a system directory ({@link SYSTEM_DIRS}) it is refused.
@@ -91,8 +91,6 @@ export type ResourceKind =
   | 'task'
   | 'tab'
   | 'session'
-  | 'prompt'
-  | 'turn'
   | 'artifact'
   | 'artifactFolder'
   | 'process'
@@ -100,7 +98,6 @@ export type ResourceKind =
   | 'template'
   | 'testCategory'
   | 'testLabel'
-  | 'chatQueueItem'
   | 'automationRun'
   | 'aiConfigItem'
   | 'projectGroup'
@@ -115,8 +112,6 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'task',
   'tab',
   'session',
-  'prompt',
-  'turn',
   'artifact',
   'artifactFolder',
   'process',
@@ -124,7 +119,6 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'template',
   'testCategory',
   'testLabel',
-  'chatQueueItem',
   'automationRun',
   'aiConfigItem',
   'projectGroup',
@@ -259,17 +253,12 @@ const viaTaskColumn = (table: string) =>
     JOIN projects p ON p.id = t.project_id WHERE x.id = ?`)
 
 /**
- * A runtime session key. The agent-session row is authoritative (its id IS the
- * runtime key, `recordSessionSpawn`); a row with no task is a pooled agent nobody
- * adopted yet → no owner. With no row, the legacy `taskId:tabId` key names its task
- * (plain shell tabs, and a spawn whose key is minted before any row exists).
+ * A runtime session key: `taskId:tabId` names its task. Any other key (a warm-pool
+ * agent nobody adopted yet) has no owner. The agent-session ledger is on the
+ * computer running the agents (robustness plan §9, P0), not consulted here: a
+ * runtime key never needs it.
  */
 async function resolveSession(db: SlayzoneDb, id: string): Promise<Ownership> {
-  const row = await db.get<{ task_id: string | null }>(
-    'SELECT task_id FROM agent_sessions WHERE id = ?',
-    [id]
-  )
-  if (row) return row.task_id ? viaTask(db, row.task_id) : NONE
   const colon = id.indexOf(':')
   return colon > 0 ? viaTask(db, id.slice(0, colon)) : NONE
 }
@@ -521,9 +510,11 @@ export function pathIsWithin(rawPath: string, rawRoot: string): boolean {
 // ONE resolver ({@link resolvePathResource}) decides a path against a set of roots;
 // WHICH roots is its input, by the disk the read happens on (Q1):
 //
-//   computer disk  every recorded root, with the computer it is on: a task's worktree,
-//                  a project's folder on each computer (`project_placements`), and a
-//                  pre-v176 project path. In a tie, a pre-v176 path of a project that
+//   computer disk  every recorded root, with the computer it is on: a project's folder
+//                  on each computer (`project_placements`), and a pre-v176 project
+//                  path. A task's worktree / base dir is not the hub's to know (§9 7e,
+//                  v211): every request touching one names its task, and the computer
+//                  confines the path to that task's folders. In a tie, a pre-v176 path of a project that
 //                  has a placement does not count — the placement is where its folder
 //                  is now (Q2: as a computer-less owner it made the tie unbreakable and
 //                  locked its owner out on their own computer).
@@ -545,25 +536,74 @@ const COMPUTER_DISK_ROOTS_SQL = `
   SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
     EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
   FROM (
-    SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
-    UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
-    UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
+    SELECT id AS project_id, path AS root, NULL AS computer_id FROM projects WHERE path IS NOT NULL AND path <> ''
     UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
   ) r JOIN projects p ON p.id = r.project_id`
 
+/** Project folders of the hub's disk. Its tasks' folders come from its computer (§9 7c). */
 const HUB_DISK_ROOTS_SQL = `
   SELECT r.root AS root, r.computer_id AS computer_id, p.owner_user_id AS owner_user_id,
     EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
   FROM (
-    SELECT project_id, worktree_path AS root, computer_id FROM tasks WHERE worktree_path IS NOT NULL AND worktree_path <> ''
-      AND computer_id = ?
-    UNION ALL SELECT project_id, base_dir, computer_id FROM tasks WHERE base_dir IS NOT NULL AND base_dir <> ''
-      AND computer_id = ?
-    UNION ALL SELECT id, path, NULL FROM projects WHERE path IS NOT NULL AND path <> ''
+    SELECT id AS project_id, path AS root, NULL AS computer_id FROM projects WHERE path IS NOT NULL AND path <> ''
       AND NOT EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = projects.id AND pp.root_path <> '')
     UNION ALL SELECT project_id, root_path, computer_id FROM project_placements WHERE root_path <> ''
       AND computer_id = ?
   ) r JOIN projects p ON p.id = r.project_id`
+
+/** The owner (by the HUB's task → project record) of each task a root belongs to. */
+const TASK_OWNERS_SQL = (n: number) => `
+  SELECT t.id AS task_id, p.owner_user_id AS owner_user_id,
+    EXISTS (SELECT 1 FROM project_placements pp WHERE pp.project_id = p.id AND pp.root_path <> '') AS placed
+  FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id IN (${Array(n).fill('?').join(',')})`
+
+/** A task's folder (its worktree or base dir) as the computer holding it reports. */
+export interface TaskRoot {
+  taskId: string
+  root: string
+}
+
+/**
+ * The folders of the tasks of the hub's own computer, read from THAT computer (§9
+ * Phase 7c: the hub keeps no task path). Set by the hub's composition; unset, or the
+ * computer away, there are none — a path in a task folder then belongs to nobody
+ * (refused), never to someone by a stale copy.
+ */
+let hubDiskTaskRoots: (() => Promise<TaskRoot[]>) | null = null
+export function setHubDiskTaskRoots(source: (() => Promise<TaskRoot[]>) | null): void {
+  hubDiskTaskRoots = source
+  invalidateAccessCache()
+}
+
+/** Task roots as root rows: owner by the hub's task → project record, never the computer's. */
+async function taskRootRows(
+  db: SlayzoneDb,
+  roots: readonly TaskRoot[],
+  computerId: string
+): Promise<RootRow[]> {
+  const ids = [...new Set(roots.map((r) => r.taskId))]
+  const owners = new Map<string, OwnerRow & { placed: number }>()
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500)
+    for (const row of await db.all<OwnerRow & { task_id: string; placed: number }>(
+      TASK_OWNERS_SQL(chunk.length),
+      chunk
+    ))
+      owners.set(row.task_id, row)
+  }
+  const out: RootRow[] = []
+  for (const r of roots) {
+    const owner = owners.get(r.taskId)
+    if (owner && r.root)
+      out.push({
+        root: r.root,
+        computer_id: computerId,
+        owner_user_id: owner.owner_user_id,
+        placed: owner.placed
+      })
+  }
+  return out
+}
 
 /**
  * The computer that shares the hub's disk — the desktop app's co-spawned local
@@ -576,10 +616,13 @@ export function setHubDiskComputer(computerId: string | null): void {
   invalidateAccessCache()
 }
 
-function rootsOf(db: SlayzoneDb, source: RootSource): Promise<RootRow[]> {
+async function rootsOf(db: SlayzoneDb, source: RootSource): Promise<RootRow[]> {
   if (source === 'computer-disk') return db.all<RootRow>(COMPUTER_DISK_ROOTS_SQL)
   const local = hubDiskComputerId ?? ''
-  return db.all<RootRow>(HUB_DISK_ROOTS_SQL, [local, local, local])
+  const projects = await db.all<RootRow>(HUB_DISK_ROOTS_SQL, [local])
+  if (!hubDiskComputerId || !hubDiskTaskRoots) return projects
+  const tasks = await hubDiskTaskRoots().catch(() => [] as TaskRoot[])
+  return [...projects, ...(await taskRootRows(db, tasks, hubDiskComputerId))]
 }
 
 /** `/`, a drive root (`C:\`) or a share root: never a project folder. */
@@ -733,8 +776,6 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   task: viaTask,
   tab: resolveTab,
   session: resolveSession,
-  prompt: viaTaskColumn('agent_prompts'),
-  turn: viaTaskColumn('agent_turns'),
   artifact: viaTaskColumn('task_artifacts'),
   artifactFolder: viaTaskColumn('artifact_folders'),
   process: resolveProcess,
@@ -742,11 +783,6 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   template: viaProjectColumn('task_templates'),
   testCategory: viaProjectColumn('test_categories'),
   testLabel: viaProjectColumn('test_labels'),
-  // A queued chat message lives on the computer; the hub knows it by its route. The
-  // hub's legacy `chat_queue` (kept one release for migration only) is never a target.
-  chatQueueItem: viaQuery(`SELECT p.owner_user_id FROM chat_queue_routes q
-    JOIN terminal_tabs tt ON tt.id = q.tab_id JOIN tasks t ON t.id = tt.task_id
-    JOIN projects p ON p.id = t.project_id WHERE q.id = ?`),
   automationRun: viaQuery(`SELECT p.owner_user_id FROM automation_runs r
     JOIN automations a ON a.id = r.automation_id JOIN projects p ON p.id = a.project_id
     WHERE r.id = ?`),

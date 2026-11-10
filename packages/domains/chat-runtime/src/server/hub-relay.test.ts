@@ -65,7 +65,7 @@ test.each([false, true])(
         migrate: async () => {
           throw new Error('No legacy content to migrate')
         },
-        recordConversation: async () => {}
+        onSessionsChanged: () => {}
       })
       await expect(relay.ops.getReplay('tab', -1)).resolves.toEqual(replay)
       await expect(relay.ops.openTimeline('tab', 'test-version')).resolves.toEqual({ kind: 'full' })
@@ -89,14 +89,14 @@ test.each([false, true])(
   }
 )
 
-test('metadata recovery preserves custom, removed and other native provider modes', async () => {
+test('a recorded session only refreshes the sessions list; session, settings and queue metadata are refused (v208)', async () => {
   const h = await createTestHarness()
   try {
     h.db.exec(
       "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
     )
     const ownership = createChatOwnershipStore(h.slayDb),
-      record = vi.fn(async (_value: unknown) => {})
+      record = vi.fn((_taskId: string) => {})
     await ownership.register({
       id: 'c',
       taskId: 'task',
@@ -108,7 +108,7 @@ test('metadata recovery preserves custom, removed and other native provider mode
     const relay = createHubChatRelay({
       db: h.slayDb,
       ownership,
-      recordConversation: record,
+      onSessionsChanged: record,
       request: async () => null,
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
@@ -119,41 +119,30 @@ test('metadata recovery preserves custom, removed and other native provider mode
         throw new Error('Recovery must not migrate')
       }
     })
-    const update = {
+    // The computer's ledger recorded a session: a best-effort signal, nothing copied.
+    await relay.receive('pc', {
+      type: 'sessions-changed',
       conversationId: 'c',
-      taskId: 'task',
-      tabId: 'tab',
       epoch: 1,
-      kind: 'conversation' as const,
-      sequence: 1,
-      operationId: 'custom-mode',
-      value: {
-        mode: 'my-custom-provider',
-        conversationId: 'native',
-        origin: 'user-selected',
-        createdAt: 123
-      }
-    }
-    let sequence = 0
-    for (const mode of ['my-custom-provider', 'removed-provider', 'gemini', 'claude-chat']) {
-      await relay.reconcileMetadata('pc', {
-        ...update,
-        sequence: ++sequence,
-        operationId: mode,
-        value: { ...update.value, mode }
-      })
-      expect(record).toHaveBeenLastCalledWith(
-        expect.objectContaining({ mode, createdAt: 123, mirrorProviderConfig: false })
-      )
-    }
-    await expect(
-      relay.reconcileMetadata('pc', {
-        ...update,
-        sequence: ++sequence,
-        value: { ...update.value, mode: 123 }
-      })
-    ).rejects.toThrow(/metadata/i)
-    expect(record).toHaveBeenCalledTimes(4)
+      tabId: 'tab'
+    })
+    expect(record).toHaveBeenLastCalledWith('task')
+    // All at position 1: a refused update never advances the cursor.
+    for (const kind of ['conversation', 'provider-config', 'queue-item'])
+      await expect(
+        relay.reconcileMetadata('pc', {
+          conversationId: 'c',
+          taskId: 'task',
+          tabId: 'tab',
+          epoch: 1,
+          kind: kind as never,
+          sequence: 1,
+          operationId: kind,
+          storeId: 'store',
+          value: { id: 'q', mode: 'claude-chat', conversationId: 'native' }
+        })
+      ).rejects.toThrow(/Unknown chat metadata kind/)
+    expect(record).toHaveBeenCalledTimes(1)
   } finally {
     h.cleanup()
   }
@@ -199,9 +188,7 @@ test('state relay validates identity and waits for attention consumers with comp
       migrate: async () => {
         throw new Error('Unexpected migration')
       },
-      recordConversation: async () => {
-        throw new Error('Unexpected ledger write')
-      },
+      onSessionsChanged: () => {},
       onState: async (...args) => {
         await new Promise<void>((resolve) => setImmediate(resolve))
         calls.push(args)
@@ -261,9 +248,7 @@ test('folder locators recover when child metadata arrives before its parent', as
       epoch: 1
     })
     const relay = createHubChatRelay({
-      recordConversation: async () => {
-        throw new Error('Unexpected conversation write')
-      },
+      onSessionsChanged: () => {},
       db: h.slayDb,
       ownership,
       request: async () => null,
@@ -287,6 +272,7 @@ test('folder locators recover when child metadata arrives before its parent', as
         epoch: 1,
         operationId: `folder-${sequence}`,
         sequence: sequence + 1,
+        storeId: 'store',
         kind: 'folder-changed',
         value
       })
@@ -331,11 +317,7 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
         return { ok: true }
       }
       if (raw.kind === 'invoke') return pc.invoke(raw.value)
-      if (raw.kind === 'pendingMetadata')
-        return pc.storage
-          .findRecords('settings')
-          .filter((r) => r.id.startsWith('metadata:'))
-          .map((r) => r.value)
+      if (raw.kind === 'pendingMetadata') return pc.local.pendingMetadata(500)
       if (raw.kind === 'ackMetadata') {
         const owner = pc.storage.conversation(raw.id)!
         pc.storage.removeRecord(
@@ -352,9 +334,7 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
     })
     const gate = vi.fn(async () => {})
     const relay = createHubChatRelay({
-      recordConversation: async () => {
-        throw new Error('Unexpected conversation write')
-      },
+      onSessionsChanged: () => {},
       db: h.slayDb,
       ownership,
       request,
@@ -390,39 +370,32 @@ test('hub forwards drafts to original owner; reassignment cannot move history', 
       draft: { text: 'computer-only marker', rev: 1 }
     })
     expect(h.db.prepare('SELECT count(*) AS n FROM chat_tab_state').get()).toEqual({ n: 0 })
-    await pc.local.data.writeChatModel('task', 'claude-chat', 'old-model')
-    await pc.local.data.writeChatModel('task', 'claude-chat', 'new-model')
-    const oldUpdate = pc.storage
-      .findRecords('settings')
-      .find(
-        (r) =>
-          r.id.startsWith('metadata:') &&
-          (r.value as { value: { value: unknown } }).value.value === 'old-model'
-      )!.value as import('./local-data').ChatMetadataUpdate
+    // Chat settings stay on the computer: the hub never gets a copy.
+    await pc.local.data.writeChatModel('task', 'claude-chat', 'computer-model')
+    // The terminal session id is the computer's ledger's too (robustness plan §9):
+    // recorded there, never copied to the hub — not live, not on a full re-read.
+    const terminal = (id: string) =>
+      pc.local.data.recordConversation({
+        taskId: 'task',
+        mode: 'claude-code',
+        conversationId: id,
+        origin: 'slay-spawned-resume'
+      })
+    await terminal('old-session')
+    await terminal('new-session')
     await relay.drainMetadata('pc-a')
-    await relay.reconcileMetadata('pc-a', oldUpdate)
-    const task = h.db.prepare('SELECT provider_config FROM tasks WHERE id=?').get('task') as {
-      provider_config: string
-    }
-    expect(JSON.parse(task.provider_config)['claude-chat'].chatModel).toBe('new-model')
+    const config = () =>
+      JSON.parse(
+        (h.db.prepare('SELECT provider_config FROM tasks').get() as { provider_config: string })
+          .provider_config ?? '{}'
+      )
+    expect(config()['claude-code']?.conversationId).toBeUndefined()
+    expect(config()['claude-chat']?.chatModel).toBeUndefined()
     h.db.prepare('DELETE FROM chat_metadata_progress').run()
-    h.db.prepare("UPDATE tasks SET provider_config='{}'").run()
     await relay.drainMetadata('pc-a', true)
-    expect(
-      JSON.parse(
-        (h.db.prepare('SELECT provider_config FROM tasks').get() as { provider_config: string })
-          .provider_config
-      )['claude-chat'].chatModel
-    ).toBe('new-model')
-    h.db.prepare('DELETE FROM chat_metadata_progress').run()
-    await pc.local.data.writeChatModel('task', 'claude-chat', 'after-restore')
-    await relay.drainMetadata('pc-a')
-    expect(
-      JSON.parse(
-        (h.db.prepare('SELECT provider_config FROM tasks').get() as { provider_config: string })
-          .provider_config
-      )['claude-chat'].chatModel
-    ).toBe('after-restore')
+    expect(config()['claude-code']?.conversationId).toBeUndefined()
+    expect(config()['claude-chat']?.chatModel).toBeUndefined()
+    expect(await pc.local.data.getCurrentConversationId('task', 'claude-code')).toBe('new-session')
     expect(gate).toHaveBeenCalledWith('pc-a', 'task')
     expect((await ownership.forTab('tab'))?.computerId).toBe('pc-a')
     await expect(
@@ -474,7 +447,7 @@ test('closing a newly visible answer thread atomically fences its first owner re
       request: async () => null,
       resolveComputer: async () => 'pc',
       defaultComputer: async () => 'pc',
-      recordConversation: async () => {},
+      onSessionsChanged: () => {},
       bootstrap: async () => {
         throw new Error('No bootstrap expected')
       },
@@ -491,6 +464,7 @@ test('closing a newly visible answer thread atomically fences its first owner re
         kind: 'thread-created',
         operationId: 'thread-introduction',
         sequence: 1,
+        storeId: 'store',
         value: { parentTabId: 'parent', mode: 'claude-chat' }
       })
       .catch(() => {})
@@ -542,9 +516,7 @@ test('direct link: an event-signal reports every saved event to hub consumers, o
       migrate: async () => {
         throw new Error('Unexpected migration')
       },
-      recordConversation: async () => {
-        throw new Error('Unexpected ledger write')
-      },
+      onSessionsChanged: () => {},
       onState: async (...args) => {
         await new Promise<void>((resolve) => setImmediate(resolve))
         calls.push(args)
@@ -631,7 +603,7 @@ test('a send behind its tab hydrate reaches the computer only after the hydrate 
       migrate: async () => {
         throw new Error('No legacy content to migrate')
       },
-      recordConversation: async () => {},
+      onSessionsChanged: () => {},
       beforeInvoke: async (_owner, method) => {
         if (method === 'hydrate') await hydrateHeld
       }
@@ -709,7 +681,7 @@ test('a failed hydrate does not hold its tab send back', async () => {
       migrate: async () => {
         throw new Error('No legacy content to migrate')
       },
-      recordConversation: async () => {}
+      onSessionsChanged: () => {}
     })
     const hydrated = relay.ops.hydrate({
       tabId: 'tab',
@@ -726,6 +698,228 @@ test('a failed hydrate does not hold its tab send back', async () => {
     await expect(hydrated).rejects.toThrow('hydrate failed')
     await expect(sent).resolves.toEqual({ id: 'm1', state: 'queued' })
     expect(forwarded).toEqual(['hydrate', 'send'])
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('restore isolates a conversation whose metadata snapshot fails', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab-a','task','claude-chat',0),('tab-b','task','claude-chat',1)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    for (const [id, tabId] of [
+      ['a', 'tab-a'],
+      ['b', 'tab-b']
+    ])
+      await ownership.register({
+        id,
+        taskId: 'task',
+        tabId,
+        mode: 'claude-chat',
+        computerId: 'pc',
+        epoch: 1
+      })
+    const pending = [
+      { conversationId: 'a', sequence: 1 },
+      { conversationId: 'b', sequence: 1 }
+    ].map((u) => ({
+      ...u,
+      taskId: 'task',
+      tabId: `tab-${u.conversationId}`,
+      epoch: 1,
+      kind: 'activity' as const,
+      operationId: `op-${u.conversationId}`,
+      storeId: 'store',
+      value: { at: 5 }
+    }))
+    const acked: string[] = []
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      onSessionsChanged: () => {},
+      request: async (_pc, raw) => {
+        const r = raw as { kind: string; id: string }
+        if (r.kind === 'metadata.snapshot') {
+          if (r.id === 'a') throw new Error('Artifact locator belongs to another owner')
+          return {
+            identity: { id: 'b', taskId: 'task', tabId: 'tab-b', epoch: 1 },
+            counter: 0,
+            storeId: 'store',
+            pending: [],
+            updates: []
+          }
+        }
+        if (r.kind === 'pendingMetadata')
+          return pending.filter((u) => !acked.includes(u.conversationId))
+        if (r.kind === 'ackMetadata') {
+          acked.push(r.id)
+          return { ok: true }
+        }
+        throw new Error(r.kind)
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => {
+        throw new Error('Recovery must not bootstrap')
+      },
+      migrate: async () => {
+        throw new Error('Recovery must not migrate')
+      }
+    })
+    // One poisoned conversation must not block recovery of every other one.
+    const restored = await relay.drainMetadata('pc', true)
+    expect([...restored]).toEqual(['b'])
+    expect(acked).toEqual(['b'])
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining('conversation a'),
+      expect.objectContaining({ message: expect.stringMatching(/another owner/) })
+    )
+    // The skipped update stays pending and applies on the next drain.
+    await relay.drainMetadata('pc')
+    expect(acked).toEqual(['b', 'a'])
+    errors.mockRestore()
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('one chat whose migration is stuck never blocks the other chats of its task', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(`INSERT INTO projects(id,name,color) VALUES('p','P','#000');
+      INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task');
+      INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('clean','task','claude-chat',0),('stuck','task','claude-chat',1)`)
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'clean-chat',
+      taskId: 'task',
+      tabId: 'clean',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    // Legacy history whose migration keeps failing, and the task-wide authority
+    // waiting on it; a deleted authority still delivering its removal too.
+    await ownership.register({
+      id: 'stuck-chat',
+      taskId: 'task',
+      tabId: 'stuck',
+      mode: 'claude-chat',
+      computerId: null,
+      epoch: 1
+    })
+    await ownership.register({
+      id: 'authority',
+      taskId: 'task',
+      tabId: 'task-content:task',
+      mode: 'claude-chat',
+      computerId: null,
+      epoch: 1
+    })
+    h.db.exec("INSERT INTO chat_legacy_task_authority VALUES('task','authority')")
+    const replay = { events: [], live: { afterSeq: -1, liveSeq: 0, events: [] } }
+    const migrate = vi.fn(async (id: string) => {
+      throw new Error(`migration of ${id} failed`)
+    })
+    const relay = createHubChatRelay({
+      db: h.slayDb,
+      ownership,
+      bootstrap: async () => {
+        throw new Error('unexpected bootstrap')
+      },
+      request: async (_pc, raw) => {
+        const p = raw as { kind: string; value: { method: string } }
+        if (p.kind === 'invoke' && p.value.method === 'getReplay') return replay
+        if (p.kind === 'pendingMetadata') return []
+        throw new Error('Unexpected request')
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      migrate,
+      onSessionsChanged: () => {}
+    })
+    await expect(relay.ops.getReplay('clean', -1)).resolves.toEqual(replay)
+    // The stuck chat reports its own failure, every time.
+    await expect(relay.ops.getReplay('stuck', -1)).rejects.toThrow(/stuck-chat failed/)
+    await expect(relay.ops.getReplay('clean', -1)).resolves.toEqual(replay)
+    // Prompt history spans every chat of the task: it reports the stuck one.
+    await expect(relay.ensurePromptTask('task')).rejects.toThrow(/failed/)
+    // Every stuck chat was attempted, not only the first.
+    expect(new Set(migrate.mock.calls.map(([id]) => id))).toEqual(
+      new Set(['stuck-chat', 'authority'])
+    )
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a placeholder folder resolves once every chat that referenced it was re-read without it', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','T'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    const ownership = createChatOwnershipStore(h.slayDb)
+    await ownership.register({
+      id: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const child = {
+      conversationId: 'c',
+      taskId: 'task',
+      tabId: 'tab',
+      epoch: 1,
+      operationId: 'child',
+      sequence: 1,
+      storeId: 'store',
+      kind: 'folder-changed' as const,
+      value: { id: 'child', parentId: 'lost-parent', order: 1 }
+    }
+    const relay = createHubChatRelay({
+      onSessionsChanged: () => {},
+      db: h.slayDb,
+      ownership,
+      // The computer never had the parent's own record (lost with its chat).
+      request: async (_pc, raw) =>
+        (raw as { kind: string }).kind === 'metadata.snapshot'
+          ? {
+              identity: { id: 'c', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+              counter: 1,
+              storeId: 'store',
+              pending: [],
+              updates: [child]
+            }
+          : null,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      bootstrap: async () => {
+        throw new Error('Metadata must not bootstrap')
+      },
+      migrate: async () => {
+        throw new Error('Metadata must not migrate')
+      }
+    })
+    await relay.reconcileMetadata('pc', child)
+    const placeholder = () =>
+      h.db
+        .prepare("SELECT folder_id FROM chat_folder_placeholders WHERE folder_id='lost-parent'")
+        .get()
+    expect(placeholder()).toEqual({ folder_id: 'lost-parent' })
+    // Re-read in full without the parent's record: nobody can supply it.
+    await relay.recoverMetadata('pc', 'c')
+    expect(placeholder()).toBeUndefined()
+    // A normal folder now: the child stays inside it.
+    expect(h.db.prepare("SELECT parent_id FROM artifact_folders WHERE id='child'").get()).toEqual({
+      parent_id: 'lost-parent'
+    })
   } finally {
     h.cleanup()
   }

@@ -1,3 +1,7 @@
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 import type { SlayzoneDb } from '@slayzone/platform'
 
 /**
@@ -39,6 +43,7 @@ export async function loadTimelineCheckpoint(
   db: SlayzoneDb,
   tabId: string
 ): Promise<TimelineCheckpointRow | null> {
+  if (!(await legacyChatTables(db))) return null
   const row = await db
     .prepare('SELECT version, seq, data FROM chat_timeline_checkpoints WHERE tab_id = ?')
     .get<TimelineCheckpointRow>(tabId)
@@ -50,6 +55,7 @@ export async function loadTimelinePages(
   tabId: string,
   pages: readonly number[]
 ): Promise<Array<{ page: number; rows: string }>> {
+  if (!(await legacyChatTables(db))) return []
   if (pages.length === 0) return []
   const marks = pages.map(() => '?').join(', ')
   return db
@@ -61,6 +67,7 @@ export async function loadTimelineSummaries(
   db: SlayzoneDb,
   tabId: string
 ): Promise<Array<{ page: number; summary: string }>> {
+  if (!(await legacyChatTables(db))) return []
   return db
     .prepare('SELECT page, summary FROM chat_timeline_pages WHERE tab_id = ? ORDER BY page ASC')
     .all<{ page: number; summary: string }>(tabId)
@@ -72,6 +79,7 @@ export async function saveTimeline(
   tabId: string,
   write: TimelineWrite
 ): Promise<void> {
+  if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError('chat timeline')
   const ops: Parameters<SlayzoneDb['batchTxn']>[0] = []
   if (write.dropPagesFrom !== null) {
     ops.push({
@@ -122,6 +130,7 @@ export async function searchTimelinePages(
   tabId: string,
   needleLower: string
 ): Promise<number[]> {
+  if (!(await legacyChatTables(db))) return []
   const rows = await db
     .prepare(
       'SELECT page FROM chat_timeline_pages WHERE tab_id = ? AND instr(search_text, ?) > 0 ORDER BY page ASC'
@@ -131,6 +140,7 @@ export async function searchTimelinePages(
 }
 
 export async function clearTimeline(db: SlayzoneDb, tabId: string): Promise<void> {
+  if (!(await legacyChatTables(db))) return
   await db.batchTxn([
     { type: 'run', sql: 'DELETE FROM chat_timeline_pages WHERE tab_id = ?', params: [tabId] },
     { type: 'run', sql: 'DELETE FROM chat_timeline_checkpoints WHERE tab_id = ?', params: [tabId] }

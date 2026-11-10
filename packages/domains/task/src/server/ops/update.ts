@@ -1,7 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
-import { colorOne, parseTask, updateTask, type OpDeps } from './shared.js'
+import { parseTask, updateTask, type OpDeps } from './shared.js'
 
 export async function updateTaskOp(
   db: SlayzoneDb,
@@ -37,10 +37,9 @@ export async function updateTaskOp(
         oldStatus: result.previousTask?.status
       })
     }
-    // `updateTask` writes only this task's row (+ its conversation ledger, which
-    // feeds the same row's `currentConversationByMode`), so the renderer can
-    // patch just this row instead of reloading the board.
+    // `updateTask` writes only this task's row, so the renderer can patch just
+    // this row instead of reloading the board.
     onMutation?.({ taskIds: [data.id] })
   }
-  return colorOne(db, result.nextTask)
+  return result.nextTask
 }

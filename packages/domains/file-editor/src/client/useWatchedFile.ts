@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { skipToken } from '@tanstack/react-query'
 import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC } from './trpc'
 import { useStableCallback } from '@slayzone/ui'
-import { useWorkspaceTarget } from './workspace-target'
+import { useWorkspaceScope } from './workspace-target'
 
 export interface UseWatchedFileOptions {
   projectPath: string | null
@@ -159,7 +160,7 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   const [content, setContentState] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [diskChanged, setDiskChanged] = useState(false)
@@ -363,8 +364,8 @@ export function useWatchedFile(options: UseWatchedFileOptions): UseWatchedFileRe
 
   const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { ...target, rootPath: projectPath ?? '' },
-      { enabled: !!projectPath, onData: onWatchEvent }
+      scope && projectPath ? { ...scope, rootPath: projectPath } : skipToken,
+      { onData: onWatchEvent }
     )
   )
   // Refused before any computer was there ("connect a computer"): start again on a connect.

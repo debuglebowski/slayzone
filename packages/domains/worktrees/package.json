@@ -13,6 +13,7 @@
     "./hub": "./src/server/hub.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
+    "./client/useWorktreeColors": "./src/client/useWorktreeColors.ts",
     "./hooks": "./src/client/hooks.ts",
     "./task-panels": "./src/client/task-panels.ts"
   },

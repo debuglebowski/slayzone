@@ -4,6 +4,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, cleanup } from '@testing-library/react'
 import { createTrpcTest } from '@slayzone/transport/testing'
 import { useFileEditor, isImageFile, isPdfFile, isBinaryFile } from './useFileEditor'
+import { createElement } from 'react'
+import { WorkspaceTargetProvider } from './workspace-target'
+
+/** The trpc test wrapper inside a project panel's path scope (every call names one). */
+function scopedWrapper(
+  base: (props: { children: ReactNode }) => ReactNode
+): (props: { children: ReactNode }) => ReactNode {
+  return ({ children }) =>
+    createElement(
+      base,
+      null,
+      createElement(WorkspaceTargetProvider, { target: { projectId: 'p1' }, children })
+    )
+}
 
 type FileWatchEvent = { type: 'changed' | 'deleted'; root: string; relPath: string }
 
@@ -46,7 +60,7 @@ function installFsStub(diskContent: Record<string, string> = {}): FsStub {
     writeFile,
     emitChanged: (root, rel) => emit({ type: 'changed', root, relPath: rel }),
     emitDeleted: (root, rel) => emit({ type: 'deleted', root, relPath: rel }),
-    wrapper
+    wrapper: scopedWrapper(wrapper)
   }
 }
 

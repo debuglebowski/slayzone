@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from './config'
 import type { ComputerDialer } from './handlers/types'
 import { createHubRequestHandler, startComputer, watchPrimaryHubExitCode } from './main'
+import { projectScopedDeps } from './project-scope.fixture'
+import { hubHostFromUrl } from '@slayzone/computer-transport/client'
 
 const fakeDialer: ComputerDialer = { notify: () => true }
 
@@ -89,6 +91,20 @@ describe('createHubRequestHandler dispatch table', () => {
     }
   })
 
+  it('a request naming a path scope it cannot confine fails closed, never runs unscoped', async () => {
+    // No chat store here (no computer identity): the scope's roots are unknowable,
+    // so the request is refused rather than judged by the machine bound alone.
+    const { handle } = makeDispatch()
+    const scoped = { ...ACTOR, pathScope: { kind: 'project', projectId: 'p1' } }
+    await expect(
+      handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, scoped)
+    ).rejects.toThrow()
+    // The same request without a scope still runs.
+    await expect(
+      handle(HubToComputerMethods.fsPathExists, { path: '/tmp' }, ACTOR)
+    ).resolves.toBeTruthy()
+  })
+
   it('routes implemented methods (git.isGitRepo does not throw unimplemented)', async () => {
     const { handle } = makeDispatch()
     // /tmp is inside allowedRoots but not a git repo → resolves to
@@ -153,6 +169,7 @@ describe('createHubRequestHandler dispatch table', () => {
     const root = realpathSync(tmpdir())
     let out = ''
     const { handle, dispose } = createHubRequestHandler({
+      ...projectScopedDeps({ p1: root }),
       shutdown: () => {},
       dialer: {
         notify: (method, params) => {
@@ -167,6 +184,7 @@ describe('createHubRequestHandler dispatch table', () => {
       HubToComputerMethods.ptySpawn,
       {
         sessionId: 'hub-address-dispatch',
+        projectId: 'p1',
         command: 'sh',
         args: ['-c', 'echo ADDR=[$SLAYZONE_HUB_ADDRESS]'],
         cwd: root,
@@ -282,6 +300,17 @@ describe('startComputer direct link (docs/direct-link.md)', () => {
   it('binds the loopback listener, then dials, advertising the bound address', async () => {
     const seen: Array<{ started: boolean; address: string | null }> = []
     let identity: { directAddress?: () => string | null } | undefined
+    // The terminal is a project's: its folder here is where it may start (§9 Phase 7c).
+    const slayRoot = mkdtempSync(join(tmpdir(), 'direct-seam-root-'))
+    writeFileSync(
+      join(slayRoot, 'computer.projects.json'),
+      JSON.stringify({
+        [hubHostFromUrl(testConfig.hubUrl)]: {
+          p1: { path: realpathSync(process.cwd()), updatedAt: 0 }
+        }
+      })
+    )
+    vi.stubEnv('SLAYZONE_ROOT', slayRoot)
     const handle = startComputer(testConfig, {
       credentialStore: memoryStore(),
       stateDir: tempState(),
@@ -411,6 +440,17 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       | ((method: string, params: unknown, actor: unknown) => Promise<unknown>)
       | undefined
     let identity: { directAddress?: () => string | null } | undefined
+    // The terminal is a project's: its folder here is where it may start (§9 Phase 7c).
+    const slayRoot = mkdtempSync(join(tmpdir(), 'direct-seam-root-'))
+    writeFileSync(
+      join(slayRoot, 'computer.projects.json'),
+      JSON.stringify({
+        [hubHostFromUrl(testConfig.hubUrl)]: {
+          p1: { path: realpathSync(process.cwd()), updatedAt: 0 }
+        }
+      })
+    )
+    vi.stubEnv('SLAYZONE_ROOT', slayRoot)
     const handle = startComputer(
       { ...testConfig, allowedRoots: [realpathSync(tmpdir()), process.cwd()] },
       {
@@ -421,7 +461,7 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
           onHubRequest = options.onHubRequest as typeof onHubRequest
           return {
             events: { on: () => undefined },
-            computerId: null,
+            computerId: 'direct-seam-computer',
             start: () => undefined,
             stop: async () => undefined,
             notify: () => true
@@ -445,7 +485,7 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       )
       await onHubRequest?.(
         HubToComputerMethods.ptySpawn,
-        { sessionId: 'seam-1', command: 'cat', cwd: process.cwd(), relay: false },
+        { sessionId: 'seam-1', projectId: 'p1', command: 'cat', cwd: process.cwd(), relay: false },
         ACTOR
       )
       await onHubRequest?.(
@@ -475,6 +515,8 @@ describe('startComputer direct link: a hub grant reaches that hub’s terminals'
       }
     } finally {
       await handle.stop()
+      vi.unstubAllEnvs()
+      rmSync(slayRoot, { recursive: true, force: true })
     }
   })
 })

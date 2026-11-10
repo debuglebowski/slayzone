@@ -17,6 +17,8 @@ import { getChatDeps } from './chat-router-deps'
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
 const chatContext = z.object({ taskId: z.string().optional(), tabId: z.string().optional() })
 const catalog = () => getChatDeps().catalog
+/** A queued message and the tab holding it: routed and authorized by the tab (v208). */
+const queueItemInput = z.object({ id: z.string(), tabId: z.string() })
 const queueOps = (): ReturnType<typeof getChatDeps>['queueOps'] => getChatDeps().queueOps
 
 // Structural input schemas. Value-level validation (which chatMode/effort/model/
@@ -183,6 +185,9 @@ export const chatRouter = router({
       await testing().seedPrompts(input.taskId, input.prompts)
       return { ok: true }
     }),
+  testProviderConfig: publicProcedure
+    .input(z.object({ tabId: z.string().min(1) }))
+    .query(({ input }) => testing().providerConfig(input.tabId)),
   availability: publicProcedure.input(z.object({ tabId: z.string().min(1) })).query(({ input }) => {
     const read = getChatDeps().availability
     if (!read) throw new Error('Chat availability is unavailable')
@@ -672,39 +677,42 @@ export const chatRouter = router({
       .input(
         z.object({
           id: z.string(),
+          tabId: z.string(),
           send: z.string(),
           original: z.string(),
           content: z.array(userContentBlock).min(1)
         })
       )
       .mutation(({ input }) =>
-        queueOps().update(input.id, {
-          send: input.send,
-          original: input.original,
-          content: input.content
-        })
+        queueOps().update(
+          input.id,
+          { send: input.send, original: input.original, content: input.content },
+          input.tabId
+        )
       ),
     move: publicProcedure
-      .input(z.object({ id: z.string(), toIndex: z.number().int().nonnegative() }))
-      .mutation(({ input }) => queueOps().move(input.id, input.toIndex)),
+      .input(
+        z.object({ id: z.string(), tabId: z.string(), toIndex: z.number().int().nonnegative() })
+      )
+      .mutation(({ input }) => queueOps().move(input.id, input.toIndex, input.tabId)),
     /** Hold a message while it is edited (renew while the editor is open); false when already sent. */
     hold: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().hold(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().hold(input.id, input.tabId)),
     release: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().release(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().release(input.id, input.tabId)),
     /**
      * Add a queued message to the running turn ("Send now"): the
      * agent takes it after its current tool call. `ok: false` + why when it
      * can't (the message stays queued).
      */
     steer: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().steer(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().steer(input.id, input.tabId)),
     remove: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().remove(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().remove(input.id, input.tabId)),
     clear: publicProcedure
       .input(z.object({ tabId: z.string() }))
       .mutation(({ input }) => queueOps().clear(input.tabId))

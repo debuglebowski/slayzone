@@ -257,14 +257,14 @@ function makeAsyncDb(): SlayzoneDb {
   const raw = new Database(':memory:')
   raw.exec(`
     CREATE TABLE tasks (id TEXT PRIMARY KEY, provider_config TEXT, claude_conversation_id TEXT, project_id TEXT);
-    CREATE TABLE task_conversations (
+    CREATE TABLE task_conversations (tab_id TEXT,
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, conversation_id TEXT,
       origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL);
     -- Production schema shape (ledger writes go through the fake task store here).
-    CREATE TABLE agent_sessions (
+    CREATE TABLE agent_sessions (tab_id TEXT,
       id TEXT PRIMARY KEY, mode TEXT NOT NULL, cwd TEXT, task_id TEXT, conversation_id TEXT,
       origin TEXT NOT NULL, status TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL, bound_at INTEGER);
-    CREATE TABLE session_resets (
+    CREATE TABLE session_resets (tab_id TEXT,
       id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, created_at INTEGER NOT NULL);
   `)
   raw
@@ -461,4 +461,66 @@ test('a throwing reinstallHooks never blocks the spawn', async () => {
   killPty(sid)
   setConversationResolver(null)
   setReinstallHooks(null)
+})
+
+// ── Per-tab sessions (v201): the resolver is asked for the SPAWNING tab ─────────
+test('the resolver is asked for the spawning tab (secondary tab ≠ main tab)', async () => {
+  const asked: Array<{ taskId: string; mode: string; tabId: string }> = []
+  setConversationResolver(async (req) => {
+    asked.push(req)
+    return req.tabId === 'deploy' ? 'DEPLOY-CONV' : 'MAIN-CONV'
+  })
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'tabTask:deploy'
+  await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '',
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+  })
+  expect(asked[0]).toEqual({
+    computerId: null,
+    taskId: 'tabTask',
+    mode: 'claude-code',
+    tabId: 'deploy'
+  })
+  const cmd = fake.written.join('')
+  expect(cmd).toContain('--resume')
+  expect(cmd).toContain('DEPLOY-CONV')
+  killPty(sid)
+  setConversationResolver(null)
+})
+
+test('a tab whose session is LIVE in another tab is refused, naming that tab — never a fresh mint', async () => {
+  setConversationResolver(async () => 'SHARED-CONV')
+  const first = makeFakePty()
+  installAdoptBackend(first)
+  const holder = 'liveTask:tabA'
+  const opts = {
+    win: fakeWin,
+    cwd: '/tmp',
+    mode: 'claude-code' as const,
+    type: 'claude-code',
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '',
+    adoptPty: { warmId: 'warm-1', computerId: 'computer-1' }
+  }
+  expect((await createPty({ ...opts, sessionId: holder })).success).toBe(true)
+
+  const second = makeFakePty()
+  installAdoptBackend(second)
+  const res = await createPty({ ...opts, sessionId: 'liveTask:tabB' })
+  expect(res).toMatchObject({ success: false, code: 'conversation-in-other-tab' })
+  expect(res.error).toContain('"tabA"')
+  // Nothing was started in the refused tab: no fresh session, no resume.
+  expect(second.written.join('')).toBe('')
+  killPty(holder)
+  setConversationResolver(null)
 })

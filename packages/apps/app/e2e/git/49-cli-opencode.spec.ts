@@ -5,7 +5,8 @@ import {
   getMainSessionId,
   waitForPtySession,
   readFullBuffer,
-  startAgentTerminal
+  startAgentTerminal,
+  seedSession
 } from '../fixtures/terminal'
 
 // Migrated 2026-06-22: opencode is idle-gated — startAgentTerminal clicks the
@@ -86,15 +87,9 @@ test.describe('OpenCode CLI integration', () => {
 
   test('resume uses --session flag', async ({ mainWindow }) => {
     test.setTimeout(60_000)
-    // Store a conversationId so the app resumes with --session
-    await mainWindow.evaluate(
-      ({ id }) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          providerConfig: { opencode: { conversationId: 'oc-prev-session' } }
-        }),
-      { id: taskId }
-    )
+    // A stored session (on the task's computer, robustness plan §9) so the app
+    // resumes with --session
+    await seedSession(mainWindow, taskId, 'opencode', 'oc-prev-session')
 
     // Navigate away and back to force terminal re-creation
     await goHome(mainWindow)

@@ -16,6 +16,7 @@
     "@slayzone/content-erasure": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "better-sqlite3": "^13.0.3",

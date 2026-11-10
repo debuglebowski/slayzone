@@ -58,6 +58,49 @@ export function useWorkspaceTarget(): WorkspaceTarget {
 }
 
 /**
+ * The PATH SCOPE every `fileEditor.*` call names (§9 Phase 7b): the panel's task,
+ * else its project. The hub authorizes it; the computer confines the call's paths
+ * to that scope's folders. Same shape the router requires, so a call built without
+ * one fails typecheck.
+ */
+export type WorkspaceScope = { computerId?: string | null } & (
+  | { taskId: string; projectId?: string }
+  | { taskId?: undefined; projectId: string }
+)
+
+/** The scope a target names, or null when it names neither a task nor a project. */
+export function scopeOfTarget(target: WorkspaceTarget): WorkspaceScope | null {
+  if (target.taskId)
+    return { computerId: target.computerId, taskId: target.taskId, projectId: target.projectId }
+  if (target.projectId) return { computerId: target.computerId, projectId: target.projectId }
+  return null
+}
+
+/**
+ * This panel's scope, or null outside any task / project panel. Queries then wait
+ * (`skipToken`); commands refuse with {@link WorkspaceScopeMissingError} — never a
+ * call that names nobody.
+ */
+export function useWorkspaceScope(): WorkspaceScope | null {
+  const target = useWorkspaceTarget()
+  return useMemo(() => scopeOfTarget(target), [target])
+}
+
+/** A file command issued outside any task / project panel. */
+export class WorkspaceScopeMissingError extends Error {
+  constructor() {
+    super('File editor used outside a task or project: no path scope to name')
+    this.name = 'WorkspaceScopeMissingError'
+  }
+}
+
+/** `scope`, or throw: for commands, which have no "wait" state. */
+export function requireScope(scope: WorkspaceScope | null): WorkspaceScope {
+  if (!scope) throw new WorkspaceScopeMissingError()
+  return scope
+}
+
+/**
  * Is this panel's workspace on the user's own machine?
  *
  * Gates the desktop-only affordances — "Reveal in Finder" resolves against THIS

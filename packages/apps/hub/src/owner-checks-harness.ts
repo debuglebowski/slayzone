@@ -190,8 +190,6 @@ export interface Owned {
   readonly task: string
   readonly tab: string
   readonly session: string
-  readonly prompt: string
-  readonly turn: string
   readonly artifact: string
   readonly artifactFolder: string
   readonly process: string
@@ -199,7 +197,6 @@ export interface Owned {
   readonly template: string
   readonly testCategory: string
   readonly testLabel: string
-  readonly chatQueueItem: string
   readonly automationRun: string
   readonly aiConfigItem: string
   readonly projectGroup: string
@@ -222,9 +219,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     project: id('project'),
     task: id('task'),
     tab: id('tab'),
-    session: id('session'),
-    prompt: id('prompt'),
-    turn: id('turn'),
+    // A runtime session key names its task (`taskId:tabId`): how its owner resolves.
+    session: `${id('task')}:${id('tab')}`,
     artifact: id('artifact'),
     artifactFolder: id('folder'),
     process: id('process'),
@@ -232,7 +228,6 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     template: id('template'),
     testCategory: id('testCategory'),
     testLabel: id('testLabel'),
-    chatQueueItem: id('chatQueue'),
     automationRun: id('automationRun'),
     aiConfigItem: id('aiConfigItem'),
     projectGroup: id('group'),
@@ -264,11 +259,11 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.projectGroup
     )
     run(
-      `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)`,
+      // Its folder is the project's (the hub keeps no task path, §9 7e).
+      `INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)`,
       o.task,
       o.project,
-      `${o.mark}_TASK_TITLE`,
-      o.path
+      `${o.mark}_TASK_TITLE`
     )
     // The same folder as the project's path: a record OF the hub's disk. A task on no
     // computer is not one — on a standalone hub its worktree is some computer's (Q1).
@@ -296,27 +291,6 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `INSERT INTO terminal_tabs (id, task_id, mode, is_main, agent_state) VALUES (?, ?, 'claude-code', 1, 'auto_stopped')`,
       `${o.mark}_task_hibernated`,
       `${o.mark}_task_hibernated`
-    )
-    run(
-      `INSERT INTO agent_sessions (id, mode, task_id, tab_id, origin, status, created_at)
-       VALUES (?, 'claude-code', ?, ?, 'pending-spawn', 'bound', 0)`,
-      o.session,
-      o.task,
-      o.tab
-    )
-    run(
-      `INSERT INTO agent_prompts (id, task_id, agent_id, text, created_at) VALUES (?, ?, 'claude-code', ?, 0)`,
-      o.prompt,
-      o.task,
-      `${o.mark}_PROMPT_TEXT`
-    )
-    run(
-      `INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, created_at)
-       VALUES (?, ?, ?, ?, 'sha', 0)`,
-      o.turn,
-      o.path,
-      o.task,
-      o.tab
     )
     run(
       `INSERT INTO artifact_folders (id, task_id, name) VALUES (?, ?, ?)`,
@@ -360,26 +334,6 @@ export function seedOwned(dbPath: string, o: Owned): void {
       o.testLabel,
       o.project,
       o.mark
-    )
-    // A queued chat message is the computer's; the hub keeps only its route — on its
-    // own chat tab, so the conversation's ownership fences nothing the other fixtures
-    // write on the task's terminal tab.
-    run(
-      `INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES (?, ?, 'claude-chat', 0)`,
-      `${o.chatQueueItem}-tab`,
-      o.task
-    )
-    run(
-      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, 'claude-chat', NULL, 1, 'legacy')`,
-      `conv-${o.chatQueueItem}`,
-      o.task,
-      `${o.chatQueueItem}-tab`
-    )
-    run(
-      `INSERT INTO chat_queue_routes (id, tab_id, conversation_id) VALUES (?, ?, ?)`,
-      o.chatQueueItem,
-      `${o.chatQueueItem}-tab`,
-      `conv-${o.chatQueueItem}`
     )
     run(
       `INSERT INTO automations (id, project_id, name, trigger_config, actions) VALUES (?, ?, ?, '{}', '[]')`,
@@ -469,7 +423,8 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'agentPrompts.onChanged': (o) => agentPromptsEvents.emit('agent-prompts:changed', o.task),
   'agentSessions.onChanged': (o) =>
     agentSessionsEvents.emit('agent-sessions:changed', { taskId: o.task }),
-  'agentTurns.onChanged': (o) => agentTurnsEvents.emit('agent-turns:changed', o.path),
+  'agentTurns.onChanged': (o) =>
+    agentTurnsEvents.emit('agent-turns:changed', { worktreePath: o.path, taskId: o.task }),
   'app.browser.onCreateTaskFromLink': (o) =>
     getAppDeps().browser.events.emit('create-task-from-link', {
       viewId: 'v',
@@ -568,9 +523,13 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onAgentStarts': (o) => agentStarts.mark(o.session, 'queued'),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
   'worktrees.onDiffChanged': (o) =>
-    getGitWatcher().emit('git:diff-changed', { worktreePath: o.path, refsChanged: true }),
+    getGitWatcher().emit('git:diff-changed', {
+      worktreePath: o.path,
+      refsChanged: true,
+      taskId: o.task
+    }),
   'worktrees.onDiffWatchFailed': (o) =>
-    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path }),
+    getGitWatcher().emit('git:diff-watch-failed', { worktreePath: o.path, taskId: o.task }),
   // An `admin` subscription (T-106): a void signal, attributed to who caused it.
   'automations.onChanged': (o) => asUser(o.userId, () => getAutomationsEvents().emit('changed'))
 }

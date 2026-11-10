@@ -3,7 +3,7 @@
  * WebSearch, WebFetch), hook output that matters, CLI notices and a custom
  * command's refused `!shell` line — as a reopened chat shows them.
  *
- * No agent subprocess: the session is seeded straight into `chat_events`
+ * No agent subprocess: the session is seeded straight into the chat's event log on its computer (`chat.testSeedEvents`)
  * (shapes from the recorded CLI 2.1.312 transcripts in
  * terminal/test/fixtures/claude-stream/chatui-{tool-cards,hooks,custom-commands}.ndjson),
  * which chat.hydrate replays without spawning (startup = manual).
@@ -11,6 +11,7 @@
 import path from 'node:path'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { seedChatEvents } from '../fixtures/chat-seed'
 import { expandActivities, openActivityCard } from '../fixtures/chat-activity'
 
 const MODEL = 'claude-haiku-5-5'
@@ -182,7 +183,7 @@ const EVENTS = [
 ]
 
 test.describe('Claude chat: tool cards, hook output, notices', () => {
-  test.beforeAll(async ({ mainWindow, electronApp }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     await mainWindow.evaluate(() =>
       window
@@ -207,21 +208,9 @@ test.describe('Claude chat: tool cards, hook output, notices', () => {
         .taskTerminals.ensureMain.mutate({ taskId: id, mode: 'claude-chat' })
       return tab.id
     }, task.id)
-    await electronApp.evaluate(
-      async ({}, { tab, evs }) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const [seq, ev] of evs.entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tab,
-            seq,
-            JSON.stringify(ev)
-          ])
-        }
-      },
-      { tab: tabId, evs: EVENTS }
-    )
+    // Seeded on the chat's computer, where chat history lives (robustness plan §9;
+    // the hub's legacy chat tables are gone once nothing is left to migrate).
+    await seedChatEvents(mainWindow, tabId, EVENTS)
     await s.refreshData()
     await openTaskViaSearch(mainWindow, 'Chat cards task')
     await expect(mainWindow.getByText('CARDS DONE', { exact: true })).toBeVisible({

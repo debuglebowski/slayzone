@@ -280,7 +280,14 @@ vi.mock('@slayzone/transport/client', () => {
     useTRPC: () => proxy,
     useTRPCClient: () => proxy,
     // Domain views (`typedTrpc<…>()`, e.g. file-editor's WorkspaceDirPicker) get the same proxy.
-    typedTrpc: () => ({ useTRPC: () => proxy, useTRPCClient: () => proxy }),
+    typedTrpc: () => ({
+      useTRPC: () => proxy,
+      useTRPCClient: () => proxy,
+      useClientForTask: () => proxy
+    }),
+    useClientForTask: () => proxy,
+    getClientForHub: () => proxy,
+    getHubIdForTask: () => undefined,
     useSubscription: () => undefined
   }
 })
@@ -361,8 +368,8 @@ function makeTaskDetailData(overrides: Partial<TaskDetailData> = {}): TaskDetail
       editor_open_files: null,
       provider_config: {},
       is_temporary: false,
-      worktree_path: null,
-      base_dir: null,
+      has_worktree: false,
+      has_base_dir: false,
       loop_config: null,
       dangerously_skip_permissions: false,
       assignee: null,

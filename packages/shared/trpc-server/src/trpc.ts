@@ -10,6 +10,7 @@ import {
   isHubSwitchedOffError
 } from '@slayzone/platform/hub-switch-refusal'
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
+import { PathScopeRequiredError } from '@slayzone/platform/path-scope'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './auth-gate'
 import { trpcTransformer } from './trpc-transformer'
@@ -324,6 +325,15 @@ const switchRefusal = t.middleware(async ({ next }) => {
  */
 const unsafePathRefusal = t.middleware(async ({ next }) => {
   const result = await next()
+  // A path-taking call that names no task or project (or one that does not exist):
+  // its path scope is unknowable (`@slayzone/platform/path-scope`, §9 Phase 7b).
+  if (!result.ok && result.error.cause instanceof PathScopeRequiredError) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
   if (!result.ok && isUnsafePathError(result.error.cause)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',

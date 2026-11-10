@@ -1,16 +1,16 @@
 /**
  * `usage.collect`: this computer's agent usage logs, parsed here (the same parsers
- * the hub used on its own disk) from the hub's cursors. Reads only the agents' own
- * log dirs under this computer's home; answers records + the new cursors.
+ * the hub used on its own disk) from the read offsets THIS computer keeps (robustness
+ * plan §9, P0; hub v209 — the hub keeps none). Reads only the agents' own log dirs
+ * under this computer's home; answers the new records, paged, each page with a
+ * receipt the hub acknowledges once stored — only then do its cursors move
+ * (`@slayzone/usage-analytics/collect` collector.ts).
  *
- * Paged: a reply never carries more than {@link DEFAULT_PAGE_BYTES} of records. A
- * whole backlog (a first collect: 81 MiB measured) in one message neared the hub's
- * 100 MiB WebSocket limit — past it the socket closes and every terminal on this
- * computer detaches. The rest waits here under a token the hub asks for next.
+ * Records of a session this computer's ledger names are attributed to its task here,
+ * before they leave (the ledger is only here).
  *
  * @module computer/handlers/usage-collect
  */
-import { randomUUID } from 'node:crypto'
 import {
   HubToComputerMethods,
   usageCollectParamsSchema,
@@ -18,109 +18,81 @@ import {
 } from '@slayzone/computer-transport/shared'
 import {
   collectUsage,
+  createUsageCollector,
   type ParseResult,
-  type UsageCursors
+  type UsageCursors,
+  type UsageCursorStore
 } from '@slayzone/usage-analytics/collect'
 import type { HandlerContext, HubMethodTable } from './types'
 
-/** Records per reply, by their JSON size: far under the 100 MiB message limit. */
-export const DEFAULT_PAGE_BYTES = 8 * 1024 * 1024
-/** A collect the hub stopped asking for is dropped after this. */
-const PAGES_TTL_MS = 10 * 60_000
-/** Collects held at once (one per refresh; a few if refreshes overlap). */
-const MAX_HELD = 4
-
-type Entry = UsageCollectResult['results'][number]
-
-/**
- * Split results into pages of at most `budget` bytes of records. A file larger than
- * a page spans several: every chunk but its last is `complete: false` and keeps the
- * file's old cursor, so its cursor only moves once all its records are delivered.
- */
-export function pageUsage(
-  results: ParseResult[],
-  cursors: UsageCursors,
-  budget: number
-): Entry[][] {
-  const pages: Entry[][] = []
-  let page: Entry[] = []
-  let bytes = 0
-  const close = () => {
-    if (page.length) pages.push(page)
-    page = []
-    bytes = 0
-  }
-  for (const result of results) {
-    const header = result.sourceFile.length + 96
-    let chunk: Entry['records'] = []
-    const flushPartial = () => {
-      page.push({
-        sourceFile: result.sourceFile,
-        fileMtimeMs: result.fileMtimeMs,
-        endOffset: cursors[result.sourceFile]?.offset ?? 0,
-        complete: false,
-        records: chunk
-      })
-      chunk = []
-      close()
-    }
-    if (bytes + header > budget) close()
-    bytes += header
-    for (const record of result.records) {
-      const size = JSON.stringify(record).length + 1
-      if (bytes + size > budget && (chunk.length > 0 || page.length > 0)) {
-        if (chunk.length > 0) flushPartial()
-        else close()
-        bytes = header
-      }
-      chunk.push(record as unknown as Entry['records'][number])
-      bytes += size
-    }
-    page.push({
-      sourceFile: result.sourceFile,
-      fileMtimeMs: result.fileMtimeMs,
-      endOffset: result.endOffset,
-      records: chunk
-    })
-  }
-  close()
-  return pages.length ? pages : [[]]
-}
+export { DEFAULT_PAGE_BYTES, pageUsage } from '@slayzone/usage-analytics/collect'
 
 export function createUsageCollectHandlers(
   _ctx: HandlerContext,
-  opts: { pageBytes?: number; collect?: typeof collectUsage } = {}
-): HubMethodTable {
-  const budget = opts.pageBytes ?? DEFAULT_PAGE_BYTES
-  const collect = opts.collect ?? collectUsage
-  const held = new Map<string, { pages: Entry[][]; expiresAt: number }>()
-
-  const reply = (token: string, pages: Entry[][], index: number): UsageCollectResult => {
-    const last = index + 1 >= pages.length
-    if (last) held.delete(token)
-    return {
-      results: pages[index] ?? [],
-      ...(last ? {} : { next: { token, index: index + 1 } })
-    }
+  opts: {
+    /**
+     * This hub's cursor store (its chat store). Throws while the hub's runtime is
+     * unavailable: the collect then fails, and the hub asks again next refresh.
+     */
+    cursors: () => UsageCursorStore
+    pageBytes?: number
+    collect?: typeof collectUsage
+    /**
+     * The task that ran each provider session, from this computer's session ledger
+     * (robustness plan §9: only here). A record of a session it names is
+     * attributed to that task before it leaves.
+     */
+    taskOf?: (sessionIds: string[]) => Record<string, string>
+    /**
+     * The task whose worktree each folder is, from this computer's task paths (§9
+     * Phase 7c: only here). A record no session names is attributed by its folder.
+     */
+    taskOfCwd?: (cwds: string[]) => Record<string, string>
   }
+): HubMethodTable {
+  const collectRaw = opts.collect ?? collectUsage
+  /** Attribute records `pick` keys to a task through `lookup`; no answer = unattributed. */
+  const attribute = (
+    results: ParseResult[],
+    pick: (rec: ParseResult['records'][number]) => string | null | undefined,
+    lookup: ((keys: string[]) => Record<string, string>) | undefined
+  ) => {
+    if (!lookup) return
+    const keys = new Set<string>()
+    for (const r of results)
+      for (const rec of r.records) {
+        const key = pick(rec)
+        if (!rec.taskId && key) keys.add(key)
+      }
+    if (!keys.size) return
+    let tasks: Record<string, string>
+    try {
+      tasks = lookup([...keys])
+    } catch {
+      // No store for this hub yet (its chat runtime is not up): unattributed.
+      return
+    }
+    for (const r of results)
+      for (const rec of r.records) {
+        const key = pick(rec)
+        if (!rec.taskId && key && tasks[key]) rec.taskId = tasks[key]
+      }
+  }
+  const collect = async (cursors: UsageCursors): Promise<ParseResult[]> => {
+    const results = await collectRaw(cursors)
+    attribute(results, (rec) => rec.sessionId, opts.taskOf)
+    attribute(results, (rec) => rec.cwd, opts.taskOfCwd)
+    return results
+  }
+  const collector = createUsageCollector({
+    store: opts.cursors,
+    collect,
+    pageBytes: opts.pageBytes
+  })
 
   async function usageCollect(raw: unknown): Promise<UsageCollectResult> {
-    const { cursors, page } = usageCollectParamsSchema.parse(raw)
-    const now = Date.now()
-    for (const [token, h] of held) if (h.expiresAt < now) held.delete(token)
-    if (page) {
-      const h = held.get(page.token)
-      // Expired or unknown: nothing more here; the hub resumes from its cursors.
-      if (!h) return { results: [] }
-      h.expiresAt = now + PAGES_TTL_MS
-      return reply(page.token, h.pages, page.index)
-    }
-    const pages = pageUsage(await collect(cursors), cursors, budget)
-    if (pages.length === 1) return { results: pages[0] ?? [] }
-    while (held.size >= MAX_HELD) held.delete(held.keys().next().value as string)
-    const token = randomUUID()
-    held.set(token, { pages, expiresAt: now + PAGES_TTL_MS })
-    return reply(token, pages, 0)
+    const reply = await collector.handle(usageCollectParamsSchema.parse(raw))
+    return reply as unknown as UsageCollectResult
   }
   return { [HubToComputerMethods.usageCollect]: usageCollect }
 }

@@ -2,7 +2,7 @@ import { securityEvent } from '@slayzone/platform/security-log'
 import { createDirectListener, type DirectListener } from './direct/listener'
 import { createDirectGrantStore, type DirectGrantStore } from './direct/grants'
 import type { DirectPtyService } from './handlers/pty'
-import type { DirectChatService } from './handlers/chat-runtime'
+import type { DirectChatService, DirectTaskDataService } from './handlers/chat-runtime'
 import { createDirectGrantHandlers } from './direct/handlers'
 import { createRtcAnswerer, type RtcAnswerer } from './direct/rtc-answerer'
 import { loadRtcPolyfill, rtcRuntimeAvailable, type RtcPolyfill } from './direct/rtc-runtime'
@@ -42,13 +42,22 @@ import {
   RpcError,
   computerShutdownParamsSchema,
   directRtcOfferParamsSchema,
+  projectNotPlacedError,
   requestActorSchema
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
-import { JailViolationError, setProtectedPaths } from './path-jail'
+import {
+  implicitSpawnScope,
+  JailViolationError,
+  runInScopeJail,
+  type ScopeJail,
+  scopedSpawnCwd,
+  setProtectedPaths
+} from './path-jail'
+import type { WirePathScope } from '@slayzone/platform/path-scope'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 import { startHostIdReconciler } from './host-id'
 import { createAgentHookServer } from './handlers/agent-hook'
@@ -71,6 +80,7 @@ import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
+import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
 
 /** Running package release, advertised on enrollment and reconnect. */
 declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
@@ -234,6 +244,12 @@ export interface HubRequestHandlerDeps {
    */
   getProjectPaths?: () => ProjectPathStore | null
   /**
+   * Settles once {@link getProjectPaths} has its map (loaded or failed). A request
+   * confined to a task's / project's folders waits for it: those folders come from
+   * that map, and a scope judged before it arrived would refuse a placed project.
+   */
+  projectPathsReady?: Promise<unknown>
+  /**
    * The computer-wide agent-start admission queue, shared by every hub this
    * computer serves (see spawn-admission.ts). Absent: a private one (tests).
    */
@@ -284,6 +300,8 @@ export interface HubRequestDispatch {
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
   directChat: DirectChatService
+  /** This hub's computer-only task data, as direct-link clients read it. */
+  directTaskData: DirectTaskDataService
 }
 
 /**
@@ -372,7 +390,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGitOpHandlers(ctx, { onHubDisconnected: (cb) => onHubDisconnected.push(cb) }),
     ...createExecRunHandlers(ctx, deps.getProjectPaths),
     ...createAgentConfigHandlers(ctx),
-    ...createUsageCollectHandlers(ctx),
+    // Usage is attributed to tasks here, from this hub's session ledger, and parsed
+    // from the read offsets this computer keeps for this hub (§9, hub v209).
+    ...createUsageCollectHandlers(ctx, {
+      cursors: () => chat.usageCursors(),
+      taskOf: (ids) => chat.sessionTasks(ids),
+      taskOfCwd: (cwds) => chat.worktreeTasks(cwds)
+    }),
     ...createTestScanHandlers(ctx),
     ...createWorkspaceChangesHandlers(ctx, deps.getProjectPaths ?? (() => null)),
     ...fs.handlers,
@@ -417,6 +441,16 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...Object.keys(directRtcHandlers)
   ])
 
+  /** Spawns whose cwd is confined to the task's / project's own folders (§9 Phase 7c). */
+  const SCOPED_SPAWNS: ReadonlySet<string> = new Set([
+    HubToComputerMethods.ptySpawn,
+    HubToComputerMethods.ptyWarmSpawn,
+    HubToComputerMethods.procSpawn
+  ])
+
+  /** The jail one request's path scope opens: its folders from this hub's store. */
+  const scopeJailOf = (scope: WirePathScope): ScopeJail => chat.scopeJail(scope)
+
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
     const parsedActor = requestActorSchema.safeParse(rawActor)
@@ -442,7 +476,35 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       record('refused', err.code, err.message)
       throw err
     }
-    const entry = table[method]
+    const entry0 = Object.hasOwn(table, method) ? table[method] : undefined
+    // The path scope the hub authorized (§9 Phase 7b): every path judged while this
+    // request is served must lie inside that task's / project's own folders here.
+    const scope = actor.pathScope
+    const scoped =
+      entry0 && scope ? (p: unknown) => runInScopeJail(scopeJailOf(scope), () => entry0(p)) : entry0
+    // A process the hub starts for a task or project (§9 Phase 7c) starts inside
+    // that scope's own folders: its cwd is judged against them, or chosen from them.
+    // The hub no longer knows them, so a spawn naming neither is refused.
+    const entry =
+      scoped && SCOPED_SPAWNS.has(method)
+        ? (p: unknown) => {
+            const spawnScope = scope ?? implicitSpawnScope(p)
+            if (!spawnScope) {
+              throw new JailViolationError(
+                `${method} names no task or project; refusing to start a process`
+              )
+            }
+            const cwd = (p as { cwd?: unknown }).cwd
+            const judged = scopedSpawnCwd(
+              scopeJailOf(spawnScope),
+              typeof cwd === 'string' && cwd ? cwd : undefined,
+              deps.config.allowedRoots,
+              // No folder for its project here: the user places it, then it starts.
+              spawnScope.projectId ? () => projectNotPlacedError(spawnScope.projectId!) : undefined
+            )
+            return scoped({ ...(p as object), cwd: judged })
+          }
+        : scoped
     if (!entry) {
       const err = new RpcError(
         ComputerTransportErrorCodes.unimplemented,
@@ -461,6 +523,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       )
         await cliReady
       if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady
+      // Chat requests judge their paths (agent start folder, `cwd` of a command,
+      // folder lists) inside the task's folders too, from the same map.
+      if (
+        deps.projectPathsReady &&
+        (scope || SCOPED_SPAWNS.has(method) || method === HubToComputerMethods.chatRequest)
+      )
+        await deps.projectPathsReady
       const result = await entry(params)
       record('ok')
       return result
@@ -514,6 +583,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     handle: trackedHandle,
     directPty: pty.direct,
     directChat: chat.direct,
+    directTaskData: chat.directTaskData,
     dispose,
     setAgentHookUrl,
     hubDisconnected,
@@ -642,7 +712,8 @@ export function startComputer(
     grants: directGrants,
     services: {
       pty: (hubKey) => dispatchByHub.get(hubKey)?.directPty ?? null,
-      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null
+      chat: (hubKey) => dispatchByHub.get(hubKey)?.directChat ?? null,
+      taskData: (hubKey) => dispatchByHub.get(hubKey)?.directTaskData ?? null
     },
     listenAddress: config.directListenAddress ?? DEFAULT_DIRECT_LISTEN_ADDRESS,
     ...(config.directPublicAddress ? { publicAddress: config.directPublicAddress } : {}),
@@ -757,7 +828,7 @@ export function startComputer(
     // Where this computer keeps THIS hub's projects. Loaded async (one file read)
     // and late-bound, like the agent-hook URL — the dispatch table is synchronous.
     let projectPaths: ProjectPathStore | null = null
-    void createProjectPathStore(hubHostFromUrl(hubUrl))
+    const projectPathsReady = createProjectPathStore(hubHostFromUrl(hubUrl))
       .then((store) => {
         projectPaths = store
         log('project path map loaded', {
@@ -793,6 +864,7 @@ export function startComputer(
       config,
       log,
       getProjectPaths: () => projectPaths,
+      projectPathsReady,
       admission,
       requestLog,
       directGrants,
@@ -909,7 +981,21 @@ export function startComputer(
   const connections = new Map<string, HubConnection>()
   const hubUrls = effectiveHubUrls(config)
   const primaryUrl = hubUrls[0]
-  for (const [i, url] of hubUrls.entries()) connections.set(url, connectHub(url, i === 0))
+  // The primary hub is required. Each additional configured hub connects on its
+  // own: one that cannot (a refused url, unreadable local state) is logged and
+  // never stops the computer from serving the others.
+  connections.set(primaryUrl, connectHub(primaryUrl, true))
+  forEachIsolatedSync(
+    hubUrls.filter((url) => url !== primaryUrl),
+    {
+      pass: 'computer.connect-hubs',
+      key: (url) => url,
+      isFatal: isStorageFatal,
+      log: (message, error) =>
+        log('could not connect an additional hub', { message, error: String(error) })
+    },
+    (url) => void connections.set(url, connectHub(url, false))
+  )
   const primaryDialer = connections.get(primaryUrl)!.dialer
 
   // Hub-set changes run one at a time, each after the previous has fully applied:

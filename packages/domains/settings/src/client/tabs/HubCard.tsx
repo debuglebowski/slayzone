@@ -28,6 +28,7 @@ import {
 import { useComputerActions } from './ComputerActions'
 import { MachineLabel } from './MachineLabel'
 import { ComputerName } from './ComputerName'
+import { ComputerFaults } from './ComputerFaults'
 import { HubUsersSection } from './HubUsersSection'
 
 /**
@@ -611,6 +612,7 @@ export function HubCard({
                       )}
                     </div>
                     <OutdatedNote computer={computer} />
+                    <ComputerFaults computerId={computer.id} />
                   </td>
                   {/* The same component the hub header uses, so the dot, the
                       truncation and the tone are identical rather than merely
@@ -903,6 +905,8 @@ export function HubCard({
               )}
             </tbody>
           </table>
+          {/* The hub's own (backups, erasure, project sync): admin only, else nothing. */}
+          <ComputerFaults computerId={null} title="This hub needs attention" />
           <HubUsersSection />
         </>
       }

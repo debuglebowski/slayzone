@@ -3,11 +3,17 @@ import crypto from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '@slayzone/computers/server'
 import type { RoutingGateway } from '@slayzone/computer-transport/server'
-import { configureTaskRuntimeAdapters, createTaskOp, updateTask } from '@slayzone/task/server'
+import {
+  configureTaskRuntimeAdapters,
+  createTaskOp,
+  getTaskPathsDelegate,
+  setTaskPathsDelegate,
+  type TaskPathsDelegate
+} from '@slayzone/task/server'
 import { defaultWorktreePolicyAdapters, hubWorktreeExecAdapters } from '@slayzone/worktrees/server'
 import { createComputerPlacement } from './computer-placement'
 import { createTaskWorktreeRouting } from './task-worktree-routing'
@@ -23,6 +29,13 @@ let projectId: string
 let usable: string[]
 let calls: { computerId: string; method: string; params: unknown }[]
 let routing: ReturnType<typeof createTaskWorktreeRouting>
+/**
+ * The worktree each computer holds per task (§9 7e: the hub keeps no path), and the
+ * `forget`s it received once a purge dealt with a checkout.
+ */
+let held: Map<string, { computerId: string | null; worktreePath: string }>
+let forgotten: { computerId: string | null; taskId: string }[]
+let previousDelegate: TaskPathsDelegate | null
 
 const gateway = {
   request: async (computerId: string, method: string, params?: unknown) => {
@@ -42,6 +55,36 @@ beforeEach(async () => {
   h = await createTestHarness()
   usable = []
   calls = []
+  held = new Map()
+  forgotten = []
+  previousDelegate = getTaskPathsDelegate()
+  // The computer holding each task's folders, as the hub's delegate reaches it.
+  setTaskPathsDelegate({
+    changed: async (taskId, change) => {
+      if (change.op === 'set' && change.worktreePath)
+        held.set(taskId, { computerId: madeOn(taskId), worktreePath: change.worktreePath })
+      if (change.op === 'clear') held.delete(taskId)
+      if (change.op === 'inherit') {
+        const parent = held.get(change.parentTaskId)
+        if (parent) held.set(taskId, parent)
+      }
+    },
+    apply: async () => {
+      throw new Error('not used here')
+    },
+    read: async () => ({}),
+    release: async (taskId, live) => {
+      const own = held.get(taskId)
+      return {
+        worktreePath: own?.worktreePath ?? null,
+        shared: [...held].some(
+          ([id, v]) => id !== taskId && live.includes(id) && v.worktreePath === own?.worktreePath
+        ),
+        computerId: own?.computerId ?? ''
+      }
+    },
+    forget: async () => undefined
+  })
   const sql = (s: string, ...p: unknown[]): void => void h.db.prepare(s).run(...p)
   projectId = crypto.randomUUID()
   sql(
@@ -94,6 +137,8 @@ beforeEach(async () => {
   })
 })
 
+afterEach(() => setTaskPathsDelegate(previousDelegate))
+
 const computerName = (id: string): string => (id === LOCAL ? DEFAULT_LOCAL_COMPUTER_NAME : 'remote')
 
 /** A task made while only the remote computer was connected: its worktree is there. */
@@ -130,6 +175,8 @@ test('erasure removes the worktree on the computer that holds it, not the curren
     }
   ])
   expect(exists(id)).toBe(false)
+  // Its computer is told the checkout is dealt with: no purged path lingers there.
+  expect(forgotten).toEqual([{ computerId: REMOTE, taskId: id }])
 })
 
 test('an offline worktree stays visibly incomplete after the task row is erased, then resumes', async () => {
@@ -141,10 +188,12 @@ test('an offline worktree stays visibly incomplete after the task row is erased,
   expect(report.computers).toContainEqual(expect.objectContaining({ id: REMOTE, deleted: false }))
   expect(removals()).toEqual([])
   expect(exists(id)).toBe(false)
+  expect(forgotten).toEqual([]) // still to remove: the path stays where it is
   usable = [LOCAL, REMOTE]
   const resumed = await resumeErasure(h.slayDb, root, report.id, cleanupOptions())
   expect(resumed.state).toBe('complete')
   expect(removals().map((r) => r.computerId)).toEqual([REMOTE])
+  expect(forgotten).toEqual([{ computerId: REMOTE, taskId: id }])
 })
 
 test('a revoked computer cannot be silently counted as erased', async () => {
@@ -174,11 +223,10 @@ async function unboundTaskWithWorktree(): Promise<{ id: string; path: string }> 
   h.db
     .prepare('UPDATE tasks SET worktree_computer_id=NULL, computer_id=NULL WHERE id=?')
     .run(task.id)
-  const row = h.db.prepare('SELECT worktree_path FROM tasks WHERE id=?').get(task.id) as {
-    worktree_path: string
-  }
+  const path = held.get(task.id)?.worktreePath
+  if (!path) throw new Error('no worktree held for the task')
   calls = []
-  return { id: task.id, path: row.worktree_path }
+  return { id: task.id, path }
 }
 
 test("an unbound task's worktree is removed on the default computer, like the old purge", async () => {
@@ -230,6 +278,23 @@ test('an unbound worktree with every computer revoked is reported gone, not retr
 function cleanupOptions(): ErasureOptions {
   return {
     resolveWorktreeComputer: routing.erasedWorktreeComputer,
+    // As composition.ts: the computer the worktree is on names it, then forgets it.
+    releaseWorktree: async (target, live) => {
+      if (!target.computerId || !usable.includes(target.computerId)) throw new Error('offline')
+      const own = held.get(target.taskId)
+      return {
+        worktreePath: own?.worktreePath ?? null,
+        shared: [...held].some(
+          ([id, v]) =>
+            id !== target.taskId && live.includes(id) && v.worktreePath === own?.worktreePath
+        )
+      }
+    },
+    forgetWorktree: async (target) => {
+      if (!target.computerId || !usable.includes(target.computerId)) return
+      forgotten.push({ computerId: target.computerId, taskId: target.taskId })
+      held.delete(target.taskId)
+    },
     cleanupComputer: async (request) => {
       if (!usable.includes(request.computerId)) throw new Error('offline')
       return request.taskIds.map((taskId) => ({
@@ -259,6 +324,25 @@ const madeOn = (id: string): string | null =>
     }
   ).c
 
+test("a purged subtask's shared worktree stays; its computer still forgets the purged task's path", async () => {
+  usable = [REMOTE]
+  const parent = await createTaskOp(h.slayDb, { projectId, title: 'Parent' }, {})
+  if (!parent) throw new Error('no parent')
+  const child = await createTaskOp(h.slayDb, { projectId, title: 'Child', parentId: parent.id }, {})
+  if (!child) throw new Error('no child')
+  calls = []
+  const report = await eraseContent(
+    h.slayDb,
+    h.tmpDir(),
+    { kind: 'tasks', ids: [child.id] },
+    cleanupOptions()
+  )
+  expect(report.state).toBe('complete')
+  expect(removals()).toEqual([]) // the parent still works in it
+  expect(forgotten).toEqual([{ computerId: REMOTE, taskId: child.id }])
+  expect(held.get(parent.id)?.worktreePath).toBeTruthy()
+})
+
 test('a subtask shares its parent worktree, and the computer that holds it', async () => {
   usable = [REMOTE]
   const parent = await createTaskOp(h.slayDb, { projectId, title: 'Parent' }, {})
@@ -269,14 +353,5 @@ test('a subtask shares its parent worktree, and the computer that holds it', asy
   expect(madeOn(parent.id)).toBe(REMOTE)
   expect(madeOn(child.id)).toBe(REMOTE)
 })
-
-test('a worktree path set by hand forgets the recorded computer; the same path keeps it', async () => {
-  usable = [REMOTE]
-  const task = await createTaskOp(h.slayDb, { projectId, title: 'Linked' }, {})
-  if (!task) throw new Error('no task')
-  const path = '/home/k/app-workspaces/linked'
-  await updateTask(h.slayDb, { id: task.id, worktreePath: path })
-  expect(madeOn(task.id)).toBe(REMOTE)
-  await updateTask(h.slayDb, { id: task.id, worktreePath: '/elsewhere/wt' })
-  expect(madeOn(task.id)).toBeNull()
-})
+// A path set by hand is written on the computer holding the task's folders, which
+// stays its holder (§9 7e): covered by computer-task-paths.test and soak day 21.

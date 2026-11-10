@@ -37,7 +37,8 @@ import {
   useUndoableTaskActions,
   useCloseTaskTab,
   useReopenClosedTab,
-  useCompleteAndCloseTask
+  useCompleteAndCloseTask,
+  FaultedTasksProvider
 } from '@slayzone/tasks/client'
 import { useTabStore, loadTabStoreState } from '@slayzone/tabs-state'
 import { useDialogStore, type SearchFileContext } from '@slayzone/dialogs'
@@ -696,256 +697,263 @@ export function HomeView({
   )
 
   return (
-    <SidebarProvider defaultOpen className="h-svh min-h-0 bg-background text-foreground">
-      <AppSidebar
-        projects={projects}
-        projectGroups={data.projectGroups}
-        tasks={data.tasks}
-        selectedProjectId={selectedProjectId}
-        onSelectProject={(id) => useTabStore.getState().selectProject(id)}
-        // Store-driven orchestration: sidebar buttons flip useDialogStore /
-        // useTabStore state; AppDialogs + OverlayViewRouter (below) render the
-        // target. Settings + project (create/settings/delete) + group dialogs are
-        // registered in AppDialogs; the sidebar's create/delete/group-settings
-        // buttons flip the store directly (ProjectsRailView/TreeView), so only
-        // onProjectSettings is routed through here.
-        onProjectSettings={(project) => useDialogStore.getState().openProjectSettings(project)}
-        onSettings={() => useDialogStore.getState().openSettings()}
-        onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
-        onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
-        onTaskClick={openTask}
-        onCloseTab={closeTabByTaskId}
-        onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)}
-        onCreateTemporaryTask={(projectId) => void handleCreateScratchTerminal(projectId)}
-        onboardingChecklist={onboardingChecklist}
-        zenMode={zenMode}
-        onSetWindowButtonVisibility={NOOP}
-        convexConfigured={convexConfigured}
-        feedbackSlot={
-          <ConvexScope>
-            <FeedbackDialog />
-          </ConvexScope>
-        }
-        keyRecorder={KeyRecorder}
-        sessionTaskIds={EMPTY_SESSION_IDS}
-        onReorderProjects={data.reorderProjects}
-        onCreateProjectGroup={data.createProjectGroup}
-        onCreateFolderWithProjects={data.createFolderWithProjects}
-        onRenameProjectGroup={data.renameProjectGroup}
-        onDeleteProjectGroup={data.deleteProjectGroup}
-        onSetGroupCollapsed={data.setGroupCollapsed}
-        onReorderTopLevel={data.reorderTopLevel}
-        onMoveProjectToGroup={data.moveProjectToGroup}
-        onReorderProjectsInGroup={data.reorderProjectsInGroup}
-        onTaskReorder={data.reorderTasks}
-        onTaskMove={data.moveTask}
-        onTaskReparent={data.reparentTask}
-        onTaskBulkReparent={data.bulkReparent}
-        onTaskFieldUpdate={data.contextMenuUpdate}
-        onTaskBulkFieldUpdate={data.bulkContextMenuUpdate}
-        onSetTasksPinned={data.setTasksPinned}
-        onSetCollapsed={data.setTaskCollapsed}
-        onPinnedReorder={data.reorderPinnedTasks}
-        tags={data.tags}
-        taskTags={data.taskTags}
-        blockedTaskIds={data.blockedTaskIds}
-      />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {sidebarView !== 'tree' && (
-          <TabBar
-            tabs={tabs}
-            activeIndex={activeTabIndex}
-            activeView={activeView}
-            onTabClick={(i) => useTabStore.getState().setActiveTabIndex(i)}
-            onTabClose={(i) => void closeTab(i)}
-            onTabReorder={(from, to) => useTabStore.getState().reorderTabs(from, to)}
-            onTabRename={async (taskId, title) => {
-              const updated = await trpcClient.task.update.mutate({ id: taskId, title })
-              data.updateTask(updated)
-            }}
-            hideTabs={explodeMode}
-            rightContent={headerActions}
-          />
-        )}
-        {/* `relative` so OverlayViewRouter's `absolute inset-0` plane covers the
+    <FaultedTasksProvider>
+      <SidebarProvider defaultOpen className="h-svh min-h-0 bg-background text-foreground">
+        <AppSidebar
+          projects={projects}
+          projectGroups={data.projectGroups}
+          tasks={data.tasks}
+          selectedProjectId={selectedProjectId}
+          onSelectProject={(id) => useTabStore.getState().selectProject(id)}
+          // Store-driven orchestration: sidebar buttons flip useDialogStore /
+          // useTabStore state; AppDialogs + OverlayViewRouter (below) render the
+          // target. Settings + project (create/settings/delete) + group dialogs are
+          // registered in AppDialogs; the sidebar's create/delete/group-settings
+          // buttons flip the store directly (ProjectsRailView/TreeView), so only
+          // onProjectSettings is routed through here.
+          onProjectSettings={(project) => useDialogStore.getState().openProjectSettings(project)}
+          onSettings={() => useDialogStore.getState().openSettings()}
+          onUsageAnalytics={() => useTabStore.getState().setActiveView('usage-analytics')}
+          onLeaderboard={() => useTabStore.getState().setActiveView('leaderboard')}
+          onTaskClick={openTask}
+          onCloseTab={closeTabByTaskId}
+          onOpenTaskInBackground={(id) => useTabStore.getState().openTaskInBackground(id)}
+          onCreateTemporaryTask={(projectId) => void handleCreateScratchTerminal(projectId)}
+          onboardingChecklist={onboardingChecklist}
+          zenMode={zenMode}
+          onSetWindowButtonVisibility={NOOP}
+          convexConfigured={convexConfigured}
+          feedbackSlot={
+            <ConvexScope>
+              <FeedbackDialog />
+            </ConvexScope>
+          }
+          keyRecorder={KeyRecorder}
+          sessionTaskIds={EMPTY_SESSION_IDS}
+          onReorderProjects={data.reorderProjects}
+          onCreateProjectGroup={data.createProjectGroup}
+          onCreateFolderWithProjects={data.createFolderWithProjects}
+          onRenameProjectGroup={data.renameProjectGroup}
+          onDeleteProjectGroup={data.deleteProjectGroup}
+          onSetGroupCollapsed={data.setGroupCollapsed}
+          onReorderTopLevel={data.reorderTopLevel}
+          onMoveProjectToGroup={data.moveProjectToGroup}
+          onReorderProjectsInGroup={data.reorderProjectsInGroup}
+          onTaskReorder={data.reorderTasks}
+          onTaskMove={data.moveTask}
+          onTaskReparent={data.reparentTask}
+          onTaskBulkReparent={data.bulkReparent}
+          onTaskFieldUpdate={data.contextMenuUpdate}
+          onTaskBulkFieldUpdate={data.bulkContextMenuUpdate}
+          onSetTasksPinned={data.setTasksPinned}
+          onSetCollapsed={data.setTaskCollapsed}
+          onPinnedReorder={data.reorderPinnedTasks}
+          tags={data.tags}
+          taskTags={data.taskTags}
+          blockedTaskIds={data.blockedTaskIds}
+        />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {sidebarView !== 'tree' && (
+            <TabBar
+              tabs={tabs}
+              activeIndex={activeTabIndex}
+              activeView={activeView}
+              onTabClick={(i) => useTabStore.getState().setActiveTabIndex(i)}
+              onTabClose={(i) => void closeTab(i)}
+              onTabReorder={(from, to) => useTabStore.getState().reorderTabs(from, to)}
+              onTabRename={async (taskId, title) => {
+                const updated = await trpcClient.task.update.mutate({ id: taskId, title })
+                data.updateTask(updated)
+              }}
+              hideTabs={explodeMode}
+              rightContent={headerActions}
+            />
+          )}
+          {/* `relative` so OverlayViewRouter's `absolute inset-0` plane covers the
             content. Every tab stays mounted; inactive tabs hide via `invisible` +
             `inert` so terminal/chat sessions survive tab switches (matches
             canonical App.tsx). In explode mode this same container becomes a CSS
             grid that tiles the open task tabs (mirrors canonical App.tsx). */}
-        <div
-          ref={explodeGridRef}
-          className={cn('relative min-h-0 flex-1 overflow-hidden', explodeMode && 'grid gap-1 p-1')}
-          style={
-            explodeMode
-              ? (() => {
-                  const MIN_CELL_W = 480
-                  const widthCols =
-                    explodeGridWidth > 0
-                      ? Math.max(1, Math.floor(explodeGridWidth / MIN_CELL_W))
-                      : Math.ceil(Math.sqrt(visibleTaskCount))
-                  const cols = Math.max(1, Math.min(widthCols, visibleTaskCount))
-                  const rows = Math.ceil(visibleTaskCount / cols)
-                  return {
-                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+          <div
+            ref={explodeGridRef}
+            className={cn(
+              'relative min-h-0 flex-1 overflow-hidden',
+              explodeMode && 'grid gap-1 p-1'
+            )}
+            style={
+              explodeMode
+                ? (() => {
+                    const MIN_CELL_W = 480
+                    const widthCols =
+                      explodeGridWidth > 0
+                        ? Math.max(1, Math.floor(explodeGridWidth / MIN_CELL_W))
+                        : Math.ceil(Math.sqrt(visibleTaskCount))
+                    const cols = Math.max(1, Math.min(widthCols, visibleTaskCount))
+                    const rows = Math.ceil(visibleTaskCount / cols)
+                    return {
+                      gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                      gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+                    }
+                  })()
+                : undefined
+            }
+          >
+            {tabs.map((tab, i) => {
+              const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
+              // Explode mode tiles only task tabs; the home tab is hidden.
+              if (explodeMode && tab.type !== 'task') return null
+              const isExplodeFocused =
+                explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
+              return (
+                <div
+                  key={tab.type === 'home' ? 'home' : tab.taskId}
+                  data-explode-task-id={explodeMode && tab.type === 'task' ? tab.taskId : undefined}
+                  className={
+                    explodeMode
+                      ? cn(
+                          'relative min-h-0 overflow-hidden rounded border',
+                          isExplodeFocused
+                            ? 'border-primary/60 ring-2 ring-primary/40'
+                            : 'border-border'
+                        )
+                      : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
                   }
-                })()
-              : undefined
-          }
-        >
-          {tabs.map((tab, i) => {
-            const isViewActive = activeView === 'tabs' && i === deferredActiveTabIndex
-            // Explode mode tiles only task tabs; the home tab is hidden.
-            if (explodeMode && tab.type !== 'task') return null
-            const isExplodeFocused =
-              explodeMode && tab.type === 'task' && focusedExplodeTaskId === tab.taskId
-            return (
-              <div
-                key={tab.type === 'home' ? 'home' : tab.taskId}
-                data-explode-task-id={explodeMode && tab.type === 'task' ? tab.taskId : undefined}
-                className={
-                  explodeMode
-                    ? cn(
-                        'relative min-h-0 overflow-hidden rounded border',
-                        isExplodeFocused
-                          ? 'border-primary/60 ring-2 ring-primary/40'
-                          : 'border-border'
-                      )
-                    : `absolute inset-0 ${!isViewActive ? 'invisible [&_*]:transition-none!' : 'z-10'}`
-                }
-                inert={!explodeMode && !isViewActive ? true : undefined}
-              >
-                {tab.type === 'home' ? (
-                  <HomeContainer
-                    data={data}
-                    selectedProjectId={selectedProjectId}
-                    isActive={isViewActive}
-                    onTaskClick={(task) => openTask(task.id)}
-                    editorHandleRef={homeEditorHandle}
-                  />
-                ) : (
-                  <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
-                    <TaskDetailView
+                  inert={!explodeMode && !isViewActive ? true : undefined}
+                >
+                  {tab.type === 'home' ? (
+                    <HomeContainer
                       data={data}
-                      taskId={tab.taskId}
-                      isActive={explodeMode || isViewActive}
-                      hasShortcutFocus={
-                        explodeMode ? focusedExplodeTaskId === tab.taskId : isViewActive
-                      }
-                      compact={explodeMode}
-                      zenMode={zenMode}
-                      onClose={() => closeTabByTaskId(tab.taskId)}
-                      onNavigateToTask={openTask}
+                      selectedProjectId={selectedProjectId}
+                      isActive={isViewActive}
+                      onTaskClick={(task) => openTask(task.id)}
+                      editorHandleRef={homeEditorHandle}
                     />
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          <OverlayViewRouter
-            selectedProjectId={selectedProjectId}
-            projectName={currentProjectName}
-            projectPath={currentProjectPath}
-            onTaskClick={openTask}
-          />
+                  ) : (
+                    <div className={explodeMode ? 'absolute inset-0' : 'h-full'}>
+                      <TaskDetailView
+                        data={data}
+                        taskId={tab.taskId}
+                        isActive={explodeMode || isViewActive}
+                        hasShortcutFocus={
+                          explodeMode ? focusedExplodeTaskId === tab.taskId : isViewActive
+                        }
+                        compact={explodeMode}
+                        zenMode={zenMode}
+                        onClose={() => closeTabByTaskId(tab.taskId)}
+                        onNavigateToTask={openTask}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            <OverlayViewRouter
+              selectedProjectId={selectedProjectId}
+              projectName={currentProjectName}
+              projectPath={currentProjectPath}
+              onTaskClick={openTask}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Global Agent panel — kept mounted (hidden, not unmounted) once opened so
+        {/* Global Agent panel — kept mounted (hidden, not unmounted) once opened so
           the terminal session persists across toggles. Floating-window controls
           are omitted (no floating-window infra in the fork) → the panel renders
           without the detach dropdown. */}
-      {agentSessionId !== null && globalAgentMounted && (
-        <>
-          {globalAgentVisible && (
+        {agentSessionId !== null && globalAgentMounted && (
+          <>
+            {globalAgentVisible && (
+              <ResizeHandle
+                leftWidth={100_000}
+                rightWidth={globalAgentPanelState.panelWidth}
+                leftMinWidth={0}
+                rightMinWidth={GLOBAL_AGENT_PANEL_MIN_WIDTH}
+                onResize={(_lw, rw) =>
+                  setGlobalAgentPanelState({
+                    panelWidth: Math.min(
+                      GLOBAL_AGENT_PANEL_MAX_WIDTH,
+                      Math.max(GLOBAL_AGENT_PANEL_MIN_WIDTH, rw)
+                    )
+                  })
+                }
+                onDragStart={() => setIsSidePanelResizing(true)}
+                onDragEnd={() => setIsSidePanelResizing(false)}
+                onReset={() =>
+                  setGlobalAgentPanelState({ panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH })
+                }
+              />
+            )}
+            <div
+              className={globalAgentVisible ? 'min-h-0' : 'invisible w-0 overflow-hidden'}
+              style={globalAgentVisible ? undefined : { position: 'absolute' }}
+            >
+              <GlobalAgentSidePanel
+                width={globalAgentPanelState.panelWidth}
+                sessionId={agentSessionId}
+                cwd={currentProjectPath}
+                mode={agentMode as AgentId}
+                isActive={globalAgentPanelState.isOpen}
+                isResizing={isSidePanelResizing}
+                onNewSession={handleAgentNewSession}
+                onModeChange={handleAgentModeChange}
+              />
+            </div>
+          </>
+        )}
+
+        {/* Agent Status panel — idle/stalled agent list with dismiss + navigate. */}
+        {agentStatusState.isLocked && (
+          <>
             <ResizeHandle
               leftWidth={100_000}
-              rightWidth={globalAgentPanelState.panelWidth}
+              rightWidth={agentStatusState.panelWidth}
               leftMinWidth={0}
-              rightMinWidth={GLOBAL_AGENT_PANEL_MIN_WIDTH}
+              rightMinWidth={AGENT_STATUS_PANEL_MIN_WIDTH}
               onResize={(_lw, rw) =>
-                setGlobalAgentPanelState({
+                setAgentStatusState({
                   panelWidth: Math.min(
-                    GLOBAL_AGENT_PANEL_MAX_WIDTH,
-                    Math.max(GLOBAL_AGENT_PANEL_MIN_WIDTH, rw)
+                    AGENT_STATUS_PANEL_MAX_WIDTH,
+                    Math.max(AGENT_STATUS_PANEL_MIN_WIDTH, rw)
                   )
                 })
               }
               onDragStart={() => setIsSidePanelResizing(true)}
               onDragEnd={() => setIsSidePanelResizing(false)}
-              onReset={() =>
-                setGlobalAgentPanelState({ panelWidth: DEFAULT_GLOBAL_AGENT_PANEL_WIDTH })
+              onReset={() => setAgentStatusState({ panelWidth: DEFAULT_AGENT_STATUS_PANEL_WIDTH })}
+            />
+            <AgentStatusSidePanel
+              width={agentStatusState.panelWidth}
+              idleTasks={idleTasks}
+              filterCurrentProject={agentStatusState.filterCurrentProject}
+              onFilterToggle={() =>
+                setAgentStatusState({
+                  filterCurrentProject: !agentStatusState.filterCurrentProject
+                })
               }
+              onNavigate={openTask}
+              onDismiss={handleDismissIdle}
+              columnsByProjectId={columnsByProjectId}
+              selectedProjectId={selectedProjectId}
+              currentProjectName={currentProjectName}
             />
-          )}
-          <div
-            className={globalAgentVisible ? 'min-h-0' : 'invisible w-0 overflow-hidden'}
-            style={globalAgentVisible ? undefined : { position: 'absolute' }}
-          >
-            <GlobalAgentSidePanel
-              width={globalAgentPanelState.panelWidth}
-              sessionId={agentSessionId}
-              cwd={currentProjectPath}
-              mode={agentMode as AgentId}
-              isActive={globalAgentPanelState.isOpen}
-              isResizing={isSidePanelResizing}
-              onNewSession={handleAgentNewSession}
-              onModeChange={handleAgentModeChange}
-            />
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {/* Agent Status panel — idle/stalled agent list with dismiss + navigate. */}
-      {agentStatusState.isLocked && (
-        <>
-          <ResizeHandle
-            leftWidth={100_000}
-            rightWidth={agentStatusState.panelWidth}
-            leftMinWidth={0}
-            rightMinWidth={AGENT_STATUS_PANEL_MIN_WIDTH}
-            onResize={(_lw, rw) =>
-              setAgentStatusState({
-                panelWidth: Math.min(
-                  AGENT_STATUS_PANEL_MAX_WIDTH,
-                  Math.max(AGENT_STATUS_PANEL_MIN_WIDTH, rw)
-                )
-              })
-            }
-            onDragStart={() => setIsSidePanelResizing(true)}
-            onDragEnd={() => setIsSidePanelResizing(false)}
-            onReset={() => setAgentStatusState({ panelWidth: DEFAULT_AGENT_STATUS_PANEL_WIDTH })}
-          />
-          <AgentStatusSidePanel
-            width={agentStatusState.panelWidth}
-            idleTasks={idleTasks}
-            filterCurrentProject={agentStatusState.filterCurrentProject}
-            onFilterToggle={() =>
-              setAgentStatusState({ filterCurrentProject: !agentStatusState.filterCurrentProject })
-            }
-            onNavigate={openTask}
-            onDismiss={handleDismissIdle}
-            columnsByProjectId={columnsByProjectId}
-            selectedProjectId={selectedProjectId}
-            currentProjectName={currentProjectName}
-          />
-        </>
-      )}
-
-      {/* Store-driven dialog registry + toast surface (mounted once at root).
+        {/* Store-driven dialog registry + toast surface (mounted once at root).
           Project CRUD + group dialogs patch the lifted board (`data`) + selection
           so the sidebar updates without forking a second useTasksData instance. */}
-      <AppDialogs
-        data={data}
-        selectedProjectId={selectedProjectId}
-        onSelectProject={(id) => useTabStore.getState().selectProject(id)}
-        onOpenTask={openTask}
-        onCompleteTask={completeAndCloseTask}
-        onReopenClosedTab={reopenClosedTab}
-        onboarding={onboarding}
-        startTour={startTour}
-        markSetupGuideCompleted={markSetupGuideCompleted}
-      />
-    </SidebarProvider>
+        <AppDialogs
+          data={data}
+          selectedProjectId={selectedProjectId}
+          onSelectProject={(id) => useTabStore.getState().selectProject(id)}
+          onOpenTask={openTask}
+          onCompleteTask={completeAndCloseTask}
+          onReopenClosedTab={reopenClosedTab}
+          onboarding={onboarding}
+          startTour={startTour}
+          markSetupGuideCompleted={markSetupGuideCompleted}
+        />
+      </SidebarProvider>
+    </FaultedTasksProvider>
   )
 }

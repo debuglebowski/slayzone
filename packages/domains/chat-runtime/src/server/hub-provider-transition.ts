@@ -8,6 +8,7 @@ import {
   type HubChatOwnership
 } from './hub-ownership'
 import { chatStorageMode } from './storage-mode'
+import { isolateItem } from './hub-isolation'
 
 interface TransitionRow {
   id: string
@@ -27,6 +28,12 @@ export function createHubProviderTransitions(opts: {
   request: ChatComputerRequest
   gate?(computerId: string, taskId: string): Promise<void>
   quiesce?(owner: HubChatOwnership): Promise<void>
+  /**
+   * A reserved switch was superseded: its conversation's ownership moved past
+   * it (a later migration, move or re-enrollment). Never shown to the user;
+   * the caller logs it and records a diagnostics event.
+   */
+  onSuperseded?(info: { id: string; conversationId: string; taskId: string; reason: string }): void
 }) {
   const { db, ownership } = opts
   const pending = new Map<string, Promise<void>>()
@@ -180,6 +187,24 @@ export function createHubProviderTransitions(opts: {
     // The tab now holds another conversation: access granted to the old one ends.
     notifyChatOwnershipChange(db, [from.tabId])
   }
+  async function supersede(row: TransitionRow, reason: string) {
+    const result = await db.run(
+      "UPDATE chat_provider_transitions SET state='superseded' WHERE id=? AND state='reserved'",
+      [row.id]
+    )
+    if (!result.changes) return
+    console.warn(`[chat] provider transition ${row.id} superseded: ${reason}`)
+    try {
+      opts.onSuperseded?.({
+        id: row.id,
+        conversationId: row.conversation_id,
+        taskId: row.task_id,
+        reason
+      })
+    } catch {
+      // Reporting never undoes the state change.
+    }
+  }
   async function run(row: TransitionRow) {
     const owner = await ownership.get(row.conversation_id)
     if (!owner || owner.state === 'deleted') {
@@ -194,8 +219,18 @@ export function createHubProviderTransitions(opts: {
       owner.tabId !== row.tab_id ||
       owner.epoch !== row.epoch ||
       owner.computerId !== row.computer_id
-    )
+    ) {
+      // A newer ownership commit supersedes the reservation: it can never run
+      // as reserved, and kept reserved it would block every later switch of
+      // this tab. A switch the computer did apply still publishes from its own
+      // proof (recover() re-reserves it by id).
+      if (owner.epoch > row.epoch || owner.computerId !== row.computer_id)
+        return supersede(
+          row,
+          `ownership moved to epoch ${owner.epoch} on ${owner.computerId ?? 'no computer'}`
+        )
       throw new Error('Provider transition ownership changed')
+    }
     await opts.quiesce?.(owner)
     const identity = (await opts.request(row.computer_id, {
       kind: 'conversation.transition',
@@ -255,11 +290,13 @@ export function createHubProviderTransitions(opts: {
       return work
     },
     async resume(computerId: string) {
+      // A reserved transition stays reserved: opening its tab retries it and
+      // shows the error there, not on every chat of the computer.
       for (const row of await db.all<TransitionRow>(
         "SELECT * FROM chat_provider_transitions WHERE computer_id=? AND state='reserved' ORDER BY epoch,id",
         [computerId]
       ))
-        await run(row)
+        await isolateItem(`provider transition ${row.id}`, () => run(row))
     },
     async recover(
       computerId: string,

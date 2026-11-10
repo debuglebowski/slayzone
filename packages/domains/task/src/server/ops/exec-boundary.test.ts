@@ -16,7 +16,9 @@ import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness.
 import {
   cleanupTaskFull,
   configureTaskRuntimeAdapters,
+  getTaskPathsDelegate,
   maybeAutoCreateWorktree,
+  setTaskPathsDelegate,
   type WorktreeExecAdapters
 } from './shared.js'
 
@@ -38,14 +40,6 @@ const zeroComputerAdapters = (hubCalls: string[]): WorktreeExecAdapters => ({
   isGitRepo: async () => noComputer('git repo probe')(),
   pathExists: () => noComputer('path probe')(),
   // Hub-owned: must be reachable with no computer.
-  getWorktreeColor: () => {
-    hubCalls.push('getWorktreeColor')
-    return '#abcdef'
-  },
-  ensureProjectWorktreeColors: async () => {
-    hubCalls.push('ensureProjectWorktreeColors')
-    return new Map()
-  },
   hubPathExists: () => {
     hubCalls.push('hubPathExists')
     return true
@@ -85,10 +79,10 @@ test('zero computers: task CREATE succeeds, worktree is skipped not fatal', asyn
 
   // Must NOT throw: auto-create is best-effort and runs before any agent exists.
   await maybeAutoCreateWorktree(h.slayDb, tid, pid, 'T')
-  const row = h.db.prepare('SELECT worktree_path FROM tasks WHERE id = ?').get(tid) as {
-    worktree_path: string | null
+  const row = h.db.prepare('SELECT has_worktree FROM tasks WHERE id = ?').get(tid) as {
+    has_worktree: number
   }
-  expect(row.worktree_path).toBeNull()
+  expect(row.has_worktree).toBe(0)
   h.cleanup()
 })
 
@@ -119,14 +113,26 @@ test('zero computers: cleanup of a task WITH a worktree still completes', async 
   const tid = crypto.randomUUID()
   seedProject(h, pid)
   seedTask(h, tid, pid)
-  h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run('/tmp/wt-x', tid)
+  h.db.prepare('UPDATE tasks SET has_worktree = 1 WHERE id = ?').run(tid)
   configureTaskRuntimeAdapters({
     getDataRoot: () => tmpdir(),
     worktrees: zeroComputerAdapters([])
   })
-
-  // removeWorktree IS routed and throws here; cleanup wraps it, so archiving a task
-  // never depends on a computer being present.
-  await cleanupTaskFull(h.slayDb, tid)
-  h.cleanup()
+  // The computer that holds the worktree (§9 7e) cannot be asked either.
+  const previous = getTaskPathsDelegate()
+  setTaskPathsDelegate({
+    changed: async () => undefined,
+    apply: async () => noComputer('path write')(),
+    read: async () => ({}),
+    release: async () => noComputer('worktree release')(),
+    forget: async () => undefined
+  })
+  try {
+    // Asking that computer and removeWorktree ARE routed and throw here; cleanup
+    // wraps them, so archiving a task never depends on a computer being present.
+    await expect(cleanupTaskFull(h.slayDb, tid)).resolves.toBe('failed')
+  } finally {
+    setTaskPathsDelegate(previous)
+    h.cleanup()
+  }
 })

@@ -25,7 +25,8 @@ test('reconnect barrier delivers lifecycle before commands and never acknowledge
     const raw = async (_pc: string, input: unknown): Promise<unknown> => {
       const p = input as { kind: string; state: string; revision: number }
       calls.push(p.kind)
-      if (offline) throw new Error('Offline')
+      // Offline = the transport's not-connected error: no task can be delivered.
+      if (offline) throw Object.assign(new Error('Offline'), { name: 'RpcError', code: -32004 })
       return p.kind === 'task.lifecycle' ? { state: p.state, revision: p.revision } : { ok: true }
     }
     const lifecycle = createChatLifecycle({ db: adapter, request: raw })
@@ -83,6 +84,74 @@ test('tab deletion keeps durable targets while other task conversations stay act
     await lifecycle.request('pc', { kind: 'inspect' })
     expect(calls).toContain('conversation.delete')
     expect(await owners.pendingDeletions('pc')).toEqual([])
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('re-deleting an acknowledged deleted chat (recovery does, every pass) does not leave its task blocked', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task')"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    const lifecycle = createChatLifecycle({
+      db: h.slayDb,
+      request: async (_pc, raw) => {
+        const p = raw as { kind: string; state?: string; revision?: number }
+        return p.kind === 'task.lifecycle' ? { state: p.state, revision: p.revision } : { ok: true }
+      }
+    })
+    await lifecycle.track('t', 'pc')
+    await owners.deleteConversation('c')
+    await lifecycle.sync('pc')
+    expect(await owners.get('c')).toMatchObject({ state: 'deleted', cleanupPending: false })
+    // The computer still lists the deleted conversation; recovery deletes it again.
+    const epoch = (await owners.get('c'))!.epoch
+    await owners.deleteConversation('c', epoch)
+    await lifecycle.sync('pc')
+    expect(await owners.get('c')).toMatchObject({ state: 'deleted', cleanupPending: false })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a deleted chat left marked pending with every removal acknowledged is cleared', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task')"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'pc',
+      epoch: 1
+    })
+    // The state older hubs left behind.
+    h.db
+      .prepare("UPDATE chat_ownership SET state='deleted',epoch=3,cleanup_pending=1 WHERE id='c'")
+      .run()
+    h.db
+      .prepare(
+        "INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch,acknowledged) VALUES('c','pc',3,1)"
+      )
+      .run()
+    const lifecycle = createChatLifecycle({ db: h.slayDb, request: async () => ({ ok: true }) })
+    await lifecycle.sync('pc')
+    expect(await owners.get('c')).toMatchObject({ cleanupPending: false })
   } finally {
     h.cleanup()
   }

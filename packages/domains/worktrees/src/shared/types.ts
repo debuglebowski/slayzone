@@ -3,6 +3,8 @@ export interface CreateWorktreeOpts {
   targetPath: string
   branch?: string
   sourceBranch?: string
+  /** Whose worktree this is: the task it is for, else its project (the path scope). */
+  taskId?: string
   projectId?: string
   /** Correlation id for phase progress events. Omit → no progress emitted. */
   requestId?: string

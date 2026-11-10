@@ -187,6 +187,7 @@ export function ProjectMcpPanel({ projectPath, projectId }: ProjectMcpPanelProps
           }
         }}
         projectPath={projectPath}
+        projectId={projectId}
         availableProviders={enabledMcpTargets}
         onAdded={loadConfigs}
         editTarget={editTarget}

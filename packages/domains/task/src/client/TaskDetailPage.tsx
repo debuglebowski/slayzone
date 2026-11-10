@@ -45,11 +45,13 @@ import type {
 import type { TaskTemplate } from '@slayzone/task-contracts'
 import type { TaskDetailData } from './taskDetailCache'
 import {
+  hasOwnFolder,
   mainTerminalCwdFrom,
   mainTerminalProps,
   taskRepoName,
   taskRepoPath
 } from '../shared/main-terminal'
+import { useTaskPath, useTaskPathLocation } from './useTaskPath'
 import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
@@ -456,11 +458,20 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   )
   // Effective repo path (worktree > resolved child repo > project path) — drives terminal/editor/browser/worktree.
   // Shared with the hub's `task.startMainAgent` (../shared/main-terminal).
-  const effectiveRepoPath = taskRepoPath(task, resolvedRepo.path)
+  // A worktree / custom folder lives on the task's computer (§9 Phase 7d): read there.
+  // Until it answers (or while it is away) nothing falls back to the project folder.
+  const taskPath = useTaskPath(task)
+  const taskPathLocation = useTaskPathLocation(taskPath)
+  const taskPaths = taskPath.state === 'ok' ? taskPath : null
+  const worktreePath = taskPaths?.worktreePath ?? null
+  const baseDir = taskPaths?.baseDir ?? null
+  const taskPathPending = hasOwnFolder(task) && taskPath.state !== 'ok'
+  const effectiveRepoPath = taskRepoPath(task, resolvedRepo.path, taskPaths)
 
   // Git-panel viewing axis: ephemeral, repo selection here does NOT change the task-bound path.
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
-  const taskBoundRepoForView = task?.worktree_path ?? resolvedRepo.path // worktree if present, else resolved child / project root
+  // Worktree if present, else resolved child / project root (a worktree not read yet: none).
+  const taskBoundRepoForView = task?.has_worktree ? worktreePath : resolvedRepo.path
   const { repos: viewableRepos } = useTaskProjectRepos(
     projectRoot,
     taskBoundRepoForView,
@@ -1015,6 +1026,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     handleResetTerminal,
     handleSwitchSession,
     handleDeleteSession,
+    handleTabSessionReset,
+    handleTabSessionSwitch,
     handleReattachTerminal,
     handoffMode,
     handleHandoff
@@ -1602,9 +1615,9 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     status?: Task['status']
   }): Promise<Task> => {
     // Only reset PTY when the effective working directory actually changes
-    const oldEffective = task?.worktree_path ?? task?.base_dir ?? resolvedRepo.path
-    const newWorktree = data.worktreePath !== undefined ? data.worktreePath : task?.worktree_path
-    const newBaseDir = data.baseDir !== undefined ? data.baseDir : task?.base_dir
+    const oldEffective = worktreePath ?? baseDir ?? resolvedRepo.path
+    const newWorktree = data.worktreePath !== undefined ? data.worktreePath : worktreePath
+    const newBaseDir = data.baseDir !== undefined ? data.baseDir : baseDir
     const newEffective = newWorktree ?? newBaseDir ?? resolvedRepo.path
     const cwdChanged = oldEffective !== newEffective
 
@@ -1955,13 +1968,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 <div className="flex items-center gap-1">
                   <div
                     className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                    title={effectiveRepoPath ?? 'No directory set'}
+                    title={effectiveRepoPath ?? taskPathLocation ?? 'No directory set'}
                   >
-                    {effectiveRepoPath ?? 'No directory set'}
-                    {task.worktree_path && (
+                    {taskPath.state === 'loading' && hasOwnFolder(task)
+                      ? '…'
+                      : (effectiveRepoPath ?? taskPathLocation ?? 'No directory set')}
+                    {task.has_worktree && (
                       <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
                     )}
-                    {!task.worktree_path && task.base_dir && (
+                    {!task.has_worktree && task.has_base_dir && (
                       <span className="ml-1 text-[10px] opacity-60">(custom)</span>
                     )}
                   </div>
@@ -1972,7 +1987,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                   >
                     <FileCode className="size-3.5 text-muted-foreground" />
                   </button>
-                  {task.base_dir && (
+                  {task.has_base_dir && (
                     <button
                       className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
                       title="Clear custom directory"
@@ -1994,10 +2009,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     }}
                     target={{ taskId: task.id }}
                     title="Select working directory"
-                    defaultPath={task.base_dir ?? effectiveRepoPath ?? null}
+                    defaultPath={baseDir ?? effectiveRepoPath ?? null}
                   />
                 </div>
-                {task.worktree_path && (
+                {task.has_worktree && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -2014,7 +2029,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     Detach worktree
                   </Button>
                 )}
-                {task.worktree_path && task.base_dir && (
+                {task.has_worktree && task.has_base_dir && (
                   <span className="text-[10px] text-amber-400/80">
                     Worktree active — custom dir overridden
                   </span>
@@ -3050,25 +3065,28 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     )}
                     {/* Terminal + mode bar wrapper */}
                     <div className="relative flex-1 min-h-0 overflow-hidden">
-                      {(effectiveRepoPath || projectRoot) && !projectPathMissing ? (
+                      {taskPathPending ? (
+                        // The task's folder is on its computer: no terminal until it
+                        // answers — never one started in the project folder instead.
+                        <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                          {taskPathLocation
+                            ? `This task's folder is ${taskPathLocation} — connect it to start`
+                            : 'Loading the task folder…'}
+                        </div>
+                      ) : (effectiveRepoPath || projectRoot) && !projectPathMissing ? (
                         <TerminalContainer
                           ref={terminalContainerRef}
                           paused={isResizing}
-                          key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${task.worktree_path || ''}-${task.base_dir || ''}`}
+                          key={`${terminalKey}-${task.project_id}-${effectiveRepoPath || ''}-${worktreePath || ''}-${baseDir || ''}`}
                           taskId={task.id}
                           isTemporary={task.is_temporary}
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
                           cwd={mainTerminalCwdFrom(effectiveRepoPath, projectRoot) ?? ''}
                           // Spawn props shared with the terminal-first pane (one
-                          // derivation — see mainTerminalProps). The hydration gate
-                          // (`conversationHydrated`) holds the main tab's auto-spawn
-                          // until the task's conversation id is loaded, so it never
-                          // spawns with a null hint and clobbers its conversation.
+                          // derivation — see mainTerminalProps). No conversation
+                          // hint: the agent's computer resolves the resume at spawn.
                           defaultMode={mainTerminal.mode}
-                          conversationId={mainTerminal.conversationId}
-                          existingConversationId={mainTerminal.existingConversationId}
-                          conversationHydrated={mainTerminal.conversationHydrated}
                           supportsSessionId={mainTerminal.supportsSessionId}
                           providerFlags={mainTerminal.providerFlags}
                           executionContext={mainTerminal.executionContext}
@@ -3085,6 +3103,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           onSwitchSession={handleSwitchSession}
                           {...(handoffMode ? { onMainHandoff: () => void handleHandoff() } : {})}
                           onDeleteSession={handleDeleteSession}
+                          onTabSessionReset={handleTabSessionReset}
+                          onTabSessionSwitch={handleTabSessionSwitch}
                           overlay={
                             isActive && loopConfigured ? (
                               <LoopModeBanner

@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useTaskFolders, worktreeOrProject } from './task-folders'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Archive, FileText } from 'lucide-react'
@@ -36,7 +37,8 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const { projectPath, activeTask } = useGitPanelContext()
-  const repoPath = activeTask?.worktree_path ?? projectPath
+  const folders = useTaskFolders(activeTask)
+  const repoPath = worktreeOrProject(activeTask, folders, projectPath)
 
   const [stashes, setStashes] = useState<StashEntry[]>([])
   const [loading, setLoading] = useState(false)

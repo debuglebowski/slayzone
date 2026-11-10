@@ -179,9 +179,13 @@ function setupConflict() {
 }
 
 async function ensureConflictReady(page: import('@playwright/test').Page, taskId: string) {
+  // Direct API calls name the task whose checkout they touch (path scope, §9 Phase 7b).
   const conflicted = await page.evaluate(
-    (pp) => window.getTrpcVanillaClient().worktrees.getConflictedFiles.query({ path: pp }),
-    gitDir
+    ({ pp, tid }) =>
+      window
+        .getTrpcVanillaClient()
+        .worktrees.getConflictedFiles.query({ path: pp, target: { taskId: tid } }),
+    { pp: gitDir, tid: taskId }
   )
   if (conflicted.includes(conflictFile)) return
 
@@ -542,8 +546,11 @@ test.describe('Abort merge', () => {
 
     // Git merge not in progress
     const inProgress = await mainWindow.evaluate(
-      (pp) => window.getTrpcVanillaClient().worktrees.isMergeInProgress.query({ path: pp }),
-      gitDir
+      ({ pp, tid }) =>
+        window
+          .getTrpcVanillaClient()
+          .worktrees.isMergeInProgress.query({ path: pp, target: { taskId: tid } }),
+      { pp: gitDir, tid: taskId }
     )
     expect(inProgress).toBe(false)
   })
@@ -615,6 +622,8 @@ test.describe('Merge badge on kanban', () => {
 // ── Backend API: getConflictContent ───────────────────────────────
 
 test.describe('getConflictContent API', () => {
+  /** The project whose checkout the read names (its path scope, §9 Phase 7b). */
+  let projectId: string
   test.beforeAll(async ({ mainWindow }) => {
     resetRepo()
     setupConflict()
@@ -623,16 +632,20 @@ test.describe('getConflictContent API', () => {
     git(`git merge --no-commit --no-ff test-branch || true`)
 
     const s = seed(mainWindow)
+    const p = await s.createProject({ name: 'MM content API', color: '#0ea5e9', path: gitDir })
+    projectId = p.id
     await s.refreshData()
   })
 
   test('returns ours, theirs, base, merged fields', async ({ mainWindow }) => {
     const content = await mainWindow.evaluate(
-      ({ pp, fp }) =>
-        window
-          .getTrpcVanillaClient()
-          .worktrees.getConflictContent.query({ repoPath: pp, filePath: fp }),
-      { pp: gitDir, fp: conflictFile }
+      ({ pp, fp, pid }) =>
+        window.getTrpcVanillaClient().worktrees.getConflictContent.query({
+          repoPath: pp,
+          filePath: fp,
+          target: { projectId: pid }
+        }),
+      { pp: gitDir, fp: conflictFile, pid: projectId }
     )
 
     expect(content.path).toBe(conflictFile)

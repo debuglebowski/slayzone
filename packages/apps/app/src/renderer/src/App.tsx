@@ -9,7 +9,7 @@ import React, {
 } from 'react'
 import { initShortcuts } from './shortcut-init'
 import { AlertTriangle, BookOpen } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useSubscription,
   useFederationOrNull,
@@ -59,7 +59,8 @@ import {
   PROJECT_LOCKED_TOAST
 } from '@slayzone/projects'
 import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
-import { useTabStore } from '@slayzone/tabs-state'
+import { setTabWorktreePathResolver, useTabStore } from '@slayzone/tabs-state'
+import { peekTaskPath } from '@slayzone/task/client/useTaskPath'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
 import {
@@ -413,6 +414,20 @@ function App(): React.JSX.Element {
     loadedHubIds,
     onTaskRecovered: updateTask
   })
+
+  // A new tab lands next to its checkout's siblings: the worktree path is the one the
+  // client read from the task's computer (§9 Phase 7d), never a hub copy.
+  const pathQueryClient = useQueryClient()
+  useEffect(() => {
+    setTabWorktreePathResolver((t) => {
+      const full = useTabStore.getState()._taskLookup.tasks.find((x) => x.id === t.id) as
+        | Task
+        | undefined
+      const paths = full ? peekTaskPath(pathQueryClient, full) : null
+      return paths?.state === 'ok' ? paths.worktreePath : undefined
+    })
+    return () => setTabWorktreePathResolver(() => undefined)
+  }, [pathQueryClient])
 
   // Tab colors (extracted — pure derivation)
   const { taskProjectColors, taskWorktreeColors, tabCycleOrder } = useTabColors(

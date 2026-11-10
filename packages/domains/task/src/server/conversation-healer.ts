@@ -2,239 +2,82 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import {
   setConversationHealer,
   setConversationResolver,
-  claudeTranscriptPath,
-  claudeTranscriptRetentionMs,
-  listClaudeTranscriptIds,
-  readClaudeTranscriptMeta,
-  locateClaudeTranscripts,
   type ConversationHealRequest
 } from '@slayzone/terminal/hub'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import {
-  decideConversationHeal,
-  parseSqliteUtc,
-  type HealTranscriptMeta,
-  type TasksChange
-} from '@slayzone/task-contracts'
-import {
-  getTaskOp,
-  collectReferencedConversationIds,
-  recordConversation,
-  getCurrentConversationId,
-  getConversationFirstSeenAt,
-  listResumeCandidates,
-  claimedByOtherTasks
-} from './ops/index.js'
+import { parseSqliteUtc, type TasksChange } from '@slayzone/task-contracts'
+import { getTaskOp, taskSessionLedger } from './ops/index.js'
 
-/** Capabilities the healer needs from packages built on top of task. */
-export interface ConversationHealerDeps {
-  /** `getCurrentBranch` from `worktrees/server`: the checked-out branch
-   *  of the git repo at `cwd`, or null. */
-  getCurrentBranch: (cwd: string) => Promise<string | null>
+/** The computer's answer (`HealConversationResult`, chat-runtime/server/conversation-heal.ts). */
+interface HealAnswer {
+  id: string
+  healed: boolean
+  fresh?: true
+  diagnostic?: { event: string; message: string; payload: Record<string, unknown> }
 }
 
-/** Max gap between task creation and the real Claude session's first message,
- *  used to bound the orphan candidate window. */
-const HEAL_WINDOW_MS = 5 * 60 * 1000
-
-/** Tasks created before the fix shipped have no recorded `conversationHistory`, so
- *  they rely on the conservative on-disk orphan match. Newer tasks build history
- *  from real SessionStarts and use ONLY that zero-guess path — the orphan
- *  heuristic can never run on them. Retire this gate once the legacy backlog has
- *  drained. */
-const FIX_SHIP_TS = Date.parse('2026-06-04T00:00:00Z')
-
 /**
- * Register the conversation self-heal + authoritative resolver invoked by
- * `createPty` before a resume. Lives in `task/server` (not the composition root)
- * so BOTH hosts — the Electron main process AND the slice-9 sidecar, which now
- * owns the pty runtime — wire the SAME implementation by importing this one
- * module. Pre-fix it lived in `apps/app/src/main`, so post-inversion the sidecar
- * (where `createPty` actually runs) had a null healer/resolver and a stale
- * conversation id looped `--resume` forever. See plans/conv-id-robustness-v2.md
- * and the slice-9 orphaned-listener class (composition.ts state-change note).
+ * Register the conversation self-heal invoked by `createPty` before a resume.
+ * Lives in `task/server` so every host that runs the pty runtime wires the SAME
+ * implementation (plans/conv-id-robustness-v2.md, slice-9 orphaned listeners).
  *
- * The package graph runs task → terminal/diagnostics, so this module can reach
- * the task DB ops, transcript helpers and diagnostics without a cycle — the
- * reason it could not live in `terminal/server` directly. The git branch lookup
- * is the one capability task does not own (worktrees builds on task), so the
- * composition root injects it via {@link ConversationHealerDeps}.
+ * The heal is DECIDED on the computer the agent runs on (robustness plan §9, P0:
+ * `ledger` op `healConversation`, chat-runtime/server/conversation-heal.ts): its
+ * session ledger, its transcripts, its checkout and its Claude retention setting
+ * are all there. The hub only forwards the request with the one fact it holds
+ * (the task's creation time), records the diagnostic the computer returns, and
+ * refreshes the task's board row after a repoint.
  *
- * Safety: never guesses. A healthy pointer is left untouched; any ambiguity in the
- * legacy orphan path resolves to the honest "session expired" overlay. The decision
- * matrix is the pure, unit-tested `decideConversationHeal`; this wrapper only does
- * the IO (disk stats, transcript head parsing, referenced-id lookup) and the
- * atomic compare-and-swap repoint.
+ * Safety: any failure (computer offline, an error) resumes the stored id — the
+ * CLI resumes it or the honest "session expired" overlay shows. Never fresh on a
+ * failure.
  */
 export function registerConversationHealer(
   db: SlayzoneDb,
-  notifyRenderer: (change?: TasksChange) => void,
-  deps: ConversationHealerDeps
+  notifyRenderer: (change?: TasksChange) => void
 ): void {
-  const { getCurrentBranch } = deps
   setConversationHealer(async (req: ConversationHealRequest) => {
     const { taskId, mode, cwd, storedId } = req
-    // Only claude-code persists transcripts at the path we read.
-    if (mode !== 'claude-code') return { id: storedId, healed: false }
+    const keep = { id: storedId, healed: false }
+    // Only claude-code persists transcripts the heal can read.
+    if (mode !== 'claude-code') return keep
+    // The ledger and the transcripts are on the agent's computer; none = nothing to ask.
+    const computerId = req.computerId ?? null
+    if (!computerId) return keep
     try {
       const task = await getTaskOp(db, taskId)
-      if (!task) return { id: storedId, healed: false }
-
-      // Candidates come from `agent_sessions` (every session this task owns after
-      // its last reset, newest-owned first), UNIONed with the legacy
-      // provider_config list for tasks that predate v147.
-      //
-      // The legacy list alone is empty for any warm-pool-adopted task — a pooled
-      // agent boots with no `SLAYZONE_TASK_ID`, so its SessionStart is never
-      // attributed and never appended. That is what produced `candidateCount: 0`
-      // next to an intact 1.8 MB transcript, and turned a repointable situation
-      // into a reset.
-      const legacyHistory = task.provider_config?.[mode]?.conversationHistory ?? []
-      const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
-      // One task per provider session. `owned` already excludes other tasks'
-      // sessions (`listResumeCandidates`); the pre-ledger list does not — its
-      // SessionStart hook appended whatever `/resume` picked in a shared cwd, a
-      // parent's or sibling's session included. Repointing to one would make two
-      // tasks drive one transcript, so those ids are never candidates.
-      const merged = [...new Set([...owned, ...legacyHistory])]
-      const foreign = await claimedByOtherTasks(db, taskId, merged)
-      const history = merged.filter((id) => !foreign.has(id))
-      const storedInHistory = history.includes(storedId)
-
-      // Where each transcript is, on the disk of the computer the agent runs on,
-      // in ANY project dir: a session that used EnterWorktree keeps its file only
-      // under the worktree's. A lookup in `cwd` alone read such a session as
-      // "never written" and started it fresh over its own conversation.
-      const located = await locateClaudeTranscripts({
-        taskId,
-        computerId: req.computerId ?? null,
-        projectId: req.projectId ?? null,
-        cwd,
-        sessionIds: [...new Set([storedId, ...history])]
-      })
-      // Unknown (the computer could not answer): it may well exist. Resume it —
-      // the CLI resumes it, or the honest overlay shows. Never fresh, never a
-      // repoint on a guess.
-      const storedLocated = located?.get(storedId)
-      if (!storedLocated) return { id: storedId, healed: false }
-      const storedExists = storedLocated.found
-
-      // Rule 1 (hot path): a transcript ON DISK is the only proof the stored id
-      // is resumable → keep. History membership alone is NOT proof (a
-      // zero-turn/pruned session is in history but has no `.jsonl`), so it no
-      // longer short-circuits here — it flows into decideConversationHeal, which
-      // repoints to a surviving sibling or surfaces the honest overlay.
-      if (storedExists) return { id: storedId, healed: false }
-
+      if (!task) return keep
       const createdAtMs = parseSqliteUtc(task.created_at)
-      const isLegacy = !Number.isNaN(createdAtMs) && createdAtMs < FIX_SHIP_TS
-
-      // Rule 2: exact history fallback (which recorded ids still exist on disk).
-      // An id the computer did not answer for counts as absent: never repoint on a guess.
-      const historyExists = history.map((id) => ({ id, exists: located?.get(id)?.found === true }))
-
-      // Rule 3: orphan candidates — gathered lazily, legacy-only.
-      let candidates: HealTranscriptMeta[] = []
-      let taskBranch: string | null = null
-      if (isLegacy) {
-        const ids = await listClaudeTranscriptIds(cwd)
-        if (ids.length > 0) {
-          const [referenced, branch, metas] = await Promise.all([
-            collectReferencedConversationIds(db),
-            getCurrentBranch(cwd),
-            Promise.all(
-              ids.map(async (id) => ({
-                id,
-                meta: await readClaudeTranscriptMeta(claudeTranscriptPath(cwd, id))
-              }))
-            )
-          ])
-          taskBranch = branch
-          candidates = metas.map(({ id, meta }) => ({
-            id,
-            cwd: meta.cwd ?? '',
-            firstTsMs: meta.firstTsMs,
-            gitBranch: meta.gitBranch,
-            hasHumanTurn: meta.hasHumanTurn,
-            referenced: referenced.has(id)
-          }))
-        }
-      }
-
-      const storedFirstSeenAtMs = await getConversationFirstSeenAt(db, storedId).catch(() => null)
-      const retentionMs = claudeTranscriptRetentionMs()
-      const decision = decideConversationHeal({
-        storedId,
-        storedExists,
-        storedInHistory,
-        history: historyExists,
-        task: { cwd, gitBranch: taskBranch, createdAtMs, isLegacy },
-        candidates,
-        windowMs: HEAL_WINDOW_MS,
-        storedFirstSeenAtMs,
-        retentionMs,
-        nowMs: Date.now()
-      })
-
-      if (decision.action === 'keep') return { id: storedId, healed: false }
-      if (decision.action === 'fresh') {
-        // Never prompted (no transcript was ever written) — e.g. an agent spawned
-        // and closed before anyone typed. `--resume` could only fail, so start the
-        // same id fresh: nothing is lost, and no false "session expired".
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'pty',
-          event: 'conv_id.heal_fresh',
-          taskId,
-          message: storedId,
-          payload: { firstSeenAgoMs: Date.now() - (storedFirstSeenAtMs ?? 0), retentionMs }
-        })
-        return { id: storedId, healed: false, fresh: true }
-      }
-      if (decision.action === 'overlay') {
-        recordDiagnosticEvent({
-          level: 'info',
-          source: 'pty',
-          event: 'conv_id.heal_skipped',
-          taskId,
-          message: storedId,
-          // `historyCount` distinguishes "this task genuinely has no other
-          // session" from "the candidate source was blind to them" — the two
-          // looked identical in the a426d99d diagnostics, which is why the real
-          // conversation went unnoticed for 77 minutes.
-          payload: {
-            reason: candidates.length ? 'ambiguous' : 'none',
-            candidateCount: candidates.length,
-            historyCount: history.length,
-            historyOnDisk: historyExists.filter((h) => h.exists).length
-          }
-        })
-        return { id: storedId, healed: false }
-      }
-
-      // history | orphan → append a `cas-repoint-heal` row to task_conversations.
-      // Under append-only semantics there is no CAS to fail: getCurrentConversationId
-      // picks up the newest honored row on the next read.
-      await recordConversation(db, {
+      const result = await taskSessionLedger().call<HealAnswer>(computerId, 'healConversation', {
         taskId,
         mode,
-        conversationId: decision.id,
-        origin: 'cas-repoint-heal'
+        // Sessions are per tab (v201): a heal repoints only within the spawning tab.
+        tabId: req.tabId ?? taskId,
+        cwd,
+        projectId: req.projectId ?? null,
+        storedId,
+        taskCreatedAtMs: Number.isNaN(createdAtMs) ? null : createdAtMs
       })
+      if (result.diagnostic) {
+        recordDiagnosticEvent({
+          level: 'info',
+          source: 'pty',
+          event: result.diagnostic.event,
+          taskId,
+          message: result.diagnostic.message,
+          payload: result.diagnostic.payload
+        })
+      }
       // The repoint lives in this task's ledger → only its board row changes.
-      notifyRenderer({ taskIds: [taskId] })
-      recordDiagnosticEvent({
-        level: 'info',
-        source: 'pty',
-        event: 'conv_id.heal',
-        taskId,
-        message: `${storedId} -> ${decision.id}`,
-        payload: { via: decision.action, oldId: storedId, newId: decision.id }
-      })
-      return { id: decision.id, healed: true }
+      if (result.healed) notifyRenderer({ taskIds: [taskId] })
+      return {
+        id: result.id,
+        healed: result.healed,
+        ...(result.fresh ? { fresh: true as const } : {})
+      }
     } catch {
       // Best-effort — on any failure resume the original id (→ overlay if stale).
-      return { id: storedId, healed: false }
+      return keep
     }
   })
 }
@@ -250,17 +93,24 @@ export function registerConversationHealer(
  * durably shadow its real conversation. With main resolving from the ledger,
  * a missing hint resumes the known conversation instead of minting over it.
  */
-export function registerConversationResolver(db: SlayzoneDb): void {
-  setConversationResolver(async ({ taskId, mode }) => {
+export function registerConversationResolver(): void {
+  setConversationResolver(async ({ computerId, taskId, mode, tabId }) => {
+    // The ledger is on the computer the agent runs on; none = nothing to resume.
+    if (!computerId) return null
     try {
-      const current = await getCurrentConversationId(db, taskId, mode)
+      const ledger = taskSessionLedger()
+      // `store` reads prepare the computer first: the hub's remaining rows of the
+      // task, its undelivered resets/deletions, its one-time tab recovery.
+      const current = await ledger.store.getCurrentConversationId(computerId, taskId, mode, tabId)
       // Observability for the one new way this can answer null: the task HAS
       // sessions, but none has proven content yet (v158), so the spawn goes
       // fresh. Silence here is what made the warm-pool failure take 77 minutes
       // to notice — "no conversation" and "no RESUMABLE conversation" looked
       // identical from the outside.
       if (!current) {
-        const owned = await listResumeCandidates(db, taskId, mode).catch(() => [] as string[])
+        const owned = await ledger
+          .listResumeCandidates(computerId, taskId, mode, tabId)
+          .catch(() => [] as string[])
         if (owned.length > 0) {
           recordDiagnosticEvent({
             level: 'info',
@@ -268,7 +118,7 @@ export function registerConversationResolver(db: SlayzoneDb): void {
             event: 'conv_id.unproven_skipped',
             taskId,
             message: owned[0],
-            payload: { mode, ownedCount: owned.length }
+            payload: { mode, tabId, ownedCount: owned.length }
           })
         }
       }

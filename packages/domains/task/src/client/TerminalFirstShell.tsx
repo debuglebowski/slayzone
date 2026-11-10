@@ -78,8 +78,6 @@ function TerminalFirstShell({ entry }: { entry: TerminalFirstEntry }): React.JSX
           sessionId={sessionId}
           cwd={cwd}
           mode={props.mode}
-          conversationId={props.conversationId}
-          existingConversationId={props.existingConversationId}
           supportsSessionId={props.supportsSessionId}
           providerFlags={props.providerFlags}
           executionContext={props.executionContext}

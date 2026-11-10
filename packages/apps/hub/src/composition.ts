@@ -18,6 +18,20 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
   }
 }
 import { createTaskWorktreeRouting } from './task-worktree-routing'
+import { eraseTasksOnComputer, type ErasureReply } from './erasure-fanout'
+import { createComputerDataHandoff } from './computer-data-handoff'
+import {
+  createComputerTaskPaths,
+  readComputerTaskPath,
+  recordHolder,
+  readComputerTaskRoots,
+  TASK_PATH_KIND,
+  taskPathTarget
+} from './computer-task-paths'
+import { type ComputerTaskDataRelay, createComputerTaskDataRelay } from './computer-task-data'
+import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
+import { createItemFaultService } from './item-faults'
+import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import { acceptComputerGeneration } from '@slayzone/computers/server'
 import { setChatSessionSource } from '@slayzone/terminal/hub'
 import {
@@ -45,7 +59,12 @@ const PTY_FORGET_TIMEOUT_MS = 10_000
 const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
 const GH_DEFAULT_TIMEOUT_MS = 30_000
-import { setTaskSessionPromptReader, agentSessionsEvents } from '@slayzone/task/server'
+import {
+  setChatSettingsDelegate,
+  setTaskPathsDelegate,
+  setTaskSessionPromptReader,
+  agentSessionsEvents
+} from '@slayzone/task/server'
 import { readHubSessionRetentionDays, readHubStunAddresses } from '@slayzone/platform/hub-switches'
 import { createChatCompaction } from './chat-compaction'
 import {
@@ -57,6 +76,7 @@ import {
   runAsSecurityActor,
   runWithSecurityContext
 } from '@slayzone/platform/security-log'
+import { currentPathScope, PathScopeRequiredError } from '@slayzone/platform/path-scope'
 import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
@@ -92,6 +112,7 @@ import {
   setComputersDeps,
   setHubAdminDeps,
   setHubDiskComputer,
+  setHubDiskTaskRoots,
   requestGithubSignInStart,
   hubGithubSignInConvexUrl,
   evictAgentTree,
@@ -112,11 +133,10 @@ import {
   taskOps,
   configureTaskRuntimeAdapters,
   startArtifactWatcher,
-  purgeStaleAndOrphanedTasks,
   handleAttentionTransition,
   registerConversationHealer,
   registerConversationResolver,
-  taskSessionStore,
+  setTaskSessionLedger,
   setTaskDeps,
   getTaskOp,
   resolveMainAgentLaunch,
@@ -197,6 +217,7 @@ import {
   warmPoolEnabled,
   type TerminalState
 } from '@slayzone/terminal-contracts'
+import type { AgentId } from '@slayzone/terminal-contracts'
 import {
   createIntegrationOps,
   ensureIntegrationSchema,
@@ -213,7 +234,13 @@ import {
   aiConfigComputerGone
 } from '@slayzone/ai-config/server'
 import { createRoutingSlayExecutor } from './slay-routing'
-import { setTurnGitRouting } from '@slayzone/agent-turns/server'
+import {
+  AgentHistoryOfflineError,
+  setTurnGitRouting,
+  type TurnListOutcome,
+  type TurnRecordOutcome
+} from '@slayzone/agent-turns/server'
+import type { TurnsRequest } from '@slayzone/chat-runtime/shared'
 import { setUsageCollectRouting, type UsageCollectReply } from '@slayzone/usage-analytics/server'
 import { setTestScanRouting } from '@slayzone/test-panel/server'
 import {
@@ -264,10 +291,8 @@ import {
   defaultWorktreePolicyAdapters,
   executeGitOp,
   setGitOpTransport,
-  setWorktreeColorDetector,
   deliverGitWatchEvent,
   gitWatchComputerGone,
-  gitTargetForPath,
   setAiCommandRunner
 } from '@slayzone/worktrees/hub'
 import { createComputerProjectSync } from './computer-project-sync'
@@ -342,6 +367,12 @@ import { buildBackupOps } from './backup.js'
 import { startFdWatch } from './fd-watch.js'
 import { startSessionRetention } from './session-retention.js'
 import { repairSharedSessionClaims } from './shared-session-repair.js'
+import { recoverTaskSessionTabs } from './session-tab-recovery.js'
+import {
+  type ComputerSessionLedger,
+  createComputerSessionLedger,
+  lateSessionStore
+} from '@slayzone/chat-runtime/hub'
 import { startSsoRecheck } from './sso-recheck.js'
 import { createTrpcConnectionRegistry, type TrpcConnectionRegistry } from './trpc-connections.js'
 import { createUserAccessRevoker, type UserAccessRevoker } from './user-access.js'
@@ -429,6 +460,11 @@ export type ServerComposition = {
   userAccess: UserAccessRevoker
   /** Emergency admin access while sign-in is down (break-glass.ts). */
   breakGlass: BreakGlass
+  /**
+   * Reads of a task's computer-only data through the hub relay (robustness plan §9):
+   * the computer holding it answers; offline is an answer (`computer-offline`).
+   */
+  computerTaskData: ComputerTaskDataRelay
   /** E2E-only (`POST /api/dev/reset`): wipe the DB and every runtime cache IN
    *  PROCESS. See `resetForTest` in composeServer. */
   resetForTest: () => Promise<void>
@@ -720,17 +756,13 @@ export function composeServer(opts: {
   // sidecar's copy null: a stale/phantom conversation id then looped `--resume`
   // ("No conversation found") forever with no self-heal. Same orphaned-listener
   // class as the state-change consumers wired just below.
-  // The branch a checkout is on comes from its computer; none (or no answer) = unknown.
-  registerConversationHealer(db, notifyTasksChanged, {
-    getCurrentBranch: (repoPath) =>
-      executeGitOp('getCurrentBranch', { path: repoPath }, false, db).catch(() => null)
-  })
-  // Worktree colors are the hub's; the worktrees they color are listed on the
-  // checkout's computer (none: no colors yet — detected again next read).
-  setWorktreeColorDetector((projectPath) =>
-    executeGitOp('listWorktrees', { repoPath: projectPath }, false, db)
-  )
-  registerConversationResolver(db)
+  // The heal is decided on the agent's computer (its ledger, transcripts and
+  // checkout, robustness plan §9); the hub forwards and records its diagnostic.
+  registerConversationHealer(db, notifyTasksChanged)
+  // The resolver asks the agent's computer (its session ledger, robustness plan
+  // §9). Sessions are per terminal tab (v201): the one-time per-tab recovery runs
+  // per task on that computer before its first resolve (`computerSessionLedger`).
+  registerConversationResolver()
 
   // Terminal state-change consumers: task auto-move + the needs_attention flag.
   // Both listened in the Electron host pre-cutover and regressed dead at slice 9
@@ -814,7 +846,6 @@ export function composeServer(opts: {
   // Open-file watchdog (fd-watch.ts): a descriptor leak is a diagnostics warning long
   // before the hub runs out and every spawn — git included — fails.
   startFdWatch({ record: recordDiagnosticEvent })
-  bootBestEffort('startup-purge', () => purgeStaleAndOrphanedTasks(db))
   // Repoint migrated icon rows (absolute legacy paths) at the copies the desktop
   // app placed in this root. No-op on a standalone hub / once already repointed.
   bootBestEffort('project-icons-relocate', async () => {
@@ -837,12 +868,6 @@ export function composeServer(opts: {
     }
   })
   startArtifactWatcher(join(dataRoot, 'artifacts'))
-  // One task per provider session (shared-session-repair.ts): tombstone the losing
-  // claims on a session two tasks hold (pre-ledger data). Idempotent; a no-op on
-  // any store written after the provenance gate.
-  bootBestEffort('shared-session-repair', () =>
-    repairSharedSessionClaims({ db, record: recordDiagnosticEvent })
-  )
 
   // --- PTY + chat runtime --------------------------------------------------
   // Configure the pty-host bridge with a STUB window. node-pty spawns in THIS
@@ -900,18 +925,35 @@ export function composeServer(opts: {
   /** Same, for a project — its default binding, else the connected default. */
   const resolveComputerForProject = placement.forProject
 
+  // The agent-session ledger (robustness plan §9): created with the computer chat
+  // services below, reached by the pty runtime wired before them.
+  let computerSessionLedgerRef: ComputerSessionLedger | null = null
+  const sessionLedger = (): ComputerSessionLedger => {
+    if (!computerSessionLedgerRef) throw new Error('The session ledger is starting')
+    return computerSessionLedgerRef
+  }
+  const sessionStore = lateSessionStore(sessionLedger)
+
   // Inject computer-aware spawn lookups BEFORE createPtyOps (which captures the
   // lookups at construction). Only `resolveComputerId` is overridden; the mode-row /
   // project-id reads keep their db defaults.
   const dbLookups = createDbPtySpawnLookups(db)
   setPtySpawnLookups({
     ...dbLookups,
-    resolveComputerId: (taskId, context) => computerChat.resolvePtyComputer(taskId, context),
+    // Hand the task's remaining hub rows (computer-only data, §9) to the computer
+    // before an agent of the task starts there: a resume must never miss them.
+    resolveComputerId: async (taskId, context) => {
+      const computerId = await computerChat.resolvePtyComputer(taskId, context)
+      // The hub's remaining rows, its session intents and the task's one-time tab
+      // recovery reach that computer before any resume is decided there.
+      if (computerId) await sessionLedger().prepare(taskId, computerId)
+      return computerId
+    },
     resolveProjectComputerId: (projectId) => resolveComputerForProject(projectId)
   })
-  // `taskSessionStore`: task's ledger writes (task_conversations / agent_sessions),
-  // injected because terminal must not import task.
-  setPtyDeps({ ops: createPtyOps(db, taskSessionStore), events: ptyEvents })
+  // The session ledger is on the computer running the agents (robustness plan §9):
+  // the terminal runtime's ledger calls go there (`computerSessionLedger.store`).
+  setPtyDeps({ ops: createPtyOps(db, sessionStore), events: ptyEvents })
 
   // `terminal_tabs.agent_state` recorder — wired HERE for the same reason as
   // `wireIdleClose` below: the pty/chat runtimes live in THIS process, so the
@@ -952,7 +994,7 @@ export function composeServer(opts: {
   })
   initWarmProcessManager({
     db,
-    ops: createDbWarmPoolDataOps(db, taskSessionStore),
+    ops: createDbWarmPoolDataOps(db, sessionStore),
     isEnabled: () => prewarmEnabled,
     // `settings.set` writes the row but emits no settings-changed, so the cache
     // above would otherwise stay stale until the next boot — i.e. changing the
@@ -992,9 +1034,18 @@ export function composeServer(opts: {
   const computerChat = createComputerChatServices({
     db,
     retentionDays: chatRetentionPolicy.days,
+    onProviderTransitionSuperseded: ({ id, conversationId, taskId, reason }) =>
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'server',
+        event: 'chat.provider_transition_superseded',
+        taskId,
+        message: `Provider switch ${id} superseded: ${reason}`,
+        payload: { transitionId: id, conversationId }
+      }),
     diagnosticsConfig: getDiagnosticsConfig,
     diagnostics: legacyChatDiagnostics,
-    legacyData: createDbChatDataOps(db, taskSessionStore),
+    legacyData: createDbChatDataOps(db, sessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
       if (!execGateway) throw new Error('Chat computer gateway is starting')
@@ -1023,7 +1074,12 @@ export function composeServer(opts: {
     admitComputer: async (computerId) => {
       await placement.forTarget({ computerId })
     },
-    resolveComputer: resolveComputerForTask,
+    // A new chat of the task starts on this computer: hand it the hub's rows first.
+    resolveComputer: async (taskId) => {
+      const computerId = await resolveComputerForTask(taskId)
+      if (computerId) await sessionLedger().prepare(taskId, computerId)
+      return computerId
+    },
     resolveAvailabilityComputer: async (taskId) => {
       try {
         return await resolveComputerForTask(taskId)
@@ -1039,6 +1095,7 @@ export function composeServer(opts: {
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
+    onSessionsChanged: (taskId) => agentSessionsEvents.emit('agent-sessions:changed', { taskId }),
     hasLiveTask: async (taskId) =>
       (await listPtys()).some((p) => p.taskId === taskId && hasLivePty(p.sessionId)) ||
       computerChat.relay.sessions
@@ -1057,6 +1114,71 @@ export function composeServer(opts: {
     onBackgroundJobs: (sessionId, count) => {
       ptyEvents.emit('background-jobs', sessionId, count)
     }
+  })
+  // Computer-only data (robustness plan §9, P0): what the hub still holds of it goes
+  // to the computer owning its task, once; reads go to that computer (direct link or
+  // this relay), never to a hub copy.
+  const computerDataHandoff = createComputerDataHandoff({
+    db,
+    // Through the lifecycle barrier: a task's pause/delete reaches the computer first.
+    request: (computerId, request) => computerChat.lifecycle.request(computerId, request),
+    track: (taskId, computerId) => computerChat.lifecycle.track(taskId, computerId),
+    fallbackTarget: async (taskId) => {
+      try {
+        return await resolveComputerForTask(taskId)
+      } catch (error) {
+        if (error instanceof BindComputerError) return null
+        throw error
+      }
+    },
+    ledger: (computerId) => createAsyncFaultLedger(db, { origin: 'hub', computerId }),
+    isUnreachable: isComputerUnreachable,
+    // A task's paths go to the computer holding its folders (§9, Phase 7a).
+    kindTargets: { [TASK_PATH_KIND]: taskPathTarget(db) },
+    // The computer a task's paths first reached holds its folders from then on (7e).
+    delivered: async (kind, taskId, computerId) => {
+      if (kind === TASK_PATH_KIND) await recordHolder(db, taskId, computerId)
+    }
+  })
+  // Every write of a task's worktree path / base dir runs on that computer: the hub
+  // keeps no path (§9, Phase 7e), only whether each is set.
+  setTaskPathsDelegate(
+    createComputerTaskPaths({
+      db,
+      targetOf: (kind, taskId) => computerDataHandoff.targetOf(kind, taskId),
+      flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
+      usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
+      request: (computerId, request) => computerChat.lifecycle.request(computerId, request)
+    })
+  )
+  computerSessionLedgerRef = createComputerSessionLedger({
+    db,
+    request: (computerId, request) => computerChat.lifecycle.request(computerId, request),
+    target: (taskId) => computerDataHandoff.target(taskId),
+    usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
+    flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
+    track: (taskId, computerId) => computerChat.lifecycle.track(taskId, computerId),
+    recoverTabs: async (taskId, computerId) => {
+      await recoverTaskSessionTabs(
+        {
+          db,
+          diagnostics: opts.diagnostics?.db ?? null,
+          record: recordDiagnosticEvent,
+          ledger: sessionLedger(),
+          computerId
+        },
+        taskId
+      )
+    },
+    onChanged: (taskId) => agentSessionsEvents.emit('agent-sessions:changed', { taskId })
+  })
+  const computerSessionLedger = sessionLedger()
+  setTaskSessionLedger(computerSessionLedger)
+  const computerTaskData = createComputerTaskDataRelay({
+    target: (taskId) => computerDataHandoff.target(taskId),
+    usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
+    flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
+    request: (computerId, request) => computerChat.lifecycle.request(computerId, request)
   })
   setArtifactStorage(
     dataRoot,
@@ -1110,10 +1232,12 @@ export function composeServer(opts: {
   })
   setChatSessionSource(computerChat.relay.sessions)
   // Turn snapshots: an agent terminal's submitted prompt and a chat turn's result.
-  // The rows live here; each snapshot's git runs on the checkout's computer.
+  // Each is recorded (git and row) on the checkout's computer (§9, v207).
   wireTurnRecording(db, { onPtyInputSubmit, chatEvents: computerChat.relay.events })
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
   setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
+  // A computer-owned chat's settings change on its computer, never in a hub copy.
+  setChatSettingsDelegate(computerChat.chatSettings)
   setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
   // Every saved event is reported to the hub (`saved`), relayed in full or not
   // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
@@ -1648,30 +1772,56 @@ export function composeServer(opts: {
       runAsSecurityActor(null, async () => {
         if (!execGateway?.listUsableComputers().some((c) => c.computerId === request.computerId))
           throw new Error('COMPUTER_UNAVAILABLE')
-        const replies: Array<{ taskId: string; revision: number; erased: true }> = []
-        for (const taskId of request.taskIds) {
-          const lifecycle = await db.get<{ revision: number }>(
-            'SELECT revision FROM chat_task_lifecycle WHERE task_id=?',
-            [taskId]
-          )
-          if (!lifecycle) throw new Error('DELETION_FENCE_MISSING')
-          replies.push(
-            (await execGateway.request(
+        const gateway = execGateway
+        return eraseTasksOnComputer({
+          taskIds: request.taskIds,
+          ledger: createAsyncFaultLedger(db, { origin: 'hub', computerId: request.computerId }),
+          revisionOf: async (taskId) =>
+            (
+              await db.get<{ revision: number }>(
+                'SELECT revision FROM chat_task_lifecycle WHERE task_id=?',
+                [taskId]
+              )
+            )?.revision ?? null,
+          erase: async (taskId, revision) =>
+            (await gateway.request(
               request.computerId,
               HubToComputerMethods.chatRequest,
-              { kind: 'task.erase', jobId: request.jobId, taskId, revision: lifecycle.revision },
+              { kind: 'task.erase', jobId: request.jobId, taskId, revision },
               60_000
-            )) as { taskId: string; revision: number; erased: true }
-          )
-        }
-        return replies
+            )) as ErasureReply
+        })
       }),
     // An unbound task's worktree is on the default computer (the old Trash purge's
     // rule); the engine persists the pick so retries never follow a later default.
     resolveWorktreeComputer: taskWorktreeRouting.erasedWorktreeComputer,
+    // The hub keeps no path (§9, 7e): the computer holding the worktree names it.
+    releaseWorktree: async (target, liveTaskIds) =>
+      runAsSecurityActor(null, async () => {
+        if (!target.computerId || !execGateway?.isComputerUsable(target.computerId))
+          throw new Error('COMPUTER_UNAVAILABLE')
+        const answer = (await computerChat.lifecycle.request(target.computerId, {
+          kind: 'taskPaths',
+          value: { op: 'release', taskId: target.taskId, liveTaskIds }
+        })) as { worktreePath: string | null; shared: boolean }
+        if (!answer || typeof answer.shared !== 'boolean')
+          throw new Error('Invalid task path release answer')
+        return answer
+      }),
+    forgetWorktree: async (target) =>
+      runAsSecurityActor(null, async () => {
+        if (!target.computerId || !execGateway?.isComputerUsable(target.computerId)) return
+        await computerChat.lifecycle
+          .request(target.computerId, {
+            kind: 'taskPaths',
+            value: { op: 'forget', taskId: target.taskId }
+          })
+          .catch(() => undefined)
+      }),
     cleanupWorktree: async (target) =>
       runAsSecurityActor(null, async () => {
-        if (!target.computerId || !target.repoPath) throw new Error('WORKTREE_LOCATION_UNKNOWN')
+        if (!target.computerId || !target.repoPath || !target.path)
+          throw new Error('WORKTREE_LOCATION_UNKNOWN')
         if (!execGateway?.listUsableComputers().some((c) => c.computerId === target.computerId))
           throw new Error('COMPUTER_UNAVAILABLE')
         await execGateway.request(
@@ -1686,6 +1836,21 @@ export function composeServer(opts: {
   const erasureRetries = startErasureRetries(db, dataRoot)
   const restDeps: RestApiDeps = {
     captureAgentPrompt: computerChat.captureHook,
+    // The agent-session ledger is on the computer running the reporting agent (§9).
+    agentSessionLedger: {
+      computerFor: async (hook, reporterComputerId) => {
+        if (reporterComputerId) return reporterComputerId
+        const live = findSessionByTaskIdAndMode(hook.taskId, hook.mode as AgentId, hook.tabId)
+        const running = live ? getPtyDirectTarget(live)?.computerId : null
+        return running ?? (await computerSessionLedger.forTask(hook.taskId))
+      },
+      recordHookConversation: (computerId, args) =>
+        computerSessionLedger.recordHookConversation(computerId, args),
+      confirmSessionConversation: (computerId, args) =>
+        computerSessionLedger.confirmSessionConversation(computerId, args),
+      markSessionFirstTurn: (computerId, conversationId) =>
+        computerSessionLedger.markSessionFirstTurn(computerId, conversationId)
+    },
     db,
     notifyRenderer,
     automationEngine,
@@ -1879,7 +2044,19 @@ export function composeServer(opts: {
   // the async gateway init below resolves). The getters read the late-bound refs,
   // so `list` sees the gateway once it exists and `mintJoinToken` sees the
   // URL once the server host feeds it via setComputerListenerInfo.
+  // Needs attention (P3): the hub's own faults and each computer's, over the
+  // late-bound gateway (a computer not connected shows its last snapshot).
+  const itemFaults = createItemFaultService({
+    db,
+    isConnected: (computerId) =>
+      !!execGateway?.listUsableComputers().some((c) => c.computerId === computerId),
+    requestComputer: async (computerId, value) => {
+      if (!execGateway) throw new Error('COMPUTER_UNAVAILABLE')
+      return execGateway.request(computerId, HubToComputerMethods.chatRequest, value, 30_000)
+    }
+  })
   setComputersDeps({
+    itemFaults,
     getGateway: () => computerGatewayRef,
     getHubUrl: () => computerHubUrl,
     // Who a join token is for (T-20), over the late-bound hub-auth ref; consulted
@@ -1992,7 +2169,23 @@ export function composeServer(opts: {
     // On the hub's own disk, only the co-spawned local computer's folders are the hub's
     // (the desktop app's). A standalone hub has none: what any computer reports
     // describes that computer's disk, never the hub's (api access.ts, Q1).
-    setHubDiskComputer(supervised ? deterministicLocalComputerId(localComputerName) : null)
+    const hubDiskComputer = supervised ? deterministicLocalComputerId(localComputerName) : null
+    setHubDiskComputer(hubDiskComputer)
+    // Its tasks' folders on that disk come from it, never from a hub copy (§9 Phase 7c).
+    setHubDiskTaskRoots(
+      hubDiskComputer
+        ? () =>
+            readComputerTaskRoots(
+              {
+                db,
+                request: (computerId, request) =>
+                  computerChat.lifecycle.request(computerId, request),
+                usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false
+              },
+              hubDiskComputer
+            )
+        : null
+    )
     // Assigned further down, once the workspace-fs adapters exist. The
     // `computer-connected` listener below only calls it on a later event, so the
     // forward reference is never read before it is set.
@@ -2034,6 +2227,14 @@ export function composeServer(opts: {
         if (!owner || owner.state !== 'active' || !owner.computerId) return null
         if (await computerChat.ownership.unavailable(owner.id)) return null
         return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
+      },
+      // A task's computer-only data: on the computer holding it, with whatever the hub
+      // still held of it delivered first (so a direct read never misses it).
+      resolveTask: async (taskId) => {
+        const computerId = await computerDataHandoff.target(taskId)
+        if (computerId === null || !computerGateway.isComputerUsable(computerId)) return null
+        await computerDataHandoff.flushTask(taskId, computerId)
+        return { computerId }
       },
       ...(placement.gate ? { gate: placement.gate } : {}),
       onChatOwnershipChange: (listener) => computerChat.ownership.onChange(listener),
@@ -2093,9 +2294,24 @@ export function composeServer(opts: {
     }
     const chatMaintenance = createComputerChatMaintenance({
       asOwner: asComputerOwner,
+      faults: async (id) => {
+        await itemFaults.refreshComputer(id)
+      },
       projects: (id) => syncComputerProjects(id),
       recover: (id, force) => computerChat.recoverComputer(id, force),
       lifecycle: computerChat.lifecycle.sync,
+      handoff: async (id) => {
+        await computerDataHandoff.deliverTo(id)
+        // The session ledger lives there (robustness plan §9): the hub's session
+        // intents it missed, then one task per provider session there.
+        await computerSessionLedger.onComputerConnected(id)
+        await repairSharedSessionClaims({
+          db,
+          record: recordDiagnosticEvent,
+          ledger: computerSessionLedger,
+          computerId: id
+        })
+      },
       sessions: computerChat.relay.refreshSessions,
       migrate: async (id) => {
         await computerChat.migrateIdleComputer(id)
@@ -2139,6 +2355,10 @@ export function composeServer(opts: {
     // REST, a departing user's cleanup): the runs it kept are forgotten.
     setComputerRemovedListener((computerId) => {
       processesComputerRemoved(computerId)
+      // Chat work addressed to a deleted computer is retired now (a revoked one waits).
+      void computerChat
+        .retireComputers()
+        .catch((error: unknown) => console.error('[chat] computer retirement failed:', error))
       // Its direct-link grants go with it, whoever removed it (docs/direct-link.md).
       void directLinkIssuer
         ?.revoke({ by: 'computer', computerId }, 'computer_removed')
@@ -2157,7 +2377,8 @@ export function composeServer(opts: {
     // drain metadata as after a relayed command — in the same per-computer order.
     const chatDirectWrite = createChatDirectWriteHandler({
       forTab: (tabId) => computerChat.ownership.forTab(tabId),
-      drainMetadata: (computerId) => computerChat.relay.drainMetadata(computerId)
+      drainMetadata: (computerId, conversationId) =>
+        computerChat.relay.drainMetadata(computerId, false, undefined, undefined, conversationId)
     })
     computerGateway.events.on('event', ({ computerId, name, payload }) => {
       if ((name !== 'chat-runtime' && name !== CHAT_DIRECT_WRITE_EVENT_NAME) || resettingForTest)
@@ -2222,10 +2443,10 @@ export function composeServer(opts: {
       gitWatchComputerGone(computerId)
     )
     computerGateway.events.on('computer-lost', ({ computerId }) => gitWatchComputerGone(computerId))
-    // The test panel's scan reads the project's files: on the project's computer.
+    // The test panel's scan reads the project's files: on the project's computer,
+    // under the project's path scope (§9 Phase 7b).
     setTestScanRouting({
-      computerFor: async ({ projectPath, projectId }) =>
-        placement.forTarget((await gitTargetForPath(db, projectPath)) ?? { projectId }),
+      computerFor: ({ projectId }) => placement.forTarget({ projectId }),
       scan: async (computerId, input) =>
         testPanelScanResultSchema.parse(
           await computerGateway.request(
@@ -2237,39 +2458,38 @@ export function composeServer(opts: {
         )
     })
     // Agent usage logs are on the computers: each refresh asks every usable one for
-    // what is new since its own cursors.
+    // what is new since the read offsets it keeps (robustness plan §9, v209).
     setUsageCollectRouting({
       computers: () => computerGateway.listUsableComputers().map((c) => c.computerId),
       // The hub's machine's own computer reads the logs the old hub-disk cursors index.
       localComputerId: () => deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME),
       // The hub's own cache of every computer's usage logs, refreshed for whoever
       // asked: run as the hub, not as that caller.
-      collect: async (computerId, cursors, page) => {
+      collect: async (computerId, request) => {
         const reply = usageCollectResultSchema.parse(
           await runAsSecurityActor(null, () =>
             computerGateway.request(
               computerId,
               HubToComputerMethods.usageCollect,
-              // Pages after the first carry only where to continue.
-              page ? { cursors: {}, page } : { cursors },
+              request,
               USAGE_COLLECT_TIMEOUT_MS
             )
           )
         )
         return {
           results: reply.results as unknown as UsageCollectReply['results'],
-          ...(reply.next ? { next: reply.next } : {})
+          ...(reply.next ? { next: reply.next } : {}),
+          ...(reply.receipt ? { receipt: reply.receipt } : {})
         }
       }
     })
-    // AI-config files (instructions, skills, MCP): a project's on the project's
-    // computer (by its checkout path), the computer-level ones on an explicit computer
-    // or the caller's own — each fs call one agentConfig.fs.
+    // AI-config files (instructions, skills, MCP): a project's on the computer of the
+    // scope the call names (§9 Phase 7c — never routed by a path), the computer-level
+    // ones on an explicit computer or the caller's own — each fs call one
+    // agentConfig.fs.
     setAiConfigFsRouting({
-      computerForProject: async ({ projectPath, projectId }) => {
-        const byPath = projectPath ? await gitTargetForPath(db, projectPath) : null
-        return placement.forTarget(byPath ?? (projectId ? { projectId } : {}))
-      },
+      computerForProject: ({ taskId, projectId }) =>
+        placement.forTarget(taskId ? { taskId } : projectId ? { projectId } : {}),
       computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),
       request: async (computerId, call) =>
         agentConfigFsResultSchema.parse(
@@ -2308,7 +2528,19 @@ export function composeServer(opts: {
         return null
       },
       isReachable: (computerId) => computerGateway.isComputerUsable(computerId),
-      run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command)
+      run: (computerId, command) => execRunOnComputer(computerGateway, computerId, command),
+      // `{{task.worktree_path}}` / path conditions: as the computer the actions run on
+      // holds them (§9 7c/7d).
+      taskPaths: (computerId, taskId) =>
+        readComputerTaskPath(
+          {
+            request: (id, request) => computerChat.lifecycle.request(id, request),
+            usable: (id) => computerGateway.isComputerUsable(id),
+            flushTask: (id, target) => computerDataHandoff.flushTask(id, target)
+          },
+          computerId,
+          taskId
+        )
     })
     // Cron catch-ups that waited for a computer (launch, wake) run now (H1).
     computerGateway.events.on('computer-connected', () => {
@@ -2336,11 +2568,24 @@ export function composeServer(opts: {
         /* best-effort, see above */
       })
     })
-    // Agent-turn snapshots and the turn list's filter: git on the checkout's computer,
-    // resolved like the git panel (by path, or by the task for a boundary).
+    // Agent-turn snapshots live on the checkout's computer (robustness plan §9, P0;
+    // v207): its git and its rows. Resolved like the git panel (by path, or by the
+    // task for a boundary). A computer that is not connected: the history is offline
+    // (the hub keeps no copy).
+    const turnsRequest = async (computerId: string, value: TurnsRequest) => {
+      try {
+        return await computerGateway.request(
+          computerId,
+          HubToComputerMethods.chatRequest,
+          { kind: 'turns', value },
+          TURN_GIT_OP_TIMEOUT_MS
+        )
+      } catch (error) {
+        if (isComputerUnreachable(error)) throw new AgentHistoryOfflineError()
+        throw error
+      }
+    }
     setTurnGitRouting({
-      computerForPath: async (path) =>
-        placement.forTarget((await gitTargetForPath(db, path)) ?? {}),
       computerForTask: (taskId) => placement.forTarget({ taskId }),
       request: async (computerId, op, input) =>
         gitOpResultSchema.parse(
@@ -2350,15 +2595,23 @@ export function composeServer(opts: {
             { op, input },
             TURN_GIT_OP_TIMEOUT_MS
           )
-        ).result
+        ).result,
+      record: async (computerId, input) =>
+        (await turnsRequest(computerId, { op: 'record', ...input })) as TurnRecordOutcome,
+      list: async (computerId, input) =>
+        (await turnsRequest(computerId, { op: 'list', ...input })) as TurnListOutcome
     })
     setGhExecutor(async (args, opts) => {
-      // `gh` runs where the checkout is: the path names a task or project placement,
-      // resolved — and, with login, admitted (T-19: `gh` speaks as the machine's
-      // account, never someone else's) — like any workspace target. A path the hub
-      // does not know falls back to the caller's own computer.
-      const pathTarget = opts.cwd ? await gitTargetForPath(db, opts.cwd) : null
-      const computerId = await placement.forTarget(pathTarget ?? {})
+      // `gh` runs where the checkout is: on the computer of the path scope the
+      // procedure opened (§9 Phase 7b: the task or project it names, never a bare
+      // path), resolved — and, with login, admitted (T-19: `gh` speaks as the
+      // machine's account, never someone else's) — like any workspace target. The
+      // computer confines its cwd to that scope's folders.
+      const scope = currentPathScope()
+      if (!scope) throw new PathScopeRequiredError('gh')
+      const computerId = await placement.forTarget(
+        scope.kind === 'task' ? { taskId: scope.taskId } : { projectId: scope.projectId }
+      )
       // No computer: `gh` has nowhere to run ("connect a computer") — the hub never
       // runs it itself.
       if (computerId == null || !opts.cwd) refuseNoComputer({ op: 'gh' })
@@ -2440,7 +2693,20 @@ export function composeServer(opts: {
             await computerGateway.request(computerId, HubToComputerMethods.projectList, {})
           )
           return listed.projects.map((p) => ({ projectId: p.projectId, path: p.path }))
-        }
+        },
+        // The tasks' folders as that computer holds them (the hub keeps no path, §9 7e).
+        listTaskFolders: async (computerId, taskIds) =>
+          (
+            await readComputerTaskRoots(
+              {
+                db,
+                usable: (id) => execGateway?.isComputerUsable(id) ?? false,
+                request: (id, request) => computerChat.lifecycle.request(id, request)
+              },
+              computerId,
+              taskIds
+            )
+          ).map((r) => r.root)
       },
       // A computer places only its owner's projects (T-19): a report naming anyone
       // else's would make paths on it resolve to their project (access.ts `path`).
@@ -2631,6 +2897,8 @@ export function composeServer(opts: {
     },
     trpcConnections,
     userAccess,
-    breakGlass
+    breakGlass,
+    /** Reads of a task's computer-only data through the hub relay (robustness plan §9). */
+    computerTaskData
   }
 }

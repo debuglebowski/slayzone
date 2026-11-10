@@ -3,7 +3,7 @@ import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import type { RecordActivityEventInput } from '@slayzone/history/server'
 import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
-import { colorOne, parseTask, updateTask, validateTaskUpdate, type OpDeps } from './shared.js'
+import { parseTask, updateTask, validateTaskUpdate, type OpDeps } from './shared.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -65,10 +65,5 @@ export async function updateManyTasksOp(
   }
   if (results.some((r) => r.next)) onMutation?.()
 
-  const colored: Task[] = []
-  for (const r of results) {
-    const c = await colorOne(db, r.next)
-    if (c) colored.push(c)
-  }
-  return colored
+  return results.flatMap((r) => (r.next ? [r.next] : []))
 }

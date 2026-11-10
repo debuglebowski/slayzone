@@ -575,6 +575,11 @@ export function HomeDetail({
                           <FileEditorView
                             ref={homeEditorRefCallback}
                             projectPath={projectPath ?? ''}
+                            // The project's files (its path scope, §9 Phase 7b): the
+                            // computer confines every editor path to its folder.
+                            target={
+                              selectedProjectId ? { projectId: selectedProjectId } : undefined
+                            }
                           />
                         </Suspense>
                       )}

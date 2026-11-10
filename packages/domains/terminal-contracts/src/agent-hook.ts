@@ -7,6 +7,9 @@ export interface ResolvedAgentHook {
   taskId?: string
   sessionId?: string
   spawnToken?: string
+  /** The agent's own terminal tab (hook context). Routes the event to that tab's
+   *  PTY; never provenance — the spawn token names the spawn, its row the tab. */
+  tabId?: string
   source?: string
   cwd?: string
   raw?: unknown
@@ -45,6 +48,7 @@ export function resolveAgentHook(input: unknown): ResolvedAgentHook | null {
     taskId: str(body.taskId) ?? str(ctx?.taskId),
     sessionId: str(body.sessionId) ?? str(raw?.session_id) ?? str(raw?.conversationId),
     spawnToken: str(ctx?.spawnToken),
+    tabId: str(ctx?.tabId),
     source: str(raw?.source),
     cwd: str(body.cwd) ?? str(raw?.cwd),
     raw: raw ?? body.raw,
@@ -80,7 +84,12 @@ export function sanitizeAgentHook(hook: ResolvedAgentHook) {
     taskId: hook.taskId,
     sessionId: hook.sessionId,
     cwd: hook.cwd,
-    ctx: { mode: hook.mode, spawnToken: hook.spawnToken, releaseChannel: hook.releaseChannel },
+    ctx: {
+      mode: hook.mode,
+      spawnToken: hook.spawnToken,
+      tabId: hook.tabId,
+      releaseChannel: hook.releaseChannel
+    },
     raw
   }
 }

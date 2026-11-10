@@ -110,7 +110,15 @@ vi.mock('@slayzone/transport/client', () => ({
         },
         delete: { mutationOptions: () => ({ __key: 'delete', __hub: hub }) },
         setDisabled: { mutationOptions: () => ({ __key: 'setDisabled', __hub: hub }) },
-        rename: { mutationOptions: () => ({ __key: 'rename', __hub: hub }) }
+        rename: { mutationOptions: () => ({ __key: 'rename', __hub: hub }) },
+        // Needs attention: no faults in these tests (the list renders nothing).
+        listFaults: {
+          queryOptions: () => ({ __queryFn: () => [] }),
+          queryFilter: () => ({ __key: 'computers.listFaults' })
+        },
+        faultedTasks: { queryFilter: () => ({ __key: 'computers.faultedTasks' }) },
+        retryFault: { mutationOptions: () => ({ __key: 'retryFault', __hub: hub }) },
+        discardFault: { mutationOptions: () => ({ __key: 'discardFault', __hub: hub }) }
       }
     }
   },

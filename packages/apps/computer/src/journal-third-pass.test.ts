@@ -24,6 +24,7 @@ import {
   atomicRuntimeJson
 } from './session-host'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
+import { placeTestProject } from './project-scope.fixture'
 
 async function fixture(legacyChatMarker?: string, stagedJournals = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'chat-journal-third-'))
@@ -72,6 +73,11 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
     activeStaging = `${journal}.${process.pid}.abcdef56.tmp`
     writeFileSync(activeStaging, JSON.stringify(legacy))
   }
+  // The chat's task belongs to a project placed here: its agent starts inside it.
+  // The in-process computer reads its project map from SLAYZONE_ROOT.
+  placeTestProject(root, url, 'p1', root)
+  const previousRoot = process.env.SLAYZONE_ROOT
+  process.env.SLAYZONE_ROOT = root
   let host = await startSessionHost(root, config)
   let control = await hostControl(root)
   let allowDelivery = false
@@ -130,7 +136,7 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
     kind: 'bootstrap',
     value: {
       identity: { id: 'store', taskId: 'task', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
-      projectId: null,
+      projectId: 'p1',
       cwd: root,
       revision: 1,
       providerConfig: {},
@@ -168,6 +174,8 @@ async function fixture(legacyChatMarker?: string, stagedJournals = false) {
       peer.close()
       control.close()
       await host.stop()
+      if (previousRoot === undefined) delete process.env.SLAYZONE_ROOT
+      else process.env.SLAYZONE_ROOT = previousRoot
       rmSync(root, { recursive: true, force: true })
     }
   }

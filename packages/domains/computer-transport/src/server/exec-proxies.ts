@@ -16,9 +16,8 @@
  * survives a computer which never connected, a socket map wiped on restart, a cache
  * that can name a dead computer.
  *
- * Two categories are hub-local by DESIGN, not by fallback, and must never route:
- * worktree COLOR state (`getWorktreeColor` is sync UI state) and HUB-STORAGE fs
- * ops (`hubPathExists` / `removeArtifactDir` — artifacts live under the hub's own
+ * One category is hub-local by DESIGN, not by fallback, and must never route:
+ * HUB-STORAGE fs ops (`hubPathExists` / `removeArtifactDir` — artifacts live under the hub's own
  * `<ROOT>/storage`, a path that does not exist on a computer).
  *
  * These are drop-in replacements for the terminal/processes/task exec backends:
@@ -37,9 +36,7 @@
  *   1. The gateway emits `proc.data`/`proc.exit` (added to `ComputerGatewayEvents`).
  *   2. `WorktreeExecAdapters.pathExists`/`removeArtifactDir` were widened to
  *      `boolean | Promise<boolean>` / `void | Promise<void>` so a remote
- *      (async) impl is valid alongside the sync local default. `getWorktreeColor`
- *      stays SYNC and is always served locally — a documented cosmetic
- *      degradation for remote worktrees.
+ *      (async) impl is valid alongside the sync local default.
  *
  * @module computer/server/exec-proxies
  */
@@ -1459,6 +1456,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       computerId: string,
       spec: {
         warmId: string
+        projectId: string
         command: string
         args: string[]
         cwd: string
@@ -2559,15 +2557,10 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
 
 export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
-  /** In-process adapters. Used ONLY for the two color ops, which are hub-local UI
-   *  state and never routed — every other method requires a computer. */
   /** In-process adapters. Used ONLY for the ops that are hub-owned by design —
-   *  worktree colors and the `<ROOT>/storage` artifact paths (see
-   *  docs/exec-boundary.md). Every workspace op requires a computer. */
-  local: Pick<
-    WorktreeExecAdapters,
-    'getWorktreeColor' | 'ensureProjectWorktreeColors' | 'hubPathExists' | 'removeArtifactDir'
-  >
+   *  the `<ROOT>/storage` artifact paths (see docs/exec-boundary.md). Every
+   *  workspace op requires a computer. */
+  local: Pick<WorktreeExecAdapters, 'hubPathExists' | 'removeArtifactDir'>
   /**
    * The computer a given TASK's worktree work belongs to, or null for hub-local.
    * Takes the taskId because that is the only thing a computer can be resolved
@@ -2589,10 +2582,6 @@ export interface RemoteWorktreeAdaptersOptions {
 
 /**
  * A COMPLETE `WorktreeExecAdapters` that forwards git/fs work to a computer.
- * `getWorktreeColor` (SYNC) and `ensureProjectWorktreeColors` are always served
- * by `local` — worktree colors are hub-local UI state, and a sync getter cannot
- * be a network call (documented cosmetic degradation for remote worktrees).
- * When `resolveComputerId()` is null every method degrades to `local`.
  */
 /**
  * Request limits for a task's worktree steps — never the gateway's 30 s default, as
@@ -2701,15 +2690,6 @@ export function createRemoteWorktreeAdapters(
         WORKTREE_PROBE_TIMEOUT_MS
       )
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
-    },
-
-    // SYNC + hub-local: worktree colors are UI state; cannot be a network call.
-    getWorktreeColor(projectPath, worktreePath) {
-      return local.getWorktreeColor(projectPath, worktreePath)
-    },
-
-    ensureProjectWorktreeColors(projectPath) {
-      return local.ensureProjectWorktreeColors(projectPath)
     },
 
     // WORKSPACE path probe → routed (the workspace lives on the computer).

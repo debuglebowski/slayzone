@@ -26,11 +26,10 @@ const seededRow: ProcessRow = {
   label: 'seeded',
   command: 'echo seeded',
   cwd: '/tmp',
-  auto_restart: 1,
-  pid: null
+  auto_restart: 1
 }
-// A row whose last run never cleared its pid (an uncontrolled exit): the hub never
-// probes or signals that pid — the run, if any, is its computer's.
+// A second row: hydrated stopped, with no pid (a run, if any, is its computer's,
+// adopted from its `proc.list`; the hub persists no pid since v209).
 const seedLeftover: ProcessRow = {
   id: 'seed-leftover',
   task_id: 'task-9',
@@ -38,8 +37,7 @@ const seedLeftover: ProcessRow = {
   label: 'left over',
   command: 'echo seeded2',
   cwd: '/tmp',
-  auto_restart: 0,
-  pid: 4242
+  auto_restart: 0
 }
 // Set to make insert/update reject, as the database does for a NOT NULL column or a
 // project/task that does not exist.
@@ -59,11 +57,7 @@ const fake: ProcessPersistence = {
     // already have run (statement order inside removeProcess is load-bearing —
     // the exit handler's auto-restart checks `processes.has`).
     removes.push({ id, stillListed: listAllProcesses().some((p) => p.id === id) })
-  },
-  updatePid: async () => {},
-  recordPid: async () => {},
-  listPidHistory: async () => [],
-  removePidHistory: async () => {}
+  }
 }
 
 describe('process manager lifecycle over the persistence seam', () => {
@@ -234,8 +228,7 @@ describe('createDbProcessPersistence', () => {
       label: 'l',
       command: 'c',
       cwd: '/',
-      auto_restart: 0,
-      pid: null
+      auto_restart: 0
     }
   ]
   const stubDb = {
@@ -309,49 +302,9 @@ describe('createDbProcessPersistence', () => {
     ])
   })
 
-  test('remove deletes pid history first (no FK cascade to rely on)', async () => {
+  test('remove runs the exact pre-seam DELETE on processes', async () => {
     await persistenceOverDb.remove('the-id')
-    expect(calls[3]).toEqual({
-      sql: 'DELETE FROM process_pids WHERE process_id = ?',
-      params: ['the-id']
-    })
-  })
-  test('remove then runs the exact pre-seam DELETE on processes', () => {
-    expect(calls[4]).toEqual({ sql: 'DELETE FROM processes WHERE id = ?', params: ['the-id'] })
-  })
-
-  test('updatePid runs a minimal UPDATE, pid then id', async () => {
-    await persistenceOverDb.updatePid('the-id', 4242)
-    expect(squash(calls[5].sql)).toBe('UPDATE processes SET pid = ? WHERE id = ?')
-    expect(calls[5].params).toEqual([4242, 'the-id'])
-  })
-  test('updatePid accepts null to clear the pid', async () => {
-    await persistenceOverDb.updatePid('the-id', null)
-    expect(calls[6].params).toEqual([null, 'the-id'])
-  })
-
-  test('recordPid inserts-or-replaces a history row, never overwriting a different pid', async () => {
-    await persistenceOverDb.recordPid('the-id', 7777)
-    expect(calls[7]).toEqual({
-      sql: 'INSERT OR REPLACE INTO process_pids (process_id, pid) VALUES (?, ?)',
-      params: ['the-id', 7777]
-    })
-  })
-
-  test('listPidHistory selects every recorded pid for this row, oldest first', async () => {
-    await persistenceOverDb.listPidHistory('the-id')
-    expect(calls[8]).toEqual({
-      sql: 'SELECT pid, spawned_at as spawnedAt FROM process_pids WHERE process_id = ? ORDER BY spawned_at',
-      params: ['the-id']
-    })
-  })
-
-  test('removePidHistory deletes exactly the one entry, not the whole row', async () => {
-    await persistenceOverDb.removePidHistory('the-id', 7777)
-    expect(calls[9]).toEqual({
-      sql: 'DELETE FROM process_pids WHERE process_id = ? AND pid = ?',
-      params: ['the-id', 7777]
-    })
+    expect(calls[3]).toEqual({ sql: 'DELETE FROM processes WHERE id = ?', params: ['the-id'] })
   })
 
   // Sync-throw parity: pre-seam code called db.prepare() synchronously, so a

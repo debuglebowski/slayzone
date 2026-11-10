@@ -29,7 +29,7 @@ export function ProjectStatusCard({
     if (isTerminalStatus(status, columnsConfig)) {
       trackTask(task.id, 'task_completed', {
         provider: task.agent_id ?? 'terminal',
-        had_worktree: Boolean(task.worktree_path)
+        had_worktree: Boolean(task.has_worktree)
       })
     }
     const updated = await updateTask.mutateAsync({ id: task.id, status })

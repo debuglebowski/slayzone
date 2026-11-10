@@ -9,6 +9,8 @@ import {
   fsyncSync
 } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { eraseQuarantinedForTask } from '@slayzone/platform/quarantine'
+import { artifactJournalBelongsTo } from '@slayzone/content-erasure/server'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
 
 interface Candidates {
@@ -22,7 +24,17 @@ const CONTENT_TABLES = [
   'provider_configs',
   'queue_message_identities',
   'task_artifacts',
-  'artifact_folders'
+  'artifact_folders',
+  // The agent-session ledger (only here since robustness plan §9).
+  'agent_sessions',
+  'task_conversations',
+  'session_resets',
+  'session_deletions',
+  'legacy_conversation_history',
+  // Turn snapshots (only here since robustness plan §9, hub v207).
+  'agent_turns',
+  // Worktree path / base dir (only here since robustness plan §9, hub v210).
+  'task_paths'
 ]
 
 /** Content of this task still in the database (removed by the lifecycle purge or finish). */
@@ -138,6 +150,16 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
           `DELETE FROM ${table} WHERE conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`
         )
         .run(taskId).changes
+    // The task's checkout is the hub's to remove (it asks `release`, then `forget`):
+    // its worktree path waits in `task_path_releases` meanwhile (hub v211).
+    if (has(db, 'task_paths') && has(db, 'task_path_releases'))
+      db.prepare(
+        `INSERT INTO task_path_releases(task_id, project_id, worktree_path, released_at)
+         SELECT task_id, project_id, worktree_path, ? FROM task_paths
+          WHERE task_id=? AND worktree_path IS NOT NULL
+         ON CONFLICT(task_id) DO UPDATE SET worktree_path=excluded.worktree_path,
+           project_id=excluded.project_id, released_at=excluded.released_at`
+      ).run(Date.now(), taskId)
     for (const table of CONTENT_TABLES)
       if (has(db, table))
         removed += db.prepare(`DELETE FROM ${table} WHERE task_id=?`).run(taskId).changes
@@ -145,6 +167,15 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
       removed += db
         .prepare("DELETE FROM migration_checkpoints WHERE json_extract(identity,'$.taskId')=?")
         .run(taskId).changes
+    // A resumability proof is per conversation: gone once no remaining row names it.
+    if (has(db, 'session_turns'))
+      removed += db
+        .prepare(
+          `DELETE FROM session_turns
+            WHERE NOT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.conversation_id=session_turns.conversation_id)
+              AND NOT EXISTS(SELECT 1 FROM task_conversations c WHERE c.conversation_id=session_turns.conversation_id)`
+        )
+        .run().changes
     removed += db
       .prepare(
         "UPDATE conversations SET state='deleted',migration_id=NULL,migration_hash=NULL WHERE task_id=? AND (state<>'deleted' OR migration_id IS NOT NULL OR migration_hash IS NOT NULL)"
@@ -190,9 +221,14 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
       if (!entry.isDirectory()) continue
       const path = containedPath(journals, assertPathSafeId(entry.name, 'journalId'))
       const manifest = join(path, 'manifest.json')
-      if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).taskId === taskId)
+      if (
+        existsSync(manifest) &&
+        artifactJournalBelongsTo(readFileSync(manifest), { taskIds: [taskId] })
+      )
         erase(path)
     }
+  // Quarantined files (unreadable journals, archives) that name the task.
+  eraseQuarantinedForTask(root, taskId)
   for (const table of ['events', 'records', 'receipts'])
     if (
       db

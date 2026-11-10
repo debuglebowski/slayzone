@@ -24,7 +24,6 @@ import { HubToComputerMethods as M } from '@slayzone/computer-transport/shared'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { canAccess, invalidateAccessCache, requestComputerOf, resource } from '@slayzone/api'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
-import { gitTargetForPath } from '@slayzone/worktrees/hub'
 import { countRunningWork, startsNewWork } from './computer-new-work'
 
 const h = await createTestHarness()
@@ -58,21 +57,8 @@ project('pA2', A, '/home/u/sub/x')
 project('pB2', B, '/home/u/Sub')
 // L6: A's project on the hub's own disk.
 project('pAlocal', A, aLocal)
-// L3 routing: A's task worktree and B's at a case variant of it.
-const task = (id: string, projectId: string, worktree: string) =>
-  sql(
-    `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, 'T', ?)`,
-    id,
-    projectId,
-    worktree
-  )
-task('tA', 'pA', '/Users/a/proj')
-task('tB', 'pB', '/Users/a/PROJ')
-// N6: one worktree only (a macOS path spelled in another case finds it), and two
-// that differ only in case (no guess between them).
-task('tC', 'pA', '/Users/c/Proj')
-task('tD', 'pA', '/Users/d/x')
-task('tE', 'pB', '/Users/d/X')
+// L3/N6 routing by task worktree is gone: a request names its task or project
+// (§9 7b/7c) and the hub keeps no task folder (7e), so no task rows are seeded.
 // L6 (Windows computer): A's project on drive C.
 project('pAwin', A, 'C:\\Users\\a\\proj')
 
@@ -98,30 +84,10 @@ describe("L3: case folding is the computer's, never the hub's disk", () => {
     expect(await can(A, '/home/u/Sub/x/f')).toBe(false)
     expect(await can(A, '/home/u/sub/x/f')).toBe(true)
   })
-
-  test("routing: a case variant of A's worktree is not A's checkout", async () => {
-    expect(await gitTargetForPath(h.slayDb, '/Users/a/proj/x')).toEqual({ taskId: 'tA' })
-    expect(await gitTargetForPath(h.slayDb, '/Users/a/PROJ/x')).toEqual({ taskId: 'tB' })
-  })
 })
 
-// Round-7 N6: exact-case routing alone sent `/Users/c/proj/x` (a worktree recorded as
-// `/Users/c/Proj`, on a case-insensitive Mac) to the caller's default computer. An
-// exact match still wins; with none, ONE case-insensitive candidate is taken (the
-// gateway's owner check still decides whether the caller may use it); two are not
-// guessed between.
-describe('N6: git routing falls back to a single case-insensitive candidate', () => {
-  test('one candidate in another case: that task', async () => {
-    expect(await gitTargetForPath(h.slayDb, '/Users/c/proj/sub')).toEqual({ taskId: 'tC' })
-  })
-  test('two candidates differing only in case: neither', async () => {
-    const t = await gitTargetForPath(h.slayDb, '/Users/D/x/f')
-    expect(t?.taskId).toBeUndefined()
-  })
-  test('an exact match still wins over case variants', async () => {
-    expect(await gitTargetForPath(h.slayDb, '/Users/d/X/f')).toEqual({ taskId: 'tE' })
-  })
-})
+// Round-7 N6 (case-insensitive path routing) is gone with path routing itself
+// (§9 Phase 7c): every path request names its task / project scope.
 
 test("L3: one folder recorded for two users is neither's by path (a tie never grants)", async () => {
   project('pTieA', A, '/srv/same')

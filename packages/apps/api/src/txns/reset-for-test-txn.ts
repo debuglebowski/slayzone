@@ -4,6 +4,7 @@ import { ensureIntegrationSchemaSync } from '@slayzone/integrations/db'
 import { syncAgents } from '@slayzone/terminal/db'
 import { runMigrations } from '@slayzone/db-migrations'
 import { normalizeProjectStatusData } from '@slayzone/projects/db'
+import { settleLegacyChatTablesTxn } from '@slayzone/chat-runtime/db'
 
 /**
  * Playwright-only full schema rebuild.
@@ -52,6 +53,10 @@ export const resetForTestTxns = {
     ensureIntegrationSchemaSync(db)
     normalizeProjectStatusData(db)
     syncAgents(db)
+    // As the hub's boot did (robustness plan §9, Phase 8): a fresh schema has no
+    // legacy chat to migrate, so its legacy chat tables go — the hub's memo of
+    // their absence stays true across the reset.
+    settleLegacyChatTablesTxn(db, Date.now())
 
     for (const row of computers) {
       const cols = Object.keys(row)

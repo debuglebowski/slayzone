@@ -35,6 +35,7 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { test, expect } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
+import { installTaskPathsComputer } from '../../../../shared/test-utils/task-paths-computer.js'
 import type { CreateTaskInput, Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import {
   taskRouter,
@@ -43,8 +44,10 @@ import {
   configureTaskRuntimeAdapters,
   updateTask,
   handleAttentionTransition,
-  taskEvents
+  taskEvents,
+  setTaskSessionLedger
 } from '@slayzone/task/server'
+import { createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/hub'
 import {
   defaultWorktreeExecAdapters,
@@ -53,6 +56,13 @@ import {
 
 const h = await createTestHarness()
 setTaskDeps({ ops: taskOps })
+// The session ledger lives on the computer (robustness plan §9): an in-process one.
+const computer = createSessionLedgerHarness({ db: h.slayDb })
+setTaskSessionLedger(computer.ledger)
+const currentOf = (taskId: string, mode = 'claude-code') =>
+  computer.ledger.store.getCurrentConversationId(computer.computerId, taskId, mode)
+const resetsOf = (taskId: string) =>
+  h.db.prepare('SELECT mode, tab_id, except_chat FROM session_resets WHERE task_id = ?').all(taskId)
 
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-task-')) }
 // updateTask/cleanup paths resolve the data root via the task runtime adapter
@@ -571,38 +581,19 @@ test('update: no-op returns current task', async () => {
   expect(same.title).toBe('NoOp')
 })
 
-test('update: provider_config deep merge - conversationId', async () => {
+test('update: provider_config deep merge - flags of one mode keep the others', async () => {
   const t = await createTask('DeepMerge')
   expect(t.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
-  const updated = await up({
-    id: t.id,
-    providerConfig: { 'claude-code': { conversationId: 'abc123' } }
-  })
-  expect(updated.provider_config['claude-code']?.conversationId).toBe('abc123')
-  expect(updated.provider_config['claude-code']?.flags).toBe('--allow-dangerously-skip-permissions')
+  await up({ id: t.id, providerConfig: { codex: { flags: '--codex' } } })
+  const updated = await up({ id: t.id, providerConfig: { 'claude-code': { flags: '--claude' } } })
+  expect(updated.provider_config['codex']?.flags).toBe('--codex')
+  expect(updated.provider_config['claude-code']?.flags).toBe('--claude')
 })
 
-test('update: provider_config deep merge - partial mode update', async () => {
-  const t = await createTask('PartialMerge')
-  await up({ id: t.id, providerConfig: { codex: { conversationId: 'codex-1' } } })
-  const updated = await up({
-    id: t.id,
-    providerConfig: { 'claude-code': { conversationId: 'claude-1' } }
-  })
-  expect(updated.provider_config['codex']?.conversationId).toBe('codex-1')
-  expect(updated.provider_config['claude-code']?.conversationId).toBe('claude-1')
-})
-
-test('update: legacy fields update provider_config', async () => {
+test('update: legacy flag fields update provider_config', async () => {
   const t = await createTask('LegacyUpdate')
-  const updated = await up({
-    id: t.id,
-    claudeConversationId: 'legacy-id',
-    claudeFlags: '--legacy-flag'
-  })
-  expect(updated.provider_config['claude-code']?.conversationId).toBe('legacy-id')
+  const updated = await up({ id: t.id, claudeFlags: '--legacy-flag' })
   expect(updated.provider_config['claude-code']?.flags).toBe('--legacy-flag')
-  expect(updated.claude_conversation_id).toBe('legacy-id')
   expect(updated.claude_flags).toBe('--legacy-flag')
 })
 
@@ -616,38 +607,44 @@ test('update: updates JSON columns (panel_visibility)', async () => {
   expect(updated.panel_visibility?.browser).toBe(false)
 })
 
+// A task's paths as the computer holding its folders has them (§9 7e: the hub keeps
+// only whether each is set — checked against that here too).
+const folders = installTaskPathsComputer()
+const pathsOf = (t: { id: string }) => {
+  const held = folders.get(t.id)
+  const flags = h.db
+    .prepare('SELECT has_worktree, has_base_dir FROM tasks WHERE id = ?')
+    .get(t.id) as { has_worktree: number; has_base_dir: number }
+  expect(!!flags.has_worktree, 'has_worktree').toBe(!!held.worktreePath)
+  expect(!!flags.has_base_dir, 'has_base_dir').toBe(!!held.baseDir)
+  return { worktree_path: held.worktreePath, base_dir: held.baseDir }
+}
+
 test('update: updates worktree fields', async () => {
   const t = await createTask('Worktree')
   const updated = await up({ id: t.id, worktreePath: '/tmp/wt', worktreeParentBranch: 'main' })
-  expect(updated.worktree_path).toBe('/tmp/wt')
+  expect(pathsOf(updated).worktree_path).toBe('/tmp/wt')
   expect(updated.worktree_parent_branch).toBe('main')
 })
 
-test('update: clears conversation IDs when worktreePath changes', async () => {
+test('update: a worktreePath change resets every tab of the task (a reset intent)', async () => {
   const t = await createTask('SessionReset', { agentId: 'codex' })
-  const withSession = await up({
-    id: t.id,
-    providerConfig: { codex: { conversationId: 'stale-session-123' } }
-  })
-  expect(withSession.provider_config.codex?.conversationId).toBe('stale-session-123')
-  const after = await up({ id: withSession.id, worktreePath: '/tmp/new-worktree' })
-  expect(after.worktree_path).toBe('/tmp/new-worktree')
-  expect(after.provider_config.codex?.conversationId).toBeNull()
+  await seedSession(t.id, 'WT-SESSION', 1000, 'codex')
+  const after = await up({ id: t.id, worktreePath: '/tmp/new-worktree' })
+  expect(pathsOf(after).worktree_path).toBe('/tmp/new-worktree')
   expect(after.provider_config.codex?.flags).toBeTruthy()
+  expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null, except_chat: 0 }])
+  expect(await currentOf(t.id, 'codex')).toBeNull()
 })
 
-test('update: does not clear conversation IDs when worktreePath and providerConfig both update', async () => {
+test('update: no reset when worktreePath and providerConfig both update', async () => {
   const t = await createTask('SessionKeep')
-  const withSession = await up({
+  await up({
     id: t.id,
-    providerConfig: { 'claude-code': { conversationId: 'keep-me' } }
-  })
-  const updated = await up({
-    id: withSession.id,
     worktreePath: '/tmp/other-wt',
-    providerConfig: { 'claude-code': { conversationId: 'new-session' } }
+    providerConfig: { 'claude-code': { flags: '--k' } }
   })
-  expect(updated.provider_config['claude-code']?.conversationId).toBe('new-session')
+  expect(resetsOf(t.id)).toEqual([])
 })
 
 test('update: project move clears worktree fields and conversation IDs', async () => {
@@ -663,20 +660,24 @@ test('update: project move clears worktree fields and conversation IDs', async (
     projectId: sourceId,
     title: 'MoveWorktree'
   } as unknown as CreateTaskInput)) as Task
+  await seedSession(t.id, 'MOVE-SESSION', 1000)
   const setup = await up({
     id: t.id,
     worktreePath: '/tmp/wt-src/feat-branch',
     worktreeParentBranch: 'main',
-    repoName: 'my-repo',
-    providerConfig: { 'claude-code': { conversationId: 'stale-conv' } }
+    repoName: 'my-repo'
   })
-  expect(setup.worktree_path).toBe('/tmp/wt-src/feat-branch')
+  expect(pathsOf(setup).worktree_path).toBe('/tmp/wt-src/feat-branch')
   const moved = await up({ id: t.id, projectId: targetId })
   expect(moved.project_id).toBe(targetId)
-  expect(moved.worktree_path).toBeNull()
+  expect(pathsOf(moved).worktree_path).toBeNull()
   expect(moved.worktree_parent_branch).toBeNull()
   expect(moved.repo_name).toBeNull()
-  expect(moved.provider_config['claude-code']?.conversationId).toBeNull()
+  // The worktree set reset the whole task once, the move once more.
+  expect(resetsOf(t.id)).toEqual([
+    { mode: '*', tab_id: null, except_chat: 0 },
+    { mode: '*', tab_id: null, except_chat: 0 }
+  ])
 })
 
 test('update: same-project update preserves worktree fields', async () => {
@@ -696,12 +697,12 @@ test('update: same-project update preserves worktree fields', async () => {
   })
   const updated = await up({ id: t.id, projectId: pid, title: 'Renamed' })
   expect(updated.title).toBe('Renamed')
-  expect(updated.worktree_path).toBe('/tmp/same/wt')
+  expect(pathsOf(updated).worktree_path).toBe('/tmp/same/wt')
   expect(updated.worktree_parent_branch).toBe('develop')
   expect(updated.repo_name).toBe('keep-repo')
 })
 
-test('update: project move with explicit providerConfig preserves conversation IDs', async () => {
+test('update: project move with explicit providerConfig resets nothing', async () => {
   const srcId = crypto.randomUUID()
   const dstId = crypto.randomUUID()
   h.db
@@ -714,13 +715,8 @@ test('update: project move with explicit providerConfig preserves conversation I
     projectId: srcId,
     title: 'MoveWithConfig'
   } as unknown as CreateTaskInput)) as Task
-  await up({ id: t.id, providerConfig: { 'claude-code': { conversationId: 'old-conv' } } })
-  const moved = await up({
-    id: t.id,
-    projectId: dstId,
-    providerConfig: { 'claude-code': { conversationId: 'new-conv' } }
-  })
-  expect(moved.provider_config['claude-code']?.conversationId).toBe('new-conv')
+  await up({ id: t.id, projectId: dstId, providerConfig: { 'claude-code': { flags: '--n' } } })
+  expect(resetsOf(t.id)).toEqual([])
 })
 
 test('update: sets is_blocked and blocked_comment', async () => {
@@ -813,7 +809,7 @@ test('archive: clears worktree_path', async () => {
   const t = await createTask('WTArchive')
   await up({ id: t.id, worktreePath: '/tmp/wt' })
   const archived = await caller.archive({ id: t.id })
-  expect(archived.worktree_path).toBeNull()
+  expect(pathsOf(archived).worktree_path).toBeNull()
 })
 
 test('archive: cascades to sub-tasks', async () => {
@@ -1333,18 +1329,18 @@ test('inherit: inherits parent worktree fields', async () => {
     repoName: 'repo-x'
   })
   const wtChild = await createTask('WtChild', { parentId: wtParent.id })
-  expect(wtChild.worktree_path).toBe('/tmp/wt-parent')
+  expect(pathsOf(wtChild).worktree_path).toBe('/tmp/wt-parent')
   expect(wtChild.worktree_parent_branch).toBe('main')
-  expect(wtChild.base_dir).toBe('/tmp/base')
+  expect(pathsOf(wtChild).base_dir).toBe('/tmp/base')
   expect(wtChild.repo_name).toBe('repo-x')
 })
 
 test('inherit: null when parent has no worktree', async () => {
   const noWtParent = await createTask('NoWtParent')
   const noWtChild = await createTask('NoWtChild', { parentId: noWtParent.id })
-  expect(noWtChild.worktree_path).toBeNull()
+  expect(pathsOf(noWtChild).worktree_path).toBeNull()
   expect(noWtChild.worktree_parent_branch).toBeNull()
-  expect(noWtChild.base_dir).toBeNull()
+  expect(pathsOf(noWtChild).base_dir).toBeNull()
 })
 
 test('inherit: parent repo_name overrides caller-supplied value', async () => {
@@ -1363,7 +1359,7 @@ test('inherit: archiving subtask alone keeps parent worktree fields intact', asy
   const guardChild = await createTask('GuardChild', { parentId: guardParent.id })
   await caller.archive({ id: guardChild.id })
   const guardParentAfter = await caller.get({ id: guardParent.id })
-  expect(guardParentAfter?.worktree_path).toBe('/tmp/wt-guard')
+  expect(pathsOf(guardParentAfter!).worktree_path).toBe('/tmp/wt-guard')
   expect(guardParentAfter?.worktree_parent_branch).toBe('main')
 })
 
@@ -1463,35 +1459,31 @@ test('task router: missing id throws TRPCError NOT_FOUND (not silent null)', asy
 // Each test names its own conversation ids: one provider session belongs to ONE
 // task (the earliest claimant), and these tests share one DB.
 // ===========================================================================
-const seedSession = (taskId: string, conv: string, at: number, mode = 'claude-code'): void => {
-  h.db
-    .prepare(
-      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
-       VALUES (?, ?, '/p', ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`
-    )
-    .run(crypto.randomUUID(), mode, taskId, conv, at, at)
-  // These model sessions that actually ran, so they carry the v158 resumability
-  // proof. Without it they would be correctly ignored: a session that never took
-  // a turn has no transcript, so it can never be a resume target.
-  h.db
-    .prepare(`INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`)
-    .run(conv, at)
+const seedSession = async (
+  taskId: string,
+  conv: string,
+  at: number,
+  mode = 'claude-code'
+): Promise<void> => {
+  // A session that ran (resumable: proven), on the task's computer.
+  await computer.service.handle({
+    op: 'recordConversation',
+    args: { taskId, mode, conversationId: conv, origin: 'slay-spawned-resume', createdAt: at }
+  })
 }
 
 test('switchConversation: re-points the task at an earlier session', async () => {
   const t = await createTask('switch me')
-  seedSession(t.id, 'SWITCH-A', 1000)
-  seedSession(t.id, 'SWITCH-B', 2000)
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
-    'SWITCH-B'
-  )
+  await seedSession(t.id, 'SWITCH-A', 1000)
+  await seedSession(t.id, 'SWITCH-B', 2000)
+  expect(await currentOf(t.id)).toBe('SWITCH-B')
 
-  const after = await caller.switchConversation({
+  await caller.switchConversation({
     id: t.id,
     mode: 'claude-code',
     conversationId: 'SWITCH-A'
   })
-  expect(after.currentConversationByMode!['claude-code']).toBe('SWITCH-A')
+  expect(await currentOf(t.id)).toBe('SWITCH-A')
 })
 
 test('switchConversation: a chat → terminal hand-off stops the chat where it runs first', async () => {
@@ -1507,15 +1499,15 @@ test('switchConversation: a chat → terminal hand-off stops the chat where it r
   })
   try {
     const t = await createTask('hand off')
-    seedSession(t.id, 'CONV-CHAT', 1000, 'claude-chat')
-    const after = await caller.switchConversation({
+    await seedSession(t.id, 'CONV-CHAT', 1000, 'claude-chat')
+    await caller.switchConversation({
       id: t.id,
       mode: 'claude-code',
       conversationId: 'CONV-CHAT',
       sourceMode: 'claude-chat'
     })
     expect(released).toEqual([[t.id, 'CONV-CHAT']])
-    expect(after.currentConversationByMode!['claude-code']).toBe('CONV-CHAT')
+    expect(await currentOf(t.id)).toBe('CONV-CHAT')
   } finally {
     defaultConversationRegistry.registerConversationHolder('chat', {
       isLive: () => false,
@@ -1526,7 +1518,7 @@ test('switchConversation: a chat → terminal hand-off stops the chat where it r
 
 test('switchConversation: rejects an id the task does not own', async () => {
   const t = await createTask('switch guard')
-  seedSession(t.id, 'GUARD-A', 1000)
+  await seedSession(t.id, 'GUARD-A', 1000)
   expect(
     await errCode(() =>
       caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'SOMEONE-ELSE' })
@@ -1541,8 +1533,8 @@ test('switchConversation: rejects an id the task does not own', async () => {
 
 test('deleteConversation: tombstones a non-current session', async () => {
   const t = await createTask('delete me')
-  seedSession(t.id, 'DELETE-A', 1000)
-  seedSession(t.id, 'DELETE-B', 2000)
+  await seedSession(t.id, 'DELETE-A', 1000)
+  await seedSession(t.id, 'DELETE-B', 2000)
   await caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'DELETE-A' })
   // Gone from the honored set → no longer switchable, and still not current.
   expect(
@@ -1550,21 +1542,41 @@ test('deleteConversation: tombstones a non-current session', async () => {
       caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'DELETE-A' })
     )
   ).toBe('BAD_REQUEST')
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
-    'DELETE-B'
-  )
+  expect(await currentOf(t.id)).toBe('DELETE-B')
 })
 
 test('deleteConversation: refuses the CURRENT session', async () => {
   const t = await createTask('delete current')
-  seedSession(t.id, 'CURRENT-A', 1000)
-  seedSession(t.id, 'CURRENT-B', 2000)
+  await seedSession(t.id, 'CURRENT-A', 1000)
+  await seedSession(t.id, 'CURRENT-B', 2000)
   expect(
     await errCode(() =>
       caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'CURRENT-B' })
     )
   ).toBe('BAD_REQUEST')
-  expect((await caller.get({ id: t.id }))!.currentConversationByMode!['claude-code']).toBe(
-    'CURRENT-B'
-  )
+  expect(await currentOf(t.id)).toBe('CURRENT-B')
+})
+
+test('sessions with the computer offline: switch and delete are refused as offline; a reset waits for it', async () => {
+  const t = await createTask('offline')
+  await seedSession(t.id, 'OFF-A', 1000)
+  await seedSession(t.id, 'OFF-B', 2000)
+  computer.setOnline(false)
+  try {
+    expect(
+      await errCode(() =>
+        caller.switchConversation({ id: t.id, mode: 'claude-code', conversationId: 'OFF-A' })
+      )
+    ).toBe('PRECONDITION_FAILED')
+    expect(
+      await errCode(() =>
+        caller.deleteConversation({ id: t.id, mode: 'claude-code', conversationId: 'OFF-A' })
+      )
+    ).toBe('PRECONDITION_FAILED')
+    // The reset is the hub's intent: recorded now, applied when the computer is back.
+    await caller.resetConversation({ id: t.id, mode: 'claude-code' })
+  } finally {
+    computer.setOnline(true)
+  }
+  expect(await currentOf(t.id)).toBeNull()
 })

@@ -192,13 +192,14 @@ function ProjectInstructionsBody({ projectId, projectPath }: ProjectInstructions
     projectPath: !linkedVariant && projectPath ? projectPath : null,
     relPath: !linkedVariant && selectedFile ? selectedFile.path : null,
     read: useCallback(async () => {
-      if (!projectPath || !selectedProvider) return null
+      if (!projectId || !projectPath || !selectedProvider) return null
       const r = await trpcClient.aiConfig.readProviderInstructions.query({
+        projectId,
         projectPath,
         provider: selectedProvider
       })
       return r.content
-    }, [trpcClient, projectPath, selectedProvider]),
+    }, [trpcClient, projectId, projectPath, selectedProvider]),
     save: useCallback(
       async (content: string) => {
         if (!projectId || !projectPath || !selectedProvider) return

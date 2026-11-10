@@ -76,11 +76,6 @@ const MODE_TO_FLAT_FLAGS: Record<string, string> = {
 // working server-side counterpart to reload from).
 interface TerminalRowExtras {
   agent_id?: Task['agent_id']
-  claude_conversation_id?: string | null
-  codex_conversation_id?: string | null
-  cursor_conversation_id?: string | null
-  gemini_conversation_id?: string | null
-  opencode_conversation_id?: string | null
   claude_flags?: string
   codex_flags?: string
   cursor_flags?: string
@@ -103,71 +98,22 @@ function setExtras(id: string, patch: TerminalRowExtras): void {
   terminalExtras.set(id, { ...getExtras(id), ...patch })
 }
 
-// Electron's main DB handler keeps `providerConfig.<mode>.conversationId` and
-// the deprecated flat `*_conversation_id` columns in lock-step. Writes to
-// providerConfig (mode switch / clearAllConversationIds) must null the flat
-// field so `task.claude_conversation_id === null` reads correctly; writes to
-// the flat field must project into providerConfig so a later
-// `clearAllConversationIds(task.provider_config)` actually walks the mode.
-const MODE_TO_FLAT_CONV: Record<string, string> = {
-  'claude-code': 'claude_conversation_id',
-  codex: 'codex_conversation_id',
-  'cursor-agent': 'cursor_conversation_id',
-  gemini: 'gemini_conversation_id',
-  opencode: 'opencode_conversation_id'
-}
-// UpdateTaskInput import cycle: imported types don't include these runtime
-// helpers, so we type the helper's input loosely and rely on callers passing
-// the UpdateTaskInput shape.
-interface ConvSyncInput {
+// A task update's providerConfig merges per mode into the cached row, like the hub's
+// deep merge. (No session ids: those live on the agent's computer.)
+function mergeProviderConfig(data: {
   id: string
-  providerConfig?: Record<string, { conversationId?: string | null; flags?: string }> | null
-  claudeConversationId?: string | null
-  codexConversationId?: string | null
-  cursorConversationId?: string | null
-  geminiConversationId?: string | null
-  opencodeConversationId?: string | null
-}
-function syncProviderAndFlatConversationIds(data: ConvSyncInput): void {
-  if (data.providerConfig && typeof data.providerConfig === 'object') {
-    const flatPatch: Record<string, unknown> = {}
-    for (const [mode, cfg] of Object.entries(data.providerConfig)) {
-      const flat = MODE_TO_FLAT_CONV[mode]
-      if (!flat) continue
-      if (cfg && Object.prototype.hasOwnProperty.call(cfg, 'conversationId')) {
-        flatPatch[flat] = cfg.conversationId ?? null
-      }
-    }
-    if (Object.keys(flatPatch).length > 0) {
-      setExtras(data.id, flatPatch as TerminalRowExtras)
-    }
-    const priorProvider = getExtras(data.id).provider_config ?? {}
-    const nextProvider: Record<string, unknown> = { ...priorProvider }
-    for (const [mode, cfg] of Object.entries(data.providerConfig)) {
-      nextProvider[mode] = {
-        ...((priorProvider as Record<string, unknown>)[mode] as object | undefined),
-        ...cfg
-      }
-    }
-    setExtras(data.id, { provider_config: nextProvider })
-  }
-  const flatWrites: Array<[string, string | null | undefined]> = [
-    ['claude-code', data.claudeConversationId],
-    ['codex', data.codexConversationId],
-    ['cursor-agent', data.cursorConversationId],
-    ['gemini', data.geminiConversationId],
-    ['opencode', data.opencodeConversationId]
-  ]
-  let provMerged: Record<string, unknown> | null = null
-  for (const [mode, val] of flatWrites) {
-    if (val === undefined) continue
-    if (!provMerged) provMerged = { ...(getExtras(data.id).provider_config ?? {}) }
-    provMerged[mode] = {
-      ...((provMerged as Record<string, unknown>)[mode] as object | undefined),
-      conversationId: val
+  providerConfig?: Record<string, Record<string, unknown>> | null
+}): void {
+  if (!data.providerConfig || typeof data.providerConfig !== 'object') return
+  const priorProvider = getExtras(data.id).provider_config ?? {}
+  const nextProvider: Record<string, unknown> = { ...priorProvider }
+  for (const [mode, cfg] of Object.entries(data.providerConfig)) {
+    nextProvider[mode] = {
+      ...((priorProvider as Record<string, unknown>)[mode] as object | undefined),
+      ...cfg
     }
   }
-  if (provMerged) setExtras(data.id, { provider_config: provMerged })
+  setExtras(data.id, { provider_config: nextProvider })
 }
 
 const nowIso = (): string => new Date().toISOString()
@@ -256,11 +202,6 @@ function synthTask(
     agent_id: (extras.agent_id ?? 'claude-code') as Task['agent_id'],
     provider_config: (extras.provider_config ?? {}) as Task['provider_config'],
     terminal_shell: extras.terminal_shell ?? null,
-    claude_conversation_id: extras.claude_conversation_id ?? null,
-    codex_conversation_id: extras.codex_conversation_id ?? null,
-    cursor_conversation_id: extras.cursor_conversation_id ?? null,
-    gemini_conversation_id: extras.gemini_conversation_id ?? null,
-    opencode_conversation_id: extras.opencode_conversation_id ?? null,
     claude_flags: extras.claude_flags ?? '',
     codex_flags: extras.codex_flags ?? '',
     cursor_flags: extras.cursor_flags ?? '',
@@ -268,18 +209,19 @@ function synthTask(
     opencode_flags: extras.opencode_flags ?? '',
     dangerously_skip_permissions: false,
     panel_visibility: extras.panel_visibility ?? null,
-    worktree_path:
-      typeof entry.worktree_path === 'string' && entry.worktree_path.length > 0
-        ? entry.worktree_path
-        : (extras.worktree_path ?? null),
+    // A task's paths live on its computer (§9 Phase 7d): the row says only whether set.
+    has_worktree: !!(
+      (typeof entry.worktree_path === 'string' && entry.worktree_path.length > 0) ||
+      extras.worktree_path
+    ),
     worktree_parent_branch:
       typeof entry.worktree_parent_branch === 'string' && entry.worktree_parent_branch.length > 0
         ? entry.worktree_parent_branch
         : null,
-    base_dir:
-      typeof entry.base_dir === 'string' && entry.base_dir.length > 0
-        ? entry.base_dir
-        : (extras.base_dir ?? null),
+    has_base_dir: !!(
+      (typeof entry.base_dir === 'string' && entry.base_dir.length > 0) ||
+      extras.base_dir
+    ),
     browser_url: null,
     browser_tabs: null,
     web_panel_urls: null,
@@ -406,23 +348,13 @@ export const dbShim = {
   },
   updateTask: async (data: UpdateTaskInput): Promise<Task> => {
     // cap-migrate-all-tests (terminal-core batch) — terminal-related fields
-    // (agent_id, conversation IDs, flags, is_temporary) land in the
+    // (agent_id, flags, is_temporary) land in the
     // renderer-side `terminalExtras` cache, which `synthTask` below reads
     // back — this cache IS the storage now, not a pre-read before a network
     // round-trip (there is none left for these fields).
     const terminalPatch: TerminalRowExtras = {}
     if (data.agentId !== undefined) terminalPatch.agent_id = data.agentId
     if (data.terminalShell !== undefined) terminalPatch.terminal_shell = data.terminalShell
-    if (data.claudeConversationId !== undefined)
-      terminalPatch.claude_conversation_id = data.claudeConversationId
-    if (data.codexConversationId !== undefined)
-      terminalPatch.codex_conversation_id = data.codexConversationId
-    if (data.cursorConversationId !== undefined)
-      terminalPatch.cursor_conversation_id = data.cursorConversationId
-    if (data.geminiConversationId !== undefined)
-      terminalPatch.gemini_conversation_id = data.geminiConversationId
-    if (data.opencodeConversationId !== undefined)
-      terminalPatch.opencode_conversation_id = data.opencodeConversationId
     if (data.claudeFlags !== undefined) terminalPatch.claude_flags = data.claudeFlags
     if (data.codexFlags !== undefined) terminalPatch.codex_flags = data.codexFlags
     if (data.cursorFlags !== undefined) terminalPatch.cursor_flags = data.cursorFlags
@@ -436,41 +368,8 @@ export const dbShim = {
     const linearLike = data as UpdateTaskInput & { linearUrl?: string | null }
     if (linearLike.linearUrl !== undefined) terminalPatch.linear_url = linearLike.linearUrl
     if (Object.keys(terminalPatch).length > 0) setExtras(data.id, terminalPatch)
-    syncProviderAndFlatConversationIds(data)
-    // Agent-switch invariant: on agentId changes the renderer drops all
-    // other conversation IDs (Electron's main handler mirrors this).
+    mergeProviderConfig(data as Parameters<typeof mergeProviderConfig>[0])
     if (data.agentId !== undefined) {
-      const explicitFlat: Record<string, boolean> = {
-        'claude-code': data.claudeConversationId !== undefined,
-        codex: data.codexConversationId !== undefined,
-        'cursor-agent': data.cursorConversationId !== undefined,
-        gemini: data.geminiConversationId !== undefined,
-        opencode: data.opencodeConversationId !== undefined
-      }
-      const extendedForMode = data as UpdateTaskInput & {
-        providerConfig?: Record<string, { conversationId?: string | null; flags?: string }> | null
-      }
-      const hasExplicitProvider = (mode: string): boolean => {
-        const pc = extendedForMode.providerConfig
-        if (!pc || typeof pc !== 'object') return false
-        const entry = pc[mode]
-        return !!entry && Object.prototype.hasOwnProperty.call(entry, 'conversationId')
-      }
-      for (const mode of Object.keys(explicitFlat)) {
-        if (explicitFlat[mode] || hasExplicitProvider(mode)) continue
-        const flat = MODE_TO_FLAT_CONV[mode]
-        if (flat) setExtras(data.id, { [flat]: null } as TerminalRowExtras)
-        const prior = getExtras(data.id).provider_config ?? {}
-        setExtras(data.id, {
-          provider_config: {
-            ...prior,
-            [mode]: {
-              ...((prior as Record<string, unknown>)[mode] as object | undefined),
-              conversationId: null
-            }
-          }
-        })
-      }
       // Reset per-mode flag fields to their built-in defaults on any mode
       // switch. Matches the Electron "switching back restores the mode's
       // default flags" behavior. Skips flags the caller explicitly set in
@@ -499,10 +398,6 @@ export const dbShim = {
       await remote.updateTask(data.id, data.title ?? '', data.description ?? '')
     }
 
-    // cap-migrate-all-tests (git batch): sidecar-side auto-clear of every
-    // provider's conversationId on a worktree_path/base_dir/projectId move
-    // (matches Electron main handlers.ts:383-397) — mirrored here against
-    // the LOCAL cache, since that cache is the only place these fields live.
     const extended = data as UpdateTaskInput & {
       worktreePath?: string | null
       worktreeParentBranch?: string | null
@@ -511,35 +406,6 @@ export const dbShim = {
       projectId?: string
       providerConfig?: Record<string, unknown> | null
     }
-    const autoClear =
-      extended.providerConfig === undefined &&
-      ((typeof extended.worktreePath === 'string' && extended.worktreePath.length > 0) ||
-        (typeof extended.baseDir === 'string' && extended.baseDir.length > 0) ||
-        typeof extended.projectId === 'string')
-    if (autoClear) {
-      const prior = getExtras(data.id).provider_config
-      if (prior && typeof prior === 'object') {
-        const cleared: Record<string, unknown> = {}
-        for (const [k, v] of Object.entries(prior as Record<string, unknown>)) {
-          if (v && typeof v === 'object' && !Array.isArray(v)) {
-            const entry = { ...(v as Record<string, unknown>) }
-            if ('conversationId' in entry) entry.conversationId = null
-            cleared[k] = entry
-          } else {
-            cleared[k] = v
-          }
-        }
-        setExtras(data.id, { provider_config: cleared as Record<string, unknown> })
-      }
-      setExtras(data.id, {
-        claude_conversation_id: null,
-        codex_conversation_id: null,
-        cursor_conversation_id: null,
-        gemini_conversation_id: null,
-        opencode_conversation_id: null
-      })
-    }
-
     // Local echo of the row as updated — synthTask merges the extras cache
     // (just written above) back in, so terminal-field round-trips still work
     // within a session even with no server-side task table behind this.

@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, expect, it, vi } from 'vitest'
 import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+import { placeTestProject } from './project-scope.fixture'
 import { createUpgradeController, type UpgradeWorker } from './auto-upgrade'
 import { launchUpgradeWorker, releaseEntry, superviseUpgrades } from './upgrade-runtime'
 
@@ -73,6 +74,7 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
   writeFileSync(newEntry, versioned('2.0.0'))
   writeFileSync(badEntry, 'process.exit(1)')
   const hub = await startLoopbackHub({ floodLimits: false })
+  placeTestProject(root, hub.url, 'p1', root)
   cleanups.push(() => hub.close())
   let upgraded = false
   // Before the upgrade the hub speaks the previous protocol; its current gate rejects it.
@@ -171,6 +173,7 @@ it('hub protocol upgrade → fatal old hello → exact release → same enrollme
   const latest = workers.at(-1)!
   await hub.gateway.request(id, 'proc.spawn', {
     sessionId: 'active-job',
+    projectId: 'p1',
     command: process.execPath,
     args: ['-e', 'setInterval(() => {}, 1000)'],
     cwd: root
@@ -244,6 +247,7 @@ it('supervisor discovers hub release, persists progress and resumes the upgraded
     }) as typeof socket.send
   })
   const { port } = server.address() as AddressInfo
+  placeTestProject(root, `ws://127.0.0.1:${port}`, 'p1', root)
   const config = {
     hubUrl: `ws://127.0.0.1:${port}/computers`,
     name: 'supervisor-test',
@@ -359,6 +363,7 @@ it('hub upgrade, failed candidate, retry and supervisor restart preserve active 
     }) as typeof socket.send
   })
   const { port } = server.address() as AddressInfo
+  placeTestProject(root, `ws://127.0.0.1:${port}`, 'p1', root)
   const config = {
     hubUrl: `ws://127.0.0.1:${port}/computers`,
     name: 'live-upgrade',
@@ -382,11 +387,13 @@ it('hub upgrade, failed candidate, retry and supervisor restart preserve active 
   const epoch = hub.gateway.listComputers()[0].epoch
   await hub.gateway.request(id, 'pty.spawn', {
     sessionId: 'idle',
+    projectId: 'p1',
     command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
     cwd: root
   })
   await hub.gateway.request(id, 'proc.spawn', {
     sessionId: 'working',
+    projectId: 'p1',
     command: process.execPath,
     args: ['-e', 'setInterval(()=>{},1000)'],
     cwd: root
@@ -477,6 +484,7 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
     if (computer.version === '2.0.0') upgradedConnections++
   })
   const { port } = server.address() as AddressInfo
+  placeTestProject(root, `ws://127.0.0.1:${port}`, 'p1', root)
   writeFileSync(
     join(root, 'computer.config.json'),
     JSON.stringify({ hubUrl: `ws://127.0.0.1:${port}/computers`, allowedRoots: [root] })
@@ -535,6 +543,7 @@ it('stable launcher replaces supervisor and later idle host after a hub release 
   const id = hub.gateway.listComputers()[0].computerId
   await hub.gateway.request(id, 'pty.spawn', {
     sessionId: 'preserved',
+    projectId: 'p1',
     command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
     cwd: root
   })
@@ -617,6 +626,8 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   writeFileSync(entry, source)
   const first = await startLoopbackHub({ floodLimits: false }),
     second = await startLoopbackHub({ floodLimits: false })
+  placeTestProject(root, first.url, 'p1', root)
+  placeTestProject(root, second.url, 'p1', root)
   cleanups.push(() => first.close())
   cleanups.push(() => second.close())
   const configPath = join(root, 'computer.config.json')
@@ -662,6 +673,7 @@ it('changed hub configuration waits for active work then reloads with auto-upgra
   const id = first.gateway.listComputers()[0].computerId
   await first.gateway.request(id, 'pty.spawn', {
     sessionId: 'active',
+    projectId: 'p1',
     command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
     cwd: root
   })

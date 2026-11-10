@@ -1636,6 +1636,8 @@ test('history that cannot be read: the switch still happens, and the chat says s
   })
   await ops.switchConversation({ ...o, conversationId: PICKED, sourceMode: 'claude-chat' })
   expect(spawns).toHaveLength(2)
+  // Events are saved asynchronously (as the other switch tests wait for theirs).
+  await until(() => kinds().some((e) => e.kind === 'notice'))
   expect(kinds().find((e) => e.kind === 'notice')).toMatchObject({ code: 'history-unavailable' })
   setClaudeSessionReader(null)
 })

@@ -249,6 +249,8 @@ export interface TransportDeps {
 export type ChatEventMap = {
   'threads-changed': [parentTabId: string]
   'pinned-messages-changed': [tabId: string]
+  /** The task of this tab recorded a session (the computer's ledger; the hub refreshes lists). */
+  'sessions-changed': [tabId: string]
   'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   /**

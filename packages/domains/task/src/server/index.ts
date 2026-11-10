@@ -81,38 +81,38 @@ export {
   restoreTaskOp,
   unarchiveTaskOp,
   updateTaskOp,
-  collectReferencedConversationIds,
-  casRepointConversationId,
-  recordConversation,
-  getCurrentConversationId,
-  listConversationHistory,
+  setTaskSessionLedger,
+  taskSessionLedger,
+  SessionsOfflineError,
   listTaskSessions,
   setTaskSessionPromptReader,
-  legacySessionPromptSummaries,
+  legacyCodexChatPromptSummaries,
   isHonoredConversation,
   deleteSession,
-  recordPendingSpawn,
-  findPendingSpawn,
-  findOwnedSpawnForConversation,
-  prunePendingSpawns,
-  recordSessionSpawn,
-  confirmSessionConversation,
-  confirmSessionConversationByTaskMode,
-  markSessionDead,
-  markSessionFirstTurn,
-  listResumeCandidates,
-  bindSessionToTask,
   relinquishSession,
-  claimedByOtherTasks,
-  listSharedSessionClaims
+  resetConversation,
+  switchConversation
 } from './ops'
-export type { CreateImportedTaskInput, SharedSessionClaim, TaskSessionSummary } from './ops'
-export { taskSessionStore } from './task-session-store'
+export type {
+  CreateImportedTaskInput,
+  LedgerSessionRow,
+  SessionLedgerClient,
+  TaskSessionSummary
+} from './ops'
 export {
   configureTaskRuntimeAdapters,
   getRuntimeAdapters,
   updateTask,
-  InvalidTaskUpdateError
+  setChatSettingsDelegate,
+  type ChatSettingsDelegate,
+  setTaskPathsDelegate,
+  getTaskPathsDelegate,
+  notifyTaskPaths,
+  type TaskPathsDelegate,
+  type TaskPathChange,
+  type TaskPathRelease,
+  InvalidTaskUpdateError,
+  TaskFoldersUnavailableError
 } from './ops/shared'
 // The in-process implementations (`defaultWorktreeExecAdapters`,
 // `defaultWorktreePolicyAdapters`) live in `worktrees/server`.
@@ -121,7 +121,6 @@ export type {
   WorktreeExecAdapters,
   WorktreePolicyAdapters
 } from './ops/shared'
-export { purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
   TaskRuntimeAdapters,
@@ -133,9 +132,6 @@ export type { TaskOps } from './task-ops-bundle'
 export { handleAttentionTransition } from './attention'
 // Conversation self-heal + resolver. Registered by BOTH composition roots (the
 // Electron main process and the slice-9 sidecar that owns the pty runtime) so
-// the healer/resolver seams `createPty` calls are never left null. Lives here
-// because it needs task DB ops + terminal transcript helpers, and the package graph
-// runs task → terminal (a cycle from terminal/server). The git branch lookup is
-// injected (`ConversationHealerDeps`) since worktrees builds on task.
+// the healer/resolver seams `createPty` calls are never left null. Both only
+// forward to the agent's computer (its session ledger decides, robustness plan §9).
 export { registerConversationHealer, registerConversationResolver } from './conversation-healer'
-export type { ConversationHealerDeps } from './conversation-healer'

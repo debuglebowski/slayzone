@@ -158,16 +158,14 @@ test('expiry removes old content and cached pages, preserves new references, tas
   expect(r.storage.read('c', -1)).toMatchObject([{ seq: 1, event: { id: 'new' } }])
   expect((await r.ops.getTabState('tab'))?.draft).toEqual({ text: '', attachments: [], rev: 10 })
   expect(await r.local.queue.list('tab')).toEqual([])
+  // Queued messages are this computer's alone (v208): nothing is reported to the hub.
   expect(
     r.storage
       .findRecords('settings')
       .some(
-        (m) =>
-          m.id.startsWith('metadata:') &&
-          (m.value as { kind?: string; value?: { removed?: boolean } }).kind === 'queue-item' &&
-          (m.value as { value: { removed?: boolean } }).value.removed
+        (m) => m.id.startsWith('metadata:') && (m.value as { kind?: string }).kind === 'queue-item'
       )
-  ).toBe(true)
+  ).toBe(false)
   expect(
     r.storage.records('c').filter((v) => ['prompt', 'workspace', 'timeline'].includes(v.kind))
   ).toEqual([])
@@ -496,7 +494,12 @@ test('a failed expiry transaction preserves history and releases foreground call
     if (args[2].id === 'event-sequence-floor') throw new Error('disk full')
     return put(...args)
   }
-  await expect(r.retention.runNow(now)).rejects.toThrow('disk full')
+  // One conversation's failure is recorded (P3), never aborts the whole sweep.
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await r.retention.runNow(now)
+  expect(r.storage.listFaults()).toMatchObject([
+    { pass: 'computer.chat-retention', item_key: 'c', message: 'disk full' }
+  ])
   expect(r.storage.read('c', -1)).toHaveLength(1)
   expect(r.storage.getRecord('c', 'timeline', 'checkpoint')).not.toBeNull()
   r.storage.putRecord = put
@@ -530,7 +533,9 @@ test('shutdown still closes storage when a running sweep fails', async () => {
   await started
   const close = r.close()
   release()
-  await expect(sweep).rejects.toThrow('quiescence failed')
+  // The failing conversation is isolated (P3); the sweep itself ends cleanly.
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  await sweep.catch(() => undefined)
   await expect(close).resolves.toBeUndefined()
   expect(() => r.storage.read('c', -1)).toThrow(/not open|closed/i)
 })

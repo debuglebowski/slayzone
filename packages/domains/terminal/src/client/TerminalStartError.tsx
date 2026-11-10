@@ -4,18 +4,26 @@ import { Button } from '@slayzone/ui'
 /**
  * Why the terminal could not start. A start refused because a chat of the task
  * runs the conversation (`conversation-in-use`) offers "Continue here": the
- * chat stops first, then the terminal starts on that conversation.
+ * chat stops first, then the terminal starts on that conversation. One refused
+ * because ANOTHER terminal tab runs this tab's session
+ * (`conversation-in-other-tab`, the message names the tab) offers "Start new
+ * session" — never automatically: a silent fresh start is how a tab loses its
+ * session.
  */
 export function TerminalStartError({
   message,
   code,
-  onContinueHere
+  onContinueHere,
+  onStartFresh
 }: {
   message: string
   code: string | null
   /** The hand-off; absent where this tab cannot take the conversation over. */
   onContinueHere?: () => Promise<void>
+  /** Reset this tab's session and start a new one; absent where unsupported. */
+  onStartFresh?: () => void
 }) {
+  const canStartFresh = code === 'conversation-in-other-tab' && onStartFresh !== undefined
   const [pending, setPending] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   const canContinue = code === 'conversation-in-use' && onContinueHere !== undefined
@@ -44,6 +52,16 @@ export function TerminalStartError({
             onClick={continueHere}
           >
             {pending ? 'Continuing…' : 'Continue here'}
+          </Button>
+        )}
+        {canStartFresh && (
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="terminal-start-new-session"
+            onClick={onStartFresh}
+          >
+            Start new session
           </Button>
         )}
         {failed && (

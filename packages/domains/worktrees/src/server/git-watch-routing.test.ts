@@ -43,38 +43,38 @@ const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot
 
 describe('routed git watch', () => {
   test('two panels on one checkout share one computer watch; the last stop ends it', async () => {
-    await caller.watchStart({ worktreePath: '/w/r' })
-    await caller.watchStart({ worktreePath: '/w/r' })
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/r' })
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/r' })
     expect(calls).toEqual(['start c1 /w/r'])
-    await caller.watchStop({ worktreePath: '/w/r' })
+    await caller.watchStop({ target: { projectId: 'p-test' }, worktreePath: '/w/r' })
     expect(calls).toEqual(['start c1 /w/r'])
-    await caller.watchStop({ worktreePath: '/w/r' })
+    await caller.watchStop({ target: { projectId: 'p-test' }, worktreePath: '/w/r' })
     expect(calls).toEqual(['start c1 /w/r', 'stop c1 last'])
   })
 
   test("the computer's report becomes the panel's diff-changed", async () => {
     calls.length = 0
-    await caller.watchStart({ worktreePath: '/w/s' })
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/s' })
     const seen: unknown[] = []
     const on = (p: unknown) => seen.push(p)
     getGitWatcher().on('git:diff-changed', on)
     deliverGitWatchEvent('c1', { watchId: watchIds.at(-1)!, kind: 'changed', refsChanged: true })
     deliverGitWatchEvent('c2', { watchId: watchIds.at(-1)!, kind: 'changed', refsChanged: true })
     getGitWatcher().off('git:diff-changed', on)
-    expect(seen).toEqual([{ worktreePath: '/w/s', refsChanged: true }])
-    await caller.watchStop({ worktreePath: '/w/s' })
+    expect(seen).toEqual([{ worktreePath: '/w/s', refsChanged: true, projectId: 'p-test' }])
+    await caller.watchStop({ target: { projectId: 'p-test' }, worktreePath: '/w/s' })
   })
 
   test('a lost computer: watch-failed, and the next subscribe starts afresh', async () => {
     calls.length = 0
-    await caller.watchStart({ worktreePath: '/w/t' })
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/t' })
     const failed: unknown[] = []
     const on = (p: unknown) => failed.push(p)
     getGitWatcher().on('git:diff-watch-failed', on)
     gitWatchComputerGone('c1')
     getGitWatcher().off('git:diff-watch-failed', on)
-    expect(failed).toEqual([{ worktreePath: '/w/t' }])
-    await caller.watchStart({ worktreePath: '/w/t' })
+    expect(failed).toEqual([{ worktreePath: '/w/t', projectId: 'p-test' }])
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/t' })
     expect(calls).toEqual(['start c1 /w/t', 'start c1 /w/t'])
   })
 
@@ -95,22 +95,22 @@ describe('routed git watch', () => {
     const on = (p: unknown) => failed.push(p)
     getGitWatcher().on('git:diff-watch-failed', on)
     try {
-      const first = caller.watchStart({ worktreePath: '/w/u' })
+      const first = caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/u' })
       await new Promise((r) => setTimeout(r, 10))
-      const second = caller.watchStart({ worktreePath: '/w/u' })
+      const second = caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/u' })
       await new Promise((r) => setTimeout(r, 10))
       fail(new Error('computer gone'))
       const outcomes = await Promise.allSettled([first, second])
       expect(outcomes.map((o) => o.status)).toEqual(['rejected', 'rejected'])
-      expect(failed).toEqual([{ worktreePath: '/w/u' }])
+      expect(failed).toEqual([{ worktreePath: '/w/u', projectId: 'p-test' }])
     } finally {
       getGitWatcher().off('git:diff-watch-failed', on)
       setGitOpTransport(transport)
     }
     // Nothing left counted: the next start is a fresh one.
     calls.length = 0
-    await caller.watchStart({ worktreePath: '/w/u' })
+    await caller.watchStart({ target: { projectId: 'p-test' }, worktreePath: '/w/u' })
     expect(calls).toEqual(['start c1 /w/u'])
-    await caller.watchStop({ worktreePath: '/w/u' })
+    await caller.watchStop({ target: { projectId: 'p-test' }, worktreePath: '/w/u' })
   })
 })

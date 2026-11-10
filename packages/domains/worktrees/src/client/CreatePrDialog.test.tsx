@@ -46,10 +46,20 @@ vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: vi.fn() })
 }))
 
+// The task's worktree path comes from its computer (§9 Phase 7d).
+vi.mock('@slayzone/task/client/useTaskPath', () => ({
+  useTaskPath: () => ({ state: 'ok', worktreePath: '/wt', baseDir: null })
+}))
+
 const { CreatePrDialog } = await import('./pr-dialogs')
 
 const task = (parent: string | null): Task =>
-  ({ id: 't1', title: 'Feature', worktree_path: '/wt', worktree_parent_branch: parent }) as Task
+  ({
+    id: 't1',
+    title: 'Feature',
+    has_worktree: true,
+    worktree_parent_branch: parent
+  }) as Task
 
 const into = (): string => screen.getByTestId('into').textContent ?? ''
 

@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from 'react'
+import { useTaskWorktreePaths } from '@slayzone/task/client/useTaskPath'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { ExternalLink, GitPullRequest, GitMerge, CircleDot, CircleX } from 'lucide-react'
@@ -118,10 +119,16 @@ export function ProjectPrTab({ projectPath, visible, tasks, onTaskClick }: Proje
 
   const worktrees = worktreesQuery.data
 
+  // Each task's worktree path, from its computer (§9 Phase 7d).
+  const worktreePaths = useTaskWorktreePaths(tasks)
+
   // Build map of PR URL → task
   const prTaskMap = useMemo(
-    () => mapPrsToTasks(prs, tasks, worktrees ?? []),
-    [prs, tasks, worktrees]
+    () =>
+      mapPrsToTasks(prs, tasks, worktrees ?? [], (t) =>
+        t.has_worktree ? worktreePaths.get(t.id) : undefined
+      ),
+    [prs, tasks, worktrees, worktreePaths]
   )
 
   // Unique authors for filter

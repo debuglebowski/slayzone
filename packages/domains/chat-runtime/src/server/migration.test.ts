@@ -84,7 +84,8 @@ async function fixture() {
       offset += Buffer.from(p.data, 'base64').length
       return { offset }
     }
-    if (p.kind === 'transfer.finish') return { id: 'c', epoch: 2, hash: manifest.hash }
+    if (p.kind === 'transfer.finish')
+      return { id: 'c', epoch: (await ownership.get('c'))!.epoch + 1, hash: manifest.hash }
     if (p.kind === 'migration.verify') return { missing: [] }
     if (p.kind === 'migration.activate') {
       if (activationFailures-- > 0) throw new Error('Disconnected')
@@ -94,6 +95,7 @@ async function fixture() {
   let manifest: ChatTransferManifest
   const migration = createChatMigration({ ownership, source, request })
   return {
+    h,
     ownership,
     source,
     request,
@@ -145,3 +147,42 @@ test('deleted ownership never activates or cleans a concurrent migration', async
   expect(f.source.cleanup).not.toHaveBeenCalled()
   expect(f.request).not.toHaveBeenCalled()
 })
+
+test.each([true, false])(
+  'a migrated copy its computer lost is re-copied from the intact hub source (source content=%s)',
+  async (content) => {
+    const f = await fixture()
+    f.h.db.exec(`INSERT INTO projects(id,name,color) VALUES('p','P','#000');
+    INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task');
+    INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)`)
+    if (content)
+      f.h.db.exec(
+        "INSERT INTO chat_tab_state(tab_id,draft_text,draft_attachments,rev,updated_at) VALUES('tab','legacy draft','[]',1,1)"
+      )
+    f.failActivation()
+    await expect(f.migration.ensure('c', 'pc')).rejects.toThrow('Disconnected')
+    // Committed (epoch 2, source not cleaned yet), then the computer returned
+    // nothing for it: its copy is gone. The hub source still holds everything.
+    await f.ownership.markUnavailable('c', 'pc', 2)
+    if (!content) {
+      // Nothing proves the hub still holds it: never replace with an empty copy.
+      await expect(f.migration.ensure('c', 'pc2')).rejects.toThrow()
+      expect(await f.ownership.get('c')).toMatchObject({
+        state: 'active',
+        computerId: 'pc',
+        epoch: 2
+      })
+      return
+    }
+    await f.migration.ensure('c', 'pc2')
+    expect(await f.ownership.get('c')).toMatchObject({
+      state: 'active',
+      computerId: 'pc2',
+      epoch: 4,
+      cleanupPending: false
+    })
+    expect(await f.ownership.unavailable('c')).toBeUndefined()
+    expect(f.source.open).toHaveBeenCalledTimes(2)
+    expect(f.source.cleanup).toHaveBeenCalledTimes(1)
+  }
+)

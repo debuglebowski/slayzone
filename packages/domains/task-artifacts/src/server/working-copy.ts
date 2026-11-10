@@ -20,10 +20,18 @@ import {
 import path from 'node:path'
 import { fsyncFileSync } from '@slayzone/platform/durable-fs'
 import { isPathSafeId } from '@slayzone/platform/safe-path'
+import {
+  forEachIsolatedSync,
+  isStorageFatal,
+  StructuralFaultError
+} from '@slayzone/platform/isolation'
+import { quarantineMove } from '@slayzone/platform/quarantine'
 import { artifactFilePathIn, artifactsDirOf } from '@slayzone/task/server/artifact-paths'
 
 interface FileChange {
   taskId: string
+  /** Set when the artifact moves to `taskId` from another task's directory. */
+  previousTaskId?: string
   artifactId: string
   previousTitle: string
   title: string
@@ -85,15 +93,44 @@ function manifest(dir: string): FileChange | null {
   if (!existsSync(file)) return null // Publication never starts before this file is durable.
   const value = JSON.parse(readFileSync(file, 'utf8')) as FileChange
   if (
+    !value ||
+    typeof value !== 'object' ||
     !isPathSafeId(value.taskId) ||
+    (value.previousTaskId !== undefined && !isPathSafeId(value.previousTaskId)) ||
     !isPathSafeId(value.artifactId) ||
     typeof value.previousTitle !== 'string' ||
     typeof value.title !== 'string' ||
     typeof value.hadOriginal !== 'boolean' ||
     !Number.isSafeInteger(value.sequence)
   )
-    throw new Error('Invalid artifact file journal')
+    throw new StructuralFaultError('Invalid artifact file journal')
   return value
+}
+
+/** Quarantine pass for journals that cannot be read (see `@slayzone/platform/quarantine`). */
+export const ARTIFACT_JOURNAL_QUARANTINE_PASS = 'artifact-file-journal'
+
+/**
+ * A journal whose manifest cannot be read names no file to restore. Its bytes
+ * (a possible before-image) move into quarantine instead of blocking every later
+ * file mutation; erasure deletes them by task id, Discard deletes them.
+ */
+function quarantineJournal(dataDir: string, dir: string, error: Error): void {
+  quarantineMove(dataDir, {
+    pass: ARTIFACT_JOURNAL_QUARANTINE_PASS,
+    path: dir,
+    reason: error.message
+  })
+}
+
+/** A journal's manifest, or the error that makes it unreadable. */
+function readJournal(dir: string): { change: FileChange | null } | { error: Error } {
+  try {
+    return { change: manifest(dir) }
+  } catch (raw) {
+    if (isStorageFatal(raw)) throw raw
+    return { error: raw instanceof Error ? raw : new Error(String(raw)) }
+  }
 }
 
 export function ensureWorkingCopySchema(db: Database): void {
@@ -116,7 +153,7 @@ export function publishWorkingCopy(
     dir = path.join(root, operationId)
   const oldPath = artifactFilePathIn(
     artifactsDirOf(dataDir),
-    change.taskId,
+    change.previousTaskId ?? change.taskId,
     change.artifactId,
     change.previousTitle
   )
@@ -155,20 +192,55 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
     db.prepare('DELETE FROM artifact_file_commits').run()
     return
   }
-  const entries = readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name))
-    .map((entry) => ({ name: entry.name, change: manifest(path.join(root, entry.name)) }))
-    .sort((a, b) => (b.change?.sequence ?? 0) - (a.change?.sequence ?? 0))
-  for (const entry of entries) {
-    const dir = path.join(root, entry.name),
-      change = entry.change
+  const entries: Array<{ name: string; change: FileChange | null }> = []
+  forEachIsolatedSync(
+    readdirSync(root, { withFileTypes: true }).filter(
+      (entry) => entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name)
+    ),
+    { pass: 'artifact-file-journal-read', key: (entry) => entry.name, isFatal: isStorageFatal },
+    (entry) => {
+      const dir = path.join(root, entry.name)
+      const read = readJournal(dir)
+      if ('error' in read) {
+        // The unreadable journal alone is set aside; its quarantine entry is the record.
+        quarantineJournal(dataDir, dir, read.error)
+        db.prepare('DELETE FROM artifact_file_commits WHERE operation_id=?').run(entry.name)
+      } else entries.push({ name: entry.name, change: read.change })
+    }
+  )
+  entries.sort((a, b) => (b.change?.sequence ?? 0) - (a.change?.sequence ?? 0))
+  forEachIsolatedSync(
+    entries,
+    {
+      pass: 'artifact-file-journal-recovery',
+      key: (entry) => entry.name,
+      isFatal: isStorageFatal
+    },
+    (entry) => {
+      const dir = path.join(root, entry.name),
+        change = entry.change
+      if (!existsSync(dir)) return
+      try {
+        recoverJournal(entry.name, dir, change)
+      } catch (error) {
+        // A journal missing its own before/after image can never be replayed.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' && existsSync(dir)) {
+          quarantineJournal(dataDir, dir, error as Error)
+          db.prepare('DELETE FROM artifact_file_commits WHERE operation_id=?').run(entry.name)
+          return
+        }
+        throw error
+      }
+    }
+  )
+  function recoverJournal(name: string, dir: string, change: FileChange | null) {
     const committed = db
       .prepare('SELECT 1 FROM artifact_file_commits WHERE operation_id=?')
-      .get(entry.name)
+      .get(name)
     if (change && !committed) {
       const oldPath = artifactFilePathIn(
         artifactsDirOf(dataDir),
-        change.taskId,
+        change.previousTaskId ?? change.taskId,
         change.artifactId,
         change.previousTitle
       )
@@ -209,7 +281,7 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
     // A committed file was fsynced before its marker committed. Leave later
     // external-editor changes intact; recovery must not overwrite those bytes.
     rmSync(dir, { recursive: true, force: true })
-    db.prepare('DELETE FROM artifact_file_commits WHERE operation_id=?').run(entry.name)
+    db.prepare('DELETE FROM artifact_file_commits WHERE operation_id=?').run(name)
   }
   if (readdirSync(root).length === 0) rmSync(root, { recursive: true, force: true })
 }
@@ -218,10 +290,29 @@ export function recoverWorkingCopies(db: Database, dataDir: string): void {
 export function cleanupTaskWorkingCopies(dataDir: string, taskId: string): void {
   const root = workingCopyJournalDir(dataDir)
   if (!existsSync(root)) return
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^[a-f0-9-]{36}$/.test(entry.name)) continue
-    const dir = path.join(root, entry.name)
-    const change = manifest(dir)
-    if (!change || change.taskId === taskId) rmSync(dir, { recursive: true, force: true })
-  }
+  const dirs = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name))
+    .map((entry) => path.join(root, entry.name))
+  forEachIsolatedSync(
+    dirs,
+    {
+      pass: 'artifact-file-journal-cleanup',
+      key: (dir) => path.basename(dir),
+      isFatal: isStorageFatal
+    },
+    (dir) => {
+      const read = readJournal(dir)
+      if ('error' in read) {
+        // Unreadable: it may hold this task's bytes. Delete it if it names the task,
+        // otherwise set it aside so it never blocks another task's deletion.
+        if (existsSync(dir) && readFileSync(path.join(dir, 'manifest.json')).includes(taskId))
+          rmSync(dir, { recursive: true, force: true })
+        else quarantineJournal(dataDir, dir, read.error)
+        return
+      }
+      const change = read.change
+      if (!change || change.taskId === taskId || change.previousTaskId === taskId)
+        rmSync(dir, { recursive: true, force: true })
+    }
+  )
 }

@@ -10,10 +10,12 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
+import { assertPathSafeId, containedPath, isPathSafeId } from '@slayzone/platform/safe-path'
+import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import { eraseQuarantinedForTask } from '@slayzone/platform/quarantine'
 import type { ErasureReceipt, ErasureReport, ErasureScope } from '../shared'
 import { isErasureDoneOrCompacting } from '../shared'
-import { SHARED_WORKTREE_SQL, addComputerTask } from './manifest'
+import { addComputerTask } from './manifest'
 import type {
   ErasureJob,
   ErasureLocalSteps,
@@ -36,6 +38,18 @@ export interface ErasureOptions {
   beforeResume?: (scope: ErasureScope) => void | Promise<void>
   onProgress?: (report: ErasureReport) => void
   cleanupWorktree?: (target: ErasureManifest['worktrees'][number]) => Promise<void>
+  /**
+   * The worktree of an erased task as its computer (`target.computerId`) holds it —
+   * the hub keeps no path (robustness plan §9, 7e) — and whether a task in
+   * `liveTaskIds` still names it (then it stays). Throws when that computer cannot be
+   * asked. Null `worktreePath`: it holds none (nothing to remove).
+   */
+  releaseWorktree?: (
+    target: ErasureManifest['worktrees'][number],
+    liveTaskIds: string[]
+  ) => Promise<{ worktreePath: string | null; shared: boolean }>
+  /** The computer may let the erased task's worktree path go (best effort; it expires). */
+  forgetWorktree?: (target: ErasureManifest['worktrees'][number]) => Promise<void>
   /** The hub's default computer for a worktree no binding names (an unbound task's):
    *  where its work ran. Asked until it answers; the answer is then persisted. */
   resolveWorktreeComputer?: (target: {
@@ -307,20 +321,55 @@ export async function getErasureReport(db: SlayzoneDb, id: string): Promise<Eras
   }
 }
 
+/**
+ * Whether an artifact working-copy journal (`artifacts/.transactions/<id>/manifest.json`)
+ * belongs to the erased tasks/artifacts. One unreadable manifest must not fail every
+ * erasure: when it cannot be parsed, its raw bytes decide, conservatively (any
+ * mention of an erased id erases it).
+ */
+export function artifactJournalBelongsTo(
+  manifestBytes: Buffer,
+  ids: { taskIds: readonly string[]; artifactIds?: readonly string[] }
+): boolean {
+  const artifactIds = ids.artifactIds ?? []
+  try {
+    const change = JSON.parse(manifestBytes.toString('utf8')) as {
+      taskId?: unknown
+      previousTaskId?: unknown
+      artifactId?: unknown
+    }
+    return (
+      ids.taskIds.includes(String(change?.taskId ?? '')) ||
+      ids.taskIds.includes(String(change?.previousTaskId ?? '')) ||
+      artifactIds.includes(String(change?.artifactId ?? ''))
+    )
+  } catch {
+    return [...ids.taskIds, ...artifactIds].some((id) => manifestBytes.includes(Buffer.from(id)))
+  }
+}
+
+/**
+ * Removes one job's local files. Every path is attempted (one stuck file does not
+ * leave the others behind); the job stays incomplete if any remains.
+ */
 function cleanupFiles(root: string, m: ErasureManifest, remove: (path: string) => void) {
   const erase = (file: string) => {
     remove(file)
     if (existsSync(file)) throw new Error('FILE_REMAINS')
     syncDirectory(dirname(file))
   }
+  const paths: string[] = []
+  // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
   for (const taskId of m.taskIds) {
     assertPathSafeId(taskId, 'taskId')
     for (const directory of ['artifacts', 'assets'])
-      erase(containedPath(join(root, directory), taskId))
+      paths.push(containedPath(join(root, directory), taskId))
   }
   if (m.scope.kind === 'artifacts') {
+    // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
     for (const original of m.artifactTasks) {
       assertPathSafeId(original.artifactId, 'artifactId')
+      // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
       for (const directory of ['artifacts', 'assets']) {
         const taskDir = containedPath(
           join(root, directory),
@@ -330,34 +379,37 @@ function cleanupFiles(root: string, m: ErasureManifest, remove: (path: string) =
           for (const entry of readdirSync(taskDir)) {
             // Artifact IDs cannot contain '.', so this cannot match another ID.
             if (entry === original.artifactId || entry.startsWith(original.artifactId + '.'))
-              erase(containedPath(taskDir, entry))
+              paths.push(containedPath(taskDir, entry))
           }
       }
     }
   }
+  // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
   for (const projectId of m.projectIds) {
     assertPathSafeId(projectId, 'projectId')
     for (const extension of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'])
-      erase(containedPath(join(root, 'project-icons'), `${projectId}.${extension}`))
+      paths.push(containedPath(join(root, 'project-icons'), `${projectId}.${extension}`))
   }
   // Before/after images may survive a crash independently of working originals.
   const journalRoot = join(root, 'artifacts', '.transactions')
   if (existsSync(journalRoot))
+    // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
     for (const entry of readdirSync(journalRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const journal = containedPath(journalRoot, assertPathSafeId(entry.name, 'journalId'))
+      if (!entry.isDirectory() || !isPathSafeId(entry.name)) continue
+      const journal = containedPath(journalRoot, entry.name)
       const manifest = join(journal, 'manifest.json')
       if (!existsSync(manifest)) continue
-      const change = JSON.parse(readFileSync(manifest, 'utf8')) as {
-        taskId?: string
-        artifactId?: string
-      }
-      if (
-        m.taskIds.includes(change.taskId ?? '') ||
-        m.artifactIds.includes(change.artifactId ?? '')
-      )
-        erase(journal)
+      if (artifactJournalBelongsTo(readFileSync(manifest), m)) paths.push(journal)
     }
+  const report = forEachIsolatedSync(
+    paths,
+    { pass: 'hub-erasure-files', key: (path) => path, isFatal: isStorageFatal },
+    erase
+  )
+  // Quarantined unreadable files (journals, backups) that name an erased task.
+  // isolation: fatal — collecting this one job's files: an unreadable one leaves the job incomplete (retried)
+  for (const taskId of m.taskIds) eraseQuarantinedForTask(root, taskId)
+  if (report.failed.length) throw report.failed[0].error
 }
 
 const running = new WeakMap<SlayzoneDb, Map<string, Promise<ErasureReport>>>()
@@ -545,18 +597,25 @@ async function run(
   }
   if (!local.files) {
     try {
-      cleanupFiles(
-        root,
-        m,
-        options.removePath ?? ((file) => rmSync(file, { recursive: true, force: true }))
-      )
+      let filesRemain = false
+      try {
+        cleanupFiles(
+          root,
+          m,
+          options.removePath ?? ((file) => rmSync(file, { recursive: true, force: true }))
+        )
+      } catch {
+        filesRemain = true
+      }
+      // Blob GC only removes unreferenced blobs: it runs even when a file remains.
       const gc = await db.namedTxn('content-erasure:collect-blobs', { id, dataRoot: root })
       await db.run(
         'UPDATE content_erasure_jobs SET retained_shared_blobs=?,retained_backup_blobs=? WHERE id=?',
         [gc.shared, gc.backup, id]
       )
+      if (filesRemain) failures.push('LOCAL_FILES_NOT_DELETED')
       if (gc.deferred) failures.push('BLOB_CLEANUP_WAITING_FOR_BACKUP')
-      else local.files = true
+      else if (!filesRemain) local.files = true
     } catch {
       failures.push('LOCAL_FILES_NOT_DELETED')
     }
@@ -603,9 +662,17 @@ async function run(
             reply.erased !== true ||
             !lifecycle ||
             lifecycle.state !== 'deleted' ||
-            reply.revision !== lifecycle.revision
+            !Number.isSafeInteger(reply.revision) ||
+            reply.revision < lifecycle.revision
           )
             continue
+          // Erased at a newer deletion revision (this hub was restored from a
+          // backup): the same deletion. The hub's fence follows the computer's.
+          if (reply.revision > lifecycle.revision)
+            await db.run(
+              "UPDATE chat_task_lifecycle SET revision=MAX(revision,?) WHERE task_id=? AND state='deleted'",
+              [reply.revision, taskId]
+            )
           await db.run(
             `INSERT INTO content_erasure_computer_acks(job_id,computer_id,task_id,revision) VALUES(?,?,?,?)
           ON CONFLICT(job_id,computer_id,task_id) DO UPDATE SET revision=excluded.revision,verified_at=datetime('now')`,
@@ -630,30 +697,44 @@ async function run(
   for (const worktree of m.worktrees) {
     if (worktree.deleted) continue
     try {
-      // Re-check after intent commit: another task may now share this directory.
-      const shared = await db.get(SHARED_WORKTREE_SQL, [
-        worktree.path,
-        JSON.stringify(m.taskIds),
-        worktree.computerId,
-        worktree.computerId
-      ])
-      if (!shared) {
-        // Never automatic: only the operator procedure can verify it (offline.ts).
-        if (worktree.gone) {
-          failures.push('WORKTREE_COMPUTER_GONE')
-          continue
-        }
-        if (!worktree.computerId) {
-          failures.push('WORKTREE_COMPUTER_UNAVAILABLE')
-          continue
-        }
+      // Never automatic: only the operator procedure can verify it (offline.ts).
+      if (worktree.gone) {
+        failures.push('WORKTREE_COMPUTER_GONE')
+        continue
+      }
+      if (!worktree.computerId) {
+        failures.push('WORKTREE_COMPUTER_UNAVAILABLE')
+        continue
+      }
+      if (!options.releaseWorktree) throw new Error('WORKTREE_CLEANUP_UNAVAILABLE')
+      // Its computer names the worktree and whether a live task (any task left in the
+      // project) shares it — checked after the intent commit, every attempt.
+      const live = worktree.projectId
+        ? (
+            await db.all<{ id: string }>('SELECT id FROM tasks WHERE project_id=?', [
+              worktree.projectId
+            ])
+          )
+            .map((r) => r.id)
+            .filter((taskId) => !m.taskIds.includes(taskId))
+        : []
+      let release: { worktreePath: string | null; shared: boolean }
+      try {
+        release = await options.releaseWorktree(worktree, live)
+      } catch {
+        failures.push('WORKTREE_COMPUTER_UNAVAILABLE')
+        continue
+      }
+      if (release.worktreePath && !release.shared) {
         if (!worktree.repoPath) {
           failures.push('WORKTREE_LOCATION_UNKNOWN')
           continue
         }
         if (!options.cleanupWorktree) throw new Error('WORKTREE_CLEANUP_UNAVAILABLE')
+        worktree.path = release.worktreePath
         await options.cleanupWorktree(worktree)
       }
+      await options.forgetWorktree?.(worktree)
       worktree.deleted = true
       await db.run('UPDATE content_erasure_jobs SET manifest=? WHERE id=?', [JSON.stringify(m), id])
     } catch {

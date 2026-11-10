@@ -1,12 +1,12 @@
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskTerminal, startAgentTerminal, closeAllTaskTabs } from '../fixtures/terminal'
-import type { ElectronApplication } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 /**
  * Session-history sidebar: lists every agent session (one entry per distinct
  * provider conversation) tied to the MAIN agent. The listTaskSessions grouping
  * + exclusion rules are unit-covered (task/server list-task-sessions.test.ts);
- * this spec proves the live chain — agent_sessions rows → tRPC → sidebar render
+ * this spec proves the live chain — the computer's session ledger → tRPC → sidebar render
  * — plus the session-history gate on the toggle button.
  *
  * Sessions are seeded BEFORE the task terminal opens: the sidebar/query mounts
@@ -29,11 +29,11 @@ test.describe('Session history sidebar', () => {
     projectId = p.id
   })
 
-  test('single-session task shows NO toggle', async ({ mainWindow, electronApp }) => {
+  test('single-session task shows NO toggle', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'One session', status: 'todo' })
-    await seedSession(electronApp, { id: 'one-1', taskId: t.id, conv: 'ONE-A', createdAt: 1000 })
-    await seedPrompt(electronApp, {
+    await seedSession(mainWindow, { id: 'one-1', taskId: t.id, conv: 'ONE-A', createdAt: 1000 })
+    await seedPrompt(mainWindow, {
       id: 'one-p1',
       taskId: t.id,
       conv: 'ONE-A',
@@ -51,22 +51,21 @@ test.describe('Session history sidebar', () => {
   })
 
   test('multi-session task lists sessions newest-first, docks beside messages', async ({
-    mainWindow,
-    electronApp
+    mainWindow
   }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'Many sessions', status: 'todo' })
     // Two distinct conversations. CONV-B is newer → must list first.
-    await seedSession(electronApp, { id: 'many-1', taskId: t.id, conv: 'CONV-A', createdAt: 1000 })
-    await seedPrompt(electronApp, {
+    await seedSession(mainWindow, { id: 'many-1', taskId: t.id, conv: 'CONV-A', createdAt: 1000 })
+    await seedPrompt(mainWindow, {
       id: 'many-p1',
       taskId: t.id,
       conv: 'CONV-A',
       text: 'older session',
       createdAt: 1001
     })
-    await seedSession(electronApp, { id: 'many-2', taskId: t.id, conv: 'CONV-B', createdAt: 2000 })
-    await seedPrompt(electronApp, {
+    await seedSession(mainWindow, { id: 'many-2', taskId: t.id, conv: 'CONV-B', createdAt: 2000 })
+    await seedPrompt(mainWindow, {
       id: 'many-p2',
       taskId: t.id,
       conv: 'CONV-B',
@@ -114,13 +113,10 @@ test.describe('Session history sidebar', () => {
    * The switch assertion is the load-bearing one: it is not enough that the
    * "Current" badge moves (that only proves a row landed in the ledger) — the
    * point of a switch is that the RESPAWN resumes the picked conversation. So we
-   * capture the opts at the real `createPty` chokepoint and assert
-   * `existingConversationId`, which is what becomes `--resume <id>`.
+   * capture the opts at the real `createPty` chokepoint and assert the conversation
+   * it resumes (the computer's ledger answers), which becomes `--resume <id>`.
    */
-  test('switch to an earlier session, then delete a non-current one', async ({
-    mainWindow,
-    electronApp
-  }) => {
+  test('switch to an earlier session, then delete a non-current one', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     const t = await s.createTask({ projectId, title: 'Switch sessions', status: 'in_progress' })
     // Three so the delete still leaves >1 — the toggle's gate would otherwise
@@ -132,13 +128,13 @@ test.describe('Session history sidebar', () => {
         ['SW-C', 'newest session']
       ] as const
     ).entries()) {
-      await seedSession(electronApp, {
+      await seedSession(mainWindow, {
         id: `sw-${conv}`,
         taskId: t.id,
         conv,
         createdAt: 1000 * (i + 1)
       })
-      await seedPrompt(electronApp, {
+      await seedPrompt(mainWindow, {
         id: `sw-p-${conv}`,
         taskId: t.id,
         conv,
@@ -152,12 +148,12 @@ test.describe('Session history sidebar', () => {
     await mainWindow.evaluate(() =>
       window.getTrpcVanillaClient().pty.testSetPtyCreateCapture.mutate({ enabled: true })
     )
-    const lastOpts = (): Promise<{ existingConversationId?: string | null } | null> =>
+    const lastOpts = (): Promise<{ resumeConversationId?: string | null } | null> =>
       mainWindow.evaluate(async () => {
         const all = (await window
           .getTrpcVanillaClient()
           .pty.testTakePtyCreateOpts.query()) as unknown[]
-        return (all[all.length - 1] ?? null) as { existingConversationId?: string | null } | null
+        return (all[all.length - 1] ?? null) as { resumeConversationId?: string | null } | null
       })
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'Switch sessions' })
@@ -177,7 +173,7 @@ test.describe('Session history sidebar', () => {
 
     // The respawn must carry the picked conversation as its resume target.
     await expect
-      .poll(async () => (await lastOpts())?.existingConversationId, { timeout: 20_000 })
+      .poll(async () => (await lastOpts())?.resumeConversationId, { timeout: 20_000 })
       .toBe('SW-A')
 
     // …and the badge follows the binding. Card ORDER is by session start, so the
@@ -204,48 +200,51 @@ test.describe('Session history sidebar', () => {
 })
 
 /**
- * A session as the real write paths leave it: the `agent_sessions` row PLUS its
- * `session_turns` proof (migration v158).
- *
- * The proof is not optional decoration — `getCurrentConversationId` requires it
- * (`first_turn_at IS NOT NULL`), because a provider only writes its transcript at
- * the first turn, so an id that never took one cannot be resumed. Every real path
- * supplies it (`recordConversation` writes it inline; v158 backfilled every
- * pre-existing session), so a seed without it is a shape the app never produces:
- * the sessions still LIST, but none of them is ever "Current".
+ * A session as the real write paths leave it, on the session ledger of the task's
+ * computer (robustness plan §9): a proven (resumed) session row — a provider only
+ * writes its transcript at the first turn, so an unproven one is never "Current".
  */
 function seedSession(
-  electronApp: ElectronApplication,
+  page: Page,
   row: { id: string; taskId: string; conv: string; createdAt: number }
-): Promise<void> {
-  return electronApp.evaluate(async ({}, r) => {
-    const db = (globalThis as Record<string, unknown>).__db as {
-      run: (sql: string, params?: unknown[]) => Promise<unknown>
-    }
-    await db.run(
-      `INSERT INTO agent_sessions (id, mode, cwd, task_id, conversation_id, origin, status, created_at, bound_at)
-       VALUES (?, 'claude-code', '/p', ?, ?, 'slay-spawned-fresh', 'dead', ?, ?)`,
-      [r.id, r.taskId, r.conv, r.createdAt, r.createdAt]
-    )
-    await db.run(
-      `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
-      [r.conv, r.createdAt]
-    )
-  }, row)
+): Promise<unknown> {
+  return page.evaluate(
+    (r) =>
+      window.getTrpcVanillaClient().agentSessions.testLedger.mutate({
+        taskId: r.taskId,
+        op: 'recordConversation',
+        args: {
+          id: r.id,
+          taskId: r.taskId,
+          mode: 'claude-code',
+          conversationId: r.conv,
+          origin: 'slay-spawned-resume',
+          createdAt: r.createdAt
+        }
+      }),
+    row
+  )
 }
 
+/** A captured prompt, in the task's prompt history on its computer (robustness plan §9). */
 function seedPrompt(
-  electronApp: ElectronApplication,
+  page: Page,
   row: { id: string; taskId: string; conv: string; text: string; createdAt: number }
-): Promise<void> {
-  return electronApp.evaluate(async ({}, r) => {
-    const db = (globalThis as Record<string, unknown>).__db as {
-      run: (sql: string, params?: unknown[]) => Promise<unknown>
-    }
-    await db.run(
-      `INSERT INTO agent_prompts (id, task_id, agent_id, cli_session_id, text, created_at)
-       VALUES (?, ?, 'claude-code', ?, ?, ?)`,
-      [r.id, r.taskId, r.conv, r.text, r.createdAt]
-    )
-  }, row)
+): Promise<unknown> {
+  return page.evaluate(
+    (r) =>
+      window.getTrpcVanillaClient().chat.testSeedPrompts.mutate({
+        taskId: r.taskId,
+        prompts: [
+          {
+            id: r.id,
+            agentId: 'claude-code',
+            cliSessionId: r.conv,
+            text: r.text,
+            createdAt: r.createdAt
+          }
+        ]
+      }),
+    row
+  )
 }

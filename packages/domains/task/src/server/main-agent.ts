@@ -20,11 +20,12 @@
 import { randomUUID } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { clearAllConversationIds, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
+import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { getProviderFlags } from '@slayzone/task-contracts/types'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 import { parseProject } from '@slayzone/projects/server'
-import { getRuntimeAdapters } from './ops/shared'
+import { getRuntimeAdapters, readTaskPaths } from './ops/shared'
+import { resetConversation } from './ops/task-conversations'
 import { ensureMainTab } from '@slayzone/task-terminals/server'
 import { getChatDeps, getPtyDeps } from '@slayzone/terminal/hub'
 import {
@@ -34,6 +35,7 @@ import {
   type TerminalState
 } from '@slayzone/terminal-contracts'
 import {
+  hasOwnFolder,
   mainTerminalCwd,
   mainTerminalCwdNeedsRepos,
   mainTerminalProps,
@@ -189,7 +191,14 @@ async function resolveTaskAgentCwd(
   const detected = mainTerminalCwdNeedsRepos(task, project, projectRoot)
     ? await detectChildRepos(task.id, projectRoot!)
     : []
-  const cwd = mainTerminalCwd(task, project, projectRoot, detected)
+  // A worktree / custom folder is read from the task's computer (§9 Phase 7d).
+  const paths = hasOwnFolder(task) ? (await readTaskPaths([task.id]))[task.id] : null
+  if (paths?.state === 'offline')
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: "This task's folder is on a computer that is not connected"
+    })
+  const cwd = mainTerminalCwd(task, project, projectRoot, detected, paths)
   if (!cwd)
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
@@ -231,8 +240,8 @@ async function startOnce(
       {
         mode: props.mode,
         supportsSessionId: props.supportsSessionId,
-        conversationId: props.conversationId,
-        existingConversationId: props.existingConversationId
+        conversationId: undefined,
+        existingConversationId: undefined
       },
       randomUUID
     )
@@ -313,11 +322,19 @@ export async function switchMainAgentMode(
   if (launch.kind === 'chat') await getChatDeps().ops.kill(launch.tabId)
   else await getPtyDeps().ops.ptyKill(launch.sessionId)
 
-  const updated = await io.update({
-    id: taskId,
-    agentId: mode,
-    providerConfig: clearAllConversationIds(task.provider_config)
+  // A mode switch starts the MAIN tab fresh — in every mode, so switching back
+  // does not resume the abandoned session either. Only the main tab: the task's
+  // other agent tabs keep their own sessions. (This used to reset every tab of
+  // the task, which is how a secondary "deploy" tab lost its session.)
+  // Chat modes are left to the update below exactly as before: a chat tab's
+  // conversation is owned per tab by the chat runtime (`chat_ownership`).
+  await resetConversation(db, {
+    taskId,
+    scope: { tabId: taskId },
+    exceptChat: true
   })
+
+  const updated = await io.update({ id: taskId, agentId: mode })
   if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' })
   return updated
 }

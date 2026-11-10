@@ -204,6 +204,15 @@ export async function retireStaleLocalComputers(
       sql: `DELETE FROM project_placements WHERE computer_id IN (${placeholders})`,
       params: staleIds
     },
+    // Chat bookkeeping names computers too; the chat domain repoints it onto the
+    // survivor from this record (applyComputerRetirements), whenever it next runs.
+    {
+      type: 'run',
+      sql: `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT id,?,'re-enrolled',? FROM computers WHERE id IN (${placeholders})
+        ON CONFLICT(computer_id) DO UPDATE SET successor_id=excluded.successor_id,reason=excluded.reason`,
+      params: [opts.keepComputerId, Date.now(), ...staleIds]
+    },
     {
       type: 'run',
       sql: `DELETE FROM computers WHERE id IN (${placeholders})`,
@@ -271,6 +280,15 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
     },
     { type: 'run', sql: `DELETE FROM project_placements WHERE computer_id = ?`, params: [id] },
     { type: 'run', sql: `DELETE FROM computer_grants WHERE computer_id = ?`, params: [id] },
+    // No survivor: the chat domain retires the work still addressed to it, with
+    // this reason (applyComputerRetirements). Revoke records nothing: that work waits.
+    {
+      type: 'run',
+      sql: `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT id,NULL,'deleted',? FROM computers WHERE id = ?
+        ON CONFLICT(computer_id) DO UPDATE SET successor_id=NULL,reason='deleted'`,
+      params: [Date.now(), id]
+    },
     { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
   ])
   computerRemoved(id)
@@ -399,21 +417,72 @@ export async function setProjectDefaultComputer(
  * every install that has never opened project settings — which is why an
  * unbound task must resolve to a real computer rather than to "the hub".
  */
+/**
+ * The computer a task's work runs on (one statement: the computers store, chat-data-ops
+ * and the hub's data handoff all use it — divergence would route a chat agent and a
+ * terminal agent of the SAME task to different computers):
+ *
+ *  1. while the task has a folder (worktree or base dir), the computer holding it
+ *     (`worktree_computer_id`): the folder exists only there (robustness plan §9,
+ *     Phase 7e). Not one removed for good (retired with no successor): its folders
+ *     went with it;
+ *  2. the task's own pin;
+ *  3. its project's default.
+ *
+ * One positional parameter: the task id.
+ */
+export const TASK_COMPUTER_SQL = `SELECT COALESCE(
+    CASE WHEN (t.has_worktree = 1 OR t.has_base_dir = 1)
+      AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                       WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)
+    THEN t.worktree_computer_id END,
+    t.computer_id, p.default_computer_id) AS computer_id
+  FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+  WHERE t.id = ?`
+
 export async function resolveTaskComputerId(
   db: SlayzoneDb,
   taskId: string
 ): Promise<string | null> {
-  // The task's own pin wins over the project default. `chat-data-ops.ts`
-  // `resolveComputerId` MUST stay identical — divergence would route a chat agent
-  // and a terminal agent for the SAME task to different computers.
-  const row = await db.get<{ computer_id: string | null }>(
-    `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
-     FROM tasks t
-     LEFT JOIN projects p ON p.id = t.project_id
-     WHERE t.id = ?`,
+  const row = await db.get<{ computer_id: string | null }>(TASK_COMPUTER_SQL, [taskId])
+  return row?.computer_id ?? null
+}
+
+/** A task's folder is on another computer than the one it would be pinned to. */
+export class TaskFoldersElsewhereError extends Error {
+  constructor(
+    readonly taskId: string,
+    readonly holderId: string,
+    readonly holderName: string
+  ) {
+    super(
+      `This task's folder is on ${holderName}, and its work runs there. Remove its worktree or base folder to move it to another computer.`
+    )
+    this.name = 'TaskFoldersElsewhereError'
+  }
+}
+
+/**
+ * Refuse pinning a task to `computerId` while its folder (worktree or base dir) is on
+ * another computer that still exists: the folder exists only there, and its work runs
+ * there whatever the pin says ({@link TASK_COMPUTER_SQL}). Unpinning (`null`) is fine.
+ */
+export async function assertTaskMovable(
+  db: SlayzoneDb,
+  taskId: string,
+  computerId: string | null
+): Promise<void> {
+  if (computerId === null) return
+  const row = await db.get<{ holder: string | null; name: string | null }>(
+    `SELECT t.worktree_computer_id AS holder, c.name AS name FROM tasks t
+       LEFT JOIN computers c ON c.id = t.worktree_computer_id
+      WHERE t.id = ? AND (t.has_worktree = 1 OR t.has_base_dir = 1)
+        AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                         WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)`,
     [taskId]
   )
-  return row?.computer_id ?? null
+  if (!row?.holder || row.holder === computerId) return
+  throw new TaskFoldersElsewhereError(taskId, row.holder, row.name ?? `computer ${row.holder}`)
 }
 
 /** Record which SlayZone user a computer belongs to (set at enroll). */

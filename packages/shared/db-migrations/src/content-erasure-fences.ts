@@ -24,7 +24,6 @@ export const CONTENT_ERASURE_UNFENCED_TABLES: ReadonlySet<string> = new Set([
   'chat_ownership',
   'chat_deletion_targets',
   'chat_tab_bindings',
-  'chat_provider_bindings',
   'chat_metadata_progress',
   'chat_bootstrap_reservations',
   'chat_unavailable_owners',

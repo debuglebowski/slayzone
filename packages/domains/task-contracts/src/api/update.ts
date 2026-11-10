@@ -23,11 +23,6 @@ export const updateTaskInputSchema = z
     terminalShell: z.string().nullable().optional(),
 
     // @deprecated — use providerConfig
-    claudeConversationId: z.string().nullable().optional(),
-    codexConversationId: z.string().nullable().optional(),
-    cursorConversationId: z.string().nullable().optional(),
-    geminiConversationId: z.string().nullable().optional(),
-    opencodeConversationId: z.string().nullable().optional(),
     claudeFlags: z.string().optional(),
     codexFlags: z.string().optional(),
     cursorFlags: z.string().optional(),

@@ -23,6 +23,7 @@ import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/c
 import { startComputer } from '../main'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './computer-config'
 import type { ComputerDialer } from './types'
+import { placeTestProject } from '../project-scope.fixture'
 
 vi.mock('node:fs', async (original) => {
   const fs = await original<typeof import('node:fs')>()
@@ -217,6 +218,8 @@ describe('standalone live folder policy', () => {
   it('live removal narrows future requests while running job survives', async () => {
     const { root, wide, path, config } = fixture()
     writeFileSync(path, JSON.stringify({ allowedRoots: [wide] }))
+    // The job is a project's: it starts in that project's folder here (§9 Phase 7c).
+    placeTestProject(join(home, 'computer'), config.hubUrl, 'p1', wide)
     let dispatch!: NonNullable<HubDialerOptions['onHubRequest']>
     const log = vi.fn()
     const handle = startComputer(config, {
@@ -234,6 +237,7 @@ describe('standalone live folder policy', () => {
         'proc.spawn',
         {
           sessionId: 'survivor',
+          projectId: 'p1',
           command: process.execPath,
           args: ['-e', 'setInterval(()=>{},1000)'],
           cwd: wide

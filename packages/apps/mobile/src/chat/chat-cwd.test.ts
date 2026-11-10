@@ -2,18 +2,20 @@ import { chatCwdFromSession, chatCwdFromTask, chosenFolder } from './chat-cwd'
 
 const task = (
   fields: Partial<{
-    worktree_path: string | null
-    base_dir: string | null
+    has_worktree: boolean
+    has_base_dir: boolean
     repo_name: string | null
     computer_id: string | null
   }> = {}
 ) => ({
-  worktree_path: null,
-  base_dir: null,
+  has_worktree: false,
+  has_base_dir: false,
   repo_name: null,
   computer_id: null,
   ...fields
 })
+const ok = (worktreePath: string | null, baseDir: string | null = null) =>
+  ({ state: 'ok', worktreePath, baseDir }) as const
 
 describe('chatCwdFromSession', () => {
   it("is the folder of the tab's session on the hub, when it is this task's", () => {
@@ -38,9 +40,25 @@ describe('chatCwdFromTask', () => {
   }
 
   it("resolves the folder desktop starts the task in: worktree, base dir, the project's folder", () => {
-    expect(chatCwdFromTask(task({ worktree_path: '/wt' }), project, [])).toEqual({ cwd: '/wt' })
-    expect(chatCwdFromTask(task({ base_dir: '/base' }), project, [])).toEqual({ cwd: '/base' })
+    expect(chatCwdFromTask(task({ has_worktree: true }), project, [], ok('/wt'))).toEqual({
+      cwd: '/wt'
+    })
+    expect(chatCwdFromTask(task({ has_base_dir: true }), project, [], ok(null, '/base'))).toEqual({
+      cwd: '/base'
+    })
     expect(chatCwdFromTask(task(), project, [])).toEqual({ cwd: '/proj' })
+  })
+
+  it('a worktree / base dir waits for the computer (§9 7d), never the project folder', () => {
+    expect(chatCwdFromTask(task({ has_worktree: true }), project, [])).toEqual({
+      needsPaths: true
+    })
+    expect(
+      chatCwdFromTask(task({ has_worktree: true }), project, [], {
+        state: 'offline',
+        computerId: 'mac'
+      })
+    ).toEqual({ needsPaths: true })
   })
 
   it("takes the project's folder on the computer the task runs on", () => {

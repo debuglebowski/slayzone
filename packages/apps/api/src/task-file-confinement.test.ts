@@ -1,9 +1,8 @@
 /**
  * The `files` scope's confinement against a real, fully migrated database: a scoped
- * (non-`full`) session may reach the file editor only for a task, and only under that
- * task's own folders — its worktree, its base dir, its project's path, or one of its
- * project's computer placements. Everything else is refused, including a path inside
- * nobody's project, which the owner gate alone would let through (`HUB_WIDE`).
+ * (non-`full`) session may reach the file editor only for a task — named alone, so
+ * the task is the call's path scope. Its folders are the computer's to judge (§9
+ * Phase 7c): `scope-jail.test.ts` in the computer covers that side.
  *
  * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
@@ -15,7 +14,7 @@ import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { TRPCError } from '@trpc/server'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
-import { confineTaskFileCall, taskRootsContain } from './task-file-confinement'
+import { confineTaskFileCall } from './task-file-confinement'
 
 const h = await createTestHarness()
 const db = h.slayDb
@@ -40,47 +39,16 @@ sql(
   projectRoot,
   otherProject
 )
+// The hub keeps only whether each folder is set (§9 7e); the paths are the computer's.
 sql(
-  `INSERT INTO tasks (id, project_id, title, worktree_path, base_dir) VALUES
-  ('tWorktree', 'p1', 'w', ?, NULL), ('tBase', 'p1', 'b', NULL, ?), ('tOther', 'p2', 'o', NULL, NULL)`,
-  worktree,
-  baseDir
+  `INSERT INTO tasks (id, project_id, title, has_worktree, has_base_dir) VALUES
+  ('tWorktree', 'p1', 'w', 1, 0), ('tBase', 'p1', 'b', 0, 1), ('tOther', 'p2', 'o', 0, 0)`
 )
 sql(
   `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
   VALUES ('c1', 'p1', ?, 'ok', 0)`,
   placement
 )
-
-describe('taskRootsContain', () => {
-  test("a path under the task's worktree, base dir, project path or placement", async () => {
-    expect(await taskRootsContain(db, 'tWorktree', join(worktree, 'src'))).toBe(true)
-    expect(await taskRootsContain(db, 'tWorktree', worktree)).toBe(true)
-    expect(await taskRootsContain(db, 'tBase', baseDir)).toBe(true)
-    expect(await taskRootsContain(db, 'tWorktree', projectRoot)).toBe(true)
-    expect(await taskRootsContain(db, 'tWorktree', join(placement, 'pkg'))).toBe(true)
-  })
-
-  test("another task's folder, another project, or a path inside nobody's project", async () => {
-    expect(await taskRootsContain(db, 'tWorktree', baseDir)).toBe(false)
-    expect(await taskRootsContain(db, 'tWorktree', otherProject)).toBe(false)
-    expect(await taskRootsContain(db, 'tOther', projectRoot)).toBe(false)
-    expect(await taskRootsContain(db, 'tWorktree', outside)).toBe(false)
-    expect(await taskRootsContain(db, 'tWorktree', '/')).toBe(false)
-  })
-
-  test('`..` and symlinks are resolved before matching', async () => {
-    expect(await taskRootsContain(db, 'tWorktree', join(worktree, '..', '..', 'outside'))).toBe(
-      false
-    )
-    expect(await taskRootsContain(db, 'tWorktree', escapeLink)).toBe(false)
-  })
-
-  test('an unknown task, or an empty path, contains nothing', async () => {
-    expect(await taskRootsContain(db, 'nope', worktree)).toBe(false)
-    expect(await taskRootsContain(db, 'tWorktree', '')).toBe(false)
-  })
-})
 
 describe('confineTaskFileCall', () => {
   const web = ['read', 'tasks', 'agent', 'files'] as const
@@ -118,11 +86,9 @@ describe('confineTaskFileCall', () => {
     await refused(call({ taskId: 'tWorktree', projectId: 'p1', rootPath: worktree }))
   })
 
-  test("a scoped session pointing outside its task's folders is refused", async () => {
-    await refused(call({ taskId: 'tWorktree', rootPath: outside }))
-    await refused(call({ taskId: 'tWorktree', rootPath: '/' }))
-    await refused(call({ taskId: 'tWorktree', rootPath: escapeLink }))
-    await refused(call({ taskId: 'tWorktree' }))
+  test("its folders are the computer's to judge: the hub keeps no task path", async () => {
+    // The hub passes the call on in the task's path scope; the computer confines it.
+    await expect(call({ taskId: 'tWorktree', rootPath: outside })).resolves.toBe(undefined)
   })
 
   test('a full session, and a path the files scope does not cover, are untouched', async () => {

@@ -59,6 +59,7 @@ import { handleWebAssets } from './web-assets.js'
 import { getServerBuildInfo } from './build-info.js'
 import { ensureBootstrapOwner } from './bootstrap-owner'
 import { backfillOwnership } from './ownership-backfill.js'
+import { settleLegacyChatTablesAtBoot } from './legacy-chat-tables-boot'
 import { BREAK_GLASS_PATH, handleBreakGlassRequest } from './break-glass'
 import {
   type HubAdminSocket,
@@ -155,6 +156,9 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   const ownsDb = cfg.db === undefined
   log(`db opened: ${dbPath} (schema bootstrapped)`)
   bootSteps.step('db opened')
+  // Before any service exists: the legacy chat tables go once every chat migrated
+  // (robustness plan §9, Phase 8). Never blocks boot.
+  await settleLegacyChatTablesAtBoot(db, log)
 
   // Separate diagnostics events DB so THIS process's recordDiagnosticEvent calls
   // (pty + agent pool run here) persist + are queryable, instead of buffering +

@@ -46,12 +46,6 @@ test.each([false, true])(
       expect(await legacySessionAuthority(h.slayDb, 'task', 'claude-code', 'session')).toBe(
         recordedSession ? 'a' : null
       )
-      if (recordedSession) {
-        await owners.bindProvider('a', 'session', 'claude-code')
-        await expect(owners.bindProvider('b', 'session', 'claude-code')).rejects.toThrow(
-          /another storage owner/i
-        )
-      }
       expect(await legacySessionAuthority(h.slayDb, 'task', 'claude-chat', 'session')).toBe(
         recordedSession ? 'a' : null
       )

@@ -133,7 +133,7 @@ describe('useProjectMcpServers', () => {
     expect(result.current.loading).toBe(true)
     await flush()
     expect(callsTo('aiConfig.discoverMcpConfigs').map((c) => c.input)).toEqual([
-      { projectPath: '/a' }
+      { projectId: 'p1', projectPath: '/a' }
     ])
     expect(result.current.loading).toBe(true)
 
@@ -145,8 +145,8 @@ describe('useProjectMcpServers', () => {
     expect(result.current.loading).toBe(true)
     await flush()
     expect(callsTo('aiConfig.discoverMcpConfigs').map((c) => c.input)).toEqual([
-      { projectPath: '/a' },
-      { projectPath: '/b' }
+      { projectId: 'p1', projectPath: '/a' },
+      { projectId: 'p1', projectPath: '/b' }
     ])
     expect(result.current.loading).toBe(true)
     await act(async () => discover[1].resolve([]))

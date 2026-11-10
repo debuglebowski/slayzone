@@ -1,5 +1,6 @@
 import type { SlayzoneDb } from '@slayzone/platform'
-import { terminalStorageAgentId } from './storage-mode'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
+import { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
 
 export interface HubChatOwnership {
   id: string
@@ -49,7 +50,24 @@ const fromRow = (r: Row): HubChatOwnership => ({
   settingsRevision: r.settings_revision,
   settingsHash: r.settings_hash
 })
-const providerMode = terminalStorageAgentId
+
+/**
+ * A stale locator: a hub row that only POINTS at a chat's history and holds no
+ * computer authority — never activated on a computer (`computer_id` NULL), still
+ * legacy or mid-migration. Only such a row may be replaced by what a computer
+ * reports for its tab; any other row is a live chat. SQL form, for `alias`.
+ */
+export const staleLocatorSql = (alias: string) =>
+  `(${alias}.computer_id IS NULL AND ${alias}.state IN ('legacy','copying','verified'))`
+export const isStaleLocator = (owner: Pick<HubChatOwnership, 'computerId' | 'state'>) =>
+  owner.computerId === null && ['legacy', 'copying', 'verified'].includes(owner.state)
+
+/** SQL: `expr` is not a retired computer id (re-enrolled or removed): it can still receive work. */
+const notRetired = (expr: string) =>
+  `NOT EXISTS(SELECT 1 FROM computer_retirements r WHERE r.computer_id=${expr})`
+/** SQL: computer id `expr` was removed for good (deleted or missing, no successor). */
+export const retiredComputerSql = (expr: string) =>
+  `EXISTS(SELECT 1 FROM computer_retirements r WHERE r.computer_id=${expr} AND r.successor_id IS NULL)`
 
 type ChangeListener = (tabIds: readonly string[]) => void
 /**
@@ -120,13 +138,6 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       return (
         await db.all<Row>('SELECT * FROM chat_ownership WHERE task_id=? ORDER BY id', [taskId])
       ).map(fromRow)
-    },
-    async forProviderSession(id: string, mode: string) {
-      const row = await db.get<Row>(
-        'SELECT c.* FROM chat_ownership c JOIN chat_provider_bindings b ON b.conversation_id=c.id WHERE b.provider_session_id=? AND b.mode=?',
-        [id, providerMode(mode)]
-      )
-      return row ? fromRow(row) : null
     },
     async register(
       value: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'computerId' | 'epoch'>,
@@ -378,6 +389,38 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       if (committed.changes) notifyChatOwnershipChange(db, [r.tabId])
       return r
     },
+    /**
+     * The computer a committed migration went to no longer holds the copy (its
+     * recovery did not return it), while the hub source is still intact: its
+     * cleanup waits for activation, which never ran. Reset to the hub source at
+     * a new epoch, so the migration runs again from it. The lost copy's epoch
+     * can never be activated afterwards.
+     */
+    async reseedFromSource(id: string, epoch: number) {
+      const tables = await legacyChatTables(db)
+      await db.batchTxn([
+        {
+          type: 'run',
+          sql: `UPDATE chat_ownership SET state='legacy',computer_id=NULL,source_computer_id=NULL,destination_computer_id=NULL,
+            migration_id=NULL,manifest_hash=NULL,cleanup_pending=0,epoch=epoch+1
+            WHERE id=? AND epoch=? AND state='active' AND cleanup_pending=1 AND migration_id IS NOT NULL
+            AND source_computer_id IS NULL
+            -- The hub source still holds the content (its cleanup is one atomic batch).
+            AND (EXISTS(SELECT 1 FROM terminal_tabs t WHERE t.id=chat_ownership.tab_id AND ${legacyChatTabContentSql(tables, 't')})
+              OR (chat_ownership.tab_id='task-content:'||chat_ownership.task_id
+                AND EXISTS(SELECT 1 FROM tasks task WHERE task.id=chat_ownership.task_id AND ${legacyChatTaskContentSql(tables, 'task.id')})))
+            AND EXISTS(SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=chat_ownership.id
+              AND u.computer_id=chat_ownership.computer_id AND u.epoch=chat_ownership.epoch)`,
+          params: [id, epoch]
+        },
+        {
+          type: 'run',
+          sql: "DELETE FROM chat_unavailable_owners WHERE conversation_id=? AND EXISTS(SELECT 1 FROM chat_ownership WHERE id=? AND state='legacy')",
+          params: [id, id]
+        }
+      ])
+      return required(id)
+    },
     async completeCleanup(id: string, migrationId: string, epoch: number) {
       await db.run(
         "UPDATE chat_ownership SET cleanup_pending=0 WHERE id=? AND migration_id=? AND epoch=? AND state='active'",
@@ -393,13 +436,28 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       await db.batchTxn([
         {
           type: 'run',
-          sql: "UPDATE chat_ownership SET state='deleted',epoch=MAX(epoch+CASE WHEN state='deleted' THEN 0 ELSE 1 END,?),cleanup_pending=1 WHERE id=?",
+          sql: "UPDATE chat_ownership SET state='deleted',epoch=MAX(epoch+CASE WHEN state='deleted' THEN 0 ELSE 1 END,?) WHERE id=?",
           params: [minimumEpoch, id]
         },
         {
           type: 'run',
-          sql: `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch) SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.id=? AND o.state='deleted' ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END`,
-          params: [id]
+          // Every computer of the task, and the one holding the conversation.
+          sql: `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
+            SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.id=? AND o.state='deleted'
+              AND ${notRetired('c.computer_id')}
+            UNION SELECT o.id,o.computer_id,o.epoch FROM chat_ownership o WHERE o.id=? AND o.state='deleted' AND o.computer_id IS NOT NULL
+              AND ${notRetired('o.computer_id')}
+            ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END`,
+          params: [id, id]
+        },
+        {
+          type: 'run',
+          // Pending exactly while a computer has not acknowledged the removal. A
+          // repeated delete (recovery re-applies a computer-reported deletion on
+          // every pass) of an already removed chat must not re-fence its task
+          // forever: no unacknowledged target would ever clear the flag.
+          sql: "UPDATE chat_ownership SET cleanup_pending=EXISTS(SELECT 1 FROM chat_deletion_targets WHERE conversation_id=? AND acknowledged=0) WHERE id=? AND state='deleted'",
+          params: [id, id]
         }
       ])
       if (before) notifyChatOwnershipChange(db, [before.tabId])
@@ -417,12 +475,19 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
           sql: "UPDATE chat_ownership SET state='deleted',epoch=epoch+1,cleanup_pending=1 WHERE task_id=? AND state<>'deleted'",
           params: [taskId]
         },
-        ...['computer_id', 'source_computer_id', 'destination_computer_id'].map((column) => ({
+        // Every computer of the task and each conversation's own computers. The
+        // flag follows (schema trigger): pending exactly while a target is unacked.
+        ...[
+          `SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE o.task_id=? AND o.state=? AND ${notRetired('c.computer_id')}`,
+          ...['computer_id', 'source_computer_id', 'destination_computer_id'].map(
+            (column) =>
+              `SELECT id,${column},epoch FROM chat_ownership WHERE task_id=? AND state=? AND ${column} IS NOT NULL AND ${notRetired(column)}`
+          )
+        ].map((select) => ({
           type: 'run' as const,
-          sql: `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
-      SELECT id,${column},epoch FROM chat_ownership WHERE task_id=? AND state='deleted' AND ${column} IS NOT NULL
+          sql: `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch) ${select}
       ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END`,
-          params: [taskId]
+          params: [taskId, 'deleted']
         }))
       ])
       notifyChatOwnershipChange(
@@ -436,6 +501,42 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
       if (!set) changeListeners.set(db, (set = new Set()))
       set.add(listener)
       return () => set.delete(listener)
+    },
+    /**
+     * A conversation a computer deleted that the hub does not know: kept as a
+     * standalone tombstone bound to no tab. It deletes nothing else, and later
+     * reports of it are recognised as already applied.
+     */
+    async recordTombstone(
+      identity: Pick<HubChatOwnership, 'id' | 'taskId' | 'tabId' | 'mode' | 'epoch'>
+    ) {
+      await db.run(
+        `INSERT INTO chat_ownership(id,task_id,tab_id,mode,epoch,state) VALUES(?,?,?,?,?,'deleted')
+        ON CONFLICT(id) DO UPDATE SET epoch=MAX(chat_ownership.epoch,excluded.epoch) WHERE chat_ownership.state='deleted'`,
+        [identity.id, identity.taskId, identity.tabId, identity.mode, identity.epoch]
+      )
+    },
+    /**
+     * A computer still holds a conversation the hub deleted: deliver the
+     * deletion to it (again). The existing delivery removes it there.
+     */
+    async queueDeletion(id: string, computerId: string, epoch: number) {
+      await db.run(
+        `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
+        SELECT id,?,MAX(epoch,?) FROM chat_ownership WHERE id=? AND state='deleted'
+        ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=0`,
+        [computerId, epoch, id]
+      )
+    },
+    /** The computer reported it no longer holds this deleted conversation. */
+    async acknowledgeRemoved(id: string, computerId: string) {
+      await db.run(
+        "UPDATE chat_deletion_targets SET acknowledged=1 WHERE conversation_id=? AND computer_id=? AND acknowledged=0 AND EXISTS(SELECT 1 FROM chat_ownership WHERE id=? AND state='deleted')",
+        [id, computerId, id]
+      )
+    },
+    async isRetired(computerId: string) {
+      return !!(await db.get(`SELECT 1 WHERE ${retiredComputerSql('?')}`, [computerId]))
     },
     async pendingDeletions(computerId: string) {
       return db.all<{ conversationId: string; epoch: number }>(
@@ -456,84 +557,6 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
           params: [id, id]
         }
       ])
-    },
-    async bindProvider(id: string, providerSessionId: string, mode: string) {
-      await db.run(
-        'INSERT INTO chat_provider_bindings VALUES(?,?,?) ON CONFLICT(provider_session_id,mode) DO NOTHING',
-        [providerSessionId, providerMode(mode), id]
-      )
-      // Early legacy exports copied every provider's session list into each
-      // owner. Repair only a proven cross-provider misclaim: the durable legacy
-      // authority must name this target, and the old owner's provider must not
-      // match the session. Genuine same-provider conflicts remain fenced.
-      await db.run(
-        `UPDATE chat_provider_bindings SET conversation_id=? WHERE provider_session_id=? AND mode=?
-        AND EXISTS(SELECT 1 FROM chat_ownership old JOIN chat_ownership target ON target.id=?
-          JOIN chat_legacy_session_authority a ON a.task_id=target.task_id AND a.mode=? AND a.provider_session_id=? AND a.conversation_id=target.id
-          WHERE old.id=chat_provider_bindings.conversation_id AND old.task_id=target.task_id AND target.state='active'
-          AND (CASE old.mode WHEN 'claude-chat' THEN 'claude-code' WHEN 'codex-chat' THEN 'codex' ELSE old.mode END)<>?
-          AND (CASE target.mode WHEN 'claude-chat' THEN 'claude-code' WHEN 'codex-chat' THEN 'codex' ELSE target.mode END)=?)`,
-        [
-          id,
-          providerSessionId,
-          providerMode(mode),
-          id,
-          providerMode(mode),
-          providerSessionId,
-          providerMode(mode),
-          providerMode(mode)
-        ]
-      )
-      // A deleted owner holds no history, so its binding is dead. Let a live
-      // owner of the same task resume the session (e.g. a closed tab's session
-      // reopened in the task's main tab); otherwise every metadata retry fails.
-      await db.run(
-        `UPDATE chat_provider_bindings SET conversation_id=? WHERE provider_session_id=? AND mode=?
-        AND conversation_id<>? AND EXISTS(SELECT 1 FROM chat_ownership old JOIN chat_ownership new ON new.id=?
-          WHERE old.id=chat_provider_bindings.conversation_id AND old.state='deleted'
-          AND new.state='active' AND new.task_id=old.task_id)`,
-        [id, providerSessionId, providerMode(mode), id, id]
-      )
-      const row = await api.forProviderSession(providerSessionId, mode)
-      if (row?.id !== id) {
-        const target = await required(id)
-        if (
-          !row ||
-          row.taskId !== target.taskId ||
-          row.computerId !== target.computerId ||
-          row.state !== 'active' ||
-          target.state !== 'active'
-        )
-          throw new Error('Provider conversation belongs to another storage owner')
-      }
-    },
-    async setQueueRoute(id: string, conversationId: string, removed = false) {
-      const r = await required(conversationId)
-      if (removed) {
-        await db.run('DELETE FROM chat_queue_routes WHERE id=? AND conversation_id=?', [
-          id,
-          conversationId
-        ])
-        return
-      }
-      await db.run('INSERT INTO chat_queue_routes VALUES(?,?,?) ON CONFLICT(id) DO NOTHING', [
-        id,
-        r.tabId,
-        conversationId
-      ])
-      const previous = await db.get<{ conversation_id: string }>(
-        'SELECT conversation_id FROM chat_queue_routes WHERE id=?',
-        [id]
-      )
-      if (previous?.conversation_id !== conversationId)
-        throw new Error('Queue item ownership conflict')
-    },
-    async forQueueItem(id: string) {
-      const row = await db.get<Row>(
-        'SELECT c.* FROM chat_ownership c JOIN chat_queue_routes q ON q.conversation_id=c.id WHERE q.id=?',
-        [id]
-      )
-      return row ? fromRow(row) : null
     }
   }
   return api

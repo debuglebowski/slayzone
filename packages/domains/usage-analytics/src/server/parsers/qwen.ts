@@ -70,11 +70,7 @@ export async function parseQwenFiles(
         const stream = createReadStream(filePath, { start: startOffset, encoding: 'utf-8' })
         const rl = createInterface({ input: stream, crlfDelay: Infinity })
 
-        let lineIndex = 0
-
         rl.on('line', (line) => {
-          lineIndex++
-
           let entry: QwenAssistantEntry
           try {
             entry = JSON.parse(line)
@@ -87,10 +83,13 @@ export async function parseQwenFiles(
           if (!usage) return
 
           const baseKey = `qwen:${entry.uuid ?? ''}:${entry.sessionId ?? ''}:${entry.timestamp ?? ''}`
+          // No identity of its own: the line itself, in its file. Never where the read
+          // started (a line index restarts at a resumed cursor): a computer parses
+          // again whatever the hub did not acknowledge, and the hub dedupes by id.
           const idKey =
             entry.uuid || entry.sessionId || entry.timestamp
               ? baseKey
-              : `qwen:fallback:${filePath}:${lineIndex}:${line}`
+              : `qwen:fallback:${filePath}:${line}`
           const id = createHash('md5').update(idKey).digest('hex')
 
           records.push({

@@ -11,7 +11,7 @@ import { describe, test, expect, afterAll } from 'vitest'
 import { installLoopbackTurnComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { agentTurnsRouter } from './agent-turns-router.js'
-import { agentTurnsEvents } from './events.js'
+import { agentTurnsEvents, type AgentTurnsChange } from './events.js'
 import { recordTurnBoundary } from './turn-tracker.js'
 import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -20,7 +20,8 @@ import * as path from 'node:path'
 import type { AgentTurnRange } from '../shared/types.js'
 
 // The hub runs no git: turns' git runs on a (loopback) computer, as in production.
-installLoopbackTurnComputer()
+// The computer resolves a task's checkout (§9 7c): here, from the fixture database.
+const computer = installLoopbackTurnComputer(() => h.db)
 
 // --- onChanged subscription (unchanged — nothing else touches it) ---
 
@@ -30,15 +31,18 @@ describe('agentTurns.onChanged subscription', () => {
   test('forwards each agent-turns:changed emit, stops after unsubscribe', async () => {
     const caller = agentTurnsRouter.createCaller(subCtx)
     const obs = await caller.onChanged()
-    const got: string[] = []
-    const sub = obs.subscribe({ next: (v: string) => got.push(v) })
+    const got: AgentTurnsChange[] = []
+    const sub = obs.subscribe({ next: (v: AgentTurnsChange) => got.push(v) })
 
-    agentTurnsEvents.emit('agent-turns:changed', '/tmp/wt-a')
-    agentTurnsEvents.emit('agent-turns:changed', '/tmp/wt-b')
+    agentTurnsEvents.emit('agent-turns:changed', { worktreePath: '/tmp/wt-a', taskId: 'a' })
+    agentTurnsEvents.emit('agent-turns:changed', { worktreePath: '/tmp/wt-b', taskId: 'b' })
     sub.unsubscribe()
-    agentTurnsEvents.emit('agent-turns:changed', '/tmp/wt-after-unsub')
+    agentTurnsEvents.emit('agent-turns:changed', { worktreePath: '/tmp/wt-x', taskId: 'x' })
 
-    expect(got).toEqual(['/tmp/wt-a', '/tmp/wt-b'])
+    expect(got).toEqual([
+      { worktreePath: '/tmp/wt-a', taskId: 'a' },
+      { worktreePath: '/tmp/wt-b', taskId: 'b' }
+    ])
   })
 
   test('teardown removes the listener (no leak)', async () => {
@@ -81,15 +85,20 @@ function freshTask(): { taskId: string; tabId: string; repo: string } {
   const taskId = crypto.randomUUID()
   const tabId = `tab-${taskId.slice(0, 8)}`
   h.db
-    .prepare('INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, ?, ?, ?)')
-    .run(taskId, projectId, 'T', repo)
+    .prepare('INSERT INTO tasks (id, project_id, title, has_worktree) VALUES (?, ?, ?, 1)')
+    .run(taskId, projectId, 'T')
+  // The task's worktree is on its computer (§9 7e), not in the hub row.
+  computer.setWorktree(taskId, repo)
   h.db
     .prepare('INSERT INTO terminal_tabs (id, task_id, mode, position) VALUES (?, ?, ?, ?)')
     .run(tabId, taskId, 'claude-code', 0)
+  if (!repoTask.has(repo)) repoTask.set(repo, taskId)
   return { taskId, tabId, repo }
 }
+// The list names the task whose checkout it is (its path scope); any task of it.
+const repoTask = new Map<string, string>()
 const list = (repo: string): Promise<AgentTurnRange[]> =>
-  caller.list({ worktreePath: repo }) as Promise<AgentTurnRange[]>
+  caller.list({ taskId: repoTask.get(repo) ?? 'none' }) as Promise<AgentTurnRange[]>
 
 describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sha', () => {
   test('drops a row whose snapshot equals prev (legacy noop)', async () => {
@@ -99,12 +108,12 @@ describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sh
     fs.writeFileSync(path.join(repo, 'a.txt'), '2')
     await recordTurnBoundary(h.slayDb, tabId, 'p2')
 
-    const latest = h.db
+    const latest = computer.db
       .prepare(
         'SELECT snapshot_sha, head_sha_at_snap FROM agent_turns WHERE worktree_path = ? ORDER BY created_at DESC LIMIT 1'
       )
       .get(repo) as { snapshot_sha: string; head_sha_at_snap: string }
-    h.db
+    computer.db
       .prepare(
         'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
       )
@@ -130,7 +139,7 @@ describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sh
     fs.writeFileSync(path.join(repo, 'b.txt'), 'third')
     await recordTurnBoundary(h.slayDb, tabId, 'p3')
 
-    const rows = h.db
+    const rows = computer.db
       .prepare('SELECT * FROM agent_turns WHERE worktree_path = ? ORDER BY created_at ASC')
       .all(repo) as Array<{
       id: string
@@ -140,7 +149,7 @@ describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sh
     }>
     expect(rows.length).toBe(3)
     const between = (rows[0].created_at + rows[1].created_at) / 2 + 0.5
-    h.db
+    computer.db
       .prepare(
         'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
       )
@@ -283,10 +292,10 @@ describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sh
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
     await recordTurnBoundary(h.slayDb, tabId, 'live')
-    const live = h.db
+    const live = computer.db
       .prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1')
       .get(repo) as { snapshot_sha: string }
-    h.db
+    computer.db
       .prepare(
         'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, NULL, ?, ?)'
       )
@@ -300,10 +309,10 @@ describe('agentTurns.list filters empty-diff turns + re-threads prev_snapshot_sh
     const { tabId, repo } = freshTask()
     fs.writeFileSync(path.join(repo, 'live.txt'), 'live')
     await recordTurnBoundary(h.slayDb, tabId, 'live')
-    const live = h.db
+    const live = computer.db
       .prepare('SELECT snapshot_sha FROM agent_turns WHERE worktree_path = ? LIMIT 1')
       .get(repo) as { snapshot_sha: string }
-    h.db
+    computer.db
       .prepare(
         'INSERT INTO agent_turns (id, worktree_path, task_id, terminal_tab_id, snapshot_sha, head_sha_at_snap, prompt_preview, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)'
       )

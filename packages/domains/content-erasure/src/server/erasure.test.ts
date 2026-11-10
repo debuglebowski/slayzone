@@ -260,7 +260,7 @@ test('a delayed import cannot recreate a permanently erased artifact in a live t
   ).toThrow(/permanently erased/)
 })
 
-test('legacy cross-owner folder links and shared conversation references preserve the other owner', async () => {
+test('legacy cross-owner folder links preserve the other owner', async () => {
   const { h, root } = await fixture()
   h.db
     .prepare(
@@ -272,25 +272,13 @@ test('legacy cross-owner folder links and shared conversation references preserv
       "INSERT INTO artifact_folders(id,task_id,name,parent_id) VALUES('fb','task-bob','Bob folder','fa')"
     )
     .run()
-  for (const user of ['alice', 'bob'])
-    h.db
-      .prepare(
-        "INSERT INTO task_conversations(id,task_id,mode,conversation_id,origin,created_at) VALUES(?,?,?,'shared-conversation','user-selected',1)"
-      )
-      .run('ledger-' + user, 'task-' + user, 'claude-code')
-  h.db.prepare("INSERT INTO session_turns VALUES('shared-conversation',1)").run()
+  // Shared conversation references live in the computers' session ledgers (§9);
+  // their erasure keeps another task's proof (chat-runtime erase-stored-task.test).
   await eraseContent(h.slayDb, root, { kind: 'user', userId: 'alice' })
   expect(h.db.prepare("SELECT name,parent_id FROM artifact_folders WHERE id='fb'").get()).toEqual({
     name: 'Bob folder',
     parent_id: null
   })
-  expect(
-    h.db
-      .prepare(
-        "SELECT first_turn_at FROM session_turns WHERE conversation_id='shared-conversation'"
-      )
-      .get()
-  ).toEqual({ first_turn_at: 1 })
 })
 
 test('cached references lose deleted titles without deleting another user’s layout or preferences', async () => {
@@ -367,12 +355,28 @@ test('unattributed blob staging cannot be silently counted as erased', async () 
 
 // --- Subtasks: deleting a task erases only what was selected --------------------
 
-function insertTask(h: TestHarness, id: string, parentId: string | null, extra = '') {
+/**
+ * The task folders a computer holds (the hub keeps no path, robustness plan §9 7e):
+ * the fake computer every worktree test asks (`releaseWorktree`).
+ */
+const held = new Map<string, string>()
+afterEach(() => held.clear())
+function withWorktree(h: TestHarness, id: string, path: string) {
+  h.db.prepare('UPDATE tasks SET has_worktree=1 WHERE id=?').run(id)
+  held.set(id, path)
+}
+async function releaseWorktree(target: { taskId: string }, live: string[]) {
+  const own = held.get(target.taskId) ?? null
+  return {
+    worktreePath: own,
+    shared: [...held].some(([id, p]) => id !== target.taskId && p === own && live.includes(id))
+  }
+}
+function insertTask(h: TestHarness, id: string, parentId: string | null, worktree = false) {
   h.db
-    .prepare(
-      `INSERT INTO tasks(id,project_id,title,parent_id${extra ? ',' + extra : ''}) VALUES(?,?,?,?${extra ? ',?' : ''})`
-    )
-    .run(id, 'project-alice', `${id} title`, parentId, ...(extra ? ['/wt/shared'] : []))
+    .prepare('INSERT INTO tasks(id,project_id,title,parent_id) VALUES(?,?,?,?)')
+    .run(id, 'project-alice', `${id} title`, parentId)
+  if (worktree) withWorktree(h, id, '/wt/shared')
 }
 const parentOf = (h: TestHarness, id: string) =>
   (
@@ -443,23 +447,28 @@ test('project erasure still erases every task in the project, subtasks included'
 
 test('a surviving subtask keeps the worktree it shares with its deleted parent', async () => {
   const { h, root } = await fixture()
-  insertTask(h, 'parent', null, 'worktree_path')
-  insertTask(h, 'child', 'parent', 'worktree_path')
+  // The computer holding both folders knows the child still names the worktree.
+  computer(h, 'pc')
+  h.db.prepare("UPDATE projects SET default_computer_id='pc' WHERE id='project-alice'").run()
+  insertTask(h, 'parent', null, true)
+  insertTask(h, 'child', 'parent', true)
   const cleaned: string[] = []
   const report = await eraseContent(
     h.slayDb,
     root,
     { kind: 'tasks', ids: ['parent'] },
     {
+      cleanupComputer: ackAll(h),
+      releaseWorktree,
       cleanupWorktree: async (target) => {
-        cleaned.push(target.path)
+        cleaned.push(target.path ?? '')
       }
     }
   )
   expect(report.state).toBe('complete')
   expect(cleaned).toEqual([])
-  expect(h.db.prepare("SELECT worktree_path FROM tasks WHERE id='child'").get()).toEqual({
-    worktree_path: '/wt/shared'
+  expect(h.db.prepare("SELECT has_worktree FROM tasks WHERE id='child'").get()).toEqual({
+    has_worktree: 1
   })
 })
 
@@ -494,7 +503,7 @@ test('an unbound worktree resolves through the project computer and its placemen
   const { h, root } = await fixture()
   computer(h, 'pc')
   h.db.prepare("UPDATE projects SET default_computer_id='pc' WHERE id='project-alice'").run()
-  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  withWorktree(h, 'task-alice', '/wt/a')
   const removed: unknown[] = []
   const report = await eraseContent(
     h.slayDb,
@@ -502,6 +511,7 @@ test('an unbound worktree resolves through the project computer and its placemen
     { kind: 'tasks', ids: ['task-alice'] },
     {
       cleanupComputer: ackAll(h),
+      releaseWorktree,
       cleanupWorktree: async (t) => {
         removed.push({ computerId: t.computerId, repoPath: t.repoPath, path: t.path })
       }
@@ -515,12 +525,13 @@ test('an unbound worktree resolves to the hub default once, durably, and waits w
   const { h, root } = await fixture()
   computer(h, 'first')
   computer(h, 'second')
-  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  withWorktree(h, 'task-alice', '/wt/a')
   const picks: Array<string | null> = [null, 'first', 'second']
   const asked: unknown[] = [],
     removed: unknown[] = []
   const options = {
     cleanupComputer: ackAll(h),
+    releaseWorktree,
     resolveWorktreeComputer: async (target: unknown) => {
       asked.push(target)
       const computerId = picks.shift() ?? null
@@ -560,16 +571,14 @@ test('an unbound worktree resolves to the hub default once, durably, and waits w
 test('a revoked worktree computer is reported clearly and never retried automatically', async () => {
   const { h, root } = await fixture()
   computer(h, 'gone', 5)
-  h.db
-    .prepare(
-      "UPDATE tasks SET worktree_path='/wt/a',worktree_computer_id='gone' WHERE id='task-alice'"
-    )
-    .run()
+  h.db.prepare("UPDATE tasks SET worktree_computer_id='gone' WHERE id='task-alice'").run()
+  withWorktree(h, 'task-alice', '/wt/a')
   let attempts = 0
   const options = {
     cleanupComputer: async () => {
       throw new Error('COMPUTER_UNAVAILABLE')
     },
+    releaseWorktree,
     cleanupWorktree: async () => {
       attempts++
     }
@@ -585,13 +594,14 @@ test('a revoked worktree computer is reported clearly and never retried automati
 
 test('no computer that could ever hold an unbound worktree: reported gone, not retried', async () => {
   const { h, root } = await fixture()
-  h.db.prepare("UPDATE tasks SET worktree_path='/wt/a' WHERE id='task-alice'").run()
+  withWorktree(h, 'task-alice', '/wt/a')
   let asked = 0
   const options = {
     resolveWorktreeComputer: async () => {
       asked++
       return { computerId: null, gone: true }
     },
+    releaseWorktree,
     cleanupWorktree: async () => {
       throw new Error('must not be called')
     }
@@ -605,13 +615,10 @@ test('no computer that could ever hold an unbound worktree: reported gone, not r
 test('a live task sharing the path keeps the worktree even when only the deleted task recorded its computer', async () => {
   const { h, root } = await fixture()
   computer(h, 'pc')
-  h.db
-    .prepare(
-      "UPDATE tasks SET worktree_path='/wt/s',worktree_computer_id='pc' WHERE id='task-alice'"
-    )
-    .run()
-  insertTask(h, 'other', null, 'worktree_path')
-  h.db.prepare("UPDATE tasks SET worktree_path='/wt/s' WHERE id='other'").run()
+  h.db.prepare("UPDATE tasks SET worktree_computer_id='pc' WHERE id='task-alice'").run()
+  withWorktree(h, 'task-alice', '/wt/s')
+  insertTask(h, 'other', null)
+  withWorktree(h, 'other', '/wt/s')
   const removed: string[] = []
   await eraseContent(
     h.slayDb,
@@ -619,10 +626,32 @@ test('a live task sharing the path keeps the worktree even when only the deleted
     { kind: 'tasks', ids: ['task-alice'] },
     {
       cleanupComputer: ackAll(h),
+      releaseWorktree,
       cleanupWorktree: async (t) => {
-        removed.push(t.path)
+        removed.push(t.path ?? '')
       }
     }
   )
   expect(removed).toEqual([])
+})
+
+test('an unrelated unreadable working-copy journal never blocks an erasure', async () => {
+  const { h, root } = await fixture()
+  const journals = join(root, 'artifacts', '.transactions')
+  const unrelated = join(journals, '00000000-0000-4000-8000-0000000000aa')
+  const alices = join(journals, '00000000-0000-4000-8000-0000000000bb')
+  mkdirSync(unrelated, { recursive: true })
+  mkdirSync(alices, { recursive: true })
+  writeFileSync(join(unrelated, 'manifest.json'), '{"taskId":"task-bob","art')
+  writeFileSync(join(alices, 'manifest.json'), '{"taskId":"task-alice","art')
+  const report = await eraseContent(h.slayDb, root, { kind: 'tasks', ids: ['task-alice'] })
+  expect(report.failures).toEqual([])
+  expect(report.state).toBe('complete')
+  // An account erasure flags the unreadable journal for review (owner unknown)
+  // instead of failing its whole ownership inventory.
+  const account = await eraseContent(h.slayDb, root, { kind: 'user', userId: 'alice' })
+  expect(account.failures).toEqual(['LEGACY_FILES_NEED_OWNERSHIP_REVIEW'])
+  // The torn journal naming alice's task is erased; bob's is left alone.
+  expect(existsSync(alices)).toBe(false)
+  expect(existsSync(unrelated)).toBe(true)
 })

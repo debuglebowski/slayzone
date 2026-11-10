@@ -122,6 +122,8 @@ const permissions = z.object({
   ])
 })
 const tab = z.tuple([id]),
+  /** A queued message's id and the tab holding it. */
+  queueItem = z.tuple([id, id]),
   taskMode = z.tuple([id, z.string()]),
   createTuple = z.tuple([create])
 export const chatOperationSchemas = {
@@ -271,13 +273,16 @@ export const chatQueueOperationSchemas = {
   renewReservation: z.tuple([id, z.object({ key: id, token: id })]),
   cancelReservation: z.tuple([id, z.object({ key: id, token: id })]),
   push: z.tuple([id, text, text, queueOptions]),
-  update: z.tuple([id, z.object({ send: text, original: text, content: chatContentSchema })]),
-  move: z.tuple([id, z.number().int().nonnegative()]),
-  hold: tab,
-  release: tab,
-  /** Add a queued message to the running turn (by its id). An older computer refuses the method. */
-  steer: tab,
-  remove: tab,
+  // Item operations name the queued message AND its tab (robustness plan §9, v208):
+  // the hub routes and authorizes by the tab; the computer refuses an item another
+  // tab holds.
+  update: z.tuple([id, z.object({ send: text, original: text, content: chatContentSchema }), id]),
+  move: z.tuple([id, z.number().int().nonnegative(), id]),
+  hold: queueItem,
+  release: queueItem,
+  /** Add a queued message to the running turn (by its id). */
+  steer: queueItem,
+  remove: queueItem,
   clear: tab
 } as const
 export type ChatOperation = keyof typeof chatOperationSchemas
@@ -334,6 +339,8 @@ export function parseChatInvocation(input: unknown) {
   return { ...request, args }
 }
 export type ChatInvocation = ReturnType<typeof parseChatInvocation>
+export { COMPUTER_OWNED_CHAT_KEYS } from '@slayzone/terminal-contracts'
+
 export const chatBootstrapSchema = z.object({
   identity: chatIdentitySchema,
   projectId: id.nullable(),
@@ -352,18 +359,6 @@ export const chatBootstrapSchema = z.object({
   defaultFlags: z.string().nullable(),
   settings: z.record(z.string(), z.string().nullable()).optional(),
   terminalProviderConfig: z.record(z.string(), z.unknown()).optional(),
-  providerConfigRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
-  terminalProviderConfigRevision: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(Number.MAX_SAFE_INTEGER)
-    .optional(),
-  honoredConversations: z.array(z.string()).optional(),
-  honoredSessions: z.array(z.object({ mode: z.string(), conversationId: z.string() })).optional(),
-  deletedConversations: z
-    .array(z.object({ mode: z.string(), conversationId: z.string() }))
-    .optional(),
   env: z.record(z.string(), z.string())
 })
 export const chatTransferManifestSchema = z.object({

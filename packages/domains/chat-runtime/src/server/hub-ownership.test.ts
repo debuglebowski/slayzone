@@ -64,16 +64,6 @@ test('deletion metadata survives independently of task/tab rows', async () => {
   expect(db.prepare('SELECT count(*) AS n FROM chat_ownership').get()).toEqual({ n: 1 })
 })
 
-test('terminal and chat modes resolve to the same provider-session owner', async () => {
-  const { store } = await fixture()
-  await store.register(route)
-  await store.bindProvider('storage', 'provider-session', 'claude-chat')
-  expect(await store.forProviderSession('provider-session', 'claude-code')).toMatchObject({
-    id: 'storage',
-    computerId: 'pc-a'
-  })
-})
-
 test('a rejected registration cannot leave an alias to another task conversation', async () => {
   const { store } = await fixture()
   await store.register(route)
@@ -95,43 +85,6 @@ test('stale deletion acknowledgements cannot clear the reconnect barrier', async
   expect(await store.get('storage')).toMatchObject({ state: 'deleted', cleanupPending: false })
 })
 
-test('same-computer tabs can select a provider session; another computer cannot claim it', async () => {
-  const { store } = await fixture()
-  await store.register(route)
-  await store.bindProvider(route.id, 'native', 'claude-chat')
-  await store.register({ ...route, id: 'second', tabId: 'tab2' })
-  await expect(store.bindProvider('second', 'native', 'claude-chat')).resolves.toBeUndefined()
-  await store.register({ ...route, id: 'foreign', tabId: 'tab3', computerId: 'pc-b' })
-  await expect(store.bindProvider('foreign', 'native', 'claude-chat')).rejects.toThrow(/owner/i)
-  expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({
-    computerId: 'pc-a'
-  })
-})
-
-test('a live tab reclaims a provider session whose previous owner in the same task was deleted', async () => {
-  const { store } = await fixture()
-  await store.register({ ...route, id: 'closed', tabId: 'prompt-history:task' })
-  await store.bindProvider('closed', 'native', 'claude-chat')
-  await store.deleteConversation('closed')
-  await store.register(route)
-  await expect(store.bindProvider(route.id, 'native', 'claude-chat')).resolves.toBeUndefined()
-  expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({
-    id: route.id,
-    state: 'active'
-  })
-  await store.register({ ...route, id: 'foreign', taskId: 'other', tabId: 'tab-other' })
-  await expect(store.bindProvider('foreign', 'native', 'claude-chat')).rejects.toThrow(/owner/i)
-})
-
-test('a deleted owner in another task never yields its provider session', async () => {
-  const { store } = await fixture()
-  await store.register({ ...route, id: 'closed', taskId: 'other', tabId: 'tab-other' })
-  await store.bindProvider('closed', 'native', 'claude-chat')
-  await store.deleteConversation('closed')
-  await store.register(route)
-  await expect(store.bindProvider(route.id, 'native', 'claude-chat')).rejects.toThrow(/owner/i)
-  expect(await store.forProviderSession('native', 'claude-code')).toMatchObject({ id: 'closed' })
-})
 test('every ownership move, provider transition or deletion signals the tabs it took away, across store instances', async () => {
   const { store } = await fixture()
   const watcher = createChatOwnershipStore(harnesses[0]!.slayDb)

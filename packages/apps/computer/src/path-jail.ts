@@ -49,6 +49,7 @@ import {
   writeSync
 } from 'node:fs'
 import { lstat as lstatAsync, open as openAsync, readdir as readdirAsync } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { promisify } from 'node:util'
 import { write as writeCb } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
@@ -88,6 +89,14 @@ export interface JailOptions {
    * ANCESTOR of a protected path is refused too.
    */
   subtree?: boolean
+  /**
+   * A file the user picked on this machine to copy IN (`fs.copyIn` source): on a
+   * hub without login it may lie outside the request's path scope (still inside
+   * the machine bound), as a desktop drag from Finder always could.
+   */
+  hostRead?: boolean
+  /** A folder the request makes a NEW root of (see {@link ScopeJail.foreign}). */
+  newRoot?: boolean
 }
 
 // --- protected paths --------------------------------------------------------
@@ -333,6 +342,122 @@ export function judgePath(
   allowedRoots: readonly string[],
   opts: JailOptions = {}
 ): string {
+  const judged = judgeMachine(candidate, allowedRoots, opts)
+  const scope = scopeStore.getStore()
+  if (!scope || (opts.hostRead === true && scope.hostReads)) return judged
+  if (opts.newRoot === true) return judgeNewRoot(judged, candidate, scope)
+  return judgeScope(judged, candidate, scope)
+}
+
+// --- the request's path scope (§9 Phase 7b) -----------------------------------
+
+/**
+ * The roots ONE hub request may touch: the task's or project's own folders on this
+ * computer (`roots`), minus the roots of other tasks nested inside them
+ * (`excluded`: a task working in its project's folder never reaches into another
+ * task's worktree there). Opened by the dispatcher from the request's path scope;
+ * every path judged while it runs must ALSO lie inside it — on top of the machine
+ * bound (`allowedRoots`), never instead of it.
+ */
+export interface ScopeJail {
+  /** What the request is about, for refusals ("task t1", "project p1"). */
+  label: string
+  roots: readonly string[]
+  excluded: readonly string[]
+  /** Every root here that is someone else's (other tasks', other projects'). */
+  foreign: readonly string[]
+  /** The hub has no login: a user-chosen file to copy IN may lie outside the scope. */
+  hostReads: boolean
+}
+
+const scopeStore = new AsyncLocalStorage<ScopeJail>()
+
+/** Serve one request under `jail`: every path it judges is confined to it. */
+export function runInScopeJail<T>(jail: ScopeJail, fn: () => T): T {
+  return scopeStore.run(jail, fn)
+}
+
+/**
+ * Run `fn` OUTSIDE the request's scope jail: only for the computer-level provider
+ * dirs under home (`~/.claude`, …), which a project's AI-config ops read beside its
+ * own files and which belong to no task or project. Callers still judge every path
+ * by the machine bound (their own roots).
+ */
+export function outsideScopeJail<T>(fn: () => T): T {
+  return scopeStore.exit(fn)
+}
+
+/** The scope jail of the request being served, if it named one. */
+export function currentScopeJail(): ScopeJail | undefined {
+  return scopeStore.getStore()
+}
+
+/** The canonical (real) spelling of a root, or null when it does not exist here. */
+function realRoot(root: string): string | null {
+  try {
+    return canonical(resolve(root))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * `judged` (already the canonical path the op will use, inside the machine bound)
+ * must lie inside one of the scope's roots and inside none of its excluded ones.
+ * Both sides compared canonically: a link from a scope root into another task's
+ * worktree was already resolved by the machine walk, so it is judged by where it
+ * lands.
+ */
+function judgeScope(judged: string, candidate: string, scope: ScopeJail): string {
+  const roots = scope.roots.map(realRoot).filter((r): r is string => r !== null)
+  const home = roots.find((r) => isInside(judged, r))
+  if (!home) {
+    throw new JailViolationError(
+      roots.length === 0
+        ? `${scope.label} has no folder on this computer; refusing '${candidate}'`
+        : `path '${candidate}' is outside the folders of ${scope.label}; refused`
+    )
+  }
+  for (const excluded of scope.excluded) {
+    const real = realRoot(excluded)
+    // Another task's root that IS (or holds) this scope's own root is not carved out.
+    if (!real || isInside(home, real)) continue
+    if (isInside(judged, real)) {
+      throw new JailViolationError(
+        `path '${candidate}' is inside another task's folder, not ${scope.label}'s; refused`
+      )
+    }
+  }
+  return judged
+}
+
+/**
+ * A folder the request is about to MAKE a root (`git worktree add`'s target): inside
+ * the scope as any path, or outside it but inside nobody else's root — the rule the
+ * hub applied to a new root before it stopped knowing roots.
+ */
+function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): string {
+  try {
+    return judgeScope(judged, candidate, scope)
+  } catch (err) {
+    if (!(err instanceof JailViolationError)) throw err
+  }
+  for (const root of scope.foreign) {
+    const real = realRoot(root)
+    if (real && isInside(judged, real)) {
+      throw new JailViolationError(
+        `path '${candidate}' is inside a folder that is not ${scope.label}'s; refused`
+      )
+    }
+  }
+  return judged
+}
+
+function judgeMachine(
+  candidate: string,
+  allowedRoots: readonly string[],
+  opts: JailOptions
+): string {
   const access = opts.access ?? 'read'
   if (allowedRoots.length === 0) {
     throw new JailViolationError(
@@ -398,6 +523,50 @@ export function spawnCwd(cwd: string | undefined, allowedRoots: readonly string[
   const first = liveRoots(allowedRoots)[0]
   if (first) return first.real
   throw new JailViolationError('computer has no existing allowedRoots; refusing to start a process')
+}
+
+/**
+ * Where a process the hub starts FOR A TASK OR PROJECT starts (§9 Phase 7c): an
+ * explicit `cwd` must lie inside that scope's own folders here (and the machine
+ * bound); none runs in the scope's own folder — the task's worktree, else its base
+ * dir, else its project's folder (the order `scopeBounds` lists them). The hub no
+ * longer knows those folders, so this is the only check a cwd gets.
+ */
+export function scopedSpawnCwd(
+  jail: ScopeJail,
+  cwd: string | undefined,
+  allowedRoots: readonly string[],
+  /** The error for a scope with no folder here (a project not placed on this computer). */
+  noFolder?: () => Error
+): string {
+  return runInScopeJail(jail, () => {
+    if (cwd) return judgePath(cwd, allowedRoots)
+    for (const root of jail.roots) {
+      const real = realRoot(root)
+      if (real && lstatOrNull(real)?.isDirectory()) return judgePath(real, allowedRoots)
+    }
+    if (noFolder) throw noFolder()
+    throw new JailViolationError(
+      `${jail.label} has no folder on this computer; refusing to start a process`
+    )
+  })
+}
+
+/**
+ * The scope a spawn's own params name: its task (with the project the hub recorded
+ * for it), else its project. Null when it names neither — such a spawn is refused.
+ */
+export function implicitSpawnScope(
+  params: unknown
+):
+  | { kind: 'task'; taskId: string; projectId: string | null }
+  | { kind: 'project'; projectId: string }
+  | null {
+  if (!params || typeof params !== 'object') return null
+  const p = params as { taskId?: unknown; projectId?: unknown }
+  const projectId = typeof p.projectId === 'string' && p.projectId ? p.projectId : null
+  if (typeof p.taskId === 'string' && p.taskId) return { kind: 'task', taskId: p.taskId, projectId }
+  return projectId ? { kind: 'project', projectId } : null
 }
 
 // --- writing ----------------------------------------------------------------

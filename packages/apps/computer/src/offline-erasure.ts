@@ -15,7 +15,14 @@ import { z } from 'zod'
 import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
-import { HOOK_JOURNAL_FILE, hookJournalPath, legacyHookJournalPath } from './hook-journal'
+import { forEachIsolated, isStorageFatal } from '@slayzone/platform/isolation'
+import { eraseQuarantinedForTask } from '@slayzone/platform/quarantine'
+import {
+  HOOK_JOURNAL_FILE,
+  hookJournalPath,
+  legacyHookJournalPath,
+  readHookJournal
+} from './hook-journal'
 import { ptyHistoryDir } from './pty-history'
 
 const requestSchema = z.object({
@@ -67,13 +74,24 @@ const ownJournalNames = (runtime: string, hubUrl: string): Set<string> =>
  */
 function ownHookJournals(runtime: string, hubUrl: string, tasks: ReadonlySet<string>): string[] {
   const own = ownJournalNames(runtime, hubUrl)
+  // isolation: fatal — an unreadable journal must refuse the receipt, never be skipped
   for (const entry of readdirSync(runtime)) {
     const staging = HOOK_JOURNAL_STAGING.exec(entry)
     if (staging && own.has(staging[1]) && alive(Number(staging[2])))
       throw new Error('A hook journal writer is still running')
     if (!HOOK_JOURNAL_FILE.test(entry) || own.has(entry)) continue
-    const events = journalSchema.parse(JSON.parse(readFileSync(join(runtime, entry), 'utf8')))
-    if (events.some((event) => tasks.has(taskOf(event.params) ?? '')))
+    // Another hub's journal is only read to look for these tasks: when it cannot
+    // be parsed its raw bytes decide (a mention of a task id refuses, as below).
+    const bytes = readFileSync(join(runtime, entry))
+    let holds: boolean
+    try {
+      holds = journalSchema
+        .parse(JSON.parse(bytes.toString('utf8')))
+        .some((event) => tasks.has(taskOf(event.params) ?? ''))
+    } catch {
+      holds = [...tasks].some((taskId) => bytes.includes(Buffer.from(taskId)))
+    }
+    if (holds)
       throw new Error(
         'Agent hook events of these tasks are kept under another spelling of the hub URL. ' +
           'Repeat with --computer-hub-url exactly as this computer is configured (its hubUrl); nothing was deleted.'
@@ -134,25 +152,42 @@ export async function eraseComputerOffline(
     r.storage.compose((raw) =>
       raw.exec('DELETE FROM blob_leases; DELETE FROM artifact_blob_leases;')
     )
-    for (const task of request.tasks) {
-      assertPathSafeId(task.taskId, 'taskId')
-      await r.eraseTask(task.taskId, task.revision)
-      // Where the live computer keeps it (main.ts): the same helper, so never another dir.
-      const historyRoot = ptyHistoryDir(root, request.hubScope)
-      const history = containedPath(historyRoot, task.taskId)
-      // The task's whole dir: its sessions' files and any write a crash left
-      // (pty-history.ts `<file>.<pid>.<n>.tmp`).
-      rmSync(history, { recursive: true, force: true })
-      if (existsSync(history)) throw new Error('Terminal history remains')
-      sync(historyRoot)
-    }
+    // One task at a time: a task that cannot be erased yet does not stop the
+    // others. No receipt is issued until every task is erased (the throw below).
+    const erased = await forEachIsolated(
+      request.tasks,
+      { pass: 'computer.offline-erasure', key: (task) => task.taskId, isFatal: isStorageFatal },
+      async (task) => {
+        assertPathSafeId(task.taskId, 'taskId')
+        await r.eraseTask(task.taskId, task.revision)
+        // Where the live computer keeps it (main.ts): the same helper, so never another dir.
+        const historyRoot = ptyHistoryDir(root, request.hubScope)
+        const history = containedPath(historyRoot, task.taskId)
+        // The task's whole dir: its sessions' files and any write a crash left
+        // (pty-history.ts `<file>.<pid>.<n>.tmp`).
+        rmSync(history, { recursive: true, force: true })
+        if (existsSync(history)) throw new Error('Terminal history remains')
+        sync(historyRoot)
+        // Quarantined hook-journal bytes and rejected events naming the task.
+        eraseQuarantinedForTask(runtime, task.taskId)
+      }
+    )
+    if (erased.failed.length)
+      throw new AggregateError(
+        erased.failed.map((f) => f.error),
+        `Offline cleanup could not erase ${erased.failed.map((f) => f.key).join(', ')}; ` +
+          'the other tasks were erased. Repeat the cleanup; no receipt was issued.'
+      )
   } finally {
     await r.close()
   }
+  // isolation: fatal — no receipt may be issued unless every journal of this hub is rewritten
   for (const journal of journals) {
-    const remaining = journalSchema
-      .parse(JSON.parse(readFileSync(journal, 'utf8')))
-      .filter((entry) => !ids.has(taskOf(entry.params) ?? ''))
+    // A torn journal keeps its readable events; the rest is quarantined, and the
+    // quarantine is erased by task id below.
+    const remaining = readHookJournal(runtime, journal).filter(
+      (entry) => !ids.has(taskOf(entry.params) ?? '')
+    )
     const temp = journal + '.' + randomUUID() + '.tmp'
     writeFileSync(temp, JSON.stringify(remaining), { flag: 'wx', mode: 0o600 })
     sync(temp)
@@ -161,12 +196,14 @@ export async function eraseComputerOffline(
   }
   // Unpublished journal writes (any hub's) whose writer is gone: discarded, as the
   // host's own startup does (session-host.ts `scrubChatJournals`).
+  // isolation: fatal — a stale staging file left behind must not be reported erased
   for (const entry of readdirSync(runtime)) {
     const staging = HOOK_JOURNAL_STAGING.exec(entry)
     if (!staging || alive(Number(staging[2]))) continue
     rmSync(join(runtime, entry))
     sync(runtime)
   }
+  for (const taskId of ids) eraseQuarantinedForTask(runtime, taskId)
   return {
     request,
     verifiedAt: new Date().toISOString(),

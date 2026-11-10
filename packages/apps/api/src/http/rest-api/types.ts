@@ -49,7 +49,9 @@ export interface HubUserListRow {
  * diagnostics but skips state transitions.
  */
 export interface TerminalStateBridge {
-  findSession: (taskId: string, mode: AgentId) => string | null
+  /** The live PTY a hook is about: `tabId` (from the hook context) picks that
+   *  tab's session; without it, the task's main tab session of `mode`. */
+  findSession: (taskId: string, mode: AgentId, tabId?: string) => string | null
   transition: (sessionId: string, state: TerminalState, hookEvent: string) => boolean
   /** Refresh the silence-timer clock without changing state. Called for hook
    *  events that prove activity but don't transition (PostToolUse, etc.). */
@@ -230,7 +232,48 @@ export interface ArtifactExportAccess {
   ) => Promise<boolean>
 }
 
+/**
+ * The agent-session ledger as the hook route reaches it (robustness plan §9, P0):
+ * on the computer that runs the reporting agent. Absent = no ledger (a host without
+ * computers): hooks still drive state, nothing is recorded.
+ */
+export interface AgentHookSessionLedger {
+  /**
+   * The computer running the agent that reported: the relaying computer, else the
+   * computer of the task's live terminal of that mode/tab, else the task's; null =
+   * none known (nothing is recorded).
+   */
+  computerFor(
+    hook: { taskId: string; mode: string; tabId?: string },
+    reporterComputerId?: string | null
+  ): Promise<string | null>
+  /** A SessionStart's session id, with its provenance (see the ledger's `recordHookConversation`). */
+  recordHookConversation(
+    computerId: string,
+    args: {
+      taskId: string
+      mode: string
+      sessionId: string
+      source?: string
+      spawnToken?: string
+      ctxTabId?: string
+    }
+  ): Promise<{
+    origin: import('@slayzone/task-contracts').ConversationOrigin
+    tabId: string
+  } | null>
+  /** A warm (pooled) agent's conversation, on its pooled session row (write-once). */
+  confirmSessionConversation(
+    computerId: string,
+    args: { sessionId: string; observedConversationId: string }
+  ): Promise<unknown>
+  /** The conversation took its first turn: it can be resumed. */
+  markSessionFirstTurn(computerId: string, conversationId: string): Promise<boolean>
+}
+
 export interface RestApiDeps {
+  /** The agent-session ledger on the reporting agent's computer (hook route). */
+  agentSessionLedger?: AgentHookSessionLedger
   captureAgentPrompt?: (
     hook: import('@slayzone/terminal-contracts').ResolvedAgentHook,
     computerId?: string | null

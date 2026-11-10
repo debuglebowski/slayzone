@@ -24,7 +24,12 @@ const hashOf = (token: string) => createHash('sha256').update(token).digest('hex
 let n = 0
 function grant(
   store: DirectGrantStore,
-  over: { ttlMs?: number; sessionId?: string; chat?: { tabId: string; epoch: number } } = {}
+  over: {
+    ttlMs?: number
+    sessionId?: string
+    chat?: { tabId: string; epoch: number }
+    taskId?: string
+  } = {}
 ) {
   const token = `tok-${++n}-${'x'.repeat(40)}`
   store.grant('hub', {
@@ -33,7 +38,9 @@ function grant(
     userId: 'u1',
     resource: over.chat
       ? { kind: 'chat', ...over.chat }
-      : { kind: 'pty', sessionId: over.sessionId ?? 's1' },
+      : over.taskId
+        ? { kind: 'task', taskId: over.taskId }
+        : { kind: 'pty', sessionId: over.sessionId ?? 's1' },
     ttlMs: over.ttlMs ?? 60_000
   })
   return { token, grantId: `g${n}` }
@@ -114,6 +121,13 @@ function fakeChat() {
 async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits']) {
   const pty = fakePty()
   const chat = fakeChat()
+  const taskReads: Array<{ taskId: string; request: unknown }> = []
+  const taskData = {
+    read: async (taskId: string, request: unknown) => {
+      taskReads.push({ taskId, request })
+      return { taskId }
+    }
+  }
   const store = createDirectGrantStore()
   const audit: Array<Record<string, unknown>> = []
   const listener = await createDirectListener({
@@ -123,13 +137,14 @@ async function setup(limits?: Parameters<typeof createDirectListener>[0]['limits
     audit: (line) => audit.push({ ...line }),
     services: {
       pty: (hubKey) => (hubKey === 'hub' ? pty.service : null),
-      chat: (hubKey) => (hubKey === 'hub' ? chat.service : null)
+      chat: (hubKey) => (hubKey === 'hub' ? chat.service : null),
+      taskData: (hubKey) => (hubKey === 'hub' ? taskData : null)
     },
     ...(limits ? { limits } : {})
   })
   cleanups.push(() => listener.close())
   cleanups.push(() => store.close())
-  return { store, listener, audit, pty, chat }
+  return { store, listener, audit, pty, chat, taskReads }
 }
 
 function client(listener: DirectListener, token: string | null) {
@@ -509,6 +524,29 @@ describe('direct listener: chat', () => {
     expect(got).toEqual([{ tabId: 't1', event: { kind: 'x' }, seq: 1, at: 5 }])
     chat.watchers.get('t1')?.onEnd('epoch')
     await waitFor(() => errors.length === 1)
+  })
+})
+
+describe('direct listener: task data', () => {
+  it('reads only the granted task; no other grant reaches it', async () => {
+    const { store, listener, taskReads } = await setup()
+    const { token } = grant(store, { taskId: 'task-1' })
+    const { trpc } = client(listener, token)
+    expect(await trpc.task.read.query({ taskId: 'task-1', request: { kind: 'describe' } })).toEqual(
+      { taskId: 'task-1' }
+    )
+    expect(taskReads).toEqual([{ taskId: 'task-1', request: { kind: 'describe' } }])
+    await expect(
+      trpc.task.read.query({ taskId: 'task-2', request: { kind: 'describe' } })
+    ).rejects.toThrow(/no capability/)
+    // A chat grant (whose tab lies in the task) does not reach the task's data.
+    const c = grant(store, { chat: { tabId: 'task-1', epoch: 1 } })
+    await expect(
+      client(listener, c.token).trpc.task.read.query({
+        taskId: 'task-1',
+        request: { kind: 'describe' }
+      })
+    ).rejects.toThrow(/no capability/)
   })
 })
 

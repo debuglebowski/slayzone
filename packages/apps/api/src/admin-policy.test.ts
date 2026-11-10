@@ -257,7 +257,7 @@ describe('tRPC, on a hub that requires login', () => {
 
   const ADMIN_PATHS = ofClass(TRPC_ADMIN_POLICY, 'admin')
 
-  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(43))
+  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(45))
 
   for (const path of ADMIN_PATHS) {
     test(`${path}: a user account is FORBIDDEN (ADMIN_ONLY, one audit line); an admin passes`, async () => {

@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest'
 import type { DiagnosticEvent } from '@slayzone/diagnostics/shared'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
-import { createChatOwnershipStore } from '@slayzone/chat-runtime/server'
-import { getCurrentConversationId } from '@slayzone/task/server'
+import { createChatOwnershipStore, createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
+import { setTaskSessionLedger } from '@slayzone/task/server'
 import { repairSharedSessionClaims } from './shared-session-repair'
 
 /**
@@ -12,23 +12,24 @@ import { repairSharedSessionClaims } from './shared-session-repair'
  * in the winner can never resurface it in a loser. A chat owner holding the
  * session picks the winner — it is the side driving the transcript; otherwise the
  * earliest claim does, the same rule the readers apply.
+ *
+ * The claims are a computer's (its session ledger, robustness plan §9); the
+ * tombstones are the hub's intent, delivered to it.
  */
 async function setup() {
   const h = await createTestHarness()
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   for (const id of ['task-a', 'task-b', 'task-c'])
     h.db.prepare('INSERT INTO tasks(id,project_id,title) VALUES(?,?,?)').run(id, 'p', id)
-  let n = 0
-  const claim = (taskId: string, session: string, at: number, mode = 'claude-code') => {
-    h.db
-      .prepare(
-        "INSERT INTO agent_sessions(id,mode,task_id,conversation_id,origin,status,created_at,bound_at) VALUES(?,?,?,?,'legacy-migration','dead',?,?)"
-      )
-      .run(`s${++n}`, mode, taskId, session, at, at)
-    h.db
-      .prepare('INSERT OR IGNORE INTO session_turns(conversation_id,first_turn_at) VALUES(?,?)')
-      .run(session, at)
-  }
+  const computer = createSessionLedgerHarness({ db: h.slayDb })
+  setTaskSessionLedger(computer.ledger)
+  const claim = (taskId: string, session: string, at: number, mode = 'claude-code') =>
+    computer.service.handle({
+      op: 'recordConversation',
+      args: { taskId, mode, conversationId: session, origin: 'legacy-migration', createdAt: at }
+    })
+  const current = (taskId: string) =>
+    computer.ledger.store.getCurrentConversationId(computer.computerId, taskId, 'claude-code')
   const tombstones = () =>
     h.db
       .prepare(
@@ -36,17 +37,43 @@ async function setup() {
       )
       .all()
   const events: DiagnosticEvent[] = []
-  const repair = () => repairSharedSessionClaims({ db: h.slayDb, record: (e) => events.push(e) })
-  return { h, claim, tombstones, events, repair }
+  const repair = () =>
+    repairSharedSessionClaims({
+      db: h.slayDb,
+      record: (e) => events.push(e),
+      ledger: computer.ledger,
+      computerId: computer.computerId
+    })
+  const cleanup = () => {
+    computer.close()
+    h.cleanup()
+  }
+  /** A chat of `taskId` on the computer holding `session` (its own session record). */
+  const chatHolds = (conversationId: string, taskId: string, tabId: string, session: string) => {
+    computer.storage.createConversation({
+      id: conversationId,
+      taskId,
+      tabId,
+      mode: 'claude-chat',
+      epoch: 1
+    })
+    computer.storage.putRecord(conversationId, 1, {
+      kind: 'settings',
+      id: `session:${JSON.stringify(['claude-chat', session])}`,
+      value: { mode: 'claude-chat', conversationId: session, origin: 'handoff' },
+      at: 1
+    })
+  }
+  return { h, claim, tombstones, events, repair, current, cleanup, chatHolds }
 }
 
 test('the earliest claimant keeps a shared session; every other claim is tombstoned, once', async () => {
-  const { h, claim, tombstones, events, repair } = await setup()
+  const { h, claim, tombstones, events, repair, current, cleanup } = await setup()
   try {
-    claim('task-a', 'shared', 1)
-    claim('task-b', 'shared', 2)
-    claim('task-c', 'shared', 3, 'claude-chat')
-    claim('task-a', 'solo', 1)
+    await claim('task-a', 'shared', 1)
+    await claim('task-b', 'shared', 2)
+    await claim('task-c', 'shared', 3, 'claude-chat')
+    await claim('task-a', 'solo', 1)
 
     expect(await repair()).toEqual([
       {
@@ -80,17 +107,17 @@ test('the earliest claimant keeps a shared session; every other claim is tombsto
         "INSERT INTO session_deletions(id,task_id,mode,conversation_id,created_at) VALUES('d','task-a','claude-code','shared',9)"
       )
       .run()
-    expect(await getCurrentConversationId(h.slayDb, 'task-b', 'claude-code')).toBeNull()
+    expect(await current('task-b')).toBeNull()
   } finally {
-    h.cleanup()
+    cleanup()
   }
 })
 
-test("a chat owner's binding picks the winner, even over an earlier claim", async () => {
-  const { h, claim, tombstones, repair } = await setup()
+test('the chat holding the session on the computer picks the winner, even over an earlier claim', async () => {
+  const { h, claim, tombstones, repair, current, cleanup, chatHolds } = await setup()
   try {
-    claim('task-a', 'shared', 1)
-    claim('task-b', 'shared', 2)
+    await claim('task-a', 'shared', 1)
+    await claim('task-b', 'shared', 2)
     // Task B's chat holds the transcript (bound before the fix shipped).
     const ownership = createChatOwnershipStore(h.slayDb)
     h.db
@@ -106,7 +133,7 @@ test("a chat owner's binding picks the winner, even over an earlier claim", asyn
       computerId: 'pc',
       epoch: 1
     })
-    await ownership.bindProvider('owner-b', 'shared', 'claude-chat')
+    chatHolds('owner-b', 'task-b', 'chat-b', 'shared')
 
     expect(await repair()).toEqual([
       {
@@ -120,9 +147,9 @@ test("a chat owner's binding picks the winner, even over an earlier claim", asyn
       { task_id: 'task-a', mode: 'claude-code', conversation_id: 'shared' }
     ])
     // Readers now agree with the binding.
-    expect(await getCurrentConversationId(h.slayDb, 'task-b', 'claude-code')).toBe('shared')
-    expect(await getCurrentConversationId(h.slayDb, 'task-a', 'claude-code')).toBeNull()
+    expect(await current('task-b')).toBe('shared')
+    expect(await current('task-a')).toBeNull()
   } finally {
-    h.cleanup()
+    cleanup()
   }
 })

@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { chromium, test, expect, type Browser, type Page } from '@playwright/test'
+import { attachComputer, scrubbedEnv, until } from '../fixtures/web-shell-computer'
 
 /**
  * The hub's Content-Security-Policy against the REAL web shell bundle in a real
@@ -47,30 +48,6 @@ function freePort(): Promise<number> {
       srv.close(() => resolve(port))
     })
   })
-}
-
-function scrubbedEnv(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v == null) continue
-    if (/^(ELECTRON_|SLAYZONE_)/.test(k)) continue
-    out[k] = v
-  }
-  return out
-}
-
-async function until<T>(fn: () => Promise<T | null> | T | null, label: string): Promise<T> {
-  const deadline = Date.now() + 30_000
-  while (Date.now() < deadline) {
-    try {
-      const v = await fn()
-      if (v != null) return v
-    } catch {
-      /* not yet */
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  throw new Error(`timed out waiting for ${label}`)
 }
 
 interface Hub {
@@ -147,10 +124,10 @@ async function seed(hub: Hub): Promise<void> {
     sql: "INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', 'true')",
     method: 'run'
   })
-  // This hub has no computer, so a project folder has nowhere to live (a folder
-  // belongs to a computer). The terminal only has to render here, so the task gets
-  // its own working folder instead — beside the hub root, never inside it: the
-  // owner gate refuses any path in the hub's own state directory.
+  // The terminal only has to render here: the task gets its own working folder —
+  // beside the hub root, never inside it (the owner gate refuses the hub's own state
+  // directory). A folder lives on a computer (the hub keeps no path, §9 7e), so the
+  // hub's one computer (attachComputer) holds it, set as a user sets it.
   const workDir = fs.mkdtempSync(path.join(hub.scratch, 'project-'))
   const project = await post('/api/projects', { name: 'CSP Project' })
   const task = await post('/api/tasks', {
@@ -158,11 +135,12 @@ async function seed(hub: Hub): Promise<void> {
     title: 'CSP Task',
     agentId: 'terminal'
   })
-  await post('/api/dev/sql', {
-    sql: 'UPDATE tasks SET base_dir = ? WHERE id = ?',
-    params: [workDir, task.data?.id],
-    method: 'run'
+  const r = await fetch(`${hub.base}/api/tasks/${task.data?.id}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ baseDir: workDir })
   })
+  if (!r.ok) throw new Error(`PATCH task baseDir: ${r.status} ${await r.text()}`)
 }
 
 interface Recorder {
@@ -219,6 +197,7 @@ function expectClean(rec: Recorder): void {
 test.describe('web shell under the hub CSP — real hub, real browser', () => {
   let browser: Browser
   const hubs: Hub[] = []
+  const computers: Array<() => Promise<void>> = []
 
   test.beforeAll(async () => {
     browser = await chromium.launch()
@@ -226,6 +205,7 @@ test.describe('web shell under the hub CSP — real hub, real browser', () => {
 
   test.afterAll(async () => {
     await browser.close()
+    for (const stop of computers) await stop()
     for (const hub of hubs) {
       await hub.stop()
       fs.rmSync(hub.scratch, { recursive: true, force: true })
@@ -235,6 +215,7 @@ test.describe('web shell under the hub CSP — real hub, real browser', () => {
   test('login required: load, password sign-in, board and terminal, zero violations', async () => {
     const hub = await spawnHub(true)
     hubs.push(hub)
+    computers.push(await attachComputer(hub, 'e2e-csp-computer'))
     await seed(hub)
     const { page, rec } = await recordingPage(browser, hub)
 
@@ -259,6 +240,7 @@ test.describe('web shell under the hub CSP — real hub, real browser', () => {
   test('login off: PostHog only at the allowed hosts, no remote script, zero violations', async () => {
     const hub = await spawnHub(false)
     hubs.push(hub)
+    computers.push(await attachComputer(hub, 'e2e-csp-computer'))
     await seed(hub)
     const { page, rec } = await recordingPage(browser, hub)
 

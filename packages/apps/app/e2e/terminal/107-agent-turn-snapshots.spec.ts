@@ -25,6 +25,8 @@ const MODE = 'turn-snapshots-e2e'
 test.describe('Agent turn snapshots', () => {
   let repo: string
   let sessionId: string
+  /** The task whose checkout the turn list reads (its path scope, §9 Phase 7b). */
+  let turnTaskId: string
 
   test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
@@ -52,6 +54,7 @@ test.describe('Agent turn snapshots', () => {
     const p = await s.createProject({ name: 'Turn Snapshots', color: '#16a34a', path: repo })
     const t = await s.createTask({ projectId: p.id, title: 'Turn task', status: 'in_progress' })
     sessionId = getMainSessionId(t.id)
+    turnTaskId = t.id
     await mainWindow.evaluate(
       ({ id, m }) => window.getTrpcVanillaClient().task.update.mutate({ id, agentId: m }),
       { id: t.id, m: MODE }
@@ -89,9 +92,8 @@ test.describe('Agent turn snapshots', () => {
         async () =>
           (
             (await mainWindow.evaluate(
-              (worktreePath) =>
-                window.getTrpcVanillaClient().agentTurns.list.query({ worktreePath }),
-              repo
+              ({ taskId }) => window.getTrpcVanillaClient().agentTurns.list.query({ taskId }),
+              { taskId: turnTaskId }
             )) as unknown[]
           ).length,
         { timeout: 20_000 }

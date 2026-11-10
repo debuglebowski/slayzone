@@ -88,6 +88,27 @@ function buildFkInfo(db: Database, table: string): Map<string, FkColInfo> {
   return result
 }
 
+const columnsCache = new WeakMap<Database, Map<string, Set<string>>>()
+/** The columns `table` has in this database. */
+function tableColumns(db: Database, table: string): Set<string> {
+  if (!IMPORT_TABLES.has(table)) throw new Error(`Unknown import table: ${table}`)
+  let byTable = columnsCache.get(db)
+  if (!byTable) {
+    byTable = new Map()
+    columnsCache.set(db, byTable)
+  }
+  let cols = byTable.get(table)
+  if (!cols) {
+    cols = new Set(
+      (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map(
+        (c) => c.name
+      )
+    )
+    byTable.set(table, cols)
+  }
+  return cols
+}
+
 function insertRow(
   db: Database,
   table: string,
@@ -119,7 +140,10 @@ function insertRow(
     }
   }
 
-  const cols = Object.keys(remapped)
+  // Only this schema's columns: a bundle from another version may name columns this
+  // one dropped (e.g. the `*_conversation_id` columns, robustness plan §9).
+  const known = tableColumns(db, table)
+  const cols = Object.keys(remapped).filter((c) => known.has(c))
   const quotedCols = cols.map((c) => (RESERVED_COLUMNS.has(c) ? `"${c}"` : c)).join(', ')
   const placeholders = cols.map(() => '?').join(', ')
   db.prepare(`INSERT INTO ${table} (${quotedCols}) VALUES (${placeholders})`).run(
@@ -127,14 +151,19 @@ function insertRow(
   )
 }
 
+/**
+ * Session ids are the agent's computer's (robustness plan §9): never carried over.
+ * A bundle from an older version may still hold them in `provider_config`.
+ */
 function clearProviderConversationIds(providerConfig: string | null): string | null {
   if (!providerConfig) return providerConfig
   try {
     const parsed = JSON.parse(providerConfig)
     for (const mode of Object.keys(parsed)) {
-      if (parsed[mode]?.conversationId) {
-        parsed[mode].conversationId = null
-      }
+      if (!parsed[mode] || typeof parsed[mode] !== 'object') continue
+      delete parsed[mode].conversationId
+      delete parsed[mode].conversationHistory
+      delete parsed[mode].chatConversationId
     }
     return JSON.stringify(parsed)
   } catch {
@@ -195,17 +224,16 @@ function importBundle(
   // Clean non-portable task fields
   for (const t of data.tasks) {
     t.computer_id = null
-    t.worktree_path = null
+    // Computer paths (worktree, custom folder) never travel (§9 Phase 7d/7e): they live
+    // on a computer of the exporting hub (an older bundle may still name them; their
+    // columns are gone and are dropped below). Neither does where they were.
+    t.has_worktree = 0
+    t.has_base_dir = 0
+    t.worktree_computer_id = null
     t.worktree_parent_branch = null
     t.merge_state = null
     t.merge_context = null
     t.provider_config = clearProviderConversationIds(t.provider_config as string | null)
-    // Clear legacy conversation ID columns too
-    if ('claude_conversation_id' in t) t.claude_conversation_id = null
-    if ('codex_conversation_id' in t) t.codex_conversation_id = null
-    if ('cursor_conversation_id' in t) t.cursor_conversation_id = null
-    if ('gemini_conversation_id' in t) t.gemini_conversation_id = null
-    if ('opencode_conversation_id' in t) t.opencode_conversation_id = null
   }
 
   const fkInfoByTable = new Map<string, Map<string, FkColInfo>>()

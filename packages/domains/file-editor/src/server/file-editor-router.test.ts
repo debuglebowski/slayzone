@@ -13,11 +13,11 @@ import { fileEditorRouter } from './file-editor-router.js'
 import { setWorkspaceDeps } from './workspace-deps.js'
 import { createLocalWorkspaceFsAdapters } from './workspace-fs.js'
 
-// The local implementation under test (what a computer runs); a hub's default is
-// "connect a computer".
+// The local implementation under test (what a computer runs), behind a "computer"
+// the scope resolves to. Every call names its path scope (§9 Phase 7b): a project.
 setWorkspaceDeps({
   fs: createLocalWorkspaceFsAdapters(),
-  resolveComputer: async () => null,
+  resolveComputer: async () => 'c1',
   isLocalComputer: () => true
 })
 
@@ -46,7 +46,7 @@ const didThrow = async (fn: () => Promise<unknown>): Promise<boolean> => {
 }
 
 test('file-editor router: readDir sorts dirs first, hard-filters .git, FLAGS gitignored, lists subdir, empty for missing', async () => {
-  const entries = (await caller.readDir({ rootPath, dirPath: '' })) as {
+  const entries = (await caller.readDir({ projectId: 'p1', rootPath, dirPath: '' })) as {
     name: string
     type: string
     ignored?: boolean
@@ -63,26 +63,32 @@ test('file-editor router: readDir sorts dirs first, hard-filters .git, FLAGS git
   expect(entries.find((e) => e.name === 'node_modules')?.ignored).toBe(true)
   expect(entries.find((e) => e.name === 'debug.log')?.ignored).toBe(true)
 
-  const sub = (await caller.readDir({ rootPath, dirPath: 'src' })) as { name: string }[]
+  const sub = (await caller.readDir({ projectId: 'p1', rootPath, dirPath: 'src' })) as {
+    name: string
+  }[]
   expect(sub.map((e) => e.name)).toContain('main.ts')
   expect(sub.map((e) => e.name)).toContain('utils.ts')
 
-  expect(await caller.readDir({ rootPath, dirPath: 'missing-dir' })).toEqual([])
+  expect(await caller.readDir({ projectId: 'p1', rootPath, dirPath: 'missing-dir' })).toEqual([])
 })
 
 test('file-editor router: readFile content + rejects traversal', async () => {
-  const result = (await caller.readFile({ rootPath, filePath: 'readme.md' })) as { content: string }
+  const result = (await caller.readFile({ projectId: 'p1', rootPath, filePath: 'readme.md' })) as {
+    content: string
+  }
   expect(result.content).toBe('# Hello')
-  expect(await didThrow(() => caller.readFile({ rootPath, filePath: '../../../etc/passwd' }))).toBe(
-    true
-  )
+  expect(
+    await didThrow(() =>
+      caller.readFile({ projectId: 'p1', rootPath, filePath: '../../../etc/passwd' })
+    )
+  ).toBe(true)
 })
 
 // Whole-tree reads are capped at the transport layer now that they cross a wire,
 // so the shape is `{ files, truncated }` — the flag has to reach the caller or a
 // partial tree reads as the complete one.
 test('file-editor router: listAllFiles recursive, excludes ignored', async () => {
-  const { files, truncated } = await caller.listAllFiles({ rootPath })
+  const { files, truncated } = await caller.listAllFiles({ projectId: 'p1', rootPath })
   expect(files).toContain('readme.md')
   expect(files).toContain('src/main.ts')
   expect(files).toContain('src/utils.ts')
@@ -92,40 +98,61 @@ test('file-editor router: listAllFiles recursive, excludes ignored', async () =>
 })
 
 test('file-editor router: writeFile mutates disk', async () => {
-  await caller.writeFile({ rootPath, filePath: 'readme.md', content: '# Updated' })
+  await caller.writeFile({ projectId: 'p1', rootPath, filePath: 'readme.md', content: '# Updated' })
   expect(fs.readFileSync(path.join(rootPath, 'readme.md'), 'utf-8')).toBe('# Updated')
 })
 
 test('file-editor router: createFile new / rejects existing / creates parent dirs', async () => {
-  await caller.createFile({ rootPath, filePath: 'new-file.txt' })
+  await caller.createFile({ projectId: 'p1', rootPath, filePath: 'new-file.txt' })
   expect(fs.existsSync(path.join(rootPath, 'new-file.txt'))).toBe(true)
-  expect(await didThrow(() => caller.createFile({ rootPath, filePath: 'readme.md' }))).toBe(true)
-  await caller.createFile({ rootPath, filePath: 'deep/nested/file.txt' })
+  expect(
+    await didThrow(() => caller.createFile({ projectId: 'p1', rootPath, filePath: 'readme.md' }))
+  ).toBe(true)
+  await caller.createFile({ projectId: 'p1', rootPath, filePath: 'deep/nested/file.txt' })
   expect(fs.existsSync(path.join(rootPath, 'deep', 'nested', 'file.txt'))).toBe(true)
 })
 
 test('file-editor router: createDir single + nested', async () => {
-  await caller.createDir({ rootPath, dirPath: 'new-dir' })
+  await caller.createDir({ projectId: 'p1', rootPath, dirPath: 'new-dir' })
   expect(fs.statSync(path.join(rootPath, 'new-dir')).isDirectory()).toBe(true)
-  await caller.createDir({ rootPath, dirPath: 'a/b/c' })
+  await caller.createDir({ projectId: 'p1', rootPath, dirPath: 'a/b/c' })
   expect(fs.statSync(path.join(rootPath, 'a', 'b', 'c')).isDirectory()).toBe(true)
 })
 
 test('file-editor router: rename file + rejects traversal', async () => {
-  await caller.rename({ rootPath, oldPath: 'new-file.txt', newPath: 'renamed.txt' })
+  await caller.rename({
+    projectId: 'p1',
+    rootPath,
+    oldPath: 'new-file.txt',
+    newPath: 'renamed.txt'
+  })
   expect(fs.existsSync(path.join(rootPath, 'renamed.txt'))).toBe(true)
   expect(fs.existsSync(path.join(rootPath, 'new-file.txt'))).toBe(false)
   expect(
     await didThrow(() =>
-      caller.rename({ rootPath, oldPath: 'renamed.txt', newPath: '../../escape.txt' })
+      caller.rename({
+        projectId: 'p1',
+        rootPath,
+        oldPath: 'renamed.txt',
+        newPath: '../../escape.txt'
+      })
     )
   ).toBe(true)
 })
 
 test('file-editor router: delete file + dir recursive + rejects traversal', async () => {
-  await caller.delete({ rootPath, targetPath: 'renamed.txt' })
+  await caller.delete({ projectId: 'p1', rootPath, targetPath: 'renamed.txt' })
   expect(fs.existsSync(path.join(rootPath, 'renamed.txt'))).toBe(false)
-  await caller.delete({ rootPath, targetPath: 'a' })
+  await caller.delete({ projectId: 'p1', rootPath, targetPath: 'a' })
   expect(fs.existsSync(path.join(rootPath, 'a'))).toBe(false)
-  expect(await didThrow(() => caller.delete({ rootPath, targetPath: '../../danger' }))).toBe(true)
+  expect(
+    await didThrow(() => caller.delete({ projectId: 'p1', rootPath, targetPath: '../../danger' }))
+  ).toBe(true)
+})
+
+test('file-editor router: a call naming no task or project is refused (never routed by its path)', async () => {
+  expect(await didThrow(() => caller.readDir({ rootPath, dirPath: '' } as never))).toBe(true)
+  expect(await didThrow(() => caller.readFile({ rootPath, filePath: 'readme.md' } as never))).toBe(
+    true
+  )
 })

@@ -11,7 +11,9 @@ import type { DetectedWorktree, GhPullRequest } from '../shared/types'
 export function mapPrsToTasks(
   prs: GhPullRequest[],
   tasks: Task[],
-  worktrees: DetectedWorktree[]
+  worktrees: DetectedWorktree[],
+  /** A task's worktree path as its computer answered; undefined = not known (yet). */
+  worktreeOf: (task: Task) => string | undefined
 ): Map<string, Task> {
   const map = new Map<string, Task>()
   for (const task of tasks) {
@@ -21,8 +23,9 @@ export function mapPrsToTasks(
   const branchByPath = new Map(worktrees.map((w) => [w.path, w.branch]))
   const tasksByBranch = new Map<string, Task[]>()
   for (const task of tasks) {
-    if (task.pr_url || !task.worktree_path) continue
-    const branch = branchByPath.get(task.worktree_path)
+    const worktreePath = task.pr_url ? undefined : worktreeOf(task)
+    if (!worktreePath) continue
+    const branch = branchByPath.get(worktreePath)
     if (!branch) continue
     tasksByBranch.set(branch, [...(tasksByBranch.get(branch) ?? []), task])
   }

@@ -1,6 +1,10 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 import { createChatThreadStore, type ChatThreadStore } from '../chat-threads-store'
-import { recordedProjectRoot } from '@slayzone/computers/server'
+import { recordedProjectRoot, resolveTaskComputerId } from '@slayzone/computers/server'
 import type { RecordConversationInput, TaskSessionStore } from './task-session-store'
 import {
   persistChatEvent,
@@ -237,6 +241,8 @@ export function createDbAttachmentLookup(db: SlayzoneDb): AttachmentLookup {
       return new Map(rows.map((r) => [r.id, { taskId: r.task_id, contentHash: r.content_hash }]))
     },
     queued: async (tabId, exceptId) => {
+      // No legacy queue once every chat migrated (§9 Phase 8): nothing queued here.
+      if (!(await legacyChatTables(db))) return []
       const rows = await db.all<{ id: string; content: string | null }>(
         `SELECT id, content FROM chat_queue WHERE tab_id = ? AND content IS NOT NULL`,
         [tabId]
@@ -281,6 +287,15 @@ const PATCH_PROVIDER_CONFIG_SQL = `UPDATE tasks SET provider_config = (
 ) WHERE id = ?`
 
 export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore): ChatDataOps {
+  /** The computer a task's chat runs on — the one holding its sessions. */
+  const ledgerComputer = async (taskId: string): Promise<string | null> => {
+    const row = await db.get<{ computer_id: string | null }>(
+      `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
+         FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
+      [taskId]
+    )
+    return row?.computer_id ?? null
+  }
   const readEntry = async (taskId: string, mode: string): Promise<ProviderConfigEntry> => {
     const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
       | { provider_config: string | null }
@@ -389,13 +404,15 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return row?.value || null
     },
 
-    recordConversation: (input) => taskStore.recordConversation(db, input),
+    // The session ledger lives on the computer holding the task's sessions.
+    recordConversation: async (input) =>
+      taskStore.recordConversation(await ledgerComputer(input.taskId), input),
 
-    isHonoredConversation: (taskId, mode, conversationId) =>
-      taskStore.isHonoredConversation(db, taskId, mode, conversationId),
+    isHonoredConversation: async (taskId, mode, conversationId) =>
+      taskStore.isHonoredConversation(await ledgerComputer(taskId), taskId, mode, conversationId),
 
-    getCurrentConversationId: (taskId, mode) =>
-      taskStore.getCurrentConversationId(db, taskId, mode),
+    getCurrentConversationId: async (taskId, mode) =>
+      taskStore.getCurrentConversationId(await ledgerComputer(taskId), taskId, mode),
 
     bumpLastInteraction: async (taskId, now) => {
       const res = await db
@@ -407,6 +424,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     },
 
     persistChatEvent: async (tabId, seq, event, at) => {
+      if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError('chat event')
       if (event.kind === 'user-message' && event.id) {
         const attachments = userMessageAttachments(event.content ?? [])
         if (attachments.length) {
@@ -422,7 +440,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     loadChatEvents: (tabId) => loadChatEvents(db, tabId),
     loadUserMessageContent: async (taskId, ids) => {
       const result = new Map<string, UserContentBlock[]>()
-      if (ids.length === 0) return result
+      if (ids.length === 0 || !(await legacyChatTables(db))) return result
       const archived = (await db
         .prepare(`SELECT message_id, attachments FROM chat_attachment_messages
         WHERE task_id = ? AND message_id IN (${ids.map(() => '?').join(',')})`)
@@ -442,6 +460,7 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
     getNextSeqForTab: (tabId) => getNextSeqForTab(db, tabId),
 
     clearChatEventsForTab: async (tabId) => {
+      if (!(await legacyChatTables(db))) return
       await clearChatEventsForTab(db, tabId)
       await db.prepare('DELETE FROM chat_workspace_changes WHERE tab_id=?').run(tabId)
       await db.prepare('DELETE FROM chat_legacy_tab_computers WHERE tab_id=?').run(tabId)
@@ -472,19 +491,9 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return buildMcpEnv(db, taskId, mode as AgentId, undefined, remote)
     },
 
-    resolveComputerId: async (taskId) => {
-      // Task pin over project default — IDENTICAL to `resolveTaskComputerId` in
-      // the computers store. Divergence here would route a chat agent and a
-      // terminal agent for the SAME task to different computers.
-      const row = await db.get<{ computer_id: string | null }>(
-        `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
-           FROM tasks t
-           LEFT JOIN projects p ON p.id = t.project_id
-          WHERE t.id = ?`,
-        [taskId]
-      )
-      return row?.computer_id ?? null
-    },
+    // The ONE statement `resolveTaskComputerId` uses: a chat agent and a terminal agent
+    // of the same task never land on different computers.
+    resolveComputerId: (taskId) => resolveTaskComputerId(db, taskId),
 
     getTaskProjectId: async (taskId) => {
       const row = await db.get<{ project_id: string | null }>(

@@ -1,6 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { openTaskTerminal, switchAgent } from '../fixtures/terminal'
+import { openTaskTerminal, switchAgent, currentSession, seedSession } from '../fixtures/terminal'
 import type { ElectronApplication, Page } from '@playwright/test'
 
 // Simulate a native menu accelerator by invoking the real menu item from the
@@ -130,22 +130,12 @@ test.describe('Agent switching', () => {
   })
 
   test('conversation IDs cleared on mode switch', async ({ mainWindow }) => {
-    await mainWindow.evaluate(
-      (id) =>
-        window.getTrpcVanillaClient().task.update.mutate({
-          id,
-          claudeConversationId: 'fake-convo-123',
-          codexConversationId: 'fake-codex-456'
-        }),
-      taskId
-    )
+    await seedSession(mainWindow, taskId, 'claude-code', 'fake-convo-123')
+    await seedSession(mainWindow, taskId, 'codex', 'fake-codex-456')
     await switchAgent(mainWindow, 'codex')
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      taskId
-    )
-    expect(task?.claude_conversation_id).toBeNull()
-    expect(task?.codex_conversation_id).toBeNull()
+    // The main tab reset on the computer: no session resumes.
+    expect(await currentSession(mainWindow, taskId, 'claude-code')).toBeNull()
+    expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
   })
 
   test('switching back to a mode restores that mode default flags', async ({ mainWindow }) => {

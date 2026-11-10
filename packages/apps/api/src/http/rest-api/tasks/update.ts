@@ -1,7 +1,12 @@
 import type { Express } from 'express'
 import { TRPCError } from '@trpc/server'
 import { updateTaskInputSchema, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
-import { getTaskOp, switchMainAgentMode, updateTaskOp } from '@slayzone/task/server'
+import {
+  getTaskOp,
+  switchMainAgentMode,
+  TaskFoldersUnavailableError,
+  updateTaskOp
+} from '@slayzone/task/server'
 import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
@@ -155,7 +160,11 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: updated })
     } catch (err) {
-      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      // A path no connected computer can take now (§9 7e): the caller can fix it.
+      const status = err instanceof TaskFoldersUnavailableError ? 409 : 500
+      res
+        .status(status)
+        .json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
 }

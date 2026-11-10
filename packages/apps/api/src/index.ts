@@ -125,7 +125,9 @@ export {
   type Ownership,
   type ResourceKind,
   requestComputerOf,
-  setHubDiskComputer
+  setHubDiskComputer,
+  setHubDiskTaskRoots,
+  type TaskRoot
 } from './access'
 export {
   TRPC_OWNER_POLICY,

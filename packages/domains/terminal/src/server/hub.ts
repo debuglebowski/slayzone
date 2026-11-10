@@ -48,7 +48,12 @@ export {
   setPtyDeps
 } from './pty-router-deps'
 export { createDbChatDataOps } from './runtime/chat-data-ops'
-export { defaultConversationRegistry, releaseConversation } from './runtime/live-conversations'
+export {
+  defaultConversationRegistry,
+  releaseConversation,
+  liveConversationSession,
+  conversationInOtherTabMessage
+} from './runtime/live-conversations'
 export {
   locateClaudeTranscripts,
   setClaudeTranscriptLocator

@@ -20,7 +20,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ComputerTransportErrorCodes,
   HubToComputerMethods,
@@ -30,6 +30,7 @@ import { type ComputerConfig, loadComputerConfig } from './config'
 import { setProtectedPaths } from './path-jail'
 import { reloadLocalRoots } from './handlers/computer-config'
 import type { ComputerDialer } from './handlers/types'
+import { projectScopedDeps } from './project-scope.fixture'
 import { createHubRequestHandler, startComputer } from './main'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 
@@ -76,13 +77,14 @@ function configWith(roots: string[], hubMayEditRoots = false): ComputerConfig {
   }
 }
 
-function dispatchFor(config: ComputerConfig) {
+function dispatchFor(config: ComputerConfig, folders: Record<string, string> = {}) {
   return createHubRequestHandler({
     shutdown: () => {},
     dialer,
     config,
     requestLog: log,
-    hubHost: 'hub.example.com'
+    hubHost: 'hub.example.com',
+    ...projectScopedDeps(folders)
   })
 }
 
@@ -205,13 +207,19 @@ describe('folder limits stay local', () => {
     const project = join(dir, 'Volumes-project')
     mkdirSync(project)
     const config = configWith([root], true)
-    const dispatch = dispatchFor(config)
+    const dispatch = dispatchFor(config, { p1: project })
     try {
       // Outside the jail first: refused.
       const before = await rejection(
         dispatch.handle(
           HubToComputerMethods.ptySpawn,
-          { sessionId: 's-1', command: '/bin/sh', args: ['-c', 'exit 0'], cwd: project },
+          {
+            sessionId: 's-1',
+            projectId: 'p1',
+            command: '/bin/sh',
+            args: ['-c', 'exit 0'],
+            cwd: project
+          },
           { userId: null, route: null }
         )
       )
@@ -226,7 +234,13 @@ describe('folder limits stay local', () => {
 
       const spawned = (await dispatch.handle(
         HubToComputerMethods.ptySpawn,
-        { sessionId: 's-2', command: '/bin/sh', args: ['-c', 'exit 0'], cwd: project },
+        {
+          sessionId: 's-2',
+          projectId: 'p1',
+          command: '/bin/sh',
+          args: ['-c', 'exit 0'],
+          cwd: project
+        },
         { userId: null, route: null }
       )) as { pid: number }
       expect(typeof spawned.pid).toBe('number')
@@ -349,12 +363,18 @@ describe('local request log', () => {
 describe('processes start inside the jail', () => {
   it('refuses a proc.spawn and a pty.spawn whose cwd is outside allowedRoots, and logs it', async () => {
     const config = configWith([root])
-    const dispatch = dispatchFor(config)
+    const dispatch = dispatchFor(config, { p1: dir })
     try {
       const proc = await rejection(
         dispatch.handle(
           HubToComputerMethods.procSpawn,
-          { sessionId: 'p-1', command: '/bin/sh', args: ['-c', 'exit 0'], cwd: dir },
+          {
+            sessionId: 'p-1',
+            projectId: 'p1',
+            command: '/bin/sh',
+            args: ['-c', 'exit 0'],
+            cwd: dir
+          },
           ACTOR
         )
       )
@@ -362,7 +382,7 @@ describe('processes start inside the jail', () => {
       const pty = await rejection(
         dispatch.handle(
           HubToComputerMethods.ptyWarmSpawn,
-          { warmId: 'w-1', command: '/bin/sh', cwd: '/' },
+          { warmId: 'w-1', projectId: 'p1', command: '/bin/sh', cwd: '/' },
           ACTOR
         )
       )
@@ -373,16 +393,99 @@ describe('processes start inside the jail', () => {
     }
   })
 
-  it('starts a cwd-less process in the first allowed root, not the launch directory', async () => {
-    const config = configWith([root])
-    const dispatch = dispatchFor(config)
+  it("starts a cwd-less project spawn in that project's folder; an unplaced project asks to be placed", async () => {
+    const project = join(root, 'proj')
+    mkdirSync(project)
+    const dispatch = dispatchFor(configWith([root]), { p1: project })
     try {
+      const out = join(project, 'where.txt')
       const res = (await dispatch.handle(
         HubToComputerMethods.procSpawn,
-        { sessionId: 'p-2', command: 'pwd', shell: true },
+        { sessionId: 'p-4', projectId: 'p1', command: `pwd > ${out}`, shell: true },
         ACTOR
       )) as { pid: number | null }
       expect(res.pid).not.toBeNull()
+      await vi.waitFor(() => expect(readFileSync(out, 'utf8').trim()).toBe(realpathSync(project)))
+      const err = await rejection(
+        dispatch.handle(
+          HubToComputerMethods.procSpawn,
+          { sessionId: 'p-5', projectId: 'p2', command: 'pwd', shell: true },
+          ACTOR
+        )
+      )
+      expect(err.code).toBe(ComputerTransportErrorCodes.projectNotPlaced)
+      // Another project's folder, inside the machine bound: not this spawn's to start in.
+      const other = join(root, 'other')
+      mkdirSync(other)
+      const foreign = await rejection(
+        dispatch.handle(
+          HubToComputerMethods.procSpawn,
+          { sessionId: 'p-6', projectId: 'p1', command: 'pwd', shell: true, cwd: other },
+          ACTOR
+        )
+      )
+      expect(foreign.code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+      expect(foreign.message).toMatch(/outside the folders of project p1/)
+    } finally {
+      dispatch.dispose()
+    }
+  })
+
+  it('refuses a spawn that names no task or project (§9 Phase 7c), cwd or not', async () => {
+    const config = configWith([root])
+    const dispatch = dispatchFor(config)
+    try {
+      for (const params of [
+        { sessionId: 'p-2', command: 'pwd', shell: true },
+        { sessionId: 'p-3', command: 'pwd', shell: true, cwd: root }
+      ]) {
+        const err = await rejection(dispatch.handle(HubToComputerMethods.procSpawn, params, ACTOR))
+        expect(err.code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+        expect(err.message).toMatch(/names no task or project/)
+      }
+    } finally {
+      dispatch.dispose()
+    }
+  })
+})
+
+describe('chat paths wait for the project folder map (§9 Phase 7c)', () => {
+  it('a chat folder list sent while the map is still loading is judged once it loads, not refused', async () => {
+    const project = join(root, 'proj')
+    mkdirSync(project)
+    const deps = projectScopedDeps({ p1: project })
+    let loaded = false
+    let markReady!: () => void
+    const projectPathsReady = new Promise<void>((resolve) => {
+      markReady = () => {
+        loaded = true
+        resolve()
+      }
+    })
+    const dispatch = createHubRequestHandler({
+      shutdown: () => {},
+      dialer,
+      config: configWith([root]),
+      requestLog: log,
+      hubHost: 'hub.example.com',
+      ...deps,
+      // At computer boot the map is one async file read away: nothing placed yet.
+      getProjectPaths: () => (loaded ? deps.getProjectPaths() : null),
+      projectPathsReady
+    })
+    try {
+      const pending = dispatch.handle(
+        HubToComputerMethods.chatRequest,
+        {
+          kind: 'catalog',
+          method: 'listFiles',
+          args: [project, ''],
+          scope: { taskId: 't1', projectId: 'p1' }
+        },
+        ACTOR
+      )
+      setTimeout(markReady, 20)
+      await expect(pending).resolves.toBeDefined()
     } finally {
       dispatch.dispose()
     }

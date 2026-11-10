@@ -4,7 +4,8 @@ import {
   seed,
   TEST_PROJECT_PATH,
   resetApp,
-  ensureGitRepo
+  ensureGitRepo,
+  taskWithPaths
 } from '../fixtures/electron'
 import path from 'path'
 
@@ -48,10 +49,7 @@ test.describe('Auto worktree on task create', () => {
     const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-          created.id
-        )
+        const task = await taskWithPaths(mainWindow, created.id)
         return task?.worktree_path ?? null
       })
       .toBe(
@@ -77,10 +75,7 @@ test.describe('Auto worktree on task create', () => {
       status: 'todo'
     })
 
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      created.id
-    )
+    const task = await taskWithPaths(mainWindow, created.id)
     expect(task?.worktree_path).toBeNull()
   })
 
@@ -109,10 +104,7 @@ test.describe('Auto worktree on task create', () => {
     const projectFolder = path.basename(TEST_PROJECT_PATH)
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-          created.id
-        )
+        const task = await taskWithPaths(mainWindow, created.id)
         return task?.worktree_path ?? null
       })
       .toBe(

@@ -21,8 +21,36 @@ import {
   configureTaskRuntimeAdapters,
   maybeAutoCreateWorktree,
   type WorktreeExecAdapters,
-  type WorktreePolicyAdapters
+  type WorktreePolicyAdapters,
+  setTaskPathsDelegate
 } from './shared.js'
+
+/**
+ * The computer holding each task's folders (§9 7e: the hub keeps only whether a
+ * worktree is set): this test's stand-in, reached through the task-paths delegate.
+ */
+const held = new Map<string, string>()
+const hold = (taskId: string, path: string | null | undefined) => {
+  if (path === undefined) return
+  if (path) held.set(taskId, path)
+  else held.delete(taskId)
+}
+setTaskPathsDelegate({
+  changed: async (taskId, change) => {
+    if (change.op === 'set') hold(taskId, change.worktreePath)
+    else if (change.op === 'clear') held.delete(taskId)
+    else hold(taskId, held.get(change.parentTaskId) ?? null)
+  },
+  apply: async (taskId, patch) => hold(taskId, patch.worktreePath),
+  read: async () => ({}),
+  release: async (taskId, live) => {
+    const own = held.get(taskId) ?? null
+    const shared =
+      own !== null && [...held].some(([id, p]) => id !== taskId && p === own && live.includes(id))
+    return { worktreePath: own, shared, computerId: 'c' }
+  },
+  forget: async () => undefined
+})
 
 type Harness = Awaited<ReturnType<typeof createTestHarness>>
 
@@ -60,11 +88,14 @@ const seedTask = (h: Harness, id: string, pid: string, title: string): void => {
 const taskRow = (
   h: Harness,
   id: string
-): { worktree_path: string | null; worktree_parent_branch: string | null } =>
-  h.db.prepare('SELECT worktree_path, worktree_parent_branch FROM tasks WHERE id = ?').get(id) as {
-    worktree_path: string | null
-    worktree_parent_branch: string | null
-  }
+): { worktree_path: string | null; worktree_parent_branch: string | null } => ({
+  worktree_path: held.get(id) ?? null,
+  worktree_parent_branch: (
+    h.db.prepare('SELECT worktree_parent_branch FROM tasks WHERE id = ?').get(id) as {
+      worktree_parent_branch: string | null
+    }
+  ).worktree_parent_branch
+})
 
 /** Full fake set (override contract: complete object). Mutating exec ops
  *  (create/remove/setup/copy/removeArtifactDir) record into `calls` so ordering
@@ -92,8 +123,6 @@ const makeFakes = (
   },
   getCurrentBranch: async () => 'main',
   isGitRepo: async () => true,
-  getWorktreeColor: () => undefined,
-  ensureProjectWorktreeColors: async () => new Map(),
   pathExists: () => false,
   hubPathExists: () => false,
   removeArtifactDir: () => {
@@ -230,7 +259,9 @@ test('cleanupTaskFull: shared-worktree guard skips removal, batchIds unblocks it
   seedTask(h, taskA, projectId, 'Shared A')
   seedTask(h, taskB, projectId, 'Shared B')
   const sharedWt = '/tmp/wt/shared-' + taskA.slice(0, 8)
-  h.db.prepare('UPDATE tasks SET worktree_path = ? WHERE id IN (?, ?)').run(sharedWt, taskA, taskB)
+  h.db.prepare('UPDATE tasks SET has_worktree = 1 WHERE id IN (?, ?)').run(taskA, taskB)
+  held.set(taskA, sharedWt)
+  held.set(taskB, sharedWt)
   const projectPath = (
     h.db.prepare('SELECT path FROM projects WHERE id = ?').get(projectId) as { path: string }
   ).path

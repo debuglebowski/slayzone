@@ -14,6 +14,8 @@ const row = (conversationId: string, over: Partial<TaskSessionRow> = {}): TaskSe
   messageCount: 1,
   firstPrompt: conversationId,
   isCurrent: false,
+  ownerTabId: 'task',
+  currentInOtherTab: false,
   ...over
 })
 

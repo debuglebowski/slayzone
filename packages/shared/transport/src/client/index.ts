@@ -49,6 +49,7 @@ export {
   type DirectLinkManagerOptions,
   type DirectRtcPeerFactory
 } from './direct-link'
+export { readTaskData, type TaskDataReadResult } from './direct-task-data'
 export {
   keepDirectLease,
   type DirectLeaseKeeper,
@@ -96,6 +97,7 @@ export { hubAllows, hubPermitsTelemetry } from './hubCapabilities'
 export { useHubRegistryStore } from './hubRegistryStore'
 export {
   useHubOwnershipStore,
+  getClientForHub,
   getHubIdForProject,
   getHubIdForTask,
   useHubIdForProject,

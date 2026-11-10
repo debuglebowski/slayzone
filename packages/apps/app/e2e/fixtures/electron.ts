@@ -1057,28 +1057,157 @@ export const test = base.extend<ElectronFixtures, ElectronWorkerFixtures>({
 })
 
 /**
- * Record that `conversationId` took its first turn — the `session_turns` proof
- * (migration v158) the real agent-hook path writes when the user first prompts.
+ * Record that `conversationId` took its first turn — the resumability proof the
+ * real agent-hook path writes when the user first prompts — on the session ledger
+ * of the task's computer (robustness plan §9).
  *
- * A claude-code id stored via `task.update` lands as `slay-spawned-fresh`, which
- * for a turn-tracked agent is UNPROVEN: Claude writes its transcript only at the
- * first turn, so the app (correctly) never resumes it — `existingConversationId`
- * stays null. A spec asserting resume of a seeded claude id must call this to
- * build the state a real prompted session leaves behind.
+ * A claude-code session recorded fresh is UNPROVEN: Claude writes its transcript
+ * only at the first turn, so the app (correctly) never resumes it. A spec asserting
+ * resume of a seeded claude id must call this to build the state a real prompted
+ * session leaves behind.
  */
-export function proveConversationTurn(
-  electronApp: ElectronApplication,
+export async function proveConversationTurn(
+  page: Page,
+  taskId: string,
   conversationId: string
 ): Promise<void> {
-  return electronApp.evaluate(async ({}, conv) => {
-    const db = (globalThis as Record<string, unknown>).__db as {
-      run: (sql: string, params?: unknown[]) => Promise<unknown>
-    }
-    await db.run(
-      `INSERT OR IGNORE INTO session_turns (conversation_id, first_turn_at) VALUES (?, ?)`,
-      [conv, Date.now()]
-    )
-  }, conversationId)
+  await page.evaluate(
+    ({ taskId, conversationId }) =>
+      window.getTrpcVanillaClient().agentSessions.testLedger.mutate({
+        taskId,
+        op: 'markSessionFirstTurn',
+        args: { conversationId }
+      }),
+    { taskId, conversationId }
+  )
+}
+
+/**
+ * A task's worktree path and custom folder as its computer holds them (robustness plan
+ * §9, Phase 7d: task rows carry no path). Null fields: unset. Throws while the
+ * computer is away, so a poll keeps polling.
+ */
+export async function taskPaths(
+  page: Page,
+  taskId: string
+): Promise<{ worktreePath: string | null; baseDir: string | null }> {
+  const answer = (await page.evaluate(
+    (id) => window.getTrpcVanillaClient().task.paths.query({ taskIds: [id] }),
+    taskId
+  )) as Record<string, { state: string; worktreePath?: string | null; baseDir?: string | null }>
+  const state = answer[taskId]
+  if (state?.state !== 'ok') throw new Error(`paths of ${taskId}: computer away`)
+  return { worktreePath: state.worktreePath ?? null, baseDir: state.baseDir ?? null }
+}
+
+/** `task.get` plus its paths from the computer (`worktree_path` / `base_dir`, as rows had). */
+export async function taskWithPaths(page: Page, taskId: string) {
+  const task = await page.evaluate(
+    (id) => window.getTrpcVanillaClient().task.get.query({ id }),
+    taskId
+  )
+  if (!task) return null
+  const paths = await taskPaths(page, taskId)
+  return { ...task, worktree_path: paths.worktreePath, base_dir: paths.baseDir }
+}
+
+/** One conversation ledger row as the task's computer holds it (`listConversations`). */
+export interface LedgerConversation {
+  id: string
+  conversationId: string | null
+  origin: string
+  tabId: string
+  createdAt: number
+}
+
+/**
+ * The task's conversation ledger of `mode` (optionally one tab), oldest first, read
+ * from the computer that holds it (robustness plan §9 — the hub has no copy).
+ */
+export function ledgerConversations(
+  page: Page,
+  taskId: string,
+  mode: string,
+  tabId?: string
+): Promise<LedgerConversation[]> {
+  return page.evaluate(
+    ({ taskId, mode, tabId }) =>
+      window.getTrpcVanillaClient().agentSessions.testLedger.mutate({
+        taskId,
+        op: 'listConversations',
+        args: { taskId, mode, ...(tabId ? { tabId } : {}) }
+      }),
+    { taskId, mode, tabId }
+  ) as Promise<LedgerConversation[]>
+}
+
+/** The newest ledger row of a task's mode (optionally only `origin`), or null. */
+export async function lastLedgerConversation(
+  page: Page,
+  taskId: string,
+  mode: string,
+  origin?: string
+): Promise<{ origin: string; conv: string | null } | null> {
+  const rows = (await ledgerConversations(page, taskId, mode)).filter(
+    (r) => !origin || r.origin === origin
+  )
+  const last = rows[rows.length - 1]
+  return last ? { origin: last.origin, conv: last.conversationId } : null
+}
+
+/** Session rows (warm pool included) on the computer of `taskId`, by status and/or id. */
+export function ledgerAgentSessions(
+  page: Page,
+  taskId: string,
+  filter: { status?: 'pooled' | 'bound' | 'dead'; id?: string }
+): Promise<
+  Array<{ id: string; taskId: string | null; status: string; conversationId: string | null }>
+> {
+  return page.evaluate(
+    ({ taskId, filter }) =>
+      window.getTrpcVanillaClient().agentSessions.testLedger.mutate({
+        taskId,
+        op: 'listAgentSessions',
+        args: filter
+      }),
+    { taskId, filter }
+  ) as Promise<
+    Array<{ id: string; taskId: string | null; status: string; conversationId: string | null }>
+  >
+}
+
+/**
+ * Record an older, already-prompted session of `mode` in the task's ledger on its
+ * computer — the state a past agent run leaves behind (resumable, with a first turn).
+ */
+export async function seedLedgerSession(
+  page: Page,
+  taskId: string,
+  s: { mode: string; conversationId: string; createdAt: number; tabId?: string }
+): Promise<void> {
+  await page.evaluate(
+    async ({ taskId, s }) => {
+      const client = window.getTrpcVanillaClient()
+      await client.agentSessions.testLedger.mutate({
+        taskId,
+        op: 'recordConversation',
+        args: {
+          taskId,
+          mode: s.mode,
+          ...(s.tabId ? { tabId: s.tabId } : {}),
+          conversationId: s.conversationId,
+          origin: 'slay-spawned-fresh',
+          createdAt: s.createdAt
+        }
+      })
+      await client.agentSessions.testLedger.mutate({
+        taskId,
+        op: 'markSessionFirstTurn',
+        args: { conversationId: s.conversationId }
+      })
+    },
+    { taskId, s }
+  )
 }
 
 /** Seed helpers — use the vanilla tRPC client to create test data without UI interaction. */

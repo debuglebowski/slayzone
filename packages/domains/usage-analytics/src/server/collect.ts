@@ -2,7 +2,7 @@
  * `@slayzone/usage-analytics/collect`: parse the agents' usage logs on THIS machine
  * (`~/.claude`, `~/.codex`, OpenCode, Qwen) from the given cursors — only what is
  * new since each file's last offset. The computer runs it for the hub
- * (`usage.collect`); the hub runs it itself only with no computer routing.
+ * (`usage.collect`, collector.ts), from the cursors it keeps itself.
  *
  * Lean: fs + readline only — no DB.
  */
@@ -12,6 +12,16 @@ import { parseOpenCodeFiles } from './parsers/opencode'
 import { parseQwenFiles } from './parsers/qwen'
 
 export type { ParseResult }
+export {
+  createUsageCollector,
+  DEFAULT_PAGE_BYTES,
+  pageUsage,
+  type UsageCollectEntry,
+  type UsageCollectPage,
+  type UsageCollectRequest,
+  type UsageCollectResponse,
+  type UsageCursorStore
+} from './collector'
 
 /** Per log file: where the last parse stopped, and the mtime it saw then. */
 export type UsageCursors = Record<string, { offset: number; modifiedMs: number }>

@@ -19,6 +19,24 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage } from './storage'
 import { createLocalChatData, type ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
+import { createComputerTaskData, type DataImportKinds } from './task-data'
+import { createSessionLedgerService } from './session-ledger-service'
+import type { ConversationHealIo } from './conversation-heal'
+import { sessionLedgerImports } from './session-ledger-imports'
+import { historyImports } from './history-imports'
+import { createTaskPaths, taskPathImport } from './task-paths'
+import { createAgentTurns, type TurnGit } from './agent-turns'
+
+/** No turn git wired (a runtime without a checkout): every turn operation refuses. */
+const refuseTurnGit = () =>
+  Promise.reject(new Error('Agent turns are unavailable on this computer'))
+const refusingTurnGit: TurnGit = {
+  canonical: refuseTurnGit,
+  snapshot: refuseTurnGit,
+  deleteTurnRef: refuseTurnGit,
+  diffIsEmpty: refuseTurnGit,
+  filterTurns: refuseTurnGit
+}
 import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
 
 export function createComputerChatRuntime(opts: {
@@ -31,6 +49,12 @@ export function createComputerChatRuntime(opts: {
   sessionReader?: ClaudeSessionReader
   transport?: Partial<TransportDeps>
   onMetadata?: (update: ChatMetadataUpdate) => void
+  /** Kinds of hub data this computer accepts (`data.import`); default: the built-in ones. */
+  dataImports?: DataImportKinds
+  /** This computer's disk and checkout, jailed: the session ledger's conversation heal. */
+  healIo?: ConversationHealIo
+  /** Turn git on this computer, jailed (agent-turn snapshots); none = turns refused. */
+  turnGit?: TurnGit
 }) {
   const storage = openChatStorage(opts)
   // Register before artifact purge listeners: every deletion delivery captures
@@ -60,7 +84,28 @@ export function createComputerChatRuntime(opts: {
     })
   }
   const prompts = createLocalPrompts(storage)
-  const local = createLocalChatData(storage, opts.onMetadata)
+  // Agent-turn snapshots (robustness plan §9, P0): only here, never on the hub.
+  const turns = createAgentTurns(storage, opts.turnGit ?? refusingTurnGit)
+  // The agent-session ledger (robustness plan §9, P0): only here, never on the hub.
+  const ledger = createSessionLedgerService(storage, { healIo: opts.healIo })
+  // Bound once the transport exists: a session recorded before that has no listener.
+  let sessionsChanged: (tabId: string) => void = () => undefined
+  // Task worktree paths / base dirs (robustness plan §9, P0, Phase 7a): only here.
+  const taskPaths = createTaskPaths(storage)
+  const local = createLocalChatData(storage, opts.onMetadata, ledger, (tabId) =>
+    sessionsChanged(tabId)
+  )
+  const taskData = createComputerTaskData({
+    storage,
+    computerId: opts.computerId,
+    imports: opts.dataImports ?? {
+      ...sessionLedgerImports,
+      ...historyImports,
+      'task-path': taskPathImport
+    },
+    providerConfig: local.providerConfig,
+    taskPath: taskPaths.get
+  })
   // A restarted runtime has no in-flight admission to renew these slots. Cancel
   // them before draining so a lost hub/host cannot block later accepted messages.
   local.cancelPendingQueueAdmissions()
@@ -132,6 +177,8 @@ export function createComputerChatRuntime(opts: {
     },
     conversations
   )
+  sessionsChanged = (tabId) => transport.chatEvents.emit('sessions-changed', tabId)
+
   let retention: ReturnType<typeof createChatRetention> | undefined
   const transitioning = (tabId: string) => {
     const owner = storage.forTab(tabId)
@@ -210,6 +257,10 @@ export function createComputerChatRuntime(opts: {
   const retentionService = retention
   return {
     diagnosticsConfig,
+    taskData,
+    ledger,
+    turns,
+    taskPaths,
     configureDiagnostics,
     invoke: async (input: unknown) =>
       retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
@@ -269,7 +320,7 @@ export function createComputerChatRuntime(opts: {
       const previous = storage.taskLifecycle(taskId)
       if (previous.state === 'deleted') {
         const applied = storage.applyTaskLifecycle(taskId, state, revision)
-        artifacts.cleanupDeletedTasks()
+        artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
@@ -286,7 +337,7 @@ export function createComputerChatRuntime(opts: {
       const applied = storage.applyTaskLifecycle(taskId, state, revision)
       await Promise.all(closing)
       if (applied.state === 'deleted') {
-        artifacts.cleanupDeletedTasks()
+        artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
@@ -300,17 +351,22 @@ export function createComputerChatRuntime(opts: {
         .listForTask(taskId)
         .map((o) => transport.removeSession(o.identity.tabId))
       const applied = storage.applyTaskLifecycle(taskId, 'deleted', revision)
-      if (applied.state !== 'deleted' || applied.revision !== revision)
+      // Already deleted at a newer revision (the hub was restored from a
+      // backup): the same deletion, erased again idempotently. A task this
+      // computer has not deleted is never erased.
+      if (applied.state !== 'deleted' || applied.revision < revision)
         throw new Error('Stale computer erasure request')
       await stopExternal?.()
       await Promise.all(closing)
       transfers.removeTask(taskId)
-      artifacts.cleanupDeletedTasks()
+      artifacts.cleanupDeletedTasks(taskId)
       await artifacts.retryErasures(taskId)
       artifacts.collectGarbage()
       storage.compose((raw) => finishStoredTaskErasure(raw, storage.dir, taskId))
       await backups.eraseTask(taskId)
-      return { taskId, revision, erased: true as const }
+      // Needs-attention records name the task (and quote its errors): erased too.
+      storage.deleteTaskFaults(taskId)
+      return { taskId, revision: applied.revision, erased: true as const }
     },
     async close() {
       if (closed) return

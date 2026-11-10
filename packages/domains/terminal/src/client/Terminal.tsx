@@ -1426,6 +1426,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             message={initError}
             code={initErrorCode}
             {...(continueHere ? { onContinueHere: continueHere } : {})}
+            {...(onStartFresh ? { onStartFresh: handleStartFresh } : {})}
           />
         )}
         {computerOffline && !showDeadOverlay && <TerminalComputerOffline />}

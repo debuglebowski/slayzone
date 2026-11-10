@@ -5,6 +5,7 @@
  * they work on a hub with processes switched off; with no computer, every hub says
  * "connect a computer" (`NO_COMPUTER_CONNECTED`) — the hub's own disk is never read.
  */
+import { currentPathScope } from '@slayzone/platform/path-scope'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { afterEach, beforeAll, describe, expect, test } from 'vitest'
@@ -85,11 +86,12 @@ describe('AI config on the computer', () => {
     route()
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'
     const content = await caller.readContextFile({
+      projectId: 'p-test',
       filePath: path.join(projectPath, 'CLAUDE.md'),
       projectPath
     })
     expect(content).toBe('project instructions')
-    expect(targets[0]).toMatchObject({ projectPath })
+    expect(targets[0]).toMatchObject({ projectId: 'p-test' })
     expect(calls.some((c) => c.computerId === 'c1' && c.call.op === 'readFile')).toBe(true)
   })
 
@@ -106,11 +108,56 @@ describe('AI config on the computer', () => {
     route()
     computer = null
     const err = await caller
-      .readContextFile({ filePath: path.join(projectPath, 'CLAUDE.md'), projectPath })
+      .readContextFile({
+        projectId: 'p-test',
+        filePath: path.join(projectPath, 'CLAUDE.md'),
+        projectPath
+      })
       .catch((e: unknown) => e)
     expect(err).toBeInstanceOf(TRPCError)
     expect((err as TRPCError).code).toBe('FORBIDDEN')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('§9 Phase 7c: a project file is reached under its path scope, never by its path', () => {
+  test('a project folder named without a project / task: refused, nothing routed or read', async () => {
+    route()
+    const err = await caller
+      .readContextFile({ filePath: path.join(projectPath, 'CLAUDE.md'), projectPath })
+      .catch((e: unknown) => e)
+    expect(String(err)).toMatch(/must name the task or project/)
+    expect(targets).toHaveLength(0)
+    expect(calls).toHaveLength(0)
+  })
+
+  test('the project scope rides every agentConfig.fs call', async () => {
+    const scopes: unknown[] = []
+    setAiConfigFsRouting({
+      computerForProject: async () => 'c1',
+      computerForCaller: async () => 'c1',
+      request: async (computerId, call) => {
+        scopes.push(currentPathScope())
+        return serve(computerId, call)
+      }
+    })
+    await caller.readContextFile({
+      projectId: 'p-test',
+      filePath: path.join(projectPath, 'CLAUDE.md'),
+      projectPath
+    })
+    expect(scopes.length).toBeGreaterThan(0)
+    for (const scope of scopes.filter(Boolean))
+      expect(scope).toMatchObject({ kind: 'project', projectId: 'p-test' })
+    expect(scopes.at(-1)).toMatchObject({ kind: 'project', projectId: 'p-test' })
+  })
+
+  test('only the context-file read / write serve computer-level files unscoped', async () => {
+    route()
+    const err = await caller
+      .discoverMcpConfigs({ projectPath: '' } as never)
+      .catch((e: unknown) => e)
+    expect(String(err)).toMatch(/must name the task or project/)
   })
 })
 
@@ -160,6 +207,7 @@ describe('every AI-config write lands on the computer (siblings of QA 964073b0 5
     route()
     const dir = h.tmpDir()
     await caller.writeMcpServer({
+      projectId: 'p-test',
       projectPath: dir,
       provider: 'claude',
       serverKey: 'qa',
@@ -167,13 +215,23 @@ describe('every AI-config write lands on the computer (siblings of QA 964073b0 5
     })
     expect(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8')).toContain('"qa"')
     expect(wrote('writeFile', path.join(dir, '.mcp.json'))).toBe(true)
-    await caller.removeMcpServer({ projectPath: dir, provider: 'claude', serverKey: 'qa' })
+    await caller.removeMcpServer({
+      projectId: 'p-test',
+      projectPath: dir,
+      provider: 'claude',
+      serverKey: 'qa'
+    })
     expect(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf-8')).not.toContain('"qa"')
 
     const from = path.join(dir, 'CLAUDE.md')
     const to = path.join(dir, 'AGENTS.md')
     fs.writeFileSync(from, 'x')
-    await caller.renameContextFile({ oldPath: from, newPath: to, projectPath: dir })
+    await caller.renameContextFile({
+      projectId: 'p-test',
+      oldPath: from,
+      newPath: to,
+      projectPath: dir
+    })
     expect(fs.existsSync(to) && !fs.existsSync(from)).toBe(true)
     await caller.deleteContextFile({ filePath: to, projectPath: dir, projectId: 'none' })
     expect(fs.existsSync(to)).toBe(false)
@@ -210,7 +268,11 @@ describe('editing a project instructions file (pushProviderInstructions)', () =>
       )
     ).toBe(true)
     // Reopening the editor reads the edit back.
-    const reread = await caller.readProviderInstructions({ projectPath: dir, provider: 'codex' })
+    const reread = await caller.readProviderInstructions({
+      projectId: 'p-test',
+      projectPath: dir,
+      provider: 'codex'
+    })
     expect(reread.content).toBe('line 1\nline 2\n')
     // A plain edit: the project is not opted into managed instructions.
     const items = await h.slayDb

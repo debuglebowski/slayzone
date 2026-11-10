@@ -3,6 +3,7 @@ export {
   tabStoreReady,
   loadTabStoreState,
   stopViewStatePersistence,
+  setTabWorktreePathResolver,
   type Tab,
   type ClosedTab,
   type ClosedTabRestorer,

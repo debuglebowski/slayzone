@@ -134,9 +134,9 @@ export function useChatQueue(
 
   const remove = useCallback(
     async (id: string) => {
-      await trpcClient.chat.queue.remove.mutate({ id })
+      await trpcClient.chat.queue.remove.mutate({ id, tabId })
     },
-    [trpcClient]
+    [trpcClient, tabId]
   )
 
   const clear = useCallback(async () => {
@@ -145,26 +145,29 @@ export function useChatQueue(
 
   const update = useCallback(
     (id: string, send: string, original: string, content: UserContentBlock[]) =>
-      trpcClient.chat.queue.update.mutate({ id, send, original, content }),
-    [trpcClient]
+      trpcClient.chat.queue.update.mutate({ id, tabId, send, original, content }),
+    [trpcClient, tabId]
   )
   const move = useCallback(
     async (id: string, toIndex: number) => {
-      await trpcClient.chat.queue.move.mutate({ id, toIndex })
+      await trpcClient.chat.queue.move.mutate({ id, tabId, toIndex })
     },
-    [trpcClient]
+    [trpcClient, tabId]
   )
-  const hold = useCallback((id: string) => trpcClient.chat.queue.hold.mutate({ id }), [trpcClient])
+  const hold = useCallback(
+    (id: string) => trpcClient.chat.queue.hold.mutate({ id, tabId }),
+    [trpcClient, tabId]
+  )
   const release = useCallback(
     async (id: string) => {
-      await trpcClient.chat.queue.release.mutate({ id })
+      await trpcClient.chat.queue.release.mutate({ id, tabId })
     },
-    [trpcClient]
+    [trpcClient, tabId]
   )
 
   const steer = useCallback(
-    (id: string) => trpcClient.chat.queue.steer.mutate({ id }),
-    [trpcClient]
+    (id: string) => trpcClient.chat.queue.steer.mutate({ id, tabId }),
+    [trpcClient, tabId]
   )
 
   return {

@@ -29,7 +29,16 @@ const LATEST = migrations[migrations.length - 1].version
  */
 const SUCCESSOR: Record<string, string> = {
   runners: 'computers', // v163: runner → computer rename
-  terminal_modes: 'agents' // v192: "terminal mode" → "agent" rename
+  terminal_modes: 'agents', // v192: "terminal mode" → "agent" rename
+  // v206: the session ledger lives on the computer (robustness plan §9); the hub's
+  // rows are staged for it there.
+  task_conversations: 'computer_data_handoff',
+  // v207: prompt history and turn snapshots too.
+  agent_prompts: 'computer_data_handoff',
+  agent_turns: 'computer_data_handoff',
+  // v209: usage-log read offsets live on the computer that reads the logs; the hub's
+  // are a one-time handoff to it (dropped by the hub once delivered).
+  usage_parse_state: 'usage_cursor_handoff'
 }
 
 /** Columns a synthesized value cannot satisfy (CHECK on an enum): fixed by hand. */

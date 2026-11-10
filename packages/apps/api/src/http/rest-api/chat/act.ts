@@ -38,7 +38,7 @@ export async function sendChatMessage(
     expectedMode: target.mode
   })
   if (!input.steer) return { messageId: item.id, started, steered: null }
-  const steer = await queue.steer(item.id)
+  const steer = await queue.steer(item.id, target.tabId)
   return steer.ok
     ? { messageId: item.id, started, steered: true }
     : { messageId: item.id, started, steered: false, steerError: steer.reason }

@@ -53,10 +53,6 @@ vi.mock('@slayzone/task/server', async () => {
     templateRouter: router({}),
     // api wires `task.startMainAgent`'s repo-discovery seam at load.
     setMainAgentDeps: () => {},
-    recordConversation: vi.fn(),
-    findPendingSpawn: vi.fn(async () => ({ expectedSessionId: null, usedResume: false })),
-    confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
-    markSessionFirstTurn: vi.fn(async () => {}),
     artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
   }
 })
@@ -87,6 +83,13 @@ function makeDeps(): RestApiDeps {
   return {
     db: { get: async () => undefined } as never,
     notifyRenderer: () => {},
+    // The session ledger on the reporting agent's computer (robustness plan §9).
+    agentSessionLedger: {
+      computerFor: async (_hook: unknown, reporter?: string | null) => reporter ?? null,
+      recordHookConversation: async () => null,
+      confirmSessionConversation: (...args: unknown[]) => confirmSessionConversationSpy(...args),
+      markSessionFirstTurn: async () => true
+    },
     agentLifecycle: {
       emit: (_c: string, e: unknown) => {
         lifecycleSpy(e)
@@ -174,7 +177,9 @@ describe('attachAgentHookRelayConsumer', () => {
 
   test("a relayed warm agent's SessionStart confirms its conversation on the pooled session", async () => {
     unadoptedWarmAgentSpy.mockImplementation((taskId) =>
-      taskId === 'reserved-1' ? { sessionId: 'pool-1' } : null
+      taskId === 'reserved-1'
+        ? { sessionId: 'pool-1', projectId: 'p', computerId: 'computer-a' }
+        : null
     )
     const { gateway, emit } = makeFakeGateway()
     attachAgentHookRelayConsumer(gateway, makeDeps(), makeBridge())
@@ -189,6 +194,8 @@ describe('attachAgentHookRelayConsumer', () => {
     })
     await flush()
 
+    // On the computer the warm agent runs on (its pool row is there).
+    expect(confirmSessionConversationSpy.mock.calls[0][0]).toBe('computer-a')
     expect(confirmSessionConversationSpy.mock.calls[0][1]).toEqual({
       sessionId: 'pool-1',
       observedConversationId: '55555555-5555-4555-8555-555555555555'

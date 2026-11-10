@@ -97,10 +97,21 @@ test.each([false, true])(
       }
     })
     try {
+      // The released exporter ran BEFORE the update, against a hub that still held
+      // the session ledger, prompts and turns (v206/v207 moved them to the computer,
+      // robustness plan §9): their empty tables, as that hub had them.
+      h.db.exec(`CREATE TABLE task_conversations (id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        mode TEXT NOT NULL, tab_id TEXT, conversation_id TEXT, origin TEXT NOT NULL,
+        pending_meta TEXT, created_at INTEGER NOT NULL);
+        CREATE TABLE agent_prompts (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+          cli_session_id TEXT, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+        CREATE TABLE agent_turns (id TEXT PRIMARY KEY, worktree_path TEXT NOT NULL, task_id TEXT,
+          terminal_tab_id TEXT NOT NULL, snapshot_sha TEXT NOT NULL, prompt_preview TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL, head_sha_at_snap TEXT)`)
       h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
       h.db
-        .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('task','p','Task',?)")
-        .run(dir)
+        .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('task','p','Task',1)")
+        .run()
       h.db
         .prepare(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"

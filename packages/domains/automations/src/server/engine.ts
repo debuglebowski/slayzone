@@ -371,6 +371,31 @@ export class AutomationEngine {
     }
   }
 
+  /**
+   * A condition's value of a task field. A task's paths (worktree, custom folder) live
+   * on its computer (§9 Phase 7d): whether one is set is the hub's fact; the path
+   * itself (to compare it) is read from the computer the task's work runs on — an
+   * unreachable computer fails the evaluation (thrown), never a guessed path.
+   */
+  private async conditionValue(
+    taskId: string,
+    row: Record<string, unknown>,
+    field: string,
+    operator: string
+  ): Promise<unknown> {
+    if (field !== 'worktree_path' && field !== 'base_dir') return row[field]
+    // The hub keeps only whether a path is set (§9 7e); its value is the computer's.
+    const set = Boolean(field === 'worktree_path' ? row.has_worktree : row.has_base_dir)
+    if (operator === 'exists' || operator === 'not_exists') return set ? true : null
+    if (!set) return null
+    const routing = getAutomationCommandRouting()
+    const computerId = routing ? await routing.computerFor({ taskId }) : null
+    if (!routing?.taskPaths || computerId == null)
+      throw new Error(`the computer holding task ${taskId}'s folders is not available`)
+    const paths = await routing.taskPaths(computerId, taskId)
+    return (field === 'worktree_path' ? paths?.worktreePath : paths?.baseDir) ?? null
+  }
+
   private async evaluateConditions(
     automation: Automation,
     event: AutomationEvent
@@ -403,7 +428,7 @@ export class AutomationEngine {
         )
         if (!task) return false
 
-        const actual = task[field]
+        const actual = await this.conditionValue(event.taskId, task, field, operator)
 
         switch (operator) {
           case 'equals':
@@ -448,12 +473,13 @@ export class AutomationEngine {
 
     // The computer the actions run on (the task's, else the project's); null = the hub.
     const computerId = await this.computerFor(event)
-    const ctx = await this.buildTemplateContext(event, computerId)
     const prevDepth = this.currentDepth
     let runStatus: 'success' | 'error' = 'success'
     let runError: string | null = null
 
     try {
+      // Inside the run: a value its computer cannot answer fails this run, recorded.
+      const ctx = await this.buildTemplateContext(event, computerId)
       this.currentDepth = depth + 1
       for (let i = 0; i < automation.actions.length; i++) {
         const action = automation.actions[i]
@@ -668,12 +694,11 @@ export class AutomationEngine {
         name: string
         status: string
         priority: number
-        worktree_path: string | null
         branch: string | null
         agent_id: string | null
         project_id: string
       }>(
-        'SELECT id, title AS name, status, priority, worktree_path, worktree_parent_branch AS branch, agent_id, project_id FROM tasks WHERE id = ?',
+        'SELECT id, title AS name, status, priority, worktree_parent_branch AS branch, agent_id, project_id FROM tasks WHERE id = ?',
         [event.taskId]
       )
       if (task) {
@@ -693,12 +718,19 @@ export class AutomationEngine {
             }
           }
         }
+        // The worktree path lives on the computer the actions run on (§9 Phase 7c/7e);
+        // the hub holds no copy to fall back on.
+        const routing = getAutomationCommandRouting()
+        const worktreePath =
+          routing && computerId != null
+            ? ((await routing.taskPaths?.(computerId, task.id))?.worktreePath ?? null)
+            : null
         ctx.task = {
           id: task.id,
           name: task.name,
           status: task.status,
           priority: task.priority,
-          worktree_path: task.worktree_path,
+          worktree_path: worktreePath,
           branch: task.branch,
           agent_id: task.agent_id,
           agent_flags: agentFlags

@@ -239,7 +239,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
     if (isTerminalStatus(status, columnsConfig)) {
       trackTask(taskId, 'task_completed', {
         provider: task.agent_id ?? 'terminal',
-        had_worktree: Boolean(task.worktree_path)
+        had_worktree: Boolean(task.has_worktree)
       })
     }
     onTaskUpdated(await updateTask({ id: taskId, status }))

@@ -98,6 +98,8 @@ export const SECURITY_EVENTS = [
   'computer.disable',
   'computer.enable',
   'computer.rename',
+  'computer.fault.retry',
+  'computer.fault.discard',
   'computer.claim',
   'computer.visibility.set',
   /** T-16: at boot, projects with no owner (and the settings from before login) went

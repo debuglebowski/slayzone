@@ -150,3 +150,19 @@ export function stripChatOwnedFlags(flags: string[]): string[] {
   }
   return out
 }
+
+/**
+ * A chat's settings — `provider_config` keys of a chat mode that only the chat's
+ * computer holds (robustness plan §9, decision 2). On the hub they exist only as
+ * starting values (a template's) of a chat no computer holds yet.
+ */
+export const CHAT_SETTING_KEYS = [
+  'chatMode',
+  'chatModel',
+  'chatEffort',
+  'chatCollaboration',
+  'chatFastMode'
+] as const
+
+/** Every computer-owned key of a chat mode: its settings and its session id. */
+export const COMPUTER_OWNED_CHAT_KEYS = [...CHAT_SETTING_KEYS, 'chatConversationId'] as const

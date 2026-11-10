@@ -154,7 +154,6 @@ test.each([true, false])(
       cwd: '/tmp',
       revision: 2,
       providerConfig: { chatModel: 'old-model' },
-      providerConfigRevision: 0,
       defaultFlags: null,
       env: {}
     })

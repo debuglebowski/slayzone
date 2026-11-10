@@ -30,3 +30,12 @@ export {
   useTaskScopedQueriesFreshOnTasksChanged,
   taskIdOfScopedQuery
 } from './taskScopedQueries'
+export {
+  useTaskPath,
+  useTaskWorktreePaths,
+  useTaskPathLocation,
+  peekTaskPath,
+  taskPathQueryKey,
+  type TaskPathView,
+  type TaskPathSubject
+} from './useTaskPath'

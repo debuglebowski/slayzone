@@ -458,34 +458,44 @@ test('Trash pauses chat without losing drafts or queue; final purge cannot be un
   ).toThrow(/deleted/i)
 })
 
-test('deleted native sessions remain excluded after newer and stale bootstraps', async () => {
+const deletion = (mode: string, conversationId: string) => ({
+  op: 'applySessionIntents',
+  args: {
+    resets: [],
+    deletions: [
+      { id: `del-${mode}-${conversationId}`, taskId: 'task-a', mode, conversationId, createdAt: 1 }
+    ]
+  }
+})
+
+test('a delivered deletion keeps a session excluded across newer and stale bootstraps', async () => {
   const { r } = runtime()
-  r.bootstrap({
-    ...bootstrap,
-    honoredConversations: ['native'],
-    providerConfig: { chatConversationId: 'native' }
+  r.bootstrap({ ...bootstrap, providerConfig: {} })
+  await r.local.data.recordConversation({
+    taskId: 'task-a',
+    mode: 'claude-chat',
+    conversationId: 'native',
+    origin: 'slay-spawned-fresh',
+    legacyJsonField: 'chatConversationId'
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(true)
-  r.bootstrap({
-    ...bootstrap,
-    revision: 2,
-    providerConfig: {},
-    deletedConversations: [{ mode: 'claude-chat', conversationId: 'native' }]
-  })
+  await r.ledger.handle(deletion('claude-chat', 'native'))
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
-  r.bootstrap({
-    ...bootstrap,
-    honoredConversations: ['native'],
-    providerConfig: { chatConversationId: 'native' }
-  })
+  r.bootstrap({ ...bootstrap, revision: 2, providerConfig: { chatConversationId: 'native' } })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'native')).toBe(false)
 })
 
-test('historical session proof preserves source mode and respects later deletion', async () => {
+test('a ledger session is honored for its own mode and leaves with a delivered deletion', async () => {
   const { r } = runtime()
-  r.bootstrap({
-    ...bootstrap,
-    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
+  r.bootstrap(bootstrap)
+  await r.ledger.handle({
+    op: 'recordConversation',
+    args: {
+      taskId: 'task-a',
+      mode: 'claude-code',
+      conversationId: 'terminal-old',
+      origin: 'slay-spawned-resume'
+    }
   })
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
     true
@@ -493,24 +503,12 @@ test('historical session proof preserves source mode and respects later deletion
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-old')).toBe(
     false
   )
-  await r.local.data.recordConversation({
-    taskId: 'task-a',
-    mode: 'claude-code',
-    conversationId: 'terminal-new',
-    origin: 'slay-spawned-fresh'
-  })
-  expect(await r.local.data.isHonoredConversation('task-a', 'claude-chat', 'terminal-new')).toBe(
-    false
-  )
-  r.bootstrap({
-    ...bootstrap,
-    revision: 2,
-    honoredSessions: [{ mode: 'claude-code', conversationId: 'terminal-old' }],
-    deletedConversations: [{ mode: 'claude-code', conversationId: 'terminal-old' }]
-  })
+  expect(await r.local.data.getCurrentConversationId('task-a', 'claude-code')).toBe('terminal-old')
+  await r.ledger.handle(deletion('claude-code', 'terminal-old'))
   expect(await r.local.data.isHonoredConversation('task-a', 'claude-code', 'terminal-old')).toBe(
     false
   )
+  expect(await r.local.data.getCurrentConversationId('task-a', 'claude-code')).toBeNull()
 })
 
 test('computer bootstrap preserves user default settings added on main', async () => {

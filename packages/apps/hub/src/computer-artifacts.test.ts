@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createArtifactStore } from '@slayzone/task-artifacts/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerArtifactStorage } from './computer-artifacts'
 
@@ -14,7 +14,8 @@ test('new chat files and versions stay on owner; general artifacts stay on hub',
   const h = await createTestHarness(),
     dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-files-')),
     hubDir = join(dir, 'hub')
-  const pc = createChatRuntimeHandlers({
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
     stateDir: join(dir, 'pc'),
     hubScope: 'hub',
     computerId: () => 'pc',
@@ -33,8 +34,8 @@ test('new chat files and versions stay on owner; general artifacts stay on hub',
   try {
     h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','P','#000')").run()
     h.db
-      .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('t','p','Task',?)")
-      .run(dir)
+      .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('t','p','Task',1)")
+      .run()
     h.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
@@ -144,6 +145,142 @@ test('new chat files and versions stay on owner; general artifacts stay on hub',
       sourcePath: path
     } as never)
     expect(await store.readArtifactContent(h.slayDb, noPath!.id)).toBe('')
+  } finally {
+    await pc.close()
+    h.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('moving files to another task keeps ids on hub and computer, and survives metadata recovery', async () => {
+  const h = await createTestHarness(),
+    dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-move-')),
+    hubDir = join(dir, 'hub')
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
+    stateDir: join(dir, 'pc'),
+    hubScope: 'hub',
+    computerId: () => 'pc',
+    getProjectPaths: () => null,
+    ctx: {
+      config: {
+        hubUrl: 'ws://hub/computers',
+        name: 'pc',
+        allowedRoots: [realpathSync(tmpdir())],
+        capabilities: ['proc']
+      },
+      dialer: { notify: () => true },
+      log: () => {}
+    }
+  })
+  try {
+    h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','P','#000')").run()
+    for (const id of ['src', 'dst'])
+      h.db
+        .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,'p','Task',1)")
+        .run(id)
+    h.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','src','claude-chat',0)"
+      )
+      .run()
+    const request = (_pc: string, p: unknown) => pc.request(p)
+    const chat = createComputerChatServices({
+      db: h.slayDb,
+      legacyData: {
+        ...createDbChatDataOps(h.slayDb, taskSessionStore),
+        buildMcpEnv: async () => ({})
+      },
+      attachments: { read: async () => new Uint8Array() },
+      request,
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      hasLiveTask: async () => false
+    })
+    const store = createComputerArtifactStorage({
+      db: h.slayDb,
+      local: createArtifactStore(hubDir),
+      chat,
+      request
+    })
+    // A chat upload (computer-held, in the computer's "Uploads" folder), a hub
+    // folder holding a hub file AND a chat file, and a loose hub file.
+    const upload = (await store.uploadArtifactBlob(h.slayDb, {
+      taskId: 'src',
+      title: 'shot.png',
+      bytes: Buffer.from('PNG bytes'),
+      chatTabId: 'tab'
+    }))!
+    const general = (await store.createFolder(h.slayDb, { taskId: 'src', name: 'General' }))!
+    const hubFile = (await store.createArtifact(h.slayDb, {
+      taskId: 'src',
+      title: 'notes.md',
+      folderId: general.id,
+      content: 'hub notes'
+    }))!
+    const chatInHub = (await store.uploadArtifactBlob(h.slayDb, {
+      taskId: 'src',
+      title: 'log.txt',
+      bytes: Buffer.from('chat log'),
+      chatTabId: 'tab'
+    }))!
+    await store.updateArtifact(h.slayDb, { id: chatInHub.id, folderId: general.id })
+    const loose = (await store.createArtifact(h.slayDb, {
+      taskId: 'src',
+      title: 'loose.txt',
+      content: 'loose'
+    }))!
+    const before = await store.listArtifactsByTask(h.slayDb, 'src')
+    const roots = {
+      artifactIds: before.filter((a) => !a.folder_id).map((a) => a.id),
+      folderIds: (await store.listFoldersByTask(h.slayDb, 'src'))
+        .filter((f) => !f.parent_id)
+        .map((f) => f.id)
+    }
+
+    await store.moveArtifacts(h.slayDb, {
+      ...roots,
+      sourceTaskId: 'src',
+      destTaskId: 'dst',
+      destFolderId: null
+    })
+
+    const moved = await store.listArtifactsByTask(h.slayDb, 'dst')
+    expect(moved.map((a) => a.id).sort()).toEqual(
+      [upload.id, hubFile.id, chatInHub.id, loose.id].sort()
+    )
+    expect(await store.listArtifactsByTask(h.slayDb, 'src')).toEqual([])
+    expect(await store.listFoldersByTask(h.slayDb, 'src')).toEqual([])
+    expect(Buffer.from(await store.readArtifactBytes(h.slayDb, upload.id)).toString()).toBe(
+      'PNG bytes'
+    )
+    expect(Buffer.from(await store.readArtifactBytes(h.slayDb, chatInHub.id)).toString()).toBe(
+      'chat log'
+    )
+    expect(await store.readArtifactContent(h.slayDb, hubFile.id)).toBe('hub notes')
+    expect(moved.find((a) => a.id === chatInHub.id)!.folder_id).toBe(general.id)
+
+    // The computer agrees after a full metadata re-read (a hub restart).
+    h.db.prepare('DELETE FROM chat_metadata_progress').run()
+    await expect(chat.relay.drainMetadata('pc', true)).resolves.toBeDefined()
+    expect(
+      h.db
+        .prepare(
+          `SELECT a.id,a.task_id FROM task_artifacts a JOIN chat_artifact_locations l ON l.artifact_id=a.id ORDER BY a.id`
+        )
+        .all()
+    ).toEqual([upload.id, chatInHub.id].sort().map((id) => ({ id, task_id: 'dst' })))
+    // A retry of the finished move changes nothing.
+    await store.moveArtifacts(h.slayDb, {
+      ...roots,
+      sourceTaskId: 'src',
+      destTaskId: 'dst',
+      destFolderId: null
+    })
+    expect((await store.listArtifactsByTask(h.slayDb, 'dst')).length).toBe(4)
+    // The computer still serves the chat files' versions and edits.
+    await store.updateArtifact(h.slayDb, { id: upload.id, content: 'edited after move' })
+    expect(await store.readArtifactContent(h.slayDb, upload.id)).toBe('edited after move')
   } finally {
     await pc.close()
     h.cleanup()

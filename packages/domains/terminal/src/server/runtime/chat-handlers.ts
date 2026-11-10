@@ -114,7 +114,7 @@ export interface ChatEventContext {
 
 export interface ChatHandlerOpts {
   /** Optional secondary subscriber to every persisted chat event. Used by the
-   * agent-turns domain (turn boundaries; chat prompts → `agent_prompts`). */
+   * agent-turns domain (turn boundaries; prompts live on the computer). */
   onChatEvent?: (tabId: string, event: AgentEvent, ctx: ChatEventContext | null) => void
   /** Data seam (hub/computer split). The composition root passes the local-DB
    * impl (`createDbChatDataOps(db, taskStore)`), which runs the same SQL the
@@ -831,7 +831,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       void seq
       void (async () => {
         // Tree-view "Last interaction" sort marker — only fire on user-message
-        // (clear "I interacted" signal). Agent-side bumps come via agent_turns.
+        // (clear "I interacted" signal). Agent-side bumps come via recorded agent turns.
         if (event.kind === 'user-message' && !event.history) {
           const info = getSessionInfo(tabId)
           if (info) {

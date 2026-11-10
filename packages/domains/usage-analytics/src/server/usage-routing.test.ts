@@ -1,12 +1,12 @@
 /**
- * Usage is parsed where the logs are — each connected computer — and the hub keeps
- * each computer's parse cursors apart (`usage_parse_state` keyed by computer AND
- * file: two computers' `~/.claude/projects/x.jsonl` are different files). Records
- * aggregate in one table; a computer that cannot answer is skipped this refresh.
+ * Usage is parsed where the logs are — each connected computer — from the read
+ * offsets THAT computer keeps (robustness plan §9, P0; v209: the hub keeps none).
+ * Records aggregate in one hub table; each stored page is acknowledged so the
+ * computer moves its cursors; a computer that cannot answer is skipped this refresh.
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
-import { refreshUsageData, setUsageCollectRouting } from './cache'
+import { refreshUsageData, setUsageCollectRouting, type UsageCollectRequest } from './cache'
 
 const h = await createTestHarness()
 const db = h.slayDb
@@ -25,100 +25,123 @@ const rec = (id: string) => ({
   cwd: null,
   taskId: null
 })
-
-const asked: Array<{ computerId: string; cursors: Record<string, unknown> }> = []
+const ids = () =>
+  (h.db.prepare('SELECT id FROM usage_records ORDER BY id').all() as Array<{ id: string }>).map(
+    (r) => r.id
+  )
+const handoffRows = () =>
+  h.db.prepare("SELECT 1 FROM sqlite_master WHERE name='usage_cursor_handoff'").get()
+    ? (h.db
+        .prepare('SELECT computer_id, file_path FROM usage_cursor_handoff ORDER BY computer_id')
+        .all() as Array<{ computer_id: string; file_path: string }>)
+    : null
 
 afterEach(() => setUsageCollectRouting(null))
 
 describe('usage from computers', () => {
-  test('each computer parses its own logs; cursors are kept per computer', async () => {
+  test("each computer's records are stored and acknowledged; an offline one is skipped", async () => {
+    h.db.exec('DROP TABLE IF EXISTS usage_cursor_handoff')
+    const asked: Array<{ computerId: string; request: UsageCollectRequest }> = []
     setUsageCollectRouting({
       computers: () => ['c1', 'c2', 'gone'],
-      collect: async (computerId, cursors) => {
-        asked.push({ computerId, cursors })
+      collect: async (computerId, request) => {
+        asked.push({ computerId, request })
         if (computerId === 'gone') throw new Error('offline')
+        if (request.ack) return { results: [] }
         return {
           results: [
             {
               sourceFile: file,
-              fileMtimeMs: computerId === 'c1' ? 10 : 20,
-              endOffset: computerId === 'c1' ? 100 : 200,
+              fileMtimeMs: 10,
+              endOffset: 100,
               records: [rec(`${computerId}-r1`)]
             }
-          ]
+          ],
+          receipt: { token: `tok-${computerId}`, index: 0 }
         }
       }
     })
     await refreshUsageData(db)
-    const states = h.db
-      .prepare('SELECT computer_id, last_offset FROM usage_parse_state ORDER BY computer_id')
-      .all()
-    expect(states).toEqual([
-      { computer_id: 'c1', last_offset: 100 },
-      { computer_id: 'c2', last_offset: 200 }
+    expect(ids()).toEqual(['c1-r1', 'c2-r1'])
+    expect(asked).toEqual([
+      { computerId: 'c1', request: {} },
+      { computerId: 'c1', request: { ack: { token: 'tok-c1', index: 0 } } },
+      { computerId: 'c2', request: {} },
+      { computerId: 'c2', request: { ack: { token: 'tok-c2', index: 0 } } },
+      { computerId: 'gone', request: {} }
     ])
-    const n = h.db.prepare('SELECT COUNT(*) AS n FROM usage_records').get() as { n: number }
-    expect(n.n).toBe(2)
-
-    asked.length = 0
-    await refreshUsageData(db)
-    expect(asked.find((a) => a.computerId === 'c1')?.cursors).toEqual({
-      [file]: { offset: 100, modifiedMs: 10 }
-    })
-    expect(asked.find((a) => a.computerId === 'c2')?.cursors).toEqual({
-      [file]: { offset: 200, modifiedMs: 20 }
-    })
+    // The hub keeps no cursor: v209 renamed the old table to a one-time handoff.
+    expect(h.db.prepare("SELECT 1 FROM sqlite_master WHERE name='usage_parse_state'").get()).toBe(
+      undefined
+    )
   })
 })
 
-// v195 kept the hub's own parse cursors under computer_id '' (this hub's disk). On
-// the desktop the local computer reads those very files: its first collect must
-// start from them, or it re-parses every log in one huge reply (81 MiB measured)
-// that times out on every refresh. Another computer's disk is not this hub's.
-describe("the hub's old cursors after v195", () => {
-  test('the local computer takes them over; another computer does not', async () => {
-    h.db.prepare('DELETE FROM usage_parse_state').run()
+// v209 turned the hub's cursors into a one-time handoff. Each computer gets its own
+// rows with its first collect; the hub machine's own computer also gets the hub-disk
+// rows (computer_id '', the files it reads), so it never re-parses every log in one
+// huge reply. Once taken, they are gone; the table goes when empty.
+describe("the hub's former cursors after v209", () => {
+  test('each computer is seeded once with its own; the local one also with the hub-disk rows', async () => {
+    h.db.exec(`DROP TABLE IF EXISTS usage_cursor_handoff;
+      CREATE TABLE usage_cursor_handoff (computer_id TEXT NOT NULL DEFAULT '', file_path TEXT NOT NULL,
+        last_offset INTEGER NOT NULL, last_modified_ms REAL NOT NULL, PRIMARY KEY (computer_id, file_path))`)
     h.db
       .prepare(
-        "INSERT INTO usage_parse_state (computer_id, file_path, last_offset, last_modified_ms) VALUES ('', ?, 500, 50)"
+        `INSERT INTO usage_cursor_handoff (computer_id, file_path, last_offset, last_modified_ms) VALUES
+          ('', ?, 500, 50), ('local', ?, 700, 70), ('remote', ?, 9, 1), ('later', ?, 3, 3)`
       )
-      .run(file)
-    const seen: Record<string, Record<string, unknown>> = {}
+      .run(file, file, file, '/other')
+    const seen: Record<string, UsageCollectRequest[]> = {}
+    let remoteUp = false
     setUsageCollectRouting({
       computers: () => ['remote', 'local'],
       localComputerId: () => 'local',
-      collect: async (computerId, cursors) => {
-        seen[computerId] = cursors
+      collect: async (computerId, request) => {
+        ;(seen[computerId] ??= []).push(request)
+        if (computerId === 'remote' && !remoteUp) throw new Error('timed out')
         return { results: [] }
       }
     })
     await refreshUsageData(db)
-    expect(seen.local).toEqual({ [file]: { offset: 500, modifiedMs: 50 } })
-    expect(seen.remote).toEqual({})
-    const rows = h.db
-      .prepare('SELECT computer_id FROM usage_parse_state ORDER BY computer_id')
-      .all()
-    expect(rows, 'moved, not copied: the hub-disk rows are gone').toEqual([
-      { computer_id: 'local' }
+    expect(seen.local).toEqual([{ seed: { [file]: { offset: 700, modifiedMs: 70 } } }])
+    expect(seen.remote).toEqual([{ seed: { [file]: { offset: 9, modifiedMs: 1 } } }])
+    expect(handoffRows(), 'a computer that did not answer keeps its rows').toEqual([
+      { computer_id: 'later', file_path: '/other' },
+      { computer_id: 'remote', file_path: file }
     ])
+
+    remoteUp = true
+    await refreshUsageData(db)
+    expect(seen.local?.[1], 'handed over once').toEqual({})
+    expect(seen.remote?.[1]).toEqual({ seed: { [file]: { offset: 9, modifiedMs: 1 } } })
+    expect(handoffRows()).toEqual([{ computer_id: 'later', file_path: '/other' }])
+
+    setUsageCollectRouting({
+      computers: () => ['later'],
+      collect: async () => ({ results: [] })
+    })
+    await refreshUsageData(db)
+    expect(handoffRows(), 'dropped once empty').toBe(null)
+    await refreshUsageData(db) // no table: nothing owed, no error
   })
 })
 
-// A large collect arrives in pages: each page's records and complete cursors are
-// saved before the next is asked for, so a page that fails loses nothing already
-// delivered; a file split across pages keeps its cursor until its last chunk.
+// A large collect arrives in pages: each page is stored before it is acknowledged
+// (with the request for the next one), so a lost page loses nothing earlier and its
+// own cursors never move.
 describe('paged collect', () => {
-  test('saves page by page and follows `next` until done', async () => {
-    h.db.prepare('DELETE FROM usage_parse_state').run()
+  test('stores page by page, acknowledging each with the next request', async () => {
+    h.db.exec('DROP TABLE IF EXISTS usage_cursor_handoff')
     h.db.prepare('DELETE FROM usage_records').run()
     const a = '/home/u/.claude/projects/p/a.jsonl'
     const b = '/home/u/.claude/projects/p/b.jsonl'
-    const calls: unknown[] = []
+    const calls: UsageCollectRequest[] = []
     setUsageCollectRouting({
       computers: () => ['c1'],
-      collect: async (_computerId, _cursors, page) => {
-        calls.push(page ?? null)
-        if (!page)
+      collect: async (_computerId, request) => {
+        calls.push(request)
+        if (!request.page)
           return {
             results: [
               { sourceFile: a, fileMtimeMs: 1, endOffset: 10, records: [rec('pa-1')] },
@@ -130,24 +153,14 @@ describe('paged collect', () => {
                 records: [rec('pb-1')]
               }
             ],
-            next: { token: 't', index: 1 }
+            next: { token: 't', index: 1 },
+            receipt: { token: 't', index: 0 }
           }
         throw new Error('page 2 lost')
       }
     })
     await refreshUsageData(db)
-    expect(calls).toEqual([null, { token: 't', index: 1 }])
-    const states = h.db
-      .prepare('SELECT file_path, last_offset FROM usage_parse_state ORDER BY file_path')
-      .all()
-    expect(states, "a's cursor moved; b (split, unfinished) kept none").toEqual([
-      { file_path: a, last_offset: 10 }
-    ])
-    const ids = (
-      h.db.prepare('SELECT id FROM usage_records ORDER BY id').all() as Array<{
-        id: string
-      }>
-    ).map((r) => r.id)
-    expect(ids, "page 1's records are stored").toEqual(['pa-1', 'pb-1'])
+    expect(calls).toEqual([{}, { page: { token: 't', index: 1 }, ack: { token: 't', index: 0 } }])
+    expect(ids(), "page 1's records are stored").toEqual(['pa-1', 'pb-1'])
   })
 })

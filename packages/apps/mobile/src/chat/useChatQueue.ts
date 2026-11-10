@@ -102,17 +102,17 @@ export function useChatQueue(
   )
   const remove = useCallback(
     async (id: string) => {
-      await trpcClient.chat.queue.remove.mutate({ id })
+      await trpcClient.chat.queue.remove.mutate({ id, tabId })
     },
-    [trpcClient]
+    [trpcClient, tabId]
   )
   const clear = useCallback(async () => {
     await trpcClient.chat.queue.clear.mutate({ tabId })
   }, [trpcClient, tabId])
 
   const steer = useCallback(
-    (id: string) => trpcClient.chat.queue.steer.mutate({ id }),
-    [trpcClient]
+    (id: string) => trpcClient.chat.queue.steer.mutate({ id, tabId }),
+    [trpcClient, tabId]
   )
 
   return {

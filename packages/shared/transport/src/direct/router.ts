@@ -30,9 +30,13 @@ export const DIRECT_ROUTER_PROTOCOL = 1
 export type DirectGrantResource =
   | { kind: 'pty'; sessionId: string }
   | { kind: 'chat'; tabId: string; epoch: number }
+  | { kind: 'task'; taskId: string }
 
 /** A resource as a procedure names it (a chat tab without its epoch). */
-export type DirectTarget = { kind: 'pty'; sessionId: string } | { kind: 'chat'; tabId: string }
+export type DirectTarget =
+  | { kind: 'pty'; sessionId: string }
+  | { kind: 'chat'; tabId: string }
+  | { kind: 'task'; taskId: string }
 
 /**
  * What a client asks the hub to issue for: a computer target (its task, and its
@@ -178,10 +182,20 @@ export interface DirectChatEvent {
   at?: number
 }
 
+/**
+ * One hub's computer-only task data on this computer (robustness plan §9): the reads
+ * the hub relays as `taskData`, answered here. `request` is the chat-runtime
+ * `TaskDataRequest`, validated by the computer.
+ */
+export interface DirectTaskDataService {
+  read(taskId: string, request: unknown): Promise<unknown>
+}
+
 /** What the computer serves, per hub link (a grant names its hub). */
 export interface DirectRouterServices {
   pty(hubKey: string): DirectPtyService | null
   chat?(hubKey: string): DirectChatService | null
+  taskData?(hubKey: string): DirectTaskDataService | null
 }
 
 /** One chunk of a session's output, as the hub's `pty.onData` emits it. */
@@ -236,6 +250,14 @@ export function createDirectRouter(services: DirectRouterServices) {
     const service = grant ? services.chat?.(grant.hubKey) : null
     if (!grant || grant.resource.kind !== 'chat' || !service) throw noCapability()
     return { service, epoch: grant.resource.epoch }
+  }
+
+  /** The hub's task data for a task this socket holds a grant on. */
+  function taskDataFor(ctx: DirectContext, id: string): DirectTaskDataService {
+    const grant = ctx.socket.grantFor({ kind: 'task', taskId: id })
+    const service = grant ? services.taskData?.(grant.hubKey) : null
+    if (!service) throw noCapability()
+    return service
   }
 
   return t.router({
@@ -429,6 +451,16 @@ export function createDirectRouter(services: DirectRouterServices) {
           }
         })
       })
+    }),
+
+    /**
+     * One task's computer-only data (robustness plan §9): the same reads the hub relays
+     * (`taskData`), answered by this computer. The request is validated here.
+     */
+    task: t.router({
+      read: t.procedure
+        .input(z.object({ taskId: z.string().min(1).max(200), request: z.unknown() }))
+        .query(({ ctx, input }) => taskDataFor(ctx, input.taskId).read(input.taskId, input.request))
     })
   })
 }

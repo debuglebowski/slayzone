@@ -112,6 +112,32 @@ describe('direct-link issuer', () => {
     expect(gated[0]).toEqual({ computerId: 'c-local', work: { kind: 'task', id: 'task-1' } })
   })
 
+  it('grants one task’s data on the computer holding it, gated as that task; revocable by target', async () => {
+    const resolved: string[] = []
+    const { issuer, requests, gated } = setup({
+      resolveTask: async (taskId) => {
+        resolved.push(taskId)
+        return taskId === 'task-gone' ? null : { computerId: 'c-local' }
+      }
+    })
+    const out = await issuer.issue({ kind: 'task', taskId: 'task-1' }, local)
+    expect(out.available).toBe(true)
+    expect(resolved).toEqual(['task-1'])
+    expect(requests[0]?.params.resource).toEqual({ kind: 'task', taskId: 'task-1' })
+    expect(gated[0]).toEqual({ computerId: 'c-local', work: { kind: 'task', id: 'task-1' } })
+    expect(await issuer.issue({ kind: 'task', taskId: 'task-gone' }, local)).toEqual({
+      available: false,
+      reason: 'no-computer'
+    })
+    await issuer.revoke({ by: 'target', target: { kind: 'task', taskId: 'task-1' } }, 'test')
+    expect(issuer.heldGrantIds('c-local')).toEqual([])
+    // A hub that resolves no task data issues no task grant.
+    expect(await setup().issuer.issue({ kind: 'task', taskId: 'task-1' }, local)).toEqual({
+      available: false,
+      reason: 'no-computer'
+    })
+  })
+
   it('audits each issue with grant id, computer and resource — never the token', async () => {
     const { issuer } = setup()
     const out = await issuer.issue({ kind: 'pty', sessionId: 't:t', taskId: 'task-1' }, local)

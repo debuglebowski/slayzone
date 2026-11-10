@@ -35,13 +35,14 @@ h.db
   )
   .run(A, join(base, 'a'))
 const ROOTS = 300
+// Many roots of A's (projects: the hub keeps no task folder, §9 7e).
 const insert = h.db.prepare(
-  `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES (?, 'pA', 't', ?)`
+  `INSERT INTO projects (id, name, color, owner_user_id, path) VALUES (?, 'r', '#1', ?, ?)`
 )
 for (let i = 0; i < ROOTS; i++) {
-  const wt = join(base, 'a', 'wt', `t${i}`)
-  mkdirSync(wt, { recursive: true })
-  insert.run(`t${i}`, wt)
+  const root = join(base, 'a', 'wt', `t${i}`)
+  mkdirSync(root, { recursive: true })
+  insert.run(`p${i}`, A, root)
 }
 const dir = join(base, 'a', 'upload')
 mkdirSync(dir, { recursive: true })

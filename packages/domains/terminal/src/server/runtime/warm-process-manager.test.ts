@@ -42,6 +42,7 @@ const settle = (): Promise<void> => wait(240)
 interface WarmSpawnCall {
   computerId: string
   warmId: string
+  projectId: string
   command: string
   args: string[]
   cwd: string
@@ -206,10 +207,10 @@ test('warm spawn pre-boots the agent + records a pooled session (B3b)', async ()
   // (zsh tolerates it, which hid this on macOS). GitHub #173.
   expect(post.startsWith("exec 'claude' ")).toBeTruthy()
   expect(post.match(/\bexec\b/g)?.length).toBe(1)
-  // A pooled agent_sessions row was recorded (via the task store, on the pool's db).
+  // A pooled agent_sessions row was recorded on the warm agent's computer.
   const pooledInsert = sessionCalls('recordSessionSpawn')[0]
   expect(!!pooledInsert).toBeTruthy()
-  expect(pooledInsert!.db).toBe(db)
+  expect(pooledInsert!.computerId).toBe('computer-1')
   expect((pooledInsert!.args as { status: string }).status).toBe('pooled')
 })
 
@@ -563,7 +564,7 @@ test('injected ops seam handles mode lookup + session writes (db untouched)', as
     recordSessionSpawn: async (input) => {
       recorded = input
     },
-    markSessionDead: async (sessionId) => {
+    markSessionDead: async (_computerId, sessionId) => {
       deadIds.push(sessionId)
     }
   }

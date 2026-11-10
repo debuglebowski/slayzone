@@ -31,16 +31,20 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
       // not read the hub's DB file to get it (that is exactly what broke against a
       // hub on another machine). It is the folder on the computer this task's work
       // runs on — where its worktrees are.
-      const task = await db.get<Record<string, unknown>>(
+      const row = await db.get<Record<string, unknown>>(
         `SELECT t.*, p.name AS project_name
          FROM tasks t JOIN projects p ON t.project_id = p.id
          WHERE t.id = ?`,
         [taskId]
       )
-      if (!task) {
+      if (!row) {
         res.status(404).json({ ok: false, error: `Task not found: ${req.params.id}` })
         return
       }
+      // The task's paths live on its computer (§9 Phase 7d): only whether they are set.
+      const task = { ...row }
+      task.has_worktree = Boolean(row.has_worktree)
+      task.has_base_dir = Boolean(row.has_base_dir)
       task.project_path = await getRuntimeAdapters().projectRootForTask(
         db,
         taskId,

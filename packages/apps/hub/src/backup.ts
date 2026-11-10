@@ -4,6 +4,11 @@ import { sanitizeHubChatBackup } from './chat-backup'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { containedPath } from '@slayzone/platform/safe-path'
+import {
+  createAsyncFaultLedger,
+  forEachIsolated,
+  isStorageFatal
+} from '@slayzone/platform/isolation'
 import type { BackupInfo, BackupSettings } from '@slayzone/types'
 import {
   createArtifactBackupProtection,
@@ -291,7 +296,18 @@ export function buildBackupOps(deps: BackupDeps) {
     if (max <= 0) return
     const existing = (await listBackups(deps)).filter((b) => b.type === type)
     if (existing.length <= max) return
-    for (const b of existing.slice(max)) await remove(b.filename)
+    // One backup that cannot be removed is recorded and retried next tick; the
+    // rest of the rotation still happens.
+    await forEachIsolated(
+      existing.slice(max),
+      {
+        pass: 'hub-backup-rotation',
+        key: (b) => b.filename,
+        ledger: createAsyncFaultLedger(db, { origin: 'hub' }),
+        isFatal: isStorageFatal
+      },
+      (b) => remove(b.filename)
+    )
   }
 
   /** One auto-backup tick: snapshot, then enforce the cap. Settings are read per tick, so

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
+import { useTaskFolders } from './task-folders'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Check, X } from 'lucide-react'
@@ -28,6 +29,8 @@ export function ConflictPhaseContent({
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  // The task's worktree, from its computer (§9 Phase 7d).
+  const worktreePath = useTaskFolders(task).worktreePath
   // `mutateAsync` (stable): handleCompleteMerge depends on it, and the useMutation()
   // result object is new on every render.
   const { mutateAsync: commitFiles } = useMutation(trpc.worktrees.commitFiles.mutationOptions())
@@ -87,8 +90,9 @@ export function ConflictPhaseContent({
     setCompleting(true)
     setError(null)
     try {
+      if (!worktreePath) throw new Error("The task's worktree is not reachable right now")
       const sourceBranch = await queryClient.fetchQuery(
-        trpc.worktrees.getCurrentBranch.queryOptions({ path: task.worktree_path! })
+        trpc.worktrees.getCurrentBranch.queryOptions({ path: worktreePath })
       )
       await commitFiles({
         repoPath: projectPath,
@@ -105,6 +109,7 @@ export function ConflictPhaseContent({
     }
   }, [
     task,
+    worktreePath,
     projectPath,
     completedStatus,
     markDone,

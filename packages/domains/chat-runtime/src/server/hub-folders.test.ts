@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatFolderDeletions } from './hub-folders'
 import { createChatLifecycle } from './hub-lifecycle'
@@ -20,12 +20,27 @@ test('folder fences precede commands; a failed or malformed acknowledgement rema
       }
     })
     await lifecycle.track('t', 'pc')
-    await expect(lifecycle.request('pc', { kind: 'invoke' })).rejects.toThrow(/acknowledgement/)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The task's own commands wait for its folder fence; other tasks' proceed.
+    await expect(lifecycle.request('pc', { kind: 'invoke', taskId: 't' })).rejects.toThrow(
+      /acknowledgement/
+    )
     expect(calls).toEqual(['folders.delete'])
     expect(h.db.prepare('SELECT * FROM chat_folder_deletion_acks').all()).toEqual([])
-    answer = { ok: true }
-    expect(await lifecycle.request('pc', { kind: 'invoke' })).toBe('command result')
+    expect(await lifecycle.request('pc', { kind: 'invoke', taskId: 'other' })).toBe(
+      'command result'
+    )
     expect(calls).toEqual(['folders.delete', 'folders.delete', 'invoke'])
+    answer = { ok: true }
+    expect(await lifecycle.request('pc', { kind: 'invoke', taskId: 't' })).toBe('command result')
+    expect(calls).toEqual([
+      'folders.delete',
+      'folders.delete',
+      'invoke',
+      'folders.delete',
+      'invoke'
+    ])
+    errors.mockRestore()
   } finally {
     h.cleanup()
   }
@@ -74,7 +89,8 @@ test('recovery authorizes folder inventory before deleting anything', async () =
           throw new Error('Denied')
         }
       )
-    ).rejects.toThrow('Denied')
+    ).resolves.toBeUndefined()
+    // Refused for that row alone: nothing is deleted.
     expect(h.db.prepare('SELECT name FROM artifact_folders').all()).toEqual([{ name: 'Original' }])
     expect(h.db.prepare('SELECT * FROM chat_folder_deletions').all()).toEqual([])
   } finally {

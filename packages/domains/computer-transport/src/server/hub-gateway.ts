@@ -31,6 +31,7 @@ import {
   createFixedWindowLimiter,
   createRateLimitAudit
 } from '@slayzone/platform/rate-limit'
+import { currentPathScope } from '@slayzone/platform/path-scope'
 import {
   currentSecurityContext,
   runWithSecurityContext,
@@ -1161,9 +1162,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       // Who asked, for the computer's local request log (T-27). Same context the
       // audit line above reads; none = the hub acting on its own behalf.
       const ctx = currentSecurityContext()
+      // The path scope the router authorized rides beside the actor: the computer
+      // confines every path of this request to it (platform/path-scope).
+      const pathScope = currentPathScope()
       const actor: RequestActor = {
         userId: ctx?.actor ? ctx.actor.slice(0, 200) : null,
-        route: ctx?.route ? ctx.route.slice(0, 200) : null
+        route: ctx?.route ? ctx.route.slice(0, 200) : null,
+        ...(pathScope ? { pathScope } : {})
       }
       const send = () => {
         if (getConnection(computerId) !== conn || conn.closed)

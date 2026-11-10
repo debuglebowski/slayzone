@@ -4,6 +4,18 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {} from './artifact-store-txns'
+import {
+  asItemDamage,
+  classifyFault,
+  createAsyncFaultLedger,
+  forEachIsolated,
+  isStorageFatal,
+  StructuralFaultError
+} from '@slayzone/platform/isolation'
+import { quarantineMove } from '@slayzone/platform/quarantine'
+
+/** Quarantine pass of retained hub backups that can no longer be read (`<dataRoot>/quarantine/hub-backup`). */
+export const HUB_BACKUP_QUARANTINE_PASS = 'hub-backup'
 
 export const HUB_BACKUP_PIN_SCOPE = 'hub-backup'
 const TTL = 300_000
@@ -35,6 +47,7 @@ export function createArtifactBackupProtection(
   const dir = join(dataRoot, 'backups'),
     guard = `hub-backup-recovery:${randomUUID()}`
   const inspected = new Map<string, string>()
+  const ledger = createAsyncFaultLedger(db, { origin: 'hub' })
   let closed = false,
     pending: Promise<void> | null = null
   let retry: ReturnType<typeof setTimeout> | null = null
@@ -63,7 +76,15 @@ export function createArtifactBackupProtection(
       schedule()
     }
   }
+  /** A snapshot's refs; its own damage (corrupt/not a database) is structural. */
   function references(path: string): Ref[] {
+    try {
+      return readReferences(path)
+    } catch (error) {
+      throw asItemDamage(error)
+    }
+  }
+  function readReferences(path: string): Ref[] {
     const snapshot = new Database(path, { readonly: true, fileMustExist: true })
     try {
       const tables = new Set(
@@ -76,7 +97,7 @@ export function createArtifactBackupProtection(
       const refs = new Map<string, Ref>()
       const remember = (row: Ref) => {
         if (!/^[a-f0-9]{64}$/.test(row.hash) || !Number.isSafeInteger(row.size) || row.size < 0)
-          throw new Error('Invalid backup artifact reference')
+          throw new StructuralFaultError('Invalid backup artifact reference')
         refs.set(row.hash, row)
       }
       if (tables.has('artifact_versions') && tables.has('task_artifacts'))
@@ -145,7 +166,35 @@ export function createArtifactBackupProtection(
       let complete = false
       try {
         const files = new Set(existsSync(dir) ? readdirSync(dir).filter(isBackup) : [])
-        for (const filename of files) await pin(filename, join(dir, filename))
+        // One snapshot at a time. An unreadable one can never be restored, so it
+        // needs no pins: it is quarantined (listed under Needs attention, Retry/
+        // Discard) and stops holding every blob GC and erasure hostage. Any other
+        // failure keeps the guard (its pins may be stale) and retries.
+        const pinned = await forEachIsolated(
+          [...files],
+          {
+            pass: 'hub-backup-pins',
+            key: (filename) => filename,
+            ledger,
+            ignoreGate: true,
+            isFatal: isStorageFatal
+          },
+          async (filename) => {
+            try {
+              await pin(filename, join(dir, filename))
+            } catch (error) {
+              if (classifyFault(error) !== 'structural') throw error
+              quarantineMove(dataRoot, {
+                pass: HUB_BACKUP_QUARANTINE_PASS,
+                path: join(dir, filename),
+                reason: error instanceof Error ? error.message : String(error)
+              })
+              files.delete(filename)
+              inspected.delete(filename)
+            }
+          }
+        )
+        if (pinned.failed.length) throw new Error('A retained backup could not be pinned yet')
         const owners = await db.all<{ owner_id: string }>(
           'SELECT DISTINCT owner_id FROM artifact_blob_pins WHERE scope=?',
           [HUB_BACKUP_PIN_SCOPE]

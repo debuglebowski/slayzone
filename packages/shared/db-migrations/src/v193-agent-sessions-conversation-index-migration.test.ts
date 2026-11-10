@@ -14,7 +14,8 @@ import { migrations } from './index'
 function migrated(): Database.Database {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
-  for (const m of migrations)
+  // Through v205: v206 moved the ledger to the computer (its own index there).
+  for (const m of migrations.filter((m) => m.version <= 205))
     db.transaction(() => {
       m.up(db)
       db.pragma(`user_version = ${m.version}`)

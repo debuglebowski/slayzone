@@ -18,13 +18,13 @@ import {
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { startConnector } from '../../computer/src/connector'
 import { ensureSessionHost, superviseUpgrades } from '../../computer/src/upgrade-runtime'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { connectorHost, type ConnectorGrant } from '../../computer/src/session-host'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { createFakeClaude } from '../../../shared/test-utils/fake-claude'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createComputerChatServices } from './computer-chat'
 import Database from 'better-sqlite3'
 import { readdirSync } from 'node:fs'
@@ -333,7 +333,8 @@ test('remote third control: timed-out websocket draft commit replays one receipt
   const didCommit = new Promise<void>((done) => {
     committed = done
   })
-  const computer = createChatRuntimeHandlers({
+  const computer = createFixtureChatRuntime({
+    taskFolder: () => dir,
     stateDir: dir,
     hubScope: 'timeout-audit',
     computerId: () => 'computer-1',
@@ -515,8 +516,8 @@ test('released contract1 chat host accepts maintenance UI Stop without spawning 
     expect(hub.gateway.listComputers()[0].chatRuntimeReady).toBe(false)
     h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
     h.db
-      .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('t','p','Task',?)")
-      .run(dir)
+      .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('t','p','Task',1)")
+      .run()
     h.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"

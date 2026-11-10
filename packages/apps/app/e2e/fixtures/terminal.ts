@@ -254,13 +254,10 @@ export async function switchAgent(page: Page, mode: AgentId): Promise<void> {
       } catch {
         /* may not exist */
       }
-      const t = await window.getTrpcVanillaClient().task.get.query({ id })
-      const cfg = t?.provider_config ?? null
-      const cleared: Record<string, { conversationId: null }> = {}
-      for (const k of Object.keys(cfg ?? {})) cleared[k] = { conversationId: null }
-      await window
-        .getTrpcVanillaClient()
-        .task.update.mutate({ id, agentId: m, providerConfig: cleared })
+      // The new mode starts fresh: reset the main tab's session of it (the
+      // session ledger lives on the task's computer, robustness plan §9).
+      await window.getTrpcVanillaClient().task.update.mutate({ id, agentId: m })
+      await window.getTrpcVanillaClient().task.resetConversation.mutate({ id, mode: m })
       const refresh = (window as { __slayzone_refreshData?: () => Promise<void> | void })
         .__slayzone_refreshData
       await refresh?.()
@@ -503,5 +500,40 @@ export async function getTerminalState(
       return { cursorY: buf.cursorY, cursorX: buf.cursorX, lines }
     },
     { sid: sessionId }
+  )
+}
+
+/**
+ * The conversation tab `tabId` (default: the main tab) of `mode` resumes next, as the
+ * task's computer decides it (its session ledger, robustness plan §9); null = none.
+ */
+export async function currentSession(
+  page: Page,
+  taskId: string,
+  mode: string,
+  tabId?: string
+): Promise<string | null> {
+  return page.evaluate(
+    ({ taskId, mode, tabId }) =>
+      window
+        .getTrpcVanillaClient()
+        .agentSessions.current.query({ taskId, agentId: mode, ...(tabId ? { tabId } : {}) }),
+    { taskId, mode, tabId }
+  )
+}
+
+/** Record `conversationId` as the main tab's session of `mode` on the task's computer. */
+export async function seedSession(
+  page: Page,
+  taskId: string,
+  mode: string,
+  conversationId: string
+): Promise<void> {
+  await page.evaluate(
+    ({ taskId, mode, conversationId }) =>
+      window
+        .getTrpcVanillaClient()
+        .agentSessions.recordDetected.mutate({ taskId, agentId: mode, conversationId }),
+    { taskId, mode, conversationId }
   )
 }

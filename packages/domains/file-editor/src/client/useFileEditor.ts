@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type SetStateAction
 } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { skipToken, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useResubscribeOnComputerConnect, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useTrack, type Tracker } from '@slayzone/telemetry/client'
@@ -17,7 +17,7 @@ import type {
   OpenFileOptions,
   ReadFileResult
 } from '@slayzone/file-editor/shared'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 export interface OpenFile {
   path: string
@@ -300,7 +300,7 @@ export function useFileEditor(
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   const trpcClient = useTRPCClient()
   const { track } = useTrack()
   const queryClient = useQueryClient()
@@ -343,7 +343,11 @@ export function useFileEditor(
             continue
           }
           const result = await queryClient.fetchQuery(
-            trpc.fileEditor.readFile.queryOptions({ ...target, rootPath: projectPath, filePath })
+            trpc.fileEditor.readFile.queryOptions({
+              ...requireScope(scope),
+              rootPath: projectPath,
+              filePath
+            })
           )
           if (result.tooLarge) {
             setOpenFiles((prev) => {
@@ -401,9 +405,9 @@ export function useFileEditor(
         setOpenFiles,
         setActiveFilePath,
         setFileVersions,
-        readFile: (path) =>
+        readFile: async (path) =>
           trpcClient.fileEditor.readFile.query({
-            ...target,
+            ...requireScope(scope),
             rootPath: projectPath,
             filePath: path
           })
@@ -496,7 +500,7 @@ export function useFileEditor(
   )
   const watch = useSubscription(
     trpc.fileEditor.watch.subscriptionOptions(
-      { ...target, rootPath: projectPath },
+      scope ? { ...scope, rootPath: projectPath } : skipToken,
       { onData: onWatchEvent }
     )
   )
@@ -531,16 +535,20 @@ export function useFileEditor(
           setFocusToken,
           setGoToPosition,
           setOpenFilesAndRef,
-          readFile: (input) =>
+          readFile: async (input) =>
             queryClient.fetchQuery(
-              trpc.fileEditor.readFile.queryOptions({ ...target, rootPath: projectPath, ...input })
+              trpc.fileEditor.readFile.queryOptions({
+                ...requireScope(scope),
+                rootPath: projectPath,
+                ...input
+              })
             ),
           track
         },
         filePath,
         options
       ),
-    [projectPath, openFiles, queryClient, setOpenFilesAndRef, trpc, target, track]
+    [projectPath, openFiles, queryClient, setOpenFilesAndRef, trpc, scope, track]
   )
 
   const openFileForced = useCallback(
@@ -548,7 +556,7 @@ export function useFileEditor(
       try {
         const result = await queryClient.fetchQuery(
           trpc.fileEditor.readFile.queryOptions({
-            ...target,
+            ...requireScope(scope),
             rootPath: projectPath,
             filePath,
             force: true
@@ -572,7 +580,7 @@ export function useFileEditor(
         // File read failed
       }
     },
-    [projectPath, queryClient, trpc, target]
+    [projectPath, queryClient, trpc, scope]
   )
 
   const updateContent = useCallback((filePath: string, content: string) => {
@@ -595,8 +603,13 @@ export function useFileEditor(
               openFilesRef,
               inFlightWrites: inFlightWrites.current,
               setOpenFiles,
-              writeFile: (path, content) =>
-                writeFile({ ...target, rootPath: projectPath, filePath: path, content })
+              writeFile: async (path, content) =>
+                writeFile({
+                  ...requireScope(scope),
+                  rootPath: projectPath,
+                  filePath: path,
+                  content
+                })
             },
             filePath
           )
@@ -608,7 +621,7 @@ export function useFileEditor(
       run.then(release, release)
       return run
     },
-    [projectPath, writeFile, target]
+    [projectPath, writeFile, scope]
   )
 
   const closeFile = useCallback(

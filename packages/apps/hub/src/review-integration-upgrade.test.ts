@@ -4,10 +4,10 @@ import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { ensureMainTab } from '../../../domains/task-terminals/src/server/tabs-store'
 import { createComputerChatRuntime } from '../../../domains/chat-runtime/src/server/computer-runtime'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import {
   fakeChild,
@@ -91,7 +91,8 @@ test.each(['claude-chat', 'codex-chat'])(
   async (nextMode) => {
     const h = await createTestHarness()
     const dir = mkdtempSync(join(realpathSync(tmpdir()), 'review-integration-mode-'))
-    const pc = createChatRuntimeHandlers({
+    const pc = createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',
@@ -119,8 +120,8 @@ test.each(['claude-chat', 'codex-chat'])(
     try {
       h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','P','#000')").run()
       h.db
-        .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-        .run('task', 'p', 'Task', dir)
+        .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+        .run('task', 'p', 'Task')
       await ensureMainTab(h.slayDb, 'task', 'claude-chat')
       const services = createComputerChatServices({
         db: h.slayDb,
@@ -216,7 +217,8 @@ test.each([false, true])(
     const requestKinds: string[] = []
     let olderComputer = false
     let outOfBandWrite: string | null = null
-    const pc = createChatRuntimeHandlers({
+    const pc = createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',
@@ -245,8 +247,8 @@ test.each([false, true])(
     try {
       h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','P','#000')").run()
       h.db
-        .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-        .run('task', 'p', 'Task', dir)
+        .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+        .run('task', 'p', 'Task')
       h.db
         .prepare(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
@@ -255,8 +257,8 @@ test.each([false, true])(
       // A second chat on the same computer, in another task, that stays idle
       // through the outage. (Chats of one task share its metadata state version.)
       h.db
-        .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-        .run('idle-task', 'p', 'Idle', dir)
+        .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+        .run('idle-task', 'p', 'Idle')
       h.db
         .prepare(
           "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('idle','idle-task','claude-chat',0)"

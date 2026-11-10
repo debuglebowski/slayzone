@@ -63,6 +63,7 @@ export interface ChatOwnership {
   migrationHash: string | null
 }
 export * from './protocol'
+export * from './task-data'
 export interface ChatTransferHeader {
   format: 'slayzone-chat'
   version: 1
@@ -77,3 +78,6 @@ export interface ChatTransferManifest {
   hash: string
   bytes: number
 }
+export * from './session-ledger'
+export * from './agent-turns'
+export * from './task-paths'

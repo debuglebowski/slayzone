@@ -106,8 +106,11 @@ export function createChatInvoker(runtime: Runtime) {
     ) {
       if (first !== identity.tabId) throw new Error('Chat queue tab ownership mismatch')
     } else {
-      const tab = await runtime.local.queue.getTabIdForItem(first as string)
-      if (tab && tab !== identity.tabId) throw new Error('Chat queue item ownership mismatch')
+      // `[itemId, …, tabId]`: the hub routed by the named tab, which must be this
+      // conversation's. The queue ops then find nothing for an item another tab
+      // holds (as for one already sent): its existence is not disclosed.
+      if (req.args[req.args.length - 1] !== identity.tabId)
+        throw new Error('Chat queue tab ownership mismatch')
     }
     const target = req.target === 'ops' ? runtime.ops : runtime.queueOps
     if (

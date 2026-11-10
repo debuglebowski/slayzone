@@ -15,7 +15,7 @@ import { describe, test, expect, beforeAll } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { installLoopbackAiConfigComputer } from '../../../../shared/test-utils/loopback-git-computer.js'
 import { initAiConfigOps } from '@slayzone/ai-config/server'
-import { skillSlugFromContextPath } from '@slayzone/ai-config/shared'
+import { skillSlugFromContextPath, type CliProvider } from '@slayzone/ai-config/shared'
 import { aiConfigRouter } from './ai-config-router.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -494,7 +494,10 @@ describe('discoverContextFiles', () => {
 
   test('finds CLAUDE.md when present', async () => {
     fs.writeFileSync(path.join(root, 'CLAUDE.md'), '# rules')
-    const entries = (await caller.discoverContextFiles({ projectPath: root })) as {
+    const entries = (await caller.discoverContextFiles({
+      projectId: 'p-test',
+      projectPath: root
+    })) as {
       name: string
       exists: boolean
     }[]
@@ -560,6 +563,7 @@ describe('getContextTree', () => {
 describe('readContextFile', () => {
   test('reads file content', async () => {
     const content = await caller.readContextFile({
+      projectId: 'p-test',
       filePath: path.join(root, 'CLAUDE.md'),
       projectPath: root
     })
@@ -568,7 +572,9 @@ describe('readContextFile', () => {
 
   test('rejects path outside project', async () => {
     expect(
-      await didThrow(() => caller.readContextFile({ filePath: '/etc/passwd', projectPath: root }))
+      await didThrow(() =>
+        caller.readContextFile({ projectId: 'p-test', filePath: '/etc/passwd', projectPath: root })
+      )
     ).toBe(true)
   })
 })
@@ -576,6 +582,7 @@ describe('readContextFile', () => {
 describe('writeContextFile', () => {
   test('writes file', async () => {
     await caller.writeContextFile({
+      projectId: 'p-test',
       filePath: path.join(root, 'CLAUDE.md'),
       content: '# updated',
       projectPath: root
@@ -1396,7 +1403,7 @@ describe('renameContextFile', () => {
     })
     const oldPath = path.join(root, '.claude/skills/manual/renameme.md')
     const newPath = path.join(root, '.claude/skills/manual/renamed.md')
-    await caller.renameContextFile({ oldPath, newPath, projectPath: root })
+    await caller.renameContextFile({ projectId: 'p-test', oldPath, newPath, projectPath: root })
     expect(fs.existsSync(newPath)).toBe(true)
     expect(fs.existsSync(oldPath)).toBe(false)
   })
@@ -1576,7 +1583,10 @@ describe('checkSyncStatus', () => {
 
 describe('discoverMcpConfigs', () => {
   test('returns entries for supported providers (codex disabled)', async () => {
-    const results = (await caller.discoverMcpConfigs({ projectPath: root })) as {
+    const results = (await caller.discoverMcpConfigs({
+      projectId: 'p-test',
+      projectPath: root
+    })) as {
       provider: string
       exists: boolean
       servers: Record<string, unknown>
@@ -1597,7 +1607,10 @@ describe('discoverMcpConfigs', () => {
       path.join(root, '.mcp.json'),
       JSON.stringify({ mcpServers: { 'my-server': { command: 'node', args: ['server.js'] } } })
     )
-    const results = (await caller.discoverMcpConfigs({ projectPath: root })) as {
+    const results = (await caller.discoverMcpConfigs({
+      projectId: 'p-test',
+      projectPath: root
+    })) as {
       provider: string
       exists: boolean
       servers: Record<string, unknown>
@@ -1611,6 +1624,7 @@ describe('discoverMcpConfigs', () => {
 describe('writeMcpServer', () => {
   test('writes server config to provider file', async () => {
     await caller.writeMcpServer({
+      projectId: 'p-test',
       projectPath: root,
       provider: 'claude',
       serverKey: 'test-server',
@@ -1631,6 +1645,7 @@ describe('writeMcpServer', () => {
     expect(
       await didThrow(() =>
         caller.writeMcpServer({
+          projectId: 'p-test',
           projectPath: root,
           provider: 'codex',
           serverKey: 'test-server',
@@ -1644,6 +1659,7 @@ describe('writeMcpServer', () => {
 describe('removeMcpServer', () => {
   test('removes server from config', async () => {
     await caller.removeMcpServer({
+      projectId: 'p-test',
       projectPath: root,
       provider: 'claude',
       serverKey: 'test-server'
@@ -3029,7 +3045,9 @@ describe('marketplace: uninstall via delete-item', () => {
       entryId: entry3.id,
       scope: 'library'
     })) as AiConfigItem
-    const providers = (await caller.getProjectProviders({ projectId: mkt3.projectId })) as string[]
+    const providers = (await caller.getProjectProviders({
+      projectId: mkt3.projectId
+    })) as CliProvider[]
     await caller.loadLibraryItem({
       projectId: mkt3.projectId,
       projectPath: mkt3.projectPath,

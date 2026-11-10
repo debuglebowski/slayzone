@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { getStorageDir, type SlayzoneDb } from '@slayzone/platform'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import {
   artifactsRouter,
   createArtifactStore,

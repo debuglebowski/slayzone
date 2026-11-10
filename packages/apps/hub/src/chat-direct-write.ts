@@ -18,7 +18,8 @@ export interface ChatDirectWriteDeps {
     epoch: number
     state: string
   } | null>
-  drainMetadata(computerId: string): Promise<unknown>
+  /** `conversationId`: the writer, whose own metadata failure fails the drain. */
+  drainMetadata(computerId: string, conversationId: string): Promise<unknown>
 }
 
 export function createChatDirectWriteHandler(
@@ -36,6 +37,6 @@ export function createChatDirectWriteHandler(
       owner.id !== parsed.data.conversationId
     )
       return
-    await deps.drainMetadata(computerId)
+    await deps.drainMetadata(computerId, owner.id)
   }
 }

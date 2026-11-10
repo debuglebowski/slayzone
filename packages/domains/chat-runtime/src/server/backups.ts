@@ -17,6 +17,19 @@ import {
   fsyncSync
 } from 'node:fs'
 import { fsyncFile } from '@slayzone/platform/durable-fs'
+import {
+  asItemDamage,
+  classifyFault,
+  forEachIsolated,
+  forEachIsolatedSync,
+  isStorageFatal,
+  StructuralFaultError
+} from '@slayzone/platform/isolation'
+import {
+  eraseQuarantinedForTask,
+  fileFingerprint,
+  quarantineMove
+} from '@slayzone/platform/quarantine'
 import { basename, join, resolve, sep } from 'node:path'
 import { createReadStream, promises as fsAsync } from 'node:fs'
 import { z } from 'zod'
@@ -143,6 +156,10 @@ function durableJson(path: string, value: unknown) {
 }
 
 /** Online SQLite snapshot + immutable referenced blobs. Restore never opens a live runtime. */
+/** Quarantine pass of restored archives that can no longer be read. */
+export const ARCHIVE_QUARANTINE_PASS = 'chat-archive'
+const isMissingFile = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
+
 export function createChatBackups(store: ChatStorage, options: { automatic?: boolean } = {}) {
   const dir = join(store.dir, 'backups'),
     archiveDir = join(store.dir, 'archives'),
@@ -577,12 +594,22 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
     timer = setTimeout(() => {
       void create('auto')
         .then(() => {
+          // One old backup that cannot be removed is recorded and retried next run;
+          // the rest of the rotation still happens.
           if (policy.maxAutoBackups > 0)
-            for (const item of list()
-              .filter((b) => b.kind === 'auto')
-              .slice(policy.maxAutoBackups))
-              if (!restorePins.has(item.id))
-                rmSync(folder(dir, item.id), { recursive: true, force: true })
+            forEachIsolatedSync(
+              list()
+                .filter((b) => b.kind === 'auto')
+                .slice(policy.maxAutoBackups)
+                .filter((b) => !restorePins.has(b.id)),
+              {
+                pass: 'chat-backup-rotation',
+                key: (item) => item.id,
+                ledger: store.faults,
+                isFatal: isStorageFatal
+              },
+              (item) => rmSync(folder(dir, item.id), { recursive: true, force: true })
+            )
         })
         .catch(() => {
           // Keep the previous verified backups; the next scheduled run retries.
@@ -868,54 +895,176 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
       // Finish already-started copies before cleaning readable restored copies.
       // Retained backup snapshots keep their normal retention policy.
       await Promise.all([...restoring.values()].map((r) => r.work))
-      for (const id of readdirSync(archiveDir).filter((id) => UUID.test(id))) {
-        const path = folder(archiveDir, id),
-          m = manifest(archiveDir, id)
-        const db = new Database(fileWithin(path, 'chat.sqlite'), { fileMustExist: true })
-        try {
-          if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId))
-            continue
-          // A restored copy has no live backup writer; copied leases are stale.
-          db.exec('DELETE FROM blob_leases')
-          if (
-            db
-              .prepare(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_blob_leases'"
-              )
-              .get()
-          )
-            db.exec('DELETE FROM artifact_blob_leases')
-          prepareStoredTaskErasure(db, taskId)
-          finishStoredTaskErasure(db, path, taskId)
-        } finally {
-          db.close()
+      const unchecked = await refreshArchiveIndex()
+      const holding = store.compose(
+        (raw) =>
+          raw.prepare('SELECT archive_id FROM archive_tasks WHERE task_id=?').all(taskId) as Array<{
+            archive_id: string
+          }>
+      )
+      // One archive at a time: a damaged archive is set aside (or recorded) and
+      // the others are still erased. Only THIS task's erasure reports a failure.
+      const erased = await forEachIsolated(
+        holding.map((row) => row.archive_id),
+        {
+          pass: 'chat-archive-erasure',
+          key: (id) => id,
+          taskId: () => taskId,
+          ledger: store.faults,
+          ignoreGate: true,
+          isFatal: isStorageFatal
+        },
+        async (id) => {
+          try {
+            await eraseFromArchive(id, taskId)
+          } catch (raw) {
+            // A corrupt archive database is the archive's damage, not this disk's.
+            const error = asItemDamage(raw)
+            if (classifyFault(error) === 'structural') quarantineArchive(id, error)
+            else throw error
+          }
         }
-        // Archive manifests describe the remaining readable files. Rebuild after
-        // every retry, including a crash between DB cleanup and manifest publish.
-        m.files = m.files
-          .filter((file) => {
-            try {
-              return existsSync(fileWithin(path, file.path))
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-              throw error
-            }
-          })
-          .map((file) => {
-            const actual = fileWithin(path, file.path)
-            return { ...file, size: statSync(actual).size, hash: hashFile(actual) }
-          })
-        const next = join(path, `.erasure-${randomUUID()}.json`)
-        durableJson(next, m)
-        renameSync(next, join(path, 'manifest.json'))
-        await syncDir(path)
-      }
+      )
+      // Unreadable archives cannot be inspected row by row: any whose raw bytes
+      // name the task is deleted outright (the user's erasure wins over a copy
+      // that can no longer be read anyway).
+      eraseQuarantinedForTask(store.dir, taskId)
+      const failed = [...erased.failed.map((f) => f.key), ...unchecked]
+      if (failed.length)
+        throw new Error(
+          `Restored archive could not be erased yet (${failed.join(', ')}); retrying later`
+        )
     },
     async close() {
       closed = true
       if (timer) clearTimeout(timer)
       await Promise.allSettled([...pending.values(), ...[...restoring.values()].map((r) => r.work)])
     }
+  }
+  /** Moves an unreadable restored archive out of the archive list into quarantine. */
+  function quarantineArchive(id: string, error: unknown) {
+    quarantineMove(store.dir, {
+      pass: ARCHIVE_QUARANTINE_PASS,
+      path: folder(archiveDir, id),
+      reason: error instanceof Error ? error.message : String(error)
+    })
+    store.compose((raw) => raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id))
+  }
+  /**
+   * Brings the archive→task index up to date: an archive is (re)read only when
+   * its manifest changed since it was indexed. An archive that cannot be read is
+   * quarantined (structural) or recorded (transient). Returns the ids that could
+   * not be checked this time: an erasure cannot rule them out.
+   */
+  async function refreshArchiveIndex(): Promise<string[]> {
+    const ids = readdirSync(archiveDir).filter((id) => UUID.test(id))
+    const indexed = new Map(
+      store
+        .compose(
+          (raw) =>
+            raw.prepare('SELECT archive_id,fingerprint FROM archive_index').all() as Array<{
+              archive_id: string
+              fingerprint: string
+            }>
+        )
+        .map((row) => [row.archive_id, row.fingerprint])
+    )
+    store.compose((raw) => {
+      for (const id of indexed.keys())
+        if (!ids.includes(id)) raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id)
+    })
+    const fingerprintOf = (id: string) =>
+      fileFingerprint(join(archiveDir, id, 'manifest.json')) ?? 'missing'
+    const report = await forEachIsolated(
+      ids.filter((id) => indexed.get(id) !== fingerprintOf(id)),
+      {
+        pass: 'chat-archive-index',
+        key: (id) => id,
+        ledger: store.faults,
+        ignoreGate: true,
+        isFatal: isStorageFatal
+      },
+      (id) => {
+        try {
+          indexArchive(id, fingerprintOf(id))
+        } catch (raw) {
+          const error = asItemDamage(raw)
+          if (classifyFault(error) === 'structural' || isMissingFile(error))
+            quarantineArchive(id, error)
+          else throw error
+        }
+      }
+    )
+    return report.failed.map((f) => f.key)
+  }
+  function indexArchive(id: string, fingerprint: string) {
+    manifest(archiveDir, id)
+    const db = new Database(fileWithin(folder(archiveDir, id), 'chat.sqlite'), {
+      readonly: true,
+      fileMustExist: true
+    })
+    let taskIds: string[]
+    try {
+      taskIds = (
+        db.prepare('SELECT DISTINCT task_id FROM conversations').all() as Array<{ task_id: string }>
+      ).map((row) => row.task_id)
+    } catch (error) {
+      // A file that is not a readable chat database is the archive's own damage.
+      throw new StructuralFaultError('Archive database cannot be read', { cause: error })
+    } finally {
+      db.close()
+    }
+    store.transaction(() =>
+      store.compose((raw) => {
+        raw.prepare('DELETE FROM archive_index WHERE archive_id=?').run(id)
+        raw.prepare('INSERT INTO archive_index VALUES(?,?)').run(id, fingerprint)
+        const insert = raw.prepare('INSERT INTO archive_tasks VALUES(?,?)')
+        for (const taskId of taskIds) insert.run(id, taskId)
+      })
+    )
+  }
+  async function eraseFromArchive(id: string, taskId: string) {
+    const path = folder(archiveDir, id),
+      m = manifest(archiveDir, id)
+    const db = new Database(fileWithin(path, 'chat.sqlite'), { fileMustExist: true })
+    try {
+      if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId)) return
+      // A restored copy has no live backup writer; copied leases are stale.
+      db.exec('DELETE FROM blob_leases')
+      if (
+        db
+          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_blob_leases'")
+          .get()
+      )
+        db.exec('DELETE FROM artifact_blob_leases')
+      prepareStoredTaskErasure(db, taskId)
+      finishStoredTaskErasure(db, path, taskId)
+    } finally {
+      db.close()
+    }
+    // Archive manifests describe the remaining readable files. Rebuild after
+    // every retry, including a crash between DB cleanup and manifest publish.
+    m.files = m.files
+      .filter((file) => {
+        try {
+          return existsSync(fileWithin(path, file.path))
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+          throw error
+        }
+      })
+      .map((file) => {
+        const actual = fileWithin(path, file.path)
+        return { ...file, size: statSync(actual).size, hash: hashFile(actual) }
+      })
+    const next = join(path, `.erasure-${randomUUID()}.json`)
+    durableJson(next, m)
+    renameSync(next, join(path, 'manifest.json'))
+    await syncDir(path)
+    // The manifest changed: drop the task from the index now (re-read lazily).
+    store.compose((raw) =>
+      raw.prepare('DELETE FROM archive_tasks WHERE archive_id=? AND task_id=?').run(id, taskId)
+    )
   }
   function withArchive<T>(id: string, read: (db: Database.Database) => T): T {
     const path = folder(archiveDir, id)

@@ -40,9 +40,19 @@ test('computer invocation accepts shared message and queue shapes', () => {
       target: 'queue',
       method: 'hold',
       operationId: 'hold-1',
-      args: ['item']
+      args: ['item', 'tab']
     })
   ).toMatchObject({ method: 'hold' })
+  // A queue item operation names the tab holding it (v208): the hub routes by it.
+  expect(() =>
+    parseChatInvocation({
+      route,
+      target: 'queue',
+      method: 'hold',
+      operationId: 'hold-2',
+      args: ['item']
+    })
+  ).toThrow()
 })
 
 test('new main operations cross the computer boundary with their full input', () => {

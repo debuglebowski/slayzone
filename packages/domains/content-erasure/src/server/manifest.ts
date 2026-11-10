@@ -70,7 +70,11 @@ export interface ErasureWorktree {
   repoPath: string | null
   /** The project's folder on each computer, captured before project rows can be erased. */
   repoPaths?: Array<{ computerId: string; path: string }>
-  path: string
+  /**
+   * The worktree, as its computer named it at cleanup (the hub keeps no path, §9
+   * 7e); null until then. Kept for retries, scrubbed once the job is done.
+   */
+  path: string | null
   deleted: boolean
   /** Its computer is revoked or removed, or no computer could ever hold it: it is not
    *  retried automatically. Only the operator procedure can verify its removal. */
@@ -80,19 +84,6 @@ export interface ErasureWorktree {
 /** The hub's pick for a worktree no task/project binding names. `gone`: no computer
  *  that could hold it can ever answer; else null means none is usable yet. */
 export type ErasureWorktreeComputer = { computerId: string } | { computerId: null; gone: boolean }
-
-/**
- * Whether a task outside the erased set still uses this worktree directory — then it
- * is shared and kept. A task's holding computer is its recorded one, else its own or
- * its project's; one that names none (an unbound task) counts as the same computer,
- * like a target whose computer is not known yet: removing a directory a live task
- * still uses is worse than keeping one. Params: path, erased-ids JSON, computer, computer.
- */
-export const SHARED_WORKTREE_SQL = `SELECT 1 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
-  WHERE t.worktree_path=? AND t.id NOT IN (SELECT value FROM json_each(?))
-    AND (? IS NULL OR coalesce(t.worktree_computer_id,t.computer_id,p.default_computer_id) IS NULL
-      OR coalesce(t.worktree_computer_id,t.computer_id,p.default_computer_id)=?)
-  LIMIT 1`
 
 /** Record that `computerId` holds data of `taskId` (idempotent). */
 export function addComputerTask(m: ErasureManifest, computerId: string, taskId: string): void {

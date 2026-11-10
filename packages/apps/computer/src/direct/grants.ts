@@ -86,6 +86,7 @@ function sameResource(
 ): boolean {
   if (r.kind === 'pty' && target.kind === 'pty') return r.sessionId === target.sessionId
   if (r.kind === 'chat' && target.kind === 'chat') return r.tabId === target.tabId
+  if (r.kind === 'task' && target.kind === 'task') return r.taskId === target.taskId
   return false
 }
 
