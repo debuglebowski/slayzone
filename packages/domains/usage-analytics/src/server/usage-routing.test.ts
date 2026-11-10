@@ -164,3 +164,44 @@ describe('paged collect', () => {
     expect(ids(), "page 1's records are stored").toEqual(['pa-1', 'pb-1'])
   })
 })
+
+// Two computers can read the same agent logs — two computer processes of one OS user
+// on one machine (e.g. the desktop's own computer plus a standalone one) — and only the
+// one whose ledger names the session attributes its records. The hub must keep that
+// attribution whichever copy arrives first. Found by the migration persona suite
+// (tools/migration-personas, p05-v0380-full: task_id flipped between runs).
+describe('the same record from two computers', () => {
+  test('a later copy that names the task fills in a missing task_id; it never overwrites one', async () => {
+    h.db.exec('DROP TABLE IF EXISTS usage_cursor_handoff')
+    h.db.exec("DELETE FROM usage_records WHERE id LIKE 'shared-%'")
+    const copy = (taskId: string | null) => ({ ...rec('shared-r1'), taskId })
+    let order: Array<string | null> = []
+    setUsageCollectRouting({
+      computers: () => ['first', 'second'],
+      collect: async (computerId, request) => {
+        if (request.ack) return { results: [] }
+        const taskId = order[computerId === 'first' ? 0 : 1]
+        return {
+          results: [{ sourceFile: file, fileMtimeMs: 10, endOffset: 100, records: [copy(taskId)] }],
+          receipt: { token: `tok-${computerId}`, index: 0 }
+        }
+      }
+    })
+    const taskOf = () =>
+      (
+        h.db.prepare("SELECT task_id FROM usage_records WHERE id='shared-r1'").get() as {
+          task_id: string | null
+        }
+      ).task_id
+
+    // The unattributed copy lands first: the attributed one still names the task.
+    order = [null, 'task-a']
+    await refreshUsageData(db)
+    expect(taskOf()).toBe('task-a')
+
+    // An attributed record is never re-attributed by a later copy.
+    order = ['task-b', null]
+    await refreshUsageData(db)
+    expect(taskOf()).toBe('task-a')
+  })
+})

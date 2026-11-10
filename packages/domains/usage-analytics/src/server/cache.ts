@@ -105,12 +105,18 @@ async function upsertRecords(
 ): Promise<number> {
   if (records.length === 0) return 0
 
+  // A record already stored is kept as it is, except that a copy naming its task fills
+  // in a missing task_id: two computers can read the same logs (two computer processes
+  // of one OS user on one machine), and only the one whose ledger names the session
+  // attributes it — whichever copy arrives first. An attributed record is never changed.
   const sql = `
-    INSERT OR IGNORE INTO usage_records (
+    INSERT INTO usage_records (
       id, provider, model, session_id, timestamp,
       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
       cost_usd, cwd, task_id, source_file, source_offset
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 0)
+    ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id
+      WHERE usage_records.task_id IS NULL AND excluded.task_id IS NOT NULL
   `
 
   const results = await db.batchTxn(
