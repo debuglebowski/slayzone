@@ -1858,6 +1858,26 @@ describe('createRoutingProcessBackend', () => {
     })
   })
 
+  it("a process row's own folder travels as declared (B3); none, or one not declared, does not", () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec({ id: 'p-a', cwd: '/home/u/backend', declaredCwd: true }))
+    backend.spawn(procSpec({ id: 'p-b', cwd: '', declaredCwd: true }))
+    backend.spawn(procSpec({ id: 'p-c', cwd: '/home/u/app' }))
+    const sent = gateway.calls
+      .filter((c) => c.method === 'proc.spawn')
+      .map((c) => c.params as { cwd?: string; declaredCwd?: boolean })
+    expect(sent.map((p) => [p.cwd, p.declaredCwd])).toEqual([
+      ['/home/u/backend', true],
+      [undefined, undefined],
+      ['/home/u/app', undefined]
+    ])
+  })
+
   it('lists the runs a computer holds that this hub does not track, and ends one there', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 555 }))

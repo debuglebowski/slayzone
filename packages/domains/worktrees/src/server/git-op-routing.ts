@@ -80,7 +80,12 @@ let watchSeq = 0
 
 /** One watch per scope and checkout. */
 function watchKey(target: GitScope, worktreePath: string): string {
-  return JSON.stringify([target.taskId ?? null, target.projectId ?? null, worktreePath])
+  return JSON.stringify([
+    target.taskId ?? null,
+    target.projectId ?? null,
+    target.projectWide === true,
+    worktreePath
+  ])
 }
 
 /** The scope a watch's events carry, for their owner check. */

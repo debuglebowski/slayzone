@@ -35,6 +35,8 @@ const m = vi.hoisted(() => {
     setMode,
     getAutoEligibility,
     toast: vi.fn(),
+    /** The latest `useChatSettingsChanged` listener: fire it as the hub would. */
+    settingsChanged: { taskId: '', fire: () => {} },
     // One identity for the hook's lifetime, like the real client.
     client: {
       chat: {
@@ -48,6 +50,12 @@ const m = vi.hoisted(() => {
 })
 
 vi.mock('../trpc', () => ({ useTRPCClient: () => m.client }))
+vi.mock('./useChatSettingsChanged', () => ({
+  useChatSettingsChanged: (taskId: string, onChanged: () => void) => {
+    m.settingsChanged.taskId = taskId
+    m.settingsChanged.fire = onChanged
+  }
+}))
 vi.mock('@slayzone/ui', async () => ({
   ...(await vi.importActual<object>('../../../../../shared/ui/src/use-stable-callback')),
   toast: m.toast
@@ -192,6 +200,33 @@ describe('useChatMode hydration', () => {
     m.getAutoEligibility.mockRejectedValue(new Error('hub down'))
     const { result } = await setup()
     expect(result.current.autoCapability).toEqual({ eligible: false, optedIn: false })
+  })
+})
+
+describe('useChatMode restored settings (S4)', () => {
+  it('re-reads the mode when the task’s saved settings land after the chat opened', async () => {
+    const { result } = await setup()
+    expect(result.current.chatMode).toBe('auto-accept')
+    expect(m.settingsChanged.taskId).toBe('task1')
+    // The hub's staged settings were imported on the computer: auto-accept → bypass.
+    m.getMode.mockResolvedValue('bypass')
+    act(() => m.settingsChanged.fire())
+    await flush()
+    expect(result.current.chatMode).toBe('bypass')
+  })
+
+  it('a user change in flight wins over a re-read', async () => {
+    const first = deferred<unknown>()
+    m.setMode.mockReturnValueOnce(first.promise)
+    const { result } = await setup()
+    act(() => {
+      void result.current.handleModeChange('plan')
+    })
+    m.getMode.mockResolvedValue('bypass')
+    act(() => m.settingsChanged.fire())
+    await flush()
+    expect(result.current.chatMode).toBe('plan')
+    await act(async () => first.resolve({ chatMode: 'plan' }))
   })
 })
 

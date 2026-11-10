@@ -35,13 +35,18 @@ import type { SlayzoneDb } from '@slayzone/platform'
 
 /** The handoff kind of a task's paths (chat-runtime `taskPathImport`). */
 export const TASK_PATH_KIND = 'task-path'
+/** What a path read or write waits for: the task's staged paths, never its history. */
+const PATH_KINDS: readonly string[] = [TASK_PATH_KIND]
 
 export interface ComputerTaskPathsDeps {
   db: SlayzoneDb
   /** The computer a kind of the task's data goes to now (`ComputerDataHandoff.targetOf`). */
   targetOf(kind: string, taskId: string): Promise<string | null>
-  /** Deliver what the hub still holds of the task there first (`ComputerDataHandoff.flushTask`). */
-  flushTask(taskId: string, computerId: string): Promise<void>
+  /**
+   * Deliver what the hub still holds of the task there first, only `kinds` when
+   * given (`ComputerDataHandoff.flushTask`).
+   */
+  flushTask(taskId: string, computerId: string, kinds?: readonly string[]): Promise<void>
   /** Whether that computer is connected and usable now. */
   usable(computerId: string): boolean
   /** A `chat.request` to the computer (through the lifecycle barrier in production). */
@@ -157,13 +162,13 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
   async function run(taskId: string, change: TaskPathChange, projectId: string | null, at: number) {
     const computerId = await deps.targetOf(TASK_PATH_KIND, taskId)
     if (computerId === null || !deps.usable(computerId)) return false
-    await deps.flushTask(taskId, computerId)
+    await deps.flushTask(taskId, computerId, PATH_KINDS)
     if (change.op === 'clear') {
       await call(computerId, { op: 'clear', taskId, at })
       return true
     }
     if (change.op === 'inherit') {
-      await deps.flushTask(change.parentTaskId, computerId)
+      await deps.flushTask(change.parentTaskId, computerId, PATH_KINDS)
       await call(computerId, {
         op: 'inherit',
         taskId,
@@ -191,7 +196,7 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     const computerId = await deps.targetOf(TASK_PATH_KIND, taskId)
     if (computerId === null || !deps.usable(computerId))
       throw new TaskFoldersOfflineError(taskId, computerId)
-    await deps.flushTask(taskId, computerId)
+    await deps.flushTask(taskId, computerId, PATH_KINDS)
     return computerId
   }
 
@@ -210,10 +215,22 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
         list.push(taskId)
         byComputer.set(computerId, list)
       }
-      for (const [computerId, ids] of byComputer) {
+      for (const [computerId, all] of byComputer) {
+        // A row the hub still stages goes first: the read never misses it. Only the
+        // task's paths (never its history), and per task: one task whose row cannot
+        // be delivered is offline on its own; the batch's others still answer.
+        const ids: string[] = []
+        for (const id of all) {
+          try {
+            await deps.flushTask(id, computerId, PATH_KINDS)
+            ids.push(id)
+          } catch (error) {
+            log(`staged paths of ${id} not delivered to ${computerId}`, error)
+            out[id] = { state: 'offline', computerId }
+          }
+        }
+        if (ids.length === 0) continue
         try {
-          // A row the hub still stages goes first: the read never misses it.
-          for (const id of ids) await deps.flushTask(id, computerId)
           const rows = (await call(computerId, { op: 'get', taskIds: ids })) as Array<{
             taskId: string
             worktreePath: string | null
@@ -346,7 +363,7 @@ export async function readComputerTaskPath(
   taskId: string
 ): Promise<{ worktreePath: string | null; baseDir: string | null } | null> {
   if (!deps.usable(computerId)) throw new Error(`computer ${computerId} is not connected`)
-  await deps.flushTask(taskId, computerId)
+  await deps.flushTask(taskId, computerId, PATH_KINDS)
   const rows = (await deps.request(computerId, {
     kind: 'taskPaths',
     value: { op: 'get', taskIds: [taskId] }

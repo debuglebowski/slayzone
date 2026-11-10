@@ -15,8 +15,11 @@ import {
 import {
   taskEvents,
   configureTaskRuntimeAdapters,
+  getTaskPathsDelegate,
+  setTaskPathsDelegate,
   setTaskSessionLedger
 } from '@slayzone/task/server'
+import { COMPUTER_REFUSED_RPC_CODE } from '@slayzone/platform/path-scope'
 import { createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
 import { tmpdir } from 'node:os'
 import { TypedEmitter } from '@slayzone/platform/events'
@@ -382,6 +385,42 @@ describe('PATCH /api/tasks/:id', () => {
       has_worktree: number
     }
     expect(row.has_worktree).toBe(0)
+  })
+
+  test('409 COMPUTER_REFUSED: the task computer refuses the folder, nothing written (B3)', async () => {
+    // The computer's path jail refused it (an RpcError with refusedByComputer, as the
+    // hub gateway rejects): a conflict the caller can resolve, never a 500.
+    const id = seedTask()
+    const refused = Object.assign(
+      new Error("path '/etc' is outside this computer's allowed folders; refused"),
+      { name: 'RpcError', code: COMPUTER_REFUSED_RPC_CODE }
+    )
+    const prior = getTaskPathsDelegate()
+    setTaskPathsDelegate({
+      changed: async () => {},
+      release: async () => ({ worktreePath: null, shared: false, computerId: 'c' }),
+      apply: async () => {
+        throw refused
+      },
+      forget: async () => {},
+      read: async () => ({})
+    } as never)
+    try {
+      const res = await rest.request<{ ok: boolean; error: string; code: string }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { baseDir: '/etc' }
+      )
+      expect(res.status).toBe(409)
+      expect(res.body).toMatchObject({ ok: false, code: 'COMPUTER_REFUSED' })
+      expect(res.body.error).toMatch(/outside this computer's allowed folders/)
+      const row = h.db.prepare('SELECT has_base_dir FROM tasks WHERE id = ?').get(id) as {
+        has_base_dir: number
+      }
+      expect(row.has_base_dir).toBe(0)
+    } finally {
+      setTaskPathsDelegate(prior)
+    }
   })
 
   test('500: invalid reparent throws (cyclic)', async () => {

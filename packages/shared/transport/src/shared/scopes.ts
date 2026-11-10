@@ -528,6 +528,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'chat.setFastMode': 'agent',
   'chat.setMode': 'agent',
   'chat.setModel': 'agent',
+  // A restored chat's settings arrived from the hub's hand-off: re-read them (review 2, S4).
+  'chat.settings.onChanged': 'agent',
   // `/btw`: a question to the running agent, like `send` — its answer never enters the chat.
   'chat.sideQuestion.ask': 'agent',
   'chat.sideQuestion.cancel': 'agent',
@@ -821,6 +823,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.loadBoardData': 'tasks',
   'task.loadBoardRows': 'tasks',
   'task.onChanged': 'tasks',
+  'task.onPathsChanged': 'tasks',
   'task.removeBlocker': 'tasks',
   'task.reorder': 'tasks',
   'task.reorderPinned': 'tasks',

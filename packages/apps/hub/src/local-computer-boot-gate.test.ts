@@ -73,4 +73,71 @@ describe('local computer boot gate', () => {
     expect(await gate.settle(async () => null)).toBeNull()
     expect(Date.now() - started).toBeLessThan(1_000)
   })
+
+  test('S6: the boot window closes after its timeout: later calls answer at once, not 30s each', async () => {
+    const { gate } = setup(60)
+    expect(await gate.settle(async () => null)).toBeNull()
+    const started = Date.now()
+    expect(await gate.settle(async () => null)).toBeNull()
+    expect(await gate.settle(async () => null)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(40)
+    expect(gate.booting).toBe(false)
+  })
+
+  test('S6: the window is one deadline from boot, shared — a late call waits only what is left', async () => {
+    const { gate } = setup(120)
+    await new Promise((r) => setTimeout(r, 80))
+    const started = Date.now()
+    expect(await gate.settle(async () => null)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(100)
+  })
+
+  test('S6: a reported spawn failure closes the window: waiting calls answer now, later ones at once', async () => {
+    const { gate } = setup(60_000)
+    const started = Date.now()
+    const pending = gate.settle(async () => null)
+    await new Promise((r) => setTimeout(r, 20))
+    gate.close('spawn failed')
+    expect(await pending).toBeNull()
+    expect(await gate.settle(async () => null)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  test('S6: the local computer still connecting after the window closed is used from then on', async () => {
+    const { gate, connect } = setup(30)
+    expect(await gate.settle(async () => null)).toBeNull()
+    connect('local')
+    expect(gate.booted).toBe(true)
+    expect(await gate.settle(async () => 'local')).toBe('local')
+  })
+
+  test('S6: settleWith — any read: an unanswered result, or an offline error, waits for the boot', async () => {
+    const { gate, connect } = setup()
+    let n = 0
+    const paths = gate.settleWith(async () => (++n === 1 ? { a: 'offline' } : { a: 'ok' }), {
+      unanswered: (r) => Object.values(r).includes('offline')
+    })
+    let m = 0
+    class Offline extends Error {}
+    const prompts = gate.settleWith(
+      async () => {
+        if (++m === 1) throw new Offline('offline')
+        return ['p']
+      },
+      { offline: (e) => e instanceof Offline }
+    )
+    await new Promise((r) => setTimeout(r, 20))
+    connect('local')
+    expect(await paths).toEqual({ a: 'ok' })
+    expect(await prompts).toEqual(['p'])
+    // A real error is never waited on or swallowed.
+    await expect(
+      gate.settleWith(
+        async () => {
+          throw new Error('boom')
+        },
+        { offline: (e) => e instanceof Offline }
+      )
+    ).rejects.toThrow('boom')
+  })
 })

@@ -825,6 +825,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'chat.onQueueChanged': streamed(on('tabId', 'tab')),
   // A bare signal (no payload to filter): the tab named in the input is checked instead.
   'chat.threads.onChanged': checked(tab('tabId')),
+  'chat.settings.onChanged': checked(task('taskId')),
   'chat.pinnedMessages.onChanged': checked(tab('tabId')),
   'chat.onQueueDrained': streamed(on('tabId', 'tab')),
 
@@ -1191,6 +1192,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.loadBoardData': listed(board),
   'task.loadBoardRows': listed(board),
   'task.onChanged': streamed(on('projectId', 'project')),
+  'task.onPathsChanged': streamed(on('taskId', 'task')),
 
   // ── templates, terminal tabs ──
   'template.getByProject': checked(project('projectId')),

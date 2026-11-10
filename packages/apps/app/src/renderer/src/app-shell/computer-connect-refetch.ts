@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { noteComputerConnected, useSubscription } from '@slayzone/transport/client'
 import { retryFailedGitWatches } from '@slayzone/worktrees/hooks'
 import { TASK_PATHS_QUERY_ROOT } from '@slayzone/task/client/useTaskPath'
+import { WORKTREE_COLORS_QUERY_ROOT } from '@slayzone/worktrees/client/useWorktreeColors'
 import { useTRPC } from '../trpc'
 
 /** The tRPC namespaces (or single procedures) whose answers come from a computer. */
@@ -35,10 +36,14 @@ export type ComputerBackedQuery = (typeof COMPUTER_BACKED_QUERIES)[number]
 
 /**
  * Computer-backed queries keyed outside tRPC: a task's worktree / custom folder
- * (useTaskPath batches its own reads). Its `offline` answer from before the local
- * computer enrolled otherwise stays, showing "connect it to start".
+ * (useTaskPath batches its own reads) and the worktree colours (useWorktreeColors).
+ * An answer from before the local computer enrolled otherwise stays: "connect it to
+ * start", neutral colours.
  */
-export const COMPUTER_BACKED_KEYS: ReadonlyArray<readonly unknown[]> = [TASK_PATHS_QUERY_ROOT]
+export const COMPUTER_BACKED_KEYS: ReadonlyArray<readonly unknown[]> = [
+  TASK_PATHS_QUERY_ROOT,
+  WORKTREE_COLORS_QUERY_ROOT
+]
 
 interface Invalidator {
   invalidateQueries(filter: { queryKey: readonly unknown[] }): Promise<unknown>

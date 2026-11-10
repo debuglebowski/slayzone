@@ -12,6 +12,7 @@ import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { resolveAgentIdAlias } from '../../agent-id-alias'
+import { respondComputerRefusal } from '../computer-refusal'
 
 /**
  * PATCH /api/tasks/:id — update a task (CLI `slay tasks update`, plus the
@@ -160,6 +161,8 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: updated })
     } catch (err) {
+      // The computer refused the folder by its own policy (B3): 409, its message.
+      if (respondComputerRefusal(res, err)) return
       // A path no connected computer can take now (§9 7e): the caller can fix it.
       const status = err instanceof TaskFoldersUnavailableError ? 409 : 500
       res

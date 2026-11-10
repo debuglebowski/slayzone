@@ -2303,6 +2303,8 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           // Same rule as pty.spawn: an absent cwd lets the computer resolve the
           // project's checkout, rather than an empty string travelling as a path.
           ...(spec.cwd ? { cwd: spec.cwd } : {}),
+          // The user's own folder for the process (B3): a root of this spawn.
+          ...(spec.cwd && spec.declaredCwd ? { declaredCwd: true } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
           env: spec.env,
           // A background process's computer sweeps its group when it exits on

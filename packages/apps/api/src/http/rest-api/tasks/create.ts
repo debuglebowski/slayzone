@@ -11,6 +11,7 @@ import {
   type ResolvedProject
 } from '../resolve'
 import { resolveAgentIdAlias } from '../../agent-id-alias'
+import { respondComputerRefusal } from '../computer-refusal'
 
 /**
  * POST /api/tasks — create a task (CLI `slay tasks create`).
@@ -187,6 +188,8 @@ export function registerCreateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: task, project: projectSummary })
     } catch (err) {
+      // The computer refused a folder by its own policy (B3): 409, its message.
+      if (respondComputerRefusal(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

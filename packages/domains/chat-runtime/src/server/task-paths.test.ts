@@ -240,9 +240,11 @@ describe('task paths on the computer', () => {
     paths.handle({ op: 'set', taskId: 'b', projectId: 'p', baseDir: '/b', at: 1 })
     paths.handle({ op: 'set', taskId: 'n', projectId: 'p', at: 1 })
     const bounds = (scope: Parameters<typeof scopeBounds>[1]) => scopeBounds(paths, scope, folder)
-    // Own root + the project's checkout it belongs to.
+    // Own roots (worktree, and the base dir the user chose too) + the project's
+    // checkout it belongs to.
     expect(bounds({ kind: 'task', taskId: 'w', projectId: 'p' }).roots).toEqual([
       '/proj/.wt/w',
+      '/b',
       '/proj'
     ])
     expect(bounds({ kind: 'task', taskId: 'b', projectId: 'p' }).roots).toEqual(['/b', '/proj'])
@@ -257,11 +259,67 @@ describe('task paths on the computer', () => {
     // No row here: the project the hub names, never another task's, never the computer's.
     expect(bounds({ kind: 'task', taskId: 'x', projectId: 'p' }).roots).toEqual(['/proj'])
     expect(bounds({ kind: 'task', taskId: 'x', projectId: null }).roots).toEqual([])
+    // A project: its folder first, then every root of its tasks held here (B1).
     expect(bounds({ kind: 'project', projectId: 'p' })).toEqual({
-      roots: ['/proj'],
+      roots: ['/proj', '/proj/.wt/w', '/b', '/proj/payments'],
       excluded: [],
       foreign: []
     })
     expect(bounds({ kind: 'project', projectId: 'q' }).roots).toEqual([])
+  })
+
+  test("B1: a project scope covers its worktree bases and its tasks' roots, never another project's", () => {
+    const storage = open()
+    const paths = createTaskPaths(storage)
+    const folders: Record<string, string> = { app: '/dev/app', other: '/dev/other' }
+    const bounds = (projectId: string, bases = (_: string, f: string) => [`${f}-workspaces`]) =>
+      scopeBounds(
+        paths,
+        { kind: 'project', projectId },
+        (id) => folders[id] ?? null,
+        () => Object.entries(folders).map(([projectId, path]) => ({ projectId, path })),
+        bases
+      )
+    // Task worktrees of `app` in its default base, and one elsewhere (a configured base
+    // that later changed); a task of `other` whose worktree landed in app's base dir.
+    paths.handle({
+      op: 'set',
+      taskId: 'a1',
+      projectId: 'app',
+      worktreePath: '/dev/app-workspaces/feat',
+      at: 1
+    })
+    paths.handle({ op: 'set', taskId: 'a2', projectId: 'app', worktreePath: '/wt/app/fix', at: 1 })
+    paths.handle({
+      op: 'set',
+      taskId: 'o1',
+      projectId: 'other',
+      worktreePath: '/dev/app-workspaces/theirs',
+      at: 1
+    })
+    const app = bounds('app')
+    // Folder first (a project process with no cwd starts there), then the bases and
+    // the project's tasks' roots.
+    expect(app.roots).toEqual([
+      '/dev/app',
+      '/dev/app-workspaces',
+      '/dev/app-workspaces/feat',
+      '/wt/app/fix'
+    ])
+    // Another project's folder and task roots are carved out of the extra roots…
+    expect(app.excluded).toEqual(
+      expect.arrayContaining(['/dev/other', '/dev/app-workspaces/theirs'])
+    )
+    expect(app.foreign).toEqual(
+      expect.arrayContaining(['/dev/other', '/dev/app-workspaces/theirs'])
+    )
+    expect(app.roots).not.toContain('/dev/app-workspaces/theirs')
+    // …never inside the project's own folder (S5: a project nested in it stays the outer's).
+    folders.web = '/dev/app/web'
+    expect(bounds('app').excluded).not.toContain('/dev/app/web')
+    // Not placed here: nothing, whatever its tasks hold.
+    expect(bounds('ghost').roots).toEqual([])
+    delete folders.app
+    expect(bounds('app').roots).toEqual([])
   })
 })

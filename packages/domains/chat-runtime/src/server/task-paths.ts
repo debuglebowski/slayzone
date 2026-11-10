@@ -8,8 +8,9 @@
  * with the task's purge.
  *
  * {@link scopeBounds} names the roots a request's paths are confined to (Phase 7b
- * on): a task's worktree, else its base dir, else its project's folder on this
- * computer; a project's folder. Never another task's roots.
+ * on): a task's worktree and base dir and its project's folder on this computer; a
+ * project's folder, its worktree bases and its tasks' roots. Never another task's
+ * worktree from a task scope, never another project's roots from a project scope.
  *
  * @module chat-runtime/server/task-paths
  */
@@ -21,6 +22,7 @@ import {
   taskPathsRequestSchema,
   taskPathValueSchema
 } from '../shared/task-paths'
+import { isAbsolute, relative } from 'node:path'
 import type { ChatStorage } from './storage'
 import type { DataImportKind } from './task-data'
 
@@ -105,6 +107,25 @@ export function taskPathsStore(storage: ChatStorage) {
         worktrees: set(rows.map((r) => r.worktree_path)),
         baseDirs: set(rows.map((r) => r.base_dir))
       }
+    },
+    /**
+     * The roots (worktrees and base dirs) of the tasks held here for `projectId`
+     * (`own`) and of every other task held here (`others`, another project's or none):
+     * a project scope covers its tasks' folders, and no other task's (B1).
+     */
+    ofProject(projectId: string): { own: string[]; others: string[] } {
+      const rows = db
+        .prepare(
+          'SELECT project_id, worktree_path, base_dir FROM task_paths WHERE worktree_path IS NOT NULL OR base_dir IS NOT NULL'
+        )
+        .all() as Array<Pick<Row, 'project_id' | 'worktree_path' | 'base_dir'>>
+      const own = new Set<string>()
+      const others = new Set<string>()
+      for (const r of rows) {
+        const into = r.project_id === projectId ? own : others
+        for (const p of [r.worktree_path, r.base_dir]) if (p !== null) into.add(p)
+      }
+      return { own: [...own], others: [...others] }
     },
     getMany(taskIds: string[]): TaskPathRow[] {
       const out: TaskPathRow[] = []
@@ -232,6 +253,8 @@ export function createTaskPaths(storage: ChatStorage, now: () => number = Date.n
     handle,
     get: (taskId: string): TaskPathRow | null => store.get(taskId),
     others: (taskId: string): { worktrees: string[]; baseDirs: string[] } => store.others(taskId),
+    ofProject: (projectId: string): { own: string[]; others: string[] } =>
+      store.ofProject(projectId),
     byWorktree: (paths: string[]): Record<string, string> => store.byWorktree(paths)
   }
 }
@@ -258,39 +281,58 @@ export const taskPathImport: DataImportKind<TaskPathValue> = {
   }
 }
 
+/** `p` is `root` or lies under it (lexically: both absolute, already normalized). */
+function isWithin(p: string, root: string): boolean {
+  const rel = relative(root, p)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
 /**
  * What one request's path scope may touch on this computer (`@slayzone/platform/
  * path-scope`; the path jail enforces it on top of the machine bound).
  *
- * - A task: its own root — its worktree, else its base dir — and its project's
- *   folder here (the checkout its worktree belongs to: merge into the parent
- *   branch, copy ignored files, the repo of `git worktree add`). The project is the
- *   one this computer recorded for the task, else the one the hub names (task →
- *   project is hub data). Every OTHER task's WORKTREE is carved out (`excluded`), so
- *   a task never reaches into another task's checkout nested in the project folder;
- *   another task's base dir is NOT (S4): it is a plain folder of the same checkout,
- *   as any subfolder (project `shop`, task B's base dir `shop/payments` — a task at
- *   the project root edits `shop/payments/checkout.ts`). A folder that is also this
+ * - A task: its own roots — its worktree and its base dir, each a folder the task
+ *   declared (created for it, or the user chose it: B3, a folder outside the project,
+ *   one another task shares, one inside another project's folder) — and its project's
+ *   folder here (the checkout its worktree belongs to: merge into the parent branch,
+ *   copy ignored files, the repo of `git worktree add`). The project is the one this
+ *   computer recorded for the task, else the one the hub names (task → project is hub
+ *   data). Every OTHER task's WORKTREE is carved out (`excluded`), so a task never
+ *   reaches into another task's checkout nested in the project folder; another
+ *   task's base dir is NOT (S4): it is a plain folder of the same checkout, as any
+ *   subfolder (project `shop`, task B's base dir `shop/payments` — a task at the
+ *   project root edits `shop/payments/checkout.ts`). A folder that is also this
  *   task's own root (a subtask shares its parent's worktree) is the jail's to keep.
- * - A project: its folder here; tasks' folders nested in it are the project's too.
+ * - A project (B1): its folder here first (a project process with no cwd starts
+ *   there), then where its worktrees live (`worktreeBases`: the default
+ *   `../<folder name>-workspaces`, and the hub's configured base), then every root of
+ *   its tasks held here — the union of what its tasks may touch, so its git panel's
+ *   Worktrees tab reaches every worktree of the project. Nothing of it without a
+ *   folder here (the project is not placed on this computer). Another project's
+ *   folder, and another project's tasks' roots, are carved out where they lie in
+ *   those extra roots, never inside the project's own folder (S5, nested projects:
+ *   project A `~/dev` holds project B `~/dev/web`).
  *
  * `foreign`: every root here that belongs to someone else — other tasks' folders,
- * other projects' folders. A NEW root the request creates (`git worktree add`'s
- * target) may lie outside the scope, but never inside a foreign one.
+ * other projects' folders (and their tasks'). A NEW root the request creates (`git
+ * worktree add`'s target) may lie outside the scope, but never inside a foreign one.
  *
  * `projectFolder` resolves a project's folder on this computer (its placement);
- * `projectFolders` lists every project's folder here.
+ * `projectFolders` lists every project's folder here; `worktreeBases` names the
+ * folders a project's worktrees are made in, from its folder here.
  */
 export function scopeBounds(
   paths: {
     get(taskId: string): TaskPathRow | null
     others(taskId: string): { worktrees: string[]; baseDirs: string[] }
+    ofProject?(projectId: string): { own: string[]; others: string[] }
   },
   scope:
     | { kind: 'task'; taskId: string; projectId: string | null }
     | { kind: 'project'; projectId: string },
   projectFolder: (projectId: string) => string | null,
-  projectFolders: () => Array<{ projectId: string; path: string }> = () => []
+  projectFolders: () => Array<{ projectId: string; path: string }> = () => [],
+  worktreeBases: (projectId: string, folder: string) => string[] = () => []
 ): { roots: string[]; excluded: string[]; foreign: string[] } {
   const otherProjects = (projectId: string | null) =>
     projectFolders()
@@ -298,17 +340,28 @@ export function scopeBounds(
       .map((p) => p.path)
   if (scope.kind === 'project') {
     const folder = projectFolder(scope.projectId)
+    const tasks = paths.ofProject?.(scope.projectId) ?? { own: [], others: [] }
+    const foreign = [...new Set([...otherProjects(scope.projectId), ...tasks.others])]
+    if (!folder) return { roots: [], excluded: [], foreign }
+    const roots = [...new Set([folder, ...worktreeBases(scope.projectId, folder), ...tasks.own])]
     return {
-      roots: folder ? [folder] : [],
-      excluded: [],
-      foreign: otherProjects(scope.projectId)
+      roots,
+      // Someone else's root inside the project's extra roots; inside its own folder
+      // everything stays the project's (S5).
+      excluded: foreign.filter((r) => !isWithin(r, folder)),
+      foreign
     }
   }
   const row = paths.get(scope.taskId)
   const projectId = row?.projectId ?? scope.projectId
   const folder = projectId ? projectFolder(projectId) : null
-  const own = row?.worktreePath ?? row?.baseDir ?? null
-  const roots = [...new Set([own, folder].filter((r): r is string => r !== null))]
+  const roots = [
+    ...new Set(
+      [row?.worktreePath ?? null, row?.baseDir ?? null, folder].filter(
+        (r): r is string => r !== null
+      )
+    )
+  ]
   const others = roots.length > 0 ? paths.others(scope.taskId) : { worktrees: [], baseDirs: [] }
   return {
     roots,

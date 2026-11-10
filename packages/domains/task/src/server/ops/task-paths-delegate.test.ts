@@ -21,6 +21,7 @@ import {
   updateTask
 } from './shared.js'
 import { getTaskOp } from './get.js'
+import { taskEvents } from '../events.js'
 
 afterEach(() => setTaskPathsDelegate(null))
 
@@ -138,6 +139,33 @@ test('a title-only update does not touch paths; a failing hand-over never fails 
     const archived = await archiveTaskOp(h.slayDb, task.id, {})
     expect(archived?.has_base_dir).toBe(false)
   } finally {
+    h.cleanup()
+  }
+})
+
+test('B2: every path write tells clients (`task:paths-changed`); a title or status update does not', async () => {
+  const { h, projectId } = await setup()
+  const changed: string[] = []
+  const onChanged = (e: { taskId: string }) => changed.push(e.taskId)
+  taskEvents.on('task:paths-changed', onChanged)
+  try {
+    const parent = (await createTaskOp(h.slayDb, { projectId, title: 'P' }, {}))!
+    changed.length = 0
+    await updateTask(h.slayDb, { id: parent.id, title: 'Renamed', status: 'done' })
+    expect(changed).toEqual([])
+    // A user path (apply), an inherit, a clear (archive): each names its task, once.
+    await updateTask(h.slayDb, { id: parent.id, baseDir: '/custom' })
+    expect(changed).toEqual([parent.id])
+    const child = (await createTaskOp(
+      h.slayDb,
+      { projectId, title: 'C', parentId: parent.id },
+      {}
+    ))!
+    expect(changed).toEqual([parent.id, child.id])
+    await archiveTaskOp(h.slayDb, child.id, {})
+    expect(changed.slice(2)).toEqual([child.id])
+  } finally {
+    taskEvents.off('task:paths-changed', onChanged)
     h.cleanup()
   }
 })

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { createContext, createElement, type ReactNode, useContext, useMemo } from 'react'
 import { typedTrpc } from '@slayzone/transport/client'
 import {
   useWorkspaceTarget,
@@ -28,12 +28,35 @@ const base = typedTrpc<WorktreesAmbientMounts & TaskMounts & SettingsMounts & Ap
  * (`WorktreesAmbientMounts`); every other client sees it required. Outside any
  * provider nothing is added and the hub refuses the call (a query/mutation error).
  */
-export function gitScopeOf(target: WorkspaceTarget): GitScopeTarget | null {
-  if (target.taskId) return { taskId: target.taskId, computerId: target.computerId }
+export function gitScopeOf(target: WorkspaceTarget, projectWide = false): GitScopeTarget | null {
+  if (target.taskId)
+    return {
+      taskId: target.taskId,
+      computerId: target.computerId,
+      ...(projectWide ? { projectWide: true } : {})
+    }
   if (target.projectId) return { projectId: target.projectId, computerId: target.computerId }
   return null
 }
-export type GitScopeTarget = { taskId?: string; projectId?: string; computerId?: string | null }
+export type GitScopeTarget = {
+  taskId?: string
+  projectId?: string
+  computerId?: string | null
+  projectWide?: boolean
+}
+
+const ProjectWideContext = createContext(false)
+
+/**
+ * Its subtree works on the panel's whole PROJECT, not only the panel's task (B1): the
+ * Worktrees tab lists, polls and removes every worktree of the project — another
+ * task's, or none's. In a task's panel its `worktrees.*` calls name the task with
+ * `projectWide`, so the hub runs them in the task's project's path scope, on the
+ * task's computer; a project's panel is that scope already.
+ */
+export function ProjectWideGitScope({ children }: { children: ReactNode }) {
+  return createElement(ProjectWideContext.Provider, { value: true }, children)
+}
 
 /**
  * `input` with the panel's scope, unless it names one (or is not an object input).
@@ -118,7 +141,8 @@ function scopeRoot<T extends object>(
 export function useTRPC(): ReturnType<typeof base.useTRPC> {
   const trpc = base.useTRPC()
   const target = useWorkspaceTarget()
-  const scope = useMemo(() => gitScopeOf(target), [target])
+  const projectWide = useContext(ProjectWideContext)
+  const scope = useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
   return useMemo(() => scopeRoot(trpc, scope, scopeOptionsProcedure), [trpc, scope])
 }
 
@@ -126,6 +150,7 @@ export function useTRPC(): ReturnType<typeof base.useTRPC> {
 export function useTRPCClient(): ReturnType<typeof base.useTRPCClient> {
   const client = base.useTRPCClient()
   const target = useWorkspaceTarget()
-  const scope = useMemo(() => gitScopeOf(target), [target])
+  const projectWide = useContext(ProjectWideContext)
+  const scope = useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
   return useMemo(() => scopeRoot(client, scope, scopeClientProcedure), [client, scope])
 }

@@ -55,7 +55,8 @@ import {
   runInScopeJail,
   type ScopeJail,
   scopedSpawnCwd,
-  setProtectedPaths
+  setProtectedPaths,
+  withDeclaredRoot
 } from './path-jail'
 import type { WirePathScope } from '@slayzone/platform/path-scope'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
@@ -493,7 +494,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // that scope's own folders: its cwd is judged against them, or chosen from them.
     // The hub no longer knows them, so a spawn naming neither is refused — except a
     // background process the hub declares GLOBAL (no task, no project): it starts as
-    // before 7c, judged by the machine bound in the proc handler.
+    // before 7c, judged by the machine bound in the proc handler. A background
+    // process whose cwd its user set (`declaredCwd`, B3) starts there: that folder
+    // is a root of the spawn, judged by the machine bound.
     const entry =
       scoped && SCOPED_SPAWNS.has(method)
         ? (p: unknown) => {
@@ -504,15 +507,26 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
                 `${method} names no task or project; refusing to start a process`
               )
             }
-            const cwd = (p as { cwd?: unknown }).cwd
+            const raw = (p as { cwd?: unknown }).cwd
+            const cwd = typeof raw === 'string' && raw ? raw : undefined
+            // A background process's own folder, set by its user (B3): a root of this
+            // spawn, judged by the machine bound only — the handler runs in that jail.
+            const declared =
+              method === HubToComputerMethods.procSpawn &&
+              cwd !== undefined &&
+              (p as { declaredCwd?: unknown }).declaredCwd === true
+            const jail = declared
+              ? withDeclaredRoot(scopeJailOf(spawnScope), cwd)
+              : scopeJailOf(spawnScope)
             const judged = scopedSpawnCwd(
-              scopeJailOf(spawnScope),
-              typeof cwd === 'string' && cwd ? cwd : undefined,
+              jail,
+              cwd,
               deps.config.allowedRoots,
               // No folder for its project here: the user places it, then it starts.
               spawnScope.projectId ? () => projectNotPlacedError(spawnScope.projectId!) : undefined
             )
-            return scoped({ ...(p as object), cwd: judged })
+            const next = { ...(p as object), cwd: judged }
+            return declared ? runInScopeJail(jail, () => entry0!(next)) : scoped(next)
           }
         : scoped
     if (!entry) {

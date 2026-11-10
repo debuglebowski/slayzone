@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
+import * as L from './session-ledger'
 
 const dirs: string[] = [],
   runtimes: ReturnType<typeof createComputerChatRuntime>[] = []
@@ -538,4 +539,36 @@ test('shutdown still closes storage when a running sweep fails', async () => {
   await sweep.catch(() => undefined)
   await expect(close).resolves.toBeUndefined()
   expect(() => r.storage.read('c', -1)).toThrow(/not open|closed/i)
+})
+
+// Review 2, Area 6 (ported from the hub's session-retention suite, which lost it when
+// the ledger moved to the computer): expiry removes old CONTENT, never the session
+// ledger — every task's resume target and resume candidates are as they were.
+test('expiry leaves the session ledger alone: the resume target is unchanged after a sweep', async () => {
+  const { r } = setup()
+  const db = r.ledger.db
+  for (const [id, at] of [
+    ['conv-older', old - 86_400_000],
+    ['conv-live', old]
+  ] as const)
+    await L.recordConversation(db, {
+      taskId: 'task',
+      mode: 'claude-code',
+      conversationId: id,
+      origin: 'slay-spawned-resume',
+      createdAt: at
+    })
+  r.storage.append('c', 1, { kind: 'assistant-text', messageId: 'old', text: 'expired' }, old)
+  const before = {
+    current: await L.getCurrentConversationId(db, 'task', 'claude-code'),
+    candidates: await L.listResumeCandidates(db, 'task', 'claude-code')
+  }
+  expect(before).toEqual({ current: 'conv-live', candidates: ['conv-live', 'conv-older'] })
+  r.retention.configure(1)
+  await r.retention.runNow(now)
+  expect(r.storage.read('c', -1)).toEqual([])
+  expect({
+    current: await L.getCurrentConversationId(db, 'task', 'claude-code'),
+    candidates: await L.listResumeCandidates(db, 'task', 'claude-code')
+  }).toEqual(before)
 })

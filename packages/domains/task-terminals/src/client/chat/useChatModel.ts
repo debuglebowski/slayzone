@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
+import { useChatSettingsChanged } from './useChatSettingsChanged'
 import { toast, useStableCallback, type AgentModel } from '@slayzone/ui'
 
 interface SessionInfoLite {
@@ -81,6 +82,9 @@ export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
       cancelled = true
     }
   }, [taskId, mode, tabId, hydrate])
+
+  // Saved settings of a restored chat landed after it opened: re-read them.
+  useChatSettingsChanged(taskId, () => hydrate({ taskId, mode, tabId }, () => false))
 
   const handleModelChange = useCallback(
     async (next: AgentModel) => {

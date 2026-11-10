@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
+import { useChatSettingsChanged } from './useChatSettingsChanged'
 import { toast, useStableCallback } from '@slayzone/ui'
 import { DEFAULT_CHAT_FAST_MODE } from '@slayzone/terminal-contracts'
 
@@ -83,6 +84,9 @@ export function useChatFastMode({ taskId, mode, tabId, cwd }: UseChatFastModeOpt
       cancelled = true
     }
   }, [taskId, mode, tabId, hydrate])
+
+  // Saved settings of a restored chat landed after it opened: re-read them.
+  useChatSettingsChanged(taskId, () => hydrate({ taskId, mode, tabId }, () => false))
 
   const handleFastModeChange = useCallback(
     async (next: boolean) => {

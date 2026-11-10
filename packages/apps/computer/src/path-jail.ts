@@ -562,6 +562,19 @@ export function scopedSpawnCwd(
 }
 
 /**
+ * `jail` with `root` DECLARED one of its own roots, ahead of the others (B3): a folder
+ * the user chose for this request — a background process's own working folder (a
+ * sibling repo `~/backend`) — which is the request's to work in although it lies
+ * outside the task's / project's folders, inside another project's folder, or is
+ * another task's folder. Judged like every path by the machine bound (allowed roots,
+ * no link out of them, never this computer's own state); listed first, so a folder
+ * nested in another task's root is not carved out of itself.
+ */
+export function withDeclaredRoot(jail: ScopeJail, root: string): ScopeJail {
+  return { ...jail, roots: [root, ...jail.roots.filter((r) => r !== root)] }
+}
+
+/**
  * The scope a spawn's own params name: its task (with the project the hub recorded
  * for it), else its project. Null when it names neither — such a spawn is refused.
  */

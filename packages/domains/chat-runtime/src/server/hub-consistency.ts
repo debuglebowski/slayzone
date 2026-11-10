@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { TASK_COMPUTER_EXPR } from '@slayzone/computers/server'
 import {
   LEGACY_CHAT_TABLES,
   LEGACY_CHAT_TABLES_DROPPED_SETTING
@@ -179,7 +180,7 @@ const HUB_RULES: Array<{ rule: string; detail: string; sql: string }> = [
       JOIN computer_retirements r ON r.computer_id=COALESCE(
         (SELECT o.computer_id FROM chat_ownership o WHERE o.task_id=h.task_id AND o.state='active'
           AND o.computer_id IS NOT NULL ORDER BY o.epoch DESC LIMIT 1),
-        t.computer_id, p.default_computer_id)
+        ${TASK_COMPUTER_EXPR})
       WHERE r.successor_id IS NOT NULL`
   },
   // ── P0 (7e, v211): a task's folders live only on the computer holding them ──

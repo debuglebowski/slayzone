@@ -408,19 +408,12 @@ export async function setProjectDefaultComputer(
 }
 
 /**
- * The task's EXPLICIT computer binding: its own `computer_id`, else its project's
- * `default_computer_id`. `null` = nothing bound, which does NOT mean "run locally"
- * — see {@link resolveTaskComputerIdOrDefault}, which falls back to the connected
- * default computer. (Computers run the agents; there is no in-process spawn path.)
- *
- * Both columns are plain nullable TEXT with no default, so `null` is the state of
- * every install that has never opened project settings — which is why an
- * unbound task must resolve to a real computer rather than to "the hub".
- */
-/**
- * The computer a task's work runs on (one statement: the computers store, chat-data-ops
- * and the hub's data handoff all use it — divergence would route a chat agent and a
- * terminal agent of the SAME task to different computers):
+ * THE answer to "which computer is this task's" (S5): the one resolver. The computers
+ * store, chat-data-ops (session ledger, terminal start gate), the hub's data handoff,
+ * the local-roots sync and the hub consistency checks all use it — divergence would
+ * route a chat agent and a terminal agent of the SAME task to different computers,
+ * or make the start gate ask a computer that does not hold the task's sessions.
+ * `pnpm lint:task-computer` refuses a second copy.
  *
  *  1. while the task has a folder (worktree or base dir), the computer holding it
  *     (`worktree_computer_id`): the folder exists only there (robustness plan §9,
@@ -429,14 +422,24 @@ export async function setProjectDefaultComputer(
  *  2. the task's own pin;
  *  3. its project's default.
  *
- * One positional parameter: the task id.
+ * `null` = nothing bound, which does NOT mean "run locally" — see
+ * {@link resolveTaskComputerIdOrDefault}, which falls back to the connected default
+ * computer. Both binding columns are plain nullable TEXT with no default.
+ *
+ * An SQL EXPRESSION over the aliases `t` (tasks) and `p` (the task's project, joined
+ * on `t.project_id`), for queries that resolve many tasks at once. NULL when `t` is
+ * NULL (e.g. a LEFT JOIN that matched no task).
  */
-export const TASK_COMPUTER_SQL = `SELECT COALESCE(
+export const TASK_COMPUTER_EXPR = `COALESCE(
     CASE WHEN (t.has_worktree = 1 OR t.has_base_dir = 1)
-      AND NOT EXISTS (SELECT 1 FROM computer_retirements r
-                       WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM computer_retirements task_computer_r
+                       WHERE task_computer_r.computer_id = t.worktree_computer_id
+                         AND task_computer_r.successor_id IS NULL)
     THEN t.worktree_computer_id END,
-    t.computer_id, p.default_computer_id) AS computer_id
+    t.computer_id, p.default_computer_id)`
+
+/** {@link TASK_COMPUTER_EXPR} for one task. One positional parameter: the task id. */
+export const TASK_COMPUTER_SQL = `SELECT ${TASK_COMPUTER_EXPR} AS computer_id
   FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
   WHERE t.id = ?`
 
@@ -498,8 +501,7 @@ export async function setComputerOwner(
  * Effective computer for a task, including the implicit default.
  *
  * Resolution order:
- *   1. the task's explicit `computer_id`
- *   2. its project's `default_computer_id`
+ *   1-2. {@link resolveTaskComputerId} (its folder's holder, its pin, its project's default)
  *   3. the sole connected computer, if exactly one is connected
  *   4. the connected computer named {@link DEFAULT_LOCAL_COMPUTER_NAME} (the
  *      co-located one the app auto-enrolls)

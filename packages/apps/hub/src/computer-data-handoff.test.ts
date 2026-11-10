@@ -33,9 +33,15 @@ const probe: DataImportKinds = {
            WHERE excluded.at > probe.at`
         ).run(item.key, item.taskId, item.value.text, item.value.at)
       })
+      // A deterministic failure of the real kinds ("Conversation deleted", "of
+      // another task", a malformed local row): the item's own data cannot apply.
+      if (item.value.text === 'boom') throw new Error('Session of another task')
     }
   }
 }
+/** Same rows under the real kinds' names: the priority order is by kind. */
+for (const kind of ['task-path', 'chat-settings', 'agent-session', 'agent-prompt', 'agent-turn'])
+  (probe as Record<string, unknown>)[kind] = probe.probe
 
 function computer(id: string) {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), `handoff-${id}-`))
@@ -160,17 +166,128 @@ test('flushTask delivers one task now; a lost ack is redelivered without duplica
   expect(f.sent).toHaveLength(1)
 })
 
-test('flushTask fails while its computer cannot take the rows (a resume must not miss them)', async () => {
+test('flushTask fails while its computer cannot be reached (a resume must not miss the rows)', async () => {
   const f = await fixture()
   f.stage('probe', 'a', 't1', { text: 'one', at: 1 })
   f.online.delete('pc')
   await expect(f.handoff.flushTask('t1', 'pc')).rejects.toThrow('offline')
-  f.failWith(new Error('disk busy'))
-  f.online.add('pc')
-  await expect(f.handoff.flushTask('t1', 'pc')).rejects.toThrow('disk busy')
   expect(f.left()).toHaveLength(1)
+  f.online.add('pc')
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toEqual([])
+})
+
+test('a failed delivery never blocks the task’s work: recorded (visible), retried on its backoff', async () => {
+  const f = await fixture()
+  f.stage('probe', 'a', 't1', { text: 'one', at: 1 })
+  f.failWith(new Error('import failed'))
+  // The start goes on; the failure is in Needs attention, the row still staged.
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toHaveLength(1)
+  expect(
+    f.h.db.prepare("SELECT pass,item_key,task_id,kind FROM item_faults WHERE origin='hub'").all()
+  ).toEqual([
+    // `probe` is no decisive kind: the task's history phase backs off.
+    { pass: 'hub-data-handoff-task', item_key: 't1:history', task_id: 't1', kind: 'transient' }
+  ])
+  // Backing off: the next start does not retry (nor wait for) the failing delivery.
+  f.sent.length = 0
   f.failWith(null)
   await f.handoff.flushTask('t1', 'pc')
+  expect(f.sent).toEqual([])
+  // Once the backoff is over it is delivered, and the fault clears.
+  f.h.db.exec("UPDATE item_faults SET next_retry_at=0 WHERE origin='hub'")
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toEqual([])
+  expect(f.h.db.prepare("SELECT 1 FROM item_faults WHERE origin='hub'").all()).toEqual([])
+})
+
+test('one item the computer cannot apply is quarantined; the rest of its batch delivers', async () => {
+  const f = await fixture()
+  f.stage('probe', 'a', 't1', { text: 'one', at: 1 })
+  f.stage('probe', 'b', 't1', { text: 'boom', at: 1 })
+  f.stage('probe', 'c', 't1', { text: 'three', at: 1 })
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toEqual([{ kind: 'probe', item_key: 'b' }])
+  expect(
+    f.h.db.prepare("SELECT pass,item_key,kind,message FROM item_faults WHERE origin='hub'").all()
+  ).toEqual([
+    {
+      pass: 'hub-data-handoff',
+      item_key: 'probe:b',
+      kind: 'structural',
+      message: 'Session of another task'
+    }
+  ])
+  // Quarantined: a later start does not resend it until it changes.
+  f.sent.length = 0
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.sent).toEqual([])
+})
+
+test('a staged row the hub cannot parse is quarantined on its own; the others deliver', async () => {
+  const f = await fixture()
+  f.stage('probe', 'a', 't1', { text: 'one', at: 1 })
+  f.h.db
+    .prepare(
+      "INSERT INTO computer_data_handoff(kind,item_key,task_id,payload,created_at) VALUES('probe','torn','t1','{not json',0)"
+    )
+    .run()
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toEqual([{ kind: 'probe', item_key: 'torn' }])
+  expect(
+    f.h.db.prepare("SELECT pass,item_key,kind FROM item_faults WHERE origin='hub'").all()
+  ).toEqual([{ pass: 'hub-data-handoff', item_key: 'probe:torn', kind: 'structural' }])
+})
+
+test('flushTask of some kinds delivers only those', async () => {
+  const f = await fixture()
+  f.stage('task-path', 't1', 't1', { text: 'path', at: 1 })
+  f.stage('agent-prompt', 'p1', 't1', { text: 'prompt', at: 1 })
+  await f.handoff.flushTask('t1', 'pc', ['task-path'])
+  expect(f.left()).toEqual([{ kind: 'agent-prompt', item_key: 'p1' }])
+  await f.handoff.flushTask('t1', 'pc')
+  expect(f.left()).toEqual([])
+})
+
+test('a connect delivers the decisive kinds of every task first (open tasks first), history after', async () => {
+  const f = await fixture()
+  f.h.db.exec("INSERT INTO tasks(id,project_id,title,computer_id) VALUES('t0','p','Zero','pc')")
+  for (const t of ['t0', 't1', 't2']) {
+    f.stage('agent-prompt', `p-${t}`, t, { text: 'prompt', at: 1 })
+    f.stage('agent-turn', `u-${t}`, t, { text: 'turn', at: 1 })
+    f.stage('agent-session', `s-${t}`, t, { text: 'session', at: 1 })
+    f.stage('chat-settings', `c-${t}`, t, { text: 'settings', at: 1 })
+    f.stage('task-path', t, t, { text: 'path', at: 1 })
+  }
+  // t2 is open in a tab: its rows go first in each phase.
+  f.h.db
+    .prepare("INSERT INTO settings(key,value) VALUES('viewState',?)")
+    .run(JSON.stringify({ tabs: [{ type: 'home' }, { type: 'task', taskId: 't2' }] }))
+  await f.handoff.deliverTo('pc')
+  const order = f.sent.map((s) => {
+    const v = (
+      s.request as unknown as { value: { kind: string; items: Array<{ taskId: string }> } }
+    ).value
+    return `${v.items[0]!.taskId}:${v.kind}`
+  })
+  expect(order).toEqual([
+    't2:task-path',
+    't2:chat-settings',
+    't2:agent-session',
+    't0:task-path',
+    't0:chat-settings',
+    't0:agent-session',
+    't1:task-path',
+    't1:chat-settings',
+    't1:agent-session',
+    't2:agent-turn',
+    't2:agent-prompt',
+    't0:agent-turn',
+    't0:agent-prompt',
+    't1:agent-turn',
+    't1:agent-prompt'
+  ])
   expect(f.left()).toEqual([])
 })
 

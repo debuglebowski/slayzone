@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTRPCClient } from '../trpc'
+import { useChatSettingsChanged } from './useChatSettingsChanged'
 import { toast, useStableCallback, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { rawPermissionModeToChatMode } from '@slayzone/terminal-contracts'
 
@@ -198,6 +199,12 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
       cancelled = true
     }
   }, [taskId, mode, tabId, hydrate])
+
+  // Saved settings of a restored chat landed after it opened: re-read them, unless
+  // the user's own change is in flight (it wins).
+  useChatSettingsChanged(taskId, () => {
+    if (pendingModeRef.current === null) hydrate({ taskId, mode, tabId }, () => false)
+  })
 
   // Drift sync: apply live permission mode only on transitions. A stale
   // render where livePermissionMode equals the last-applied value is a no-op,

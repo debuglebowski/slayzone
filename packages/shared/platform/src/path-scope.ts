@@ -36,7 +36,32 @@ import { isHubLoginRequired } from './hub-switches'
  */
 export type WirePathScope =
   | { kind: 'task'; taskId: string; projectId: string | null; hostReads?: boolean }
-  | { kind: 'project'; projectId: string; hostReads?: boolean }
+  | {
+      kind: 'project'
+      projectId: string
+      hostReads?: boolean
+      /**
+       * The hub's `worktree_base_path` setting, a TEMPLATE (`../{project-folder-name}-
+       * workspaces`, `{project}/…`, an absolute folder), when one is set: the computer
+       * resolves it against the project's folder THERE and covers it as one of the
+       * project's roots (B1, its Worktrees tab), beside the default base it always
+       * covers. A template names no particular machine, so the hub can send it.
+       */
+      worktreeBase?: string
+    }
+
+/** What a path-taking request names: a task, else a project. */
+export interface PathScopeTarget {
+  taskId?: string | null
+  projectId?: string | null
+  /**
+   * The op is about the task's whole PROJECT — its Worktrees tab: listing, polling
+   * and removing every worktree of the project, another task's or none — so it runs
+   * in the task's project's scope, routed and authorized through the task (task →
+   * project is hub data; a project is the root of ownership). Ignored without a task.
+   */
+  projectWide?: boolean
+}
 
 const store = new AsyncLocalStorage<WirePathScope>()
 
@@ -56,20 +81,35 @@ export function currentPathScope(): WirePathScope | undefined {
  */
 export async function pathScopeFor(
   db: Pick<SlayzoneDb, 'get'>,
-  target: { taskId?: string | null; projectId?: string | null },
+  target: PathScopeTarget,
   /** Whether this hub has no login (its one local user). Default: from env. */
   singleUser: boolean = !isHubLoginRequired()
 ): Promise<WirePathScope | null> {
   const hostReads = singleUser || undefined
+  const project = async (projectId: string): Promise<WirePathScope> => {
+    const value = (
+      await db.get<{ value: unknown }>(
+        "SELECT value FROM settings WHERE key = 'worktree_base_path'"
+      )
+    )?.value
+    const template = typeof value === 'string' ? value.trim() : ''
+    return {
+      kind: 'project',
+      projectId,
+      hostReads,
+      ...(template ? { worktreeBase: template } : {})
+    }
+  }
   if (target.taskId) {
     const row = await db.get<{ project_id: string | null }>(
       'SELECT project_id FROM tasks WHERE id = ?',
       [target.taskId]
     )
     if (!row) return null
+    if (target.projectWide === true) return row.project_id ? project(row.project_id) : null
     return { kind: 'task', taskId: target.taskId, projectId: row.project_id, hostReads }
   }
-  if (target.projectId) return { kind: 'project', projectId: target.projectId, hostReads }
+  if (target.projectId) return project(target.projectId)
   return null
 }
 
@@ -80,7 +120,7 @@ export async function pathScopeFor(
  */
 export async function inPathScopeOf<T>(
   db: Pick<SlayzoneDb, 'get'>,
-  target: { taskId?: string | null; projectId?: string | null } | null | undefined,
+  target: PathScopeTarget | null | undefined,
   op: string,
   fn: () => Promise<T>
 ): Promise<T> {
@@ -95,4 +135,30 @@ export class PathScopeRequiredError extends Error {
     super(`${op} must name the task or project whose files it touches`)
     this.name = 'PathScopeRequiredError'
   }
+}
+
+/**
+ * The JSON-RPC code a computer answers a request it refuses by its OWN policy — its
+ * path jail (a path outside the request's scope or machine bound, a link out of it,
+ * its own state), a project not placed there (T-27). The same number as
+ * computer-transport's `ComputerTransportErrorCodes.refusedByComputer`, kept here so
+ * the transports (tRPC, REST) can recognise the refusal without importing that domain.
+ */
+export const COMPUTER_REFUSED_RPC_CODE = -32006
+
+/** The stable code a computer's refusal carries to a client (`data.appCode`, REST `code`). */
+export const COMPUTER_REFUSED = 'COMPUTER_REFUSED'
+
+/**
+ * Is `err` a computer's refusal by its own policy (an `RpcError` with
+ * {@link COMPUTER_REFUSED_RPC_CODE})? Structural, as it crosses module copies: a
+ * conflict the caller can resolve (pick another folder, place the project), never a
+ * server fault — tRPC `CONFLICT`, REST 409.
+ */
+export function isComputerRefusal(err: unknown): err is Error & { code: number } {
+  return (
+    err instanceof Error &&
+    err.name === 'RpcError' &&
+    (err as { code?: unknown }).code === COMPUTER_REFUSED_RPC_CODE
+  )
 }

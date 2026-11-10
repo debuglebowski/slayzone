@@ -15,6 +15,8 @@ const updateFn = vi.fn<(input: unknown) => Promise<Task>>()
 const recordFn = vi.fn<(input: unknown) => Promise<{ ok: true }>>()
 /** The main tab's current conversation as the computer answers it. */
 let currentId: string | null = null
+/** How the computer answers (default: at once with `currentId`). */
+let answerCurrent: () => Promise<string | null> = async () => currentId
 const sub = { subscriptionOptions: () => ({}) }
 // The respawn subscription hands its onData to useSubscription — capture it so a
 // test can fire a `pty:respawn-suggested` at the hook.
@@ -40,7 +42,7 @@ const trpc = {
     current: {
       queryOptions: (input: unknown, opts: object) => ({
         queryKey: ['agentSessions.current', input],
-        queryFn: async () => currentId,
+        queryFn: () => answerCurrent(),
         ...opts
       })
     },
@@ -83,12 +85,15 @@ afterEach(() => {
   updateFn.mockReset()
   recordFn.mockReset()
   currentId = null
+  answerCurrent = async () => currentId
   respawnSuggested = null
   vi.clearAllMocks()
 })
 
 function setup(initial: Task) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } }
+  })
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
@@ -229,5 +234,76 @@ describe('useTaskTerminalSession — revive (task leaves a terminal status)', ()
     await settle()
     expect(trpcClient.pty.kill.mutate).toHaveBeenCalled()
     expect(trpcClient.task.resetConversation.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useTaskTerminalSession — S8: an unknown current session is not "no session"', () => {
+  /** The computer's answer, held until the test releases it. */
+  function heldAnswer() {
+    let release: (v: string | null) => void = () => {}
+    let fail: (e: Error) => void = () => {}
+    answerCurrent = () =>
+      new Promise<string | null>((resolve, reject) => {
+        release = resolve
+        fail = reject
+      })
+    return { release: (v: string | null) => release(v), fail: (e: Error) => fail(e) }
+  }
+
+  it('no banner while the answer is loading; shown once the computer answers "none"', async () => {
+    const held = heldAnswer()
+    const { result } = setup(task())
+    await settle()
+    expect(result.current.showSessionBanner).toBe(false)
+    await act(async () => held.release(null))
+    await settle()
+    expect(result.current.showSessionBanner).toBe(true)
+  })
+
+  it('no banner while the computer is offline (the read failed)', async () => {
+    const held = heldAnswer()
+    const { result } = setup(task())
+    await act(async () => held.fail(new Error('PRECONDITION_FAILED: computer offline')))
+    await settle()
+    expect(result.current.showSessionBanner).toBe(false)
+  })
+
+  it('"resume won\'t work" (no detection possible) waits for the answer too', async () => {
+    const held = heldAnswer()
+    const { result } = setup({ ...task(), agent_id: 'cursor-agent' } as Task)
+    await settle()
+    expect(result.current.showUnavailableBanner).toBe(false)
+    await act(async () => held.release(null))
+    await settle()
+    expect(result.current.showUnavailableBanner).toBe(true)
+  })
+
+  it('a /status detection before the answer is not recorded when it IS the current id', async () => {
+    recordFn.mockResolvedValue({ ok: true })
+    const held = heldAnswer()
+    const { result, detect } = setup(task())
+    detect('sess-current')
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    await act(async () => held.release('sess-current'))
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    expect(result.current.detectedSessionId).toBeNull()
+  })
+
+  it('a /status detection before the answer IS recorded once the answer shows it is new', async () => {
+    recordFn.mockResolvedValue({ ok: true })
+    const held = heldAnswer()
+    const { detect } = setup(task())
+    detect('sess-new')
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    await act(async () => held.release('sess-old'))
+    await settle()
+    expect(recordFn).toHaveBeenCalledExactlyOnceWith({
+      taskId: 't1',
+      agentId: 'codex',
+      conversationId: 'sess-new'
+    })
   })
 })

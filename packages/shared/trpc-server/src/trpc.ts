@@ -10,7 +10,11 @@ import {
   isHubSwitchedOffError
 } from '@slayzone/platform/hub-switch-refusal'
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
-import { PathScopeRequiredError } from '@slayzone/platform/path-scope'
+import {
+  COMPUTER_REFUSED,
+  isComputerRefusal,
+  PathScopeRequiredError
+} from '@slayzone/platform/path-scope'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './auth-gate'
 import { trpcTransformer } from './trpc-transformer'
@@ -34,6 +38,8 @@ const t = initTRPC.context<TrpcContext>().create({
       ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
       // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
       ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A computer's refusal by its own policy (its path jail, T-27): `COMPUTER_REFUSED`.
+      ...(isComputerRefusal(error.cause) ? { appCode: COMPUTER_REFUSED } : {}),
       // A domain's own refusal, registered by the module defining its error (see
       // app-codes.ts) — e.g. a refused join-token mint (T-20, `@slayzone/api`'s
       // join-token-policy.ts): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
@@ -345,6 +351,25 @@ const unsafePathRefusal = t.middleware(async ({ next }) => {
 })
 
 /**
+ * A computer refused the request by its own policy — its path jail refused a folder
+ * (outside the task's or project's folders and every folder the user declared, a
+ * link out of the machine bound, its own state) — answered as CONFLICT with the
+ * computer's message (B3): the caller can pick another folder. Not the
+ * INTERNAL_SERVER_ERROR an unknown throw becomes.
+ */
+const computerRefusal = t.middleware(async ({ next }) => {
+  const result = await next()
+  if (!result.ok && isComputerRefusal(result.error.cause)) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  return result
+})
+
+/**
  * Default procedure — auth-gated on an authed hub, then role- and scope-gated. All app
  * routers use this, so both enforcements are automatic + fail-closed (a new
  * procedure is gated by default, and unclassified by default until someone
@@ -359,6 +384,7 @@ export const publicProcedure = t.procedure
   .use(ownerGate)
   .use(switchRefusal)
   .use(unsafePathRefusal)
+  .use(computerRefusal)
 
 /**
  * A procedure that works on the hub's OWN disk — git, `gh` probes, the OS opener,

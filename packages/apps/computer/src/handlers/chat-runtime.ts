@@ -1,5 +1,9 @@
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
+import {
+  DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
+  resolveWorktreeBasePathTemplate
+} from '@slayzone/worktrees/shared'
 import { createComputerFaults } from '../item-faults'
 import {
   chatSavedSummary,
@@ -51,7 +55,14 @@ import {
   workspaceCaptureResultSchema,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { judgePath, runInScopeJail, type ScopeJail, scopedSpawnCwd, spawnCwd } from '../path-jail'
+import {
+  judgePath,
+  outsideScopeJail,
+  runInScopeJail,
+  type ScopeJail,
+  scopedSpawnCwd,
+  spawnCwd
+} from '../path-jail'
 import { createProcHandlers, type ProcHandlerOptions } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
@@ -335,6 +346,22 @@ const requestSchema = z.discriminatedUnion('kind', [
     operationId: z.string().min(1)
   })
 ])
+/**
+ * Where a project's worktrees are made, from its folder HERE (B1): the default
+ * `../<folder name>-workspaces` always, and the hub's configured `worktree_base_path`
+ * template when the scope carries one (resolved against this folder; a relative one
+ * is project-relative). Absolute folders only.
+ */
+export function projectWorktreeBases(folder: string, scope: WirePathScope): string[] {
+  const templates = [DEFAULT_WORKTREE_BASE_PATH_TEMPLATE]
+  if (scope.kind === 'project' && scope.worktreeBase) templates.push(scope.worktreeBase)
+  const bases = templates
+    .map((t) => resolveWorktreeBasePathTemplate(t, folder))
+    .filter((b) => b && isAbsolute(b))
+    .map((b) => resolve(b))
+  return [...new Set(bases)]
+}
+
 /** A per-hub runtime. Raw subprocess output never leaves this process. */
 export function createChatRuntimeHandlers(opts: {
   ctx: HandlerContext
@@ -526,17 +553,38 @@ export function createChatRuntimeHandlers(opts: {
     runtimeDir: join(opts.stateDir, 'computer-runtime'),
     hubUrl: opts.ctx.config.hubUrl
   })
+  /**
+   * The folders of a project's tasks held here, for its scope (B1). A project scope
+   * needs no chat store: with none (no computer identity yet, shutting down) no
+   * task's folder is held here, and one that cannot be read narrows the scope to the
+   * project's own folders — it never fails a project's request.
+   */
+  function projectTaskRoots(projectId: string): { own: string[]; others: string[] } {
+    const none = { own: [], others: [] }
+    if (closed || resetting || (!instance && !opts.computerId())) return none
+    try {
+      return runtime().taskPaths.ofProject(projectId)
+    } catch (err) {
+      opts.ctx.log('project scope: task folders unreadable', {
+        projectId,
+        error: err instanceof Error ? err.message : String(err)
+      })
+      return none
+    }
+  }
   /** What a request's path scope may touch here (§9 Phase 7b): see `scopeBounds`. */
   function boundsOf(scope: WirePathScope) {
     return scopeBounds(
-      // Lazy: a project scope needs no task row (nor this hub's chat store).
+      // Lazy: each part reads this hub's chat store only when the scope needs it.
       {
         get: (taskId) => runtime().taskPaths.get(taskId),
-        others: (taskId) => runtime().taskPaths.others(taskId)
+        others: (taskId) => runtime().taskPaths.others(taskId),
+        ofProject: (projectId) => projectTaskRoots(projectId)
       },
       scope,
       (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
-      () => opts.getProjectPaths()?.list() ?? []
+      () => opts.getProjectPaths()?.list() ?? [],
+      (_projectId, folder) => projectWorktreeBases(folder, scope)
     )
   }
   /** The jail of a task's / project's own folders here. */
@@ -682,13 +730,18 @@ export function createChatRuntimeHandlers(opts: {
       case 'taskPaths': {
         const value = req.value
         if (value.op === 'set') {
-          // The hub keeps no path (§9 Phase 7e): a path set for a task is judged HERE —
-          // inside this computer's allowed roots, and as a new root of the task: inside
-          // its own folders, or outside them but inside nobody else's.
-          const jail = scopeJail({ kind: 'task', taskId: value.taskId, projectId: value.projectId })
-          runInScopeJail(jail, () => {
+          // The hub keeps no path (§9 Phase 7e): a path set for a task is judged HERE.
+          // It is the task's DECLARED root (B3) — a folder the user chose (a custom
+          // folder outside the project, one another task already uses, one inside
+          // another project's folder; a worktree assigned from the Worktrees tab, as a
+          // subtask shares its parent's) or the worktree just made for it — so it is
+          // judged by this computer's machine bound only: inside its allowed roots, no
+          // link out of them, never its own state. Reaching another task's worktree
+          // through the task's scope stays refused (`scopeBounds`); declaring one is
+          // the user's choice. Outside any request scope, whatever the hub sent.
+          outsideScopeJail(() => {
             for (const path of [value.worktreePath, value.baseDir])
-              if (path) judgePath(path, opts.ctx.config.allowedRoots, { newRoot: true })
+              if (path) judgePath(path, opts.ctx.config.allowedRoots)
           })
         }
         return r.taskPaths.handle(value)

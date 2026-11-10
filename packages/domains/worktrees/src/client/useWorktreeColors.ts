@@ -21,6 +21,9 @@ import { getClientForHub, getHubIdForProject } from '@slayzone/transport/client'
 import { useTRPCClient } from './trpc'
 import type { DetectedWorktree } from '../shared/types'
 
+/** The root of every worktree-colour query key (the app shell refetches it on a computer connect). */
+export const WORKTREE_COLORS_QUERY_ROOT = ['worktree-colors'] as const
+
 interface DetectClient {
   worktrees: {
     detectWorktrees: {
@@ -49,7 +52,7 @@ export function useWorktreeColors(
   const lists = [...roots.values()]
   const results = useQueries({
     queries: lists.map(({ projectId, root }) => ({
-      queryKey: ['worktree-colors', projectId, root],
+      queryKey: [...WORKTREE_COLORS_QUERY_ROOT, projectId, root],
       queryFn: () =>
         (
           getClientForHub(

@@ -16,10 +16,18 @@
  * - **When.** On every (re)connect of a computer, for the tasks whose data it owns
  *   ({@link deliverTo}); and right before work of a task starts on a computer
  *   ({@link flushTask}), so an agent never resumes without data the hub still held.
+ * - **Order.** The small kinds that decide work ({@link DECISIVE_HANDOFF_KINDS}: a
+ *   task's paths, chat settings, session ledger) go first, for every task, before
+ *   any task's prompt and turn history; within each phase, tasks open in a tab go
+ *   first. A caller that needs only some kinds names them (a path read flushes only
+ *   `task-path`), so it never waits for a task's whole history.
  * - **Isolation (P3).** Per task: one task the computer cannot take is recorded and
  *   the others are delivered; only an unreachable computer ends the pass. Per item: an
- *   invalid value (or a kind the computer does not know) is quarantined on its own
- *   until its row changes; its task's other rows are delivered.
+ *   invalid value (or a kind the computer does not know, a row the computer cannot
+ *   apply, a staged payload the hub cannot parse) is quarantined on its own until
+ *   its row changes; its task's other rows are delivered. A delivery that fails as a
+ *   whole is recorded (Needs attention) and retried on its backoff: it never blocks
+ *   the task's work ({@link flushTask}); only an unreachable computer does.
  * - **Idempotent.** A batch delivered twice (its acknowledgement lost) changes nothing
  *   on the computer, which keeps a newer local row over an older hub copy.
  * - **Erasure.** Rows are fenced like every task table and swept with their task.
@@ -41,6 +49,43 @@ import { type FaultLedger, forEachIsolated } from '@slayzone/platform/isolation'
 export const HANDOFF_ITEM_PASS = 'hub-data-handoff'
 /** Fault pass of one task whose delivery failed (transient: retried with backoff). */
 export const HANDOFF_TASK_PASS = 'hub-data-handoff-task'
+
+/** The handoff kind of a chat's settings (hub v205; chat-runtime `chatSettingsImport`). */
+export const CHAT_SETTINGS_KIND = 'chat-settings'
+
+/**
+ * The kinds that decide whether and how a task's work starts (paths judge its
+ * folders, settings its agent's permission mode and model, the ledger which session
+ * resumes), in delivery order. Every other kind (prompt and turn history) is
+ * delivered after these, for every task.
+ */
+export const DECISIVE_HANDOFF_KINDS: readonly string[] = [
+  'task-path',
+  CHAT_SETTINGS_KIND,
+  'agent-session',
+  'task-conversation',
+  'session-turn',
+  'legacy-conversation-history'
+]
+/** Delivery order of the history kinds (unknown kinds after them, by name). */
+const HISTORY_KIND_ORDER: readonly string[] = ['agent-turn', 'agent-prompt']
+
+const isDecisive = (kind: string) => DECISIVE_HANDOFF_KINDS.includes(kind)
+
+function kindRank(kind: string): number {
+  const decisive = DECISIVE_HANDOFF_KINDS.indexOf(kind)
+  if (decisive !== -1) return decisive
+  const history = HISTORY_KIND_ORDER.indexOf(kind)
+  return DECISIVE_HANDOFF_KINDS.length + (history !== -1 ? history : HISTORY_KIND_ORDER.length)
+}
+
+/** The two delivery phases of a task; each backs off on its own after a failure. */
+type Phase = 'decisive' | 'history'
+const PHASES: readonly Phase[] = ['decisive', 'history']
+const phaseOf = (kind: string): Phase => (isDecisive(kind) ? 'decisive' : 'history')
+/** Fault key of one task's phase (the decisive one keeps the task id alone). */
+const phaseKey = (taskId: string, phase: Phase) =>
+  phase === 'decisive' ? taskId : `${taskId}:history`
 
 /** Longest chain of re-enrollments followed to a live successor. */
 const MAX_SUCCESSORS = 16
@@ -69,6 +114,12 @@ export interface ComputerDataHandoffDeps {
   /** The computer cannot be reached: the pass ends (every later task would fail too). */
   isUnreachable(error: unknown): boolean
   /**
+   * Tasks open in a client's tab now: their rows go first on a connect. Default:
+   * the task tabs of every saved tab layout (`viewState`).
+   */
+  openTasks?(): Promise<readonly string[]>
+  log?(message: string, error: unknown): void
+  /**
    * Kinds whose rows belong to another computer than the task's data (default
    * {@link target}): e.g. `task-path` goes to the computer holding the worktree. Given
    * the task's default target, answers the kind's computer, or null (it waits).
@@ -90,8 +141,25 @@ export interface HandoffReport {
 
 const fingerprint = (payload: string) => createHash('sha256').update(payload).digest('hex')
 
+/** The task tabs of every saved tab layout (one per user with login, else one). */
+export async function openTaskIds(db: SlayzoneDb): Promise<string[]> {
+  const rows = await db.all<{ task_id: string }>(
+    `SELECT DISTINCT json_extract(t.value,'$.taskId') AS task_id
+       FROM (SELECT value FROM settings WHERE key='viewState'
+             UNION ALL SELECT value FROM user_settings WHERE key='viewState') s,
+            json_each(s.value,'$.tabs') t
+      WHERE json_valid(s.value) AND json_type(s.value,'$.tabs')='array'
+        AND json_extract(t.value,'$.type')='task'
+        AND json_type(t.value,'$.taskId')='text'`
+  )
+  return rows.map((r) => r.task_id)
+}
+
 export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
   const { db } = deps
+  const log =
+    deps.log ?? ((message, error) => console.warn(`[computer-data-handoff] ${message}`, error))
+  const openTasks = deps.openTasks ?? (() => openTaskIds(db))
   const track =
     deps.track ??
     (async (taskId: string, computerId: string) => {
@@ -153,25 +221,54 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
     return live(await deps.kindTargets![kind](taskId, () => target(taskId)))
   }
 
-  async function rowsOf(taskId: string): Promise<HandoffRow[]> {
-    return db.all<HandoffRow>(
+  /** A task's staged rows of `kinds` (default: all), in delivery order. */
+  async function rowsOf(taskId: string, kinds?: readonly string[]): Promise<HandoffRow[]> {
+    const rows = await db.all<HandoffRow>(
       `SELECT kind,item_key,payload FROM computer_data_handoff
         WHERE task_id=? ORDER BY kind, created_at, item_key`,
       [taskId]
     )
+    const wanted = kinds ? rows.filter((row) => kinds.includes(row.kind)) : rows
+    // Stable: within a kind, the rows keep their staging order.
+    return wanted.sort((a, b) => kindRank(a.kind) - kindRank(b.kind))
+  }
+
+  /** Quarantine one item the hub itself cannot send (its staged payload is not JSON). */
+  async function quarantine(
+    computerId: string,
+    taskId: string,
+    row: HandoffRow,
+    error: unknown
+  ): Promise<void> {
+    log(`staged ${itemKey(row)} of ${taskId} is unreadable; quarantined`, error)
+    await deps.ledger?.(computerId).record(
+      {
+        pass: HANDOFF_ITEM_PASS,
+        itemKey: itemKey(row),
+        taskId,
+        kind: 'structural',
+        fingerprint: fingerprint(row.payload),
+        error: error instanceof Error ? error : new Error(String(error))
+      },
+      Date.now()
+    )
   }
 
   /**
-   * Deliver every deliverable row of one task to `computerId`. Throws when a batch
-   * could not be delivered (the computer is unreachable, or failed the batch).
-   * Rejected items are quarantined, not thrown.
+   * Deliver the deliverable rows of one task (of `kinds`, default all) to
+   * `computerId`. Throws when a batch could not be delivered (the computer is
+   * unreachable, or failed the batch). Rejected items are quarantined, not thrown.
    */
-  async function deliverTask(taskId: string, computerId: string): Promise<void> {
+  async function deliverTask(
+    taskId: string,
+    computerId: string,
+    kinds?: readonly string[]
+  ): Promise<void> {
     const ledger = deps.ledger?.(computerId)
     const now = Date.now()
-    const byKind = new Map<string, HandoffRow[]>()
+    const byKind = new Map<string, Array<{ row: HandoffRow; value: unknown }>>()
     const kindIsMine = new Map<string, boolean>()
-    for (const row of await rowsOf(taskId)) {
+    for (const row of await rowsOf(taskId, kinds)) {
       let mine = kindIsMine.get(row.kind)
       if (mine === undefined) {
         mine = (await targetOf(row.kind, taskId)) === computerId
@@ -183,8 +280,16 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
         !(await ledger.allows(HANDOFF_ITEM_PASS, itemKey(row), fingerprint(row.payload), now))
       )
         continue
+      let value: unknown
+      try {
+        value = JSON.parse(row.payload) as unknown
+      } catch (error) {
+        // One torn row is its own fault: the task's other rows still go.
+        await quarantine(computerId, taskId, row, error)
+        continue
+      }
       const list = byKind.get(row.kind) ?? []
-      list.push(row)
+      list.push({ row, value })
       byKind.set(row.kind, list)
     }
     if (byKind.size === 0) return
@@ -197,15 +302,11 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
             kind: 'data.import',
             value: {
               kind,
-              items: batch.map((row) => ({
-                key: row.item_key,
-                taskId,
-                value: JSON.parse(row.payload) as unknown
-              }))
+              items: batch.map(({ row, value }) => ({ key: row.item_key, taskId, value }))
             }
           })
         )
-        const sentPayload = new Map(batch.map((row) => [row.item_key, row.payload]))
+        const sentPayload = new Map(batch.map(({ row }) => [row.item_key, row.payload]))
         // Forget exactly what was sent: a row rewritten meanwhile is delivered again.
         for (const key of [...result.applied, ...result.skipped]) {
           const payload = sentPayload.get(key)
@@ -250,45 +351,97 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
 
     /**
      * A computer (re)connected: deliver the rows of every task whose data it owns.
-     * One task failing is recorded and the others proceed; an unreachable computer
-     * ends the pass (rethrown).
+     * First the decisive kinds of every task, then every task's history; in each
+     * phase, tasks open in a tab first. One task failing is recorded (per phase) and
+     * the others proceed; an unreachable computer ends the pass (rethrown).
      */
     async deliverTo(computerId: string): Promise<HandoffReport> {
       await dropOrphans()
-      const tasks = await db.all<{ task_id: string; kind: string }>(
+      const staged = await db.all<{ task_id: string; kind: string }>(
         'SELECT DISTINCT task_id, kind FROM computer_data_handoff ORDER BY task_id, kind'
       )
-      const mine: string[] = []
-      for (const { task_id, kind } of tasks)
-        if (mine.at(-1) !== task_id && (await targetOf(kind, task_id)) === computerId)
-          mine.push(task_id)
-      const report = await forEachIsolated(
-        mine,
-        {
-          pass: HANDOFF_TASK_PASS,
-          key: (taskId) => taskId,
-          taskId: (taskId) => taskId,
-          ...(deps.ledger ? { ledger: deps.ledger(computerId) } : {}),
-          isFatal: deps.isUnreachable
-        },
-        (taskId) => serialize(taskId, () => deliverTask(taskId, computerId))
-      )
-      return { delivered: report.ok, failed: report.failed.length }
+      const byPhase: Record<Phase, string[]> = { decisive: [], history: [] }
+      for (const { task_id, kind } of staged) {
+        const list = byPhase[phaseOf(kind)]
+        if (list.at(-1) !== task_id && (await targetOf(kind, task_id)) === computerId)
+          list.push(task_id)
+      }
+      const open = new Map((await openTasks()).map((id, i) => [id, i]))
+      const rank = (id: string) => open.get(id) ?? open.size
+      const failed = new Set<string>()
+      const attempted = new Set<string>()
+      const ledger = deps.ledger?.(computerId)
+      for (const phase of PHASES) {
+        const tasks = [...byPhase[phase]].sort((a, b) => rank(a) - rank(b))
+        const kinds = (kind: string) => phaseOf(kind) === phase
+        const report = await forEachIsolated(
+          tasks,
+          {
+            pass: HANDOFF_TASK_PASS,
+            key: (taskId) => phaseKey(taskId, phase),
+            taskId: (taskId) => taskId,
+            ...(ledger ? { ledger } : {}),
+            isFatal: deps.isUnreachable
+          },
+          (taskId) => {
+            attempted.add(taskId)
+            return serialize(taskId, async () =>
+              deliverTask(
+                taskId,
+                computerId,
+                (await rowsOf(taskId)).map((r) => r.kind).filter(kinds)
+              )
+            )
+          }
+        )
+        for (const failure of report.failed) failed.add(failure.item)
+      }
+      return { delivered: [...attempted].filter((t) => !failed.has(t)).length, failed: failed.size }
     },
 
     /**
      * Work of `taskId` is about to start on `computerId`: deliver what the hub still
-     * holds of the task there first. Throws when it could not (the caller's start
-     * fails and is retried) — an agent must never resume without that data.
-     * Quarantined items do not block.
+     * holds of the task there first (only `kinds`, when given). Throws only when the
+     * computer cannot be reached (the caller's start fails and is retried) — an agent
+     * never resumes without that data while it could be delivered. A delivery that
+     * failed otherwise is recorded (Needs attention) and retried on its backoff: a
+     * deterministic failure never blocks the task's work. Quarantined items do not
+     * block either.
      */
-    async flushTask(taskId: string, computerId: string): Promise<void> {
-      const any = await db.get<{ one: number }>(
-        'SELECT 1 AS one FROM computer_data_handoff WHERE task_id=? LIMIT 1',
+    async flushTask(taskId: string, computerId: string, kinds?: readonly string[]): Promise<void> {
+      const staged = await db.all<{ kind: string }>(
+        'SELECT DISTINCT kind FROM computer_data_handoff WHERE task_id=?',
         [taskId]
       )
-      if (!any) return
-      await serialize(taskId, () => deliverTask(taskId, computerId))
+      const wanted = staged.map((r) => r.kind).filter((k) => !kinds || kinds.includes(k))
+      if (wanted.length === 0) return
+      const ledger = deps.ledger?.(computerId)
+      for (const phase of PHASES) {
+        const phaseKinds = wanted.filter((k) => phaseOf(k) === phase)
+        if (phaseKinds.length === 0) continue
+        const key = phaseKey(taskId, phase)
+        // Backing off after a failure: the start does not wait for it again.
+        if (ledger && !(await ledger.allows(HANDOFF_TASK_PASS, key, null, Date.now()))) continue
+        try {
+          await serialize(taskId, () => deliverTask(taskId, computerId, phaseKinds))
+        } catch (error) {
+          if (deps.isUnreachable(error)) throw error
+          log(`delivery of ${taskId} to ${computerId} failed; its work goes on`, error)
+          await ledger?.record(
+            {
+              pass: HANDOFF_TASK_PASS,
+              itemKey: key,
+              taskId,
+              kind: 'transient',
+              error: error instanceof Error ? error : new Error(String(error))
+            },
+            Date.now()
+          )
+          continue
+        }
+        // A whole phase delivered clears its fault; a partial one leaves it to its pass.
+        if (!kinds) await ledger?.clear(HANDOFF_TASK_PASS, key)
+      }
     }
   }
 }

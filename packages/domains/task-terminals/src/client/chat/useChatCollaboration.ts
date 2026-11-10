@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
+import { useChatSettingsChanged } from './useChatSettingsChanged'
 import { toast, useStableCallback } from '@slayzone/ui'
 import {
   DEFAULT_CHAT_COLLABORATION,
@@ -98,6 +99,9 @@ export function useChatCollaboration({ taskId, mode, tabId, cwd }: UseChatCollab
       cancelled = true
     }
   }, [taskId, mode, tabId, hydrate])
+
+  // Saved settings of a restored chat landed after it opened: re-read them.
+  useChatSettingsChanged(taskId, () => hydrate({ taskId, mode, tabId }, () => false))
 
   const handleCollaborationChange = useCallback(
     async (next: ChatCollaborationMode) => {

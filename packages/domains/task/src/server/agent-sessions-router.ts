@@ -38,22 +38,26 @@ export const agentSessionsRouter = router({
 
   /**
    * The conversation tab `tabId` (default: the main tab) of `agentId` resumes next,
-   * as the task's computer decides it; null when there is none or the computer is
-   * offline (the hub holds no copy).
+   * as the task's computer decides it; null when there is none. PRECONDITION_FAILED
+   * while that computer is offline (the hub holds no copy): "cannot be asked" is
+   * not "none" — the UI shows its no-session banners and records a detected id only
+   * against a known answer (S8).
    */
   current: publicProcedure
     .input(z.object({ taskId: z.string(), agentId: z.string(), tabId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const ledger = taskSessionLedger()
-      const computerId = await ledger.forTask(input.taskId)
-      if (!computerId) return null
-      return ledger.store.getCurrentConversationId(
-        computerId,
-        input.taskId,
-        input.agentId,
-        input.tabId
-      )
-    }),
+    .query(({ input }) =>
+      onComputer(async () => {
+        const ledger = taskSessionLedger()
+        const computerId = await ledger.forTask(input.taskId)
+        if (!computerId) throw new SessionsOfflineError()
+        return ledger.store.getCurrentConversationId(
+          computerId,
+          input.taskId,
+          input.agentId,
+          input.tabId
+        )
+      })
+    ),
 
   /**
    * Test-only (PLAYWRIGHT): one raw operation on the task's computer's session

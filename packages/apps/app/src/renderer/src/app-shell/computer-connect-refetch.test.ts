@@ -48,6 +48,9 @@ describe('refetch on computer connect', () => {
     // S1: a task's worktree / custom folder (useTaskPath's own key, not a tRPC one):
     // an offline answer cached before the local computer enrolled must not stick.
     expect(COMPUTER_BACKED_KEYS).toContainEqual(['task-paths'])
+    // S6: the worktree colours (useWorktreeColors' own key): a boot-time failure
+    // must not leave them neutral until they age out.
+    expect(COMPUTER_BACKED_KEYS).toContainEqual(['worktree-colors'])
   })
 
   it('a connect invalidates every computer-backed query', () => {

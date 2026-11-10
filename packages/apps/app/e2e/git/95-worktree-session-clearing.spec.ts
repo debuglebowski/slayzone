@@ -1,4 +1,4 @@
-import { test, expect, seed, resetApp } from '../fixtures/electron'
+import { test, expect, seed, resetApp, proveConversationTurn } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 import { currentSession, seedSession } from '../fixtures/terminal'
 
@@ -33,7 +33,13 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     )
     // A session newer than any earlier reset.
     await new Promise((r) => setTimeout(r, 5))
+    await seedSession(mainWindow, id, 'claude-code', 'claude-conv-aaa')
+    // Claude Code is turn-tracked: its session resumes once its first turn is proven.
+    await proveConversationTurn(mainWindow, id, 'claude-conv-aaa')
     await seedSession(mainWindow, id, 'codex', 'codex-conv-bbb')
+    // Both modes hold a current session before the change under test.
+    expect(await currentSession(mainWindow, id, 'claude-code')).toBe('claude-conv-aaa')
+    expect(await currentSession(mainWindow, id, 'codex')).toBe('codex-conv-bbb')
   }
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -67,6 +73,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
       taskId
     )
     // The sessions reset
+    expect(await currentSession(mainWindow, taskId, 'claude-code')).toBeNull()
     expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     // Flags should survive
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
@@ -85,6 +92,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
+    expect(await currentSession(mainWindow, taskId, 'claude-code')).toBeNull()
     expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
@@ -102,6 +110,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
       (id) => window.getTrpcVanillaClient().task.get.query({ id }),
       taskId
     )
+    expect(await currentSession(mainWindow, taskId, 'claude-code')).toBeNull()
     expect(await currentSession(mainWindow, taskId, 'codex')).toBeNull()
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--claude-flag')
     expect(task?.provider_config?.codex?.flags).toBe('--codex-flag')
@@ -135,6 +144,7 @@ test.describe('Worktree/project change clears conversation IDs', () => {
     )
     expect(task?.provider_config?.['claude-code']?.flags).toBe('--explicit')
     // The session survives (the reset was suppressed by the explicit providerConfig)
+    expect(await currentSession(mainWindow, taskId, 'claude-code')).toBe('claude-conv-aaa')
     expect(await currentSession(mainWindow, taskId, 'codex')).toBe('codex-conv-bbb')
   })
 })

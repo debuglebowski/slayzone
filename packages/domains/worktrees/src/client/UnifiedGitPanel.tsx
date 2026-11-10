@@ -9,6 +9,7 @@ import { GitDiffPanel, type GitDiffPanelHandle } from './GitDiffPanel'
 import { GeneralTabContent } from './GeneralTabContent'
 import { ProjectGeneralTab } from './ProjectGeneralTab'
 import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
+import { ProjectWideGitScope } from './trpc'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
 import { StashTab, type StashTabHandle } from './StashTab'
@@ -201,7 +202,9 @@ const UnifiedGitPanelInner = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanelPr
               />
             </div>
             <div className={cn('absolute inset-0', activeTab !== 'worktrees' && 'hidden')}>
-              <WorktreesTab ref={worktreesRef} visible={visible && activeTab === 'worktrees'} />
+              <ProjectWideGitScope>
+                <WorktreesTab ref={worktreesRef} visible={visible && activeTab === 'worktrees'} />
+              </ProjectWideGitScope>
             </div>
             <div className={cn('absolute inset-0', activeTab !== 'stash' && 'hidden')}>
               <StashTab

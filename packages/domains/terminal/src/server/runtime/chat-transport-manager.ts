@@ -251,6 +251,11 @@ export type ChatEventMap = {
   'pinned-messages-changed': [tabId: string]
   /** The task of this tab recorded a session (the computer's ledger; the hub refreshes lists). */
   'sessions-changed': [tabId: string]
+  /**
+   * The task's chat settings changed outside a client's own write (the hub's staged
+   * settings landed on its computer): open chats of the task re-read them.
+   */
+  'settings-changed': [taskId: string]
   'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   /**

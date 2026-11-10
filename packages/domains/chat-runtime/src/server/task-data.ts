@@ -6,11 +6,15 @@
  *    row, so a batch delivered twice (its acknowledgement lost) changes nothing. An
  *    item of a task deleted here is skipped (nothing to keep); an invalid value or an
  *    unknown kind is rejected for the hub to quarantine — never thrown, so one bad
- *    item never blocks its batch.
+ *    item never blocks its batch. Each item applies in its own savepoint: one whose
+ *    apply throws (a malformed local row, a conversation deleted or owned elsewhere,
+ *    a row of another task) is rejected the same way and its writes roll back; only
+ *    a broken or busy database fails the whole batch (the hub retries it).
  *  - `read`: a task-data request, from a direct-link client or relayed by the hub.
  *
  * @module chat-runtime/server/task-data
  */
+import { isStorageFatal } from '@slayzone/platform/isolation'
 import type { z } from 'zod'
 import {
   type DataImportResult,
@@ -24,14 +28,27 @@ export interface DataImportKind<T = unknown> {
   /** The item's value. One that does not parse is rejected. */
   value: z.ZodType<T>
   /**
-   * Upsert by `item.key`, keeping a newer local row. Runs inside the batch's
-   * transaction: throwing fails the whole batch (the hub retries it).
+   * Upsert by `item.key`, keeping a newer local row. Runs in its own savepoint
+   * inside the batch's transaction: throwing rejects only this item (the hub
+   * quarantines it until its row changes) and undoes its writes; the batch's other
+   * items still apply. Only a broken or busy database fails the whole batch.
    */
   apply(storage: ChatStorage, item: { key: string; taskId: string; value: T }): void
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: each kind narrows its own value type.
 export type DataImportKinds = Readonly<Record<string, DataImportKind<any>>>
+
+/** The database is locked by another writer: transient, the batch is retried later. */
+function isStorageBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED'
+}
+
+function errorMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message || error.name : String(error)
+  return (text || 'Import failed').slice(0, 2000)
+}
 
 export function createComputerTaskData(opts: {
   storage: ChatStorage
@@ -67,9 +84,20 @@ export function createComputerTaskData(opts: {
         valid.push({ key: item.key, taskId: item.taskId, value: parsed.data })
       }
       opts.storage.transaction(() => {
-        for (const item of valid) kind.apply(opts.storage, item)
+        for (const item of valid) {
+          try {
+            // A savepoint per item: a failing item's own writes roll back, the
+            // batch's other items still apply (one bad item never blocks a task).
+            opts.storage.transaction(() => kind.apply(opts.storage, item))
+            result.applied.push(item.key)
+          } catch (error) {
+            // The machine's disk or database is broken: no item can succeed here.
+            // The whole batch fails and the hub retries it later.
+            if (isStorageFatal(error) || isStorageBusy(error)) throw error
+            result.rejected.push({ key: item.key, message: errorMessage(error) })
+          }
+        }
       })
-      result.applied.push(...valid.map((item) => item.key))
       return result
     },
 

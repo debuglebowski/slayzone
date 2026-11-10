@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { z } from 'zod'
+import { chatSettingsImport } from './chat-settings-import'
+import { historyImports } from './history-imports'
 import { openChatStorage } from './storage'
 import { createComputerTaskData, type DataImportKinds } from './task-data'
 
@@ -70,6 +72,122 @@ describe('computer task data', () => {
     expect(storage.compose((db) => db.prepare('SELECT text FROM probe').all())).toEqual([
       { text: 'local' }
     ])
+  })
+
+  test('an item whose apply throws is rejected on its own; its writes roll back, the rest apply', () => {
+    const storage = open()
+    const real = probeKind().probe!
+    const data = createComputerTaskData({
+      storage,
+      computerId: 'pc',
+      imports: {
+        probe: {
+          value: real.value,
+          apply(s, item) {
+            real.apply(s, item)
+            // Deterministic failures of the real kinds: "Conversation deleted",
+            // "ownership conflict", "of another task", a malformed local row.
+            if (item.value.text === 'bad') throw new Error('Session of another task')
+          }
+        }
+      },
+      providerConfig: () => ({})
+    })
+    const result = data.importBatch({
+      kind: 'probe',
+      items: [
+        { key: 'a', taskId: 't', value: { text: 'one', at: 1 } },
+        { key: 'b', taskId: 't', value: { text: 'bad', at: 1 } },
+        { key: 'c', taskId: 't', value: { text: 'three', at: 1 } }
+      ]
+    })
+    expect(result).toEqual({
+      applied: ['a', 'c'],
+      skipped: [],
+      rejected: [{ key: 'b', message: 'Session of another task' }]
+    })
+    // The failed item's own write is undone; the others stay.
+    expect(storage.compose((db) => db.prepare('SELECT key FROM probe ORDER BY key').all())).toEqual(
+      [{ key: 'a' }, { key: 'c' }]
+    )
+  })
+
+  test('malformed local chat settings reject only that item', () => {
+    const storage = open()
+    const data = createComputerTaskData({
+      storage,
+      computerId: 'pc',
+      imports: { 'chat-settings': chatSettingsImport },
+      providerConfig: () => ({})
+    })
+    storage.compose((db) => {
+      db.prepare('INSERT INTO provider_configs VALUES(?,?,0,?)').run('t', 'claude-chat', '{torn')
+    })
+    const result = data.importBatch({
+      kind: 'chat-settings',
+      items: [
+        { key: 'a', taskId: 't', value: { mode: 'claude-chat', settings: { chatMode: 'auto' } } },
+        { key: 'b', taskId: 't', value: { mode: 'codex-chat', settings: { chatModel: 'm' } } }
+      ]
+    })
+    expect(result.applied).toEqual(['b'])
+    expect(result.rejected.map((r) => r.key)).toEqual(['a'])
+  })
+
+  test('a prompt whose conversation was deleted here is rejected; the other task’s prompt applies', () => {
+    const storage = open()
+    const data = createComputerTaskData({
+      storage,
+      computerId: 'pc',
+      imports: historyImports,
+      providerConfig: () => ({})
+    })
+    const prompt = (id: string) => ({
+      id,
+      agentId: 'claude-code',
+      cliSessionId: null,
+      text: 'hello',
+      createdAt: 1
+    })
+    // t's prompt inbox exists here but was deleted: storePrompt throws "Conversation deleted".
+    storage.createConversation({
+      id: 'hook-inbox:t',
+      taskId: 't',
+      tabId: 'hook-inbox:t',
+      mode: 'claude-chat',
+      epoch: 1
+    })
+    storage.compose((db) =>
+      db.prepare("UPDATE conversations SET state='deleted' WHERE id='hook-inbox:t'").run()
+    )
+    const result = data.importBatch({
+      kind: 'agent-prompt',
+      items: [
+        { key: 'p1', taskId: 't', value: prompt('p1') },
+        { key: 'p2', taskId: 'u', value: prompt('p2') }
+      ]
+    })
+    expect(result.applied).toEqual(['p2'])
+    expect(result.rejected).toEqual([{ key: 'p1', message: 'Conversation deleted' }])
+  })
+
+  test('a broken disk still fails the whole batch (no item can succeed; the hub retries)', () => {
+    const data = createComputerTaskData({
+      storage: open(),
+      computerId: 'pc',
+      imports: {
+        probe: {
+          value: z.object({}),
+          apply() {
+            throw Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' })
+          }
+        }
+      },
+      providerConfig: () => ({})
+    })
+    expect(() =>
+      data.importBatch({ kind: 'probe', items: [{ key: 'a', taskId: 't', value: {} }] })
+    ).toThrow('disk I/O error')
   })
 
   test('an unknown kind is rejected, never thrown', () => {

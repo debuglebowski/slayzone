@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
+import { useChatSettingsChanged } from './useChatSettingsChanged'
 import { toast, useStableCallback } from '@slayzone/ui'
 import { DEFAULT_CHAT_EFFORT } from '@slayzone/terminal-contracts'
 
@@ -94,6 +95,9 @@ export function useChatEffort({ taskId, mode, tabId, cwd }: UseChatEffortOpts) {
       cancelled = true
     }
   }, [taskId, mode, tabId, hydrate])
+
+  // Saved settings of a restored chat landed after it opened: re-read them.
+  useChatSettingsChanged(taskId, () => hydrate({ taskId, mode, tabId }, () => false))
 
   const handleEffortChange = useCallback(
     async (next: ChatEffortValue) => {

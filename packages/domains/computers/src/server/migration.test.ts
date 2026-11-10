@@ -249,16 +249,25 @@ describe('v163 computer → computer rename', () => {
 describe('v176 legacy project path → folder on the local computer', () => {
   const LOCAL = deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
 
-  function migratedTo(version: number): Database.Database {
-    const raw = new Database(':memory:')
-    for (const pragma of DB_PRAGMAS) raw.pragma(pragma)
+  // A per-version test migrates only up to its own version, never to latest: a
+  // later migration (v212 adds a placement for a project's default computer)
+  // would otherwise leak its rows into this version's assertions.
+  function migrateTo(raw: Database.Database, version: number): void {
+    const from = raw.pragma('user_version', { simple: true }) as number
     for (const m of migrations) {
+      if (m.version <= from) continue
       if (m.version > version) break
       raw.transaction(() => {
         m.up(raw)
         raw.pragma(`user_version = ${m.version}`)
       })()
     }
+  }
+
+  function migratedTo(version: number): Database.Database {
+    const raw = new Database(':memory:')
+    for (const pragma of DB_PRAGMAS) raw.pragma(pragma)
+    migrateTo(raw, version)
     return raw
   }
 
@@ -297,7 +306,7 @@ describe('v176 legacy project path → folder on the local computer', () => {
       project(raw, 'p2', '/Users/me/remote-default', 'remote-1')
       project(raw, 'none', null)
       project(raw, 'empty', '')
-      runMigrations(raw)
+      migrateTo(raw, 176)
 
       expect(placements(raw)).toEqual([
         { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/app', status: 'pending' },
@@ -336,7 +345,7 @@ describe('v176 legacy project path → folder on the local computer', () => {
       )
       ins.run(LOCAL, 'p1', '/Users/me/app')
       ins.run(LOCAL, 'p2', '/Users/me/old')
-      runMigrations(raw)
+      migrateTo(raw, 176)
 
       expect(placements(raw)).toEqual([
         { computer_id: LOCAL, project_id: 'p1', root_path: '/Users/me/app', status: 'pending' },

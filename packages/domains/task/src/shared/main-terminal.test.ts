@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { Task } from '@slayzone/task-contracts'
 import {
   mainTerminalCwd,
+  mainTerminalCwdFrom,
   mainTerminalCwdNeedsRepos,
+  ownFolderMissing,
   mainTerminalProps,
   plainMainTerminalCwd,
   taskRepoName,
@@ -133,5 +135,27 @@ describe('main terminal cwd', () => {
     expect(taskRepoPath(task({ has_worktree: true }), '/r', null)).toBeNull()
     expect(taskRepoPath(task(), '/r', null)).toBe('/r')
     expect(taskRepoPath(null, null, null)).toBeNull()
+  })
+
+  it('S7: a task with its own folder and no known path never runs in the project folder', () => {
+    const own = task({ has_worktree: true })
+    // Loading / offline / missing on its computer: taskRepoPath is null.
+    expect(mainTerminalCwdFrom(own, null, '/project')).toBeNull()
+    expect(mainTerminalCwdFrom(task({ has_base_dir: true }), '', '/project')).toBeNull()
+    expect(mainTerminalCwdFrom(own, '/wt', '/project')).toBe('/wt')
+    // No folder of its own: the project folder is the task's folder.
+    expect(mainTerminalCwdFrom(task(), null, '/project')).toBe('/project')
+    expect(mainTerminalCwdFrom(task(), '/project/web', '/project')).toBe('/project/web')
+  })
+
+  it('S7: ownFolderMissing — its computer answered and holds no folder for it', () => {
+    const own = task({ has_worktree: true })
+    expect(ownFolderMissing(own, ok(null))).toBe(true)
+    expect(ownFolderMissing(own, ok('/wt'))).toBe(false)
+    expect(ownFolderMissing(task({ has_base_dir: true }), ok(null, '/b'))).toBe(false)
+    // Not answered yet / away: not "missing" — unknown.
+    expect(ownFolderMissing(own, null)).toBe(false)
+    expect(ownFolderMissing(own, { state: 'offline', computerId: 'pc' })).toBe(false)
+    expect(ownFolderMissing(task(), ok(null))).toBe(false)
   })
 })

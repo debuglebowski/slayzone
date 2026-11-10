@@ -134,13 +134,14 @@ vi.mock('@slayzone/ui', async (importOriginal) => {
   }
 })
 
+const projectRootMock = vi.hoisted(() => ({ value: null as string | null }))
 vi.mock('@slayzone/projects-contracts', () => ({
   getDefaultStatus: () => 'todo',
   getDoneStatus: () => 'done',
   isTerminalStatus: () => false,
   isCompletedStatus: () => false,
   resolveRepoPath: () => ({ path: null, detected: false }),
-  taskProjectRoot: () => null,
+  taskProjectRoot: () => projectRootMock.value,
   placementOn: () => null,
   workComputerId: () => null
 }))
@@ -167,7 +168,27 @@ vi.mock('@slayzone/terminal-contracts', async (importOriginal) => ({
 }))
 
 vi.mock('@slayzone/editor', () => ({ RichTextEditor: () => null }))
-vi.mock('@slayzone/task-terminals', () => ({ TerminalContainer: React.forwardRef(() => null) }))
+// Counts mounts: the terminal must never be unmounted/remounted by a task update (B2).
+const terminalMounts = vi.hoisted(() => ({ count: 0 }))
+vi.mock('@slayzone/task-terminals', () => ({
+  TerminalContainer: React.forwardRef(function TerminalStub() {
+    React.useEffect(() => {
+      terminalMounts.count++
+    }, [])
+    return <div data-testid="terminal" />
+  })
+}))
+// The task's paths as its computer answers them (per test). The page's own
+// first-load gate (useHeldTaskPath) stays real.
+const pathMock = vi.hoisted(() => ({
+  view: { state: 'ok', worktreePath: null, baseDir: null } as Record<string, unknown>
+}))
+vi.mock('./useTaskPath', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useTaskPath')>()),
+  useTaskPath: () => pathMock.view,
+  useTaskPathLocation: (view: { state: string }) =>
+    view.state === 'offline' ? 'on Remote Mac' : null
+}))
 vi.mock('@slayzone/task-browser', () => ({
   BrowserPanel: React.forwardRef(() => null),
   registerBrowserTaskSource: () => {}
@@ -288,7 +309,8 @@ vi.mock('@slayzone/transport/client', () => {
     useClientForTask: () => proxy,
     getClientForHub: () => proxy,
     getHubIdForTask: () => undefined,
-    useSubscription: () => undefined
+    useSubscription: () => undefined,
+    hubAllows: async () => false
   }
 })
 
@@ -517,5 +539,61 @@ describe('TaskDetailPage — web panel shortcut', () => {
     const title = renderWithWebPanel()
     fireEvent.keyDown(title, { code: 'KeyL', ...init })
     expect(document.querySelector(panelSelector)).toBeNull()
+  })
+})
+
+describe('TaskDetailPage — the terminal survives task updates (B2)', () => {
+  afterEach(() => {
+    terminalMounts.count = 0
+    projectRootMock.value = null
+    pathMock.view = { state: 'ok', worktreePath: null, baseDir: null }
+  })
+
+  it('a worktree task: status / title / version updates and a transient offline re-read never remount it', () => {
+    const data = makeTaskDetailData()
+    const wt = { ...data.task, has_worktree: true } as typeof data.task
+    pathMock.view = { state: 'ok', worktreePath: '/wt', baseDir: null }
+    const page = (task: typeof wt) => (
+      <TaskDetailPage {...requiredProps} isActive task={task} project={null} initialData={data} />
+    )
+    const r = render(page(wt))
+    expect(screen.getByTestId('terminal')).toBeDefined()
+    expect(terminalMounts.count).toBe(1)
+    const node = screen.getByTestId('terminal')
+
+    r.rerender(page({ ...wt, status: 'done', title: 'Renamed', updated_at: '2026-11-10 10:00:05' }))
+    // A window-focus refetch that came back while its computer was briefly away.
+    pathMock.view = { state: 'offline', computerId: 'pc' }
+    r.rerender(page({ ...wt, status: 'in_progress', updated_at: '2026-11-10 10:00:06' }))
+    // A re-read in flight (a path-change reset of an unrelated field's event).
+    pathMock.view = { state: 'loading' }
+    r.rerender(page({ ...wt, updated_at: '2026-11-10 10:00:07' }))
+
+    expect(screen.queryByText(/connect it to start|Loading the task folder/)).toBeNull()
+    expect(screen.getByTestId('terminal')).toBe(node)
+    expect(terminalMounts.count).toBe(1)
+  })
+
+  it("the FIRST load still gates it: no terminal before the task's folder is known", () => {
+    const data = makeTaskDetailData()
+    const wt = { ...data.task, has_worktree: true } as typeof data.task
+    pathMock.view = { state: 'offline', computerId: 'pc' }
+    render(
+      <TaskDetailPage {...requiredProps} isActive task={wt} project={null} initialData={data} />
+    )
+    expect(screen.queryByTestId('terminal')).toBeNull()
+    expect(screen.getByText(/on Remote Mac — connect it to start/)).toBeDefined()
+  })
+
+  it('S7: its computer holds no folder for it: "not found", never a terminal in the project folder', () => {
+    const data = makeTaskDetailData()
+    const wt = { ...data.task, has_worktree: true } as typeof data.task
+    pathMock.view = { state: 'ok', worktreePath: null, baseDir: null }
+    projectRootMock.value = '/project'
+    render(
+      <TaskDetailPage {...requiredProps} isActive task={wt} project={null} initialData={data} />
+    )
+    expect(screen.queryByTestId('terminal')).toBeNull()
+    expect(screen.getAllByText(/folder was not found on its computer/).length).toBeGreaterThan(0)
   })
 })

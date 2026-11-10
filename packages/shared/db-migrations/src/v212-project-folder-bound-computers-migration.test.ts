@@ -100,7 +100,11 @@ test('a folder a computer already holds is left as it is', () => {
     ).run()
     runRange(db, 211, LATEST())
     expect(
-      db.prepare("SELECT root_path, status FROM project_placements WHERE project_id='ml' AND computer_id='gpu'").get()
+      db
+        .prepare(
+          "SELECT root_path, status FROM project_placements WHERE project_id='ml' AND computer_id='gpu'"
+        )
+        .get()
     ).toEqual({ root_path: '/srv/ml', status: 'ready' })
   } finally {
     db.close()

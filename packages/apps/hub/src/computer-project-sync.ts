@@ -42,6 +42,7 @@ import {
   listPlacements,
   recordComputerProjectPaths,
   setPlacement,
+  TASK_COMPUTER_EXPR,
   type PlacementRow
 } from '@slayzone/computers/server'
 import { USABLE_PLACEMENT_STATUSES, type PlacementStatus } from '@slayzone/computers/shared'
@@ -198,15 +199,15 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
     // Background processes ran on the desktop's own disk, unjailed, until v0.38.0 moved
     // them onto the computer: one set up in `/tmp`, `/opt/x` or on an external drive
     // must keep starting there. A project process sends no cwd (its computer resolves
-    // the project's folder, covered above); one whose task or project is bound to
-    // another computer names a folder on THAT computer.
+    // the project's folder, covered above); one whose task is another computer's (the
+    // one resolver, TASK_COMPUTER_EXPR) names a folder on THAT computer.
     for (const p of await db.all<{ cwd: string }>(
       `SELECT pr.cwd FROM processes pr
          LEFT JOIN tasks t ON t.id = pr.task_id
          LEFT JOIN projects p ON p.id = COALESCE(t.project_id, pr.project_id)
         WHERE pr.cwd != ''
           AND NOT (pr.task_id IS NULL AND pr.project_id IS NOT NULL)
-          AND COALESCE(t.computer_id, p.default_computer_id, ?) = ?`,
+          AND COALESCE(${TASK_COMPUTER_EXPR}, ?) = ?`,
       [computerId, computerId]
     )) {
       if (isAbsolute(p.cwd)) folders.push(p.cwd)

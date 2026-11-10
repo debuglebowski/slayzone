@@ -1547,6 +1547,13 @@ export function createHubChatRelay(opts: {
     sessions,
     conversations,
     refreshSessions,
+    /**
+     * Settings of the task's chats changed on their computer without a client's own
+     * write (the hub's staged settings were imported there): clients re-read them.
+     */
+    settingsChanged(taskId: string) {
+      events.emit('settings-changed', taskId)
+    },
     /** Relayed-event progress, compared with the computer's at recovery. */
     history,
     async notifyReplayRequired(

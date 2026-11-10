@@ -23,7 +23,7 @@ import { BOOTSTRAP_OWNER_EMAIL } from '@slayzone/platform/hub-owner-file'
 import { runWithSecurityContext } from '@slayzone/platform/security-log'
 import { getAppDeps, getMenuEvents, getNotifyEvents, type AppRouter } from '@slayzone/api'
 import { getAutomationsEvents } from '@slayzone/automations/server'
-import { agentSessionsEvents, artifactWatcherEvents } from '@slayzone/task/server'
+import { agentSessionsEvents, artifactWatcherEvents, taskEvents } from '@slayzone/task/server'
 import { tabsEvents } from '@slayzone/task-terminals/server'
 import {
   agentStarts,
@@ -522,6 +522,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'pty.onResizeNeeded': (o) => getPtyDeps().events.emit('resize-needed', o.session),
   'pty.onAgentStarts': (o) => agentStarts.mark(o.session, 'queued'),
   'taskTerminals.onChanged': (o) => tabsEvents.emit('tabs:changed', { taskId: o.task }),
+  'task.onPathsChanged': (o) => taskEvents.emit('task:paths-changed', { taskId: o.task }),
   'worktrees.onDiffChanged': (o) =>
     getGitWatcher().emit('git:diff-changed', {
       worktreePath: o.path,

@@ -65,7 +65,7 @@ export function taskOwnFolderOf(paths: TaskPathState | null | undefined): string
 export function hasOwnFolder(
   task: Pick<Task, 'has_worktree' | 'has_base_dir'> | null | undefined
 ): boolean {
-  return !!task && (task.has_worktree || task.has_base_dir)
+  return !!task && !!(task.has_worktree || task.has_base_dir)
 }
 
 /**
@@ -95,13 +95,30 @@ export function taskRepoPath(
 }
 
 /**
- * The main terminal's cwd from the task-bound directory: it, else the project's
- * folder on the task's computer (`taskProjectRoot`).
+ * Whether the task has a folder of its own (worktree / custom folder) that its
+ * computer answered it does NOT hold (a quarantined path hand-off, an inherit with
+ * no parent row there). The task then has nowhere to run: the UI shows the folder
+ * missing — never the project folder in its place.
+ */
+export function ownFolderMissing(
+  task: Pick<Task, 'has_worktree' | 'has_base_dir'> | null | undefined,
+  paths: TaskPathState | null | undefined
+): boolean {
+  return hasOwnFolder(task) && paths?.state === 'ok' && taskOwnFolderOf(paths) === null
+}
+
+/**
+ * The main terminal's cwd from the task-bound directory (`taskRepoPath`): it, else
+ * — only for a task WITHOUT a folder of its own — the project's folder on the task's
+ * computer (`taskProjectRoot`). A task with its own folder whose path is not known
+ * (loading, offline, missing) gets null: never the project folder (S7).
  */
 export function mainTerminalCwdFrom(
+  task: Pick<Task, 'has_worktree' | 'has_base_dir'> | null | undefined,
   repoPath: string | null | undefined,
   projectRoot: string | null | undefined
 ): string | null {
+  if (hasOwnFolder(task)) return repoPath || null
   return repoPath || projectRoot || null
 }
 
@@ -122,7 +139,7 @@ export function mainTerminalCwd(
 ): string | null {
   if (hasOwnFolder(task)) return taskOwnFolderOf(paths)
   const resolved = resolveRepoPath(projectRoot, [...detectedRepos], taskRepoName(task, project))
-  return mainTerminalCwdFrom(resolved.path, projectRoot)
+  return mainTerminalCwdFrom(task, resolved.path, projectRoot)
 }
 
 /**

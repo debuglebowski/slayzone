@@ -36,6 +36,7 @@ import { existsSync, rmSync } from 'fs'
 import { isHubSwitchedOffError } from '@slayzone/platform/hub-switch-refusal'
 import type { WorktreeCopyBehavior } from '@slayzone/projects-contracts'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
+import { taskEvents } from '../events.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -923,14 +924,19 @@ export async function readTaskPaths(
   return taskPathsDelegate.read(taskIds)
 }
 
-/** Tell the task's computer; never fails the hub write (the delegate stages what it cannot send). */
+/**
+ * Tell the task's computer; never fails the hub write (the delegate stages what it
+ * cannot send). Then every client re-reads the task's paths (`task:paths-changed`):
+ * nothing else tells them a path changed (B2 — their reads are not keyed on the row's
+ * version).
+ */
 export async function notifyTaskPaths(taskId: string, change: TaskPathChange): Promise<void> {
-  if (!taskPathsDelegate) return
   try {
-    await taskPathsDelegate.changed(taskId, change)
+    await taskPathsDelegate?.changed(taskId, change)
   } catch (error) {
     console.warn(`[task] paths of ${taskId} not handed to its computer:`, error)
   }
+  taskEvents.emit('task:paths-changed', { taskId })
 }
 
 export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise<Task | null> {
@@ -1436,6 +1442,8 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   if (!userPaths && (pathPatch.worktreePath !== undefined || pathPatch.baseDir !== undefined))
     await notifyTaskPaths(data.id, { op: 'set', ...pathPatch })
+  // A path the user set was written on its computer above (`apply`): clients re-read it.
+  else if (userPaths) taskEvents.emit('task:paths-changed', { taskId: data.id })
 
   // A worktree / base-dir / project change: every tab's agent ran in the old folder,
   // so the WHOLE task resets — every tab, every mode (a reset intent the hub

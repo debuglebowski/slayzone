@@ -13,6 +13,12 @@ export interface TaskEventMap {
   'task:deleted': TaskEventBase
   'task:restored': TaskEventBase
   'task:tag-changed': TaskEventBase & { tagId?: string | null }
+  /**
+   * The task's worktree path or base dir changed (made, removed, set, cleared,
+   * inherited) — handed to the computer holding them, or staged for it. Clients
+   * drop their copy of the task's paths and read them again (`task.onPathsChanged`).
+   */
+  'task:paths-changed': { taskId: string }
 }
 
 export interface AgentSessionsEventMap {

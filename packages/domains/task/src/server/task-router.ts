@@ -442,7 +442,8 @@ export const taskRouter = router({
     observable<{ taskId: string; projectId: string }>((emit) => {
       const handler = (e: { taskId: string; projectId: string }): void =>
         emit.next({ taskId: e.taskId, projectId: e.projectId })
-      const events: (keyof TaskEventMap)[] = [
+      // Row changes (each names its project); not `task:paths-changed` (onPathsChanged).
+      const events: Exclude<keyof TaskEventMap, 'task:paths-changed'>[] = [
         'task:created',
         'task:archived',
         'task:unarchived',
@@ -454,6 +455,19 @@ export const taskRouter = router({
       for (const e of events) taskEvents.on(e, handler)
       return () => {
         for (const e of events) taskEvents.off(e, handler)
+      }
+    })
+  ),
+
+  // A task's worktree path / base dir changed (`task:paths-changed`): clients drop
+  // their copy of its paths and read them again (`task.paths`). Their reads are not
+  // keyed on the row's version, so a status or title change never re-reads them.
+  onPathsChanged: publicProcedure.subscription(() =>
+    observable<{ taskId: string }>((emit) => {
+      const handler = (e: { taskId: string }): void => emit.next({ taskId: e.taskId })
+      taskEvents.on('task:paths-changed', handler)
+      return () => {
+        taskEvents.off('task:paths-changed', handler)
       }
     })
   )

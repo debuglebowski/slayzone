@@ -12,6 +12,8 @@ import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { checkComputerChatConsistency } from '@slayzone/chat-runtime/hub'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { createComputerDataHandoff } from './computer-data-handoff'
+import { createTaskPathRequestGate } from './task-path-request-gate'
+import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
 import {
   createComputerTaskPaths,
   readComputerTaskRoots,
@@ -227,5 +229,75 @@ test('read (§9 7d): from each holding computer, staged rows first; away = offli
     parent: { state: 'ok', worktreePath: W('w-parent'), baseDir: null },
     child: { state: 'ok', worktreePath: null, baseDir: null }
   })
+  expect(f.staged()).toEqual([])
+})
+
+test('read flushes only the task-path row: the open task never waits for any task’s history', async () => {
+  const f = await fixture()
+  f.online.delete('pc')
+  await f.set('t1', W('w-one'))
+  f.h.db
+    .prepare(
+      `INSERT INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+       VALUES('agent-prompt','p1','t1',?,0)`
+    )
+    .run(
+      JSON.stringify({
+        id: 'p1',
+        agentId: 'claude-code',
+        cliSessionId: null,
+        text: 'x',
+        createdAt: 1
+      })
+    )
+  f.online.add('pc')
+  expect(await f.paths.read(['t1'])).toEqual({
+    t1: { state: 'ok', worktreePath: W('w-one'), baseDir: null }
+  })
+  expect(f.h.db.prepare('SELECT kind FROM computer_data_handoff ORDER BY kind').all()).toEqual([
+    { kind: 'agent-prompt' }
+  ])
+})
+
+test('read: one task failing its handoff is offline on its own; the batch’s others answer', async () => {
+  const f = await fixture()
+  await f.set('t1', W('w-one'))
+  const paths = createComputerTaskPaths({
+    db: f.h.slayDb,
+    targetOf: f.handoff.targetOf,
+    flushTask: async (taskId, computerId, kinds) => {
+      if (taskId === 'parent') throw new Error('parent breaks')
+      return f.handoff.flushTask(taskId, computerId, kinds)
+    },
+    usable: (id) => f.online.has(id),
+    request: f.request,
+    log: () => {}
+  })
+  expect(await paths.read(['t1', 'parent', 'child'])).toEqual({
+    t1: { state: 'ok', worktreePath: W('w-one'), baseDir: null },
+    parent: { state: 'offline', computerId: 'pc' },
+    child: { state: 'ok', worktreePath: null, baseDir: null }
+  })
+})
+
+test('S3: a process restarted on connect finds its staged worktree on the computer', async () => {
+  const f = await fixture()
+  f.online.delete('pc')
+  await f.set('t1', W('w-restart'))
+  f.online.add('pc')
+  // The gateway's beforeRequest: the one place task paths reach the computer first.
+  const gate = createTaskPathRequestGate({
+    flushTaskPaths: (taskId, computerId) =>
+      f.handoff.flushTask(taskId, computerId, [TASK_PATH_KIND])
+  })
+  let seen: unknown = null
+  const spawn = async (computerId: 'pc', params: { taskId: string }) => {
+    await gate(computerId, HubToComputerMethods.procSpawn, params)
+    // What the computer judges the spawn's cwd against, when the spawn arrives.
+    seen = await f.onComputer(computerId, [params.taskId])
+  }
+  // Before the reconnect handoff ran (processesComputerConnected spawns at once).
+  await spawn('pc', { taskId: 't1' })
+  expect(seen).toEqual([expect.objectContaining({ taskId: 't1', worktreePath: W('w-restart') })])
   expect(f.staged()).toEqual([])
 })

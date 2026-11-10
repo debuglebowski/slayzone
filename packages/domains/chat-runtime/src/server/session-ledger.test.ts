@@ -497,3 +497,223 @@ describe('chatSessionOwner: which chat on this computer holds a provider session
     expect(await owner('native-1', 'claude-code')).toBeNull()
   })
 })
+
+// Ported from task's shared-session-claims suite (removed in 7d25d823c; review 2,
+// Area 6): a provider session is the task's that claimed it FIRST (honored, not
+// deleted, across every mode). Every other task's claim is invisible to every reader
+// that answers "which sessions does this task have / resume?" — else two tasks resume
+// one transcript and clobber it.
+describe('one task per provider session: claim rules', () => {
+  const Ccode = M
+  const Cchat = 'claude-chat'
+
+  test('the later claimant does not resume it, list it, or honor it', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1, origin: 'legacy-migration' })
+    await session(db, { task: 'b', id: 'shared', at: 2, origin: 'legacy-migration' })
+    expect(await L.getCurrentConversationId(db, 'a', Ccode)).toBe('shared')
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBeNull()
+    expect(await L.isHonoredConversation(db, 'a', Ccode, 'shared')).toBe(true)
+    expect(await L.isHonoredConversation(db, 'b', Ccode, 'shared')).toBe(false)
+    expect(await L.listResumeCandidates(db, 'b', Ccode)).toEqual([])
+    expect(await L.listResumeCandidates(db, 'a', Ccode)).toEqual(['shared'])
+    expect((await L.listTaskSessionRows(db, 'b', Ccode)).map((r) => r.conversationId)).toEqual([])
+    expect((await L.listTaskSessionRows(db, 'a', Ccode)).map((r) => r.conversationId)).toEqual([
+      'shared'
+    ])
+  })
+
+  test("the winner is decided by each task's FIRST claim, not its newest row", async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1, origin: 'legacy-migration' })
+    await session(db, { task: 'b', id: 'shared', at: 2, origin: 'legacy-migration' })
+    // A later resume in A must not hand the session to B (whose first claim is
+    // earlier than A's newest row).
+    await session(db, { task: 'a', id: 'shared', at: 5, origin: 'slay-spawned-resume' })
+    expect(await L.getCurrentConversationId(db, 'a', Ccode)).toBe('shared')
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBeNull()
+  })
+
+  test('a tie on claim time is broken by task id, deterministically', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'b', id: 'shared', at: 7 })
+    await session(db, { task: 'a', id: 'shared', at: 7 })
+    expect(await L.getCurrentConversationId(db, 'a', Ccode)).toBe('shared')
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBeNull()
+    expect([...(await L.claimedByOtherTasks(db, 'b', ['shared']))]).toEqual(['shared'])
+    expect([...(await L.claimedByOtherTasks(db, 'a', ['shared']))]).toEqual([])
+  })
+
+  test('a claim under another mode contests too (chat and terminal share session files)', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1, mode: Cchat, origin: 'legacy-migration' })
+    await session(db, { task: 'b', id: 'shared', at: 2 })
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBeNull()
+    expect(await L.isHonoredConversation(db, 'b', Ccode, 'shared')).toBe(false)
+  })
+
+  test('one task holding the session under two modes is not a conflict', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1, mode: Cchat, origin: 'legacy-migration' })
+    await session(db, { task: 'a', id: 'shared', at: 2, origin: 'handoff' })
+    expect(await L.getCurrentConversationId(db, 'a', Ccode)).toBe('shared')
+    expect(await L.getCurrentConversationId(db, 'a', Cchat)).toBe('shared')
+    expect(await L.listSharedSessionClaims(db)).toEqual([])
+  })
+
+  test('a foreign-observed (audit-only) row never contests', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1, origin: 'foreign-observed' })
+    await session(db, { task: 'b', id: 'shared', at: 2 })
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBe('shared')
+    expect(await L.isHonoredConversation(db, 'b', Ccode, 'shared')).toBe(true)
+    expect(await L.listSharedSessionClaims(db)).toEqual([])
+  })
+
+  test('a relinquished claim (deletion tombstone) no longer contests: the other task gets it', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'shared', at: 1 })
+    await session(db, { task: 'b', id: 'shared', at: 2 })
+    // The shared-session repair relinquishes the winner's CURRENT session: a
+    // tombstone delivered as a deletion intent, without deleteSession's guard.
+    await L.applySessionIntents(db, {
+      resets: [],
+      deletions: [{ id: 'rel', taskId: 'a', mode: Ccode, conversationId: 'shared', createdAt: 3 }]
+    })
+    expect(await L.getCurrentConversationId(db, 'a', Ccode)).toBeNull()
+    expect(await L.getCurrentConversationId(db, 'b', Ccode)).toBe('shared')
+    expect(await L.listSharedSessionClaims(db)).toEqual([])
+  })
+
+  test('claimedByOtherTasks names ids another task wins, keeps own and unclaimed ids', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'a', id: 'a-wins', at: 1 })
+    await session(db, { task: 'b', id: 'a-wins', at: 2 })
+    await session(db, { task: 'b', id: 'b-wins', at: 1 })
+    await session(db, { task: 'a', id: 'b-wins', at: 2 })
+    await session(db, { task: 'a', id: 'only-b', at: 1, origin: 'foreign-observed' })
+    await session(db, { task: 'b', id: 'only-b', at: 2 })
+    expect([
+      ...(await L.claimedByOtherTasks(db, 'b', ['a-wins', 'b-wins', 'only-b', 'unknown']))
+    ]).toEqual(['a-wins'])
+    // An id this task never claimed but another task holds is foreign (a parent's
+    // session `/resume`d in a subtask, listed in pre-ledger history).
+    await session(db, { task: 'a', id: 'parents', at: 1 })
+    expect([...(await L.claimedByOtherTasks(db, 'c', ['parents']))]).toEqual(['parents'])
+  })
+
+  test('listSharedSessionClaims lists every task holding a shared session, earliest claim first', async () => {
+    const { db } = ledger()
+    await session(db, { task: 'b', id: 'shared', at: 2 })
+    await session(db, { task: 'a', id: 'shared', at: 1 })
+    await session(db, { task: 'a', id: 'shared', at: 4, origin: 'slay-spawned-resume' })
+    await session(db, { task: 'c', id: 'shared', at: 3, mode: Cchat, origin: 'legacy-migration' })
+    await session(db, { task: 'a', id: 'solo', at: 1 })
+    expect(await L.listSharedSessionClaims(db)).toEqual([
+      {
+        conversationId: 'shared',
+        claims: [
+          { taskId: 'a', mode: Ccode, firstClaimAt: 1 },
+          { taskId: 'b', mode: Ccode, firstClaimAt: 2 },
+          { taskId: 'c', mode: Cchat, firstClaimAt: 3 }
+        ]
+      }
+    ])
+  })
+})
+
+// Review 2, Area 6: the pending-spawn time windows (10 min with an expected id, 30 s
+// without) and the unscoped sweep. A stale pending row must never claim a LATER
+// session (wrong resume, wrong tab); the sweep must never delete a live launch.
+describe('pending-spawn windows and the sweep', () => {
+  const MIN = 60_000
+  /** A pending row of `tab` written `ageMs` ago (as recordPendingSpawn would have). */
+  const pendingAged = (
+    db: ReturnType<typeof ledger>['db'],
+    args: { id: string; ageMs: number; expected: string | null; tab?: string; token?: string }
+  ) => {
+    const at = Date.now() - args.ageMs
+    return L.recordConversation(db, {
+      id: args.id,
+      taskId: T,
+      mode: M,
+      tabId: args.tab ?? T,
+      conversationId: args.expected,
+      origin: 'pending-spawn',
+      createdAt: at,
+      pendingMeta: {
+        usedResume: false,
+        spawnedAt: at,
+        ...(args.token ? { spawnToken: args.token } : {})
+      }
+    })
+  }
+  const hook = (db: ReturnType<typeof ledger>['db'], sessionId: string) =>
+    L.recordHookConversation(db, { taskId: T, mode: M, sessionId })
+
+  test('a launch with an expected id is found for 10 minutes, then never again', async () => {
+    const { db } = ledger()
+    await pendingAged(db, { id: 'young', ageMs: 9 * MIN, expected: 'E1', tab: DEPLOY })
+    expect(await L.findPendingSpawn(db, T, M)).toMatchObject({ expectedSessionId: 'E1' })
+    expect(await hook(db, 'E1')).toEqual({ origin: 'slay-spawned-fresh', tabId: DEPLOY })
+
+    const { db: db2 } = ledger()
+    await pendingAged(db2, { id: 'stale', ageMs: 11 * MIN, expected: 'E2', tab: DEPLOY })
+    expect(await L.findPendingSpawn(db2, T, M)).toBeNull()
+    // The same id reported later is no launch of slay's, and lands on no tab of the stale row.
+    expect(await hook(db2, 'E2')).toEqual({ origin: 'foreign-observed', tabId: T })
+  })
+
+  test('a launch without an expected id is found for 30 seconds, then never claims a later session', async () => {
+    const { db } = ledger()
+    await pendingAged(db, { id: 'young', ageMs: 10_000, expected: null, tab: DEPLOY })
+    expect(await hook(db, 'S1')).toEqual({ origin: 'slay-spawned-fresh', tabId: DEPLOY })
+
+    const { db: db2 } = ledger()
+    await pendingAged(db2, { id: 'stale', ageMs: 60_000, expected: null, tab: DEPLOY })
+    expect(await L.findPendingSpawn(db2, T, M)).toBeNull()
+    expect(await hook(db2, 'LATER')).toEqual({ origin: 'foreign-observed', tabId: T })
+    await L.markSessionFirstTurn(db2, 'LATER')
+    expect(await L.getCurrentConversationId(db2, T, M, DEPLOY)).toBeNull()
+    expect(await L.getCurrentConversationId(db2, T, M)).toBeNull()
+  })
+
+  test('a token-carrying launch without an expected id stays findable past 30 seconds', async () => {
+    const { db } = ledger()
+    await pendingAged(db, { id: 'tok', ageMs: 5 * MIN, expected: null, token: 'live' })
+    expect(await L.findPendingSpawn(db, T, M)).toMatchObject({ spawnToken: 'live' })
+    expect(await L.findPendingSpawn(db, T, M, { spawnToken: 'live' })).toMatchObject({
+      spawnToken: 'live'
+    })
+  })
+
+  test('the newest launch in its window wins over an older one', async () => {
+    const { db } = ledger()
+    await pendingAged(db, { id: 'older', ageMs: 5 * MIN, expected: 'OLD', tab: DEPLOY })
+    await pendingAged(db, { id: 'newer', ageMs: 1 * MIN, expected: 'NEW' })
+    expect(await L.findPendingSpawn(db, T, M)).toMatchObject({
+      expectedSessionId: 'NEW',
+      tabId: T
+    })
+  })
+
+  test('the unscoped sweep drops only stale token-less pending rows; a live launch survives', async () => {
+    const { db } = ledger()
+    await pendingAged(db, { id: 'stale', ageMs: 11 * MIN, expected: 'X' })
+    await pendingAged(db, { id: 'young', ageMs: 9 * MIN, expected: 'Y' })
+    await pendingAged(db, { id: 'live', ageMs: 60 * MIN, expected: null, token: 'tok' })
+    // A confirmed session as old as the stale row: never a pending row, never swept.
+    await session(db, { id: 'kept', at: Date.now() - 60 * MIN })
+    expect(await L.prunePendingSpawns(db)).toBe(1)
+    const ids = async (table: string) =>
+      (await db.all<{ id: string }>(`SELECT id FROM ${table} ORDER BY id`)).map((r) => r.id)
+    expect(await ids('agent_sessions')).toEqual(expect.arrayContaining(['live', 'young']))
+    expect(await ids('agent_sessions')).not.toContain('stale')
+    expect(await ids('task_conversations')).toEqual(expect.arrayContaining(['live', 'young']))
+    expect(await ids('task_conversations')).not.toContain('stale')
+    expect(await L.findPendingSpawn(db, T, M, { spawnToken: 'tok' })).toMatchObject({
+      sessionId: 'live'
+    })
+    expect(await L.getCurrentConversationId(db, T, M)).toBe('kept')
+  })
+})

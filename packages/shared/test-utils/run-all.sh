@@ -178,6 +178,10 @@ run_harness packages/apps/hub/src/computer-project-sync.test.ts
 run_harness packages/apps/hub/src/erasure-fanout.test.ts
 run_harness packages/apps/hub/src/computer-data-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-paths.test.ts
+# A task-scoped request (spawn, exec, file/git read) waits for the task's staged paths.
+run_harness packages/apps/hub/src/task-path-request-gate.test.ts
+# A restored chat's invoke delivers its staged settings first; open chats re-read them.
+run_harness packages/apps/hub/src/computer-chat-settings-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-data.test.ts
 # Calls needing a computer wait for the local computer to enroll after boot (never the hub disk).
 run_harness packages/apps/hub/src/local-computer-boot-gate.test.ts
@@ -612,6 +616,9 @@ run_harness scripts/check-trpc-stable-deps.test.mjs
 run_harness scripts/check-workspace-cycles.test.mjs
 # P3 guard: pass loops must be isolated (forEachIsolated / try-catch / `isolation: fatal — why`).
 run_harness scripts/check-pass-isolation.test.mjs
+# `pnpm lint:task-computer` (review 2 S5): a second copy of "which computer is this
+# task's" (COALESCE of pin/holder + project default, or the TS ?? chain) fails.
+run_harness scripts/check-task-computer-resolver.test.mjs
 # `pnpm lint:tsconfig-hermetic`: tsconfig include/files/references/paths/extends entries
 # and typechecked sources' relative imports resolve inside the package or a workspace
 # package it depends on (transitively).
@@ -862,6 +869,7 @@ run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
 # as delivered intents, one task per provider session, the spawn lifecycle.
 run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
 run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
+run_harness packages/domains/chat-runtime/src/server/prompts.test.ts
 run_harness packages/domains/chat-runtime/src/server/task-paths.test.ts
 # Hub hand-off kinds on the computer: task-conversation, legacy-conversation-history, chat-settings (S6).
 run_harness packages/domains/chat-runtime/src/server/handoff-imports.test.ts
@@ -1198,6 +1206,8 @@ run_harness packages/domains/task/src/shared/main-terminal.test.ts
 # task.startMainAgent: the hub starts a task's main agent (pty or chat) only when none is
 # live, once under concurrent calls, with the cwd resolved on the hub.
 run_harness packages/domains/task/src/server/main-agent.test.ts
+# agentSessions.current: its computer offline is PRECONDITION_FAILED, never "no session" (S8).
+run_harness packages/domains/task/src/server/agent-sessions-router.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
@@ -1483,6 +1493,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \
   packages/domains/worktrees/src/client/scope-outside-panel.test.tsx \
+  packages/domains/worktrees/src/client/project-wide-scope.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.test.tsx \
   packages/domains/worktrees/src/client/useConsolidatedGeneralData.poll.test.tsx \
   packages/domains/worktrees/src/client/ProjectGeneralTab.test.tsx \
@@ -1520,6 +1531,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/trpc-server/src/trpc-transformer.test.ts \
   packages/shared/trpc-server/src/wire-bytes.test.ts \
   packages/shared/trpc-server/src/subscription-security-context.test.ts \
+  packages/shared/trpc-server/src/computer-refusal.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

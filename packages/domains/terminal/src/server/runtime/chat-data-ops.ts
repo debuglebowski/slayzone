@@ -287,15 +287,9 @@ const PATCH_PROVIDER_CONFIG_SQL = `UPDATE tasks SET provider_config = (
 ) WHERE id = ?`
 
 export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore): ChatDataOps {
-  /** The computer a task's chat runs on — the one holding its sessions. */
-  const ledgerComputer = async (taskId: string): Promise<string | null> => {
-    const row = await db.get<{ computer_id: string | null }>(
-      `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
-         FROM tasks t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
-      [taskId]
-    )
-    return row?.computer_id ?? null
-  }
+  /** The computer a task's chat runs on — the one holding its sessions (the one resolver, S5). */
+  const ledgerComputer = (taskId: string): Promise<string | null> =>
+    resolveTaskComputerId(db, taskId)
   const readEntry = async (taskId: string, mode: string): Promise<ProviderConfigEntry> => {
     const row = (await db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(taskId)) as
       | { provider_config: string | null }

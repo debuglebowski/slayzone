@@ -87,12 +87,17 @@ export function useTaskTerminalSession({
   )
   const queryClient = useQueryClient()
   // The main tab's current conversation, as the task's computer decides it
-  // (robustness plan §9, P0): null when none, or the computer is offline.
+  // (robustness plan §9, P0): null when it has none. Only a SUCCESSFUL answer is
+  // known: while it loads, or while the computer is offline (the read fails), the
+  // current session is UNKNOWN — never "no session" (S8): no "detect the session"
+  // / "resume won't work" banner, and no detected id is recorded against it.
   const currentQueryOptions = trpc.agentSessions.current.queryOptions(
     { taskId: task?.id ?? '', agentId: task?.agent_id ?? '' },
     { enabled: !!task }
   )
-  const currentConversationId = useQuery(currentQueryOptions).data ?? null
+  const currentQuery = useQuery(currentQueryOptions)
+  const currentKnown = currentQuery.status === 'success'
+  const currentConversationId = currentQuery.data ?? null
   const currentQueryKey = currentQueryOptions.queryKey
   useSubscription(
     trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
@@ -109,7 +114,7 @@ export function useTaskTerminalSession({
   // Session ID discovery: providers that don't support --session-id at creation
   const sessionIdCommand = task ? SESSION_ID_COMMANDS[task.agent_id] : undefined
   const showSessionBanner =
-    !!sessionIdCommand && !!task && !currentConversationId && !detectedSessionId
+    !!sessionIdCommand && !!task && currentKnown && !currentConversationId && !detectedSessionId
 
   // Providers where session ID detection is not possible
   const sessionIdUnavailable = !!task && SESSION_ID_UNAVAILABLE.includes(task.agent_id)
@@ -117,7 +122,10 @@ export function useTaskTerminalSession({
     null
   )
   const showUnavailableBanner =
-    sessionIdUnavailable && !currentConversationId && sessionUnavailableDismissed !== task?.id
+    sessionIdUnavailable &&
+    currentKnown &&
+    !currentConversationId &&
+    sessionUnavailableDismissed !== task?.id
 
   const handleDetectSessionId = useCallback(async () => {
     if (!task || !sessionIdCommand) return
@@ -185,6 +193,9 @@ export function useTaskTerminalSession({
   const persistedSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!task || !detectedSessionId || !sessionIdCommand) return
+    // Not before the current session is known: a detection of the id that is
+    // ALREADY current must not be recorded again (as a fresh spawn) — S8.
+    if (!currentKnown) return
     if (getConversationIdForMode(task) === detectedSessionId) {
       // Stays in the effect (lint set-state-in-effect, accepted): the clear must
       // pair with the dedupe-ref reset (a ref write in render → Compiler skip),
@@ -215,7 +226,14 @@ export function useTaskTerminalSession({
       // clear and spun the loop). Functional updater avoids clobbering a newer detect.
       setDetectedSessionId((cur) => (cur === detectedSessionId ? null : cur))
     })()
-  }, [task, detectedSessionId, sessionIdCommand, getConversationIdForMode, recordDetected])
+  }, [
+    task,
+    detectedSessionId,
+    sessionIdCommand,
+    currentKnown,
+    getConversationIdForMode,
+    recordDetected
+  ])
 
   // Shortcut and task menu restart the main agent through its transport.
   // Chat restart preserves its conversation/history without a PTY or remount.

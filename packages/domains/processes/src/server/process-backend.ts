@@ -13,6 +13,12 @@ export interface ProcSpawnSpec {
   computerId: string | null
   command: string
   cwd: string
+  /**
+   * `cwd` is the folder the user set for this process (its stored working folder),
+   * not one the hub derived: the computer starts it there even outside its task's
+   * folders (B3, `proc.spawn`'s `declaredCwd`), within its machine bound.
+   */
+  declaredCwd?: boolean
   env?: Record<string, string>
 }
 

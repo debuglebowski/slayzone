@@ -19,7 +19,12 @@ function reportDirectRevokeFailures(outcome: DirectRevokeOutcome | undefined): v
 }
 import { createTaskWorktreeRouting } from './task-worktree-routing'
 import { eraseTasksOnComputer, type ErasureReply } from './erasure-fanout'
-import { createComputerDataHandoff } from './computer-data-handoff'
+import {
+  CHAT_SETTINGS_KIND,
+  createComputerDataHandoff,
+  DECISIVE_HANDOFF_KINDS
+} from './computer-data-handoff'
+import { createTaskPathRequestGate } from './task-path-request-gate'
 import {
   createComputerTaskPaths,
   readComputerTaskPath,
@@ -78,7 +83,11 @@ import {
   runAsSecurityActor,
   runWithSecurityContext
 } from '@slayzone/platform/security-log'
-import { createLocalComputerBootGate } from './local-computer-boot-gate'
+import {
+  createLocalComputerBootGate,
+  type BootUnanswered,
+  type LocalComputerBootGate
+} from './local-computer-boot-gate'
 import {
   currentPathScope,
   PathScopeRequiredError,
@@ -909,6 +918,14 @@ export function composeServer(opts: {
   // (plan phases A→D) this is replaced by a single `listUsableComputers()` authority
   // on the gateway, not by re-adding these.
   let execGateway: HubComputerGateway | null = null
+  // The desktop's local computer boot window (./local-computer-boot-gate.ts): built
+  // with the gateway (supervised hubs only), before the hub serves.
+  let localBootGate: LocalComputerBootGate | null = null
+  /** A computer-backed read during boot waits for the local computer (S6). */
+  const throughLocalBoot = <T>(work: () => Promise<T>, when: BootUnanswered<T>): Promise<T> => {
+    const gate = localBootGate
+    return gate ? gate.settleWith(work, when) : work()
+  }
   const placement = createComputerPlacement({
     db,
     requireLogin: opts.requireLogin,
@@ -1053,8 +1070,9 @@ export function composeServer(opts: {
       }),
     diagnosticsConfig: getDiagnosticsConfig,
     diagnostics: legacyChatDiagnostics,
-    // Created below; only called once both exist (a relayed history read).
-    flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
+    // Created below; only called once both exist (a relayed history read, a chat invoke).
+    flushTask: (taskId, computerId, kinds) =>
+      computerDataHandoff.flushTask(taskId, computerId, kinds),
     legacyData: createDbChatDataOps(db, sessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
@@ -1148,23 +1166,38 @@ export function composeServer(opts: {
     // The computer a task's paths first reached holds its folders from then on (7e).
     delivered: async (kind, taskId, computerId) => {
       if (kind === TASK_PATH_KIND) await recordHolder(db, taskId, computerId)
+      // Restored settings filled in on the computer: open chats re-read them (S4).
+      if (kind === CHAT_SETTINGS_KIND) computerChat.relay.settingsChanged(taskId)
     }
   })
   // Every write of a task's worktree path / base dir runs on that computer: the hub
   // keeps no path (§9, Phase 7e), only whether each is set.
-  setTaskPathsDelegate(
-    createComputerTaskPaths({
-      db,
-      targetOf: (kind, taskId) => computerDataHandoff.targetOf(kind, taskId),
-      flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
-      usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
-      request: (computerId, request) => computerChat.lifecycle.request(computerId, request)
-    })
-  )
+  const computerTaskPaths = createComputerTaskPaths({
+    db,
+    targetOf: (kind, taskId) => computerDataHandoff.targetOf(kind, taskId),
+    flushTask: (taskId, computerId, kinds) =>
+      computerDataHandoff.flushTask(taskId, computerId, kinds),
+    usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
+    request: (computerId, request) => computerChat.lifecycle.request(computerId, request)
+  })
+  setTaskPathsDelegate({
+    ...computerTaskPaths,
+    // A read while the local computer boots waits for it: "loading", never
+    // "connect it to start" on a desktop (S6).
+    read: (taskIds) =>
+      throughLocalBoot(() => computerTaskPaths.read(taskIds), {
+        unanswered: (states) => Object.values(states).some((s) => s.state === 'offline')
+      })
+  })
   computerSessionLedgerRef = createComputerSessionLedger({
     db,
     request: (computerId, request) => computerChat.lifecycle.request(computerId, request),
-    target: (taskId) => computerDataHandoff.target(taskId),
+    // A session read while the local computer boots waits for it (S6).
+    target: (taskId) =>
+      throughLocalBoot(() => computerDataHandoff.target(taskId), {
+        unanswered: (computerId) =>
+          computerId === null || !(execGateway?.isComputerUsable(computerId) ?? false)
+      }),
     usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
     flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
     track: (taskId, computerId) => computerChat.lifecycle.track(taskId, computerId),
@@ -1245,10 +1278,16 @@ export function composeServer(opts: {
   // Each is recorded (git and row) on the checkout's computer (§9, v207).
   wireTurnRecording(db, { onPtyInputSubmit, chatEvents: computerChat.relay.events })
   defaultConversationRegistry.registerConversationHolder('chat', computerChat.relay.conversations)
-  setAgentPromptReader((_db, taskId, agentId) => computerChat.prompts(taskId, agentId))
+  // Prompt reads while the local computer boots wait for it (S6).
+  const promptsOffline = { offline: (e: unknown) => e instanceof AgentHistoryOfflineError }
+  setAgentPromptReader((_db, taskId, agentId) =>
+    throughLocalBoot(() => computerChat.prompts(taskId, agentId), promptsOffline)
+  )
   // A computer-owned chat's settings change on its computer, never in a hub copy.
   setChatSettingsDelegate(computerChat.chatSettings)
-  setTaskSessionPromptReader((_db, taskId, ids) => computerChat.promptSummaries(taskId, ids))
+  setTaskSessionPromptReader((_db, taskId, ids) =>
+    throughLocalBoot(() => computerChat.promptSummaries(taskId, ids), promptsOffline)
+  )
   // Every saved event is reported to the hub (`saved`), relayed in full or not
   // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
   computerChat.relay.events.on('saved', (tabId, saved) => {
@@ -2204,6 +2243,12 @@ export function composeServer(opts: {
       lifecycle: computerChat.lifecycle.syncNative
     })
     const newWorkGuard = createNewWorkGuard(db)
+    // A task-scoped request (spawn, exec, file/git read) waits for the task's staged
+    // paths to reach that computer: the computer judges it against them (S3).
+    const taskPathGate = createTaskPathRequestGate({
+      flushTaskPaths: (taskId, computerId) =>
+        computerDataHandoff.flushTask(taskId, computerId, [TASK_PATH_KIND])
+    })
     const computerGateway = createHubComputerGateway({
       // THE owner check (G2): every hub→computer request, whatever routed it, is
       // refused on a computer its caller does not own. The hub's own work passes.
@@ -2212,6 +2257,7 @@ export function composeServer(opts: {
         if (!resettingForTest) await chatCommandBarrier(computerId, method)
         // A disabled computer takes no new work (`computers.setDisabled`).
         await newWorkGuard(computerId, method, params)
+        if (!resettingForTest) await taskPathGate(computerId, method, params)
       },
       verifyGeneration: (id, generation) => acceptComputerGeneration(db, id, generation),
       // The dedup is the DESKTOP hub's alone: only there is a computer of that name its
@@ -2236,6 +2282,11 @@ export function composeServer(opts: {
         const owner = await computerChat.ownership.forTab(tabId)
         if (!owner || owner.state !== 'active' || !owner.computerId) return null
         if (await computerChat.ownership.unavailable(owner.id)) return null
+        // A restored chat never starts before its saved settings (and the task's
+        // paths and session ledger) reached its computer (S4). Offline: the direct
+        // link cannot reach it either; the relay explains.
+        if (!computerGateway.isComputerUsable(owner.computerId)) return null
+        await computerDataHandoff.flushTask(owner.taskId, owner.computerId, DECISIVE_HANDOFF_KINDS)
         return { computerId: owner.computerId, epoch: owner.epoch, taskId: owner.taskId }
       },
       // A task's computer-only data: on the computer holding it, with whatever the hub
@@ -2551,7 +2602,7 @@ export function composeServer(opts: {
           {
             request: (id, request) => computerChat.lifecycle.request(id, request),
             usable: (id) => computerGateway.isComputerUsable(id),
-            flushTask: (id, target) => computerDataHandoff.flushTask(id, target)
+            flushTask: (id, target, kinds) => computerDataHandoff.flushTask(id, target, kinds)
           },
           computerId,
           taskId
@@ -2785,7 +2836,7 @@ export function composeServer(opts: {
         projectSync.setFolder(computerId, projectId, path),
       forgetFolder: (computerId, projectId) => projectSync.forgetFolder(computerId, projectId)
     })
-    const localBootGate = supervised
+    localBootGate = supervised
       ? createLocalComputerBootGate({
           events: computerGateway.events,
           localComputerId,
@@ -2816,10 +2867,10 @@ export function composeServer(opts: {
       // project's, else the caller's default — see ./computer-placement.ts. While the
       // desktop's local computer is still enrolling after boot, a call waits for it
       // (never the hub's own disk): a file restored at boot opens once it is there.
-      resolveComputer: (target) =>
-        localBootGate
-          ? localBootGate.settle(() => placement.forTarget(target))
-          : placement.forTarget(target),
+      resolveComputer: (target) => {
+        const gate = localBootGate
+        return gate ? gate.settle(() => placement.forTarget(target)) : placement.forTarget(target)
+      },
       // No computer at all = this hub's own disk, which for a supervised hub IS the
       // desktop's. Otherwise only the co-spawned local computer shares a machine
       // with the user; every remote one is somewhere they cannot see.

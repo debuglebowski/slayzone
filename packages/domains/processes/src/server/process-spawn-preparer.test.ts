@@ -181,3 +181,22 @@ describe('the path scope resolver', () => {
     ])
   })
 })
+
+// Review 2, B3: a process row's working folder is the USER's — a sibling repo
+// (`~/backend`), a legacy row's folder — so its computer starts it there even outside
+// the task's folders. A project process sends no folder: its computer resolves the
+// project's own folder there (a project has one per computer).
+describe("the row's own folder", () => {
+  test('a task or global process declares its cwd; a project process sends none', async () => {
+    setProcessComputerResolver(async () => 'computer-1')
+    specs.length = 0
+    await spawnProcess(null, 'task-1', 'api', 'run', '/home/u/backend', false)
+    await spawnProcess(null, null, 'global', 'run', '/opt/g', false)
+    await spawnProcess('project-1', null, 'web', 'run', '/home/u/app', false)
+    expect(specs.map((s) => [s.cwd, s.declaredCwd])).toEqual([
+      ['/home/u/backend', true],
+      ['/opt/g', true],
+      ['', undefined]
+    ])
+  })
+})

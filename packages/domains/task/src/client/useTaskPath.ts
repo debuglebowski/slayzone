@@ -11,22 +11,26 @@
  *
  * @module task/client/useTaskPath
  */
-import { useMemo } from 'react'
-import { useQueries, useQuery, type QueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { Task, TaskPathState } from '@slayzone/task-contracts'
 import { TASK_PATHS_MAX } from '@slayzone/task-contracts'
-import { getClientForHub, getHubIdForTask } from '@slayzone/transport/client'
+import { getClientForHub, getHubIdForTask, useSubscription } from '@slayzone/transport/client'
 import { useClientForTask, useTRPC } from './trpc'
 import { hasOwnFolder } from '../shared/main-terminal'
 
 /** A task's paths as rendered: the computer's answer, or still asking. */
 export type TaskPathView = TaskPathState | { state: 'loading' }
 
-/** The fields of a task the read depends on (its version re-reads after a change). */
-export type TaskPathSubject = Pick<
-  Task,
-  'id' | 'has_worktree' | 'has_base_dir' | 'updated_at' | 'computer_id'
-> & { worktree_computer_id?: string | null }
+/**
+ * The fields of a task its paths depend on. Not its version (`updated_at`): a status
+ * or title change must not re-read them — a new key answers `loading` and the task
+ * page would replace its terminal (B2). A path changes through an explicit event
+ * ({@link useTaskPathChanges}) or a flag / holder in the key.
+ */
+export type TaskPathSubject = Pick<Task, 'id' | 'has_worktree' | 'has_base_dir' | 'computer_id'> & {
+  worktree_computer_id?: string | null
+}
 
 const NONE: TaskPathState = { state: 'ok', worktreePath: null, baseDir: null }
 const LOADING: TaskPathView = { state: 'loading' }
@@ -81,9 +85,42 @@ function loaderFor(client: PathsClient): (taskId: string) => Promise<TaskPathSta
  */
 export const TASK_PATHS_QUERY_ROOT = ['task-paths'] as const
 
-/** The react-query key of one task's paths at one version of its row. */
+/**
+ * The react-query key of one task's paths: the task, whether it has each folder, and
+ * the computers that may hold them. Never its version (see {@link TaskPathSubject}).
+ */
 export function taskPathQueryKey(task: TaskPathSubject): readonly unknown[] {
-  return [...TASK_PATHS_QUERY_ROOT, task.id, task.updated_at, task.has_worktree, task.has_base_dir]
+  return [
+    ...TASK_PATHS_QUERY_ROOT,
+    task.id,
+    task.has_worktree,
+    task.has_base_dir,
+    task.worktree_computer_id ?? null,
+    task.computer_id ?? null
+  ]
+}
+
+/**
+ * The task's paths changed (a worktree made or removed, a custom folder set, a
+ * project move, an archive): its answer is DROPPED, not just marked stale — a reader
+ * sees `loading`, never the old path — and read again.
+ */
+export function resetTaskPath(queryClient: QueryClient, taskId: string): Promise<void> {
+  return queryClient.resetQueries({ queryKey: [...TASK_PATHS_QUERY_ROOT, taskId] })
+}
+
+/**
+ * Mounted once by the app shell: the hub's `task.onPathsChanged` (every writer of a
+ * task's worktree path / base dir emits it) resets that task's answer.
+ */
+export function useTaskPathChanges(): void {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  useSubscription(
+    trpc.task.onPathsChanged.subscriptionOptions(undefined, {
+      onData: ({ taskId }) => void resetTaskPath(queryClient, taskId)
+    })
+  )
 }
 
 /**
@@ -97,8 +134,8 @@ export function useTaskPath(task: TaskPathSubject | null | undefined): TaskPathV
     queryKey: task ? taskPathQueryKey(task) : [...TASK_PATHS_QUERY_ROOT, null],
     queryFn: () => loaderFor(client)(task!.id),
     enabled: !!task && own,
-    // A path changes through the task's row (its version is in the key); the row's
-    // clock is per second, so an answer also ages out and is re-read on next mount.
+    // A path changes through an explicit event (useTaskPathChanges) or a key field;
+    // an answer also ages out and is re-read on next mount / connect.
     staleTime: 15_000,
     retry: false
   })
@@ -111,6 +148,30 @@ export function useTaskPath(task: TaskPathSubject | null | undefined): TaskPathV
       computerId: task.worktree_computer_id ?? task.computer_id ?? null
     }
   return query.data
+}
+
+/**
+ * The task page's view of its paths: only the FIRST answer gates its terminal. Once
+ * a task's folder is known, a later `loading` (a path-change reset) or `offline`
+ * (a refetch while its computer is briefly away) keeps that answer until the next
+ * one arrives — the terminal is never unmounted and remounted by a refetch. Held per
+ * path identity (task, folder flags, holder): never carried to another task, nor
+ * across a worktree / custom-folder flip.
+ */
+export function useHeldTaskPath(
+  task: TaskPathSubject | null | undefined,
+  view: TaskPathView
+): TaskPathView {
+  const identity = task ? JSON.stringify(taskPathQueryKey(task)) : null
+  const [held, setHeld] = useState<{ identity: string; view: TaskPathView } | null>(null)
+  if (
+    identity !== null &&
+    view.state === 'ok' &&
+    (held?.identity !== identity || held.view !== view)
+  )
+    setHeld({ identity, view })
+  if (view.state !== 'ok' && held !== null && held.identity === identity) return held.view
+  return view
 }
 
 /**

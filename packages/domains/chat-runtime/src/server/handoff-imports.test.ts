@@ -68,18 +68,18 @@ describe('task-conversation hand-off', () => {
     expect(read(storage)).toMatchObject([{ conversation_id: 'LOCAL' }])
   })
 
-  test('a row naming another task fails its batch whole (nothing applied; the hub retries)', () => {
+  test('a row naming another task is rejected on its own (quarantined); the rest applies', () => {
     const { storage, data } = open()
-    expect(() =>
-      data.importBatch({
-        kind: 'task-conversation',
-        items: [
-          { key: 'tc1', taskId: 't', value: row() },
-          { key: 'tc2', taskId: 't', value: row({ id: 'tc2', taskId: 'other' }) }
-        ]
-      })
-    ).toThrow(/another task/)
-    expect(read(storage)).toEqual([])
+    const result = data.importBatch({
+      kind: 'task-conversation',
+      items: [
+        { key: 'tc1', taskId: 't', value: row() },
+        { key: 'tc2', taskId: 't', value: row({ id: 'tc2', taskId: 'other' }) }
+      ]
+    })
+    expect(result.applied).toEqual(['tc1'])
+    expect(result.rejected).toEqual([{ key: 'tc2', message: 'Conversation row of another task' }])
+    expect(read(storage)).toMatchObject([{ id: 'tc1' }])
   })
 
   test('an invalid value is rejected on its own', () => {

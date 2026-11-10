@@ -60,7 +60,7 @@ import {
 } from '@slayzone/projects'
 import { AppearanceProvider, HubIssueBanners, useSettingsReopenTab } from '@slayzone/settings'
 import { setTabWorktreePathResolver, useTabStore } from '@slayzone/tabs-state'
-import { peekTaskPath } from '@slayzone/task/client/useTaskPath'
+import { peekTaskPath, useTaskPathChanges } from '@slayzone/task/client/useTaskPath'
 import { useDialogStore } from '@slayzone/dialogs'
 import { useTrack } from '@slayzone/telemetry/client'
 import {
@@ -304,6 +304,8 @@ function App(): React.JSX.Element {
   useIdlePreload()
   // Computer-backed views refetch once a computer connects (none stays on "connect a computer").
   useComputerConnectRefetch()
+  // A task's worktree / custom folder changed on the hub: its paths are read again.
+  useTaskPathChanges()
 
   // Home panel state (extracted — owns its own state fully)
   const homePanel = useHomePanel(selectedProjectId, panelSizes, homePanelConfig, orderedHomeIds)

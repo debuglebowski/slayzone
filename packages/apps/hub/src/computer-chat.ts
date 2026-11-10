@@ -55,6 +55,7 @@ import type {
   ChatTerminalState
 } from '@slayzone/terminal/runtime'
 import { defaultConversationRegistry } from '@slayzone/terminal/hub'
+import { DECISIVE_HANDOFF_KINDS } from './computer-data-handoff'
 
 /** `quiesce` refused: the task's agents run, so its history migration waits. */
 class ChatMigrationDeferredError extends Error {}
@@ -128,8 +129,9 @@ export function createComputerChatServices(opts: {
    * Deliver to `computerId` whatever the hub still holds of the task (the computer
    * data handoff) before a relayed history read there — as the direct link's task
    * grant does — so a read right after boot never misses rows still staged here.
+   * With `kinds`, only those (a chat invoke waits for its settings, not history).
    */
-  flushTask?(taskId: string, computerId: string): Promise<void>
+  flushTask?(taskId: string, computerId: string, kinds?: readonly string[]): Promise<void>
   admitComputer?(computerId: string): Promise<void>
   retentionDays?: number
   /** A reserved provider switch was superseded: record a diagnostics event. */
@@ -768,6 +770,10 @@ export function createComputerChatServices(opts: {
           await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
     },
     beforeInvoke: async (owner, method, args) => {
+      // An existing chat (restored after an upgrade, reopened) reads and starts with
+      // its saved settings and the task's paths and session ledger: what the hub
+      // still stages of them reaches its computer first (S4). Never its history.
+      await opts.flushTask?.(owner.taskId, owner.computerId!, DECISIVE_HANDOFF_KINDS)
       await sealAttachments(owner, method, args)
       if (
         CHAT_READ_OPERATIONS.has(method as ChatOperation) ||

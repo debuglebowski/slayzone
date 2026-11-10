@@ -33,3 +33,25 @@ test('handoff drift rules: erased task, missing task, a re-enrolled computer sti
     h.cleanup()
   }
 })
+
+// S5: the rule names the computer the handoff delivers to — the one resolver
+// (TASK_COMPUTER_EXPR): while the task has a folder, its holder, not the pin.
+test('handoff-target-retired follows the computer holding the task folder, not the pin', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(`INSERT INTO projects(id,name,color) VALUES('p','P','#000');
+      INSERT INTO tasks(id,project_id,title,computer_id,has_worktree,worktree_computer_id)
+        VALUES('t1','p','One','pin',1,'holder');
+      INSERT INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+        VALUES('k','a','t1','{}',0)`)
+    const rules = async () => (await checkHubChatConsistency(h.slayDb)).map((v) => v.rule).sort()
+    // The pin was re-enrolled: not the computer the data goes to.
+    h.db.exec(`INSERT INTO computer_retirements VALUES('pin','pin-new','re-enrolled',0)`)
+    expect(await rules()).toEqual([])
+    // The folder's holder was re-enrolled and the task never repointed: drift.
+    h.db.exec(`INSERT INTO computer_retirements VALUES('holder','holder-new','re-enrolled',0)`)
+    expect(await rules()).toEqual(['handoff-target-retired'])
+  } finally {
+    h.cleanup()
+  }
+})

@@ -47,11 +47,12 @@ import type { TaskDetailData } from './taskDetailCache'
 import {
   hasOwnFolder,
   mainTerminalCwdFrom,
+  ownFolderMissing,
   mainTerminalProps,
   taskRepoName,
   taskRepoPath
 } from '../shared/main-terminal'
-import { useTaskPath, useTaskPathLocation } from './useTaskPath'
+import { useHeldTaskPath, useTaskPath, useTaskPathLocation } from './useTaskPath'
 import {
   BUILTIN_PANEL_IDS,
   getProviderFlags,
@@ -460,13 +461,32 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Shared with the hub's `task.startMainAgent` (../shared/main-terminal).
   // A worktree / custom folder lives on the task's computer (§9 Phase 7d): read there.
   // Until it answers (or while it is away) nothing falls back to the project folder.
-  const taskPath = useTaskPath(task)
+  // Only the FIRST answer gates the terminal (useHeldTaskPath): a refetch, a path
+  // re-read or a brief offline answer later never unmounts it (B2).
+  const taskPath = useHeldTaskPath(task, useTaskPath(task))
   const taskPathLocation = useTaskPathLocation(taskPath)
   const taskPaths = taskPath.state === 'ok' ? taskPath : null
   const worktreePath = taskPaths?.worktreePath ?? null
   const baseDir = taskPaths?.baseDir ?? null
   const taskPathPending = hasOwnFolder(task) && taskPath.state !== 'ok'
+  // Its computer holds no folder for it (S7): nowhere to run — shown as missing.
+  const taskFolderMissing = ownFolderMissing(task, taskPaths)
+  const taskFolderLabel = taskFolderMissing
+    ? 'Folder not found on its computer'
+    : 'No directory set'
   const effectiveRepoPath = taskRepoPath(task, resolvedRepo.path, taskPaths)
+  // The main agent's cwd (terminal and chat): never the project folder for a task
+  // with a folder of its own (S7). Null: nowhere to run (yet).
+  const mainAgentCwd = mainTerminalCwdFrom(task, effectiveRepoPath, projectRoot)
+  // A new task process is stored with the task's folder: it waits until that is known.
+  const processesCwdUnavailable =
+    !hasOwnFolder(task) || mainAgentCwd
+      ? null
+      : taskFolderMissing
+        ? "This task's folder was not found on its computer"
+        : taskPathLocation
+          ? `This task's folder is ${taskPathLocation} — connect it to add a process here`
+          : "Waiting for the task's folder…"
 
   // Git-panel viewing axis: ephemeral, repo selection here does NOT change the task-bound path.
   // Default = task-bound; if that resolves to a non-git wrapper folder, default to first discovered repo.
@@ -1035,7 +1055,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     task,
     // The main agent's cwd, exactly as the terminal container gets it (a chat
     // tab is identified by it).
-    agentCwd: effectiveRepoPath || projectRoot || '',
+    agentCwd: mainAgentCwd ?? '',
     onTaskUpdated,
     shortcutActive,
     getMainSessionId,
@@ -1621,6 +1641,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     const newEffective = newWorktree ?? newBaseDir ?? resolvedRepo.path
     const cwdChanged = oldEffective !== newEffective
 
+    // The update goes first: the task's computer judges a new folder before anything
+    // is written (B3), so a refused folder throws here and the running terminal keeps
+    // running in the old one. Only an accepted change stops it.
+    const updated = await updateTaskAsync(data)
+
     if (cwdChanged) {
       const mainSessionId = `${data.id}:${data.id}`
       resetTaskState(mainSessionId)
@@ -1628,7 +1653,6 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       markSkipCache(mainSessionId)
     }
 
-    const updated = await updateTaskAsync(data)
     handleTaskUpdate(updated)
 
     // Force terminal remount if effective cwd changed
@@ -1968,11 +1992,11 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                 <div className="flex items-center gap-1">
                   <div
                     className="flex-1 min-w-0 text-xs text-muted-foreground truncate px-2 py-1.5 rounded border border-border bg-muted/30"
-                    title={effectiveRepoPath ?? taskPathLocation ?? 'No directory set'}
+                    title={effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel}
                   >
                     {taskPath.state === 'loading' && hasOwnFolder(task)
                       ? '…'
-                      : (effectiveRepoPath ?? taskPathLocation ?? 'No directory set')}
+                      : (effectiveRepoPath ?? taskPathLocation ?? taskFolderLabel)}
                     {task.has_worktree && (
                       <span className="ml-1 text-[10px] opacity-60">(worktree)</span>
                     )}
@@ -1992,7 +2016,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                       className="shrink-0 h-7 w-7 flex items-center justify-center rounded hover:bg-muted"
                       title="Clear custom directory"
                       onClick={() => {
-                        void updateTaskAndNotify({ id: task.id, baseDir: null })
+                        // A refusal leaves the terminal running in the old folder.
+                        updateTaskAndNotify({ id: task.id, baseDir: null }).catch((err: unknown) =>
+                          toast.error("Couldn't change the working directory", {
+                            description: err instanceof Error ? err.message : String(err)
+                          })
+                        )
                       }}
                     >
                       <X className="size-3.5 text-muted-foreground" />
@@ -2005,7 +2034,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     open={baseDirPickerOpen}
                     onOpenChange={setBaseDirPickerOpen}
                     onSelect={(picked) => {
-                      void updateTaskAndNotify({ id: task.id, baseDir: picked })
+                      // Judged by the task's computer first; a refusal leaves the
+                      // terminal running in the old folder.
+                      updateTaskAndNotify({ id: task.id, baseDir: picked }).catch((err: unknown) =>
+                        toast.error("Couldn't use that folder", {
+                          description: err instanceof Error ? err.message : String(err)
+                        })
+                      )
                     }}
                     target={{ taskId: task.id }}
                     title="Select working directory"
@@ -3073,7 +3108,13 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                             ? `This task's folder is ${taskPathLocation} — connect it to start`
                             : 'Loading the task folder…'}
                         </div>
-                      ) : (effectiveRepoPath || projectRoot) && !projectPathMissing ? (
+                      ) : taskFolderMissing ? (
+                        // Its computer answered and holds no folder for it: never
+                        // the project folder in its place (S7).
+                        <div className="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground">
+                          This task's folder was not found on its computer
+                        </div>
+                      ) : mainAgentCwd && !projectPathMissing ? (
                         <TerminalContainer
                           ref={terminalContainerRef}
                           paused={isResizing}
@@ -3082,7 +3123,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                           isTemporary={task.is_temporary}
                           isActive={isActive}
                           hasShortcutFocus={shortcutActive}
-                          cwd={mainTerminalCwdFrom(effectiveRepoPath, projectRoot) ?? ''}
+                          cwd={mainAgentCwd}
                           // Spawn props shared with the terminal-first pane (one
                           // derivation — see mainTerminalProps). No conversation
                           // hint: the agent's computer resolves the resume at spawn.
@@ -3793,7 +3834,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
                     <ProcessesPanel
                       taskId={task.id}
                       projectId={project?.id ?? null}
-                      cwd={effectiveRepoPath || projectRoot}
+                      cwd={mainAgentCwd}
+                      cwdUnavailable={processesCwdUnavailable}
                       terminalSessionId={getMainSessionId(task.id)}
                       onOpenUrl={openDevServerInBrowser}
                     />

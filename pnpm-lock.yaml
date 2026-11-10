@@ -1606,6 +1606,9 @@ importers:
 
   packages/domains/chat-runtime:
     dependencies:
+      '@slayzone/computers':
+        specifier: workspace:*
+        version: link:../computers
       '@slayzone/content-erasure':
         specifier: workspace:*
         version: link:../content-erasure

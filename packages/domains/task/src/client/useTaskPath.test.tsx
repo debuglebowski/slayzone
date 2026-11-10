@@ -19,21 +19,37 @@ const client = {
         calls.push(taskIds)
         return respond(taskIds)
       }
+    },
+    // The hub's path-change event: the test fires it through `pathsChanged`.
+    onPathsChanged: {
+      subscriptionOptions: (_: unknown, opts: { onData: (e: { taskId: string }) => void }) => ({
+        onData: opts.onData
+      })
     }
   },
   computers: {
     list: { queryOptions: () => ({ queryKey: ['computers'], queryFn: async () => [] }) }
   }
 }
+let pathsChanged: ((e: { taskId: string }) => void) | null = null
 vi.mock('./trpc', () => ({ useClientForTask: () => client, useTRPC: () => client }))
 vi.mock('@slayzone/transport/client', () => ({
   getClientForHub: () => client,
-  getHubIdForTask: () => undefined
+  getHubIdForTask: () => undefined,
+  useSubscription: (opts: { onData?: (e: { taskId: string }) => void }) => {
+    if (opts.onData) pathsChanged = opts.onData
+  }
 }))
 
-const { useTaskPath, useTaskWorktreePaths, peekTaskPath, taskPathQueryKey } = await import(
-  './useTaskPath'
-)
+const {
+  useTaskPath,
+  useTaskWorktreePaths,
+  peekTaskPath,
+  taskPathQueryKey,
+  resetTaskPath,
+  useTaskPathChanges,
+  useHeldTaskPath
+} = await import('./useTaskPath')
 
 let qc = new QueryClient()
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -109,22 +125,107 @@ describe('useTaskPath', () => {
     await waitFor(() => expect(result.current.state).toBe('offline'))
   })
 
-  it('a changed row (new version) is read again', async () => {
+  it('an unrelated row update (status, title, version) keeps the answer: no re-read, never loading (B2)', async () => {
     let n = 0
     respond = async (ids) =>
       Object.fromEntries(
         ids.map((id) => [id, { state: 'ok', worktreePath: `/w${++n}`, baseDir: null }])
       )
-    const { result, rerender } = renderHook(({ t }) => useTaskPath(t), {
-      wrapper,
-      initialProps: { t: task('a') }
-    })
-    await waitFor(() => expect(result.current).toMatchObject({ worktreePath: '/w1' }))
-    rerender({ t: task('a', { updated_at: '2026-11-10 10:00:05' }) })
-    await waitFor(() => expect(result.current).toMatchObject({ worktreePath: '/w2' }))
-    expect(taskPathQueryKey(task('a'))).not.toEqual(
-      taskPathQueryKey(task('a', { updated_at: 'x' }))
+    const seen: string[] = []
+    const { result, rerender } = renderHook(
+      ({ t }) => {
+        const view = useTaskPath(t)
+        seen.push(view.state)
+        return view
+      },
+      { wrapper, initialProps: { t: task('a') } }
     )
+    await waitFor(() => expect(result.current).toMatchObject({ worktreePath: '/w1' }))
+    seen.length = 0
+    rerender({
+      t: task('a', { updated_at: '2026-11-10 10:00:05', status: 'done', title: 'renamed' })
+    })
+    await act(async () => {})
+    expect(result.current).toMatchObject({ state: 'ok', worktreePath: '/w1' })
+    expect(seen).not.toContain('loading')
+    expect(calls).toEqual([['a']])
+    expect(taskPathQueryKey(task('a'))).toEqual(taskPathQueryKey(task('a', { updated_at: 'x' })))
+  })
+
+  it('a moved holder (worktree computer) or a flipped folder flag is read again', () => {
+    const base = taskPathQueryKey(task('a'))
+    expect(taskPathQueryKey(task('a', { worktree_computer_id: 'pc2' }))).not.toEqual(base)
+    expect(taskPathQueryKey(task('a', { has_base_dir: true }))).not.toEqual(base)
+    expect(taskPathQueryKey(task('a', { has_worktree: false }))).not.toEqual(base)
+  })
+
+  it("a path-change event drops the task's answer and reads it again (no stale path)", async () => {
+    let n = 0
+    respond = async (ids) =>
+      Object.fromEntries(
+        ids.map((id) => [id, { state: 'ok', worktreePath: `/w${++n}`, baseDir: null }])
+      )
+    const { result } = renderHook(() => useTaskPath(task('a')), { wrapper })
+    await waitFor(() => expect(result.current).toMatchObject({ worktreePath: '/w1' }))
+    await act(async () => {
+      await resetTaskPath(qc, 'a')
+    })
+    await waitFor(() => expect(result.current).toMatchObject({ worktreePath: '/w2' }))
+  })
+
+  it('useTaskPathChanges: the hub naming a task resets only that task', async () => {
+    respond = async (ids) =>
+      Object.fromEntries(
+        ids.map((id) => [id, { state: 'ok', worktreePath: `/${id}`, baseDir: null }])
+      )
+    const { result } = renderHook(
+      () => {
+        useTaskPathChanges()
+        return [useTaskPath(task('a')), useTaskPath(task('b'))]
+      },
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current[1]).toMatchObject({ worktreePath: '/b' }))
+    calls.length = 0
+    await act(async () => {
+      pathsChanged?.({ taskId: 'a' })
+    })
+    await waitFor(() => expect(calls).toEqual([['a']]))
+  })
+})
+
+describe('useHeldTaskPath (the task page: only the FIRST load gates the terminal)', () => {
+  const ok = (p: string) => ({ state: 'ok' as const, worktreePath: p, baseDir: null })
+  it('loading then ok: passes through; a later loading/offline keeps the last answer', () => {
+    const { result, rerender } = renderHook(({ t, v }) => useHeldTaskPath(t, v), {
+      initialProps: { t: task('a'), v: { state: 'loading' } as never }
+    })
+    expect(result.current).toEqual({ state: 'loading' })
+    rerender({ t: task('a'), v: ok('/w') as never })
+    expect(result.current).toEqual(ok('/w'))
+    rerender({
+      t: task('a', { status: 'done' }),
+      v: { state: 'offline', computerId: 'pc' } as never
+    })
+    expect(result.current).toEqual(ok('/w'))
+    rerender({ t: task('a'), v: { state: 'loading' } as never })
+    expect(result.current).toEqual(ok('/w'))
+    rerender({ t: task('a'), v: ok('/w2') as never })
+    expect(result.current).toEqual(ok('/w2'))
+  })
+
+  it('never carries an answer over to another task, nor to a task whose folder flags changed', () => {
+    const { result, rerender } = renderHook(({ t, v }) => useHeldTaskPath(t, v), {
+      initialProps: { t: task('a'), v: ok('/w') as never }
+    })
+    rerender({ t: task('b'), v: { state: 'loading' } as never })
+    expect(result.current).toEqual({ state: 'loading' })
+    rerender({ t: task('b'), v: ok('/b') as never })
+    rerender({
+      t: task('b', { has_worktree: false, has_base_dir: true }),
+      v: { state: 'loading' } as never
+    })
+    expect(result.current).toEqual({ state: 'loading' })
   })
 })
 

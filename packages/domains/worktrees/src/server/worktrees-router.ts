@@ -62,14 +62,16 @@ const obj = z.object
  * confines every path to that scope's folders. A bare path names nobody.
  */
 export type GitScope = { computerId?: string | null } & (
-  | { taskId: string; projectId?: string }
-  | { taskId?: undefined; projectId: string }
+  | { taskId: string; projectId?: string; projectWide?: boolean }
+  | { taskId?: undefined; projectId: string; projectWide?: undefined }
 )
 // Typed as the scope it validates: a caller naming neither fails typecheck.
 const gitTarget = obj({
   computerId: sn.optional(),
   taskId: s.optional(),
-  projectId: s.optional()
+  projectId: s.optional(),
+  // A task panel's Worktrees tab: the task's project, routed through the task (B1).
+  projectWide: z.boolean().optional()
 })
   .refine((t) => !!t.taskId || !!t.projectId, 'name the task or project (target)')
   // Absent at run time = `PathScopeRequiredError` (a clear refusal), not a schema

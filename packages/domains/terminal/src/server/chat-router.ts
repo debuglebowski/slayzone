@@ -370,6 +370,18 @@ export const chatRouter = router({
       )
       .mutation(async ({ input, ctx }) => ops().unpinMessage(await launchOpts(ctx, input)))
   }),
+  settings: router({
+    /** The task's chat settings changed outside this client's own write: re-read them. */
+    onChanged: publicProcedure.input(z.object({ taskId: z.string() })).subscription(({ input }) =>
+      observable<void>((emit) => {
+        const handler = (taskId: string) => {
+          if (taskId === input.taskId) emit.next()
+        }
+        getChatDeps().events.on('settings-changed', handler)
+        return () => getChatDeps().events.off('settings-changed', handler)
+      })
+    )
+  }),
   threads: router({
     onChanged: publicProcedure.input(z.object({ tabId: z.string() })).subscription(({ input }) =>
       observable<void>((emit) => {

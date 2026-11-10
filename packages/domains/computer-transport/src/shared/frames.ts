@@ -154,7 +154,13 @@ export const wirePathScopeSchema = z.discriminatedUnion('kind', [
     projectId: scopeId.nullable(),
     hostReads: z.boolean().optional()
   }),
-  z.object({ kind: z.literal('project'), projectId: scopeId, hostReads: z.boolean().optional() })
+  z.object({
+    kind: z.literal('project'),
+    projectId: scopeId,
+    hostReads: z.boolean().optional(),
+    /** The hub's `worktree_base_path` template (platform/path-scope `WirePathScope`). */
+    worktreeBase: z.string().min(1).max(4096).optional()
+  })
 ])
 
 export const requestActorSchema = z.object({
@@ -1989,6 +1995,15 @@ export const procSpawnParamsSchema = z.object({
    */
   shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
+  /**
+   * `cwd` is a folder the USER chose for this background process (the process
+   * domain's stored working folder — a sibling repo such as `~/backend`, a legacy
+   * row's folder): a declared root of this spawn (B3), judged by the computer's
+   * machine bound only (allowed roots, no link out of them, never its own state),
+   * not confined to its task's / project's folders. Absent: the cwd is judged
+   * against those folders, as for every other spawn.
+   */
+  declaredCwd: z.boolean().optional(),
   env: z.record(z.string(), z.string()).optional(),
   /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
   admission: ptySpawnAdmissionSchema.optional(),

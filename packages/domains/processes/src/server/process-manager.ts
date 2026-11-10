@@ -370,7 +370,10 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
     projectId: proc.projectId,
     computerId,
     command: proc.command,
-    cwd
+    cwd,
+    // The row's own folder, set by its user (a sibling repo, a legacy row's folder):
+    // its computer starts it there, not only inside the task's folders (B3).
+    ...(cwd ? { declaredCwd: true } : {})
   }
   const backend = getProcessBackend()
   const handle = scope ? runInPathScope(scope, () => backend.spawn(spec)) : backend.spawn(spec)

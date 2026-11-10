@@ -622,6 +622,37 @@ test('a background process folder becomes a local root, and goes with the proces
   expect(computers.get(remote)!.roots).toEqual(['/srv'])
 })
 
+// S5: a task process runs on the task's computer — the one holding its folder while it
+// has one, whatever the pin or project default says (TASK_COMPUTER_EXPR).
+test('a task process folder follows the computer holding the task folder, not the pin', async () => {
+  computers.set(LOCAL, new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/app'] }))
+  computers.set(remote, new FakeComputer({ roots: ['/srv'] }))
+  upgraded('p1', '/Users/k/app')
+  // Pinned to the remote, but its worktree is on the local computer: it runs here.
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, computer_id, has_worktree, worktree_computer_id)
+       VALUES ('t-held-here', 'p1', 't', ?, 1, ?)`
+    )
+    .run(remote, LOCAL)
+  // Pinned here, but its worktree is on the remote: it runs there.
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, project_id, title, computer_id, has_worktree, worktree_computer_id)
+       VALUES ('t-held-there', 'p1', 't', ?, 1, ?)`
+    )
+    .run(LOCAL, remote)
+  processWithCwd('here', '/opt/here', { taskId: 't-held-here', projectId: 'p1' })
+  processWithCwd('there', '/srv/there', { taskId: 't-held-there', projectId: 'p1' })
+  const { sync } = makeSync()
+
+  await sync.onConnect(LOCAL)
+
+  const roots = computers.get(LOCAL)!.roots
+  expect(isCoveredByRoots('/opt/here', roots)).toBe(true)
+  expect(isCoveredByRoots('/srv/there', roots)).toBe(false)
+})
+
 test('one project whose folder cannot be recorded does not stop delivery to the others', async () => {
   const local = new FakeComputer({ roots: ['/Users/k'], disk: ['/Users/k/a', '/Users/k/b'] })
   computers.set(LOCAL, local)
