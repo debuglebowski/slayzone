@@ -88,16 +88,23 @@ export function taskPathsStore(storage: ChatStorage) {
       )
       return true
     },
-    /** Every other task's worktree and base dir here (a task scope carves them out). */
-    others(taskId: string): string[] {
+    /**
+     * Every other task's worktree and base dir here, apart: a worktree is a separate
+     * checkout (carved out of a task scope); a base dir is a plain folder (S4).
+     */
+    others(taskId: string): { worktrees: string[]; baseDirs: string[] } {
       const rows = db
         .prepare(
           'SELECT worktree_path, base_dir FROM task_paths WHERE task_id<>? AND (worktree_path IS NOT NULL OR base_dir IS NOT NULL)'
         )
         .all(taskId) as Array<Pick<Row, 'worktree_path' | 'base_dir'>>
-      return [
-        ...new Set(rows.flatMap((r) => [r.worktree_path, r.base_dir]).filter((p) => p !== null))
-      ] as string[]
+      const set = (xs: Array<string | null>) => [
+        ...new Set(xs.filter((p): p is string => p !== null))
+      ]
+      return {
+        worktrees: set(rows.map((r) => r.worktree_path)),
+        baseDirs: set(rows.map((r) => r.base_dir))
+      }
     },
     getMany(taskIds: string[]): TaskPathRow[] {
       const out: TaskPathRow[] = []
@@ -224,7 +231,7 @@ export function createTaskPaths(storage: ChatStorage, now: () => number = Date.n
     /** One `chat.request` of kind `taskPaths`. */
     handle,
     get: (taskId: string): TaskPathRow | null => store.get(taskId),
-    others: (taskId: string): string[] => store.others(taskId),
+    others: (taskId: string): { worktrees: string[]; baseDirs: string[] } => store.others(taskId),
     byWorktree: (paths: string[]): Record<string, string> => store.byWorktree(paths)
   }
 }
@@ -259,10 +266,12 @@ export const taskPathImport: DataImportKind<TaskPathValue> = {
  *   folder here (the checkout its worktree belongs to: merge into the parent
  *   branch, copy ignored files, the repo of `git worktree add`). The project is the
  *   one this computer recorded for the task, else the one the hub names (task →
- *   project is hub data). Every OTHER task's worktree and base dir is carved out
- *   (`excluded`), so a task never reaches into another task's checkout nested in
- *   the project folder; a folder that is also this task's own root (a subtask
- *   shares its parent's worktree) is the jail's to keep.
+ *   project is hub data). Every OTHER task's WORKTREE is carved out (`excluded`), so
+ *   a task never reaches into another task's checkout nested in the project folder;
+ *   another task's base dir is NOT (S4): it is a plain folder of the same checkout,
+ *   as any subfolder (project `shop`, task B's base dir `shop/payments` — a task at
+ *   the project root edits `shop/payments/checkout.ts`). A folder that is also this
+ *   task's own root (a subtask shares its parent's worktree) is the jail's to keep.
  * - A project: its folder here; tasks' folders nested in it are the project's too.
  *
  * `foreign`: every root here that belongs to someone else — other tasks' folders,
@@ -273,7 +282,10 @@ export const taskPathImport: DataImportKind<TaskPathValue> = {
  * `projectFolders` lists every project's folder here.
  */
 export function scopeBounds(
-  paths: { get(taskId: string): TaskPathRow | null; others(taskId: string): string[] },
+  paths: {
+    get(taskId: string): TaskPathRow | null
+    others(taskId: string): { worktrees: string[]; baseDirs: string[] }
+  },
   scope:
     | { kind: 'task'; taskId: string; projectId: string | null }
     | { kind: 'project'; projectId: string },
@@ -297,6 +309,10 @@ export function scopeBounds(
   const folder = projectId ? projectFolder(projectId) : null
   const own = row?.worktreePath ?? row?.baseDir ?? null
   const roots = [...new Set([own, folder].filter((r): r is string => r !== null))]
-  const others = roots.length > 0 ? paths.others(scope.taskId) : []
-  return { roots, excluded: others, foreign: [...others, ...otherProjects(projectId)] }
+  const others = roots.length > 0 ? paths.others(scope.taskId) : { worktrees: [], baseDirs: [] }
+  return {
+    roots,
+    excluded: others.worktrees,
+    foreign: [...new Set([...others.worktrees, ...others.baseDirs, ...otherProjects(projectId)])]
+  }
 }

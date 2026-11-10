@@ -246,12 +246,14 @@ describe('task paths on the computer', () => {
       '/proj'
     ])
     expect(bounds({ kind: 'task', taskId: 'b', projectId: 'p' }).roots).toEqual(['/b', '/proj'])
-    // A task in its project's folder: every other task's folder is carved out.
-    expect(bounds({ kind: 'task', taskId: 'n', projectId: 'p' })).toEqual({
-      roots: ['/proj'],
-      excluded: expect.arrayContaining(['/proj/.wt/w', '/b']),
-      foreign: expect.arrayContaining(['/proj/.wt/w', '/b'])
-    })
+    // A task in its project's folder: every other task's WORKTREE (a separate
+    // checkout) is carved out; another task's base dir is a plain folder of the
+    // project, not carved out (S4) — but still foreign to a NEW root.
+    paths.handle({ op: 'set', taskId: 'c', projectId: 'p', baseDir: '/proj/payments', at: 1 })
+    const n = bounds({ kind: 'task', taskId: 'n', projectId: 'p' })
+    expect(n.roots).toEqual(['/proj'])
+    expect(n.excluded).toEqual(['/proj/.wt/w'])
+    expect(n.foreign).toEqual(expect.arrayContaining(['/proj/.wt/w', '/b', '/proj/payments']))
     // No row here: the project the hub names, never another task's, never the computer's.
     expect(bounds({ kind: 'task', taskId: 'x', projectId: 'p' }).roots).toEqual(['/proj'])
     expect(bounds({ kind: 'task', taskId: 'x', projectId: null }).roots).toEqual([])

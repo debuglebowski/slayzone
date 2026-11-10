@@ -435,6 +435,13 @@ function judgeScope(judged: string, candidate: string, scope: ScopeJail): string
  * A folder the request is about to MAKE a root (`git worktree add`'s target): inside
  * the scope as any path, or outside it but inside nobody else's root — the rule the
  * hub applied to a new root before it stopped knowing roots.
+ *
+ * A foreign root that IS or HOLDS one of the scope's own roots is not someone else's
+ * here (S5, nested projects): project A `~/dev`, project B `~/dev/web` — B's worktree
+ * beside its folder (`~/dev/web-workspaces/…`) lies inside A and is B's to make, as
+ * {@link judgeScope} already lets a task work in a folder another task's root holds.
+ * Any other foreign root under it (another task's worktree, project C `~/dev/c`)
+ * still refuses.
  */
 function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): string {
   try {
@@ -442,9 +449,11 @@ function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): stri
   } catch (err) {
     if (!(err instanceof JailViolationError)) throw err
   }
+  const own = scope.roots.map(realRoot).filter((r): r is string => r !== null)
   for (const root of scope.foreign) {
     const real = realRoot(root)
-    if (real && isInside(judged, real)) {
+    if (!real || own.some((r) => isInside(r, real))) continue
+    if (isInside(judged, real)) {
       throw new JailViolationError(
         `path '${candidate}' is inside a folder that is not ${scope.label}'s; refused`
       )
