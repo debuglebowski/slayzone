@@ -1,0 +1,13 @@
+{
+  "release": "v0.38.0",
+  "journey": "v0.38.0-codex",
+  "summary": "v0.38.0 desktop user (schema v194) mixing agents: Codex chat history (computer-held at this release) \u2014 a two-turn chat and a done one-turn chat \u2014 plus a Claude chat in the same project.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": [
+      "local-computer"
+    ],
+    "hubs": [],
+    "computers": []
+  }
+}

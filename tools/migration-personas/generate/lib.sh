@@ -162,10 +162,12 @@ setTimeout(()=>{console.error('$3 TIMEOUT');process.exit(1)},30000)"
 # its process (task.update → ensureMain → chat.start), then wait until the process is
 # up. A user always types after that; sending into a session still spawning loses the
 # message in these releases (the driver is attached after the first write).
+# Optional 4th arg: the chat mode (default claude-chat; codex-chat for Codex).
 chat_open() {
-  trpc_call "$1" mutation task.update "{id:'$2',terminalMode:'claude-chat'}" >/dev/null
-  trpc_call "$1" mutation taskTerminals.ensureMain "{taskId:'$2',mode:'claude-chat'}" >/dev/null
-  trpc_call "$1" mutation chat.start "{tabId:'$2',taskId:'$2',mode:'claude-chat',cwd:'$3'}" >/dev/null
+  m=${4:-claude-chat}
+  trpc_call "$1" mutation task.update "{id:'$2',terminalMode:'$m'}" >/dev/null
+  trpc_call "$1" mutation taskTerminals.ensureMain "{taskId:'$2',mode:'$m'}" >/dev/null
+  trpc_call "$1" mutation chat.start "{tabId:'$2',taskId:'$2',mode:'$m',cwd:'$3'}" >/dev/null
   sleep 5
 }
 

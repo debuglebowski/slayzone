@@ -1,0 +1,101 @@
+{
+  "repeatLast": true,
+  "processes": [
+    {
+      "defaultTurn": [
+        {
+          "emit": [
+            {
+              "method": "item/started",
+              "params": {
+                "item": {
+                  "type": "agentMessage",
+                  "id": "msg_fake_1",
+                  "text": "",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                },
+                "threadId": "{{threadId}}",
+                "turnId": "{{turnId}}"
+              }
+            }
+          ]
+        },
+        {
+          "emit": [
+            {
+              "method": "item/agentMessage/delta",
+              "params": {
+                "threadId": "{{threadId}}",
+                "turnId": "{{turnId}}",
+                "itemId": "msg_fake_1",
+                "delta": "echo: "
+              }
+            }
+          ]
+        },
+        {
+          "emit": [
+            {
+              "method": "item/agentMessage/delta",
+              "params": {
+                "threadId": "{{threadId}}",
+                "turnId": "{{turnId}}",
+                "itemId": "msg_fake_1",
+                "delta": "{{userText}}"
+              }
+            }
+          ]
+        },
+        {
+          "emit": [
+            {
+              "method": "item/completed",
+              "params": {
+                "item": {
+                  "type": "agentMessage",
+                  "id": "msg_fake_1",
+                  "text": "echo: {{userText}}",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                },
+                "threadId": "{{threadId}}",
+                "turnId": "{{turnId}}"
+              }
+            },
+            {
+              "method": "thread/tokenUsage/updated",
+              "params": {
+                "threadId": "{{threadId}}",
+                "turnId": "{{turnId}}",
+                "tokenUsage": {
+                  "total": {
+                    "totalTokens": 1202,
+                    "inputTokens": 1200,
+                    "cachedInputTokens": 0,
+                    "cacheWriteInputTokens": 0,
+                    "outputTokens": 2,
+                    "reasoningOutputTokens": 0
+                  },
+                  "last": {
+                    "totalTokens": 1202,
+                    "inputTokens": 1200,
+                    "cachedInputTokens": 0,
+                    "cacheWriteInputTokens": 0,
+                    "outputTokens": 2,
+                    "reasoningOutputTokens": 0
+                  },
+                  "modelContextWindow": 258400
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

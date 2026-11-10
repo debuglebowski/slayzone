@@ -41,6 +41,10 @@ mkdir -p "$CTX/fake/fake-claude" "$CTX/fake/fake-cli"
 cp "$TU/fake-claude/fake-claude.mjs" "$TU/fake-claude/fake-claude-tasks.mjs" "$CTX/fake/fake-claude/"
 cp "$TU/fake-cli/runtime.mjs" "$CTX/fake/fake-cli/"
 cp "$HERE/fake-claude/claude" "$HERE/fake-claude/scenario.json" "$CTX/fake/"
+mkdir -p "$CTX/fake/fake-codex"
+cp "$TU/fake-codex/fake-codex.mjs" "$CTX/fake/fake-codex/"
+cp "$HERE/fake-codex/codex" "$CTX/fake/codex"
+cp "$HERE/fake-codex/scenario.json" "$CTX/fake/codex-scenario.json"
 docker build --platform linux/amd64 -q -t "$IMAGE" "$CTX" >/dev/null
 
 C="slz-persona-gen-$P"
