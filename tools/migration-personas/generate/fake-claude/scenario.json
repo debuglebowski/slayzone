@@ -1,0 +1,93 @@
+{
+  "repeatLast": true,
+  "processes": [
+    {
+      "lifecycle": "none",
+      "defaultTurn": [
+        {
+          "emit": [
+            {
+              "type": "system",
+              "subtype": "init",
+              "cwd": "{{cwd}}",
+              "session_id": "{{sessionId}}",
+              "tools": [
+                "Task",
+                "AskUserQuestion",
+                "Bash",
+                "Edit",
+                "ExitPlanMode",
+                "Glob",
+                "Grep",
+                "NotebookEdit",
+                "Read",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "Write"
+              ],
+              "mcp_servers": [],
+              "model": "{{model}}",
+              "permissionMode": "{{permissionMode}}",
+              "slash_commands": [],
+              "apiKeySource": "none",
+              "claude_code_version": "2.1.312",
+              "output_style": "default",
+              "agents": [],
+              "skills": [],
+              "plugins": [],
+              "uuid": "evt-{{spawn}}-{{turn}}-0"
+            },
+            {
+              "type": "assistant",
+              "message": {
+                "id": "msg_{{spawn}}_{{turn}}",
+                "type": "message",
+                "role": "assistant",
+                "model": "{{model}}",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "reply: {{userText}}"
+                  }
+                ],
+                "stop_reason": null,
+                "usage": {
+                  "input_tokens": 0,
+                  "output_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "cache_creation_input_tokens": 0
+                }
+              },
+              "parent_tool_use_id": null,
+              "session_id": "{{sessionId}}",
+              "uuid": "evt-{{spawn}}-{{turn}}-1"
+            },
+            {
+              "type": "result",
+              "subtype": "success",
+              "is_error": false,
+              "duration_ms": 1,
+              "duration_api_ms": 1,
+              "num_turns": 1,
+              "result": "reply: {{userText}}",
+              "stop_reason": "end_turn",
+              "terminal_reason": null,
+              "session_id": "{{sessionId}}",
+              "total_cost_usd": 0,
+              "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0
+              },
+              "modelUsage": {},
+              "permission_denials": [],
+              "uuid": "evt-{{spawn}}-{{turn}}-2"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

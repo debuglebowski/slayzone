@@ -1,0 +1,12 @@
+#!/bin/sh
+# Scripted stand-in for the real `claude` CLI (no network in the generate container).
+# The repo's fake-claude (packages/shared/test-utils/fake-claude) plays scenario.json:
+# every chat message gets "reply: <message>". Old releases don't pass two flags the
+# fake requires, so they are appended here — they only add delivery acks, which these
+# releases never ask for (the scenario sets lifecycle "none").
+FAKE_CLAUDE_STATE_DIR=/opt/fake/state; export FAKE_CLAUDE_STATE_DIR
+# Set → the fake writes Claude's own session file, like the real CLI does.
+CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; export CLAUDE_CONFIG_DIR
+unset ELECTRON_RUN_AS_NODE
+case " $* " in *" -p "*) set -- "$@" --replay-user-messages --include-partial-messages ;; esac
+exec /usr/local/bin/node /opt/fake/fake-claude/fake-claude.mjs "$@"

@@ -1,0 +1,24 @@
+{
+  "release": "v0.36.2",
+  "journey": "v0.36.2-chat",
+  "summary": "v0.36.2 user (schema v171) with Claude chat history on two hubs: two chats on the desktop hub (local computer), one chat on a standalone team hub run on gpu-box.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": ["local-computer"],
+    "hubs": [
+      {
+        "name": "team-hub",
+        "root": "hubs/hub2",
+        "env": {
+          "SLAYZONE_HUB_LISTEN_ADDRESS": "127.0.0.1:51110",
+          "SLAYZONE_HUB_NAME": "team-hub",
+          "SLAYZONE_HUB_ENABLE_TELEMETRY": "0"
+        },
+        "computers": ["gpu-box"]
+      }
+    ],
+    "computers": [
+      { "name": "gpu-box", "root": "computers/c3", "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110" } }
+    ]
+  }
+}

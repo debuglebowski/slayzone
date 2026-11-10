@@ -1,0 +1,1080 @@
+.bash_logout  (text)
+    # ~/.bash_logout: executed by bash(1) when login shell exits.
+    
+    # when leaving the console clear the screen to increase privacy
+    
+    if [ "$SHLVL" = 1 ]; then
+        [ -x /usr/bin/clear_console ] && /usr/bin/clear_console -q
+    fi
+.bashrc  (text)
+    # ~/.bashrc: executed by bash(1) for non-login shells.
+    # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
+    # for examples
+    
+    # If not running interactively, don't do anything
+    case $- in
+        *i*) ;;
+          *) return;;
+    esac
+    
+    # don't put duplicate lines or lines starting with space in the history.
+    # See bash(1) for more options
+    HISTCONTROL=ignoreboth
+    
+    # append to the history file, don't overwrite it
+    shopt -s histappend
+    
+    # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
+    HISTSIZE=1000
+    HISTFILESIZE=2000
+    
+    # check the window size after each command and, if necessary,
+    # update the values of LINES and COLUMNS.
+    shopt -s checkwinsize
+    
+    # If set, the pattern "**" used in a pathname expansion context will
+    # match all files and zero or more directories and subdirectories.
+    #shopt -s globstar
+    
+    # make less more friendly for non-text input files, see lesspipe(1)
+    #[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+    
+    # set variable identifying the chroot you work in (used in the prompt below)
+    if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
+        debian_chroot=$(cat /etc/debian_chroot)
+    fi
+    
+    # set a fancy prompt (non-color, unless we know we "want" color)
+    case "$TERM" in
+        xterm-color|*-256color) color_prompt=yes;;
+    esac
+    
+    # uncomment for a colored prompt, if the terminal has the capability; turned
+    # off by default to not distract the user: the focus in a terminal window
+    # should be on the output of commands, not on the prompt
+    #force_color_prompt=yes
+    
+    if [ -n "$force_color_prompt" ]; then
+        if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+    	# We have color support; assume it's compliant with Ecma-48
+    	# (ISO/IEC-6429). (Lack of such support is extremely rare, and such
+    	# a case would tend to support setf rather than setaf.)
+    	color_prompt=yes
+        else
+    	color_prompt=
+        fi
+    fi
+    
+    if [ "$color_prompt" = yes ]; then
+        PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+    else
+        PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
+    fi
+    unset color_prompt force_color_prompt
+    
+    # If this is an xterm set the title to user@host:dir
+    case "$TERM" in
+    xterm*|rxvt*)
+        PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
+        ;;
+    *)
+        ;;
+    esac
+    
+    # enable color support of ls and also add handy aliases
+    if [ -x /usr/bin/dircolors ]; then
+        test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+        alias ls='ls --color=auto'
+        #alias dir='dir --color=auto'
+        #alias vdir='vdir --color=auto'
+    
+        #alias grep='grep --color=auto'
+        #alias fgrep='fgrep --color=auto'
+        #alias egrep='egrep --color=auto'
+    fi
+    
+    # colored GCC warnings and errors
+    #export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
+    
+    # some more ls aliases
+    #alias ll='ls -l'
+    #alias la='ls -A'
+    #alias l='ls -CF'
+    
+    # Alias definitions.
+    # You may want to put all your additions into a separate file like
+    # ~/.bash_aliases, instead of adding them here directly.
+    # See /usr/share/doc/bash-doc/examples in the bash-doc package.
+    
+    if [ -f ~/.bash_aliases ]; then
+        . ~/.bash_aliases
+    fi
+    
+    # enable programmable completion features (you don't need to enable
+    # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
+    # sources /etc/bash.bashrc).
+    if ! shopt -oq posix; then
+      if [ -f /usr/share/bash-completion/bash_completion ]; then
+        . /usr/share/bash-completion/bash_completion
+      elif [ -f /etc/bash_completion ]; then
+        . /etc/bash_completion
+      fi
+    fi
+.claude/projects/-home-persona-repos-ml/3b58c655-4403-48bc-9c52-a6e3efa9d93c.jsonl  (text)
+    {"parentUuid":null,"isSidechain":false,"sessionId":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","cwd":"/home/persona/repos/ml","timestamp":"2026-11-10T15:45:47.913Z","type":"user","uuid":"e279c1aa-0c08-4120-9e22-6650551068bf","message":{"role":"user","content":"Which learning rate should I start with?"}}
+    {"parentUuid":"e279c1aa-0c08-4120-9e22-6650551068bf","isSidechain":false,"sessionId":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","cwd":"/home/persona/repos/ml","timestamp":"2026-11-10T15:45:47.930Z","type":"assistant","uuid":"evt-2-1-1","message":{"id":"msg_2_1","type":"message","role":"assistant","model":"default","content":[{"type":"text","text":"reply: Which learning rate should I start with?"}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+    {"parentUuid":"evt-2-1-1","isSidechain":false,"sessionId":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","cwd":"/home/persona/repos/ml","timestamp":"2026-11-10T15:45:49.139Z","type":"user","uuid":"376ab40e-65b4-4903-b15b-afc8cc6d7061","message":{"role":"user","content":"And for fine-tuning?"}}
+    {"parentUuid":"376ab40e-65b4-4903-b15b-afc8cc6d7061","isSidechain":false,"sessionId":"3b58c655-4403-48bc-9c52-a6e3efa9d93c","cwd":"/home/persona/repos/ml","timestamp":"2026-11-10T15:45:49.140Z","type":"assistant","uuid":"evt-2-2-1","message":{"id":"msg_2_2","type":"message","role":"assistant","model":"default","content":[{"type":"text","text":"reply: And for fine-tuning?"}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+.claude/projects/-home-persona-repos-webapp/7bb11ac0-18eb-433b-86fb-8dbfa8b277bd.jsonl  (text)
+    {"parentUuid":null,"isSidechain":false,"sessionId":"7bb11ac0-18eb-433b-86fb-8dbfa8b277bd","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:32.454Z","type":"user","uuid":"eef53fc0-fee3-4f5f-a418-d64c518bd2b4","message":{"role":"user","content":"Explain the router in two sentences."}}
+    {"parentUuid":"eef53fc0-fee3-4f5f-a418-d64c518bd2b4","isSidechain":false,"sessionId":"7bb11ac0-18eb-433b-86fb-8dbfa8b277bd","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:32.472Z","type":"assistant","uuid":"evt-1-1-1","message":{"id":"msg_1_1","type":"message","role":"assistant","model":"default","content":[{"type":"text","text":"reply: Explain the router in two sentences."}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+.claude/projects/-home-persona-repos-webapp/bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1.jsonl  (text)
+    {"parentUuid":null,"isSidechain":false,"sessionId":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:20.995Z","type":"user","uuid":"d52a5950-0bd6-46aa-bd6e-36ec8d0ee6a1","message":{"role":"user","content":"Why does login redirect to / ?"}}
+    {"parentUuid":"d52a5950-0bd6-46aa-bd6e-36ec8d0ee6a1","isSidechain":false,"sessionId":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:21.019Z","type":"assistant","uuid":"evt-0-1-1","message":{"id":"msg_0_1","type":"message","role":"assistant","model":"default","content":[{"type":"text","text":"reply: Why does login redirect to / ?"}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+    {"parentUuid":"evt-0-1-1","isSidechain":false,"sessionId":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:22.670Z","type":"user","uuid":"f57fea17-b60b-4d1f-b2aa-a35074e2b1ff","message":{"role":"user","content":"I changed redirect.ts — does that fix it?"}}
+    {"parentUuid":"f57fea17-b60b-4d1f-b2aa-a35074e2b1ff","isSidechain":false,"sessionId":"bfa618f9-bf77-4a91-b0e9-5d2c040a2bf1","cwd":"/home/persona/repos/webapp","timestamp":"2026-11-10T15:45:22.672Z","type":"assistant","uuid":"evt-0-2-1","message":{"id":"msg_0_2","type":"message","role":"assistant","model":"default","content":[{"type":"text","text":"reply: I changed redirect.ts — does that fix it?"}],"stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+.claude/settings.json  (json)
+    {
+      "hooks": {
+        "Notification": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": "*"
+          }
+        ],
+        "PostToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": "*"
+          }
+        ],
+        "PreCompact": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "PreToolUse": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ],
+            "matcher": "*"
+          }
+        ],
+        "SessionEnd": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "SubagentStop": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ],
+        "UserPromptSubmit": [
+          {
+            "hooks": [
+              {
+                "_slayzoneManaged": true,
+                "command": "/home/persona/.slayzone/hooks/notify.sh",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
+.config/opencode/plugin/slayzone-notify.js  (text)
+    // SLAYZONE_COMPUTER_DISPATCHER=1
+    import { pathToFileURL } from 'node:url';
+    export const SlayzoneNotifyPlugin = async (context) => {
+     const p = process.env.SLAYZONE_COMPUTER_HOOK_DIR ? process.env.SLAYZONE_COMPUTER_HOOK_DIR + '/opencode-plugin.mjs' : "/home/persona/.slayzone/hooks/opencode-default.mjs";
+     return (await import(pathToFileURL(p).href)).SlayzoneNotifyPlugin(context);
+    };
+.local/state/slayzone/.clean-shutdown  (text)
+    1794325552996
+.local/state/slayzone/.clean-shutdown.boot  (text)
+    {"ts":1794325492649,"pid":98,"version":"0.36.2"}
+.local/state/slayzone/.updaterId  (text)
+    35bf966f-cbc7-5523-9d9f-df2b9996eaa6
+.local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db  sha256=97e8d54f8a725510 bytes=4096
+.local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.db-wal  sha256=92fef31ab4bf79ab bytes=12392
+.local/state/slayzone/GPUPersistentCache/GPUCache/5JSUEBB7TKTF55NFOHPCCGAHYNFOPU65/cache.journal  (text)
+    
+.local/state/slayzone/Local State  (text)
+    {"os_crypt":{"portal":{"prev_desktop":"","prev_init_success":false}},"uninstall_metrics":{"installation_date2":"1794325492"}}
+.local/state/slayzone/declarative_performance_observer.db  sha256=eda4c9567974174f bytes=32768
+.local/state/slayzone/declarative_performance_observer.db-journal  (text)
+    
+.profile  (text)
+    # ~/.profile: executed by the command interpreter for login shells.
+    # This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login
+    # exists.
+    # see /usr/share/doc/bash/examples/startup-files for examples.
+    # the files are located in the bash-doc package.
+    
+    # the default umask is set in /etc/profile; for setting the umask
+    # for ssh logins, install and configure the libpam-umask package.
+    #umask 022
+    
+    # if running bash
+    if [ -n "$BASH_VERSION" ]; then
+        # include .bashrc if it exists
+        if [ -f "$HOME/.bashrc" ]; then
+    	. "$HOME/.bashrc"
+        fi
+    fi
+    
+    # set PATH so it includes user's private bin if it exists
+    if [ -d "$HOME/bin" ] ; then
+        PATH="$HOME/bin:$PATH"
+    fi
+    
+    # set PATH so it includes user's private bin if it exists
+    if [ -d "$HOME/.local/bin" ] ; then
+        PATH="$HOME/.local/bin:$PATH"
+    fi
+.slayzone/hooks/notify-default.sh  (text)
+    #!/bin/sh
+    # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
+    #
+    # SLAYZONE_NOTIFY_VERSION=4
+    # ^ Bump on EVERY change to this file. The installer (notify-script-installer.ts)
+    #   refuses to overwrite an on-disk script with a strictly-lower version, so a
+    #   stale/older release channel can never downgrade a newer script on the
+    #   shared ~/.slayzone/hooks/notify.sh. Newer is always backward-compatible.
+    #
+    # WHY THIS FILE IS LOGIC-FREE (the sustainable fix):
+    #   ~/.slayzone/hooks/notify.sh is a SINGLE file shared by every release channel
+    #   (getSlayzoneHomeDir() is NOT release-channel-scoped), and agents find it via
+    #   the shared ~/.claude/settings.json pointer — so it CANNOT be
+    #   release-channel-scoped. A shared file must therefore be BENIGN: it must
+    #   contain no field-picking logic, so it does not matter which release channel's
+    #   copy wins the last write. The previous version cherry-picked named fields
+    #   (taskId, slaySessionId, session_id, hook_event_name, …) to forward; when an
+    #   OLDER release channel's copy won, its field list was missing `slaySessionId`,
+    #   so warm-pool sessions became invisible (no task resolution → no running
+    #   spinner, no unread dot). This version forwards THREE opaque channels and lets
+    #   the SERVER do all field extraction:
+    #     - ctx : $SLAYZONE_AGENT_HOOK_CONTEXT — an opaque JSON blob the app packs at
+    #             spawn with every identity field (taskId/slaySessionId/projectId/
+    #             agentId/releaseChannel). Forwarded VERBATIM; never parsed here.
+    #             v4 renamed it from $SLAYZONE_HOOK_CONTEXT (pairs with
+    #             $SLAYZONE_AGENT_HOOK_URL); the old name is still read as a FALLBACK
+    #             because this file is shared newest-wins across release channels, so
+    #             an OLDER channel's app spawns agents that only set the old name.
+    #             Dropping the fallback before every channel ships the new name would
+    #             reproduce the v2→v3 clobber (empty ctx → no task resolution → no
+    #             running spinner, no unread dot).
+    #     - raw : the hook payload piped on stdin (Claude/Codex/Gemini/Antigravity).
+    #     - arg : argv $1 — Antigravity passes the EVENT NAME here (its payload omits
+    #             it); the OpenCode plugin passes the whole JSON payload here (no
+    #             stdin). Forwarded opaquely as a JSON string; the server decides.
+    #   Adding a new identity field later touches ONLY the app (writes ctx) and the
+    #   server (reads ctx) — NEVER this script. That is the whole point.
+    #
+    # Installed by the app at ~/.slayzone/hooks/notify.sh (mode 0755).
+    # Invoked by the host agent (e.g. Claude Code, Codex) via its hooks config.
+    #
+    # Required env (injected at PTY/chat spawn by buildMcpEnv):
+    #   SLAYZONE_AGENT_HOOK_URL  - target URL, e.g. http://127.0.0.1:PORT/api/agent-hook
+    #                              (a remote computer overlays its OWN loopback URL)
+    #   SLAYZONE_AGENT_ID        - claude-code | codex | gemini | antigravity | opencode
+    # Optional:
+    #   SLAYZONE_AGENT_HOOK_CONTEXT - opaque identity blob (see above); sent as `ctx`
+    #   SLAYZONE_HOOK_CONTEXT       - retired pre-v4 name; read only as a fallback
+    #
+    # Contract: ALWAYS exit 0. Hook failures must NOT bubble into the agent TUI
+    # (Claude renders red error walls otherwise). Silent on any failure.
+    
+    set -e
+    
+    # Bail silently when not configured (e.g. agent run outside SlayZone).
+    [ -z "$SLAYZONE_AGENT_HOOK_URL" ] && exit 0
+    [ -z "$SLAYZONE_AGENT_ID" ] && exit 0
+    
+    # Gemini blocks waiting for a JSON response on stdout; empty {} = no-op.
+    # Claude/Codex/Mastra/Droid discard our stdout, so this is universal.
+    # Emit before payload read so it fires even if downstream POST fails.
+    printf '{}\n'
+    
+    # The three opaque channels. NO grep/parse/named-field extraction here.
+    #   ARG = argv $1 verbatim (may be an event name, a JSON payload, or empty).
+    #   RAW = stdin verbatim (the hook payload, or empty).
+    ARG="${1:-}"
+    # Read stdin ONLY when argv $1 is NOT already the JSON payload. This is
+    # load-bearing, not an optimization: the OpenCode plugin invokes us as
+    # `bash notify.sh '<json>'` with NO stdin write, and inside a SlayZone PTY the
+    # child inherits the terminal's stdin — which never sends EOF. An unconditional
+    # `cat` would block FOREVER there, hanging the plugin's awaited exec (dark
+    # badges — the exact failure this script exists to prevent). Every stdin-driven
+    # agent (Claude/Codex/Gemini/Antigravity) writes its payload then CLOSES stdin,
+    # so `cat` returns promptly for them. Mirrors the guard the pre-v2 script had.
+    case "$ARG" in
+      '{'*) RAW="" ;;
+      *) RAW=$(cat 2>/dev/null || true) ;;
+    esac
+    
+    # JSON-encode an arbitrary string into a quoted JSON string literal. This is the
+    # ONLY logic left, and it is GENERIC string-escaping — NOT per-field naming, so
+    # it cannot rot the way a field list does. Escapes backslash, double-quote, and
+    # the whitespace control chars that occur in real hook data (\n \r \t). Other
+    # C0 control bytes (\x00-\x1f) are not escaped — they never appear in an event
+    # name or a JSON-stringified payload, the only two things that reach argv $1.
+    # POSIX awk; falls back to a bare empty string on any failure.
+    json_encode_string() {
+      awk 'BEGIN {
+        s = ARGV[1]
+        out = "\""
+        n = length(s)
+        for (i = 1; i <= n; i++) {
+          c = substr(s, i, 1)
+          if (c == "\\") out = out "\\\\"
+          else if (c == "\"") out = out "\\\""
+          else if (c == "\n") out = out "\\n"
+          else if (c == "\r") out = out "\\r"
+          else if (c == "\t") out = out "\\t"
+          else out = out c
+        }
+        print out "\""
+        exit
+      }' "$1" 2>/dev/null || printf '""'
+    }
+    
+    # ctx: forwarded VERBATIM (already valid JSON from the app), or `{}` when unset.
+    # New name wins; the retired pre-v4 name is the fallback for an older release
+    # channel's app spawning against this newer shared script (see header). Still NO
+    # parsing — a name choice, not field-picking logic.
+    CTX="${SLAYZONE_AGENT_HOOK_CONTEXT:-$SLAYZONE_HOOK_CONTEXT}"
+    [ -z "$CTX" ] && CTX='{}'
+    
+    # raw: the stdin payload verbatim if it is present AND looks like JSON (starts
+    # with '{'); otherwise JSON `null`. The server treats a null raw as "no stdin".
+    case "$RAW" in
+      '{'*) RAW_FIELD="$RAW" ;;
+      *) RAW_FIELD="null" ;;
+    esac
+    
+    # arg: argv $1 as a JSON string (or null when empty). Opaque — the server decides
+    # whether it is an event name (Antigravity) or a JSON payload (OpenCode plugin).
+    if [ -n "$ARG" ]; then
+      ARG_FIELD=$(json_encode_string "$ARG")
+    else
+      ARG_FIELD="null"
+    fi
+    
+    AGENT_ID_FIELD=$(json_encode_string "$SLAYZONE_AGENT_ID")
+    
+    ENVELOPE="{\"ctx\":$CTX,\"raw\":$RAW_FIELD,\"arg\":$ARG_FIELD,\"agentId\":$AGENT_ID_FIELD}"
+    
+    # Fire-and-forget. Errors swallowed; never block the agent.
+    # curl is the primary path — present on macOS, most Linux, and bundled with
+    # Git for Windows (whose bash runs this script). wget is a fallback for minimal
+    # environments; if neither exists the POST is skipped silently. NO auth header:
+    # the target is always loopback (local sidecar, or the computer's own loopback),
+    # so no per-agent bearer is ever attached.
+    if command -v curl >/dev/null 2>&1; then
+      curl -s \
+        --connect-timeout 2 \
+        --max-time 5 \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        --data-binary "$ENVELOPE" \
+        "$SLAYZONE_AGENT_HOOK_URL" \
+        >/dev/null 2>&1 || true
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O /dev/null \
+        --timeout=5 \
+        --header='Content-Type: application/json' \
+        --post-data="$ENVELOPE" \
+        "$SLAYZONE_AGENT_HOOK_URL" \
+        >/dev/null 2>&1 || true
+    fi
+    
+    exit 0
+.slayzone/hooks/notify.sh  (text)
+    #!/usr/bin/env bash
+    # SLAYZONE_NOTIFY_VERSION=2147483647
+    # SLAYZONE_COMPUTER_DISPATCHER=1
+    if [ -n "${SLAYZONE_COMPUTER_HOOK_DIR:-}" ]; then
+      exec bash "$SLAYZONE_COMPUTER_HOOK_DIR/notify.sh" "$@"
+    fi
+    exec bash '/home/persona/.slayzone/hooks/notify-default.sh' "$@"
+.slayzone/hooks/opencode-default.mjs  (text)
+    // SlayZone opencode plugin v1
+    //
+    // Forwards OpenCode SDK session lifecycle events to the SlayZone agent-hook
+    // notify script over a local shell exec. Plugin is loaded by OpenCode from
+    //   ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/slayzone-notify.js
+    //
+    // The /home/persona/.slayzone/hooks/notify.sh placeholder is substituted by the SlayZone installer
+    // (packages/apps/app/src/main/agent-hooks/opencode-plugin-installer.ts) at
+    // install time with the absolute path to `~/.slayzone/hooks/notify.sh`.
+    //
+    // Behavior:
+    //   - No-op when SLAYZONE_TASK_ID is unset (plugin only fires inside SlayZone PTYs).
+    //   - Subagent (child session) events are suppressed — oh-my-opencode + similar
+    //     tools spawn many child sessions and would otherwise flap Start/Stop.
+    //   - On client.session.list() error, sessions are assumed CHILD (safer to
+    //     suppress than emit a false-positive Start/Stop).
+    //   - Handles both modern (session.status w/ nested type) and legacy
+    //     (session.busy / session.idle) event shapes for forward compat.
+    //   - Singleton guard prevents double-load if OpenCode re-imports the plugin.
+    
+    export const SlayzoneNotifyPlugin = async ({ $, client }) => {
+      if (globalThis.__slayzoneOpencodePluginV1) return {}
+      globalThis.__slayzoneOpencodePluginV1 = true
+      if (!process?.env?.SLAYZONE_TASK_ID) return {}
+    
+      const notifyPath = '/home/persona/.slayzone/hooks/notify.sh'
+      let currentState = 'idle' // 'idle' | 'busy'
+      let rootSessionID = null // first non-child session we see
+      let stopSent = false // dedup Stop emits
+      const childSessionCache = new Map() // sessionID -> isChild bool
+    
+      const notify = async (eventName) => {
+        const payload = JSON.stringify({ hook_event_name: eventName })
+        try {
+          await $`bash ${notifyPath} ${payload}`
+        } catch {
+          // Hook failures must never bubble into the OpenCode TUI.
+        }
+      }
+    
+      const isChildSession = async (sessionID) => {
+        if (!sessionID) return true
+        if (!client?.session?.list) return true
+        if (childSessionCache.has(sessionID)) return childSessionCache.get(sessionID)
+        try {
+          const sessions = await client.session.list()
+          const session = sessions.data?.find((s) => s.id === sessionID)
+          const isChild = !!session?.parentID
+          childSessionCache.set(sessionID, isChild)
+          return isChild
+        } catch {
+          // On error, assume CHILD — safer than emitting a false-positive Start/Stop.
+          return true
+        }
+      }
+    
+      const handleBusy = async (sessionID) => {
+        if (!rootSessionID) rootSessionID = sessionID
+        if (sessionID !== rootSessionID) return
+        if (currentState === 'idle') {
+          currentState = 'busy'
+          stopSent = false
+          await notify('Start')
+        }
+      }
+    
+      const handleStop = async (sessionID) => {
+        if (rootSessionID && sessionID !== rootSessionID) return
+        if (currentState === 'busy' && !stopSent) {
+          currentState = 'idle'
+          stopSent = true
+          await notify('Stop')
+          rootSessionID = null // reset for next session
+        }
+      }
+    
+      return {
+        event: async ({ event }) => {
+          const sessionID = event.properties?.sessionID ?? event.properties?.info?.id ?? null
+    
+          if (event.type === 'session.created') {
+            const isChild = Boolean(event.properties?.info?.parentID)
+            if (sessionID) childSessionCache.set(sessionID, isChild)
+            if (!isChild) await notify('SessionStart')
+            return
+          }
+    
+          if (event.type === 'session.deleted') {
+            const cached = sessionID ? childSessionCache.get(sessionID) : undefined
+            const isChild = cached !== undefined ? cached : await isChildSession(sessionID)
+            if (!isChild) await notify('SessionEnd')
+            if (sessionID) childSessionCache.delete(sessionID)
+            return
+          }
+    
+          if (await isChildSession(sessionID)) return
+    
+          if (event.type === 'session.status') {
+            const status = event.properties?.status
+            if (status?.type === 'busy') await handleBusy(sessionID)
+            else if (status?.type === 'idle') await handleStop(sessionID)
+          }
+          // Backwards-compat: some OpenCode versions emit busy/idle as top-level events.
+          if (event.type === 'session.busy') await handleBusy(sessionID)
+          if (event.type === 'session.idle') await handleStop(sessionID)
+          if (event.type === 'session.error') await handleStop(sessionID)
+        },
+        'permission.ask': async (_permission, output) => {
+          if (output.status === 'ask') await notify('PermissionRequest')
+        }
+      }
+    }
+.slayzone/stable/client/.client-settings-migrated  (text)
+    2026-11-10T15:44:52.646Z
+.slayzone/stable/client/client.boot.json  (json)
+    {
+      "default_hub_id": "local",
+      "hubs": [
+        {
+          "id": "hub:ws://127.0.0.1:51110/trpc",
+          "kind": "remote",
+          "label": "Team Hub",
+          "url": "ws://127.0.0.1:51110/trpc"
+        }
+      ],
+      "multi_hub": true,
+      "server_mode": "local"
+    }
+.slayzone/stable/computer/.channel-migrated  (text)
+    2026-11-10T15:44:51.793Z
+.slayzone/stable/computer/computer-runtime/<new-token>/chat.sqlite  (database → db/.slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite.txt)
+.slayzone/stable/computer/computer-runtime/<new-token>/transfers/<new-token>.json  (json)
+    {
+      "manifest": {
+        "bytes": 2954,
+        "hash": "<new-token>",
+        "header": {
+          "events": 6,
+          "format": "slayzone-chat",
+          "identity": {
+            "epoch": 1,
+            "id": "<new-uuid>",
+            "mode": "claude-chat",
+            "tabId": "16dc6ffa-fb7e-494e-b787-805997483a8f",
+            "taskId": "16dc6ffa-fb7e-494e-b787-805997483a8f"
+          },
+          "migrationId": "<new-uuid>",
+          "receipts": 0,
+          "records": 5,
+          "version": 1
+        }
+      },
+      "offset": 2954
+    }
+.slayzone/stable/computer/computer-runtime/<new-token>/transfers/<new-token>.json  (json)
+    {
+      "manifest": {
+        "bytes": 3848,
+        "hash": "<new-token>",
+        "header": {
+          "events": 9,
+          "format": "slayzone-chat",
+          "identity": {
+            "epoch": 1,
+            "id": "<new-uuid>",
+            "mode": "claude-chat",
+            "tabId": "ffc1038c-b0e4-4c8a-ab5d-00f4e1361bb8",
+            "taskId": "ffc1038c-b0e4-4c8a-ab5d-00f4e1361bb8"
+          },
+          "migrationId": "<new-uuid>",
+          "receipts": 0,
+          "records": 5,
+          "version": 1
+        }
+      },
+      "offset": 3848
+    }
+.slayzone/stable/computer/computer.host.json  (json)
+    {
+      "hostId": "fe113a46-0ed7-48f7-8cd0-29732225ef67",
+      "updatedAt": 1794325499014
+    }
+.slayzone/stable/computer/computer.projects.json  (json)
+    {
+      "127.0.0.1_51100": {
+        "8eea13b7-15f6-431c-be30-373bbf62962e": {
+          "path": "/home/persona/repos/webapp",
+          "updatedAt": <run-ms>
+        }
+      }
+    }
+.slayzone/stable/computer/computer.state.json  (json)
+    {
+      "127.0.0.1_51100": {
+        "apiKey": "szr_pZFywYCObcHMVCOywpDpWwBewpGefYlfLagZohtHMsqcgrYcjraChEwSZFriIfYi",
+        "computerId": "f01a216a-4803-4214-98eb-f9e28951e1bb"
+      }
+    }
+.slayzone/stable/hub/.channel-migrated  (text)
+    2026-11-10T15:44:51.787Z
+.slayzone/stable/hub/.project-icons-migrated  (text)
+    2026-11-10T15:44:51.794Z
+.slayzone/stable/hub/.storage-migrated.prod  (text)
+    2026-11-10T15:44:51.794Z
+.slayzone/stable/hub/backups/slayzone.data.<run-time>.migration.sqlite  (database backup)
+.slayzone/stable/hub/slayzone.auth.sqlite  (database → db/.slayzone/stable/hub/slayzone.auth.sqlite.txt)
+.slayzone/stable/hub/slayzone.data.sqlite  (database → db/.slayzone/stable/hub/slayzone.data.sqlite.txt)
+.slayzone/stable/hub/slayzone.diagnostics.sqlite  (database → db/.slayzone/stable/hub/slayzone.diagnostics.sqlite.txt)
+computers/c3/computer-runtime/<new-token>/chat.sqlite  (database → db/computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite.txt)
+computers/c3/computer-runtime/<new-token>/transfers/<new-token>.json  (json)
+    {
+      "manifest": {
+        "bytes": 3801,
+        "hash": "<new-token>",
+        "header": {
+          "events": 9,
+          "format": "slayzone-chat",
+          "identity": {
+            "epoch": 1,
+            "id": "<new-uuid>",
+            "mode": "claude-chat",
+            "tabId": "e562c0ee-8f43-4bb9-bb17-365cae71542e",
+            "taskId": "e562c0ee-8f43-4bb9-bb17-365cae71542e"
+          },
+          "migrationId": "<new-uuid>",
+          "receipts": 0,
+          "records": 5,
+          "version": 1
+        }
+      },
+      "offset": 3801
+    }
+computers/c3/computer-runtime/control.key  (text)
+    <new-token>
+computers/c3/computer-runtime/current-config-seen  (text)
+    
+computers/c3/computer-runtime/generations.json  (json)
+    {
+      "ws://127.0.0.1:51110/computers": 1
+    }
+computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh  (text)
+    #!/bin/sh
+    # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
+    #
+    # SLAYZONE_NOTIFY_VERSION=4
+    # ^ Bump on EVERY change to this file. The installer (notify-script-installer.ts)
+    #   refuses to overwrite an on-disk script with a strictly-lower version, so a
+    #   stale/older release channel can never downgrade a newer script on the
+    #   shared ~/.slayzone/hooks/notify.sh. Newer is always backward-compatible.
+    #
+    # WHY THIS FILE IS LOGIC-FREE (the sustainable fix):
+    #   ~/.slayzone/hooks/notify.sh is a SINGLE file shared by every release channel
+    #   (getSlayzoneHomeDir() is NOT release-channel-scoped), and agents find it via
+    #   the shared ~/.claude/settings.json pointer — so it CANNOT be
+    #   release-channel-scoped. A shared file must therefore be BENIGN: it must
+    #   contain no field-picking logic, so it does not matter which release channel's
+    #   copy wins the last write. The previous version cherry-picked named fields
+    #   (taskId, slaySessionId, session_id, hook_event_name, …) to forward; when an
+    #   OLDER release channel's copy won, its field list was missing `slaySessionId`,
+    #   so warm-pool sessions became invisible (no task resolution → no running
+    #   spinner, no unread dot). This version forwards THREE opaque channels and lets
+    #   the SERVER do all field extraction:
+    #     - ctx : $SLAYZONE_AGENT_HOOK_CONTEXT — an opaque JSON blob the app packs at
+    #             spawn with every identity field (taskId/slaySessionId/projectId/
+    #             agentId/releaseChannel). Forwarded VERBATIM; never parsed here.
+    #             v4 renamed it from $SLAYZONE_HOOK_CONTEXT (pairs with
+    #             $SLAYZONE_AGENT_HOOK_URL); the old name is still read as a FALLBACK
+    #             because this file is shared newest-wins across release channels, so
+    #             an OLDER channel's app spawns agents that only set the old name.
+    #             Dropping the fallback before every channel ships the new name would
+    #             reproduce the v2→v3 clobber (empty ctx → no task resolution → no
+    #             running spinner, no unread dot).
+    #     - raw : the hook payload piped on stdin (Claude/Codex/Gemini/Antigravity).
+    #     - arg : argv $1 — Antigravity passes the EVENT NAME here (its payload omits
+    #             it); the OpenCode plugin passes the whole JSON payload here (no
+    #             stdin). Forwarded opaquely as a JSON string; the server decides.
+    #   Adding a new identity field later touches ONLY the app (writes ctx) and the
+    #   server (reads ctx) — NEVER this script. That is the whole point.
+    #
+    # Installed by the app at ~/.slayzone/hooks/notify.sh (mode 0755).
+    # Invoked by the host agent (e.g. Claude Code, Codex) via its hooks config.
+    #
+    # Required env (injected at PTY/chat spawn by buildMcpEnv):
+    #   SLAYZONE_AGENT_HOOK_URL  - target URL, e.g. http://127.0.0.1:PORT/api/agent-hook
+    #                              (a remote computer overlays its OWN loopback URL)
+    #   SLAYZONE_AGENT_ID        - claude-code | codex | gemini | antigravity | opencode
+    # Optional:
+    #   SLAYZONE_AGENT_HOOK_CONTEXT - opaque identity blob (see above); sent as `ctx`
+    #   SLAYZONE_HOOK_CONTEXT       - retired pre-v4 name; read only as a fallback
+    #
+    # Contract: ALWAYS exit 0. Hook failures must NOT bubble into the agent TUI
+    # (Claude renders red error walls otherwise). Silent on any failure.
+    
+    set -e
+    
+    # Bail silently when not configured (e.g. agent run outside SlayZone).
+    [ -z "$SLAYZONE_AGENT_HOOK_URL" ] && exit 0
+    [ -z "$SLAYZONE_AGENT_ID" ] && exit 0
+    
+    # Gemini blocks waiting for a JSON response on stdout; empty {} = no-op.
+    # Claude/Codex/Mastra/Droid discard our stdout, so this is universal.
+    # Emit before payload read so it fires even if downstream POST fails.
+    printf '{}\n'
+    
+    # The three opaque channels. NO grep/parse/named-field extraction here.
+    #   ARG = argv $1 verbatim (may be an event name, a JSON payload, or empty).
+    #   RAW = stdin verbatim (the hook payload, or empty).
+    ARG="${1:-}"
+    # Read stdin ONLY when argv $1 is NOT already the JSON payload. This is
+    # load-bearing, not an optimization: the OpenCode plugin invokes us as
+    # `bash notify.sh '<json>'` with NO stdin write, and inside a SlayZone PTY the
+    # child inherits the terminal's stdin — which never sends EOF. An unconditional
+    # `cat` would block FOREVER there, hanging the plugin's awaited exec (dark
+    # badges — the exact failure this script exists to prevent). Every stdin-driven
+    # agent (Claude/Codex/Gemini/Antigravity) writes its payload then CLOSES stdin,
+    # so `cat` returns promptly for them. Mirrors the guard the pre-v2 script had.
+    case "$ARG" in
+      '{'*) RAW="" ;;
+      *) RAW=$(cat 2>/dev/null || true) ;;
+    esac
+    
+    # JSON-encode an arbitrary string into a quoted JSON string literal. This is the
+    # ONLY logic left, and it is GENERIC string-escaping — NOT per-field naming, so
+    # it cannot rot the way a field list does. Escapes backslash, double-quote, and
+    # the whitespace control chars that occur in real hook data (\n \r \t). Other
+    # C0 control bytes (\x00-\x1f) are not escaped — they never appear in an event
+    # name or a JSON-stringified payload, the only two things that reach argv $1.
+    # POSIX awk; falls back to a bare empty string on any failure.
+    json_encode_string() {
+      awk 'BEGIN {
+        s = ARGV[1]
+        out = "\""
+        n = length(s)
+        for (i = 1; i <= n; i++) {
+          c = substr(s, i, 1)
+          if (c == "\\") out = out "\\\\"
+          else if (c == "\"") out = out "\\\""
+          else if (c == "\n") out = out "\\n"
+          else if (c == "\r") out = out "\\r"
+          else if (c == "\t") out = out "\\t"
+          else out = out c
+        }
+        print out "\""
+        exit
+      }' "$1" 2>/dev/null || printf '""'
+    }
+    
+    # ctx: forwarded VERBATIM (already valid JSON from the app), or `{}` when unset.
+    # New name wins; the retired pre-v4 name is the fallback for an older release
+    # channel's app spawning against this newer shared script (see header). Still NO
+    # parsing — a name choice, not field-picking logic.
+    CTX="${SLAYZONE_AGENT_HOOK_CONTEXT:-$SLAYZONE_HOOK_CONTEXT}"
+    [ -z "$CTX" ] && CTX='{}'
+    
+    # raw: the stdin payload verbatim if it is present AND looks like JSON (starts
+    # with '{'); otherwise JSON `null`. The server treats a null raw as "no stdin".
+    case "$RAW" in
+      '{'*) RAW_FIELD="$RAW" ;;
+      *) RAW_FIELD="null" ;;
+    esac
+    
+    # arg: argv $1 as a JSON string (or null when empty). Opaque — the server decides
+    # whether it is an event name (Antigravity) or a JSON payload (OpenCode plugin).
+    if [ -n "$ARG" ]; then
+      ARG_FIELD=$(json_encode_string "$ARG")
+    else
+      ARG_FIELD="null"
+    fi
+    
+    AGENT_ID_FIELD=$(json_encode_string "$SLAYZONE_AGENT_ID")
+    
+    ENVELOPE="{\"ctx\":$CTX,\"raw\":$RAW_FIELD,\"arg\":$ARG_FIELD,\"agentId\":$AGENT_ID_FIELD}"
+    
+    # Fire-and-forget. Errors swallowed; never block the agent.
+    # curl is the primary path — present on macOS, most Linux, and bundled with
+    # Git for Windows (whose bash runs this script). wget is a fallback for minimal
+    # environments; if neither exists the POST is skipped silently. NO auth header:
+    # the target is always loopback (local sidecar, or the computer's own loopback),
+    # so no per-agent bearer is ever attached.
+    if command -v curl >/dev/null 2>&1; then
+      curl -s \
+        --connect-timeout 2 \
+        --max-time 5 \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        --data-binary "$ENVELOPE" \
+        "$SLAYZONE_AGENT_HOOK_URL" \
+        >/dev/null 2>&1 || true
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O /dev/null \
+        --timeout=5 \
+        --header='Content-Type: application/json' \
+        --post-data="$ENVELOPE" \
+        "$SLAYZONE_AGENT_HOOK_URL" \
+        >/dev/null 2>&1 || true
+    fi
+    
+    exit 0
+computers/c3/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
+    // SlayZone opencode plugin v1
+    //
+    // Forwards OpenCode SDK session lifecycle events to the SlayZone agent-hook
+    // notify script over a local shell exec. Plugin is loaded by OpenCode from
+    //   ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/slayzone-notify.js
+    //
+    // The /home/persona/computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh placeholder is substituted by the SlayZone installer
+    // (packages/apps/app/src/main/agent-hooks/opencode-plugin-installer.ts) at
+    // install time with the absolute path to `~/.slayzone/hooks/notify.sh`.
+    //
+    // Behavior:
+    //   - No-op when SLAYZONE_TASK_ID is unset (plugin only fires inside SlayZone PTYs).
+    //   - Subagent (child session) events are suppressed — oh-my-opencode + similar
+    //     tools spawn many child sessions and would otherwise flap Start/Stop.
+    //   - On client.session.list() error, sessions are assumed CHILD (safer to
+    //     suppress than emit a false-positive Start/Stop).
+    //   - Handles both modern (session.status w/ nested type) and legacy
+    //     (session.busy / session.idle) event shapes for forward compat.
+    //   - Singleton guard prevents double-load if OpenCode re-imports the plugin.
+    
+    export const SlayzoneNotifyPlugin = async ({ $, client }) => {
+      if (globalThis.__slayzoneOpencodePluginV1) return {}
+      globalThis.__slayzoneOpencodePluginV1 = true
+      if (!process?.env?.SLAYZONE_TASK_ID) return {}
+    
+      const notifyPath = '/home/persona/computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh'
+      let currentState = 'idle' // 'idle' | 'busy'
+      let rootSessionID = null // first non-child session we see
+      let stopSent = false // dedup Stop emits
+      const childSessionCache = new Map() // sessionID -> isChild bool
+    
+      const notify = async (eventName) => {
+        const payload = JSON.stringify({ hook_event_name: eventName })
+        try {
+          await $`bash ${notifyPath} ${payload}`
+        } catch {
+          // Hook failures must never bubble into the OpenCode TUI.
+        }
+      }
+    
+      const isChildSession = async (sessionID) => {
+        if (!sessionID) return true
+        if (!client?.session?.list) return true
+        if (childSessionCache.has(sessionID)) return childSessionCache.get(sessionID)
+        try {
+          const sessions = await client.session.list()
+          const session = sessions.data?.find((s) => s.id === sessionID)
+          const isChild = !!session?.parentID
+          childSessionCache.set(sessionID, isChild)
+          return isChild
+        } catch {
+          // On error, assume CHILD — safer than emitting a false-positive Start/Stop.
+          return true
+        }
+      }
+    
+      const handleBusy = async (sessionID) => {
+        if (!rootSessionID) rootSessionID = sessionID
+        if (sessionID !== rootSessionID) return
+        if (currentState === 'idle') {
+          currentState = 'busy'
+          stopSent = false
+          await notify('Start')
+        }
+      }
+    
+      const handleStop = async (sessionID) => {
+        if (rootSessionID && sessionID !== rootSessionID) return
+        if (currentState === 'busy' && !stopSent) {
+          currentState = 'idle'
+          stopSent = true
+          await notify('Stop')
+          rootSessionID = null // reset for next session
+        }
+      }
+    
+      return {
+        event: async ({ event }) => {
+          const sessionID = event.properties?.sessionID ?? event.properties?.info?.id ?? null
+    
+          if (event.type === 'session.created') {
+            const isChild = Boolean(event.properties?.info?.parentID)
+            if (sessionID) childSessionCache.set(sessionID, isChild)
+            if (!isChild) await notify('SessionStart')
+            return
+          }
+    
+          if (event.type === 'session.deleted') {
+            const cached = sessionID ? childSessionCache.get(sessionID) : undefined
+            const isChild = cached !== undefined ? cached : await isChildSession(sessionID)
+            if (!isChild) await notify('SessionEnd')
+            if (sessionID) childSessionCache.delete(sessionID)
+            return
+          }
+    
+          if (await isChildSession(sessionID)) return
+    
+          if (event.type === 'session.status') {
+            const status = event.properties?.status
+            if (status?.type === 'busy') await handleBusy(sessionID)
+            else if (status?.type === 'idle') await handleStop(sessionID)
+          }
+          // Backwards-compat: some OpenCode versions emit busy/idle as top-level events.
+          if (event.type === 'session.busy') await handleBusy(sessionID)
+          if (event.type === 'session.idle') await handleStop(sessionID)
+          if (event.type === 'session.error') await handleStop(sessionID)
+        },
+        'permission.ask': async (_permission, output) => {
+          if (output.status === 'ask') await notify('PermissionRequest')
+        }
+      }
+    }
+computers/c3/computer-runtime/host-config.json  (json)
+    {
+      "connection": {
+        "hubUrl": "ws://127.0.0.1:51110/computers"
+      },
+      "currentFileSeen": true,
+      "fileFingerprint": "<new-token>"
+    }
+computers/c3/computer-runtime/host-release.json  (json)
+    {
+      "current": {
+        "entry": "/repo/packages/apps/computer/dist/bin.cjs",
+        "version": "0.38.2"
+      }
+    }
+computers/c3/computer-runtime/hubs/127.0.0.1_51110/upgrade-status.json  (json)
+    {
+      "currentVersion": "0.38.2",
+      "hostVersion": "0.38.2",
+      "phase": "connected",
+      "updatedAt": "<run-time>",
+      "version": "0.38.2"
+    }
+computers/c3/computer-runtime/launch.cjs  (text)
+    #!/usr/bin/env node
+    const fs = require('node:fs'), path = require('node:path'), cp = require('node:child_process');
+    const root = process.env.SLAYZONE_ROOT;
+    if (!root) throw Error('computer launcher requires SLAYZONE_ROOT');
+    const role = process.argv.includes('--session-host') ? 'host' : 'supervisor';
+    const dir = path.join(root, 'computer-runtime'), pointer = path.join(dir, role === 'host' ? 'host-release.json' : 'supervisor.json');
+    let child, stopping = false, healthy = false, timer, probation, killTimer;
+    function read() { return JSON.parse(fs.readFileSync(pointer, 'utf8')); }
+    function launch() {
+      if (stopping) return;
+      const state = read(); let timedOut = false; healthy = false; probation = undefined;
+      child = cp.fork(state.current.entry, [role === 'host' ? '--session-host' : '--supervisor'], {env: {...process.env, SLAYZONE_NONINTERACTIVE:'1'}, stdio:['inherit','inherit','inherit','ipc']});
+      timer = setTimeout(() => {
+        timedOut = true;
+        process.stderr.write('[computer-launcher] ' + role + ' ' + state.current.version + ' startup timed out; restarting\n');
+        // A supervisor SIGTERM means explicit shutdown, including its persistent host.
+        // Crash only the supervisor; its connectors stop on IPC loss and work survives.
+        if (role === 'supervisor') child.kill('SIGKILL');
+        else { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 10000); }
+      }, 90000);
+      child.on('message', m => { if (m && m.type === 'supervisor-ready') {clearTimeout(timer); if (!probation) probation = setTimeout(() => {healthy = true;}, 60000);} });
+      child.on('error', () => {});
+      child.on('exit', (code) => {
+        clearTimeout(timer); clearTimeout(probation); clearTimeout(killTimer);
+        if (stopping) {process.exitCode = code || 0; return;}
+        if (code === 75 && !timedOut) {launch(); return;}
+        const failed = timedOut || code !== 0;
+        if (!healthy && failed && state.previous) {
+          fs.writeFileSync(path.join(dir, role + '-quarantine.json'), JSON.stringify({version: state.current.version, until: Date.now() + 900000}), {mode:0o600});
+          const temp = pointer + '.tmp';
+          fs.writeFileSync(temp, JSON.stringify({current:state.previous}) + '\n', {mode:0o600}); fs.renameSync(temp,pointer);
+        }
+        if (!failed) return;
+        setTimeout(launch, 2000);
+      });
+    }
+    for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {stopping = true; child?.kill(signal);});
+    launch();
+computers/c3/computer-runtime/supervisor-config.json  (json)
+    {
+      "currentFileSeen": true,
+      "fileFingerprint": "<new-token>"
+    }
+computers/c3/computer-runtime/supervisor.json  (json)
+    {
+      "current": {
+        "entry": "/repo/packages/apps/computer/dist/bin.cjs",
+        "version": "0.38.2"
+      }
+    }
+computers/c3/computer.config.json  (json)
+    {
+      "allowedRoots": [
+        "/home/persona/repos"
+      ],
+      "computerName": "gpu-box"
+    }
+computers/c3/computer.host.json  (json)
+    {
+      "hostId": "fe113a46-0ed7-48f7-8cd0-29732225ef67",
+      "updatedAt": 1794325503263
+    }
+computers/c3/computer.projects.json  (json)
+    {
+      "127.0.0.1_51110": {
+        "fcce6a7b-0f83-473d-8ff2-a0713cb580b8": {
+          "path": "/home/persona/repos/ml",
+          "updatedAt": <run-ms>
+        }
+      }
+    }
+computers/c3/computer.state.json  (json)
+    {
+      "127.0.0.1_51110": {
+        "apiKey": "szr_uDPhxoxKUtorxMIpvpxgYDWreYGOvmQtxeSKxPCOmuhefwfefrTUsNVpvoedQvsA",
+        "computerId": "df6aac29-b0b9-40bd-a263-ed28629e901c"
+      }
+    }
+hubs/hub2/backups/slayzone.data.<run-time>.migration.sqlite  (database backup)
+hubs/hub2/hub.state.json  (json)
+    {
+      "computerTransportSecret": "caa9ce62b88d3faef7cc9b50e9d78f399a0dc4831192feef1a994f14b43ed0fa"
+    }
+hubs/hub2/slayzone.auth.sqlite  (database → db/hubs/hub2/slayzone.auth.sqlite.txt)
+hubs/hub2/slayzone.data.sqlite  (database → db/hubs/hub2/slayzone.data.sqlite.txt)
+hubs/hub2/slayzone.diagnostics.sqlite  (database → db/hubs/hub2/slayzone.diagnostics.sqlite.txt)

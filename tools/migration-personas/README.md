@@ -20,6 +20,11 @@ Local only (Docker, no network). Never part of CI.
 | --- | --- | --- |
 | `p01-v035-solo` | v0.35.0 (schema v145) | desktop only, one project, tasks/tags/template/artifact/automation/panel |
 | `p02-v0362-multi` | v0.36.2 (schema v171) | 2 hubs, 4 computers, project + task bindings on both hubs |
+| `p03-v035-chat` | v0.35.0 (schema v145) | desktop only, Claude chat history: 2 chats, 3 turns, one task done |
+| `p04-v0362-chat` | v0.36.2 (schema v171) | Claude chats on 2 hubs, one run on a remote computer (gpu-box) |
+
+Chat personas use a scripted `claude` (`generate/fake-claude/`, the repo's fake-claude
+playing `scenario.json`), driven through the old release's own tRPC API.
 
 ## Running
 

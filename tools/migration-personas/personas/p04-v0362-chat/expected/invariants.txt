@@ -1,0 +1,39 @@
+ok   settle: settled after 20s
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 212 (latest 212)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 1 → 1
+ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 2 → 2
+ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" (folder /home/persona/repos/webapp) has a ready folder on local-computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" folder is ready on local-computer (project default there)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 16dc6ffa-fb7e-494e-b787-805997483a8f — all 6 events moved, in order, to .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 16dc6ffa-fb7e-494e-b787-805997483a8f ownership active
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat ffc1038c-b0e4-4c8a-ab5d-00f4e1361bb8 — all 9 events moved, in order, to .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat ffc1038c-b0e4-4c8a-ab5d-00f4e1361bb8 ownership active
+ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: computer_data_handoff rows left 0
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite: integrity_check ok
+ok   computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite: user_version 12 (latest 12)
+ok   hubs/hub2/slayzone.auth.sqlite: integrity_check ok
+ok   hubs/hub2/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
+ok   hubs/hub2/slayzone.data.sqlite: integrity_check ok
+ok   hubs/hub2/slayzone.data.sqlite: foreign_key_check 0 violation(s)
+ok   hubs/hub2/slayzone.data.sqlite: user_version 212 (latest 212)
+ok   hubs/hub2/slayzone.data.sqlite: projects rows 1 → 1
+ok   hubs/hub2/slayzone.data.sqlite: tasks rows 1 → 1
+ok   hubs/hub2/slayzone.data.sqlite: project "ML" (folder /home/persona/repos/ml) has a ready folder on gpu-box
+ok   hubs/hub2/slayzone.data.sqlite: project "ML" folder is ready on gpu-box (project default there)
+ok   hubs/hub2/slayzone.data.sqlite: chat e562c0ee-8f43-4bb9-bb17-365cae71542e — all 9 events moved, in order, to computers/c3/computer-runtime/6fbb80ff76962b1dece31cf014d822bb87f006d6881a343eb45a28dc2ffddbb8/chat.sqlite
+ok   hubs/hub2/slayzone.data.sqlite: chat e562c0ee-8f43-4bb9-bb17-365cae71542e ownership active
+note hubs/hub2/slayzone.data.sqlite: project fcce6a7b-0f83-473d-8ff2-a0713cb580b8 folder is 'pending' on computer f01a216a-4803-4214-98eb-f9e28951e1bb (not registered on this hub — unreachable, kept)
+ok   hubs/hub2/slayzone.data.sqlite: computer_data_handoff rows left 0
+ok   hubs/hub2/slayzone.diagnostics.sqlite: integrity_check ok
+ok   hubs/hub2/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)

@@ -480,40 +480,47 @@ function isSkipped(rel: string): boolean {
 }
 
 function dumpAll(): void {
-  const fileLines: string[] = []
+  // One entry per file: [normalized path, its lines]. Sorted by normalized path, then by
+  // content — files whose names this run minted (e.g. transfers/<token>.json) normalize
+  // to the same path, and their on-disk order would otherwise change from run to run.
+  const entries: Array<[string, string[]]> = []
   for (const f of [...walk(HOME)].sort()) {
     const rel = relative(HOME, f)
     if (isSkipped(rel)) continue
     const relN = normalize(rel)
     if (/\.sqlite$/.test(rel)) {
       if (rel.split(sep).includes('backups')) {
-        fileLines.push(`${relN}  (database backup)`)
+        entries.push([relN, [`${relN}  (database backup)`]])
         continue
       }
       const target = join(outDir, 'db', `${rel}.txt`)
       mkdirSync(dirname(target), { recursive: true })
       writeFileSync(target, dumpDb(f))
-      fileLines.push(`${relN}  (database → db/${rel}.txt)`)
+      entries.push([relN, [`${relN}  (database → db/${rel}.txt)`]])
       continue
     }
     const buf = readFileSync(f)
     if (/\.json$/.test(rel)) {
       try {
         const json = JSON.stringify(sortKeys(JSON.parse(buf.toString('utf8'))), null, 2)
-        fileLines.push(`${relN}  (json)`, ...normalize(json).split('\n').map((l) => `    ${l}`))
+        entries.push([relN, [`${relN}  (json)`, ...normalize(json).split('\n').map((l) => `    ${l}`)]])
         continue
       } catch {
-        /* not JSON after all — hash it */
+        /* not JSON after all — dump as text or hash */
       }
     }
     const text = buf.length <= 65_536 && !buf.includes(0) ? buf.toString('utf8') : null
     if (text !== null && Buffer.from(text, 'utf8').equals(buf)) {
-      fileLines.push(`${relN}  (text)`, ...normalize(text.replace(/\n$/, '')).split('\n').map((l) => `    ${l}`))
+      entries.push([relN, [`${relN}  (text)`, ...normalize(text.replace(/\n$/, '')).split('\n').map((l) => `    ${l}`)]])
       continue
     }
-    fileLines.push(`${relN}  sha256=${createHash('sha256').update(buf).digest('hex').slice(0, 16)} bytes=${buf.length}`)
+    entries.push([
+      relN,
+      [`${relN}  sha256=${createHash('sha256').update(buf).digest('hex').slice(0, 16)} bytes=${buf.length}`]
+    ])
   }
-  writeFileSync(join(outDir, 'files.txt'), `${fileLines.join('\n')}\n`)
+  entries.sort((x, y) => (x[0] === y[0] ? x[1].join('\n').localeCompare(y[1].join('\n')) : x[0] < y[0] ? -1 : 1))
+  writeFileSync(join(outDir, 'files.txt'), `${entries.flatMap((e) => e[1]).join('\n')}\n`)
 }
 
 // -------------------------------------------------------------- 5. invariants
@@ -542,6 +549,78 @@ function inputHubDb(outHubDb: string): string | null {
   return null
 }
 
+type ChatCopy = { store: string; state: string; events: string[] }
+
+/** Every conversation in every computer chat store, by tab id (events canonicalized). */
+function collectOutputChats(): Map<string, ChatCopy[]> {
+  const byTab = new Map<string, ChatCopy[]>()
+  for (const f of walk(HOME)) {
+    if (!/(^|\/)chat\.sqlite$/.test(f)) continue
+    const db = new Database(f, { readonly: true, fileMustExist: true })
+    const convs = db.prepare('SELECT id, tab_id, state FROM conversations').all() as Array<{
+      id: string
+      tab_id: string
+      state: string
+    }>
+    for (const c of convs) {
+      const events = (
+        db.prepare('SELECT event FROM events WHERE conversation_id = ? ORDER BY seq').all(c.id) as Array<{ event: string }>
+      ).map((e) => canonicalEvent(e.event))
+      const list = byTab.get(c.tab_id) ?? []
+      list.push({ store: relative(HOME, f), state: c.state, events })
+      byTab.set(c.tab_id, list)
+    }
+    db.close()
+  }
+  return byTab
+}
+
+function canonicalEvent(raw: string): string {
+  try {
+    return JSON.stringify(sortKeys(JSON.parse(raw)))
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * Chat history the hub held before the upgrade lives on a computer afterwards: every
+ * input chat (hub `chat_events`) is an ACTIVE conversation in some computer's chat store
+ * with exactly the same events in the same order, and the hub's `chat_ownership`
+ * records it active.
+ */
+function checkChats(
+  ref: Database.Database,
+  db: Database.Database,
+  rel: string,
+  chats: Map<string, ChatCopy[]>,
+  pass: (m: string) => void,
+  fail: (m: string) => void
+): void {
+  if (!tables(ref).includes('chat_events')) return
+  const tabs = ref.prepare('SELECT DISTINCT tab_id FROM chat_events ORDER BY tab_id').all() as Array<{ tab_id: string }>
+  for (const { tab_id } of tabs) {
+    const before = (
+      ref.prepare('SELECT event FROM chat_events WHERE tab_id = ? ORDER BY seq').all(tab_id) as Array<{ event: string }>
+    ).map((e) => canonicalEvent(e.event))
+    const active = (chats.get(tab_id) ?? []).filter((c) => c.state === 'active')
+    const same = active.find((c) => c.events.length === before.length && c.events.every((e, i) => e === before[i]))
+    if (same) pass(`${rel}: chat ${tab_id} — all ${before.length} events moved, in order, to ${same.store}`)
+    else
+      fail(
+        `${rel}: chat ${tab_id} — ${before.length} events before; active copies: ${
+          active.length ? active.map((c) => `${c.store} (${c.events.length} events, differ)`).join('; ') : 'NONE'
+        }`
+      )
+    const own = tables(db).includes('chat_ownership')
+      ? (db.prepare('SELECT state FROM chat_ownership WHERE tab_id = ?').all(tab_id) as Array<{ state: string }>)
+      : []
+    ;(own.some((o) => o.state === 'active') ? pass : fail)(
+      `${rel}: chat ${tab_id} ownership ${own.map((o) => o.state).join(', ') || 'MISSING'}`
+    )
+  }
+}
+
 function checkInvariants(processProblems: string[], settle: string[]): string[] {
   const out: string[] = []
   const fail = (m: string) => out.push(`FAIL ${m}`)
@@ -549,6 +628,8 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
 
   for (const p of processProblems) fail(`process: ${p}`)
   for (const s of settle) (s.startsWith('TIMEOUT') ? fail : pass)(`settle: ${s}`)
+
+  const chats = collectOutputChats()
 
   for (const f of [...walk(HOME)].sort()) {
     const rel = relative(HOME, f)
@@ -613,6 +694,7 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
             )
           }
         }
+        checkChats(ref, db, rel, chats, pass, fail)
         ref.close()
       } else {
         out.push(`note ${rel}: no input database found to compare with`)

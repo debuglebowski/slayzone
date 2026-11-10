@@ -1,0 +1,10 @@
+user_version 0
+
+## schema
+index idx_diag_level_ts: CREATE INDEX idx_diag_level_ts ON diagnostics_events(level, ts_ms)
+index idx_diag_source_event_ts: CREATE INDEX idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms)
+index idx_diag_trace: CREATE INDEX idx_diag_trace ON diagnostics_events(trace_id)
+index idx_diag_ts: CREATE INDEX idx_diag_ts ON diagnostics_events(ts_ms)
+table diagnostics_events: CREATE TABLE diagnostics_events ( id TEXT PRIMARY KEY, ts_ms INTEGER NOT NULL, level TEXT NOT NULL, source TEXT NOT NULL, event TEXT NOT NULL, trace_id TEXT, task_id TEXT, project_id TEXT, session_id TEXT, channel TEXT, message TEXT, payload_json TEXT, redaction_version INTEGER NOT NULL DEFAULT 1 )
+
+## diagnostics_events (runtime log of this boot — rows not compared)

@@ -36,12 +36,24 @@ CTX=$(mktemp -d)
 trap 'rm -rf "$CTX"' EXIT
 cp "$HERE/Dockerfile" "$CTX/Dockerfile"
 cp "$CACHE/SlayZone-amd64.deb" "$CTX/slayzone.deb"
+TU="$ROOT/../../packages/shared/test-utils"
+mkdir -p "$CTX/fake/fake-claude" "$CTX/fake/fake-cli"
+cp "$TU/fake-claude/fake-claude.mjs" "$TU/fake-claude/fake-claude-tasks.mjs" "$CTX/fake/fake-claude/"
+cp "$TU/fake-cli/runtime.mjs" "$CTX/fake/fake-cli/"
+cp "$HERE/fake-claude/claude" "$HERE/fake-claude/scenario.json" "$CTX/fake/"
 docker build --platform linux/amd64 -q -t "$IMAGE" "$CTX" >/dev/null
 
 C="slz-persona-gen-$P"
 docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" --network none --platform linux/amd64 --shm-size=1g "$IMAGE" sleep infinity >/dev/null
-cleanup() { docker rm -f "$C" >/dev/null 2>&1 || true; rm -rf "$CTX"; }
+cleanup() {
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "[$P] FAILED (exit $rc) — container logs:" >&2
+    docker exec "$C" sh -c 'for f in /tmp/*.log; do echo "--- $f"; tail -25 "$f"; done' >&2 2>/dev/null || true
+  fi
+  docker rm -f "$C" >/dev/null 2>&1 || true; rm -rf "$CTX"
+}
 trap cleanup EXIT
 
 docker exec -u root "$C" mkdir -p /gen

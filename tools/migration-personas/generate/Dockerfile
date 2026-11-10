@@ -14,5 +14,13 @@ COPY slayzone.deb /tmp/slayzone.deb
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/slayzone.deb \
     && rm /tmp/slayzone.deb && rm -rf /var/lib/apt/lists/*
 RUN usermod -l persona -d /home/persona -m node && groupmod -n persona node
+# A scripted `claude` for chat personas (see fake/claude). /usr/local/bin is on the
+# login-shell PATH both releases resolve `claude` through.
+COPY fake /opt/fake
+RUN install -m 755 /opt/fake/claude /usr/local/bin/claude \
+    && mkdir -p /opt/fake/state/epochs/1 && echo 1 > /opt/fake/state/current \
+    && cp /opt/fake/scenario.json /opt/fake/state/epochs/1/scenario.json \
+    && chown -R persona:persona /opt/fake/state
+ENV SHELL=/bin/bash
 USER persona
 WORKDIR /home/persona

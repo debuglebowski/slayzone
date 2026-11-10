@@ -89,3 +89,40 @@ ws.onopen=()=>ws.send(JSON.stringify({id:1,jsonrpc:'2.0',method:'mutation',param
 ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id!==1)return;if(m.error){console.error('$2 ERR',JSON.stringify(m.error).slice(0,400));process.exit(1)}console.log('$2 ok');ws.close();process.exit(0)};
 setTimeout(()=>{console.error('$2 TIMEOUT');process.exit(1)},20000)"
 }
+
+# trpc_call <port> <query|mutation> <path> <input JS literal> — prints the result as JSON.
+trpc_call() {
+  node -e "
+const ws=new WebSocket('ws://127.0.0.1:$1/trpc');
+ws.onopen=()=>ws.send(JSON.stringify({id:1,jsonrpc:'2.0',method:'$2',params:{path:'$3',input:{json:$4}}}));
+ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id!==1)return;if(m.error){console.error('$3 ERR',JSON.stringify(m.error).slice(0,400));process.exit(1)}console.log(JSON.stringify(m.result?.data?.json??m.result?.data??null));ws.close();process.exit(0)};
+setTimeout(()=>{console.error('$3 TIMEOUT');process.exit(1)},30000)"
+}
+
+# chat_open <port> <task id> <cwd> — make the task a Claude chat, open its tab and start
+# its process (task.update → ensureMain → chat.start), then wait until the process is
+# up. A user always types after that; sending into a session still spawning loses the
+# message in these releases (the driver is attached after the first write).
+chat_open() {
+  trpc_call "$1" mutation task.update "{id:'$2',terminalMode:'claude-chat'}" >/dev/null
+  trpc_call "$1" mutation taskTerminals.ensureMain "{taskId:'$2',mode:'claude-chat'}" >/dev/null
+  trpc_call "$1" mutation chat.start "{tabId:'$2',taskId:'$2',mode:'claude-chat',cwd:'$3'}" >/dev/null
+  sleep 5
+}
+
+# chat_results <db> <task id> — how many turns of this chat finished (result events).
+chat_results() {
+  sqlite3 "$1" "SELECT count(*) FROM chat_events WHERE tab_id='$2' AND json_extract(event,'\$.kind')='result'"
+}
+
+# chat_say <port> <db> <task id> <text> — send one message and wait for its turn to end.
+chat_say() {
+  before=$(chat_results "$2" "$3")
+  trpc_call "$1" mutation chat.send "{tabId:'$3',text:$(node -p "JSON.stringify(process.argv[1])" "$4")}" >/dev/null
+  i=0
+  while [ $i -lt 120 ]; do
+    [ "$(chat_results "$2" "$3")" -gt "$before" ] && { echo "chat turn done: $3 ($4)"; return 0; }
+    i=$((i + 1)); sleep 1
+  done
+  echo "TIMEOUT: no result for chat turn on $3" >&2; return 1
+}
