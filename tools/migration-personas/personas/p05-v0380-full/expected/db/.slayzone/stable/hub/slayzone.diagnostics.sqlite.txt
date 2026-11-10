@@ -1,0 +1,26 @@
+user_version 0
+
+## schema
+index chat_legacy_diagnostics_task: CREATE INDEX chat_legacy_diagnostics_task ON chat_legacy_diagnostics(task_id,ordinal)
+index idx_diag_level_ts: CREATE INDEX idx_diag_level_ts ON diagnostics_events(level, ts_ms)
+index idx_diag_source_event_ts: CREATE INDEX idx_diag_source_event_ts ON diagnostics_events(source, event, ts_ms)
+index idx_diag_trace: CREATE INDEX idx_diag_trace ON diagnostics_events(trace_id)
+index idx_diag_ts: CREATE INDEX idx_diag_ts ON diagnostics_events(ts_ms)
+table chat_content_locks: CREATE TABLE chat_content_locks(task_id TEXT PRIMARY KEY,state TEXT NOT NULL,cutoff INTEGER NOT NULL,blobs TEXT NOT NULL DEFAULT '[]')
+table chat_legacy_diagnostics: CREATE TABLE chat_legacy_diagnostics(ordinal INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,task_id TEXT)
+table chat_privacy_boundary: CREATE TABLE chat_privacy_boundary(id INTEGER PRIMARY KEY CHECK(id=1),cutoff_ms INTEGER NOT NULL,cleanup_generation INTEGER NOT NULL DEFAULT 1,compacted_generation INTEGER NOT NULL DEFAULT 0)
+table diagnostic_content_holds: CREATE TABLE diagnostic_content_holds ( event_id TEXT PRIMARY KEY, blob_paths TEXT NOT NULL DEFAULT '[]' )
+table diagnostics_events: CREATE TABLE diagnostics_events ( id TEXT PRIMARY KEY, ts_ms INTEGER NOT NULL, level TEXT NOT NULL, source TEXT NOT NULL, event TEXT NOT NULL, trace_id TEXT, task_id TEXT, project_id TEXT, session_id TEXT, channel TEXT, message TEXT, payload_json TEXT, redaction_version INTEGER NOT NULL DEFAULT 1 )
+trigger chat_diagnostic_delete_pending: CREATE TRIGGER chat_diagnostic_delete_pending BEFORE DELETE ON diagnostics_events WHEN EXISTS(SELECT 1 FROM chat_legacy_diagnostics l WHERE l.event_id=OLD.id AND NOT EXISTS(SELECT 1 FROM chat_content_locks c WHERE c.task_id=l.task_id AND c.state IN ('cleaning','cleaned'))) BEGIN SELECT RAISE(ABORT,'Chat diagnostic migration is pending'); END
+trigger chat_diagnostic_update_pending: CREATE TRIGGER chat_diagnostic_update_pending BEFORE UPDATE ON diagnostics_events WHEN EXISTS(SELECT 1 FROM chat_legacy_diagnostics l WHERE l.event_id=OLD.id AND NOT EXISTS(SELECT 1 FROM chat_content_locks c WHERE c.task_id=l.task_id AND c.state IN ('cleaning','cleaned'))) BEGIN SELECT RAISE(ABORT,'Chat diagnostic migration is pending'); END
+
+## chat_content_locks (0)
+
+## chat_legacy_diagnostics (0)
+
+## chat_privacy_boundary (1)
+{"id":1,"cutoff_ms":1794328313355,"cleanup_generation":1,"compacted_generation":1}
+
+## diagnostic_content_holds (0)
+
+## diagnostics_events (runtime log of this boot — rows not compared)

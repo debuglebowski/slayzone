@@ -275,7 +275,8 @@ async function waitSettled(expect: Array<{ port: number; names: string[] }>): Pr
       last = now
       quietSince = Date.now()
     } else if (Date.now() - quietSince >= 10_000 && Date.now() - startQuiet >= 20_000) {
-      return `settled after ${Math.round((Date.now() - startQuiet) / 1000)}s`
+      log(`settled after ${Math.round((Date.now() - startQuiet) / 1000)}s`)
+      return 'settled' // no duration: it is timing noise, and invariants.txt is compared
     }
   }
   return 'TIMEOUT: databases never went quiet'
@@ -621,6 +622,47 @@ function checkChats(
   }
 }
 
+/**
+ * Chat history already on a computer before the upgrade (v0.38+) stays there: every
+ * conversation in an input chat store is still an ACTIVE conversation in the SAME store
+ * with exactly the same events in the same order.
+ */
+function checkComputerChats(
+  chats: Map<string, ChatCopy[]>,
+  pass: (m: string) => void,
+  fail: (m: string) => void
+): void {
+  for (const f of walk(REF)) {
+    if (!/(^|\/)chat\.sqlite$/.test(f)) continue
+    const rel = relative(REF, f)
+    const ref = openReadonlyCopy(f)
+    if (!ref) continue
+    if (!tables(ref).includes('conversations')) {
+      ref.close()
+      continue
+    }
+    const convs = ref
+      .prepare("SELECT id, tab_id FROM conversations WHERE state = 'active' AND tab_id <> '__slz_settings__'")
+      .all() as Array<{ id: string; tab_id: string }>
+    for (const c of convs) {
+      const before = (
+        ref.prepare('SELECT event FROM events WHERE conversation_id = ? ORDER BY seq').all(c.id) as Array<{ event: string }>
+      ).map((e) => canonicalEvent(e.event))
+      const kept = (chats.get(c.tab_id) ?? []).find(
+        (x) =>
+          x.store === rel &&
+          x.state === 'active' &&
+          x.events.length === before.length &&
+          x.events.every((e, i) => e === before[i])
+      )
+      ;(kept ? pass : fail)(
+        `${rel}: chat ${c.tab_id} — ${before.length} events ${kept ? 'kept, in order' : 'NOT kept intact in this store'}`
+      )
+    }
+    ref.close()
+  }
+}
+
 function checkInvariants(processProblems: string[], settle: string[]): string[] {
   const out: string[] = []
   const fail = (m: string) => out.push(`FAIL ${m}`)
@@ -630,6 +672,7 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
   for (const s of settle) (s.startsWith('TIMEOUT') ? fail : pass)(`settle: ${s}`)
 
   const chats = collectOutputChats()
+  checkComputerChats(chats, pass, fail)
 
   for (const f of [...walk(HOME)].sort()) {
     const rel = relative(HOME, f)

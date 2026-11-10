@@ -29,3 +29,13 @@ RUN pnpm install --offline --frozen-lockfile \
       --filter . --filter "@slayzone/app..." --filter "@slayzone/hub..." --filter "@slayzone/computer..."
 RUN pnpm --filter @slayzone/hub build && pnpm --filter @slayzone/computer build
 RUN node tools/migration-personas/harness/build.mjs
+
+# An in-place .deb upgrade: the new release's bundles sit where the old one installed
+# them. v0.38+ standalone computers record `/opt/SlayZone/resources/computer/bin.cjs` as
+# the release their launcher forks (computer-runtime/supervisor.json, host-release.json),
+# so today's code must answer at that path, as it would after `apt upgrade`.
+USER root
+RUN mkdir -p /opt/SlayZone/resources/computer /opt/SlayZone/resources/hub \
+    && ln -s /repo/packages/apps/computer/dist/bin.cjs /opt/SlayZone/resources/computer/bin.cjs \
+    && ln -s /repo/packages/apps/hub/dist/bin.cjs /opt/SlayZone/resources/hub/bin.cjs
+USER persona

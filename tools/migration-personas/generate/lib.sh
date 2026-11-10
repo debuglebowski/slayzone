@@ -52,11 +52,70 @@ mint() {
 start_computer() {
   mkdir -p "$1"
   tok=$(mint "$3" "$2")
-  echo "{\"computerName\":\"$2\",\"allowedRoots\":[\"$4\"]}" > "$1/computer.config.json"
+  # autoUpgrade: off — v0.38+ computers upgrade themselves (no network here anyway).
+  echo "{\"computerName\":\"$2\",\"allowedRoots\":[\"$4\"],\"autoUpgrade\":false}" > "$1/computer.config.json"
   log="/tmp/computer-$(basename "$1").log"
   ( cd "$1" && ELECTRON_RUN_AS_NODE=1 NODE_PATH=$NP SLAYZONE_ROOT="$1" SLAYZONE_NONINTERACTIVE=1 \
       SLAYZONE_HUB_ADDRESS="127.0.0.1:$3" SLAYZONE_HUB_JOIN_TOKEN="$tok" setsid $E $R/computer/bin.cjs > "$log" 2>&1 & )
-  wait_log "$log" "connected to hub"
+  wait_connected "$3" "$2"
+}
+
+# wait_connected <hub port> <computer name> — until the hub lists it as connected.
+# (v0.38+ computers log "connected" from a detached session host, not to our log.)
+wait_connected() {
+  i=0
+  while [ $i -lt 120 ]; do
+    computer_id "$1" "$2" >/dev/null 2>&1 && return 0
+    i=$((i + 1)); sleep 2
+  done
+  echo "TIMEOUT: computer $2 never connected to :$1" >&2; return 1
+}
+
+# top_level <pid...> — the pids among these whose parent is not a SlayZone process: a
+# computer is a TREE at v0.38 (launcher → supervisor → connectors + a detached session
+# host); signal only its root, which stops the rest in order. Signalling every process
+# at once leaves the session host hanging.
+top_level() {
+  for p in "$@"; do
+    pp=$(awk '{print $4}' /proc/$p/stat 2>/dev/null) || continue
+    case "$(tr '\0' ' ' < /proc/$pp/cmdline 2>/dev/null)" in /opt/SlayZone/slayzone*) ;; *) echo $p ;; esac
+  done
+}
+
+# alive <pid...> — succeeds while any of them runs (zombies count as gone).
+alive() {
+  for p in "$@"; do
+    st=$(awk '{print $3}' /proc/$p/stat 2>/dev/null) || continue
+    [ "$st" != Z ] && return 0
+  done
+  return 1
+}
+
+# stop_root <root> — gracefully stop the computer running with SLAYZONE_ROOT=<root>.
+stop_root() {
+  pids=$(for p in $(pgrep -f '^/opt/SlayZone/slayzone'); do
+    tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -qx "SLAYZONE_ROOT=$1" && echo $p; done)
+  [ -n "$pids" ] || return 0
+  kill -TERM $(top_level $pids)
+  i=0
+  while [ $i -lt 60 ]; do alive $pids || return 0; i=$((i + 1)); sleep 1; done
+  echo "STILL RUNNING: $1" >&2; return 1
+}
+
+# start_computer_two_hubs <root> <name> <primary port> <second port> <allowed root>
+# (v0.38+) ONE computer process on two hubs: enroll on the second hub first, stop, then
+# run with `hubUrls` naming both — the join token enrolls the primary hub, the stored
+# credential reconnects the second.
+start_computer_two_hubs() {
+  start_computer "$1" "$2" "$4" "$5"
+  stop_root "$1"
+  tok=$(mint "$3" "$2")
+  printf '{"computerName":"%s","allowedRoots":["%s"],"autoUpgrade":false,"hubUrl":"ws://127.0.0.1:%s/computers","hubUrls":["ws://127.0.0.1:%s/computers","ws://127.0.0.1:%s/computers"]}\n' \
+    "$2" "$5" "$3" "$3" "$4" > "$1/computer.config.json"
+  ( cd "$1" && ELECTRON_RUN_AS_NODE=1 NODE_PATH=$NP SLAYZONE_ROOT="$1" SLAYZONE_NONINTERACTIVE=1 \
+      SLAYZONE_HUB_JOIN_TOKEN="$tok" setsid $E $R/computer/bin.cjs > "/tmp/computer-$(basename "$1").log" 2>&1 & )
+  wait_connected "$3" "$2"
+  wait_connected "$4" "$2"
 }
 
 # git_repo <dir> — an initialized repo with one empty commit.

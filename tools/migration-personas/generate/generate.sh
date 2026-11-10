@@ -45,7 +45,7 @@ docker build --platform linux/amd64 -q -t "$IMAGE" "$CTX" >/dev/null
 
 C="slz-persona-gen-$P"
 docker rm -f "$C" >/dev/null 2>&1 || true
-docker run -d --name "$C" --network none --platform linux/amd64 --shm-size=1g "$IMAGE" sleep infinity >/dev/null
+docker run -d --name "$C" --hostname slz-desktop --network none --platform linux/amd64 --shm-size=1g "$IMAGE" sleep infinity >/dev/null
 cleanup() {
   rc=$?
   if [ $rc -ne 0 ]; then
