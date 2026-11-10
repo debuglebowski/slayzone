@@ -24,6 +24,7 @@ import { createSessionLedgerService } from './session-ledger-service'
 import type { ConversationHealIo } from './conversation-heal'
 import { sessionLedgerImports } from './session-ledger-imports'
 import { historyImports } from './history-imports'
+import { chatSettingsImport } from './chat-settings-import'
 import { createTaskPaths, taskPathImport } from './task-paths'
 import { createAgentTurns, type TurnGit } from './agent-turns'
 
@@ -101,7 +102,8 @@ export function createComputerChatRuntime(opts: {
     imports: opts.dataImports ?? {
       ...sessionLedgerImports,
       ...historyImports,
-      'task-path': taskPathImport
+      'task-path': taskPathImport,
+      'chat-settings': chatSettingsImport
     },
     providerConfig: local.providerConfig,
     taskPath: taskPaths.get

@@ -208,6 +208,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         task_id TEXT NOT NULL, mode TEXT NOT NULL, revision INTEGER NOT NULL,
         value TEXT NOT NULL, PRIMARY KEY(task_id,mode)
       );
+      -- A chat's settings handed off by the hub (chat-settings, hub v205) before this
+      -- computer had a configuration for the chat: the first read starts from them.
+      CREATE TABLE IF NOT EXISTS provider_config_seeds (
+        task_id TEXT NOT NULL, mode TEXT NOT NULL, value TEXT NOT NULL,
+        PRIMARY KEY(task_id,mode)
+      );
       CREATE TABLE IF NOT EXISTS storage_maintenance (id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS task_cleanup_pending (task_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS queue_message_identities (

@@ -205,7 +205,20 @@ export function createLocalChatData(
               Number(b.conversationId === owner(tabId).id) -
                 Number(a.conversationId === owner(tabId).id)
           )
-        const value = (candidates[0]?.value as ProviderConfigEntry | undefined) ?? {}
+        // Settings the hub handed off before this configuration existed (hub v205,
+        // chat-settings): the start, under anything this computer itself cached.
+        const seed = db
+          .prepare('SELECT value FROM provider_config_seeds WHERE task_id=? AND mode=?')
+          .get(taskId, mode) as { value: string } | undefined
+        const value: ProviderConfigEntry = {
+          ...(seed ? (JSON.parse(seed.value) as ProviderConfigEntry) : {}),
+          ...((candidates[0]?.value as ProviderConfigEntry | undefined) ?? {})
+        }
+        if (seed)
+          db.prepare('DELETE FROM provider_config_seeds WHERE task_id=? AND mode=?').run(
+            taskId,
+            mode
+          )
         db.prepare('INSERT INTO provider_configs VALUES(?,?,0,?)').run(
           taskId,
           mode,

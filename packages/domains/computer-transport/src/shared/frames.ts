@@ -1997,7 +1997,16 @@ export const procSpawnParamsSchema = z.object({
    * SIGKILL): a `pnpm dev` shell can exit leaving its real server running, holding
    * the port. Set by the process domain; never for an agent. Absent: left alone.
    */
-  reapGroupOnExit: z.boolean().optional()
+  reapGroupOnExit: z.boolean().optional(),
+  /**
+   * A GLOBAL background process (the process domain's row with no task and no
+   * project): the hub declares it, and the computer starts it as before §9 Phase 7c —
+   * its `cwd` judged by the machine bound, none = the first allowed root. Ignored
+   * when the spawn names a task or a project (those start inside that scope's own
+   * folders). Absent on a spawn naming neither: refused (an unscoped spawn is a bug,
+   * not a global process).
+   */
+  global: z.boolean().optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 

@@ -10,6 +10,7 @@ import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
+import { currentPathScope, runInPathScope, type WirePathScope } from '@slayzone/platform/path-scope'
 import { TypedEventEmitter } from '../shared/events'
 import {
   ComputerTransportErrorCodes,
@@ -42,6 +43,8 @@ interface RecordedCall {
   params: unknown
   /** The caller's per-request timeout, as passed (undefined = the rpc default). */
   timeoutMs?: number
+  /** The path scope the real gateway would stamp on this request's actor. */
+  scope?: WirePathScope
 }
 
 class FakeGateway implements RoutingGateway {
@@ -60,7 +63,8 @@ class FakeGateway implements RoutingGateway {
     params?: unknown,
     timeoutMs?: number
   ): Promise<T> {
-    this.calls.push({ computerId, method, params, timeoutMs })
+    const scope = currentPathScope()
+    this.calls.push({ computerId, method, params, timeoutMs, ...(scope ? { scope } : {}) })
     const handler = this.handlers.get(method)
     if (!handler) return Promise.resolve(undefined as T)
     try {
@@ -2111,6 +2115,23 @@ describe('createRoutingProcessBackend', () => {
     return { handle, exit: () => exit, spawnId }
   }
 
+  // B1: a background process with no task and no project is declared global, so the
+  // computer starts it as before §9 Phase 7c instead of refusing an unscoped spawn.
+  it('marks a process with no task and no project as global, and only that one', () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec({ id: 'global-1', taskId: null, projectId: null }))
+    backend.spawn(procSpec({ id: 'task-1', projectId: null }))
+    backend.spawn(procSpec({ id: 'project-1', taskId: null }))
+    expect(
+      gateway.requestsOf('proc.spawn').map((c) => (c.params as { global?: boolean }).global)
+    ).toEqual([true, undefined, undefined])
+  })
+
   it('sends proc.spawn with an idempotency key and no request timeout', () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
@@ -2156,6 +2177,22 @@ describe('createRoutingProcessBackend', () => {
     const spawns = gateway.requestsOf('proc.spawn')
     expect(spawns).toHaveLength(2)
     expect((spawns[1]!.params as { spawnId: string }).spawnId).toBe(spawnId)
+  })
+
+  // B1: the hub scopes a task's process to the task's project (the computer does not
+  // know task → project for a task with no worktree). The scope is the spawn's, not
+  // the moment's: a re-send after a lost reply (outside any request) carries it too.
+  it('a proc.spawn carries the path scope it was started in, on its re-send as well', async () => {
+    const gateway = new FakeGateway()
+    const scope: WirePathScope = { kind: 'task', taskId: 'task-1', projectId: 'proj-1' }
+    const { handle } = runInPathScope(scope, () => spawnProcInFlight(gateway))
+    gateway.onMethod('proc.list', () => ({ sessions: [], exited: [] }))
+    gateway.onMethod('proc.spawn', () => ({ pid: 81 }))
+
+    connectProc(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(handle.pid).toBe(81))
+    expect(gateway.requestsOf('proc.spawn').map((c) => c.scope)).toEqual([scope, scope])
   })
 
   it('a process that exited while detached reports its real exit', async () => {

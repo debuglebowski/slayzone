@@ -16,7 +16,8 @@ import {
   killPty,
   setDatabase,
   setConversationResolver,
-  setReinstallHooks
+  setReinstallHooks,
+  SessionLedgerUnreadableError
 } from './pty-manager'
 import { setPtyBackend, type PtyBackend } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
@@ -522,5 +523,40 @@ test('a tab whose session is LIVE in another tab is refused, naming that tab —
   // Nothing was started in the refused tab: no fresh session, no resume.
   expect(second.written.join('')).toBe('')
   killPty(holder)
+  setConversationResolver(null)
+})
+
+// S2: the session ledger is on the agent's computer. A read that fails there (the
+// computer restarting, a timeout) is NOT "no session": minting a fresh session would
+// silently shadow the real one. The start is refused, naming why, and nothing runs.
+test('a session-ledger read that fails refuses the start visibly — never a fresh mint', async () => {
+  let asked = 0
+  setConversationResolver(async () => {
+    asked++
+    throw new SessionLedgerUnreadableError(new Error('computer restarting'))
+  })
+  const fake = makeFakePty()
+  installAdoptBackend(fake)
+  const sid = 'ledger-down:ledger-down'
+  const result = await createPty({
+    win: fakeWin,
+    sessionId: sid,
+    cwd: '/tmp',
+    mode: 'claude-code',
+    type: 'claude-code',
+    existingConversationId: undefined,
+    conversationId: undefined,
+    initialCommand: 'claude --session-id {id} {flags}',
+    resumeCommand: 'claude --resume {id} {flags}',
+    defaultFlags: '--allow-dangerously-skip-permissions',
+    adoptPty: { warmId: 'warm-ledger', computerId: 'computer-1' }
+  })
+  expect(result.success).toBe(false)
+  expect(result.code).toBe('session-ledger-unreadable')
+  expect(result.error).toMatch(/session history/)
+  // Retried (a transient failure may clear), then refused: nothing was started.
+  expect(asked).toBe(3)
+  expect(fake.written.join('')).not.toContain('--session-id')
+  killPty(sid)
   setConversationResolver(null)
 })

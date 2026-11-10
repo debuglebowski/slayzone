@@ -50,7 +50,7 @@ async function fixture() {
       log: () => {}
     }
   } as never)
-  const state = { live: false, failVerify: false }
+  const state = { live: false, failVerify: false, log: [] as string[] }
   const services = createComputerChatServices({
     db: h.slayDb,
     legacyData: {
@@ -59,13 +59,17 @@ async function fixture() {
     },
     attachments: { read: async () => new Uint8Array() },
     request: async (_id: string, raw: unknown) => {
+      state.log.push(`request:${(raw as { kind?: string }).kind}`)
       if (state.failVerify && (raw as { kind?: string }).kind === 'migration.verify')
         throw new Error('verify interrupted')
       return pc.request(JSON.parse(JSON.stringify(raw)))
     },
     resolveComputer: async () => 'pc',
     defaultComputer: async () => 'pc',
-    hasLiveTask: async () => state.live
+    hasLiveTask: async () => state.live,
+    flushTask: async (taskId: string, computerId: string) => {
+      state.log.push(`flush:${taskId}:${computerId}`)
+    }
   } as never)
   // The task's session (its ledger is on the computer, robustness plan §9).
   const ledger = createComputerSessionLedger({
@@ -203,6 +207,30 @@ test('a later deferred conversation never blocks the prompts on the computer', a
     })
     f.state.live = true
     await expectHistory(f)
+  } finally {
+    await f.close()
+  }
+})
+
+// S1: a relayed prompt read hands the computer what the hub still holds of the task
+// first — as the direct link's task grant does — so a read right after boot never
+// misses rows still staged on the hub.
+test("prompt reads through the relay deliver the task's staged data first", async () => {
+  const f = await fixture()
+  try {
+    for (const read of [
+      () => f.services.prompts('task', 'claude-code'),
+      () => f.services.promptSummaries('task', ['sess-1'])
+    ]) {
+      f.state.log.length = 0
+      await read()
+      const flush = f.state.log.indexOf('flush:task:pc')
+      const firstRead = f.state.log.findIndex(
+        (l) => l === 'request:prompts' || l === 'request:prompt.summaries'
+      )
+      expect(flush).toBeGreaterThanOrEqual(0)
+      expect(firstRead).toBeGreaterThan(flush)
+    }
   } finally {
     await f.close()
   }

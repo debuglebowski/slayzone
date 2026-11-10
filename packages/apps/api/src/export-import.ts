@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { getProjectFolderHost, parseProject, projectFolders } from '@slayzone/projects/server'
+import { notifyTaskPaths, readTaskPaths } from '@slayzone/task/server'
 import {
   isMachineLocalSetting,
   SettingsService,
@@ -100,10 +101,20 @@ async function withFolders(db: SlayzoneDb, projects: Row[]): Promise<Row[]> {
 }
 
 /**
- * A task row as exported: without its computer paths (worktree, custom folder) — they
- * live on a computer of this hub and mean nothing elsewhere (§9 Phase 7d).
+ * A task row as exported: without its worktree (a checkout of one machine; it never
+ * travelled) or where its folders were (§9 Phase 7d). Its custom folder (`base_dir`)
+ * travels as before 7d: read from the computer holding it — the hub keeps no copy —
+ * and handed to the importer's computer on import. A task whose computer cannot
+ * answer now is exported without it (said in the log: there is no other copy).
  */
-function exportedTasks(rows: Row[]): Row[] {
+async function exportedTasks(rows: Row[]): Promise<Row[]> {
+  const withBaseDir = rows.filter((r) => r.has_base_dir === 1).map((r) => String(r.id))
+  const paths = withBaseDir.length ? await readTaskPaths(withBaseDir) : {}
+  const unread = withBaseDir.filter((id) => paths[id]?.state !== 'ok')
+  if (unread.length)
+    console.warn(
+      `[export] custom folder of ${unread.length} task(s) not exported: their computer is not connected`
+    )
   return rows.map(
     ({
       worktree_path: _w,
@@ -112,7 +123,11 @@ function exportedTasks(rows: Row[]): Row[] {
       has_base_dir: _hb,
       worktree_computer_id: _wc,
       ...row
-    }) => row
+    }) => {
+      const state = paths[String(row.id)]
+      const baseDir = state?.state === 'ok' ? state.baseDir : null
+      return baseDir ? { ...row, base_dir: baseDir } : row
+    }
   )
 }
 
@@ -120,7 +135,7 @@ function exportedTasks(rows: Row[]): Row[] {
 async function wholeDatabase(db: SlayzoneDb): Promise<SlayExportData> {
   return {
     projects: await withFolders(db, (await db.all('SELECT * FROM projects')) as Row[]),
-    tasks: exportedTasks((await db.all('SELECT * FROM tasks')) as Row[]),
+    tasks: await exportedTasks((await db.all('SELECT * FROM tasks')) as Row[]),
     tags: (await db.all('SELECT * FROM tags')) as Row[],
     task_tags: (await db.all('SELECT * FROM task_tags')) as Row[],
     task_dependencies: (await db.all('SELECT * FROM task_dependencies')) as Row[],
@@ -165,7 +180,7 @@ async function ownRows(
     : []
   return {
     projects: await withFolders(db, await all(`SELECT * FROM projects WHERE id IN ${inProjects}`)),
-    tasks: exportedTasks(await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`)),
+    tasks: await exportedTasks(await all(`SELECT * FROM tasks WHERE project_id IN ${inProjects}`)),
     tags: await all(`SELECT * FROM tags WHERE project_id IN ${inProjects}`),
     task_tags: await all(
       `SELECT * FROM task_tags WHERE task_id IN (${ownTasks}) AND tag_id IN (${ownTags})`,
@@ -195,7 +210,7 @@ async function exportProject(db: SlayzoneDb, projectId: string): Promise<SlayExp
   if (!row) throw new Error(`Project ${projectId} not found`)
   const [project] = await withFolders(db, [row])
 
-  const tasks = exportedTasks(
+  const tasks = await exportedTasks(
     (await db.all('SELECT * FROM tasks WHERE project_id = ?', [projectId])) as Row[]
   )
   const taskIds = tasks.map((t) => t.id as string)
@@ -284,7 +299,12 @@ async function importBundle(
     projectIds: await caller.scope.accessibleProjectIds()
   } satisfies ImportTxnParams)
   await placeImportedFolders(db, result.importedProjects ?? [])
-  return result
+  // Custom folders go to the computer that will hold the imported tasks' folders
+  // (staged until one connects), like any other write of a task's base dir.
+  const { importedBaseDirs, ...reply } = result
+  for (const { taskId, baseDir } of importedBaseDirs ?? [])
+    await notifyTaskPaths(taskId, { op: 'set', baseDir })
+  return reply
 }
 
 /**

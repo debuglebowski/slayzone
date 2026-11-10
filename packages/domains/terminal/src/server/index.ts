@@ -194,6 +194,7 @@ export {
   type ConversationHealer,
   type ConversationHealRequest,
   setConversationResolver,
+  SessionLedgerUnreadableError,
   type ConversationResolver,
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/computer wave inject a non-DB-backed ledger from the composition root.

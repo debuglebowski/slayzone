@@ -40,6 +40,7 @@ export {
 } from './session-ledger-service'
 export { sessionLedgerImports } from './session-ledger-imports'
 export { historyImports } from './history-imports'
+export { chatSettingsImport } from './chat-settings-import'
 export {
   createTaskPaths,
   scopeBounds,

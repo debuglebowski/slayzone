@@ -124,6 +124,12 @@ export function createComputerChatServices(opts: {
   chatRuntimeReady?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
+  /**
+   * Deliver to `computerId` whatever the hub still holds of the task (the computer
+   * data handoff) before a relayed history read there — as the direct link's task
+   * grant does — so a read right after boot never misses rows still staged here.
+   */
+  flushTask?(taskId: string, computerId: string): Promise<void>
   admitComputer?(computerId: string): Promise<void>
   retentionDays?: number
   /** A reserved provider switch was superseded: record a diagnostics event. */
@@ -564,6 +570,7 @@ export function createComputerChatServices(opts: {
   async function historyRequest(computerId: string, taskId: string, value: unknown) {
     try {
       await opts.gate?.(computerId, taskId)
+      await opts.flushTask?.(taskId, computerId)
       return await request(computerId, value)
     } catch (error) {
       if (isComputerUnreachable(error)) throw new AgentHistoryOfflineError()

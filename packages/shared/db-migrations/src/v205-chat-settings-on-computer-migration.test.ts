@@ -83,3 +83,52 @@ test('drops the hub copy of chat settings for computer-owned chats only', () => 
     db.close()
   }
 })
+
+// S6: a computer-owned chat's settings could exist ONLY on the hub (the prod copy had
+// a chat whose computer held no provider config: its auto-accept mode was lost). The
+// hub copy still goes, but first it is staged for that chat's computer, which fills
+// only the settings it does not have (its own values are newer).
+test('stages the stripped chat settings for the computer before dropping them', () => {
+  const db = new Database(':memory:')
+  try {
+    runRange(db, 0, 204)
+    db.exec(`INSERT INTO projects (id, name, color) VALUES ('p', 'P', '#000');`)
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, provider_config) VALUES (?, ?, ?, ?)'
+    ).run(
+      'owned',
+      'p',
+      'Owned',
+      JSON.stringify({
+        'claude-chat': { chatMode: 'auto-accept', chatConversationId: 'C', flags: '--f' }
+      })
+    )
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, provider_config) VALUES (?, ?, ?, ?)'
+    ).run('flags-only', 'p', 'Flags', JSON.stringify({ 'claude-chat': { flags: '--f' } }))
+    const owner = db.prepare(
+      'INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state) VALUES (?, ?, ?, ?, ?, 1, ?)'
+    )
+    owner.run('o1', 'owned', 'owned', 'claude-chat', 'pc', 'active')
+    owner.run('o2', 'flags-only', 'flags-only', 'claude-chat', 'pc', 'active')
+
+    runRange(db, 204, 205)
+
+    const staged = db
+      .prepare(
+        'SELECT kind, item_key, task_id, payload FROM computer_data_handoff ORDER BY item_key'
+      )
+      .all() as Array<{ kind: string; item_key: string; task_id: string; payload: string }>
+    // The settings only (a session id is the computer's ledger; flags stay on the hub).
+    expect(staged.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))).toEqual([
+      {
+        kind: 'chat-settings',
+        item_key: 'owned:claude-chat',
+        task_id: 'owned',
+        payload: { mode: 'claude-chat', settings: { chatMode: 'auto-accept' } }
+      }
+    ])
+  } finally {
+    db.close()
+  }
+})

@@ -179,6 +179,8 @@ run_harness packages/apps/hub/src/erasure-fanout.test.ts
 run_harness packages/apps/hub/src/computer-data-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-paths.test.ts
 run_harness packages/apps/hub/src/computer-task-data.test.ts
+# Calls needing a computer wait for the local computer to enroll after boot (never the hub disk).
+run_harness packages/apps/hub/src/local-computer-boot-gate.test.ts
 # §9 Phase 8: the hub boot drops the legacy chat tables once every chat migrated; a
 # failed drop is a Needs-attention fault, never a failed boot.
 run_harness packages/apps/hub/src/legacy-chat-tables-boot.test.ts
@@ -545,6 +547,7 @@ run_harness packages/shared/db-migrations/src/v208-drop-provider-bindings-queue-
 run_harness packages/shared/db-migrations/src/v209-usage-cursors-to-computer-migration.test.ts
 run_harness packages/shared/db-migrations/src/v210-task-paths-to-computer-migration.test.ts
 run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration.test.ts
+run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
 # Quit drains diagnostics (flush THEN close) inside a deadline.
 run_harness packages/apps/app/src/main/lifecycle/quit-diagnostics.test.ts
@@ -860,6 +863,8 @@ run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
 run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
 run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
 run_harness packages/domains/chat-runtime/src/server/task-paths.test.ts
+# Hub hand-off kinds on the computer: task-conversation, legacy-conversation-history, chat-settings (S6).
+run_harness packages/domains/chat-runtime/src/server/handoff-imports.test.ts
 run_harness packages/domains/chat-runtime/src/server/usage-cursors.test.ts
 run_harness packages/domains/chat-runtime/src/server/conversation-heal.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-consistency-handoff.test.ts

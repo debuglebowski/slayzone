@@ -15,6 +15,7 @@ import { createTestHarness } from '../../../shared/test-utils/ipc-harness.js'
 import { createAccessScope } from './access'
 import { getAppDeps, setAppDeps, setNotifyEvents, type NotifyEventMap } from './app-deps'
 import { buildExportImportOps } from './export-import'
+import { getTaskPathsDelegate, setTaskPathsDelegate } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 const dir = mkdtempSync(join(tmpdir(), 'export-machine-local-'))
@@ -86,7 +87,133 @@ test('R3-2: an import ignores the machine-local key from an older bundle', async
   expect(value('r32_other_setting')).toBe('kept')
 })
 
-test('§9 7d: an export carries no computer path of a task (worktree, custom folder)', async () => {
+// S3: a task's custom folder (base_dir) survived an export → import before §9 7d; it
+// lives on the task's computer now, so the export reads it there and the import hands
+// it to the importer's computer (staged when none is connected). The worktree never
+// travelled (it is a checkout of this machine) and still does not.
+test('S3: a custom folder round-trips export → import through the computers', async () => {
+  const projectId = crypto.randomUUID()
+  const taskId = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+    .run(projectId, 'PS3', '#000')
+  h.db
+    .prepare(
+      'INSERT INTO tasks (id, project_id, title, has_worktree, has_base_dir) VALUES (?, ?, ?, 1, 1)'
+    )
+    .run(taskId, projectId, 'Custom folder task')
+  const changed: Array<{ taskId: string; change: unknown }> = []
+  const previous = getTaskPathsDelegate()
+  setTaskPathsDelegate({
+    read: async (ids) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          id === taskId
+            ? { state: 'ok', worktreePath: '/wt/s3', baseDir: '/Users/me/custom' }
+            : { state: 'ok', worktreePath: null, baseDir: null }
+        ])
+      ),
+    changed: async (id, change) => {
+      changed.push({ taskId: id, change })
+    },
+    release: async () => {
+      throw new Error('unused')
+    },
+    apply: async () => undefined,
+    forget: async () => undefined
+  })
+  try {
+    const file = join(dir, 's3.slay')
+    expect((await ops.testExportAllToPath!(file)).success).toBe(true)
+    const exported = (
+      JSON.parse(readFileSync(file, 'utf8')) as { data: { tasks: Record<string, unknown>[] } }
+    ).data.tasks.find((t) => t.id === taskId)
+    expect(exported).toMatchObject({ base_dir: '/Users/me/custom' })
+    expect(exported).not.toHaveProperty('worktree_path')
+
+    {
+      changed.length = 0
+      const result = await ops.testImportFromPath!(file)
+      expect(result.success, String(result.error)).toBe(true)
+      const imported = h.db
+        .prepare(
+          "SELECT id, has_base_dir, has_worktree FROM tasks WHERE title = 'Custom folder task' AND id != ?"
+        )
+        .all(taskId) as Array<{ id: string; has_base_dir: number; has_worktree: number }>
+      const fresh = imported.at(-1)!
+      expect(fresh).toMatchObject({ has_base_dir: 1, has_worktree: 0 })
+      expect(changed).toContainEqual({
+        taskId: fresh.id,
+        change: { op: 'set', baseDir: '/Users/me/custom' }
+      })
+    }
+  } finally {
+    setTaskPathsDelegate(previous)
+  }
+})
+
+test('S3: an older bundle naming base_dir as a column restores it on import', async () => {
+  const changed: Array<{ taskId: string; change: unknown }> = []
+  const previous = getTaskPathsDelegate()
+  setTaskPathsDelegate({
+    read: async () => ({}),
+    changed: async (id, change) => {
+      changed.push({ taskId: id, change })
+    },
+    release: async () => {
+      throw new Error('unused')
+    },
+    apply: async () => undefined,
+    forget: async () => undefined
+  })
+  try {
+    const file = join(dir, 'old-base-dir.slay')
+    const oldProject = crypto.randomUUID()
+    writeFileSync(
+      file,
+      JSON.stringify({
+        meta: { version: 1, scope: 'all' },
+        data: {
+          projects: [{ id: oldProject, name: 'Old S3', color: '#000' }],
+          tasks: [
+            {
+              id: crypto.randomUUID(),
+              project_id: oldProject,
+              title: 'Old custom folder task',
+              provider_config: '{}',
+              base_dir: '/Users/me/old-custom',
+              worktree_path: '/wt/old'
+            }
+          ],
+          tags: [],
+          task_tags: [],
+          task_dependencies: [],
+          terminal_tabs: [],
+          ai_config_items: [],
+          ai_config_project_selections: [],
+          ai_config_sources: [],
+          settings: []
+        }
+      })
+    )
+    const result = await ops.testImportFromPath!(file)
+    expect(result.success, String(result.error)).toBe(true)
+    const row = h.db
+      .prepare(
+        "SELECT id, has_base_dir, has_worktree FROM tasks WHERE title = 'Old custom folder task'"
+      )
+      .get() as { id: string; has_base_dir: number; has_worktree: number }
+    expect(row).toMatchObject({ has_base_dir: 1, has_worktree: 0 })
+    expect(changed).toEqual([
+      { taskId: row.id, change: { op: 'set', baseDir: '/Users/me/old-custom' } }
+    ])
+  } finally {
+    setTaskPathsDelegate(previous)
+  }
+})
+
+test('§9 7d: an export carries no worktree, and no custom folder its computer cannot answer for', async () => {
   const projectId = crypto.randomUUID()
   h.db
     .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')

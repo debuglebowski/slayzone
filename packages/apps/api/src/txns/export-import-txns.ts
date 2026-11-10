@@ -46,6 +46,8 @@ export interface ImportTxnResult {
   projectCount?: number
   taskCount?: number
   importedProjects?: Array<{ id: string; name: string }>
+  /** Imported tasks' custom folders, for the caller to hand to their computer (§9 7e). */
+  importedBaseDirs?: Array<{ taskId: string; baseDir: string }>
   error?: string
 }
 
@@ -222,13 +224,17 @@ function importBundle(
   }
 
   // Clean non-portable task fields
+  const importedBaseDirs: Array<{ taskId: string; baseDir: string }> = []
   for (const t of data.tasks) {
     t.computer_id = null
-    // Computer paths (worktree, custom folder) never travel (§9 Phase 7d/7e): they live
-    // on a computer of the exporting hub (an older bundle may still name them; their
-    // columns are gone and are dropped below). Neither does where they were.
+    // A worktree never travels (a checkout of the exporting machine), nor where the
+    // task's folders were. A custom folder does (as before §9 7d): the hub records it
+    // is set, and the caller hands it to the importer's computer (the column is gone,
+    // dropped below; an older bundle names it the same way).
+    const baseDir = typeof t.base_dir === 'string' && t.base_dir ? t.base_dir : null
+    if (baseDir) importedBaseDirs.push({ taskId: remap.get(t.id as string)!, baseDir })
     t.has_worktree = 0
-    t.has_base_dir = 0
+    t.has_base_dir = baseDir ? 1 : 0
     t.worktree_computer_id = null
     t.worktree_parent_branch = null
     t.merge_state = null
@@ -311,7 +317,11 @@ function importBundle(
     success: true,
     projectCount: data.projects.length,
     taskCount: data.tasks.length,
-    importedProjects
+    importedProjects,
+    // Only tasks actually inserted (a row whose required link is gone is skipped).
+    importedBaseDirs: importedBaseDirs.filter(
+      ({ taskId }) => db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId) !== undefined
+    )
   }
 }
 

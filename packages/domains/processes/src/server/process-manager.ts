@@ -7,6 +7,7 @@ import type { ProcHandle } from './process-backend'
 import { extractOscTitle } from '@slayzone/terminal-contracts'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { runInPathScope, type WirePathScope } from '@slayzone/platform/path-scope'
 import {
   assertHubProcessesEnabled,
   hubProcessesEnabled,
@@ -57,6 +58,24 @@ export function setProcessComputerResolver(resolver: ProcessComputerResolver | n
     persistence = p
     void loadRows(p)
   }
+}
+
+/**
+ * The path scope a spawn runs in on its computer (platform/path-scope): the task —
+ * with the project the HUB records for it — else the project. Asked before EVERY
+ * spawn. The computer confines the process's cwd to that scope's folders, and it no
+ * longer knows task → project for a task with no worktree, so a task process whose
+ * row carries no project id (the Processes dialog's "Task" scope) needs the hub to
+ * name it. `null` (a global process, a task the hub no longer has, or unset): the
+ * spawn carries no scope and the computer judges it by its own rules.
+ */
+export type ProcessPathScopeResolver = (proc: {
+  taskId: string | null
+  projectId: string | null
+}) => Promise<WirePathScope | null>
+let pathScopeResolver: ProcessPathScopeResolver | null = null
+export function setProcessPathScopeResolver(fn: ProcessPathScopeResolver | null): void {
+  pathScopeResolver = fn
 }
 
 /**
@@ -336,16 +355,25 @@ async function doSpawn(proc: ManagedProcess, generation = proc.generation): Prom
     // Superseded (or removed) while the computer was being prepared.
     if (isShuttingDown || !processes.has(proc.id) || proc.generation !== generation) return
   }
+  const resolveScope = pathScopeResolver
+  const scope = resolveScope
+    ? await Promise.resolve()
+        .then(() => resolveScope({ taskId: proc.taskId, projectId: proc.projectId }))
+        .catch(() => null)
+    : null
+  if (isShuttingDown || !processes.has(proc.id) || proc.generation !== generation) return
   proc.spawnedAt = new Date().toISOString()
   startStatsPolling()
-  const handle = getProcessBackend().spawn({
+  const spec = {
     id: proc.id,
     taskId: proc.taskId,
     projectId: proc.projectId,
     computerId,
     command: proc.command,
     cwd
-  })
+  }
+  const backend = getProcessBackend()
+  const handle = scope ? runInPathScope(scope, () => backend.spawn(spec)) : backend.spawn(spec)
 
   proc.handle = handle
   proc.awaitingComputer = false

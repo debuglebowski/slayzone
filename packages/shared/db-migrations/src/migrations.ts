@@ -5199,8 +5199,37 @@ export const migrations: Migration[] = [
       const strip = db.prepare(
         `UPDATE tasks SET provider_config=json_remove(provider_config,${keys.map(() => '?').join(',')}) WHERE id=?`
       )
-      for (const { taskId, mode } of owned)
+      // The computer may not hold them all (seen on a production copy: an active
+      // chat whose computer had no configuration — its auto-accept mode was lost).
+      // The settings are staged for the task's computer first (computer_data_handoff,
+      // v204), which fills only what it lacks: its own values are newer. The session
+      // id is not: the session ledger is the computer's.
+      const settingKeys = keys.filter((key) => key !== 'chatConversationId')
+      const read = db.prepare(
+        `SELECT ${settingKeys.map((key) => `json_extract(provider_config,?) AS ${key}`).join(',')}
+           FROM tasks WHERE id=? AND NOT EXISTS
+             (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)`
+      )
+      const stage = db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         VALUES ('chat-settings', ?, ?, ?, ?)`
+      )
+      const now = Date.now()
+      for (const { taskId, mode } of owned) {
+        const row = read.get(
+          ...settingKeys.map((key) => `$.${JSON.stringify(mode)}.${key}`),
+          taskId
+        ) as Record<string, unknown> | undefined
+        const settings = Object.fromEntries(
+          Object.entries(row ?? {}).filter(([, value]) => value !== null && value !== undefined)
+        )
+        // json_extract answers a JSON boolean as 0/1: keep the setting's type.
+        if (typeof settings.chatFastMode === 'number')
+          settings.chatFastMode = settings.chatFastMode === 1
+        if (Object.keys(settings).length)
+          stage.run(`${taskId}:${mode}`, taskId, JSON.stringify({ mode, settings }), now)
         strip.run(...keys.map((key) => `$.${JSON.stringify(mode)}.${key}`), taskId)
+      }
     }
   },
   {
@@ -5483,6 +5512,30 @@ export const migrations: Migration[] = [
         WHERE NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id);
         ALTER TABLE tasks DROP COLUMN worktree_path;
         ALTER TABLE tasks DROP COLUMN base_dir;`)
+    }
+  },
+  {
+    version: 212,
+    up: (db) => {
+      // A project's legacy folder reaches every computer its work was bound to.
+      // v176 (shipped, so it stays as it is) handed each `projects.path` to the LOCAL
+      // computer only. But before folders were per computer, that one path served
+      // whichever computer ran the work: the project's default computer and every
+      // computer a task was pinned to lost it, and on a standalone hub — which has no
+      // local computer — the project had a folder nowhere. Found by the migration
+      // persona suite (tools/migration-personas, p02-v0362-multi).
+      // Staged `pending` like v176's rows, so the hub delivers (and the computer checks)
+      // each one on connect. A folder a computer already holds is left as it is.
+      db.prepare(
+        `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+           SELECT DISTINCT b.computer_id, p.id, p.path, 'pending', ?
+             FROM projects p
+             JOIN (SELECT id AS project_id, default_computer_id AS computer_id FROM projects
+                   UNION
+                   SELECT project_id, computer_id FROM tasks) b ON b.project_id = p.id
+            WHERE p.path IS NOT NULL AND p.path <> '' AND b.computer_id IS NOT NULL
+         ON CONFLICT(computer_id, project_id) DO NOTHING`
+      ).run(Date.now())
     }
   }
 ]

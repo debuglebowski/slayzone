@@ -17,6 +17,7 @@ import {
   removeProcess,
   restartProcess,
   setProcessComputerResolver,
+  setProcessPathScopeResolver,
   setProcessSpawnPreparer,
   setProcessWrittenListener,
   spawnProcess,
@@ -29,6 +30,7 @@ import {
   type ProcSpawnSpec
 } from './process-backend'
 import type { ProcessPersistence } from './process-persistence'
+import { currentPathScope, type WirePathScope } from '@slayzone/platform/path-scope'
 
 const events: string[] = []
 let removeDelayMs = 0
@@ -44,9 +46,11 @@ const persistence = {
 await initProcessManagerWith(persistence)
 
 const specs: ProcSpawnSpec[] = []
+const scopes: Array<WirePathScope | undefined> = []
 setProcessBackend({
   spawn: (spec: ProcSpawnSpec): ProcHandle => {
     specs.push(spec)
+    scopes.push(currentPathScope())
     events.push(`spawn:${spec.cwd}`)
     return {
       pid: undefined,
@@ -64,6 +68,7 @@ const status = (id: string) => listAllProcesses().find((p) => p.id === id)
 
 afterEach(() => {
   setProcessComputerResolver(null)
+  setProcessPathScopeResolver(null)
   setProcessSpawnPreparer(null)
   setProcessWrittenListener(null)
   events.length = 0
@@ -143,5 +148,36 @@ describe('the written listener', () => {
     await sleep(50)
     // (An earlier test's removal may land here too; only this row's order matters.)
     expect(events.slice(events.indexOf(`deleted:${id}`))).toEqual([`deleted:${id}`, 'written'])
+  })
+})
+
+// B1: a task's process row may carry no project id (the Processes dialog's "Task"
+// scope). The computer no longer knows task → project for a task with no worktree,
+// so the hub names the scope — the task with ITS project — on every spawn; a global
+// process (no task, no project) is sent with none.
+describe('the path scope resolver', () => {
+  test('every spawn reaches the backend inside the scope the hub resolved for the row', async () => {
+    setProcessComputerResolver(async () => 'computer-1')
+    const asked: Array<{ taskId: string | null; projectId: string | null }> = []
+    setProcessPathScopeResolver(async (target) => {
+      asked.push(target)
+      return target.taskId
+        ? { kind: 'task', taskId: target.taskId, projectId: 'project-of-task' }
+        : null
+    })
+    scopes.length = 0
+    const taskProc = await spawnProcess(null, 'task-1', 'svc', 'run', '/opt/t', false)
+    await spawnProcess(null, null, 'global', 'run', '/opt/g', false)
+    await restartProcess(taskProc)
+    expect(asked).toEqual([
+      { taskId: 'task-1', projectId: null },
+      { taskId: null, projectId: null },
+      { taskId: 'task-1', projectId: null }
+    ])
+    expect(scopes).toEqual([
+      { kind: 'task', taskId: 'task-1', projectId: 'project-of-task' },
+      undefined,
+      { kind: 'task', taskId: 'task-1', projectId: 'project-of-task' }
+    ])
   })
 })

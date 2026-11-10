@@ -7,7 +7,7 @@
  * rejection from a timer.
  */
 import { spawn as spawnChild } from 'node:child_process'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   initProcessManagerWith,
   processEvents,
@@ -183,7 +183,11 @@ describe("a routed process's own refusal reaches its log", () => {
 
 describe("a routed process's pid is the computer's", () => {
   /** A handle whose process starts on a computer: its pid arrives with the spawn reply. */
-  function routedBackend(kills: string[]): { confirm(pid: number): void } {
+  function routedBackend(kills: string[]): {
+    confirm(pid: number): void
+    /** Resolves once the manager's spawn reached this backend (it awaits its resolvers first). */
+    reached(): Promise<void>
+  } {
     const spawned: Array<(e: { pid: number }) => void> = []
     let pid: number | undefined
     setProcessBackend({
@@ -208,7 +212,8 @@ describe("a routed process's pid is the computer's", () => {
       confirm(p) {
         pid = p
         for (const cb of spawned) cb({ pid: p })
-      }
+      },
+      reached: () => vi.waitFor(() => expect(spawned.length).toBeGreaterThan(0))
     }
   }
 
@@ -234,6 +239,7 @@ describe("a routed process's pid is the computer's", () => {
     const pending = spawnProcess('proj-1', 'task-z', 'dev', 'pnpm dev', '/w', false)
     // The computer's pid number may name ANY process here: a live local group leader.
     const bystander = spawnChild('sleep', ['30'], { detached: true, stdio: 'ignore' })
+    await backend.reached()
     backend.confirm(bystander.pid as number)
     const id = await pending
     const localKill = process.kill

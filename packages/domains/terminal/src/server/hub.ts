@@ -88,6 +88,7 @@ export {
   onTaskReachedTerminal as runtimeOnTaskReachedTerminal,
   setConversationHealer,
   setConversationResolver,
+  SessionLedgerUnreadableError,
   setIdleCloseConfigGetter,
   setAgentStateTabRecorder as setPtyAgentStateTabRecorder,
   setPtyEnricher,

@@ -108,6 +108,7 @@ export {
   setTaskPathsDelegate,
   getTaskPathsDelegate,
   notifyTaskPaths,
+  readTaskPaths,
   type TaskPathsDelegate,
   type TaskPathChange,
   type TaskPathRelease,

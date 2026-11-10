@@ -4,27 +4,40 @@
  * still names is judged against that task's own folders, never another task's.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createChatRuntimeHandlers } from './chat-runtime'
 import { projectScopedDeps } from '../project-scope.fixture'
 
 let root: string
+let template: string
 const closers: Array<() => Promise<void>> = []
 
-function repo(dir: string): string {
-  mkdirSync(dir, { recursive: true })
+/**
+ * One committed repo, built once per file: each test copies it. Building it per
+ * test was five serial `git` processes per repo (two repos a test) — under a loaded
+ * machine that setup alone outran the test timeout, though the code under test (a
+ * turn snapshot) runs only a few git commands of its own.
+ */
+beforeAll(() => {
+  template = realpathSync(mkdtempSync(join(tmpdir(), 'turn-checkout-template-')))
   for (const args of [
     ['init', '-q', '-b', 'main'],
     ['config', 'user.email', 't@t'],
     ['config', 'user.name', 't']
   ])
-    spawnSync('git', args, { cwd: dir })
-  writeFileSync(join(dir, 'seed.txt'), 'x')
-  spawnSync('git', ['add', '.'], { cwd: dir })
-  spawnSync('git', ['commit', '-qm', 'init'], { cwd: dir })
+    spawnSync('git', args, { cwd: template })
+  writeFileSync(join(template, 'seed.txt'), 'x')
+  spawnSync('git', ['add', '.'], { cwd: template })
+  spawnSync('git', ['commit', '-qm', 'init'], { cwd: template })
+})
+afterAll(() => rmSync(template, { recursive: true, force: true }))
+
+function repo(dir: string): string {
+  mkdirSync(dir, { recursive: true })
+  cpSync(template, dir, { recursive: true })
   return dir
 }
 

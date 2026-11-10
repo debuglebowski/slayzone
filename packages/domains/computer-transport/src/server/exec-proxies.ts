@@ -115,6 +115,7 @@ import {
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
 import { ComputerUpdatePendingError, type HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
@@ -2306,7 +2307,11 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           env: spec.env,
           // A background process's computer sweeps its group when it exits on
           // its own (the hub used to, against its own pids).
-          reapGroupOnExit: true
+          reapGroupOnExit: true,
+          // No task, no project: a GLOBAL process, declared so — the computer
+          // starts it in the machine bound as before §9 Phase 7c, where it refuses
+          // any other spawn that names no scope.
+          ...(!spec.taskId && !spec.projectId ? { global: true } : {})
         }),
       ...(spec.taskId ? { taskId: spec.taskId } : {}),
       // After the override: the idempotency key is the transport's, not the
@@ -2323,8 +2328,18 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     }
     // No request timeout, and a lost reply is UNKNOWN rather than failed — the
     // same rules and reasons as the pty spawn above.
+    // The path scope the spawn was started in (the hub's authorized task/project,
+    // platform/path-scope) is the spawn's own: a re-send after a lost reply runs
+    // outside that request, yet must reach the computer with the same scope.
+    const spawnScope = currentPathScope()
+    const send = (): Promise<unknown> =>
+      spawnScope
+        ? runInPathScope(spawnScope, () =>
+            gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0)
+          )
+        : gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0)
     const attempt = (): void => {
-      void gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0).then(
+      void send().then(
         (res) => {
           const parsed = procSpawnResultSchema.safeParse(res)
           if (parsed.success) setSpawnedPid(parsed.data.pid)

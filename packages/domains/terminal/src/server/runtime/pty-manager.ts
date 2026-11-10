@@ -108,7 +108,7 @@ export interface PtyCreateResult {
   /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here").
    *  `conversation-in-other-tab`: another terminal tab of the task runs it (named in
    *  `error`); the user stops it there, or starts a new session in this tab. */
-  code?: 'conversation-in-use' | 'conversation-in-other-tab'
+  code?: 'conversation-in-use' | 'conversation-in-other-tab' | 'session-ledger-unreadable'
 }
 
 /** A start refused: another side (or another terminal tab) runs this conversation. */
@@ -118,6 +118,24 @@ class ConversationInUseError extends Error {
     readonly code: 'conversation-in-use' | 'conversation-in-other-tab' = 'conversation-in-use'
   ) {
     super(message)
+  }
+}
+
+/**
+ * The task's session ledger (on the agent's computer, robustness plan §9) could
+ * not be read. NOT "no session": a fresh start would silently shadow the real one,
+ * so a resolver throws this and `createPty` refuses the start, naming why — the
+ * user retries once the computer answers.
+ */
+export class SessionLedgerUnreadableError extends Error {
+  readonly code = 'session-ledger-unreadable' as const
+  constructor(cause: unknown) {
+    const why = cause instanceof Error ? cause.message : String(cause)
+    super(
+      `This task's session history could not be read from its computer (${why}). Not starting a new session over it — try again once the computer answers.`,
+      { cause }
+    )
+    this.name = 'SessionLedgerUnreadableError'
   }
 }
 
@@ -1572,7 +1590,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // active tab on restart. Minting a fresh session over a real conversation
       // is destructive, so a single null is not taken at face value here; a real
       // id (no rows) costs at most ~300ms of retry on the cold spawn path.
+      // A ledger that could not be READ (its computer restarting, a timeout) is
+      // retried the same way, then refuses the start: unknown is not "none".
+      let unreadable: SessionLedgerUnreadableError | null = null
       for (let attempt = 0; attempt < 3; attempt++) {
+        unreadable = null
         try {
           ledgerConversationId = await conversationResolver({
             computerId,
@@ -1580,12 +1602,14 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
             mode: agentId,
             tabId: resolveTabRowId(sessionId)
           })
-        } catch {
+        } catch (err) {
           ledgerConversationId = null
+          if (err instanceof SessionLedgerUnreadableError) unreadable = err
         }
         if (ledgerConversationId) break
         if (attempt < 2) await new Promise((r) => setTimeout(r, 150))
       }
+      if (unreadable) throw unreadable
     }
     // Pure fresh-vs-resume decision — see resolveSpawnConversation. The invariant
     // (known id ⇒ resume, never mint over it) lives there + is unit-tested.
@@ -3299,6 +3323,17 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         event: 'pty.conversation_in_use',
         sessionId,
         taskId: taskIdFromSessionId(sessionId)
+      })
+      return { success: false, error: err.message, code: err.code }
+    }
+    if (err instanceof SessionLedgerUnreadableError) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.session_ledger_unreadable',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId),
+        message: err.message
       })
       return { success: false, error: err.message, code: err.code }
     }

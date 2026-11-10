@@ -448,6 +448,13 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     HubToComputerMethods.procSpawn
   ])
 
+  /** A `proc.spawn` the hub declared a global background process (see its `global` field). */
+  const isGlobalProcSpawn = (method: string, p: unknown): boolean =>
+    method === HubToComputerMethods.procSpawn &&
+    typeof p === 'object' &&
+    p !== null &&
+    (p as { global?: unknown }).global === true
+
   /** The jail one request's path scope opens: its folders from this hub's store. */
   const scopeJailOf = (scope: WirePathScope): ScopeJail => chat.scopeJail(scope)
 
@@ -484,11 +491,14 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       entry0 && scope ? (p: unknown) => runInScopeJail(scopeJailOf(scope), () => entry0(p)) : entry0
     // A process the hub starts for a task or project (§9 Phase 7c) starts inside
     // that scope's own folders: its cwd is judged against them, or chosen from them.
-    // The hub no longer knows them, so a spawn naming neither is refused.
+    // The hub no longer knows them, so a spawn naming neither is refused — except a
+    // background process the hub declares GLOBAL (no task, no project): it starts as
+    // before 7c, judged by the machine bound in the proc handler.
     const entry =
       scoped && SCOPED_SPAWNS.has(method)
         ? (p: unknown) => {
             const spawnScope = scope ?? implicitSpawnScope(p)
+            if (!spawnScope && isGlobalProcSpawn(method, p)) return scoped(p)
             if (!spawnScope) {
               throw new JailViolationError(
                 `${method} names no task or project; refusing to start a process`

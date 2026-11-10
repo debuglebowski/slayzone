@@ -449,6 +449,105 @@ describe('processes start inside the jail', () => {
   })
 })
 
+describe('global processes the hub marks as such (B1)', () => {
+  it('start as before §9 Phase 7c: cwd judged by the machine bound, none = the first allowed root', async () => {
+    const dispatch = dispatchFor(configWith([root]))
+    try {
+      const sub = join(root, 'sub')
+      mkdirSync(sub)
+      for (const [sessionId, cwd, expected] of [
+        ['g-1', undefined, root],
+        ['g-2', sub, sub]
+      ] as const) {
+        const out = join(root, `${sessionId}.txt`)
+        const res = (await dispatch.handle(
+          HubToComputerMethods.procSpawn,
+          {
+            sessionId,
+            command: `pwd > ${out}`,
+            shell: true,
+            global: true,
+            ...(cwd ? { cwd } : {})
+          },
+          ACTOR
+        )) as { pid: number | null }
+        expect(res.pid).not.toBeNull()
+        await vi.waitFor(() =>
+          expect(readFileSync(out, 'utf8').trim()).toBe(realpathSync(expected))
+        )
+      }
+      // Outside the machine bound: refused, as before.
+      const outside = await rejection(
+        dispatch.handle(
+          HubToComputerMethods.procSpawn,
+          { sessionId: 'g-3', command: 'pwd', shell: true, global: true, cwd: dir },
+          ACTOR
+        )
+      )
+      expect(outside.code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+    } finally {
+      dispatch.dispose()
+    }
+  })
+
+  it('the marker is only for a spawn naming no task or project, and only for proc.spawn', async () => {
+    const project = join(root, 'proj')
+    mkdirSync(project)
+    const other = join(root, 'other')
+    mkdirSync(other)
+    const dispatch = dispatchFor(configWith([root]), { p1: project })
+    try {
+      // A project spawn stays confined to its project, marker or not.
+      const foreign = await rejection(
+        dispatch.handle(
+          HubToComputerMethods.procSpawn,
+          {
+            sessionId: 'g-4',
+            projectId: 'p1',
+            command: 'pwd',
+            shell: true,
+            global: true,
+            cwd: other
+          },
+          ACTOR
+        )
+      )
+      expect(foreign.message).toMatch(/outside the folders of project p1/)
+      // A pty spawn naming neither is still refused.
+      const pty = await rejection(
+        dispatch.handle(
+          HubToComputerMethods.ptySpawn,
+          { sessionId: 'g-5', command: '/bin/sh', global: true, cwd: root },
+          ACTOR
+        )
+      )
+      expect(pty.code).toBe(ComputerTransportErrorCodes.refusedByComputer)
+    } finally {
+      dispatch.dispose()
+    }
+  })
+})
+
+describe('task processes the hub scopes to their project (B1)', () => {
+  it("a task with no worktree and no project id on its row starts in its project's folder", async () => {
+    const project = join(root, 'proj')
+    mkdirSync(project)
+    const dispatch = dispatchFor(configWith([root]), { p1: project })
+    try {
+      const out = join(project, 'task-where.txt')
+      const res = (await dispatch.handle(
+        HubToComputerMethods.procSpawn,
+        { sessionId: 'p-8', taskId: 't1', command: `pwd > ${out}`, shell: true, cwd: project },
+        { ...ACTOR, pathScope: { kind: 'task', taskId: 't1', projectId: 'p1' } }
+      )) as { pid: number | null }
+      expect(res.pid).not.toBeNull()
+      await vi.waitFor(() => expect(readFileSync(out, 'utf8').trim()).toBe(realpathSync(project)))
+    } finally {
+      dispatch.dispose()
+    }
+  })
+})
+
 describe('chat paths wait for the project folder map (§9 Phase 7c)', () => {
   it('a chat folder list sent while the map is still loading is judged once it loads, not refused', async () => {
     const project = join(root, 'proj')

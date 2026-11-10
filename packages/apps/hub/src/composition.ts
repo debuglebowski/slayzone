@@ -55,6 +55,8 @@ const COMPUTER_SCAN_TIMEOUT_MS = 2 * 60_000
 const COMPUTER_FS_CALL_TIMEOUT_MS = 60_000
 /** Deleting one tab's saved terminal output on its computer. */
 const PTY_FORGET_TIMEOUT_MS = 10_000
+/** Longest a call needing a computer waits for the desktop's local computer to enroll after boot. */
+const LOCAL_COMPUTER_BOOT_WAIT_MS = 30_000
 /** A turn snapshot writes a tree of a whole worktree. */
 const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
@@ -76,7 +78,12 @@ import {
   runAsSecurityActor,
   runWithSecurityContext
 } from '@slayzone/platform/security-log'
-import { currentPathScope, PathScopeRequiredError } from '@slayzone/platform/path-scope'
+import { createLocalComputerBootGate } from './local-computer-boot-gate'
+import {
+  currentPathScope,
+  PathScopeRequiredError,
+  pathScopeFor
+} from '@slayzone/platform/path-scope'
 import { createComputerRequestAuthorizer } from './computer-request-authorizer'
 import { createComputerArtifactStorage } from './computer-artifacts'
 import { createArtifactStore, setArtifactStorage } from '@slayzone/task-artifacts/server'
@@ -272,6 +279,7 @@ import {
   listAllProcesses,
   subscribeToProcessLogs,
   setProcessComputerResolver,
+  setProcessPathScopeResolver,
   setProcessComputerReachability,
   setProcessSpawnPreparer,
   setProcessWrittenListener,
@@ -1045,6 +1053,8 @@ export function composeServer(opts: {
       }),
     diagnosticsConfig: getDiagnosticsConfig,
     diagnostics: legacyChatDiagnostics,
+    // Created below; only called once both exist (a relayed history read).
+    flushTask: (taskId, computerId) => computerDataHandoff.flushTask(taskId, computerId),
     legacyData: createDbChatDataOps(db, sessionStore),
     attachments: createChatAttachmentReader(db, dataRoot),
     request: async (computerId, request) => {
@@ -2348,6 +2358,11 @@ export function composeServer(opts: {
       if (projectId) return resolveComputerForProject(projectId)
       return resolveExecComputer(null)
     })
+    // Every spawn names its task (with the project THIS hub records for it) or its
+    // project: the computer confines its cwd to that scope's folders and no longer
+    // knows task → project for a task with no worktree (a task process stored with
+    // no project id). A global process names neither and is sent unscoped.
+    setProcessPathScopeResolver((target) => pathScopeFor(db, target))
     // A kept run whose computer is offline is not a survivor (G3): it is ended, and a
     // Start or Stop asked meanwhile done, when that computer reconnects.
     setProcessComputerReachability((computerId) => computerGateway.isComputerUsable(computerId))
@@ -2770,6 +2785,18 @@ export function composeServer(opts: {
         projectSync.setFolder(computerId, projectId, path),
       forgetFolder: (computerId, projectId) => projectSync.forgetFolder(computerId, projectId)
     })
+    const localBootGate = supervised
+      ? createLocalComputerBootGate({
+          events: computerGateway.events,
+          localComputerId,
+          usable: (computerId) => computerGateway.isComputerUsable(computerId),
+          registered: async () => {
+            const local = await getComputer(db, localComputerId)
+            return !!local && local.revoked_at == null
+          },
+          timeoutMs: LOCAL_COMPUTER_BOOT_WAIT_MS
+        })
+      : null
     setWorkspaceDeps({
       fs: {
         ...userWorkspaceFs,
@@ -2786,8 +2813,13 @@ export function composeServer(opts: {
         }
       },
       // An explicit computer (the caller's own, with login), else the task's, else the
-      // project's, else the caller's default — see ./computer-placement.ts.
-      resolveComputer: (target) => placement.forTarget(target),
+      // project's, else the caller's default — see ./computer-placement.ts. While the
+      // desktop's local computer is still enrolling after boot, a call waits for it
+      // (never the hub's own disk): a file restored at boot opens once it is there.
+      resolveComputer: (target) =>
+        localBootGate
+          ? localBootGate.settle(() => placement.forTarget(target))
+          : placement.forTarget(target),
       // No computer at all = this hub's own disk, which for a supervised hub IS the
       // desktop's. Otherwise only the co-spawned local computer shares a machine
       // with the user; every remote one is somewhere they cannot see.

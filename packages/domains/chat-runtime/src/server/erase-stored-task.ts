@@ -22,6 +22,7 @@ interface Candidates {
 }
 const CONTENT_TABLES = [
   'provider_configs',
+  'provider_config_seeds',
   'queue_message_identities',
   'task_artifacts',
   'artifact_folders',

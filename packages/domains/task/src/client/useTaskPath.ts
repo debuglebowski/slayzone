@@ -73,9 +73,17 @@ function loaderFor(client: PathsClient): (taskId: string) => Promise<TaskPathSta
   return load
 }
 
+/**
+ * The root of every task-path query key. A computer connecting invalidates it (the
+ * app shell's computer-connect refetch): an `offline` answer read before the local
+ * computer enrolled — `retry: false`, and the connect does not change the key —
+ * would otherwise stick until the row's version changed.
+ */
+export const TASK_PATHS_QUERY_ROOT = ['task-paths'] as const
+
 /** The react-query key of one task's paths at one version of its row. */
 export function taskPathQueryKey(task: TaskPathSubject): readonly unknown[] {
-  return ['task-paths', task.id, task.updated_at, task.has_worktree, task.has_base_dir]
+  return [...TASK_PATHS_QUERY_ROOT, task.id, task.updated_at, task.has_worktree, task.has_base_dir]
 }
 
 /**
@@ -86,7 +94,7 @@ export function useTaskPath(task: TaskPathSubject | null | undefined): TaskPathV
   const client = useClientForTask(task?.id ?? null) as unknown as PathsClient
   const own = hasOwnFolder(task)
   const query = useQuery({
-    queryKey: task ? taskPathQueryKey(task) : ['task-paths', null],
+    queryKey: task ? taskPathQueryKey(task) : [...TASK_PATHS_QUERY_ROOT, null],
     queryFn: () => loaderFor(client)(task!.id),
     enabled: !!task && own,
     // A path changes through the task's row (its version is in the key); the row's

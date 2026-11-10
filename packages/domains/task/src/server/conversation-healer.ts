@@ -2,6 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import {
   setConversationHealer,
   setConversationResolver,
+  SessionLedgerUnreadableError,
   type ConversationHealRequest
 } from '@slayzone/terminal/hub'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
@@ -123,8 +124,14 @@ export function registerConversationResolver(): void {
         }
       }
       return current
-    } catch {
-      return null
+    } catch (error) {
+      // The ledger lives on the computer now: its read can fail (a restart, a
+      // timeout right after prepare). That is NOT "no session" — answering null
+      // made createPty mint a fresh session over the real one. createPty refuses
+      // the start visibly instead.
+      throw error instanceof SessionLedgerUnreadableError
+        ? error
+        : new SessionLedgerUnreadableError(error)
     }
   })
 }

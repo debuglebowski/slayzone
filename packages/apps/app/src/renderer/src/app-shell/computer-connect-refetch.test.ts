@@ -8,7 +8,11 @@
  * refetching once it starts.
  */
 import { describe, expect, it } from 'vitest'
-import { COMPUTER_BACKED_QUERIES, computerConnectRefetcher } from './computer-connect-refetch'
+import {
+  COMPUTER_BACKED_KEYS,
+  COMPUTER_BACKED_QUERIES,
+  computerConnectRefetcher
+} from './computer-connect-refetch'
 
 function fakeClient() {
   const invalidated: unknown[] = []
@@ -35,16 +39,25 @@ describe('refetch on computer connect', () => {
         'fileEditor',
         'workspace',
         'pty.testExecutionContext',
-        'pty.agentsTest'
+        'pty.agentsTest',
+        // S1: the prompt sidebar and the sessions list read the computer's ledger.
+        'agentPrompts',
+        'agentSessions'
       ])
     )
+    // S1: a task's worktree / custom folder (useTaskPath's own key, not a tRPC one):
+    // an offline answer cached before the local computer enrolled must not stick.
+    expect(COMPUTER_BACKED_KEYS).toContainEqual(['task-paths'])
   })
 
   it('a connect invalidates every computer-backed query', () => {
     const { client, invalidated } = fakeClient()
     const refetch = computerConnectRefetcher(client, (q) => [q])
     refetch.onData({ computerId: 'c1', connected: true })
-    expect(invalidated).toEqual(COMPUTER_BACKED_QUERIES.map((q) => ({ queryKey: [q] })))
+    expect(invalidated).toEqual([
+      ...COMPUTER_BACKED_QUERIES.map((q) => ({ queryKey: [q] })),
+      ...COMPUTER_BACKED_KEYS.map((queryKey) => ({ queryKey }))
+    ])
   })
 
   it('a disconnect refetches nothing', () => {
@@ -56,6 +69,6 @@ describe('refetch on computer connect', () => {
   it('the subscription starting refetches them too (a connect before it is never sent)', () => {
     const { client, invalidated } = fakeClient()
     computerConnectRefetcher(client, (q) => [q]).onStarted()
-    expect(invalidated).toHaveLength(COMPUTER_BACKED_QUERIES.length)
+    expect(invalidated).toHaveLength(COMPUTER_BACKED_QUERIES.length + COMPUTER_BACKED_KEYS.length)
   })
 })
