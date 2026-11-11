@@ -68,8 +68,14 @@ export type {
   ArchivedArtifactVersion,
   ArchivedArtifactOriginal,
   ChatComputerOps,
-  ChatAvailability
+  ChatAvailability,
+  ChatUnavailableReason
 } from './computer-chat'
-export { chatAvailabilityMessage } from './computer-chat'
+export {
+  CHAT_UNAVAILABLE_TITLE,
+  chatAvailabilityMessage,
+  chatUnavailableDetail,
+  chatUnavailableMessage
+} from './computer-chat'
 export * from './chat-command-schemas'
 export * from './chat-saved-summary'

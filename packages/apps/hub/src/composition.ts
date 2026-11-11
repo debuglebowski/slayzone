@@ -31,7 +31,7 @@ import {
   recordHolder,
   readComputerTaskRoots,
   TASK_PATH_KIND,
-  taskPathTarget
+  taskPathHandoffKind
 } from './computer-task-paths'
 import { type ComputerTaskDataRelay, createComputerTaskDataRelay } from './computer-task-data'
 import { isComputerUnreachable } from '@slayzone/chat-runtime/hub'
@@ -1170,6 +1170,8 @@ export function composeServer(opts: {
   // Computer-only data (robustness plan §9, P0): what the hub still holds of it goes
   // to the computer owning its task, once; reads go to that computer (direct link or
   // this relay), never to a hub copy.
+  // The hub's own Needs-attention ledger (no computer): e.g. a task path no computer takes.
+  const hubFaults = createAsyncFaultLedger(db, { origin: 'hub' })
   const computerDataHandoff = createComputerDataHandoff({
     db,
     // Through the lifecycle barrier: a task's pause/delete reaches the computer first.
@@ -1186,7 +1188,7 @@ export function composeServer(opts: {
     ledger: (computerId) => createAsyncFaultLedger(db, { origin: 'hub', computerId }),
     isUnreachable: isComputerUnreachable,
     // A task's paths go to the computer holding its folders (§9, Phase 7a).
-    kindTargets: { [TASK_PATH_KIND]: taskPathTarget(db) },
+    kinds: { [TASK_PATH_KIND]: taskPathHandoffKind(db, { ledger: hubFaults }) },
     // The computer a task's paths first reached holds its folders from then on (7e).
     delivered: async (kind, taskId, computerId) => {
       if (kind === TASK_PATH_KIND) await recordHolder(db, taskId, computerId)
@@ -1202,7 +1204,8 @@ export function composeServer(opts: {
     flushTask: (taskId, computerId, kinds) =>
       computerDataHandoff.flushTask(taskId, computerId, kinds),
     usable: (computerId) => execGateway?.isComputerUsable(computerId) ?? false,
-    request: (computerId, request) => computerChat.lifecycle.request(computerId, request)
+    request: (computerId, request) => computerChat.lifecycle.request(computerId, request),
+    ledger: hubFaults
   })
   setTaskPathsDelegate({
     ...computerTaskPaths,

@@ -1,11 +1,12 @@
 import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
+import { computerStanding } from '@slayzone/computers/server'
+import type { ChatUnavailableReason } from '@slayzone/terminal-contracts'
 import { isolateItem } from './hub-isolation'
 import { retiredComputerSql } from './hub-ownership'
 
-/** Shown on a chat whose computer was deleted: it waits for a computer that holds it. */
-export const REMOVED_COMPUTER_REASON =
-  'Chat history unavailable. Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
+/** A chat whose computer was removed waits, visibly, for a computer that holds it. */
+const REMOVED: ChatUnavailableReason = 'computer-removed'
 
 interface Retirement {
   computer_id: string
@@ -27,38 +28,40 @@ interface Retirement {
  *   that holds them reports them (recovery adopts them then).
  *
  * Revoked computers are not retired: their work waits for them.
+ *
+ * Returns the retirements that could not be applied this pass (each logged): a
+ * caller waiting on one of them knows it is still owed (computer-chat recovery
+ * does not keep such a pass, so the next one retries it).
  */
-export async function applyComputerRetirements(db: SlayzoneDb): Promise<void> {
+export async function applyComputerRetirements(db: SlayzoneDb): Promise<RetirementReport> {
   const rows = await db.all<Retirement>(
     'SELECT computer_id,successor_id,reason FROM computer_retirements ORDER BY retired_at,computer_id'
   )
-  const byId = new Map(rows.map((r) => [r.computer_id, r]))
   // v196's hub-era tab computers exist only while the legacy tables do (§9 Phase 8).
   const legacy = rows.length ? await legacyChatTables(db) : false
-  /** The newest id a chain of re-enrollments leads to; null = retired for good. */
-  const finalSuccessor = (r: Retirement): string | null => {
-    const seen = new Set([r.computer_id])
-    let next = r.successor_id
-    while (next !== null) {
-      const further = byId.get(next)
-      if (!further) return next
-      if (seen.has(next)) return null // A cycle cannot name a live computer.
-      seen.add(next)
-      next = further.successor_id
-    }
-    return null
-  }
+  const failed = new Map<string, Error>()
   for (const r of rows) {
     // One retirement that cannot be applied never stops the others.
-    await isolateItem(`retirement of computer ${r.computer_id}`, async () => {
-      const successor = finalSuccessor(r)
-      await db.batchTxn(
-        successor === null
-          ? retireOps(r.computer_id, r.reason, legacy)
-          : repointOps(r.computer_id, successor, legacy)
-      )
-    })
+    await isolateItem(
+      `retirement of computer ${r.computer_id}`,
+      async () => {
+        // Where the chain of re-enrollments leads: a live successor, or removed.
+        const standing = await computerStanding(db, r.computer_id)
+        await db.batchTxn(
+          standing.kind === 'successor'
+            ? repointOps(r.computer_id, standing.id, legacy)
+            : retireOps(r.computer_id, r.reason, legacy)
+        )
+      },
+      (error) => failed.set(r.computer_id, error)
+    )
   }
+  return { failed }
+}
+
+/** What one {@link applyComputerRetirements} pass could not apply, by retired computer id. */
+export interface RetirementReport {
+  failed: ReadonlyMap<string, Error>
 }
 
 function repointOps(from: string, to: string, legacy: boolean): BatchOp[] {
@@ -151,7 +154,7 @@ function retireOps(id: string, reason: string, legacy: boolean): BatchOp[] {
       `INSERT INTO chat_unavailable_owners(conversation_id,computer_id,epoch,reason)
       SELECT id,computer_id,epoch,? FROM chat_ownership WHERE computer_id=? AND state='active'
       ON CONFLICT(conversation_id) DO UPDATE SET computer_id=excluded.computer_id,epoch=excluded.epoch,reason=excluded.reason`,
-      [REMOVED_COMPUTER_REASON, id]
+      [REMOVED, id]
     ),
     ...(legacy ? [run('DELETE FROM chat_legacy_tab_computers WHERE computer_id=?', [id])] : []),
     // Placeholder folders only chats on it were waiting to fill: resolved to

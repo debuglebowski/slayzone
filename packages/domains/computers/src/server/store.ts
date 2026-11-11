@@ -107,8 +107,10 @@ export async function registerOrReplaceComputer(
   const now = input.now ?? Date.now()
   const capabilities_json = JSON.stringify(input.capabilities ?? {})
   const auth_key_id = input.authKeyId ?? null
-  await db.run(
-    `INSERT INTO computers
+  await db.batchTxn([
+    {
+      type: 'run',
+      sql: `INSERT INTO computers
        (id, name, platform, version, capabilities_json, auth_key_id, last_seen_at, created_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
      ON CONFLICT(id) DO UPDATE SET
@@ -119,8 +121,26 @@ export async function registerOrReplaceComputer(
        auth_key_id = excluded.auth_key_id,
        last_seen_at = excluded.last_seen_at,
        revoked_at = NULL`,
-    [input.id, input.name, input.platform, input.version, capabilities_json, auth_key_id, now, now]
-  )
+      params: [
+        input.id,
+        input.name,
+        input.platform,
+        input.version,
+        capabilities_json,
+        auth_key_id,
+        now,
+        now
+      ]
+    },
+    // Deleted, then enrolled again under its own id (it is derived from the machine):
+    // the same machine, live again ({@link computerStanding}). Its chats were retired
+    // as unavailable; its next recovery takes back the ones it still holds.
+    {
+      type: 'run',
+      sql: 'DELETE FROM computer_retirements WHERE computer_id = ?',
+      params: [input.id]
+    }
+  ])
   // Re-read so the returned record reflects the persisted row (created_at may be
   // the original birth time, not `now`, on an UPSERT that hit an existing row).
   const row = await getComputer(db, input.id)
@@ -219,6 +239,12 @@ function successionOps(formerIds: readonly string[], successorId: string): Batch
     ),
     run(`DELETE FROM project_placements WHERE computer_id IN (${placeholders})`, [...formerIds]),
     run(`DELETE FROM computer_grants WHERE computer_id IN (${placeholders})`, [...formerIds]),
+    // A retirement names its final successor ({@link computerStanding}): one that
+    // named a former id names the successor now.
+    run(
+      `UPDATE computer_retirements SET successor_id = ? WHERE successor_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
     // Chat bookkeeping names computers too; the chat domain repoints it onto the
     // successor from this record (applyComputerRetirements), whenever it next runs.
     // 're-enrolled' is what both callers mean: the same machine under a new id.
@@ -328,9 +354,58 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
         ON CONFLICT(computer_id) DO UPDATE SET successor_id=NULL,reason='deleted'`,
       params: [Date.now(), id]
     },
+    // Ids re-enrolled as this one are removed for good with it ({@link computerStanding}).
+    {
+      type: 'run',
+      sql: `UPDATE computer_retirements SET successor_id = NULL, reason = 'deleted' WHERE successor_id = ?`,
+      params: [id]
+    },
     { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
   ])
   computerRemoved(id)
+}
+
+/**
+ * Where a computer id stands, as `computer_retirements` records it — THE answer for
+ * every reader that holds an id (a chat's owner or destination, a task's holder):
+ *
+ * - `live`: not retired. Connected or not, revoked or not: its work waits for it.
+ * - `successor`: re-enrolled under a new id (`id`, the last of any chain): the same
+ *   machine, its work moves there.
+ * - `removed`: deleted or gone missing (`reason`), directly or as the end of a chain:
+ *   it never connects again; work addressed to it can never be delivered.
+ *
+ * Retirements are written collapsed (each names its final successor, or none:
+ * {@link deleteComputer}, {@link replaceComputer}; v215 collapsed stored ones), so this
+ * is one row; a chain is still followed to its end, and a cycle names no live computer.
+ */
+export type ComputerStanding =
+  | { kind: 'live'; id: string }
+  | { kind: 'successor'; id: string; formerId: string }
+  | { kind: 'removed'; id: string; reason: 'deleted' | 'missing' }
+
+/** Longest chain of re-enrollments followed (they are written collapsed: one hop). */
+const MAX_RETIREMENT_HOPS = 64
+
+export async function computerStanding(db: SlayzoneDb, id: string): Promise<ComputerStanding> {
+  let current = id
+  const seen = new Set<string>()
+  for (let hop = 0; hop <= MAX_RETIREMENT_HOPS; hop++) {
+    const row = await db.get<{ successor_id: string | null; reason: string }>(
+      'SELECT successor_id, reason FROM computer_retirements WHERE computer_id = ?',
+      [current]
+    )
+    if (!row)
+      return current === id
+        ? { kind: 'live', id }
+        : { kind: 'successor', id: current, formerId: id }
+    if (row.successor_id === null)
+      return { kind: 'removed', id, reason: row.reason === 'deleted' ? 'deleted' : 'missing' }
+    seen.add(current)
+    if (seen.has(row.successor_id)) break // A cycle names no live computer.
+    current = row.successor_id
+  }
+  return { kind: 'removed', id, reason: 'missing' }
 }
 
 export async function getComputer(db: SlayzoneDb, id: string): Promise<ComputerRecord | null> {

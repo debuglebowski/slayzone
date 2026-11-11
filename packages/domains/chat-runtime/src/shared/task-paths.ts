@@ -24,6 +24,21 @@ export const computerPathSchema = z
     'an absolute path'
   )
 
+/**
+ * One task path (worktree path or base dir) as a hub write gives it, as a computer
+ * would store it — the one place a given path is judged (the hub's task-path
+ * delegate and hand-off). `''` is unset (null); absent stays absent; a path no
+ * computer takes ({@link computerPathSchema}: relative, `~/…`, blank, padded) is
+ * `refused`, never sent: a computer refusing a staged row would fault it for good.
+ */
+export function normalizeTaskPath(
+  value: string | null | undefined
+): { ok: true; value: string | null | undefined } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, value }
+  if (value === '') return { ok: true, value: null }
+  return computerPathSchema.safeParse(value).success ? { ok: true, value } : { ok: false }
+}
+
 /** What a request touching paths is about: one task, or one project. */
 export const pathScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('task'), taskId: id }),

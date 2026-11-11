@@ -270,12 +270,15 @@ export const taskPathImport: DataImportKind<TaskPathValue> = {
       store.write(item.taskId, value)
       return
     }
-    // A parent this computer does not hold has no paths here: nothing to copy.
+    // A parent this computer does not hold has no paths here: nothing to copy. A field
+    // the row also gives was written after the inherit (the hub merges later writes into
+    // the staged row): it wins over the copy.
     const parent = store.get(inheritFrom)
     store.write(item.taskId, {
       projectId: value.projectId,
-      worktreePath: parent?.worktreePath ?? null,
-      baseDir: parent?.baseDir ?? null,
+      worktreePath:
+        value.worktreePath !== undefined ? value.worktreePath : (parent?.worktreePath ?? null),
+      baseDir: value.baseDir !== undefined ? value.baseDir : (parent?.baseDir ?? null),
       at: value.at
     })
   }

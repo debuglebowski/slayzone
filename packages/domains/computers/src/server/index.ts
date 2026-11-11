@@ -28,6 +28,8 @@ export {
   assertTaskMovable,
   TaskFoldersElsewhereError,
   resolveTaskComputerIdOrDefault,
+  computerStanding,
+  type ComputerStanding,
   type RegisterComputerInput
 } from './store'
 export {

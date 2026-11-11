@@ -20,7 +20,8 @@ import {
   listDisabledComputerIds,
   setComputerRemovedListener,
   assertTaskMovable,
-  TaskFoldersElsewhereError
+  TaskFoldersElsewhereError,
+  computerStanding
 } from './store'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
 import { listPlacements, setPlacement } from './project-paths'
@@ -699,6 +700,75 @@ describe('computer retirements (chat work repoints or retires with them)', () =>
     expect(await retirements()).toEqual([
       { computer_id: stale.id, successor_id: keep, reason: 're-enrolled' }
     ])
+  })
+
+  it('a retirement names its final successor or none: re-enrolled again, or then deleted', async () => {
+    const a = await mkComputer({ name: 'a' })
+    const b = await mkComputer({ name: 'b' })
+    const c = await mkComputer({ name: 'c' })
+    // a re-enrolled as b, b re-enrolled as c: a names c.
+    await replaceComputer(t.db, { computerId: a.id, successorId: b.id })
+    await replaceComputer(t.db, { computerId: b.id, successorId: c.id })
+    const of = async (id: string) =>
+      t.db.get('SELECT successor_id,reason FROM computer_retirements WHERE computer_id=?', [id])
+    expect(await of(a.id)).toEqual({ successor_id: c.id, reason: 're-enrolled' })
+    expect(await computerStanding(t.db, a.id)).toEqual({
+      kind: 'successor',
+      id: c.id,
+      formerId: a.id
+    })
+    // c deleted: a and b are removed for good, with c's reason.
+    await deleteComputer(t.db, c.id)
+    for (const id of [a.id, b.id, c.id]) {
+      expect(await of(id)).toEqual({ successor_id: null, reason: 'deleted' })
+      expect(await computerStanding(t.db, id)).toEqual({ kind: 'removed', id, reason: 'deleted' })
+    }
+  })
+
+  it('computerStanding: live for an unretired id (revoked or unknown too); a chain read as it ends', async () => {
+    const revoked = await mkComputer({ name: 'revoked' })
+    await revokeComputer(t.db, revoked.id, 5)
+    expect(await computerStanding(t.db, revoked.id)).toEqual({ kind: 'live', id: revoked.id })
+    expect(await computerStanding(t.db, 'never-seen')).toEqual({ kind: 'live', id: 'never-seen' })
+    // A chain left by a build before retirements were kept collapsed (v215 collapses
+    // stored ones): still read to its end; a cycle names no live computer.
+    await t.db.run(
+      `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES
+        ('x','y','re-enrolled',1),('y','z','re-enrolled',2),
+        ('p','q','re-enrolled',1),('q',NULL,'missing',2),
+        ('k','l','re-enrolled',1),('l','k','re-enrolled',2)`
+    )
+    expect(await computerStanding(t.db, 'x')).toEqual({ kind: 'successor', id: 'z', formerId: 'x' })
+    expect(await computerStanding(t.db, 'p')).toEqual({
+      kind: 'removed',
+      id: 'p',
+      reason: 'missing'
+    })
+    expect(await computerStanding(t.db, 'k')).toEqual({
+      kind: 'removed',
+      id: 'k',
+      reason: 'missing'
+    })
+  })
+
+  it('a deleted local computer enrolling again under its own id is live again', async () => {
+    const id = deterministicLocalComputerId('local-computer')
+    const enroll = () =>
+      registerOrReplaceComputer(t.db, {
+        id,
+        name: 'local-computer',
+        platform: 'p',
+        version: 'v',
+        now: 3
+      })
+    await enroll()
+    await deleteComputer(t.db, id)
+    expect(await computerStanding(t.db, id)).toEqual({ kind: 'removed', id, reason: 'deleted' })
+    // The same machine (its id is derived from it): its retirement goes, its work is
+    // its own again — recovery takes back the chats it still holds when it connects.
+    await enroll()
+    expect(await computerStanding(t.db, id)).toEqual({ kind: 'live', id })
+    expect(await retirements()).toEqual([])
   })
 
   it('deleting a computer records it with no successor; revoking records nothing', async () => {

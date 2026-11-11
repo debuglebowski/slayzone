@@ -5,12 +5,11 @@ import { z } from 'zod'
 // panelVisibility, browserTabs, webPanelUrls, editorOpenFiles, mergeState,
 // mergeContext, loopConfig) are passthrough — their structure is defined
 // and validated in their own domain modules.
-/** A worktree path / base dir: '' is unset (null) — a computer takes only absolute paths. */
-const taskPath = z
-  .string()
-  .nullable()
-  .optional()
-  .transform((v) => (v === '' ? null : v))
+/**
+ * A worktree path / base dir, as given: the hub's task-path delegate judges it, once
+ * (`''` is unset; a path no computer takes fails the update).
+ */
+const taskPath = z.string().nullable().optional()
 
 export const updateTaskInputSchema = z
   .object({

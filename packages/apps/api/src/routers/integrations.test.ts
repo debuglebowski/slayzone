@@ -76,7 +76,7 @@ setTaskPathsDelegate({
     if (change.op === 'set' && change.worktreePath) worktreeOf.set(taskId, change.worktreePath)
     if (change.op === 'clear') worktreeOf.delete(taskId)
   },
-  apply: async () => undefined,
+  apply: async (_taskId, patch) => patch,
   read: async () => ({}),
   release: async (taskId) => ({
     worktreePath: worktreeOf.get(taskId) ?? null,

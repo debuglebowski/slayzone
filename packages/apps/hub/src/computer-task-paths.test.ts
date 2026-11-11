@@ -14,11 +14,14 @@ import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runt
 import { createComputerDataHandoff } from './computer-data-handoff'
 import { createTaskPathRequestGate } from './task-path-request-gate'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
+import { createAsyncFaultLedger } from '@slayzone/platform/isolation'
 import {
   createComputerTaskPaths,
   readComputerTaskRoots,
+  recordHolder,
   TASK_PATH_KIND,
-  taskPathTarget
+  TASK_PATH_REFUSED_PASS,
+  taskPathHandoffKind
 } from './computer-task-paths'
 
 const cleanups: Array<() => unknown> = []
@@ -65,11 +68,17 @@ async function fixture() {
     if (!online.has(computerId)) throw Object.assign(new Error('offline'), { code: 'ECONNRESET' })
     return pcs[computerId as 'pc' | 'pc2'].request(JSON.parse(JSON.stringify(req)))
   }
+  // The hub's own Needs-attention ledger (a refused path names no computer).
+  const ledger = createAsyncFaultLedger(h.slayDb, { origin: 'hub' })
   const handoff = createComputerDataHandoff({
     db: h.slayDb,
     request,
     isUnreachable: (error) => (error as { code?: string }).code === 'ECONNRESET',
-    kindTargets: { [TASK_PATH_KIND]: taskPathTarget(h.slayDb) }
+    kinds: { [TASK_PATH_KIND]: taskPathHandoffKind(h.slayDb, { ledger, log: () => {} }) },
+    // As composition: the computer a task's paths reached holds its folders (7e).
+    delivered: async (kind, taskId, computerId) => {
+      if (kind === TASK_PATH_KIND) await recordHolder(h.slayDb, taskId, computerId)
+    }
   })
   const paths = createComputerTaskPaths({
     db: h.slayDb,
@@ -77,6 +86,7 @@ async function fixture() {
     flushTask: handoff.flushTask,
     usable: (id) => online.has(id),
     request,
+    ledger,
     log: () => {}
   })
   const onComputer = async (computerId: 'pc' | 'pc2', taskIds: string[]) =>
@@ -98,7 +108,29 @@ async function fixture() {
   /** The hub's flags changed with no write reaching any computer (drift). */
   const flagOnly = (taskId: string, worktree: boolean) =>
     h.db.prepare('UPDATE tasks SET has_worktree=? WHERE id=?').run(worktree ? 1 : 0, taskId)
-  return { h, pcs, online, request, handoff, paths, onComputer, staged, set, flagOnly }
+  /** The hub's Needs-attention entries for refused task paths. */
+  const refusals = () =>
+    h.db
+      .prepare(
+        "SELECT item_key, task_id FROM item_faults WHERE origin='hub' AND computer_id='' AND pass=? ORDER BY 1"
+      )
+      .all(TASK_PATH_REFUSED_PASS)
+  const flags = (taskId: string) =>
+    h.db.prepare('SELECT has_worktree, has_base_dir FROM tasks WHERE id=?').get(taskId)
+  return {
+    h,
+    pcs,
+    online,
+    request,
+    handoff,
+    paths,
+    onComputer,
+    staged,
+    set,
+    flagOnly,
+    refusals,
+    flags
+  }
 }
 
 test('a write runs on the connected computer; nothing is staged', async () => {
@@ -331,4 +363,111 @@ test("a path given as '' is unset: no '' ever reaches a computer, live or staged
   expect(await f.onComputer('pc', ['parent'])).toEqual([
     expect.objectContaining({ taskId: 'parent', worktreePath: null, baseDir: null })
   ])
+})
+
+test.each(['relative/dir', '~/x', '   ', ' /leading-space'])(
+  'a path no computer takes (%j): a user set fails; any other write leaves it unset, visibly',
+  async (bad) => {
+    const f = await fixture()
+    await f.set('t1', W('w-one'), W('base'))
+    // The user's own write fails before reaching any computer.
+    await expect(f.paths.apply('t1', { baseDir: bad })).rejects.toThrow(/absolute/)
+    expect(await f.onComputer('pc', ['t1'])).toEqual([
+      expect.objectContaining({ worktreePath: W('w-one'), baseDir: W('base') })
+    ])
+    // Any other writer (an import): live, the path is unset there and on the hub's flag,
+    // and Needs attention says so.
+    await f.paths.changed('t1', { op: 'set', baseDir: bad })
+    expect(await f.onComputer('pc', ['t1'])).toEqual([
+      expect.objectContaining({ worktreePath: W('w-one'), baseDir: null })
+    ])
+    expect(f.flags('t1')).toEqual({ has_worktree: 1, has_base_dir: 0 })
+    expect(f.refusals()).toEqual([{ item_key: 't1:baseDir', task_id: 't1' }])
+    // Staged while away: never staged as given (it would fault on delivery forever).
+    f.online.delete('pc')
+    f.h.db.prepare('UPDATE tasks SET has_worktree=1 WHERE id=?').run('parent')
+    await f.paths.changed('parent', { op: 'set', worktreePath: bad })
+    const row = f.h.db
+      .prepare(
+        "SELECT payload FROM computer_data_handoff WHERE kind='task-path' AND item_key='parent'"
+      )
+      .get() as { payload: string }
+    expect(JSON.parse(row.payload)).toMatchObject({ worktreePath: null })
+    expect(f.flags('parent')).toEqual({ has_worktree: 0, has_base_dir: 0 })
+    // A later valid write of that path clears its Needs-attention entry.
+    f.online.add('pc')
+    await f.set('t1', W('w-one'), W('base-again'))
+    expect(f.refusals()).toEqual([{ item_key: 'parent:worktreePath', task_id: 'parent' }])
+  }
+)
+
+test('a staged row a computer would refuse (written before this check) is delivered with that path unset, not faulted forever', async () => {
+  const f = await fixture()
+  f.h.db.prepare('UPDATE tasks SET has_worktree=1, has_base_dir=1 WHERE id=?').run('parent')
+  f.h.db
+    .prepare(
+      `INSERT INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+       VALUES('task-path','parent','parent',?,5)`
+    )
+    .run(JSON.stringify({ projectId: 'p', worktreePath: '~/w', baseDir: W('b'), at: 5 }))
+  await f.handoff.deliverTo('pc')
+  expect(f.staged()).toEqual([])
+  expect(await f.onComputer('pc', ['parent'])).toEqual([
+    expect.objectContaining({ worktreePath: null, baseDir: W('b') })
+  ])
+  expect(f.flags('parent')).toEqual({ has_worktree: 0, has_base_dir: 1 })
+  expect(f.refusals()).toEqual([{ item_key: 'parent:worktreePath', task_id: 'parent' }])
+})
+
+/**
+ * The parent's paths are staged for its chat's computer (pc2), not its pin (pc): its
+ * holder is not recorded yet, so the subtask (create.ts) has none to copy.
+ */
+async function parentStagedForItsChat() {
+  const f = await fixture()
+  f.h.db.exec(`INSERT INTO chat_ownership(id,task_id,tab_id,mode,state,epoch,computer_id)
+    VALUES('c-parent','parent','tab-parent','claude-chat','active',1,'pc2')`)
+  f.online.delete('pc2')
+  await f.set('parent', W('w-parent'), W('b-parent'))
+  expect(f.staged()).toEqual([{ item_key: 'parent' }])
+  // create.ts: the subtask copies the parent's flags (and its unrecorded holder).
+  f.h.db.prepare('UPDATE tasks SET has_worktree=1, has_base_dir=1 WHERE id=?').run('child')
+  const holder = (id: string) =>
+    (
+      f.h.db.prepare('SELECT worktree_computer_id AS h FROM tasks WHERE id=?').get(id) as {
+        h: string | null
+      }
+    ).h
+  return { ...f, holder }
+}
+
+test("E: an inherited subtask's paths go where its parent's go, after them (holder not recorded yet)", async () => {
+  const f = await parentStagedForItsChat()
+  // Not to its own computer (pc, connected): that one never gets the parent's row.
+  await f.paths.changed('child', { op: 'inherit', parentTaskId: 'parent' })
+  expect(await f.onComputer('pc', ['child'])).toEqual([])
+  expect(f.staged()).toEqual([{ item_key: 'child' }, { item_key: 'parent' }])
+  expect(f.holder('child')).toBeNull()
+  // Its parent's computer connects: the parent's row lands first (the pass takes
+  // 'child' before 'parent'), so the subtask copies real paths, and both hold there.
+  f.online.add('pc2')
+  await f.handoff.deliverTo('pc2')
+  expect(f.staged()).toEqual([])
+  expect(await f.onComputer('pc2', ['child'])).toEqual([
+    expect.objectContaining({ worktreePath: W('w-parent'), baseDir: W('b-parent') })
+  ])
+  expect([f.holder('parent'), f.holder('child')]).toEqual(['pc2', 'pc2'])
+})
+
+test("E: a live inherit with the parent's holder not recorded goes to the parent's computer", async () => {
+  const f = await parentStagedForItsChat()
+  // The parent's computer is back; no reconnect pass has run yet.
+  f.online.add('pc2')
+  await f.paths.changed('child', { op: 'inherit', parentTaskId: 'parent' })
+  expect(f.staged()).toEqual([])
+  expect(await f.onComputer('pc2', ['child'])).toEqual([
+    expect.objectContaining({ worktreePath: W('w-parent'), baseDir: W('b-parent') })
+  ])
+  expect(await f.onComputer('pc', ['child'])).toEqual([])
+  expect([f.holder('parent'), f.holder('child')]).toEqual(['pc2', 'pc2'])
 })

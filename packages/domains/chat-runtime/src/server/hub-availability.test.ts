@@ -1,9 +1,16 @@
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
-import { chatAvailabilityMessage } from '@slayzone/terminal-contracts'
+import { chatAvailabilityMessage, chatUnavailableDetail } from '@slayzone/terminal-contracts'
 import { createChatAvailability } from './hub-availability'
-import { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
+import { applyComputerRetirements } from './hub-retirements'
+
+/** What a chat on a removed computer reads (title-free text for older clients, and its code). */
+const REMOVED = {
+  state: 'unavailable',
+  reason: chatUnavailableDetail('computer-removed'),
+  reasonCode: 'computer-removed'
+} as const
 
 async function setup() {
   const h = await createTestHarness()
@@ -201,11 +208,7 @@ test.each([false, true])(
         connected: () => false,
         hasLiveTask: async () => false
       })
-      expect(await availability('tab')).toMatchObject({
-        state: 'unavailable',
-        reason: REMOVED_COMPUTER_REASON,
-        computer: { id: 'gone' }
-      })
+      expect(await availability('tab')).toMatchObject({ ...REMOVED, computer: { id: 'gone' } })
     } finally {
       h.cleanup()
     }
@@ -260,8 +263,140 @@ test('an offline owner whose chat another computer holds names that computer and
       "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('old-0000-id',NULL,'deleted',1)"
     )
     const removed = await availability('tab')
-    expect(removed).toMatchObject({ state: 'unavailable', reason: REMOVED_COMPUTER_REASON })
+    expect(removed).toMatchObject(REMOVED)
     expect(removed).not.toHaveProperty('heldBy')
+  } finally {
+    h.cleanup()
+  }
+})
+
+/** Availability of the one tab, its computers named by `connected`. */
+function availabilityOf(
+  h: Awaited<ReturnType<typeof setup>>['h'],
+  owners: Awaited<ReturnType<typeof setup>>['owners'],
+  o: {
+    connected?: readonly string[]
+    resolve?: string | null
+    gate?: (computerId: string) => Promise<void>
+  } = {}
+) {
+  return createChatAvailability({
+    db: h.slayDb,
+    ownership: owners,
+    resolveComputer: async () => o.resolve ?? null,
+    connected: (id) => (o.connected ?? []).includes(id),
+    hasLiveTask: async () => false,
+    ...(o.gate ? { gate: (id: string) => o.gate!(id) } : {})
+  })
+}
+const retire = (
+  h: Awaited<ReturnType<typeof setup>>['h'],
+  rows: Array<[string, string | null, string]>
+) => {
+  for (const [id, successor, reason] of rows)
+    h.db
+      .prepare(
+        'INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES(?,?,?,1)'
+      )
+      .run(id, successor, reason)
+}
+const chatOn = (owners: Awaited<ReturnType<typeof setup>>['owners'], computerId: string | null) =>
+  owners.register({ id: 'c', taskId: 't', tabId: 'tab', mode: 'claude-chat', computerId, epoch: 1 })
+
+test('A: a chat on a computer re-enrolled, then deleted (a chain), reads removed, never offline', async () => {
+  const { h, owners } = await setup()
+  try {
+    await chatOn(owners, 'a')
+    // a was re-enrolled as b, b then deleted; the hub has applied neither yet.
+    retire(h, [
+      ['a', 'b', 're-enrolled'],
+      ['b', null, 'deleted']
+    ])
+    expect(await availabilityOf(h, owners)('tab')).toMatchObject({
+      ...REMOVED,
+      computer: { id: 'a' }
+    })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('A: a chat on a re-enrolled computer reads as its successor before the hub repoints it', async () => {
+  const { h, owners } = await setup()
+  try {
+    await chatOn(owners, 'a')
+    retire(h, [['a', 'b', 're-enrolled']])
+    expect(await availabilityOf(h, owners, { connected: ['b'] })('tab')).toMatchObject({
+      state: 'ready',
+      computer: { id: 'b' }
+    })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test.each(['legacy', 'copying'] as const)(
+  'A: a %s chat bound for a removed computer reads as after its retirement: bound for none, placed again',
+  async (state) => {
+    const { h, owners } = await setup()
+    try {
+      await chatOn(owners, null)
+      h.db
+        .prepare(
+          `UPDATE chat_ownership SET state=?, destination_computer_id='gone',
+            migration_id=CASE WHEN ?='copying' THEN 'm' END WHERE id='c'`
+        )
+        .run(state, state)
+      retire(h, [['gone', null, 'deleted']])
+      const status = await availabilityOf(h, owners, { connected: ['pc'], resolve: 'pc' })('tab')
+      expect(status).toMatchObject({ computer: { id: 'pc' } })
+      expect(status.state).not.toBe('offline')
+    } finally {
+      h.cleanup()
+    }
+  }
+)
+
+test('A: an active chat is on its own computer, whatever destination a past move left', async () => {
+  const { h, owners } = await setup()
+  try {
+    await chatOn(owners, 'pc')
+    h.db.prepare("UPDATE chat_ownership SET destination_computer_id='gone' WHERE id='c'").run()
+    retire(h, [['gone', null, 'deleted']])
+    expect(await availabilityOf(h, owners, { connected: ['pc'] })('tab')).toMatchObject({
+      state: 'ready',
+      computer: { id: 'pc' }
+    })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test("A: a removed computer is not asked to authorize (it is no one's): the removal is the answer", async () => {
+  const { h, owners } = await setup()
+  try {
+    await chatOn(owners, 'gone')
+    retire(h, [['gone', null, 'deleted']])
+    const gate = async (id: string) => {
+      // As placement's gate: a computer with no row is no one's.
+      if (id === 'gone') throw new Error('no such computer, or it is not yours')
+    }
+    expect(await availabilityOf(h, owners, { gate })('tab')).toMatchObject(REMOVED)
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('A: a chat its live computer did not return carries that reason too', async () => {
+  const { h, owners } = await setup()
+  try {
+    await chatOn(owners, 'pc')
+    await owners.markUnavailable('c', 'pc', 1)
+    expect(await availabilityOf(h, owners, { connected: ['pc'] })('tab')).toMatchObject({
+      state: 'unavailable',
+      reasonCode: 'not-returned',
+      reason: chatUnavailableDetail('not-returned')
+    })
   } finally {
     h.cleanup()
   }

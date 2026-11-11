@@ -11,8 +11,9 @@
  *   the task (or its project) is pinned to; a re-enrolled computer hands over to its
  *   successor, a removed one to nobody (the rows wait for a new placement). With
  *   neither, the hub's default placement for the task (`fallbackTarget`). With none
- *   at all, the rows wait. A kind may name its own computer (`kindTargets`): a
- *   task's paths go to the computer holding its worktree.
+ *   at all, the rows wait. A kind may have its own rules ({@link HandoffKind}): its
+ *   own computer (a task's paths go to the computer holding its worktree), a repair
+ *   of a staged value before it is sent, and rows of other tasks it must follow.
  * - **When.** On every (re)connect of a computer, for the tasks whose data it owns
  *   ({@link deliverTo}); and right before work of a task starts on a computer
  *   ({@link flushTask}), so an agent never resumes without data the hub still held.
@@ -41,7 +42,7 @@ import {
   type DataImportResult,
   dataImportResultSchema
 } from '@slayzone/chat-runtime/shared'
-import { TASK_COMPUTER_SQL } from '@slayzone/computers/server'
+import { computerStanding, TASK_COMPUTER_SQL } from '@slayzone/computers/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { type FaultLedger, forEachIsolated } from '@slayzone/platform/isolation'
 
@@ -87,9 +88,6 @@ const phaseOf = (kind: string): Phase => (isDecisive(kind) ? 'decisive' : 'histo
 const phaseKey = (taskId: string, phase: Phase) =>
   phase === 'decisive' ? taskId : `${taskId}:history`
 
-/** Longest chain of re-enrollments followed to a live successor. */
-const MAX_SUCCESSORS = 16
-
 interface HandoffRow {
   kind: string
   item_key: string
@@ -119,17 +117,31 @@ export interface ComputerDataHandoffDeps {
    */
   openTasks?(): Promise<readonly string[]>
   log?(message: string, error: unknown): void
+  /** Per-kind rules (e.g. `task-path`, computer-task-paths.ts); a kind without any has none. */
+  kinds?: Readonly<Record<string, HandoffKind>>
+}
+
+/** How one kind's rows are delivered, where it differs from the default. */
+export interface HandoffKind {
   /**
-   * Kinds whose rows belong to another computer than the task's data (default
-   * {@link target}): e.g. `task-path` goes to the computer holding the worktree. Given
-   * the task's default target, answers the kind's computer, or null (it waits).
+   * The computer the kind's rows of `taskId` go to, or null (they wait). Default: the
+   * task's data computer — `dataTarget`, for any task. A re-enrolled answer is
+   * followed to its successor; a removed one waits.
    */
-  kindTargets?: Readonly<
-    Record<
-      string,
-      (taskId: string, fallback: () => Promise<string | null>) => Promise<string | null>
-    >
-  >
+  target?(
+    taskId: string,
+    dataTarget: (taskId: string) => Promise<string | null>
+  ): Promise<string | null>
+  /**
+   * The value to send for a staged row (a repair of what no computer takes); the
+   * staged row is rewritten to it before it is sent. Default: as staged.
+   */
+  prepare?(taskId: string, value: unknown): Promise<unknown>
+  /**
+   * Tasks whose rows of this kind must reach the same computer first (a subtask's
+   * inherit copies its parent's row there).
+   */
+  after?(value: unknown): readonly string[]
 }
 
 export interface HandoffReport {
@@ -186,16 +198,9 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
 
   /** The computer a re-enrolled computer became; null when it was removed for good. */
   async function live(computerId: string | null): Promise<string | null> {
-    let id = computerId
-    for (let hops = 0; id !== null && hops < MAX_SUCCESSORS; hops++) {
-      const retired = await db.get<{ successor_id: string | null }>(
-        'SELECT successor_id FROM computer_retirements WHERE computer_id=?',
-        [id]
-      )
-      if (!retired) return id
-      id = retired.successor_id
-    }
-    return null
+    if (computerId === null) return null
+    const standing = await computerStanding(db, computerId)
+    return standing.kind === 'removed' ? null : standing.id
   }
 
   /** The computer a task's data belongs to now, or null (it waits). */
@@ -214,11 +219,14 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
     return (await deps.fallbackTarget?.(taskId)) ?? null
   }
 
+  const rulesOf = (kind: string): HandoffKind | undefined =>
+    deps.kinds && Object.hasOwn(deps.kinds, kind) ? deps.kinds[kind] : undefined
+
   /** The computer one kind of a task's rows goes to now, or null (they wait). */
   async function targetOf(kind: string, taskId: string): Promise<string | null> {
-    const special = deps.kindTargets && Object.hasOwn(deps.kindTargets, kind)
-    if (!special) return target(taskId)
-    return live(await deps.kindTargets![kind](taskId, () => target(taskId)))
+    const own = rulesOf(kind)?.target
+    if (!own) return target(taskId)
+    return live(await own(taskId, target))
   }
 
   /** A task's staged rows of `kinds` (default: all), in delivery order. */
@@ -262,7 +270,9 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
   async function deliverTask(
     taskId: string,
     computerId: string,
-    kinds?: readonly string[]
+    kinds?: readonly string[],
+    /** Tasks whose delivery is waiting on this one (`after`): never waited on again. */
+    waiting: ReadonlySet<string> = new Set()
   ): Promise<void> {
     const ledger = deps.ledger?.(computerId)
     const now = Date.now()
@@ -288,13 +298,27 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
         await quarantine(computerId, taskId, row, error)
         continue
       }
+      const prepared = await prepare(taskId, row, value)
+      if (!prepared) continue
       const list = byKind.get(row.kind) ?? []
-      list.push({ row, value })
+      list.push(prepared)
       byKind.set(row.kind, list)
     }
     if (byKind.size === 0) return
     await track(taskId, computerId)
     for (const [kind, rows] of byKind) {
+      // What these rows build on goes first, when it goes to this computer too.
+      const after = rulesOf(kind)?.after
+      if (after) {
+        const tasks = new Set(rows.flatMap(({ value }) => after(value)))
+        for (const first of tasks) {
+          if (first === taskId || waiting.has(first)) continue
+          if ((await targetOf(kind, first)) !== computerId) continue
+          await serialize(first, () =>
+            deliverTask(first, computerId, [kind], new Set([...waiting, taskId]))
+          )
+        }
+      }
       for (let i = 0; i < rows.length; i += DATA_IMPORT_MAX_ITEMS) {
         const batch = rows.slice(i, i + DATA_IMPORT_MAX_ITEMS)
         const result: DataImportResult = dataImportResultSchema.parse(
@@ -336,6 +360,29 @@ export function createComputerDataHandoff(deps: ComputerDataHandoffDeps) {
         }
       }
     }
+  }
+
+  /**
+   * The row as it is sent: its kind's repair applied, and the staged row rewritten to
+   * it first (the delivered row is forgotten by its payload). Null: the row changed
+   * meanwhile — the next delivery sends its new value.
+   */
+  async function prepare(
+    taskId: string,
+    row: HandoffRow,
+    value: unknown
+  ): Promise<{ row: HandoffRow; value: unknown } | null> {
+    const repair = rulesOf(row.kind)?.prepare
+    if (!repair) return { row, value }
+    const repaired = await repair(taskId, value)
+    const payload = JSON.stringify(repaired)
+    if (payload === row.payload) return { row, value }
+    const result = await db.run(
+      'UPDATE computer_data_handoff SET payload=? WHERE kind=? AND item_key=? AND payload=?',
+      [payload, row.kind, row.item_key, row.payload]
+    )
+    if (result.changes === 0) return null
+    return { row: { ...row, payload }, value: repaired }
   }
 
   /** Rows of tasks that no longer exist: nothing to deliver them to. */

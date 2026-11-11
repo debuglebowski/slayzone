@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { updateTaskInputSchema, type Task, type UpdateTaskInput } from '@slayzone/task-contracts'
 import {
   getTaskOp,
+  InvalidTaskUpdateError,
   switchMainAgentMode,
   TaskFoldersUnavailableError,
   ProjectNotFoundError,
@@ -182,11 +183,12 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       // The computer refused the folder by its own policy (B3): 409, its message.
       if (respondComputerRefusal(res, err)) return
       // A path no connected computer can take now (§9 7e): the caller can fix it.
-      // A projectId this hub has no project for: the caller's mistake.
+      // A projectId this hub has no project for, or an update breaking a task
+      // invariant (e.g. a relative path): the caller's mistake.
       const status =
         err instanceof TaskFoldersUnavailableError
           ? 409
-          : err instanceof ProjectNotFoundError
+          : err instanceof ProjectNotFoundError || err instanceof InvalidTaskUpdateError
             ? 400
             : 500
       res

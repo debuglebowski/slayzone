@@ -49,7 +49,7 @@ let pathsAway = false
 const computerPaths = new Map<string, { worktreePath: string | null; baseDir: string | null }>()
 setTaskPathsDelegate({
   changed: async () => {},
-  apply: async () => {},
+  apply: async (_taskId, patch) => patch,
   release: async () => ({ worktreePath: null, shared: false, computerId: 'pc' }),
   forget: async () => {},
   read: async (taskIds) =>

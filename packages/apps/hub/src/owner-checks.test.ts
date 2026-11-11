@@ -261,7 +261,7 @@ describe('T-17 owner checks: two users on a real hub with login', () => {
     const pathsDelegate = getTaskPathsDelegate()
     setTaskPathsDelegate({
       changed: async () => {},
-      apply: async () => {},
+      apply: async (_taskId, patch) => patch,
       release: async () => ({ worktreePath: null, shared: false, computerId: 'pc' }),
       forget: async () => {},
       read: async (ids) =>

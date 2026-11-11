@@ -32,7 +32,7 @@ import {
 } from '../shared'
 import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 import { retiredComputerSql, type ChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
-import { REMOVED_COMPUTER_REASON } from './hub-retirements'
+import { chatComputer, ChatUnavailableError } from './hub-chat-computer'
 import type { ChatComputerRequest } from './migration'
 import { createHistoryProgress } from './hub-history-progress'
 import { createChatFolderDeletions } from './hub-folders'
@@ -422,13 +422,13 @@ export function createHubChatRelay(opts: {
         owner?.taskId ??
         (await db.get<{ task_id: string }>('SELECT task_id FROM terminal_tabs WHERE id=?', [tabId]))
           ?.task_id
+      // The chat's computer as the hub answers it everywhere (`chatComputer`). Also a
+      // removed one: recovery applies its retirement first (repointing or retiring the
+      // work that names it) and never asks it. Its chats are refused below with the
+      // removal reason.
       const pc =
-        owner?.computerId ??
-        owner?.destinationComputerId ??
+        (owner ? (await chatComputer(db, owner))?.id : null) ??
         (taskId ? await opts.resolveComputer(taskId) : null)
-      // Also for a removed computer: recovery applies its retirement first (repointing
-      // or retiring the work that names it) and never asks it. Its chats are refused
-      // below with the removal reason.
       if (pc)
         await opts.recoverComputer(
           pc,
@@ -456,14 +456,10 @@ export function createHubChatRelay(opts: {
     }
     if (owner.state === 'deleted') throw new Error('Chat conversation deleted')
     const unavailable = await ownership.unavailable(owner.id)
-    if (unavailable) throw new Error(unavailable.reason)
-    // Retired, its work not yet retired (applyComputerRetirements runs on recovery).
-    if (
-      owner.state === 'active' &&
-      owner.computerId &&
-      (await ownership.isRetired(owner.computerId))
-    )
-      throw new Error(REMOVED_COMPUTER_REASON)
+    if (unavailable) throw new ChatUnavailableError(unavailable.reason)
+    // Removed, its work not yet retired (applyComputerRetirements runs on recovery).
+    if ((await chatComputer(db, owner))?.kind === 'removed')
+      throw new ChatUnavailableError('computer-removed')
     const fence = opts.conversationFence?.(owner.id)
     if (fence) throw fence
     if (owner.state !== 'active' || owner.cleanupPending) {
@@ -529,7 +525,7 @@ export function createHubChatRelay(opts: {
     const owners = (await ownership.forTask(taskId)).filter((o) => o.state !== 'deleted')
     for (const owner of owners) {
       const unavailable = await ownership.unavailable(owner.id)
-      if (unavailable) throw new Error(unavailable.reason)
+      if (unavailable) throw new ChatUnavailableError(unavailable.reason)
     }
     const tables = await legacyChatTables(db)
     if (owners.length) {

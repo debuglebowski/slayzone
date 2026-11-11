@@ -24,14 +24,20 @@
  *
  * @module hub/computer-task-paths
  */
+import { createHash } from 'node:crypto'
 import {
+  InvalidTaskUpdateError,
   TaskFoldersUnavailableError,
   type TaskPathChange,
+  type TaskPathPatch,
   type TaskPathRelease,
   type TaskPathsDelegate
 } from '@slayzone/task/server'
 import type { TaskPathState } from '@slayzone/task-contracts'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { FaultLedger } from '@slayzone/platform/isolation'
+import { normalizeTaskPath } from '@slayzone/chat-runtime/shared'
+import type { HandoffKind } from './computer-data-handoff'
 
 /** The handoff kind of a task's paths (chat-runtime `taskPathImport`). */
 export const TASK_PATH_KIND = 'task-path'
@@ -54,6 +60,99 @@ export interface ComputerTaskPathsDeps {
   /** Wall clock (ms). */
   now?(): number
   log?(message: string, error: unknown): void
+  /** The hub's own Needs-attention ledger: a path no computer takes is recorded there. */
+  ledger?: FaultLedger
+}
+
+/** Needs-attention pass of a task path no computer takes (item key `<taskId>:<field>`). */
+export const TASK_PATH_REFUSED_PASS = 'hub-task-path'
+
+const FIELDS = ['worktreePath', 'baseDir'] as const
+type PathField = (typeof FIELDS)[number]
+const FLAG: Record<PathField, string> = { worktreePath: 'has_worktree', baseDir: 'has_base_dir' }
+const LABEL: Record<PathField, string> = { worktreePath: 'worktree path', baseDir: 'base dir' }
+
+/** A path the user set that no computer takes (relative, `~/…`, blank): the update fails. */
+export class InvalidTaskPathError extends InvalidTaskUpdateError {
+  constructor(
+    readonly field: PathField,
+    readonly value: string
+  ) {
+    super(`The ${LABEL[field]} must be an absolute path on the computer: ${JSON.stringify(value)}`)
+  }
+  override name = 'InvalidTaskPathError'
+}
+
+/**
+ * Judges the paths of one write, once, as a computer would ({@link normalizeTaskPath}):
+ * `''` is unset; a path no computer takes is never sent nor staged. Where nobody can be
+ * told at once (any writer but the user's own `apply`, a row staged before this check),
+ * it is left unset — the task's flag too, as no computer holds it — and Needs attention
+ * says so. A later write of that path ends the entry.
+ */
+function createTaskPathJudge(
+  db: SlayzoneDb,
+  opts: { ledger?: FaultLedger; log(message: string, error: unknown): void }
+) {
+  return {
+    /** The fields as sent; throws {@link InvalidTaskPathError} on one no computer takes. */
+    strict(patch: TaskPathPatch): TaskPathPatch {
+      const out: TaskPathPatch = {}
+      for (const field of FIELDS) {
+        if (!(field in patch)) continue
+        const given = patch[field]
+        const judged = normalizeTaskPath(given)
+        if (!judged.ok) throw new InvalidTaskPathError(field, String(given))
+        out[field] = judged.value
+      }
+      return out
+    },
+    /**
+     * The fields as sent: one no computer takes is unset, its flag cleared, recorded.
+     * `accepted`: the fields written as given (their earlier refusal is over once sent).
+     */
+    async lenient<T extends TaskPathPatch>(
+      taskId: string,
+      patch: T
+    ): Promise<{ patch: T; accepted: PathField[] }> {
+      const out = { ...patch }
+      const accepted: PathField[] = []
+      for (const field of FIELDS) {
+        if (!(field in patch)) continue
+        const given = patch[field]
+        const judged = normalizeTaskPath(given)
+        if (judged.ok) {
+          out[field] = judged.value as T[PathField]
+          accepted.push(field)
+          continue
+        }
+        out[field] = null as T[PathField]
+        const error = new Error(
+          `The ${LABEL[field]} ${JSON.stringify(given)} is not an absolute path, so no computer can hold it: it was left unset. Set the task's folder again.`
+        )
+        opts.log(`${LABEL[field]} of ${taskId} refused`, error)
+        await db.run(`UPDATE tasks SET ${FLAG[field]}=0 WHERE id=?`, [taskId])
+        await opts.ledger?.record(
+          {
+            pass: TASK_PATH_REFUSED_PASS,
+            itemKey: `${taskId}:${field}`,
+            taskId,
+            kind: 'structural',
+            // Lifted by a change: the next write of this path (`settled`).
+            fingerprint: createHash('sha256').update(String(given)).digest('hex'),
+            error
+          },
+          Date.now()
+        )
+      }
+      return { patch: out, accepted }
+    },
+    /** These fields were written as given: an earlier refusal of them is over. */
+    async settled(taskId: string, fields: readonly PathField[]): Promise<void> {
+      for (const field of fields)
+        await opts.ledger?.clear(TASK_PATH_REFUSED_PASS, `${taskId}:${field}`)
+    }
+  }
 }
 
 /** Thrown when the computer holding a task's folders cannot be asked now. */
@@ -80,20 +179,70 @@ interface StagedPaths {
   at: number
 }
 
+/** The computer recorded as holding a task's folders, unless it was removed for good. */
+async function recordedHolder(db: SlayzoneDb, taskId: string): Promise<string | null> {
+  const row = await db.get<{ worktree_computer_id: string | null }>(
+    `SELECT t.worktree_computer_id FROM tasks t WHERE t.id=? AND NOT EXISTS(
+       SELECT 1 FROM computer_retirements r
+        WHERE r.computer_id=t.worktree_computer_id AND r.successor_id IS NULL)`,
+    [taskId]
+  )
+  return row?.worktree_computer_id ?? null
+}
+
 /**
- * The computer holding a task's folders: its recorded holder, else the task's data
- * computer (a holder is then recorded by the first write that reaches one). A holder
- * removed for good took the folders with it: the task's data computer then.
+ * The computer holding a task's folders: its recorded holder (a holder removed for
+ * good took the folders with it: none). Without one, a subtask whose inherit is still
+ * staged goes where its parent's paths go — its folders are the parent's, and only
+ * the computer that gets the parent's row can copy it (a parent's own holder may not
+ * be recorded yet: its row staged for its chat's computer, or no computer placed).
+ * Else the task's data computer; a holder is then recorded by the first write that
+ * reaches one.
  */
-export function taskPathTarget(db: SlayzoneDb) {
-  return async (taskId: string, fallback: () => Promise<string | null>) => {
-    const row = await db.get<{ worktree_computer_id: string | null }>(
-      `SELECT t.worktree_computer_id FROM tasks t WHERE t.id=? AND NOT EXISTS(
-         SELECT 1 FROM computer_retirements r
-          WHERE r.computer_id=t.worktree_computer_id AND r.successor_id IS NULL)`,
-      [taskId]
-    )
-    return row?.worktree_computer_id ?? (await fallback())
+async function taskPathTarget(
+  db: SlayzoneDb,
+  taskId: string,
+  dataTarget: (taskId: string) => Promise<string | null>,
+  seen: ReadonlySet<string> = new Set()
+): Promise<string | null> {
+  const holder = await recordedHolder(db, taskId)
+  if (holder !== null) return holder
+  const staged = await db.get<{ parent: string | null }>(
+    `SELECT json_extract(payload,'$.inheritFrom') AS parent FROM computer_data_handoff
+      WHERE kind=? AND item_key=? AND json_valid(payload)`,
+    [TASK_PATH_KIND, taskId]
+  )
+  const parent = staged?.parent
+  if (typeof parent === 'string' && parent !== taskId && !seen.has(parent))
+    return taskPathTarget(db, parent, dataTarget, new Set([...seen, taskId]))
+  return dataTarget(taskId)
+}
+
+/**
+ * How the hand-off delivers `task-path` rows: to the computer holding the task's
+ * folders; a path no computer takes (a row staged before the delegate judged paths)
+ * is sent unset, with its Needs-attention entry, instead of faulting the row for good.
+ */
+export function taskPathHandoffKind(
+  db: SlayzoneDb,
+  opts: { ledger?: FaultLedger; log?(message: string, error: unknown): void } = {}
+): HandoffKind {
+  const judge = createTaskPathJudge(db, {
+    ledger: opts.ledger,
+    log: opts.log ?? ((message, error) => console.warn(`[task-paths] ${message}`, error))
+  })
+  return {
+    target: (taskId, dataTarget) => taskPathTarget(db, taskId, dataTarget),
+    async prepare(taskId, value) {
+      if (typeof value !== 'object' || value === null) return value
+      return (await judge.lenient(taskId, value as TaskPathPatch)).patch
+    },
+    // A subtask's inherit copies its parent's row as the computer holds it: that row
+    // goes first, or the copy is empty.
+    after: (value) => {
+      const parent = (value as { inheritFrom?: unknown } | null)?.inheritFrom
+      return typeof parent === 'string' ? [parent] : []
+    }
   }
 }
 
@@ -106,19 +255,6 @@ export async function recordHolder(db: SlayzoneDb, taskId: string, computerId: s
   )
 }
 
-/**
- * A path given as '' is unset (null): a computer takes only absolute paths, and a ''
- * it refuses would fault the task's staged row for good (found by the migration persona
- * suite, tools/migration-personas, p10-v0380-worktrees). Absent stays absent.
- */
-function unsetEmpty<T extends { worktreePath?: string | null; baseDir?: string | null }>(p: T): T {
-  return {
-    ...p,
-    ...(p.worktreePath === '' ? { worktreePath: null } : {}),
-    ...(p.baseDir === '' ? { baseDir: null } : {})
-  }
-}
-
 export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsDelegate {
   const { db } = deps
   let last = 0
@@ -128,6 +264,7 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     return last
   }
   const log = deps.log ?? ((message, error) => console.warn(`[task-paths] ${message}`, error))
+  const judge = createTaskPathJudge(db, { ledger: deps.ledger, log })
 
   const projectOf = async (taskId: string) =>
     db.get<{ project_id: string | null }>('SELECT project_id FROM tasks WHERE id=?', [taskId])
@@ -173,7 +310,12 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
   }
 
   async function run(taskId: string, change: TaskPathChange, projectId: string | null, at: number) {
-    const computerId = await deps.targetOf(TASK_PATH_KIND, taskId)
+    // An inherit with no recorded holder goes where the parent's paths go (the
+    // computer that can copy them), as its staged row would (`taskPathTarget`).
+    const computerId =
+      change.op === 'inherit' && (await recordedHolder(db, taskId)) === null
+        ? await deps.targetOf(TASK_PATH_KIND, change.parentTaskId)
+        : await deps.targetOf(TASK_PATH_KIND, taskId)
     if (computerId === null || !deps.usable(computerId)) return false
     await deps.flushTask(taskId, computerId, PATH_KINDS)
     if (change.op === 'clear') {
@@ -269,16 +411,20 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     },
 
     async changed(taskId, given) {
-      const change = given.op === 'set' ? unsetEmpty(given) : given
-      const at = now()
       const row = await projectOf(taskId)
       if (!row) return
+      // Judged once, here: nothing a computer refuses is ever sent or staged.
+      const judged = given.op === 'set' ? await judge.lenient(taskId, given) : null
+      const change = judged ? judged.patch : given
+      const at = now()
+      let sent = false
       try {
-        if (await run(taskId, change, row.project_id, at)) return
+        sent = await run(taskId, change, row.project_id, at)
       } catch (error) {
         log(`paths of ${taskId} staged for its computer`, error)
       }
-      await stage(taskId, stagedOf(change, row.project_id, at))
+      if (!sent) await stage(taskId, stagedOf(change, row.project_id, at))
+      if (judged) await judge.settled(taskId, judged.accepted)
     },
 
     async release(taskId, liveTaskIds): Promise<TaskPathRelease> {
@@ -294,7 +440,8 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
     },
 
     async apply(taskId, given) {
-      const patch = unsetEmpty(given)
+      // The user's own write: a path no computer takes fails it, before any computer.
+      const patch = judge.strict(given)
       // A task with no folder has no holder, nor one on a computer removed for good
       // (its folders went with it): a stale one goes, so the new folder is on the
       // computer the task's work runs on now.
@@ -321,6 +468,11 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
         'UPDATE tasks SET worktree_computer_id=? WHERE id=? AND worktree_computer_id IS NULL',
         [computerId, taskId]
       )
+      await judge.settled(
+        taskId,
+        FIELDS.filter((field) => field in patch)
+      )
+      return patch
     },
 
     async forget(taskId, computerId) {

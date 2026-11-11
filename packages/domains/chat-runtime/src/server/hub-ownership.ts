@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { ChatUnavailableReason } from '@slayzone/terminal-contracts'
 import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { legacyChatTabContentSql, legacyChatTaskContentSql } from './legacy-census'
 
@@ -65,7 +66,10 @@ export const isStaleLocator = (owner: Pick<HubChatOwnership, 'computerId' | 'sta
 /** SQL: `expr` is not a retired computer id (re-enrolled or removed): it can still receive work. */
 const notRetired = (expr: string) =>
   `NOT EXISTS(SELECT 1 FROM computer_retirements r WHERE r.computer_id=${expr})`
-/** SQL: computer id `expr` was removed for good (deleted or missing, no successor). */
+/**
+ * SQL: computer id `expr` was removed for good (deleted or missing, no successor). One
+ * row: retirements are written collapsed (computers store `computerStanding`).
+ */
 export const retiredComputerSql = (expr: string) =>
   `EXISTS(SELECT 1 FROM computer_retirements r WHERE r.computer_id=${expr} AND r.successor_id IS NULL)`
 
@@ -104,8 +108,9 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
   }
   const api = {
     get,
+    /** Why this chat's history cannot be had, while it can't (a reason code). */
     async unavailable(id: string) {
-      return db.get<{ reason: string }>(
+      return db.get<{ reason: ChatUnavailableReason }>(
         `SELECT u.reason FROM chat_unavailable_owners u JOIN chat_ownership o ON o.id=u.conversation_id
         WHERE u.conversation_id=? AND o.state='active' AND o.computer_id=u.computer_id AND o.epoch=u.epoch`,
         [id]
@@ -114,7 +119,7 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
     async markUnavailable(id: string, computerId: string, epoch: number) {
       await db.run(
         `INSERT INTO chat_unavailable_owners(conversation_id,computer_id,epoch,reason)
-        SELECT id,computer_id,epoch,'Chat history unavailable. Computer did not return this conversation. Restore its chat backup or reconnect the original computer; no empty history was created.'
+        SELECT id,computer_id,epoch,'not-returned'
         FROM chat_ownership WHERE id=? AND computer_id=? AND epoch=? AND state='active'
         AND NOT EXISTS(SELECT 1 FROM chat_bootstrap_reservations WHERE conversation_id=chat_ownership.id)
         ON CONFLICT(conversation_id) DO UPDATE SET computer_id=excluded.computer_id,epoch=excluded.epoch,reason=excluded.reason`,
@@ -534,9 +539,6 @@ export function createChatOwnershipStore(db: SlayzoneDb) {
         "UPDATE chat_deletion_targets SET acknowledged=1 WHERE conversation_id=? AND computer_id=? AND acknowledged=0 AND EXISTS(SELECT 1 FROM chat_ownership WHERE id=? AND state='deleted')",
         [id, computerId, id]
       )
-    },
-    async isRetired(computerId: string) {
-      return !!(await db.get(`SELECT 1 WHERE ${retiredComputerSql('?')}`, [computerId]))
     },
     async pendingDeletions(computerId: string) {
       return db.all<{ conversationId: string; epoch: number }>(

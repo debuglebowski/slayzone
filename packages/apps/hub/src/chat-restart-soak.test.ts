@@ -56,7 +56,7 @@ import {
   createComputerTaskPaths,
   TASK_PATH_KIND,
   recordHolder,
-  taskPathTarget
+  taskPathHandoffKind
 } from './computer-task-paths'
 import { z } from 'zod'
 
@@ -154,7 +154,7 @@ test('normal use across repeated hub and computer restarts never leaves a task u
       isUnreachable: isComputerUnreachable,
       // The hub's default placement: the one computer.
       fallbackTarget: async () => pcId,
-      kindTargets: { [TASK_PATH_KIND]: taskPathTarget(h.slayDb) },
+      kinds: { [TASK_PATH_KIND]: taskPathHandoffKind(h.slayDb) },
       // As composition: the computer a task's paths reached holds its folders (7e).
       delivered: async (kind, taskId, computerId) => {
         if (kind === TASK_PATH_KIND) await recordHolder(h.slayDb, taskId, computerId)

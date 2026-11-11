@@ -102,6 +102,29 @@ export interface ChatComputerOps {
   ): Promise<{ name: string; data: string }>
 }
 
+/**
+ * Why a chat's history is unavailable: its computer was removed for good (deleted, or
+ * missing), or a computer that holds the chat did not return it.
+ */
+export type ChatUnavailableReason = 'computer-removed' | 'not-returned'
+export const CHAT_UNAVAILABLE_TITLE = 'Chat history unavailable'
+/** Why, without the title ({@link CHAT_UNAVAILABLE_TITLE}). `computerName`: who did not return it. */
+export function chatUnavailableDetail(
+  reason: ChatUnavailableReason,
+  computerName = 'Its computer'
+): string {
+  switch (reason) {
+    case 'computer-removed':
+      return 'Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
+    case 'not-returned':
+      return `${computerName} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+  }
+}
+/** As an error message: the title, then why. */
+export function chatUnavailableMessage(reason: ChatUnavailableReason): string {
+  return `${CHAT_UNAVAILABLE_TITLE}. ${chatUnavailableDetail(reason)}`
+}
+
 export interface ChatAvailability {
   state:
     | 'ready'
@@ -114,7 +137,12 @@ export interface ChatAvailability {
     | 'unavailable'
     | 'upgrading'
   computer: { id: string; name: string } | null
-  /** 'unavailable' only: why, when the hub knows (e.g. its computer was removed). */
+  /** 'unavailable' only: why, when the hub knows. */
+  reasonCode?: ChatUnavailableReason
+  /**
+   * 'unavailable' only: why, as text without the title — for clients that predate
+   * `reasonCode` (a newer hub's text reads right there too).
+   */
   reason?: string
   waitingForAgents?: boolean
   /**
@@ -150,11 +178,10 @@ export function chatAvailabilityMessage(
       }
     case 'unavailable':
       return {
-        title: 'Chat history unavailable',
-        // A known reason repeats the title as its first sentence: show the rest.
-        detail: status.reason
-          ? status.reason.replace(/^Chat history unavailable\.\s*/, '')
-          : `${name} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+        title: CHAT_UNAVAILABLE_TITLE,
+        detail: status.reasonCode
+          ? chatUnavailableDetail(status.reasonCode, name)
+          : (status.reason ?? chatUnavailableDetail('not-returned', name))
       }
     case 'upgrading':
       return {

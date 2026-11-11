@@ -41,7 +41,10 @@ setTaskPathsDelegate({
     else if (change.op === 'clear') held.delete(taskId)
     else hold(taskId, held.get(change.parentTaskId) ?? null)
   },
-  apply: async (taskId, patch) => hold(taskId, patch.worktreePath),
+  apply: async (taskId, patch) => {
+    hold(taskId, patch.worktreePath)
+    return patch
+  },
   read: async () => ({}),
   release: async (taskId, live) => {
     const own = held.get(taskId) ?? null

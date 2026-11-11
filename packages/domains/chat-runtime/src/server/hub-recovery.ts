@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { computerStanding } from '@slayzone/computers/server'
 import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import type { ChatOwnership, ChatTabTransition, ConversationIdentity } from '../shared'
 import {
@@ -196,8 +197,11 @@ export function createChatRecovery(opts: {
               // Another computer holds it now (moved, or re-created there): this
               // tombstone is foreign history, not a deletion of the live chat.
               const holder = known.computerId
-              if (holder !== null && holder !== computerId && !(await owners.isRetired(holder)))
-                return
+              if (holder !== null && holder !== computerId) {
+                // Re-enrolled as the reporter: its own. Removed for good: no one's.
+                const standing = await computerStanding(db, holder)
+                if (standing.kind !== 'removed' && standing.id !== computerId) return
+              }
               await owners.deleteConversation(known.id, i.epoch)
               return
             }
@@ -345,7 +349,7 @@ export function createChatRecovery(opts: {
             previous.computerId !== computerId &&
             previous.id === i.id &&
             previous.epoch <= i.epoch &&
-            (await owners.isRetired(previous.computerId))
+            (await computerStanding(db, previous.computerId)).kind === 'removed'
           if (
             previous?.computerId &&
             !adopting &&

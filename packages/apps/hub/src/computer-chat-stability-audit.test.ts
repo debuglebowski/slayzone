@@ -10,7 +10,7 @@ import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { deleteComputer, replaceComputer, revokeComputer } from '@slayzone/computers/server'
-import { REMOVED_COMPUTER_REASON } from '@slayzone/chat-runtime/hub'
+import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
@@ -804,9 +804,11 @@ test('a computer deleted on this build: its chat reads unavailable and refuses w
     await after.retireComputers()
     expect(await after.availability('tab')).toMatchObject({
       state: 'unavailable',
-      reason: REMOVED_COMPUTER_REASON
+      reasonCode: 'computer-removed'
     })
-    await expect(after.relay.ops.getTabState('tab')).rejects.toThrow(REMOVED_COMPUTER_REASON)
+    await expect(after.relay.ops.getTabState('tab')).rejects.toThrow(
+      chatUnavailableMessage('computer-removed')
+    )
     // Recovering a removed computer asks it nothing: there is nothing to reconcile.
     await expect(after.recoverComputer('pc')).resolves.toBeUndefined()
     // The chat is kept, waiting for a computer that holds it.

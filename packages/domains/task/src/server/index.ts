@@ -118,6 +118,7 @@ export {
   readTaskPaths,
   type TaskPathsDelegate,
   type TaskPathChange,
+  type TaskPathPatch,
   type TaskPathRelease,
   InvalidTaskUpdateError,
   TaskFoldersUnavailableError,

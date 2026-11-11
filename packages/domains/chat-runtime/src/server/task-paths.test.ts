@@ -183,6 +183,43 @@ describe('task paths on the computer', () => {
     expect(paths.get('child')).toMatchObject({ worktreePath: '/w/p', baseDir: null })
   })
 
+  test('a staged inherit merged with later writes: the later fields win over the copy', () => {
+    const storage = open()
+    const paths = createTaskPaths(storage)
+    paths.handle({
+      op: 'set',
+      taskId: 'parent',
+      projectId: 'p',
+      worktreePath: '/w/p',
+      baseDir: '/b/p',
+      at: 1
+    })
+    const data = createComputerTaskData({
+      storage,
+      computerId: 'c1',
+      imports: { 'task-path': taskPathImport },
+      providerConfig: () => ({}),
+      taskPath: paths.get
+    })
+    // The hub staged the inherit, then a clear of the worktree (a project change) on
+    // top of it: one row (hub computer-task-paths.ts `stage`).
+    data.importBatch({
+      kind: 'task-path',
+      items: [
+        {
+          key: 'child',
+          taskId: 'child',
+          value: { projectId: 'p2', inheritFrom: 'parent', worktreePath: null, at: 3 }
+        }
+      ]
+    })
+    expect(paths.get('child')).toMatchObject({
+      projectId: 'p2',
+      worktreePath: null,
+      baseDir: '/b/p'
+    })
+  })
+
   test('the hub hand-off is idempotent and keeps a newer local row', () => {
     const storage = open()
     const paths = createTaskPaths(storage)

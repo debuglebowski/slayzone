@@ -887,11 +887,14 @@ export function setChatSettingsDelegate(delegate: ChatSettingsDelegate | null): 
  * here reports the values it wrote after its flag write. Without one (tests, a hub
  * with no computers) the paths have nowhere to live: only the flags change.
  */
+/** A write of a task's paths: the fields it sets (absent = unchanged; null clears). */
+export interface TaskPathPatch {
+  worktreePath?: string | null
+  baseDir?: string | null
+}
 export type TaskPathChange =
   /** The fields this write sets (absent = unchanged; null clears). */
-  | { op: 'set'; worktreePath?: string | null; baseDir?: string | null }
-  | { op: 'inherit'; parentTaskId: string }
-  | { op: 'clear' }
+  ({ op: 'set' } & TaskPathPatch) | { op: 'inherit'; parentTaskId: string } | { op: 'clear' }
 /** The worktree a cleanup may remove, on `computerId`; `shared`: a live task keeps it. */
 export interface TaskPathRelease {
   worktreePath: string | null
@@ -908,14 +911,13 @@ export interface TaskPathsDelegate {
    */
   release(taskId: string, liveTaskIds: readonly string[]): Promise<TaskPathRelease>
   /**
-   * A path the user sets: written on the computer holding the task's folders (a task
-   * with none yet: where its work runs, which then holds them) before the hub records
-   * that it is set. Throws when that computer is away or refuses the path.
+   * A path the user sets, as given: written on the computer holding the task's
+   * folders (a task with none yet: where its work runs, which then holds them) before
+   * the hub records that it is set. The delegate alone judges the paths (`''` is
+   * unset): it answers the fields as written, which the hub's flags follow. Throws
+   * when a path is one no computer takes, or that computer is away or refuses it.
    */
-  apply(
-    taskId: string,
-    patch: { worktreePath?: string | null; baseDir?: string | null }
-  ): Promise<void>
+  apply(taskId: string, patch: TaskPathPatch): Promise<TaskPathPatch>
   /** A purged task's checkout is dealt with: its computer may forget the path. */
   forget(taskId: string, computerId: string): Promise<void>
   /**
@@ -1024,7 +1026,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   const fields: string[] = []
   const values: unknown[] = []
   /** The paths this update writes, for the computer holding the task's folders. */
-  const pathPatch: { worktreePath?: string | null; baseDir?: string | null } = {}
+  let pathPatch: TaskPathPatch = {}
   const chatSettingsPushes: Array<{ mode: string; settings: Record<string, unknown> }> = []
   /** A worktree / base-dir change: every tab's session resets (below). */
   let resetsWholeTask = false
@@ -1239,12 +1241,13 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     values.push(data.panelSizes ? JSON.stringify(data.panelSizes) : null)
   }
   // A project move clears these too (`moveTasksToProject`).
-  if (data.worktreePath !== undefined) pathPatch.worktreePath = data.worktreePath || null
+  // As given: the task-paths delegate judges them (`apply`), once.
+  if (data.worktreePath !== undefined) pathPatch.worktreePath = data.worktreePath
   if (data.worktreeParentBranch !== undefined) {
     fields.push('worktree_parent_branch = ?')
     values.push(data.worktreeParentBranch)
   }
-  if (data.baseDir !== undefined) pathPatch.baseDir = data.baseDir || null
+  if (data.baseDir !== undefined) pathPatch.baseDir = data.baseDir
   if (data.browserUrl !== undefined) {
     fields.push('browser_url = ?')
     values.push(data.browserUrl)
@@ -1397,7 +1400,8 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
       throw new TaskFoldersUnavailableError(
         "No computer holds this task's folders: its paths cannot be set"
       )
-    await taskPathsDelegate.apply(data.id, pathPatch)
+    // The flags follow what the computer holds now (the delegate's answer).
+    pathPatch = await taskPathsDelegate.apply(data.id, pathPatch)
   }
   if (pathPatch.worktreePath !== undefined || pathPatch.baseDir !== undefined) {
     if (pathPatch.worktreePath !== undefined) {

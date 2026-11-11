@@ -134,8 +134,13 @@ export function installLoopbackTurnComputer(
         })
       else write(taskId, { worktreePath: change.worktreePath, baseDir: change.baseDir })
     },
-    apply: async (taskId, patch) => {
+    apply: async (taskId, given) => {
+      // As the hub's delegate: '' is unset.
+      const patch = Object.fromEntries(
+        Object.entries(given).map(([key, value]) => [key, value === '' ? null : value])
+      )
       write(taskId, patch)
+      return patch
     },
     read: async (taskIds) =>
       Object.fromEntries(

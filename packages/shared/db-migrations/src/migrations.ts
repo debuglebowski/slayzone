@@ -5629,6 +5629,60 @@ export const migrations: Migration[] = [
       // Each pass moves one generation; a task tree is acyclic, the bound only guards.
       for (let i = 0; i < 1000 && inherit.run().changes > 0; i++);
     }
+  },
+  {
+    version: 215,
+    up: (db) => {
+      // One answer about a removed computer (post-v0.39.0 review).
+      //
+      // 1. A retirement names its final successor, or none (computers store
+      //    `computerStanding`; its writers keep it so from now on). A computer
+      //    re-enrolled as one that was re-enrolled again names the last; one whose
+      //    successor was deleted or went missing is removed for good, with that reason.
+      //    Every single-row check (SQL and code) then reads a chain right. A cycle names
+      //    no live computer: removed, 'missing'.
+      const rows = db
+        .prepare('SELECT computer_id, successor_id, reason FROM computer_retirements')
+        .all() as Array<{ computer_id: string; successor_id: string | null; reason: string }>
+      const byId = new Map(rows.map((r) => [r.computer_id, r]))
+      const collapse = db.prepare(
+        'UPDATE computer_retirements SET successor_id = ?, reason = ? WHERE computer_id = ?'
+      )
+      for (const r of rows) {
+        if (r.successor_id === null) continue
+        const seen = new Set([r.computer_id])
+        let next: string = r.successor_id
+        let end: { successor: string | null; reason: string }
+        for (;;) {
+          const further = byId.get(next)
+          if (!further) {
+            end = { successor: next, reason: r.reason }
+            break
+          }
+          if (further.successor_id === null) {
+            end = { successor: null, reason: further.reason }
+            break
+          }
+          seen.add(next)
+          if (seen.has(further.successor_id)) {
+            end = { successor: null, reason: 'missing' }
+            break
+          }
+          next = further.successor_id
+        }
+        if (end.successor !== r.successor_id || end.reason !== r.reason)
+          collapse.run(end.successor, end.reason, r.computer_id)
+      }
+      // 2. A chat's unavailable reason is a code; its text lives in one place
+      //    (terminal-contracts `chatUnavailableDetail`). The hub only ever stored these
+      //    two texts (v0.39.0), frozen here; any other reads as not returned.
+      db.prepare(
+        `UPDATE chat_unavailable_owners SET reason = CASE reason WHEN ? THEN 'computer-removed' ELSE 'not-returned' END
+          WHERE reason NOT IN ('computer-removed', 'not-returned')`
+      ).run(
+        'Chat history unavailable. Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
+      )
+    }
   }
 ]
 

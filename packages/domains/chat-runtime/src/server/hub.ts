@@ -40,7 +40,8 @@ export {
   checkComputerChatConsistency,
   type ChatConsistencyViolation
 } from './hub-consistency'
-export { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
+export { applyComputerRetirements, type RetirementReport } from './hub-retirements'
+export { chatComputer, ChatUnavailableError } from './hub-chat-computer'
 export {
   createComputerSessionLedger,
   lateSessionStore,

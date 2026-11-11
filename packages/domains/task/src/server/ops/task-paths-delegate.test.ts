@@ -52,6 +52,10 @@ async function setup() {
     async apply(taskId, patch) {
       if (state.away) throw new Error('computer away')
       seen.push({ taskId, op: 'apply', change: patch, flags: flags(taskId) })
+      // As the hub's delegate: '' is unset; what it wrote is the answer.
+      return Object.fromEntries(
+        Object.entries(patch).map(([key, value]) => [key, value === '' ? null : value])
+      )
     },
     read: async () => ({}),
     release: async () => ({ worktreePath: null, shared: false, computerId: 'pc' }),
@@ -277,6 +281,28 @@ test('a subtask that inherits its parent’s folders takes the parent’s comput
       worktree_computer_id: null,
       has_worktree: 0
     })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a user path reaches the delegate as given: it alone normalizes, and the flags follow what it wrote', async () => {
+  const { h, projectId, seen } = await setup()
+  try {
+    const task = (await createTaskOp(h.slayDb, { projectId, title: 'T' }, {}))!
+    await updateTask(h.slayDb, { id: task.id, worktreePath: '/w/t', baseDir: '/b' })
+    seen.length = 0
+    const cleared = await updateTask(h.slayDb, { id: task.id, worktreePath: '' })
+    expect(seen).toEqual([
+      {
+        taskId: task.id,
+        op: 'apply',
+        change: { worktreePath: '' },
+        flags: { has_worktree: 1, has_base_dir: 1 }
+      }
+    ])
+    expect(cleared?.has_worktree).toBe(false)
+    expect(cleared?.has_base_dir).toBe(true)
   } finally {
     h.cleanup()
   }

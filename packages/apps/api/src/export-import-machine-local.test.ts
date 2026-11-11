@@ -120,7 +120,7 @@ test('S3: a custom folder round-trips export → import through the computers', 
     release: async () => {
       throw new Error('unused')
     },
-    apply: async () => undefined,
+    apply: async (_taskId, patch) => patch,
     forget: async () => undefined
   })
   try {
@@ -164,7 +164,7 @@ test('S3: an older bundle naming base_dir as a column restores it on import', as
     release: async () => {
       throw new Error('unused')
     },
-    apply: async () => undefined,
+    apply: async (_taskId, patch) => patch,
     forget: async () => undefined
   })
   try {

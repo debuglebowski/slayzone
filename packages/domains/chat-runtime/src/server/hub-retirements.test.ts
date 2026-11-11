@@ -97,7 +97,7 @@ test('a deleted computer: its pending work is retired with a reason, its chats w
       { kind: 'provider-transition', item_id: 'x', reason: 'deleted' }
     ])
     expect(await owners.unavailable('live')).toMatchObject({
-      reason: expect.stringMatching(/computer was removed/i)
+      reason: 'computer-removed'
     })
   } finally {
     h.cleanup()
@@ -140,6 +140,37 @@ test('a revoked computer is not retired: its work waits for it', async () => {
     await applyComputerRetirements(h.slayDb)
     expect(names('old')).toEqual(['ack', 'ownership', 'target', 'task', 'transition'])
     expect(await owners.get('live')).toMatchObject({ computerId: 'old' })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a removed computer back under its own id (re-enrolled local computer): its recovery takes back its chats', async () => {
+  const { h, owners, retire } = await fixture()
+  try {
+    retire(null)
+    await applyComputerRetirements(h.slayDb)
+    expect(await owners.unavailable('live')).toEqual({ reason: 'computer-removed' })
+    // It enrolls again (computers store `registerOrReplaceComputer` drops its retirement).
+    h.db.exec("DELETE FROM computer_retirements WHERE computer_id='old'")
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      onConversationFailure: (_pc, id, error) => {
+        throw new Error(`${id}: ${error.message}`)
+      },
+      request: async () => [
+        {
+          identity: { id: 'live', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+          state: 'active',
+          migrationId: null,
+          migrationHash: null,
+          bootstrapRevision: 0
+        }
+      ]
+    })
+    await recovery.reconcile('old')
+    expect(await owners.forTab('tab')).toMatchObject({ id: 'live', computerId: 'old' })
+    expect(await owners.unavailable('live')).toBeUndefined()
   } finally {
     h.cleanup()
   }

@@ -170,9 +170,10 @@ export async function createTaskOp(
       // subtask left unpinned in a project defaulting elsewhere named a folder its
       // computer did not have (found by tools/migration-personas, p10-v0380-worktrees).
       // Its holder is the parent's recorded holder as is: the same folders, wherever
-      // they are. Not recorded yet stays unrecorded (it resolves like the parent, by
-      // the copied pin); a deleted holder stays deleted, never a live computer that
-      // never had the folder.
+      // they are. Not recorded yet stays unrecorded: its inherit then goes wherever the
+      // parent's paths go (hub computer-task-paths.ts `taskPathTarget`), after them, and
+      // the computer it reaches is recorded. A deleted holder stays deleted, never a live
+      // computer that never had the folder.
       const inherits = parent.has_worktree === 1 || parent.has_base_dir === 1
       const holder = inherits ? parent.worktree_computer_id : null
       await db.run(

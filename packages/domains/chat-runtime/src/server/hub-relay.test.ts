@@ -7,7 +7,9 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 import { createHubChatRelay } from './hub-relay'
-import { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
+import { applyComputerRetirements } from './hub-retirements'
+import { computerStanding } from '@slayzone/computers/server'
+import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 
 test.each([false, true])(
   'history reads initialize new storage once and avoid repeated setup, existing=%s',
@@ -926,57 +928,86 @@ test('a placeholder folder resolves once every chat that referenced it was re-re
   }
 })
 
-test.each([false, true])(
-  'opening a chat whose computer was removed refuses with the removal reason; recovery applies the retirement and never asks the gone computer (retirement applied=%s)',
-  async (applied) => {
+/** One chat on `computerId`, its computers retired as `retirements`; a relay over it. */
+async function relayOverRetired(
+  h: Awaited<ReturnType<typeof createTestHarness>>,
+  computerId: string,
+  retirements: Array<[string, string | null, string]>,
+  applied: boolean
+) {
+  h.db.exec(
+    "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+  )
+  const ownership = createChatOwnershipStore(h.slayDb)
+  await ownership.register({
+    id: 'store',
+    taskId: 'task',
+    tabId: 'tab',
+    mode: 'claude-chat',
+    computerId,
+    epoch: 1
+  })
+  for (const [id, successor, reason] of retirements)
+    h.db
+      .prepare(
+        'INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES(?,?,?,1)'
+      )
+      .run(id, successor, reason)
+  if (applied) await applyComputerRetirements(h.slayDb)
+  // What the hub gateway answers for a computer with no connection.
+  const notConnected = (id: string) => new Error(`computer '${id}' is not connected`)
+  const request = vi.fn<ChatComputerRequest>(async (pc) => {
+    throw notConnected(pc)
+  })
+  // The hub's recoverComputer: it applies pending retirements first, and a
+  // removed computer then has nothing to reconcile (it never asks it).
+  const recoverComputer = vi.fn(async (pc: string) => {
+    await applyComputerRetirements(h.slayDb)
+    if ((await computerStanding(h.slayDb, pc)).kind === 'removed') return
+    throw notConnected(pc)
+  })
+  const relay = createHubChatRelay({
+    db: h.slayDb,
+    ownership,
+    bootstrap: async () => {
+      throw new Error('Must not bootstrap on a removed computer')
+    },
+    request,
+    recoverComputer,
+    resolveComputer: async () => null,
+    defaultComputer: async () => null,
+    migrate: async () => {
+      throw new Error('No legacy content to migrate')
+    },
+    onSessionsChanged: () => {}
+  })
+  return { relay, request, recoverComputer }
+}
+
+test.each([
+  ['removed', false],
+  ['removed', true],
+  ['re-enrolled, then removed', false],
+  ['re-enrolled, then removed', true]
+] as const)(
+  'opening a chat whose computer was %s refuses with the removal reason; recovery applies the retirement and never asks the gone computer (applied=%s)',
+  async (how, applied) => {
     const h = await createTestHarness()
     try {
-      h.db.exec(
-        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      const { relay, request, recoverComputer } = await relayOverRetired(
+        h,
+        'gone',
+        how === 'removed'
+          ? [['gone', null, 'deleted']]
+          : [
+              ['gone', 'next', 're-enrolled'],
+              ['next', null, 'deleted']
+            ],
+        applied
       )
-      const ownership = createChatOwnershipStore(h.slayDb)
-      await ownership.register({
-        id: 'store',
-        taskId: 'task',
-        tabId: 'tab',
-        mode: 'claude-chat',
-        computerId: 'gone',
-        epoch: 1
-      })
-      h.db
-        .prepare(
-          "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
-        )
-        .run()
-      if (applied) await applyComputerRetirements(h.slayDb)
-      // What the hub gateway answers for a computer with no connection.
-      const notConnected = (id: string) => new Error(`computer '${id}' is not connected`)
-      const request = vi.fn<ChatComputerRequest>(async (pc) => {
-        throw notConnected(pc)
-      })
-      // The hub's recoverComputer: it applies pending retirements first, and a
-      // removed computer then has nothing to reconcile (it never asks it).
-      const recoverComputer = vi.fn(async (pc: string) => {
-        await applyComputerRetirements(h.slayDb)
-        if (await ownership.isRetired(pc)) return
-        throw notConnected(pc)
-      })
-      const relay = createHubChatRelay({
-        db: h.slayDb,
-        ownership,
-        bootstrap: async () => {
-          throw new Error('Must not bootstrap on a removed computer')
-        },
-        request,
-        recoverComputer,
-        resolveComputer: async () => null,
-        defaultComputer: async () => null,
-        migrate: async () => {
-          throw new Error('No legacy content to migrate')
-        },
-        onSessionsChanged: () => {}
-      })
-      await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow(REMOVED_COMPUTER_REASON)
+      await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow(
+        chatUnavailableMessage('computer-removed')
+      )
       // The relay must not skip recovery for a removed computer: skipping it also
       // skipped applying the retirement (a legacy chat bound for it stayed bound).
       expect(recoverComputer).toHaveBeenCalledWith('gone', expect.any(Boolean))
@@ -989,3 +1020,21 @@ test.each([false, true])(
     }
   }
 )
+
+test('opening a chat on a re-enrolled computer recovers its successor, not the gone id', async () => {
+  const h = await createTestHarness()
+  try {
+    const { relay, recoverComputer } = await relayOverRetired(
+      h,
+      'old',
+      [['old', 'new', 're-enrolled']],
+      false
+    )
+    // The successor is offline here: the transport's answer, never the removal.
+    await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow("computer 'new' is not connected")
+    expect(recoverComputer).toHaveBeenCalledWith('new', expect.any(Boolean))
+    expect(recoverComputer).not.toHaveBeenCalledWith('old', expect.anything())
+  } finally {
+    h.cleanup()
+  }
+})

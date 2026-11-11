@@ -7,6 +7,7 @@ import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
+import { chatUnavailableMessage } from '@slayzone/terminal-contracts'
 
 test('first chat read migrates legacy history then all writes stay on its computer', async () => {
   const h = await createTestHarness(),
@@ -458,3 +459,171 @@ test.each(Array.from({ length: 30 }, (_, depth) => depth))(
     }
   }
 )
+
+/** Services over `db` whose every computer is unreachable, with one chat on 'gone'. */
+async function removedComputerServices(
+  h: Awaited<ReturnType<typeof createTestHarness>>,
+  db = h.slayDb
+) {
+  h.db.exec(
+    "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+  )
+  const services = createComputerChatServices({
+    db,
+    legacyData: {
+      ...createDbChatDataOps(h.slayDb, taskSessionStore),
+      buildMcpEnv: async () => ({})
+    },
+    attachments: { read: async () => Buffer.alloc(0) },
+    request: async (pc) => {
+      throw new Error(`computer '${pc}' is not connected`)
+    },
+    resolveComputer: async () => 'gone',
+    defaultComputer: async () => 'gone',
+    hasLiveTask: async () => false
+  })
+  // The hub-start pass is over: the retirement below is applied only by recovery.
+  await services.retireComputers()
+  await services.ownership.register({
+    id: 'store',
+    taskId: 'task',
+    tabId: 'tab',
+    mode: 'claude-chat',
+    computerId: 'gone',
+    epoch: 1
+  })
+  h.db
+    .prepare(
+      "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+    )
+    .run()
+  return services
+}
+
+test('a removed computer whose retirement failed once is retired by its next recovery', async () => {
+  const h = await createTestHarness()
+  try {
+    // Its retirement fails once (a transient write failure), then works.
+    let failures = 1
+    const db = new Proxy(h.slayDb, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver)
+        if (key !== 'batchTxn' || typeof value !== 'function') return value
+        return async (ops: Array<{ sql: string }>, ...rest: unknown[]) => {
+          if (failures > 0 && ops.some((op) => op.sql.includes('INTO chat_unavailable_owners'))) {
+            failures--
+            throw new Error('database is locked')
+          }
+          return value.call(target, ops, ...rest)
+        }
+      }
+    }) as typeof h.slayDb
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const services = await removedComputerServices(h, db)
+    // The failed pass is not kept as this computer's recovery…
+    await expect(services.recoverComputer('gone')).rejects.toThrow('database is locked')
+    // …so the next one (an open forcing it, as ensureTab does) applies the retirement.
+    await services.recoverComputer('gone', true)
+    expect(
+      h.db
+        .prepare('SELECT 1 AS ok FROM chat_unavailable_owners WHERE conversation_id=?')
+        .get('store')
+    ).toEqual({ ok: 1 })
+    errors.mockRestore()
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a removed computer recovered once is recovered again when forced', async () => {
+  const h = await createTestHarness()
+  try {
+    const services = await removedComputerServices(h)
+    await services.recoverComputer('gone')
+    // Something re-addressed work to it after that pass (a stale writer): a forced
+    // recovery retires it again instead of returning the finished pass.
+    h.db.prepare("INSERT INTO chat_task_computers(task_id,computer_id) VALUES('task','gone')").run()
+    await services.recoverComputer('gone', true)
+    expect(
+      h.db.prepare("SELECT count(*) AS n FROM chat_task_computers WHERE computer_id='gone'").get()
+    ).toEqual({ n: 0 })
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a retirement pass that failed is logged even when a fresh pass follows it', async () => {
+  const h = await createTestHarness()
+  try {
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let reads = 0
+    const db = new Proxy(h.slayDb, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver)
+        if (key !== 'all' || typeof value !== 'function') return value
+        return async (sql: string, ...rest: unknown[]) => {
+          // The first pass after setup reads, waits for the fresh request, then fails.
+          if (sql.includes('FROM computer_retirements') && ++reads === 2) {
+            await gate
+            throw new Error('retirements unreadable')
+          }
+          return value.call(target, sql, ...rest)
+        }
+      }
+    }) as typeof h.slayDb
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const services = await removedComputerServices(h, db)
+    const first = services.retireComputers()
+    await vi.waitFor(() => expect(reads).toBe(2))
+    const fresh = services.retireComputers({ fresh: true })
+    release()
+    await Promise.all([first, fresh])
+    expect(
+      errors.mock.calls.some((call) =>
+        call.some((arg) => arg instanceof Error && arg.message === 'retirements unreadable')
+      )
+    ).toBe(true)
+    errors.mockRestore()
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('A: a terminal agent resuming a session of a chat on a removed computer gets the removal, not "not connected"', async () => {
+  const h = await createTestHarness()
+  try {
+    const services = await removedComputerServices(h)
+    await expect(
+      services.resolvePtyComputer('task', { mode: 'claude-code', conversationId: 'session-1' })
+    ).rejects.toThrow(chatUnavailableMessage('computer-removed'))
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('A: task files on a removed computer are refused with the removal, and nothing is recorded on it', async () => {
+  const h = await createTestHarness()
+  try {
+    const services = await removedComputerServices(h)
+    const written = () =>
+      h.db
+        .prepare(
+          "SELECT (SELECT count(*) FROM chat_task_computers WHERE computer_id='gone') AS tracked, (SELECT count(*) FROM chat_bootstrap_reservations WHERE computer_id='gone') AS reserved, (SELECT count(*) FROM chat_ownership WHERE tab_id LIKE 'artifact-store:%') AS stores"
+        )
+        .get()
+    const before = written()
+    await expect(services.artifactOwner('task')).rejects.toThrow(
+      chatUnavailableMessage('computer-removed')
+    )
+    await expect(services.artifactOwner('task', 'gone')).rejects.toThrow(
+      chatUnavailableMessage('computer-removed')
+    )
+    expect(written()).toEqual(before)
+    expect(before).toMatchObject({ reserved: 0, stores: 0 })
+  } finally {
+    h.cleanup()
+  }
+})
