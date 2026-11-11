@@ -1,5 +1,5 @@
 import { memo, useState, useMemo, useRef, useEffect, useCallback } from 'react'
-import { Home, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Home, X } from 'lucide-react'
 import {
   cn,
   TerminalProgressDot,
@@ -176,6 +176,44 @@ function TabContent({
   )
 }
 
+/** Edge fade + arrow shown over the task-tab strip when tabs are hidden on that side. */
+function StripScrollButton({
+  side,
+  onClick
+}: {
+  side: 'left' | 'right'
+  onClick: () => void
+}): React.JSX.Element {
+  const Icon = side === 'left' ? ChevronLeft : ChevronRight
+  return (
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-y-0 flex items-center w-12',
+        side === 'left'
+          ? 'left-0 justify-start bg-gradient-to-r from-sidebar from-40% to-transparent'
+          : 'right-0 justify-end bg-gradient-to-l from-sidebar from-40% to-transparent'
+      )}
+    >
+      <button
+        type="button"
+        data-testid={`task-tab-strip-scroll-${side}`}
+        aria-label={side === 'left' ? 'Scroll tabs left' : 'Scroll tabs right'}
+        className="pointer-events-auto window-no-drag h-7 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/80 dark:hover:bg-accent/50"
+        onClick={onClick}
+      >
+        <Icon className="size-4" />
+      </button>
+    </div>
+  )
+}
+
+/** Pixels per wheel delta unit (WheelEvent.deltaMode): pixel, line, page. */
+function wheelDeltaPx(e: WheelEvent, pageWidth: number): number {
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return e.deltaY * 16
+  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return e.deltaY * pageWidth
+  return e.deltaY
+}
+
 type GroupPosition = 'solo' | 'first' | 'middle' | 'last'
 
 interface SortableTabProps {
@@ -262,6 +300,7 @@ const SortableTab = memo(function SortableTab({
       ref={setNodeRef}
       style={style}
       className="window-no-drag"
+      data-tab-active={isActive || undefined}
       onClick={() => !isEditing && onTabClick(index)}
       onDoubleClick={onDoubleClick && (() => onDoubleClick(tab))}
       onAuxClick={(e) => {
@@ -392,6 +431,69 @@ export function TabBar({
     return positions
   }, [tabs, worktreeColors])
 
+  // --- Strip overflow (#180) ---
+  const stripRef = useRef<HTMLDivElement>(null)
+  const stripContentRef = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState({ left: false, right: false })
+
+  const updateOverflow = useCallback(() => {
+    const el = stripRef.current
+    if (!el) return
+    const left = el.scrollLeft > 1
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+    setOverflow((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
+  }, [])
+
+  // Re-measure when the strip resizes (window) or its content does (tabs opened,
+  // closed, renamed).
+  useEffect(() => {
+    const strip = stripRef.current
+    const content = stripContentRef.current
+    if (!strip || !content) return
+    const ro = new ResizeObserver(updateOverflow)
+    ro.observe(strip)
+    ro.observe(content)
+    updateOverflow()
+    return () => ro.disconnect()
+  }, [updateOverflow])
+
+  // A mouse wheel only emits vertical deltas; the strip scrolls only horizontally,
+  // so map vertical → horizontal. Horizontal deltas (trackpads) scroll natively.
+  // Native non-passive listener: React's onWheel is passive, can't preventDefault.
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent): void => {
+      if (e.deltaX !== 0 || e.deltaY === 0 || e.ctrlKey) return
+      const max = el.scrollWidth - el.clientWidth
+      if (max <= 0) return
+      const next = Math.max(0, Math.min(max, el.scrollLeft + wheelDeltaPx(e, el.clientWidth)))
+      if (next === el.scrollLeft) return
+      e.preventDefault()
+      el.scrollLeft = next
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // Keep the active tab visible: switching to an off-screen tab (shortcut, click
+  // elsewhere, opening a task) scrolls it in.
+  const activeTaskId =
+    activeView === 'tabs' && tabs[activeIndex]?.type === 'task'
+      ? (tabs[activeIndex] as Tab & { type: 'task' }).taskId
+      : null
+  useEffect(() => {
+    if (!activeTaskId) return
+    const tab = stripRef.current?.querySelector('[data-tab-active]')
+    tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeTaskId])
+
+  const scrollStripByPage = (direction: 1 | -1): void => {
+    const el = stripRef.current
+    if (!el) return
+    el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: 'smooth' })
+  }
+
   function handleDragStart(event: DragStartEvent): void {
     setActiveId(event.active.id as string)
   }
@@ -439,65 +541,80 @@ export function TabBar({
         )}
       </div>
 
-      {/* Scrollable task tabs area */}
-      <div className="flex items-center overflow-x-auto scrollbar-hide flex-1 min-w-0">
-        {!hideTabs && (
-          /* Task tabs - sortable, flat DOM for dnd-kit compatibility */
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={taskIds} strategy={horizontalListSortingStrategy}>
-              {taskTabs.map((tab) => {
-                const index = tabs.findIndex((t) => t.type === 'task' && t.taskId === tab.taskId)
-                const isEditing = editingTaskId === tab.taskId
-                return (
-                  <SortableTab
-                    key={tab.taskId}
-                    tab={tab}
-                    index={index}
-                    isActive={index === activeIndex && activeView === 'tabs'}
-                    onTabClick={handleTabClick}
-                    onTabClose={handleTabClose}
-                    needsAttention={attentionTaskIds?.has(tab.taskId)}
-                    projectColor={projectColors?.get(tab.taskId)}
-                    worktreeColor={worktreeColors?.get(tab.taskId)}
-                    progress={taskProgress?.get(tab.taskId)}
-                    isDone={doneTaskIds?.has(tab.taskId)}
-                    groupPosition={groupPositions.get(tab.taskId)}
-                    isEditing={isEditing}
-                    editValue={isEditing ? editValue : undefined}
-                    onEditChange={setEditValue}
-                    onEditSubmit={handleEditSubmit}
-                    onEditCancel={handleEditCancel}
-                    onDoubleClick={handleDoubleClick}
-                    inputRef={editInputRef}
-                  />
-                )
-              })}
-            </SortableContext>
-            <DragOverlay>
-              {activeTab && (
-                <TabContent
-                  title={activeTab.title}
-                  isActive={
-                    tabs.findIndex((t) => t.type === 'task' && t.taskId === activeTab.taskId) ===
-                    activeIndex
-                  }
-                  isDragging
-                  taskId={activeTab.taskId}
-                  needsAttention={attentionTaskIds?.has(activeTab.taskId)}
-                  isTemporary={activeTab.isTemporary}
-                  projectColor={projectColors?.get(activeTab.taskId)}
-                  progress={taskProgress?.get(activeTab.taskId)}
-                  isDone={doneTaskIds?.has(activeTab.taskId)}
-                />
-              )}
-            </DragOverlay>
-          </DndContext>
-        )}
+      {/* Scrollable task tabs area. Edge arrows + fades overlay it (no layout shift);
+          scroll-px keeps a revealed tab clear of them. */}
+      <div className="relative flex items-center flex-1 min-w-0 self-stretch">
+        <div
+          ref={stripRef}
+          data-testid="task-tab-strip"
+          className="flex items-center overflow-x-auto scrollbar-hide scroll-px-10 w-full h-full"
+          onScroll={updateOverflow}
+        >
+          <div ref={stripContentRef} className="flex items-center flex-shrink-0">
+            {!hideTabs && (
+              /* Task tabs - sortable, flat DOM for dnd-kit compatibility */
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext items={taskIds} strategy={horizontalListSortingStrategy}>
+                  {taskTabs.map((tab) => {
+                    const index = tabs.findIndex(
+                      (t) => t.type === 'task' && t.taskId === tab.taskId
+                    )
+                    const isEditing = editingTaskId === tab.taskId
+                    return (
+                      <SortableTab
+                        key={tab.taskId}
+                        tab={tab}
+                        index={index}
+                        isActive={index === activeIndex && activeView === 'tabs'}
+                        onTabClick={handleTabClick}
+                        onTabClose={handleTabClose}
+                        needsAttention={attentionTaskIds?.has(tab.taskId)}
+                        projectColor={projectColors?.get(tab.taskId)}
+                        worktreeColor={worktreeColors?.get(tab.taskId)}
+                        progress={taskProgress?.get(tab.taskId)}
+                        isDone={doneTaskIds?.has(tab.taskId)}
+                        groupPosition={groupPositions.get(tab.taskId)}
+                        isEditing={isEditing}
+                        editValue={isEditing ? editValue : undefined}
+                        onEditChange={setEditValue}
+                        onEditSubmit={handleEditSubmit}
+                        onEditCancel={handleEditCancel}
+                        onDoubleClick={handleDoubleClick}
+                        inputRef={editInputRef}
+                      />
+                    )
+                  })}
+                </SortableContext>
+                <DragOverlay>
+                  {activeTab && (
+                    <TabContent
+                      title={activeTab.title}
+                      isActive={
+                        tabs.findIndex(
+                          (t) => t.type === 'task' && t.taskId === activeTab.taskId
+                        ) === activeIndex
+                      }
+                      isDragging
+                      taskId={activeTab.taskId}
+                      needsAttention={attentionTaskIds?.has(activeTab.taskId)}
+                      isTemporary={activeTab.isTemporary}
+                      projectColor={projectColors?.get(activeTab.taskId)}
+                      progress={taskProgress?.get(activeTab.taskId)}
+                      isDone={doneTaskIds?.has(activeTab.taskId)}
+                    />
+                  )}
+                </DragOverlay>
+              </DndContext>
+            )}
+          </div>
+        </div>
+        {overflow.left && <StripScrollButton side="left" onClick={() => scrollStripByPage(-1)} />}
+        {overflow.right && <StripScrollButton side="right" onClick={() => scrollStripByPage(1)} />}
       </div>
 
       {/* Fixed right content */}
