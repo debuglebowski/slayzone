@@ -124,3 +124,20 @@ test('a subtask holding its parent’s folder takes the parent’s holder (chain
     db.close()
   }
 })
+
+test('a holder recorded by a real write (not what the old v211 derived) is kept, as v211 keeps it', () => {
+  // The old v211 derived a holder as the task's pin, else its project's default
+  // ('local' for web). 'gpu' is neither: a real write (v197 on) recorded it, and
+  // v211 keeps such a holder. v214 must not overwrite it with the parent's.
+  const db = repaired(
+    `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at) VALUES
+      ('gpu', 'gpu-box', 'linux', '1', '[]', 0);` +
+      task('pinned', { pin: 'bb', holder: 'bb', wt: '/r/wt/pinned', bd: null }) +
+      task('recorded', { parent: 'pinned', holder: 'gpu', wt: '/r/wt/pinned', bd: null })
+  )
+  try {
+    expect(holder(db, 'recorded')).toBe('gpu')
+  } finally {
+    db.close()
+  }
+})

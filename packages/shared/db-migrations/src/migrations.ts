@@ -5596,7 +5596,9 @@ export const migrations: Migration[] = [
       //    as its own pin, else its project's default computer: not where the folder is
       //    when the parent was pinned elsewhere. A task whose staged paths equal its
       //    parent's (both fields given in both rows, one set) takes the parent's holder;
-      //    repeated so a grandchild follows its corrected parent.
+      //    repeated so a grandchild follows its corrected parent. Only a holder the old
+      //    v211 derived (its pin, else its project's default) moves: one a real write
+      //    recorded (v197 on) is kept, as v211 keeps it.
       //    Not derivable: a hub that delivered its staged rows (ran v211 with computers
       //    connected) before this migration keeps no path to compare — the holder v211
       //    chose stays there (no release shipped v210/v211 before this one).
@@ -5609,6 +5611,8 @@ export const migrations: Migration[] = [
             SELECT p.worktree_computer_id FROM tasks p WHERE p.id = tasks.parent_id)
          WHERE tasks.parent_id IS NOT NULL
            AND (tasks.has_worktree = 1 OR tasks.has_base_dir = 1)
+           AND tasks.worktree_computer_id IS COALESCE(tasks.computer_id,
+                 (SELECT d.default_computer_id FROM projects d WHERE d.id = tasks.project_id))
            AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)
            AND EXISTS (
              SELECT 1 FROM tasks p
