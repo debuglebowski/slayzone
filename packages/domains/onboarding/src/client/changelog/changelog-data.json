@@ -1,5 +1,77 @@
 [
   {
+    "version": "0.39.0",
+    "date": "2026-11-11",
+    "tagline": "Scrollback survives restarts",
+    "items": [
+      {
+        "category": "breaking",
+        "title": "Delete is permanent",
+        "description": "Trash is gone: deleting a task now permanently removes it with its SlayZone files and history, and tasks already in Trash were moved to Archive."
+      },
+      {
+        "category": "feature",
+        "title": "Terminal output survives restarts",
+        "description": "Shell tabs show their previous output after the app restarts, followed by a divider and the fresh session."
+      },
+      {
+        "category": "feature",
+        "title": "Close and reopen answer threads",
+        "description": "Close a chat answer thread with its X to stop its session, then reopen it from the closed-threads menu and the next message continues the conversation."
+      },
+      {
+        "category": "feature",
+        "title": "More slay CLI commands",
+        "description": "slay agent start wakes a task's agent without a message, slay tasks update --agent switches its agent mode, and slay tasks artifacts move-to-task moves artifacts to another task."
+      },
+      {
+        "category": "improvement",
+        "title": "Reach every task tab",
+        "description": "The mouse wheel scrolls an overflowing tab strip, the active tab scrolls into view, and arrows show when tabs are hidden."
+      },
+      {
+        "category": "improvement",
+        "title": "Startup shows what is left",
+        "description": "The startup card counts the pages, agents, terminals and chats still loading."
+      },
+      {
+        "category": "improvement",
+        "title": "Problems surface instead of failing silently",
+        "description": "A task whose chat or terminal can't be recovered shows a Needs attention badge, with details in Settings."
+      },
+      {
+        "category": "fix",
+        "title": "Codex status works again",
+        "description": "Newer Codex CLI versions now report to SlayZone again, so the spinner, unread dot and session resume work for Codex terminals."
+      },
+      {
+        "category": "fix",
+        "title": "Per-turn changes recorded again",
+        "description": "The diff view gets each agent turn's changes again, for both terminal and chat agents."
+      },
+      {
+        "category": "fix",
+        "title": "No lost keystrokes in the file editor",
+        "description": "Keys typed while a file saves or reloads are kept, and failed saves now show an error."
+      },
+      {
+        "category": "fix",
+        "title": "Chat double-Esc is reliable",
+        "description": "Pressing Esc twice in chat works even while new messages stream in."
+      },
+      {
+        "category": "fix",
+        "title": "Bypass sessions stay in bypass",
+        "description": "Chats in bypass mode no longer offer to switch to auto mode on CLI prompts."
+      },
+      {
+        "category": "fix",
+        "title": "Artifact rename from the menu",
+        "description": "Renaming an artifact from its context menu no longer closes the name field immediately."
+      }
+    ]
+  },
+  {
     "version": "0.38.0",
     "date": "2026-11-05",
     "tagline": "Pins and badges",

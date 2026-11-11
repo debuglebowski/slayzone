@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/app",
-  "version": "0.38.2",
+  "version": "0.39.0",
   "private": true,
   "repository": "github:debuglebowski/slayzone",
   "type": "module",
