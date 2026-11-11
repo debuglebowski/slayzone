@@ -33,7 +33,7 @@ const trpc = {
 }
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 // A task's folders come from its computer (§9 Phase 7d): the fake reads the test
 // task's own `worktree_path` / `base_dir` (test-only fields; real tasks carry none).
 vi.mock('@slayzone/task/client/useTaskPath', () => ({

@@ -33,7 +33,7 @@ import type { GitDiffSnapshot } from '../shared/types'
 // notifyDiffChanged.
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => ({
     worktrees: {
@@ -74,8 +74,8 @@ function makeSnapshot(patch: string): GitDiffSnapshot {
 
 const gitStub = {
   getWorkingDiff: vi.fn<() => Promise<GitDiffSnapshot>>(),
-  watchStart: vi.fn<(p: string) => Promise<void>>(),
-  watchStop: vi.fn<(p: string) => Promise<void>>(),
+  watchStart: vi.fn<(scope: unknown, p: string) => Promise<void>>(),
+  watchStop: vi.fn<(scope: unknown, p: string) => Promise<void>>(),
   _emitDiffChanged(path: string): void {
     notifyDiffChanged(path)
   }
@@ -150,7 +150,7 @@ describe('a refused watch start', () => {
           reject = r
         })
     )
-    const stop = subscribeGitPathChanges('/repo/refused', () => undefined)
+    const stop = subscribeGitPathChanges(null, '/repo/refused', () => undefined)
     stop() // leaves while the start is in flight
     reject(new Error('refused'))
     await flushMicrotasks()
@@ -331,7 +331,7 @@ describe('git-diff-store refcount + sharing', () => {
 
     expect(_pathWatcherStats().paths).toBe(1)
     expect(gitStub.watchStart).toHaveBeenCalledTimes(1)
-    expect(gitStub.watchStart).toHaveBeenCalledWith('/tmp/repo')
+    expect(gitStub.watchStart).toHaveBeenCalledWith(null, '/tmp/repo')
   })
 
   it('refresh() triggers an immediate re-fetch outside the poll cadence', async () => {
@@ -379,7 +379,7 @@ describe('git-diff-store refcount + sharing', () => {
     })
     await flushMicrotasks()
     expect(gitStub.getWorkingDiff).toHaveBeenCalledTimes(1)
-    expect((gitStub.getWorkingDiff.mock.calls[0] as unknown[])[0]).toBe('/tmp/repo-b')
+    expect((gitStub.getWorkingDiff.mock.calls[0] as unknown[])[1]).toBe('/tmp/repo-b')
 
     h.unmount()
   })
@@ -451,7 +451,7 @@ describe('subscribeGitPathChanges', () => {
   it('shares the refcounted watcher and fans out change events', async () => {
     gitStub.watchStart.mockResolvedValue(undefined)
     const onChange = vi.fn()
-    const off = subscribeGitPathChanges('/tmp/repo', onChange)
+    const off = subscribeGitPathChanges(null, '/tmp/repo', onChange)
     const h = mount('/tmp/repo')
     await flushMicrotasks()
     expect(gitStub.watchStart).toHaveBeenCalledTimes(1)
@@ -464,17 +464,17 @@ describe('subscribeGitPathChanges', () => {
     expect(gitStub.watchStop).not.toHaveBeenCalled()
     off()
     await flushMicrotasks()
-    expect(gitStub.watchStop).toHaveBeenCalledWith('/tmp/repo')
+    expect(gitStub.watchStop).toHaveBeenCalledWith(null, '/tmp/repo')
     expect(_pathWatcherStats().paths).toBe(0)
   })
 
   it('a path-change subscriber alone still starts the watcher', async () => {
     gitStub.watchStart.mockResolvedValue(undefined)
-    const off = subscribeGitPathChanges('/tmp/repo', () => {})
+    const off = subscribeGitPathChanges(null, '/tmp/repo', () => {})
     await flushMicrotasks()
-    expect(gitStub.watchStart).toHaveBeenCalledWith('/tmp/repo')
+    expect(gitStub.watchStart).toHaveBeenCalledWith(null, '/tmp/repo')
     off()
     await flushMicrotasks()
-    expect(gitStub.watchStop).toHaveBeenCalledWith('/tmp/repo')
+    expect(gitStub.watchStop).toHaveBeenCalledWith(null, '/tmp/repo')
   })
 })

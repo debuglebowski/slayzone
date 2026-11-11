@@ -34,7 +34,7 @@ const dag = (...hashes: string[]): Dag => ({
 
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => {
   const q = (fn: (input: { path: string }) => Promise<unknown>) => ({
     queryOptions: (input: { path: string }) => ({ queryFn: () => fn(input) })

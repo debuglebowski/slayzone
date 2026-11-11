@@ -1563,6 +1563,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task/src/client/usePanelSizes.test.ts \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
+  packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \
   packages/shared/diff-view/src/highlight.test.ts \
   packages/shared/diff-view/src/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \

@@ -69,7 +69,7 @@ const withPaths = <T extends object>(o: T): T =>
     has_worktree: !!(o as PathOver).worktree_path,
     has_base_dir: !!(o as PathOver).base_dir
   }) as T
-vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => ({
   useTRPC: () => trpc,
   useTRPCClient: () => ({

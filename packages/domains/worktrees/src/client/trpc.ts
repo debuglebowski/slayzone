@@ -8,7 +8,7 @@ import {
 import type { AppShellMounts } from '@slayzone/host-capabilities/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
 import type { TaskMounts } from '@slayzone/task/server'
-import type { WorktreesAmbientMounts } from '../server/worktrees-router'
+import type { GitScope, WorktreesAmbientMounts } from '../server/worktrees-router'
 
 /**
  * This domain's typed view of the shared tRPC client (one runtime, one socket per hub),
@@ -38,12 +38,8 @@ export function gitScopeOf(target: WorkspaceTarget, projectWide = false): GitSco
   if (target.projectId) return { projectId: target.projectId, computerId: target.computerId }
   return null
 }
-export type GitScopeTarget = {
-  taskId?: string
-  projectId?: string
-  computerId?: string | null
-  projectWide?: boolean
-}
+/** Exactly what the router validates as `target`. */
+export type GitScopeTarget = GitScope
 
 const ProjectWideContext = createContext(false)
 
@@ -137,20 +133,32 @@ function scopeRoot<T extends object>(
   })
 }
 
+/** The calling panel's git scope (null outside any task / project panel). */
+export function useGitScope(): GitScopeTarget | null {
+  const target = useWorkspaceTarget()
+  const projectWide = useContext(ProjectWideContext)
+  return useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
+}
+
 /** The options proxy, `worktrees.*` inputs scoped to the panel's task / project. */
 export function useTRPC(): ReturnType<typeof base.useTRPC> {
   const trpc = base.useTRPC()
-  const target = useWorkspaceTarget()
-  const projectWide = useContext(ProjectWideContext)
-  const scope = useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
+  const scope = useGitScope()
   return useMemo(() => scopeRoot(trpc, scope, scopeOptionsProcedure), [trpc, scope])
 }
 
 /** The vanilla client, `worktrees.*` inputs scoped to the panel's task / project. */
 export function useTRPCClient(): ReturnType<typeof base.useTRPCClient> {
   const client = base.useTRPCClient()
-  const target = useWorkspaceTarget()
-  const projectWide = useContext(ProjectWideContext)
-  const scope = useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
+  const scope = useGitScope()
   return useMemo(() => scopeRoot(client, scope, scopeClientProcedure), [client, scope])
 }
+
+/**
+ * The UNSCOPED options proxy and vanilla client — ONLY for state that outlives one
+ * panel and is shared across panels (the module-level git-diff store). Such state must
+ * never capture a panel's scoped proxy: every panel after the one that wired it would
+ * then call in THAT panel's scope. It names each call's `target` itself instead.
+ */
+export const useUnscopedTRPC = base.useTRPC
+export const useUnscopedTRPCClient = base.useTRPCClient
