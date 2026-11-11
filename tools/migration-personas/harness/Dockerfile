@@ -5,7 +5,7 @@
 #
 # The persona user is uid 1000 with home /home/persona, exactly as in the generate
 # image, so every absolute path an old release wrote into a persona stays valid.
-FROM node:24-bookworm-slim
+FROM node:24.21.0-bookworm-slim
 LABEL slz.migration-harness=1
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git python3 make g++ ca-certificates procps sqlite3 curl && rm -rf /var/lib/apt/lists/*

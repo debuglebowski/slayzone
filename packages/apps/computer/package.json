@@ -47,7 +47,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@trpc/client": "^11.19.0",
     "@types/node": "^24.19.2",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
     "vitest": "^5.0.5"
   }

@@ -122,7 +122,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -150,7 +150,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -186,7 +186,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -224,7 +224,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6.1.0
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -260,7 +260,7 @@ jobs:
             packages/apps/computer/dist
 
       - name: Upload the JS build
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: build-js
           path: ${{ runner.temp }}/build-js/build-js.tar
@@ -367,7 +367,7 @@ jobs:
       # ~1 min saving. The ubuntu jobs above keep theirs (14 s restore, 12 s install).
       # Dropping these also keeps ~1.8 GB per lockfile out of the repo's 10 GB cache budget
       # (10.7 GB on 2026-11-04, so GitHub evicts least-recently-used entries).
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -424,7 +424,7 @@ jobs:
         run: node scripts/release/wait-for-artifact.mjs --artifact build-js --job "Build JS" --timeout-minutes 30
 
       - name: Download the JS build
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: build-js
           path: ${{ runner.temp }}/build-js
@@ -534,7 +534,7 @@ jobs:
             --output "$RUNNER_TEMP/release-assets/${{ matrix.name }}"
 
       - name: Upload build assets
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-build-${{ matrix.name }}
           path: ${{ runner.temp }}/release-assets/${{ matrix.name }}
@@ -551,7 +551,7 @@ jobs:
       contents: write
     steps:
       - name: Download platform build assets
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: release-build-*
           path: ${{ runner.temp }}/release-builds
@@ -581,7 +581,7 @@ jobs:
           ref: ${{ needs.resolve.outputs.source_ref }}
 
       - name: Download platform build assets
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: release-build-*
           path: ${{ runner.temp }}/release-builds
@@ -628,7 +628,7 @@ jobs:
             --channels-json '${{ needs.resolve.outputs.channels_json }}'
 
       - name: Upload release bundle
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-bundle
           path: ${{ runner.temp }}/release-bundle
@@ -653,7 +653,7 @@ jobs:
           ref: ${{ needs.resolve.outputs.source_ref }}
 
       - name: Download release bundle
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: release-bundle
           path: release-bundle
@@ -802,7 +802,7 @@ jobs:
           ref: ${{ needs.resolve.outputs.source_ref }}
 
       - name: Download release bundle
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: release-bundle
           path: release-bundle
@@ -893,7 +893,7 @@ jobs:
           ref: main
 
       - name: Download release bundle
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: release-bundle
           path: release-bundle
