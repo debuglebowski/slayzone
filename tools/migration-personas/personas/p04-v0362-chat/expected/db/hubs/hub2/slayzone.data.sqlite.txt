@@ -1,4 +1,4 @@
-user_version 213
+user_version 214
 
 ## schema
 index artifact_blob_pins_hash: CREATE INDEX artifact_blob_pins_hash ON artifact_blob_pins(content_hash)

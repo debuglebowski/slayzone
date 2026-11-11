@@ -1,0 +1,67 @@
+note use :51100: opened Usage (usageAnalytics.refresh all)
+ok   use :51100: continuing claude-code tab 575b8f1a-0d39-4360-9586-2618947d287f refused as it must (archived: its agent starts only after a restore): paused or deleted
+note use :51100: continued 10/11 agent tab(s) (chat.start / pty.create)
+ok   settle: settled
+ok   settle: after use: settled
+ok   tab 575b8f1a-0d39-4360-9586-2618947d287f after the upgrade: no agent started (refused: archived: its agent starts only after a restore)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 2 → 2
+ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 11 → 11
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task paths — hub keeps no path column
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Abandoned worktree": hub flags has_worktree=0 has_base_dir=0 (before: worktree ∅, base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Abandoned worktree": no folder (cleared before the upgrade), held nowhere
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Api base dir": hub flags has_worktree=0 has_base_dir=1 (before: worktree ∅, base dir '/home/persona/repos/webapp/packages/api')
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Api base dir": folders held by local-computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Api base dir": local-computer has worktree ∅, base dir '/home/persona/repos/webapp/packages/api'
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Api base dir": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Cleared to empty": hub flags has_worktree=0 has_base_dir=0 (before: worktree '', base dir '')
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Cleared to empty": no folder (cleared before the upgrade), held nowhere
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Infra module work": hub flags has_worktree=1 has_base_dir=1 (before: worktree '/home/persona/repos/wt/infra/infra-module-work', base dir '/home/persona/repos/infra/modules')
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Infra module work": folders held by build-box
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Infra module work": build-box has worktree '/home/persona/repos/wt/infra/infra-module-work', base dir '/home/persona/repos/infra/modules'
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Infra module work": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/webapp/local-feature', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature": folders held by local-computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature": local-computer has worktree '/home/persona/repos/wt/webapp/local-feature', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature tests": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/webapp/local-feature', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature tests": folders held by local-computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature tests": local-computer has worktree '/home/persona/repos/wt/webapp/local-feature', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Local feature tests": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Old webapp spike" (archived): hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/webapp/old-webapp-spike', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Old webapp spike" (archived): folders held by local-computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Old webapp spike" (archived): local-computer has worktree '/home/persona/repos/wt/webapp/old-webapp-spike', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Old webapp spike" (archived): no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Old webapp spike" (archived): its worktree removal goes to local-computer, which holds '/home/persona/repos/wt/webapp/old-webapp-spike'
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned child": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/webapp/pinned-to-build-box', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned child": folders held by build-box
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned child": build-box has worktree '/home/persona/repos/wt/webapp/pinned-to-build-box', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned child": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned to build-box": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/webapp/pinned-to-build-box', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned to build-box": folders held by build-box
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned to build-box": build-box has worktree '/home/persona/repos/wt/webapp/pinned-to-build-box', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Pinned to build-box": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Remote infra change": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/infra/remote-infra-change', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Remote infra change": folders held by build-box
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Remote infra change": build-box has worktree '/home/persona/repos/wt/infra/remote-infra-change', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Remote infra change": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Ship infra": hub flags has_worktree=1 has_base_dir=0 (before: worktree '/home/persona/repos/wt/infra/ship-infra', base dir ∅)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Ship infra": folders held by build-box
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Ship infra": build-box has worktree '/home/persona/repos/wt/infra/ship-infra', base dir ∅
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task "Ship infra": no other computer holds its paths
+ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: session_tab_recovery rows left 0 (v201, after continuing every agent tab)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: usage_cursor_handoff rows left 0 (v209, after opening Usage)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: computer_data_handoff rows left 0
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)

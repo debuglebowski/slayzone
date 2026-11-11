@@ -1,0 +1,23 @@
+{
+  "taskPathHolders": {
+    "759d22f0-0632-468b-bf5a-382b92f1d243": "build-box",
+    "8fa2ed25-484e-4cba-a296-3a36205e7b76": "build-box",
+    "1d4fc407-c72d-46fd-9dfa-060649194315": "local-computer",
+    "c30236cf-198a-4756-980b-8b66dc7fdb8b": "local-computer",
+    "36658fba-cb79-4ee1-a9f4-841964a77da8": "local-computer",
+    "0fe3bee4-535b-4302-9b0f-044a65e7de0e": "build-box",
+    "8ac921f3-0de7-4496-9b47-e2fe89f5952b": "build-box",
+    "82250d6b-30c6-4699-a0dd-8a995acd0432": "build-box",
+    "575b8f1a-0d39-4360-9586-2618947d287f": "local-computer"
+  },
+  "taskPathsCleared": [
+    "431c9bee-5536-49ec-a05b-0be596b09e63",
+    "7876bcaa-96fe-44b3-9c37-a3104962ee56"
+  ],
+  "expect": {
+    "575b8f1a-0d39-4360-9586-2618947d287f": {
+      "refused": "paused or deleted",
+      "why": "archived: its agent starts only after a restore"
+    }
+  }
+}

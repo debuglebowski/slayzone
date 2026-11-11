@@ -27,7 +27,10 @@ if [ ${#PERSONAS[@]} -eq 0 ]; then
   for d in "$HERE"/personas/*/; do [ -f "$d/input.tar.gz" ] && PERSONAS+=("$(basename "$d")"); done
 fi
 
-IMAGE=slz-migration-harness:latest
+# One image + container namespace per checkout: parallel worktrees must not run each
+# other's harness (each build replaces the tag).
+CHECKOUT=$(printf %s "$REPO" | shasum | cut -c1-10)
+IMAGE=slz-migration-harness:$CHECKOUT
 echo "building harness image from the working tree…"
 # Context = tracked + untracked-not-ignored files (the working tree as it is now), minus
 # the personas' frozen inputs (copied into each container at run time instead).
@@ -38,10 +41,11 @@ echo "building harness image from the working tree…"
      docker build -q -f "$tar_dir/Dockerfile.harness" -t "$IMAGE" "$tar_dir" >/dev/null; rc=$?; rm -rf "$tar_dir"; exit $rc))
 # Each build replaces the tag; drop the previous (now untagged) harness images, or the
 # multi-GB copies fill Docker's disk within a day.
-docker image prune -f --filter label=slz.migration-harness=1 >/dev/null
+# Best effort: a concurrent prune (another checkout's run) refuses ours, harmlessly.
+docker image prune -f --filter label=slz.migration-harness=1 >/dev/null 2>&1 || true
 
 run_one() { # <persona> <out dir>
-  local p=$1 out=$2 c="slz-migration-harness-$1" rc=0
+  local p=$1 out=$2 c="slz-migration-harness-$CHECKOUT-$1" rc=0
   docker rm -f "$c" >/dev/null 2>&1 || true
   docker run -d --name "$c" --network none "$IMAGE" sleep infinity >/dev/null
   docker cp "$HERE/personas/$p/persona.json" "$c:/tmp/persona.json"

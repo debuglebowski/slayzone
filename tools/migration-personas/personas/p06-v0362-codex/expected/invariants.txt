@@ -12,7 +12,7 @@ ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
 ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 213 (latest 213)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 1 → 1
 ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 3 → 3
 ok   .slayzone/stable/hub/slayzone.data.sqlite: project "Webapp" (folder /home/persona/repos/webapp) has a ready folder on local-computer

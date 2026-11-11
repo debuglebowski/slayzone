@@ -26,7 +26,10 @@ Local only (Docker, no network). Never part of CI.
 | `p07-v0380-codex` | v0.38.0 (schema v194) | Codex chats (computer-held) + a Claude chat in one project |
 | `p08-v0380-tabs-usage` | v0.38.0 (schema v194) | a task with 2 chat tabs + usage offsets (lazy v201/v209 data) |
 | `p09-v0380-pty-tabs` | v0.38.0 (schema v194) | terminal Claude in 2 tabs of 2 tasks, both pre-v201 tab bugs (shared / stolen session) |
+| `p11-v0380-lifecycle` | v0.38.0 (schema v194) | computers came and went: one disabled with work, one re-enrolled under a new id, one deleted after chats ran on it; artifacts on live/trashed/restored/archived tasks, a backup, then an artifact deleted after it |
 | `p05-v0380-full` | v0.38.0 (schema v194) | everything: 2 hubs, build-box on both from one process, per-computer folders, bindings, chats on every computer |
+| `p10-v0380-worktrees` | v0.38.0 (schema v194) | task worktrees + base dirs on local + build-box: auto-created (custom base path), hand-linked, inherited by subtasks, done/archived holders, cleared to NULL and '' |
+| `p12-v0372-full` | v0.37.2 (schema v193) | skipped v0.38.0: p05's setup on v0.37.2, plus Codex chats on every computer; chat stores with v0.37's out-of-date triggers |
 
 The harness image links today's hub/computer bundles at the `.deb` install paths
 (`/opt/SlayZone/resources/...`): v0.38+ computers record that path as the release their

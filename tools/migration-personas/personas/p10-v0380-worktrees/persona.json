@@ -1,0 +1,17 @@
+{
+  "release": "v0.38.0",
+  "journey": "v0.38.0-worktrees",
+  "summary": "v0.38.0 desktop user (schema v194), local computer + build-box on the desktop hub: task worktrees and base dirs on both computers (auto-created under a custom base path, hand-linked, inherited by subtasks), one task pinned to build-box in a local-default project, done and archived tasks holding worktrees, and worktrees cleared to NULL and to ''.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": ["local-computer", "build-box"],
+    "hubs": [],
+    "computers": [
+      {
+        "name": "build-box",
+        "root": "computers/c2",
+        "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51100" }
+      }
+    ]
+  }
+}

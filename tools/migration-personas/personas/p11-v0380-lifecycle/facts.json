@@ -1,0 +1,41 @@
+{
+  "lifecycle": {
+    "disabled": "b47ac68e-8a59-4855-a04a-3e24b44faaae",
+    "reEnrolledOld": "30f4e0e0-40a2-4f38-81ea-98000416539d",
+    "reEnrolledNew": "15c5c16f-4fd9-41ea-af03-319e68eb2406",
+    "deleted": "ac3e035b-1e3d-46af-ab78-bcd1ee59a0e1",
+    "trashedTask": "f18b04be-e413-468d-bb6e-d9fc850ee0ce",
+    "restoredTask": "2b3b3b56-c89c-49ef-ba29-3625602e05a6",
+    "archivedTask": "ee5705c5-cb7b-4e69-9271-751fd7f64334",
+    "liveTask": "c13468fa-a7df-4935-875e-fdfd0a5b1220",
+    "deletedArtifact": "d01a3dc2-e87d-4e93-b33a-714cb6f60694",
+    "escapeHatch": { "tab": "4fbb1396-c063-442c-a65b-6a2b8cf83756", "computer": "ci-box" }
+  },
+  "expect": {
+    "3563b77a-018e-4839-8772-fea05895b93e": {
+      "refused": "is disabled, so it takes no new work",
+      "availability": "ready",
+      "why": "its computer idle-box is disabled; history stays readable"
+    },
+    "4fbb1396-c063-442c-a65b-6a2b8cf83756": {
+      "refused": "is not connected",
+      "availability": "offline",
+      "why": "ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor)"
+    },
+    "d18ae771-20ef-47b7-bc57-726cb1f5ea56": {
+      "refused": "Its computer was removed",
+      "availability": "unavailable",
+      "why": "its computer old-laptop was deleted"
+    },
+    "9aacbbcd-9aca-4844-b257-97b1c62105a6": {
+      "refused": "Its computer was removed",
+      "availability": "unavailable",
+      "why": "its computer old-laptop was deleted"
+    },
+    "f18b04be-e413-468d-bb6e-d9fc850ee0ce": {
+      "refused": "paused or deleted",
+      "why": "trashed at v0.38: archived since Trash was removed (v198)"
+    },
+    "ee5705c5-cb7b-4e69-9271-751fd7f64334": { "refused": "paused or deleted", "why": "archived" }
+  }
+}

@@ -1,0 +1,98 @@
+note use :51100: opened Usage (usageAnalytics.refresh all)
+ok   use :51100: chat tab 3563b77a-018e-4839-8772-fea05895b93e availability ready (want ready: its computer idle-box is disabled; history stays readable)
+ok   use :51100: continuing claude-chat tab 3563b77a-018e-4839-8772-fea05895b93e refused as it must (its computer idle-box is disabled; history stays readable): is disabled, so it takes no new work
+ok   use :51100: chat tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 availability offline (want offline: ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor))
+ok   use :51100: continuing claude-chat tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 refused as it must (ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor)): is not connected
+ok   use :51100: chat tab 9aacbbcd-9aca-4844-b257-97b1c62105a6 availability unavailable (want unavailable: its computer old-laptop was deleted)
+ok   use :51100: continuing claude-chat tab 9aacbbcd-9aca-4844-b257-97b1c62105a6 refused as it must (its computer old-laptop was deleted): Its computer was removed
+ok   use :51100: chat tab d18ae771-20ef-47b7-bc57-726cb1f5ea56 availability unavailable (want unavailable: its computer old-laptop was deleted)
+ok   use :51100: continuing claude-chat tab d18ae771-20ef-47b7-bc57-726cb1f5ea56 refused as it must (its computer old-laptop was deleted): Its computer was removed
+ok   use :51100: continuing claude-code tab ee5705c5-cb7b-4e69-9271-751fd7f64334 refused as it must (archived): paused or deleted
+ok   use :51100: continuing claude-code tab f18b04be-e413-468d-bb6e-d9fc850ee0ce refused as it must (trashed at v0.38: archived since Trash was removed (v198)): paused or deleted
+note use :51100: continued 3/9 agent tab(s) (chat.start / pty.create)
+ok   use :51100: re-enroll escape hatch: removed the stale old ci-box (computers.delete)
+ok   use :51100: re-enroll escape hatch: chat of tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 adopted by the new ci-box (owner new id)
+ok   use :51100: re-enroll escape hatch: availability ready (want ready)
+ok   use :51100: re-enroll escape hatch: agent start no longer refused
+ok   use :51100: re-enroll escape hatch: its agent resumes its own session 96f4bb05-f911-4343-b9b4-463997838d61
+ok   settle: settled
+ok   settle: after use: settled
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 3563b77a-018e-4839-8772-fea05895b93e — 10 events kept, in order
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: chat 4fbb1396-c063-442c-a65b-6a2b8cf83756 — 10 events kept, in order
+ok   tab 3563b77a-018e-4839-8772-fea05895b93e after the upgrade: no agent started (refused: its computer idle-box is disabled; history stays readable)
+ok   tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 after the upgrade: no agent started (refused: ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor))
+ok   tab d18ae771-20ef-47b7-bc57-726cb1f5ea56 after the upgrade: no agent started (refused: its computer old-laptop was deleted)
+ok   tab 9aacbbcd-9aca-4844-b257-97b1c62105a6 after the upgrade: no agent started (refused: its computer old-laptop was deleted)
+ok   tab f18b04be-e413-468d-bb6e-d9fc850ee0ce after the upgrade: no agent started (refused: trashed at v0.38: archived since Trash was removed (v198))
+ok   tab ee5705c5-cb7b-4e69-9271-751fd7f64334 after the upgrade: no agent started (refused: archived)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/computer/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.auth.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.data.sqlite: foreign_key_check 0 violation(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: user_version 214 (latest 214)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: projects rows 4 → 4
+ok   .slayzone/stable/hub/slayzone.data.sqlite: tasks rows 9 → 9
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task_artifacts rows 5 → 5
+ok   .slayzone/stable/hub/slayzone.data.sqlite: no task/project/placement names a gone computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat bookkeeping names gone computer ac3e035b: retired (missing)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: retired computer ac3e035b (missing) has 0 undeliverable item(s) left (applyComputerRetirements)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 70140abf on retired ac3e035b is shown unavailable (waits for ac3e035b)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 30d3cc34 on retired ac3e035b is shown unavailable (waits for ac3e035b)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: retired computer 30f4e0e0 (deleted) has 0 undeliverable item(s) left (applyComputerRetirements)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: deleted computer ac3e035b has no row and is retired (missing)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 70140abf that ran on the deleted computer is kept (active)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 30d3cc34 that ran on the deleted computer is kept (active)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer b47ac68e stays disabled (disabled_at kept → same)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer b47ac68e is not retired
+ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer keeps its work (4 binding(s)/folder(s)/chat(s))
+ok   .slayzone/stable/hub/slayzone.data.sqlite: no chat on the disabled computer is marked unavailable (0)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: re-enrolled computer's old id 30f4e0e0 removed by the user: retired (deleted), nothing names it
+ok   .slayzone/stable/hub/slayzone.data.sqlite: chat of tab 4fbb1396 is owned by the new id 15c5c16f (15c5c16f)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: re-enrolled computer's new id 15c5c16f is registered and live
+ok   .slayzone/stable/hub/slayzone.data.sqlite: no task left in Trash (0)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: trashed task f18b04be is archived (restorable) (archived_at set, deleted_at NULL)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: trashed task keeps its 1 artifact(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: archived task ee5705c5 is archived (restorable) (archived_at set, deleted_at NULL)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: archived task keeps its 1 artifact(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task restored from Trash 2b3b3b56 is live (archived_at NULL, deleted_at NULL)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: task restored from Trash keeps its 1 artifact(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: live task c13468fa is live (archived_at NULL, deleted_at NULL)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: live task keeps its 2 artifact(s)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's keep.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's gone.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's spec.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's draft.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's report.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's keep.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's spec.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's draft.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's report.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: backup's after.md is pinned by its backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: the artifact deleted after the backup is in the backup
+ok   .slayzone/stable/hub/slayzone.data.sqlite: the artifact deleted after the backup stays deleted
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's after.md exists (24bfab1e37f0)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's draft.md exists (8a9e712b9fd8)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's gone.md exists (2503e4d9cdc5)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's keep.md exists (584aea816d4c)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's report.md exists (e6c6c4a11b5c)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: blob of backup's spec.md exists (a04f83e764de)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: pin kept: hub-backup 584aea816d4c
+ok   .slayzone/stable/hub/slayzone.data.sqlite: pin kept: hub-backup 2503e4d9cdc5
+ok   .slayzone/stable/hub/slayzone.data.sqlite: pin kept: hub-backup a04f83e764de
+ok   .slayzone/stable/hub/slayzone.data.sqlite: pin kept: hub-backup 8a9e712b9fd8
+ok   .slayzone/stable/hub/slayzone.data.sqlite: pin kept: hub-backup e6c6c4a11b5c
+ok   .slayzone/stable/hub/slayzone.data.sqlite: every project folder is ready on a registered computer
+ok   .slayzone/stable/hub/slayzone.data.sqlite: session_tab_recovery rows left 0 (v201, after continuing every agent tab)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: usage_cursor_handoff rows left 0 (v209, after opening Usage)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: computer_data_handoff rows left 8 (8 wait for a computer that cannot connect: removed, or the old id of a re-enrolled one)
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: integrity_check ok
+ok   .slayzone/stable/hub/slayzone.diagnostics.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c2/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: integrity_check ok
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: foreign_key_check 0 violation(s)
+ok   computers/c3/computer-runtime/1d67157d9923e46ad4259ec2b610220ebabb9a4a506a76be46b5d4d322e23d3b/chat.sqlite: user_version 12 (latest 12)

@@ -1,0 +1,22 @@
+{
+  "release": "v0.38.0",
+  "journey": "v0.38.0-lifecycle",
+  "summary": "v0.38.0 desktop user (schema v194) whose computers came and went: idle-box disabled with work and a chat on it, ci-box re-enrolled under a new id while work and a chat name the old one, old-laptop deleted after chats ran on it; artifacts on a live, a trashed, a restored and an archived task; a backup, then an artifact deleted after it.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": ["local-computer", "idle-box", "ci-box"],
+    "hubs": [],
+    "computers": [
+      {
+        "name": "idle-box",
+        "root": "computers/c2",
+        "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51100" }
+      },
+      {
+        "name": "ci-box",
+        "root": "computers/c3",
+        "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51100" }
+      }
+    ]
+  }
+}

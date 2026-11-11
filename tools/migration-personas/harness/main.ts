@@ -32,7 +32,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import Database from 'better-sqlite3'
 import {
@@ -66,7 +66,10 @@ import {
   createDiagnosticsSchema
 } from '../../../packages/domains/diagnostics/src/server/schema'
 import { LATEST_MIGRATION_VERSION } from '../../../packages/shared/db-migrations/src/index'
-import { CHAT_STORAGE_SCHEMA_VERSION } from '../../../packages/domains/chat-runtime/src/server/storage'
+import {
+  CHAT_STORAGE_SCHEMA_VERSION,
+  openChatStorage
+} from '../../../packages/domains/chat-runtime/src/server/storage'
 
 // ---------------------------------------------------------------------------- types
 
@@ -100,7 +103,25 @@ const persona = JSON.parse(readFileSync(personaPath, 'utf8')) as Persona
 const factsPath = join(dirname(personaPath), 'facts.json')
 const facts = (existsSync(factsPath) ? JSON.parse(readFileSync(factsPath, 'utf8')) : {}) as {
   /** Per tab, what continuing it after the upgrade must do: resume this session, or start fresh. */
-  expect?: Record<string, { resume?: string; fresh?: boolean; why?: string }>
+  expect?: Record<string, TabExpectation>
+  /** Per task, the name of the computer holding its worktree / base dir (checkTaskPaths). */
+  taskPathHolders?: Record<string, string>
+  /** Tasks whose worktree / base dir the user cleared before the upgrade (checkTaskPaths). */
+  taskPathsCleared?: string[]
+  /** Computer lifecycle + Trash/backup ids (p11, see checkLifecycle). */
+  lifecycle?: LifecycleFacts
+}
+/**
+ * What continuing one tab after the upgrade must do. `refused`: the app must refuse it
+ * with a message containing this text (its computer is disabled, removed or offline;
+ * its task is archived). `availability`: `chat.availability` must report this state.
+ */
+interface TabExpectation {
+  resume?: string
+  fresh?: boolean
+  refused?: string
+  availability?: string
+  why?: string
 }
 const HOME = homedir()
 const REF = '/tmp/persona-input-ref'
@@ -194,6 +215,8 @@ interface Proc {
   kind: 'hub' | 'computer'
   child: ChildProcess
   exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
+  /** Start it again, as it was started (same label: its log continues). */
+  respawn(): Proc
 }
 const procs: Proc[] = []
 
@@ -207,13 +230,13 @@ function start(
   mkdirSync(cwd, { recursive: true })
   // stdin stays an open pipe: the hub reads EOF as "the app died" (platform/parent-watch).
   const child = spawn(process.execPath, [script], { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] })
-  const out = createWriteStream(join(logsDir, `${label}.log`))
+  const out = createWriteStream(join(logsDir, `${label}.log`), { flags: 'a' })
   child.stdout?.pipe(out)
   child.stderr?.pipe(out)
   const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((res) =>
     child.on('exit', (code, signal) => res({ code, signal }))
   )
-  const p = { label, kind, child, exit }
+  const p = { label, kind, child, exit, respawn: () => start(label, kind, script, env, cwd) }
   procs.push(p)
   log(`started ${label} (pid ${child.pid})`)
   return p
@@ -433,12 +456,31 @@ function inWindow(ms: number): boolean {
   return ms >= runStartMs - 120_000 && ms <= runStartMs + 400 * 86_400_000
 }
 
+/**
+ * A computer's auto-upgrade check runs on a 30 s wall-clock timer
+ * (apps/computer/src/upgrade-runtime.ts INTERVAL_MS) and writes `checking`, then, on
+ * the release it already runs, `connected` a moment later (auto-upgrade.ts `check`).
+ * When the harness's SIGTERM lands between the two, the check is abandoned and
+ * `checking` stays the last phase in `upgrade-status.json` and the hub's
+ * `computer_runtime_state`. Whether that happens depends only on where the timer stands
+ * at shutdown, and no migration reads or writes it (each boot reports afresh). So the
+ * interrupted idle check is recorded as its only other outcome. Every other phase
+ * (installing, failed, rollback, …) is kept.
+ */
+function settleIdleUpgradeCheck(s: string): string {
+  return s.replace(/(\\?"phase\\?": ?\\?")checking(\\?")/g, '$1connected$2')
+}
+
 /** Replace values minted by THIS run (ids, keys, wall-clock times) with stable tokens. */
+const HOSTNAME_RE = new RegExp(`\\b${hostname().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')
+
 function normalize(s: string): string {
   const known = (v: string) => inputValues.has(v) || inputValues.has(v.toLowerCase())
   return (
-    s
+    settleIdleUpgradeCheck(s)
       .replace(UUID_RE, (u) => (known(u) ? u : '<new-uuid>'))
+      // This run's container hostname (a random id; e.g. a shell prompt in saved scrollback).
+      .replace(HOSTNAME_RE, '<run-host>')
       // OS process ids of this run's processes (also inside JSON strings: \"pid\":123).
       .replace(/(\\?"pid\\?":)\d+/g, '$1"<pid>"')
       // API keys the hub mints for computers, and their 6-char `start` echo.
@@ -773,6 +815,211 @@ function checkComputerChats(
   }
 }
 
+/**
+ * Every computer chat store, by the hub computer id it serves: a computer root's
+ * `computer.state.json` maps each hub key to its computer id, and that hub's store is
+ * `computer-runtime/<sha256(JSON hub key)>/chat.sqlite` (chat-runtime `openChatStorage`).
+ */
+function chatStoresByComputer(): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const f of walk(HOME)) {
+    if (!f.endsWith(`${sep}computer.state.json`)) continue
+    const state = JSON.parse(readFileSync(f, 'utf8')) as Record<string, { computerId?: string }>
+    for (const [hubKey, cred] of Object.entries(state)) {
+      if (!cred?.computerId) continue
+      const digest = createHash('sha256').update(JSON.stringify(hubKey)).digest('hex')
+      const store = join(dirname(f), 'computer-runtime', digest, 'chat.sqlite')
+      if (existsSync(store)) out.set(cred.computerId, store)
+    }
+  }
+  return out
+}
+
+/**
+ * Task worktree paths and base dirs (v197, v210–v211): before the upgrade the hub held
+ * them; after it, each lives ONLY on the computer holding the task's folders
+ * (`tasks.worktree_computer_id`), and the hub keeps whether each is set. For every task
+ * of the input hub: the flags match, the holder is recorded (and is the computer the
+ * generator recorded as holding them, `facts.taskPathHolders`), that computer's
+ * `task_paths` row has exactly the old values, no other computer holds a row, and a
+ * task with no path (or a cleared one) has none anywhere. Silent for a hub whose tasks
+ * never had a path.
+ */
+function checkTaskPaths(
+  ref: Database.Database,
+  db: Database.Database,
+  rel: string,
+  pass: (m: string) => void,
+  fail: (m: string) => void
+): void {
+  const cols = (ref.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>).map(
+    (c) => c.name
+  )
+  if (!cols.includes('worktree_path') || !cols.includes('base_dir')) return
+  const before = ref
+    .prepare('SELECT id, title, archived_at, worktree_path, base_dir FROM tasks ORDER BY title, id')
+    .all() as Array<{
+    id: string
+    title: string
+    archived_at: string | null
+    worktree_path: string | null
+    base_dir: string | null
+  }>
+  const set = (v: string | null) => (v === null || v === '' ? null : v)
+  if (!before.some((t) => set(t.worktree_path) || set(t.base_dir))) return
+
+  const after = (db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>).map(
+    (c) => c.name
+  )
+  const kept = after.filter((c) => c === 'worktree_path' || c === 'base_dir')
+  ;(kept.length === 0 ? pass : fail)(
+    `${rel}: task paths — hub keeps no path column${kept.length ? ` (still: ${kept.join(', ')})` : ''}`
+  )
+  const names = new Map(
+    (db.prepare('SELECT id, name FROM computers').all() as Array<{ id: string; name: string }>).map(
+      (c) => [c.id, c.name]
+    )
+  )
+  const stores = chatStoresByComputer()
+  /** Each store's task_paths row of a task, by computer id. */
+  const held = (taskId: string) => {
+    const out = new Map<string, { worktree_path: string | null; base_dir: string | null }>()
+    for (const [computerId, file] of stores) {
+      const s = new Database(file, { readonly: true, fileMustExist: true })
+      if (tables(s).includes('task_paths')) {
+        const row = s
+          .prepare('SELECT worktree_path, base_dir FROM task_paths WHERE task_id = ?')
+          .get(taskId) as { worktree_path: string | null; base_dir: string | null } | undefined
+        if (row) out.set(computerId, row)
+      }
+      s.close()
+    }
+    return out
+  }
+  const show = (v: string | null) => (v === null ? '∅' : `'${v}'`)
+  const cleared = new Set(facts.taskPathsCleared ?? [])
+
+  for (const t of before) {
+    const wt = set(t.worktree_path)
+    const bd = set(t.base_dir)
+    const label = `${rel}: task "${t.title}"${t.archived_at ? ' (archived)' : ''}`
+    const now = db
+      .prepare('SELECT has_worktree, has_base_dir, worktree_computer_id FROM tasks WHERE id = ?')
+      .get(t.id) as
+      | { has_worktree: number; has_base_dir: number; worktree_computer_id: string | null }
+      | undefined
+    if (!now) {
+      fail(`${label} is gone`)
+      continue
+    }
+    const flagsOk = now.has_worktree === (wt ? 1 : 0) && now.has_base_dir === (bd ? 1 : 0)
+    ;(flagsOk ? pass : fail)(
+      `${label}: hub flags has_worktree=${now.has_worktree} has_base_dir=${now.has_base_dir} (before: worktree ${show(t.worktree_path)}, base dir ${show(t.base_dir)})`
+    )
+    const rows = held(t.id)
+    if (!wt && !bd) {
+      // No folder: no computer may hold one for it (a cleared path stays cleared).
+      const stray = [...rows].filter(([, r]) => r.worktree_path !== null || r.base_dir !== null)
+      ;(stray.length === 0 ? pass : fail)(
+        `${label}: no folder${cleared.has(t.id) ? ' (cleared before the upgrade)' : ''}, held nowhere${
+          stray.length
+            ? ` — BUT ${stray.map(([c, r]) => `${names.get(c) ?? c} holds ${show(r.worktree_path)} | ${show(r.base_dir)}`).join('; ')}`
+            : ''
+        }`
+      )
+      continue
+    }
+    const holder = now.worktree_computer_id
+    const holderName = holder ? (names.get(holder) ?? `unregistered ${holder}`) : null
+    const want = facts.taskPathHolders?.[t.id]
+    ;(holder && names.has(holder) && (!want || want === holderName) ? pass : fail)(
+      `${label}: folders held by ${holderName ?? 'NO computer'}${want && want !== holderName ? ` — expected ${want}` : ''}`
+    )
+    const mine = holder ? rows.get(holder) : undefined
+    ;(mine && mine.worktree_path === wt && mine.base_dir === bd ? pass : fail)(
+      `${label}: ${holderName ?? 'holder'} has worktree ${show(wt)}, base dir ${show(bd)}${
+        mine ? '' : ' — NO task_paths row there'
+      }${mine && (mine.worktree_path !== wt || mine.base_dir !== bd) ? ` — BUT holds ${show(mine.worktree_path)} | ${show(mine.base_dir)}` : ''}`
+    )
+    const others = [...rows.keys()].filter((c) => c !== holder)
+    ;(others.length === 0 ? pass : fail)(
+      `${label}: no other computer holds its paths${
+        others.length ? ` — BUT ${others.map((c) => names.get(c) ?? c).join(', ')} do` : ''
+      }`
+    )
+    if (t.archived_at && wt) {
+      // Removing an archived task's worktree (Trash purge) asks the holder
+      // (hub computer-task-paths.ts `taskPathTarget`): it must be the computer with it.
+      const target = (
+        db
+          .prepare(
+            `SELECT t.worktree_computer_id AS c FROM tasks t WHERE t.id = ? AND NOT EXISTS(
+               SELECT 1 FROM computer_retirements r
+                WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)`
+          )
+          .get(t.id) as { c: string | null } | undefined
+      )?.c
+      ;(target && target === holder && rows.get(target)?.worktree_path === wt ? pass : fail)(
+        `${label}: its worktree removal goes to ${target ? (names.get(target) ?? target) : 'NO computer'}, which holds ${show(wt)}`
+      )
+    }
+  }
+}
+
+/** `name → sql` of a chat store's `records_state_version_*` triggers, whitespace-collapsed. */
+function chatStoreTriggers(db: Database.Database): Map<string, string> {
+  const rows = db
+    .prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'records_state_version_%' ORDER BY name"
+    )
+    .all() as Array<{ name: string; sql: string }>
+  return new Map(rows.map((r) => [r.name, r.sql.replace(/\s+/g, ' ').trim()]))
+}
+
+/**
+ * The triggers that bump a chat's hub-facing task state version skip the record kinds
+ * that stay on the computer. v0.37 created them with `CREATE TRIGGER IF NOT EXISTS` and
+ * its own list (no `pinned-message`), so on an old store a pin would bump the version
+ * and send the hub needless metadata recovery. After the upgrade every such store must
+ * carry today's triggers. Reported only for input stores whose triggers differ from a
+ * fresh store's (v0.37), so personas whose triggers are already current get no lines.
+ */
+function checkChatStoreTriggers(pass: (m: string) => void, fail: (m: string) => void): void {
+  const freshDir = '/tmp/fresh-chat-store'
+  const fresh = openChatStorage({ stateDir: freshDir, hubScope: 'fresh' })
+  fresh.close()
+  const freshFile = [...walk(freshDir)].find((f) => /(^|\/)chat\.sqlite$/.test(f))
+  if (!freshFile) return fail('chat store triggers: no fresh chat store to compare with')
+  const freshDb = new Database(freshFile, { readonly: true, fileMustExist: true })
+  const want = chatStoreTriggers(freshDb)
+  freshDb.close()
+  const same = (a: Map<string, string>) =>
+    a.size === want.size && [...want].every(([k, v]) => a.get(k) === v)
+  for (const f of [...walk(REF)].sort()) {
+    if (!/(^|\/)chat\.sqlite$/.test(f)) continue
+    const rel = relative(REF, f)
+    const ref = openReadonlyCopy(f)
+    if (!ref) continue
+    const before = chatStoreTriggers(ref)
+    ref.close()
+    if (same(before)) continue
+    const out = join(HOME, rel)
+    if (!existsSync(out)) {
+      fail(`${rel}: chat store with out-of-date triggers is GONE after the upgrade`)
+      continue
+    }
+    const db = new Database(out, { readonly: true, fileMustExist: true })
+    const after = chatStoreTriggers(db)
+    db.close()
+    const stale = [...want.keys()].filter((k) => after.get(k) !== want.get(k))
+    ;(stale.length === 0 ? pass : fail)(
+      `${rel}: records_state_version triggers from the old build ${
+        stale.length ? `still out of date: ${stale.join(', ')}` : "replaced by today's"
+      }`
+    )
+  }
+}
+
 function checkInvariants(processProblems: string[], settle: string[]): string[] {
   const out: string[] = []
   const fail = (m: string) => out.push(`FAIL ${m}`)
@@ -783,6 +1030,7 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
 
   const chats = collectOutputChats()
   checkComputerChats(chats, pass, fail)
+  checkChatStoreTriggers(pass, fail)
   if (tabSpawns.size > 0) checkResumes(pass, fail)
 
   for (const f of [...walk(HOME)].sort()) {
@@ -853,6 +1101,8 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
           }
         }
         checkChats(ref, db, rel, chats, pass, fail)
+        checkTaskPaths(ref, db, rel, pass, fail)
+        if (facts.lifecycle) checkLifecycle(ref, db, f, rel, facts.lifecycle, pass, fail)
         ref.close()
       } else {
         out.push(`note ${rel}: no input database found to compare with`)
@@ -896,10 +1146,13 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
         `${rel}: usage_cursor_handoff ${usageHandoff === null ? 'dropped' : `rows left ${usageHandoff}`} (v209, after opening Usage)`
       )
       const handoff = count(db, 'computer_data_handoff')
-      if (handoff !== null)
-        ((handoff === 0 ? pass : fail) as (m: string) => void)(
-          `${rel}: computer_data_handoff rows left ${handoff}`
+      if (handoff !== null) {
+        // Rows of a task whose computer cannot connect wait by design (computer-data-handoff.ts).
+        const waiting = handoff && facts.lifecycle ? handoffWaiting(db, facts.lifecycle) : 0
+        ;((handoff - waiting === 0 ? pass : fail) as (m: string) => void)(
+          `${rel}: computer_data_handoff rows left ${handoff}${waiting ? ` (${waiting} wait for a computer that cannot connect: removed, or the old id of a re-enrolled one)` : ''}`
         )
+      }
     } else if (/(^|\/)chat\.sqlite$/.test(rel)) {
       ;(uv === CHAT_STORAGE_SCHEMA_VERSION ? pass : fail)(
         `${rel}: user_version ${uv} (latest ${CHAT_STORAGE_SCHEMA_VERSION})`
@@ -908,6 +1161,305 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
     db.close()
   }
   return out
+}
+
+// ------------------------------------- 5b. computer lifecycle + Trash/backup (p11)
+
+interface LifecycleFacts {
+  disabled: string
+  reEnrolledOld: string
+  reEnrolledNew: string
+  deleted: string
+  trashedTask: string
+  restoredTask: string
+  archivedTask: string
+  liveTask: string
+  deletedArtifact: string
+  /** Exercise the re-enroll escape hatch after the upgrade: remove the stale old computer
+   *  (`reEnrolledOld`), reconnect `computer` (the new id), and its chat on `tab` must be
+   *  adopted there and start again. See exerciseEscapeHatch. */
+  escapeHatch?: { tab: string; computer: string }
+}
+
+/**
+ * v194 (disabled computer), v200 (computer retirements → applyComputerRetirements) and
+ * v198/v199 (Trash removed, artifact blob pins incl. backup pins), on the ids the
+ * generator recorded in facts.json `lifecycle`.
+ */
+function checkLifecycle(
+  ref: Database.Database,
+  db: Database.Database,
+  file: string,
+  rel: string,
+  l: LifecycleFacts,
+  pass: (m: string) => void,
+  fail: (m: string) => void
+): void {
+  const all = <T>(d: Database.Database, sql: string, ...p: unknown[]) =>
+    d.prepare(sql).all(...p) as T[]
+  const one = <T>(d: Database.Database, sql: string, ...p: unknown[]) =>
+    d.prepare(sql).get(...p) as T | undefined
+  const short = (id: string) => id.slice(0, 8)
+  const computers = new Set(all<{ id: string }>(db, 'SELECT id FROM computers').map((r) => r.id))
+  const retired = new Map(
+    all<{ computer_id: string; successor_id: string | null; reason: string }>(
+      db,
+      'SELECT computer_id, successor_id, reason FROM computer_retirements'
+    ).map((r) => [r.computer_id, r])
+  )
+
+  // 1. No live work names a gone computer (worktree_computer_id keeps a deleted id by design).
+  const dangling = all<{ what: string; cid: string }>(
+    db,
+    `SELECT 'task "' || title || '"' AS what, computer_id AS cid FROM tasks WHERE computer_id IS NOT NULL
+     UNION ALL SELECT 'project "' || name || '" default', default_computer_id FROM projects WHERE default_computer_id IS NOT NULL
+     UNION ALL SELECT 'placement of project ' || project_id, computer_id FROM project_placements`
+  ).filter((r) => !computers.has(r.cid))
+  ;(dangling.length === 0 ? pass : fail)(
+    `${rel}: no task/project/placement names a gone computer${dangling.length ? `: ${dangling.map((d) => `${d.what} → ${short(d.cid)}`).join(', ')}` : ''}`
+  )
+
+  // 2. Chat bookkeeping naming a gone computer: retired (v200 backfill / delete), and applied.
+  const chatRefs = all<{ cid: string }>(
+    db,
+    `SELECT computer_id AS cid FROM chat_ownership UNION SELECT source_computer_id FROM chat_ownership
+     UNION SELECT destination_computer_id FROM chat_ownership UNION SELECT computer_id FROM chat_task_computers
+     UNION SELECT computer_id FROM chat_lifecycle_acks UNION SELECT computer_id FROM chat_bootstrap_reservations
+     UNION SELECT computer_id FROM chat_deletion_targets WHERE acknowledged=0
+     UNION SELECT computer_id FROM chat_provider_transitions WHERE state='reserved'`
+  )
+    .map((r) => r.cid)
+    .filter((c): c is string => !!c && !computers.has(c))
+  for (const cid of chatRefs)
+    (retired.has(cid) ? pass : fail)(
+      `${rel}: chat bookkeeping names gone computer ${short(cid)}: ${retired.has(cid) ? `retired (${retired.get(cid)?.reason})` : 'NOT retired'}`
+    )
+  for (const [cid, r] of retired) {
+    const pending = one<{ n: number }>(
+      db,
+      `SELECT (SELECT count(*) FROM chat_task_computers WHERE computer_id=@c)
+        + (SELECT count(*) FROM chat_lifecycle_acks WHERE computer_id=@c)
+        + (SELECT count(*) FROM chat_bootstrap_reservations WHERE computer_id=@c)
+        + (SELECT count(*) FROM chat_folder_deletion_acks WHERE computer_id=@c)
+        + (SELECT count(*) FROM chat_deletion_targets WHERE computer_id=@c AND acknowledged=0)
+        + (SELECT count(*) FROM chat_provider_transitions WHERE computer_id=@c AND state='reserved') AS n`,
+      { c: cid }
+    )?.n
+    ;(pending === 0 ? pass : fail)(
+      `${rel}: retired computer ${short(cid)} (${r.reason}) has ${pending} undeliverable item(s) left (applyComputerRetirements)`
+    )
+    const active = all<{ id: string; waits: string | null }>(
+      db,
+      `SELECT o.id, u.computer_id AS waits FROM chat_ownership o
+         LEFT JOIN chat_unavailable_owners u ON u.conversation_id = o.id
+        WHERE o.computer_id = ? AND o.state = 'active'`,
+      cid
+    )
+    if (r.successor_id === null)
+      for (const o of active)
+        (o.waits === cid ? pass : fail)(
+          `${rel}: chat ${short(o.id)} on retired ${short(cid)} is shown unavailable (${o.waits ? `waits for ${short(o.waits)}` : 'NOT marked'})`
+        )
+    else
+      (active.length === 0 ? pass : fail)(
+        `${rel}: retired ${short(cid)} → successor ${short(r.successor_id)}: ${active.length} chat(s) left on the old id`
+      )
+  }
+  // 3. Deleted computer: gone, retired, its chats kept (not dropped) and waiting visibly.
+  ;(!computers.has(l.deleted) && retired.has(l.deleted) ? pass : fail)(
+    `${rel}: deleted computer ${short(l.deleted)} has no row and is retired (${retired.get(l.deleted)?.reason ?? 'NOT retired'})`
+  )
+  const deletedChats = tables(ref).includes('chat_ownership')
+    ? all<{ id: string }>(ref, 'SELECT id FROM chat_ownership WHERE computer_id = ?', l.deleted)
+    : []
+  if (deletedChats.length === 0) fail(`${rel}: input has no chat on the deleted computer`)
+  for (const c of deletedChats) {
+    const kept = one<{ state: string }>(db, 'SELECT state FROM chat_ownership WHERE id = ?', c.id)
+    ;(kept ? pass : fail)(
+      `${rel}: chat ${short(c.id)} that ran on the deleted computer is kept (${kept?.state ?? 'GONE'})`
+    )
+  }
+
+  // 4. Disabled computer: still disabled; its bindings, folders and chats intact, not retired.
+  const before = one<{ disabled_at: number | null }>(
+    ref,
+    'SELECT disabled_at FROM computers WHERE id = ?',
+    l.disabled
+  )
+  const after = one<{ disabled_at: number | null }>(
+    db,
+    'SELECT disabled_at FROM computers WHERE id = ?',
+    l.disabled
+  )
+  ;(before?.disabled_at != null && after?.disabled_at === before.disabled_at ? pass : fail)(
+    `${rel}: disabled computer ${short(l.disabled)} stays disabled (disabled_at ${before?.disabled_at != null ? 'kept' : 'MISSING in input'} → ${after ? (after.disabled_at === before?.disabled_at ? 'same' : `${after.disabled_at}`) : 'ROW GONE'})`
+  )
+  ;(!retired.has(l.disabled) ? pass : fail)(
+    `${rel}: disabled computer ${short(l.disabled)} is not retired`
+  )
+  const bindings = (d: Database.Database, cid: string) =>
+    all<{ k: string }>(
+      d,
+      `SELECT 'task ' || id AS k FROM tasks WHERE computer_id = @c
+       UNION SELECT 'project ' || id FROM projects WHERE default_computer_id = @c
+       UNION SELECT 'placement ' || project_id || ' ' || status FROM project_placements WHERE computer_id = @c
+       UNION SELECT 'chat ' || id FROM chat_ownership WHERE computer_id = @c AND state = 'active'
+       ORDER BY 1`,
+      { c: cid }
+    )
+      .map((r) => r.k)
+      .join(', ')
+  const disabledBefore = bindings(ref, l.disabled)
+  const disabledAfter = bindings(db, l.disabled)
+  ;(disabledBefore !== '' && disabledAfter === disabledBefore ? pass : fail)(
+    `${rel}: disabled computer keeps its work (${disabledBefore.split(', ').length} binding(s)/folder(s)/chat(s)${disabledAfter === disabledBefore ? '' : ` → ${disabledAfter.split(', ').filter(Boolean).length}`})`
+  )
+  const unavailable = one<{ n: number }>(
+    db,
+    'SELECT count(*) AS n FROM chat_unavailable_owners WHERE computer_id = ?',
+    l.disabled
+  )?.n
+  ;(unavailable === 0 ? pass : fail)(
+    `${rel}: no chat on the disabled computer is marked unavailable (${unavailable})`
+  )
+
+  // 5. Re-enrolled computer: v0.38 left the old row (offline) beside the new one. Its work
+  //    must either still name the existing old row, or have moved to the successor.
+  const oldWork = bindings(ref, l.reEnrolledOld)
+  if (oldWork === '') fail(`${rel}: input has no work on the re-enrolled computer's old id`)
+  if (l.escapeHatch) {
+    // The user removed the stale old row after the upgrade (exerciseEscapeHatch).
+    const r = retired.get(l.reEnrolledOld)
+    ;(!computers.has(l.reEnrolledOld) &&
+      r?.reason === 'deleted' &&
+      bindings(db, l.reEnrolledOld) === ''
+      ? pass
+      : fail)(
+      `${rel}: re-enrolled computer's old id ${short(l.reEnrolledOld)} removed by the user: retired (${r?.reason ?? 'NOT retired'}), nothing names it`
+    )
+    const owner = one<{ computer_id: string | null }>(
+      db,
+      'SELECT o.computer_id FROM chat_ownership o JOIN chat_tab_bindings b ON b.conversation_id = o.id WHERE b.tab_id = ?',
+      l.escapeHatch.tab
+    )
+    ;(owner?.computer_id === l.reEnrolledNew ? pass : fail)(
+      `${rel}: chat of tab ${short(l.escapeHatch.tab)} is owned by the new id ${short(l.reEnrolledNew)} (${owner?.computer_id ? short(owner.computer_id) : 'NO owner'})`
+    )
+  } else if (computers.has(l.reEnrolledOld)) {
+    ;(bindings(db, l.reEnrolledOld) === oldWork ? pass : fail)(
+      `${rel}: re-enrolled computer's old id ${short(l.reEnrolledOld)} still registered; its work still names it`
+    )
+  } else {
+    const r = retired.get(l.reEnrolledOld)
+    ;(r?.successor_id === l.reEnrolledNew && bindings(db, l.reEnrolledOld) === '' ? pass : fail)(
+      `${rel}: re-enrolled computer's old id ${short(l.reEnrolledOld)} retired → ${r?.successor_id ? short(r.successor_id) : 'NO successor'}, work repointed`
+    )
+  }
+  ;(computers.has(l.reEnrolledNew) && !retired.has(l.reEnrolledNew) ? pass : fail)(
+    `${rel}: re-enrolled computer's new id ${short(l.reEnrolledNew)} is registered and live`
+  )
+
+  // 6. Trash (removed in v198): trashed → archived (restorable), restored stays live.
+  const task = (id: string) =>
+    one<{ archived_at: string | null; deleted_at: string | null }>(
+      db,
+      'SELECT archived_at, deleted_at FROM tasks WHERE id = ?',
+      id
+    )
+  const inTrash = one<{ n: number }>(
+    db,
+    'SELECT count(*) AS n FROM tasks WHERE deleted_at IS NOT NULL'
+  )?.n
+  ;(inTrash === 0 ? pass : fail)(`${rel}: no task left in Trash (${inTrash})`)
+  const states: Array<[string, string, boolean]> = [
+    ['trashed task', l.trashedTask, true],
+    ['archived task', l.archivedTask, true],
+    ['task restored from Trash', l.restoredTask, false],
+    ['live task', l.liveTask, false]
+  ]
+  for (const [what, id, archived] of states) {
+    const t = task(id)
+    const ok = !!t && t.deleted_at === null && (t.archived_at !== null) === archived
+    ;(ok ? pass : fail)(
+      `${rel}: ${what} ${short(id)} is ${archived ? 'archived (restorable)' : 'live'} (${t ? `archived_at ${t.archived_at === null ? 'NULL' : 'set'}, deleted_at ${t.deleted_at === null ? 'NULL' : 'set'}` : 'ROW GONE'})`
+    )
+    const arts = (d: Database.Database) =>
+      all<{ id: string }>(d, 'SELECT id FROM task_artifacts WHERE task_id = ? ORDER BY id', id)
+        .map((r) => r.id)
+        .join(',')
+    ;(arts(db) === arts(ref) ? pass : fail)(
+      `${rel}: ${what} keeps its ${arts(ref).split(',').filter(Boolean).length} artifact(s)`
+    )
+  }
+
+  // 7. Blobs: everything a task (any state) or a retained backup references exists, and
+  //    every retained backup's references are pinned ('hub-backup', v199).
+  const root = dirname(file)
+  const blob = (hash: string) => existsSync(join(root, 'blobs', hash.slice(0, 2), hash.slice(2)))
+  const refs = new Map<string, string>()
+  for (const d of [ref, db])
+    for (const r of all<{ hash: string; what: string }>(
+      d,
+      `SELECT v.content_hash AS hash, 'artifact ' || a.title AS what
+         FROM artifact_versions v JOIN task_artifacts a ON a.id = v.artifact_id`
+    ))
+      refs.set(r.hash, r.what)
+  const backupsDir = join(root, 'backups')
+  const backups = existsSync(backupsDir)
+    ? readdirSync(backupsDir).filter((n) => /\.sqlite$/.test(n) && !n.startsWith('.'))
+    : []
+  if (backups.length === 0) fail(`${rel}: input has no backup`)
+  let deletedHash: string | null = null
+  for (const name of backups) {
+    const snap = new Database(join(backupsDir, name), { readonly: true, fileMustExist: true })
+    const held = all<{ hash: string; title: string; artifact_id: string }>(
+      snap,
+      `SELECT v.content_hash AS hash, a.title, a.id AS artifact_id
+         FROM artifact_versions v JOIN task_artifacts a ON a.id = v.artifact_id`
+    )
+    snap.close()
+    for (const h of held) {
+      refs.set(h.hash, `backup's ${h.title}`)
+      if (h.artifact_id === l.deletedArtifact) deletedHash = h.hash
+      const pinned = one(
+        db,
+        "SELECT 1 FROM artifact_blob_pins WHERE scope = 'hub-backup' AND owner_id = ? AND content_hash = ?",
+        name,
+        h.hash
+      )
+      ;(pinned ? pass : fail)(`${rel}: backup's ${h.title} is pinned by its backup`)
+    }
+  }
+  ;(deletedHash ? pass : fail)(`${rel}: the artifact deleted after the backup is in the backup`)
+  ;(!one(db, 'SELECT 1 FROM task_artifacts WHERE id = ?', l.deletedArtifact) ? pass : fail)(
+    `${rel}: the artifact deleted after the backup stays deleted`
+  )
+  for (const [hash, what] of [...refs].sort((a, b) => a[1].localeCompare(b[1])))
+    (blob(hash) ? pass : fail)(`${rel}: blob of ${what} exists (${hash.slice(0, 12)})`)
+  // No pin the old release held is lost (backup pins are re-derived, never dropped).
+  const pinKey = "scope || ' ' || owner_id || ' ' || content_hash"
+  const pinsBefore = all<{ k: string }>(ref, `SELECT ${pinKey} AS k FROM artifact_blob_pins`)
+  for (const p of pinsBefore) {
+    const kept = one(db, `SELECT 1 FROM artifact_blob_pins WHERE ${pinKey} = ?`, p.k)
+    ;(kept ? pass : fail)(
+      `${rel}: pin kept: ${p.k.split(' ')[0]} ${p.k.split(' ')[2].slice(0, 12)}`
+    )
+  }
+}
+
+/** computer_data_handoff rows whose task's computer (its active chat's, else its own) can
+ *  never connect: the removed computer, or the re-enrolled computer's old id. */
+function handoffWaiting(db: Database.Database, l: LifecycleFacts): number {
+  return (
+    db
+      .prepare(
+        `SELECT count(*) AS n FROM computer_data_handoff h WHERE COALESCE(
+           (SELECT computer_id FROM chat_ownership WHERE task_id = h.task_id AND state = 'active'
+              AND computer_id IS NOT NULL ORDER BY epoch DESC LIMIT 1),
+           (SELECT computer_id FROM tasks WHERE id = h.task_id)) IN (?, ?)`
+      )
+      .get(l.deleted, l.reEnrolledOld) as { n: number }
+  ).n
 }
 
 // ------------------------------------------------------- 3b. use the upgraded app
@@ -971,7 +1523,8 @@ async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promis
                 (SELECT pp.root_path FROM project_placements pp
                   WHERE pp.project_id = k.project_id AND pp.status = 'ready' LIMIT 1) AS cwd
            FROM terminal_tabs t JOIN tasks k ON k.id = t.task_id
-          WHERE t.mode <> 'terminal' ORDER BY t.task_id, t.is_main DESC, t.position`
+          WHERE t.mode <> 'terminal'
+          ORDER BY t.task_id, t.is_main DESC, t.position`
       )
       .all() as Array<{
       id: string
@@ -985,6 +1538,15 @@ async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promis
     let continued = 0
     for (const t of tabs) {
       const cwd = t.cwd ?? HOME
+      const want = facts.expect?.[t.id]
+      if (want?.availability) {
+        const got = await trpc(h.port, 'query', 'chat.availability', { tabId: t.id })
+          .then((a) => (a as { state?: string } | null)?.state ?? 'none')
+          .catch((e: Error) => `error: ${e.message}`)
+        notes.push(
+          `${got === want.availability ? 'ok  ' : 'FAIL'} use :${h.port}: chat tab ${t.id} availability ${got} (want ${want.availability}: ${want.why ?? ''})`
+        )
+      }
       const before = new Set(spawnEntries().keys())
       try {
         if (t.mode.endsWith('-chat')) {
@@ -1023,11 +1585,18 @@ async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promis
         }
         continued++
       } catch (e) {
-        notes.push(
-          `FAIL use :${h.port}: continuing ${t.mode} tab ${t.id} failed: ${(e as Error).message}`
-        )
+        const message = (e as Error).message
+        if (want?.refused && message.includes(want.refused))
+          notes.push(
+            `ok   use :${h.port}: continuing ${t.mode} tab ${t.id} refused as it must (${want.why ?? ''}): ${want.refused}`
+          )
+        else notes.push(`FAIL use :${h.port}: continuing ${t.mode} tab ${t.id} failed: ${message}`)
         continue
       }
+      if (want?.refused)
+        notes.push(
+          `FAIL use :${h.port}: continuing ${t.mode} tab ${t.id} was NOT refused (want: ${want.refused}, ${want.why ?? ''})`
+        )
       // Which agent process it started (one tab at a time → an exact tab ↔ spawn map).
       const fresh = () => [...spawnEntries()].filter(([k]) => !before.has(k))
       const until = Date.now() + 30_000
@@ -1044,6 +1613,107 @@ async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promis
       `note use :${h.port}: continued ${continued}/${tabs.length} agent tab(s) (chat.start / pty.create)`
     )
   }
+  if (facts.lifecycle?.escapeHatch && hubs[0])
+    notes.push(...(await exerciseEscapeHatch(hubs[0], facts.lifecycle)))
+  return notes
+}
+
+/**
+ * The re-enroll escape hatch (p11, after every tab was continued): a computer re-enrolled
+ * under a new id holds its old chat, which the hub still assigns to the old, offline row.
+ * The user removes that stale row (Settings → Computers → Remove: `computers.delete`); on
+ * the new computer's next recovery pass (it reconnects) the chat must be adopted there,
+ * read `ready`, and its agent start again — resuming its own session.
+ */
+async function exerciseEscapeHatch(
+  h: { port: number; db: string },
+  l: LifecycleFacts
+): Promise<string[]> {
+  const e = l.escapeHatch!
+  const notes: string[] = []
+  const say = (ok: boolean, m: string) =>
+    notes.push(`${ok ? 'ok  ' : 'FAIL'} use :${h.port}: re-enroll escape hatch: ${m}`)
+  const owner = () => {
+    const db = new Database(h.db, { readonly: true, fileMustExist: true })
+    try {
+      return (
+        db
+          .prepare(
+            'SELECT o.computer_id AS c FROM chat_ownership o JOIN chat_tab_bindings b ON b.conversation_id = o.id WHERE b.tab_id = ?'
+          )
+          .get(e.tab) as { c: string | null } | undefined
+      )?.c
+    } finally {
+      db.close()
+    }
+  }
+  try {
+    await trpc(h.port, 'mutation', 'computers.delete', { computerId: l.reEnrolledOld })
+    say(true, `removed the stale old ${e.computer} (computers.delete)`)
+  } catch (err) {
+    say(false, `removing the old ${e.computer} failed: ${(err as Error).message}`)
+    return notes
+  }
+  // Its next recovery pass: reconnect it, as restarting the computer does.
+  const root = persona.topology.computers.find((c) => c.name === e.computer)?.root
+  const label = root ? `computer-${root.replace(/\W+/g, '-')}` : ''
+  const proc = procs.find(
+    (p) => p.label === label && p.child.exitCode === null && p.child.signalCode === null
+  )
+  if (!proc) {
+    say(false, `no running process for ${e.computer} to reconnect`)
+    return notes
+  }
+  proc.child.kill('SIGTERM')
+  await proc.exit
+  for (let i = 0; i < 60 && (await connectedNames(h.port)).includes(e.computer); i++)
+    await sleep(500)
+  proc.respawn()
+  for (let i = 0; i < 240 && !(await connectedNames(h.port)).includes(e.computer); i++)
+    await sleep(500)
+  for (let i = 0; i < 120 && owner() !== l.reEnrolledNew; i++) await sleep(500)
+  const now = owner()
+  say(
+    now === l.reEnrolledNew,
+    `chat of tab ${e.tab} adopted by the new ${e.computer} (owner ${now === l.reEnrolledNew ? 'new id' : now === l.reEnrolledOld ? 'STILL the old id' : (now ?? 'none')})`
+  )
+  const availability = await trpc(h.port, 'query', 'chat.availability', { tabId: e.tab })
+    .then((a) => (a as { state?: string } | null)?.state ?? 'none')
+    .catch((err: Error) => `error: ${err.message}`)
+  say(availability === 'ready', `availability ${availability} (want ready)`)
+  const db = new Database(h.db, { readonly: true, fileMustExist: true })
+  const tab = db
+    .prepare(
+      `SELECT t.task_id, t.mode, (SELECT pp.root_path FROM project_placements pp JOIN tasks k ON k.project_id = pp.project_id
+         WHERE k.id = t.task_id AND pp.status = 'ready' LIMIT 1) AS cwd FROM terminal_tabs t WHERE t.id = ?`
+    )
+    .get(e.tab) as { task_id: string; mode: string; cwd: string | null } | undefined
+  db.close()
+  if (!tab) {
+    say(false, `tab ${e.tab} is gone`)
+    return notes
+  }
+  const before = new Set(spawnEntries().keys())
+  const args = { tabId: e.tab, taskId: tab.task_id, mode: tab.mode, cwd: tab.cwd ?? HOME }
+  try {
+    await trpc(h.port, 'mutation', 'chat.hydrate', args)
+    await trpc(h.port, 'mutation', 'chat.start', args)
+    say(true, 'agent start no longer refused')
+  } catch (err) {
+    say(false, `agent start still refused: ${(err as Error).message}`)
+    return notes
+  }
+  const fresh = () => [...spawnEntries()].filter(([k]) => !before.has(k))
+  for (let i = 0; i < 60 && fresh().length === 0; i++) await sleep(500)
+  await sleep(1500)
+  const spawn = fresh()
+    .map(([, v]) => v)
+    .join('\n')
+  const session = inputChatSessions().get(e.tab)
+  say(
+    !!session && spawn.includes(session),
+    `its agent resumes its own session ${session ?? '(none in input)'}${spawn ? '' : ' — NO agent started'}`
+  )
   return notes
 }
 
@@ -1126,11 +1796,18 @@ function inputChatSessions(): Map<string, string> {
  * truth (facts.json `expect`, e.g. terminal tabs) overrides.
  */
 function checkResumes(pass: (m: string) => void, fail: (m: string) => void): void {
-  const expected = new Map<string, { resume?: string; fresh?: boolean; why?: string }>()
+  const expected = new Map<string, TabExpectation>()
   for (const [tab, session] of inputChatSessions()) expected.set(tab, { resume: session })
   for (const [tab, e] of Object.entries(facts.expect ?? {})) expected.set(tab, e)
   for (const [tab, e] of expected) {
     const spawn = tabSpawns.get(tab)
+    if (e.refused) {
+      // Judged where it was continued (exerciseTheApp): refused, no agent started.
+      ;(spawn === undefined ? pass : fail)(
+        `tab ${tab} after the upgrade: ${spawn === undefined ? 'no agent started' : 'an agent STARTED'} (refused: ${e.why ?? e.refused})`
+      )
+      continue
+    }
     const want = e.resume
       ? `resume its own session ${e.resume}`
       : `start fresh (${e.why ?? 'it never had a session of its own'})`

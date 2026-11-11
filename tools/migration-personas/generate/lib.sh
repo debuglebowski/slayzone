@@ -92,11 +92,15 @@ alive() {
 }
 
 # stop_root <root> — gracefully stop the computer running with SLAYZONE_ROOT=<root>.
+# set -e safe: the census's status is its last pid's grep (a pid of another root fails
+# it, and the assignment would kill a `set -e` journey), hence the trailing `true`; and
+# a tree member may exit between census and signal (a computer that ran chats has a
+# detached session host), so each root is signalled on its own, ESRCH ignored.
 stop_root() {
   pids=$(for p in $(pgrep -f '^/opt/SlayZone/slayzone'); do
-    tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -qx "SLAYZONE_ROOT=$1" && echo $p; done)
+    { tr '\0' '\n' < /proc/$p/environ; } 2>/dev/null | grep -qx "SLAYZONE_ROOT=$1" && echo $p; done; true)
   [ -n "$pids" ] || return 0
-  kill -TERM $(top_level $pids)
+  for p in $(top_level $pids); do kill -TERM "$p" 2>/dev/null || true; done
   i=0
   while [ $i -lt 60 ]; do alive $pids || return 0; i=$((i + 1)); sleep 1; done
   echo "STILL RUNNING: $1" >&2; return 1
