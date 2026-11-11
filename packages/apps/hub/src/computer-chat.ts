@@ -25,6 +25,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import {
   applyComputerRetirements,
+  ChatHeldByAnotherComputerError,
   createChatRecovery,
   createChatAvailability,
   chatHistoryGeneration,
@@ -55,6 +56,7 @@ import type {
   ChatTerminalState
 } from '@slayzone/terminal/runtime'
 import { defaultConversationRegistry } from '@slayzone/terminal/hub'
+import type { TakeoverCandidate } from '@slayzone/computers/server'
 import { DECISIVE_HANDOFF_KINDS } from './computer-data-handoff'
 
 /** `quiesce` refused: the task's agents run, so its history migration waits. */
@@ -167,11 +169,25 @@ export function createComputerChatServices(opts: {
    * of the computer starts with none.
    */
   const fences = new Map<string, { computerId: string; error: Error }>()
+  /**
+   * Takeover candidates: conversations a computer (the holder) reported that the hub
+   * assigns to another, unretired computer (the owner) — possibly that computer
+   * enrolled again under a new id. The user decides (`computers.replace`); recovery
+   * never adopts them. Re-decided by every recovery pass of the holder, like fences.
+   */
+  const takeovers = new Map<string, TakeoverCandidate>()
   const fence = (computerId: string, conversationId: string | null, error: Error) => {
-    if (conversationId)
-      fences.set(conversationId, {
-        computerId,
-        error: new Error(`This chat could not be recovered: ${error.message}`, { cause: error })
+    if (!conversationId) return
+    fences.set(conversationId, {
+      computerId,
+      error: new Error(`This chat could not be recovered: ${error.message}`, { cause: error })
+    })
+    if (error instanceof ChatHeldByAnotherComputerError)
+      takeovers.set(conversationId, {
+        conversationId,
+        taskId: error.taskId,
+        ownerComputerId: error.ownerComputerId,
+        holderComputerId: error.holderComputerId
       })
   }
   const conversationFence = (id: string) => fences.get(id)?.error
@@ -233,15 +249,6 @@ export function createComputerChatServices(opts: {
     })()
     return retiring
   }
-  /**
-   * A computer was removed (deleted, or revoked): its cached recovery pass is stale (a
-   * later recovery must apply its retirement, not return the old result), and the chat
-   * work naming it is moved or retired now.
-   */
-  function computerRemoved(computerId: string): Promise<void> {
-    invalidateRecovery(computerId)
-    return retireComputers({ fresh: true })
-  }
   // Hub start: a computer removed while the hub was down stops blocking now.
   void retireComputers().catch((error: unknown) =>
     console.error('[chat] applying computer retirements failed:', error)
@@ -300,8 +307,9 @@ export function createComputerChatServices(opts: {
     // reports the error, retried on the next pass) instead of failing recovery
     // for every task on the computer.
     const unfinished = new Set<string>()
-    // This pass re-decides every fence of this computer.
+    // This pass re-decides every fence of this computer, and what it holds of others.
     for (const [id, f] of fences) if (f.computerId === computerId) fences.delete(id)
+    for (const [id, t] of takeovers) if (t.holderComputerId === computerId) takeovers.delete(id)
     let inventory: ComputerChatInventory[] = []
     let restoredMetadata: ReadonlySet<string> = new Set()
     // Work still addressed to a re-enrolled or removed computer moves or is
@@ -396,6 +404,41 @@ export function createComputerChatServices(opts: {
       })
     recovered.set(computerId, work)
     return work
+  }
+  /**
+   * A computer was removed (deleted, replaced by its successor, or revoked): its cached
+   * recovery pass is stale (a later recovery must apply its retirement, not return the
+   * old result), and the chat work naming it is moved or retired now — by a pass that
+   * reads the change (`fresh`), never one already running.
+   *
+   * Deleted or replaced (a retirement is recorded): every connected computer holding
+   * chats it owned recovers again at once, so it adopts them (a successor's own, a
+   * deleted owner's) without waiting for a reconnect; one not connected adopts on its
+   * next connect. Revoked records none: its work waits for it, nothing is adopted.
+   */
+  async function computerRemoved(computerId: string): Promise<void> {
+    invalidateRecovery(computerId)
+    await retireComputers({ fresh: true })
+    if (
+      !(await opts.db.get('SELECT 1 FROM computer_retirements WHERE computer_id=?', [computerId]))
+    )
+      return
+    const holders = new Set(
+      [...takeovers.values()]
+        .filter((t) => t.ownerComputerId === computerId)
+        .map((t) => t.holderComputerId)
+    )
+    for (const holder of holders) {
+      if (opts.connected && !opts.connected(holder)) continue
+      await isolateItem(`recovery of computer ${holder} after ${computerId} was removed`, () =>
+        // A pass already running may have applied the retirements before this one.
+        (recovered.get(holder) ?? Promise.resolve())
+          .catch(() => {
+            // That pass's failure is its own (logged by it); this one runs regardless.
+          })
+          .then(() => recoverComputer(holder, true))
+      )
+    }
   }
   async function bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap> {
     const task = await opts.db.get<{ project_id: string | null }>(
@@ -1043,6 +1086,8 @@ export function createComputerChatServices(opts: {
     /** A computer was deleted or re-enrolled: move or retire the chat work naming it. */
     retireComputers,
     computerRemoved,
+    /** Conversations a computer holds that the hub assigns to another (see `takeovers`). */
+    takeoverCandidates: (): TakeoverCandidate[] => [...takeovers.values()],
     availability: createChatAvailability({
       historyGeneration,
       db: opts.db,
@@ -1051,7 +1096,11 @@ export function createComputerChatServices(opts: {
       connected: opts.connected ?? (() => false),
       chatRuntimeReady: opts.chatRuntimeReady,
       hasLiveTask: opts.hasLiveTask,
-      gate: opts.gate
+      gate: opts.gate,
+      heldBy: (conversationId, ownerId) => {
+        const t = takeovers.get(conversationId)
+        return t?.ownerComputerId === ownerId ? t.holderComputerId : null
+      }
     }),
     async migrateIdleComputer(computerId: string) {
       await recoverComputer(computerId)

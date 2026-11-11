@@ -95,6 +95,8 @@ export const SECURITY_EVENTS = [
   'computer.revoke',
   'computer.unrevoke',
   'computer.delete',
+  /** Replaced by its successor (the same machine enrolled again); `detail.successorId`. */
+  'computer.replace',
   'computer.disable',
   'computer.enable',
   'computer.rename',

@@ -15,6 +15,7 @@ import {
   touchComputerLastSeen,
   unrevokeComputer,
   deleteComputer,
+  replaceComputer,
   setComputerDisabled,
   listDisabledComputerIds,
   setComputerRemovedListener,
@@ -517,6 +518,89 @@ describe('deleteComputer', () => {
       0
     )
     expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM computer_grants`))?.n).toBe(0)
+  })
+})
+
+describe('replaceComputer', () => {
+  // A remote computer enrolled again (its credential gone) gets a new id. Once the user
+  // confirms it is the same machine, the old row's work moves to it and the old row goes.
+  it('moves every binding, placement and worktree to the successor and records it', async () => {
+    const old = await mkComputer({ name: 'ci-box', now: 1 })
+    const next = await mkComputer({ name: 'ci-box', now: 2 })
+    seedProjectAndTask(t.raw, 'proj-r', 'task-r')
+    await setProjectDefaultComputer(t.db, 'proj-r', old.id)
+    await setTaskComputer(t.db, 'task-r', old.id)
+    await t.db.run(
+      `UPDATE tasks SET worktree_computer_id = ?, has_worktree = 1 WHERE id = 'task-r'`,
+      [old.id]
+    )
+    await setPlacement(t.db, {
+      computerId: old.id,
+      projectId: 'proj-r',
+      path: '/r',
+      status: 'ready'
+    })
+    await t.db.run(
+      `INSERT INTO computer_grants (computer_id, user_id, role, created_at) VALUES (?, 'bob', 'use', 1)`,
+      [old.id]
+    )
+    const removed: string[] = []
+    setComputerRemovedListener((id) => removed.push(id))
+    try {
+      await replaceComputer(t.db, { computerId: old.id, successorId: next.id })
+    } finally {
+      setComputerRemovedListener(null)
+    }
+
+    expect(await getComputer(t.db, old.id)).toBeNull()
+    expect(await getComputer(t.db, next.id)).not.toBeNull()
+    expect(await resolveTaskComputerId(t.db, 'task-r')).toBe(next.id)
+    expect(
+      await t.db.get(`SELECT computer_id, worktree_computer_id FROM tasks WHERE id = 'task-r'`)
+    ).toEqual({ computer_id: next.id, worktree_computer_id: next.id })
+    expect(
+      (
+        await t.db.get<{ d: string }>(
+          `SELECT default_computer_id AS d FROM projects WHERE id = 'proj-r'`
+        )
+      )?.d
+    ).toBe(next.id)
+    expect(await listPlacements(t.db)).toEqual([
+      { computer_id: next.id, project_id: 'proj-r', path: '/r', status: 'ready' }
+    ])
+    // Grants described who could use the old row; the successor keeps its own.
+    expect((await t.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM computer_grants`))?.n).toBe(0)
+    // The chat domain repoints its work from this record (applyComputerRetirements).
+    expect(
+      await t.db.get(
+        `SELECT successor_id, reason FROM computer_retirements WHERE computer_id = ?`,
+        [old.id]
+      )
+    ).toEqual({ successor_id: next.id, reason: 're-enrolled' })
+    expect(removed).toEqual([old.id])
+  })
+
+  it('refuses replacing a computer with itself or with one that does not exist', async () => {
+    const old = await mkComputer()
+    await expect(
+      replaceComputer(t.db, { computerId: old.id, successorId: old.id })
+    ).rejects.toThrow(/itself/)
+    await expect(
+      replaceComputer(t.db, { computerId: old.id, successorId: 'nope' })
+    ).rejects.toThrow(/no such computer/)
+    await expect(
+      replaceComputer(t.db, { computerId: 'nope', successorId: old.id })
+    ).rejects.toThrow(/no such computer/)
+    expect(await getComputer(t.db, old.id)).not.toBeNull()
+  })
+
+  it('refuses a revoked successor', async () => {
+    const old = await mkComputer({ now: 1 })
+    const next = await mkComputer({ now: 2 })
+    await revokeComputer(t.db, next.id)
+    await expect(
+      replaceComputer(t.db, { computerId: old.id, successorId: next.id })
+    ).rejects.toThrow(/revoked/)
   })
 })
 

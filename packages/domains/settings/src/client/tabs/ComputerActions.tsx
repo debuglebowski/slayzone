@@ -65,11 +65,25 @@ export type DeleteTarget = {
   remove: () => Promise<void>
 }
 
+/**
+ * A replacement awaiting confirmation: `former` (offline) is replaced by the computer the
+ * user picks among `options` — the same machine, enrolled again under a new id. `replace`
+ * is the block's hub-bound thunk. `preselect`: the successor a takeover offer named.
+ */
+export type ReplaceTarget = {
+  former: { id: string; label: string }
+  options: Array<{ id: string; label: string; connected: boolean }>
+  preselect?: string
+  replace: (successorId: string) => Promise<void>
+}
+
 export interface ComputerActionsValue {
   /** Show the one-time enrollment token a block just minted. */
   showMintedToken: (minted: MintedToken) => void
   /** Ask for confirmation before deleting; the target carries its own thunk. */
   requestDelete: (target: DeleteTarget) => void
+  /** Pick the successor of an offline computer and confirm; the target carries its thunk. */
+  requestReplace: (target: ReplaceTarget) => void
   /** Edit a computer's filesystem path-jail; the target carries hub-bound thunks. */
   requestEditRoots: (target: RootsTarget) => void
   /** Confirm-gated restart of the app's own supervised computer. */
@@ -103,6 +117,8 @@ const RECONNECT_SETTLE_MS = 2000
 export function ComputerActionsProvider({ children }: { children: ReactNode }) {
   const [minted, setMinted] = useState<MintedToken | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null)
+  const [successorId, setSuccessorId] = useState<string | null>(null)
   const [rootsTarget, setRootsTarget] = useState<RootsTarget | null>(null)
   const [restartOpen, setRestartOpen] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -143,6 +159,10 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
 
   const showMintedToken = useCallback((next: MintedToken) => setMinted(next), [])
   const requestDelete = useCallback((target: DeleteTarget) => setDeleteTarget(target), [])
+  const requestReplace = useCallback((target: ReplaceTarget) => {
+    setReplaceTarget(target)
+    setSuccessorId(target.preselect ?? null)
+  }, [])
   const requestEditRoots = useCallback((target: RootsTarget) => setRootsTarget(target), [])
   const requestRestart = useCallback(() => setRestartOpen(true), [])
   const requestStart = useCallback(() => void runRestart(), [runRestart])
@@ -157,6 +177,19 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
       toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     setDeleteTarget(null)
+  }
+
+  const replace = async (): Promise<void> => {
+    if (!replaceTarget || !successorId) return
+    const { former, options, replace: run } = replaceTarget
+    const successor = options.find((o) => o.id === successorId)?.label ?? successorId
+    try {
+      await run(successorId)
+      toast.success(`Replaced ${former.label} with ${successor}`)
+    } catch (err) {
+      toast.error(`Replace failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    setReplaceTarget(null)
   }
 
   const copyToken = async (token: string): Promise<void> => {
@@ -179,6 +212,7 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
       value={{
         showMintedToken,
         requestDelete,
+        requestReplace,
         requestEditRoots,
         requestRestart,
         requestStart,
@@ -298,6 +332,54 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
               data-testid="computer-delete-confirm"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Replace: the same machine enrolled again under a new id. Its old row is the
+          offline one; everything it held moves to the successor picked here. */}
+      <AlertDialog open={!!replaceTarget} onOpenChange={(open) => !open && setReplaceTarget(null)}>
+        <AlertDialogContent data-testid="computer-replace-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace Computer</AlertDialogTitle>
+            <AlertDialogDescription>
+              Replace <strong>{replaceTarget?.former.label}</strong> with the same machine, enrolled
+              again under a new id. Its tasks, project defaults, folders, worktrees and chats move
+              to the computer you pick, and {replaceTarget?.former.label} is deleted. Only for the
+              same machine: another one does not have its folders.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-1" role="radiogroup" aria-label="Successor">
+            {replaceTarget?.options.map((option) => (
+              <label
+                key={option.id}
+                className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm"
+              >
+                <input
+                  type="radio"
+                  name="computer-replace-successor"
+                  checked={successorId === option.id}
+                  onChange={() => setSuccessorId(option.id)}
+                  data-testid={`computer-replace-option-${option.id}`}
+                />
+                <span className="text-foreground truncate">{option.label}</span>
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {option.connected ? 'connected' : 'offline'}
+                </span>
+              </label>
+            ))}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!successorId}
+              onClick={() => {
+                void replace()
+              }}
+              data-testid="computer-replace-confirm"
+            >
+              Replace
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

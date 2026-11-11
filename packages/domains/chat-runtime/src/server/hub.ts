@@ -23,7 +23,11 @@ export { createHubChatRelay } from './hub-relay'
 
 export { createChatLifecycle } from './hub-lifecycle'
 
-export { createChatRecovery, type ComputerChatInventory } from './hub-recovery'
+export {
+  ChatHeldByAnotherComputerError,
+  createChatRecovery,
+  type ComputerChatInventory
+} from './hub-recovery'
 
 export { computerArtifactRequestSchema } from './artifacts'
 

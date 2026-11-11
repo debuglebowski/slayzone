@@ -398,3 +398,83 @@ afterAll(() => {
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// --- re-enrolled computers ------------------------------------------------
+
+describe('hub computers takeovers / replace', () => {
+  /** A hub stand-in that keeps request bodies and answers per path. */
+  function startReplaceHub(): Promise<
+    TestServer & { bodies: Array<{ url: string; body: unknown }> }
+  > {
+    const bodies: Array<{ url: string; body: unknown }> = []
+    return new Promise((resolve) => {
+      const server = http.createServer((req, res) => {
+        let raw = ''
+        req.on('data', (c: Buffer) => (raw += c.toString()))
+        req.on('end', () => {
+          bodies.push({ url: `${req.method} ${req.url}`, body: raw ? JSON.parse(raw) : null })
+          res.setHeader('content-type', 'application/json')
+          if (req.url === '/api/hub/computers/takeovers') {
+            res.end(
+              JSON.stringify({
+                ok: true,
+                data: [
+                  {
+                    former: { id: 'old-id', name: 'ci-box', lastSeenAt: 1, revoked: false },
+                    successor: { id: 'new-id', name: 'ci-box', connected: true },
+                    conversations: 3,
+                    tasks: 2
+                  }
+                ]
+              })
+            )
+          } else {
+            res.end(JSON.stringify({ ok: true, data: { id: 'old-id', successorId: 'new-id' } }))
+          }
+        })
+      })
+      server.listen(0, '127.0.0.1', () => {
+        const { port } = server.address() as AddressInfo
+        resolve({
+          port,
+          url: `http://127.0.0.1:${port}`,
+          seen: [],
+          bodies,
+          close: () => new Promise<void>((r) => server.close(() => r()))
+        })
+      })
+    })
+  }
+
+  test('takeovers names each offer and the command that accepts it', async () => {
+    const hub = await startReplaceHub()
+    try {
+      writeHubConfig(hub.url, 'tok')
+      const out = await runHub('computers', 'takeovers')
+      const text = out.stdout.join('\n')
+      expect(text).toContain(
+        'ci-box (new-id) holds 3 chats in 2 tasks of ci-box (old-id), which is offline'
+      )
+      expect(text).toContain('slay hub computers replace old-id --with new-id')
+    } finally {
+      await hub.close()
+    }
+  })
+
+  test('replace sends the former and its successor', async () => {
+    const hub = await startReplaceHub()
+    try {
+      writeHubConfig(hub.url, 'tok')
+      const out = await runHub('computers', 'replace', 'old-id', '--with', 'new-id')
+      expect(hub.bodies).toEqual([
+        {
+          url: 'POST /api/hub/computers/replace',
+          body: { id: 'old-id', successorId: 'new-id' }
+        }
+      ])
+      expect(out.stdout.join('\n')).toContain('Replaced computer old-id with new-id')
+    } finally {
+      await hub.close()
+    }
+  })
+})

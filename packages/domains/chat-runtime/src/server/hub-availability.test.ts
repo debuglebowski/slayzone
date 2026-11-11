@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
+import { chatAvailabilityMessage } from '@slayzone/terminal-contracts'
 import { createChatAvailability } from './hub-availability'
 import { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
 
@@ -210,3 +211,58 @@ test.each([false, true])(
     }
   }
 )
+test('an offline owner whose chat another computer holds names that computer and the way out', async () => {
+  const { h, owners } = await setup()
+  try {
+    h.db.exec(
+      "INSERT INTO computers(id,name,platform,version,capabilities_json,created_at) VALUES('old-0000-id','ci-box','linux','1','{}',1),('new-1111-id','ci-box','linux','1','{}',2),('lap','laptop','linux','1','{}',3)"
+    )
+    await owners.register({
+      id: 'c',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'old-0000-id',
+      epoch: 1
+    })
+    let holder: string | null = 'new-1111-id'
+    const availability = createChatAvailability({
+      db: h.slayDb,
+      ownership: owners,
+      resolveComputer: async () => null,
+      connected: () => false,
+      hasLiveTask: async () => false,
+      heldBy: (conversationId, ownerId) =>
+        conversationId === 'c' && ownerId === 'old-0000-id' ? holder : null
+    })
+    const status = await availability('tab')
+    expect(status).toMatchObject({
+      state: 'offline',
+      computer: { id: 'old-0000-id', name: 'ci-box' },
+      heldBy: { id: 'new-1111-id', name: 'ci-box' }
+    })
+    // Alike names: the message cannot tell them apart by name, so it says "another".
+    expect(chatAvailabilityMessage(status)).toEqual({
+      title: 'ci-box is offline',
+      detail:
+        'Another computer named ci-box holds this chat, possibly this one enrolled again. If so, replace the offline ci-box with it in Settings → Connections.'
+    })
+    holder = 'lap'
+    expect(chatAvailabilityMessage(await availability('tab'))?.detail).toBe(
+      'laptop holds this chat. If laptop is ci-box enrolled again, replace ci-box with it in Settings → Connections.'
+    )
+    holder = null
+    expect(await availability('tab')).not.toHaveProperty('heldBy')
+    // Removed for good: unavailable with the removal reason (it never connects again),
+    // never "offline … replace it" — there is nothing left to replace.
+    holder = 'new-1111-id'
+    h.db.exec(
+      "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('old-0000-id',NULL,'deleted',1)"
+    )
+    const removed = await availability('tab')
+    expect(removed).toMatchObject({ state: 'unavailable', reason: REMOVED_COMPUTER_REASON })
+    expect(removed).not.toHaveProperty('heldBy')
+  } finally {
+    h.cleanup()
+  }
+})

@@ -738,3 +738,79 @@ test('computers.rename: renames; refuses the reserved name and the local compute
     await h.slayDb.run(`DELETE FROM computers WHERE id = ?`, [local.id])
   }
 })
+
+/**
+ * A remote computer enrolled again gets a new id; the hub cannot prove it is the same
+ * machine. When its recovery reports chats the hub assigns to a registered computer
+ * that is offline, the user is offered "replace <old> with <new>" (`takeovers`), and
+ * `replace` moves the old one's work to it once confirmed.
+ */
+test('computers.takeovers + replace: offered while the old one is offline, moved on confirm', async () => {
+  const old = await registerComputer(h.slayDb, { name: 'ci-box', platform: 'linux', version: '1' })
+  const next = await registerComputer(h.slayDb, { name: 'ci-box', platform: 'linux', version: '1' })
+  const local = await registerComputer(h.slayDb, {
+    name: 'local-computer',
+    platform: 'darwin-arm64',
+    version: '1'
+  })
+  const t2 = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)')
+    .run(t2, projectId, 'T2')
+  h.db.prepare('UPDATE tasks SET computer_id = ? WHERE id = ?').run(old.id, t2)
+  const candidates = [
+    { conversationId: 'c1', taskId: t2, ownerComputerId: old.id, holderComputerId: next.id },
+    { conversationId: 'c2', taskId: t2, ownerComputerId: old.id, holderComputerId: next.id },
+    // The desktop app's own computer is never offered (it is never replaced).
+    { conversationId: 'c3', taskId: t2, ownerComputerId: local.id, holderComputerId: next.id }
+  ]
+  setComputersDeps({ ...fakeDeps, localComputerId: local.id, takeoverCandidates: () => candidates })
+  const removed: string[] = []
+  setComputerRemovedListener((id) => removed.push(id))
+  const audit: Array<Record<string, unknown>> = []
+  setSecurityLogSink((line) => audit.push(JSON.parse(line) as Record<string, unknown>))
+  const code = async (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => 'ok',
+      (e: { code?: string; cause?: { code?: string } }) => `${e.code}:${e.cause?.code}`
+    )
+  try {
+    // The old one is connected: it is still itself, so nothing is offered or allowed.
+    liveComputerIds = [old.id, next.id]
+    expect(await caller.takeovers()).toEqual([])
+    expect(await code(caller.replace({ computerId: old.id, successorId: next.id }))).toBe(
+      'PRECONDITION_FAILED:COMPUTER_IS_CONNECTED'
+    )
+
+    liveComputerIds = [next.id]
+    expect(await caller.takeovers()).toEqual([
+      {
+        former: { id: old.id, name: 'ci-box', lastSeenAt: old.last_seen_at, revoked: false },
+        successor: { id: next.id, name: 'ci-box', connected: true },
+        conversations: 2,
+        tasks: 1
+      }
+    ])
+    expect(await code(caller.replace({ computerId: local.id, successorId: next.id }))).toBe(
+      'BAD_REQUEST:COMPUTER_IS_LOCAL'
+    )
+    expect(await code(caller.replace({ computerId: next.id, successorId: next.id }))).toBe(
+      'BAD_REQUEST:COMPUTER_REPLACE_REFUSED'
+    )
+
+    await caller.replace({ computerId: old.id, successorId: next.id })
+    expect(await resolveTaskComputerId(h.slayDb, t2)).toBe(next.id)
+    expect((await caller.list()).some((r) => r.id === old.id)).toBe(false)
+    expect(removed).toEqual([old.id])
+    expect(
+      audit.map((l) => [l.event, l.targetId, (l.detail as { successorId?: string })?.successorId])
+    ).toEqual([['computer.replace', old.id, next.id]])
+    // Gone from the offer with the old row.
+    expect(await caller.takeovers()).toEqual([])
+  } finally {
+    setSecurityLogSink()
+    setComputerRemovedListener(null)
+    setComputersDeps(fakeDeps)
+    liveComputerIds = []
+  }
+})

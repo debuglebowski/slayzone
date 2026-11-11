@@ -6,6 +6,7 @@ import type {
 } from '../shared/direct-link'
 import type { FindJoinTokenAccount } from './join-token-policy'
 import type { ItemFaultRef, ItemFaultView } from '../shared/item-faults'
+import type { TakeoverCandidate } from './takeovers'
 
 // Computers / computer deps — the hub/computer-split surface the `computersRouter`
 // reads from its host: the live computer gateway (computer-WS connection
@@ -112,6 +113,12 @@ export type ComputersDeps = {
    * refuses to disable rather than guess.
    */
   runningWorkOn?: (computerId: string) => Promise<number>
+  /**
+   * Conversations a computer (the holder) reported that the hub assigns to another
+   * computer (the owner): possibly the same machine enrolled again under a new id
+   * (`computers.takeovers`). Absent: this host knows none.
+   */
+  takeoverCandidates?: () => readonly TakeoverCandidate[]
 }
 
 let computersDeps: ComputersDeps | null = null

@@ -40,13 +40,16 @@ import {
   resolveTaskComputerId as storeResolveTaskComputerId,
   getComputer as storeGetComputer,
   setComputerDisabled as storeSetComputerDisabled,
-  renameComputer as storeRenameComputer
+  renameComputer as storeRenameComputer,
+  replaceComputer as storeReplaceComputer
 } from './store'
+import { listComputerTakeovers, replaceRefusal } from './takeovers'
 import {
   computerDisabledError,
   computerHasRunningWorkError,
   computerIsLocalError,
   computerNameReservedError,
+  isComputerStateError,
   type ComputerStateError
 } from './computer-state-errors'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared/types'
@@ -526,6 +529,66 @@ export const computersRouter = router({
       // Its open socket would otherwise keep it in the usable set until it re-dialed.
       getComputersDepsOrNull()?.getGateway()?.disconnect?.(input.computerId, 'computer deleted')
       auditComputer('computer.delete', input.computerId)
+      return { ok: true as const }
+    }),
+
+  /**
+   * Re-enrolled computers to offer for replacement: a computer holds chats the hub
+   * assigns to another, registered computer that is offline — possibly the same
+   * machine, enrolled again under a new id after losing its credential. Only an offer:
+   * the hub cannot prove it (host ids may be shared), so the user confirms `replace`.
+   * The caller's managed computers only, as `list`.
+   */
+  takeovers: publicProcedure.query(async ({ ctx }) => {
+    const deps = getComputersDepsOrNull()
+    const live = new Set((deps?.getGateway()?.listComputers() ?? []).map((r) => r.computerId))
+    const access = managerAccessOf(ctx)
+    return listComputerTakeovers(
+      {
+        db: ctx.db,
+        isConnected: (id) => live.has(id),
+        localComputerId: deps?.localComputerId ?? null,
+        mayManage: (id) => access.mayManage(id)
+      },
+      deps?.takeoverCandidates?.() ?? []
+    )
+  }),
+
+  /**
+   * Replace a computer with its successor: the same machine, enrolled again under a
+   * new id. The former's tasks, project defaults, folders and worktrees move to the
+   * successor, its chats follow (the chat domain repoints them and the successor adopts
+   * the ones it holds at once), and the former row is deleted.
+   *
+   * The caller must manage both. Refused while the former is connected (it is still
+   * itself), for the desktop app's own computer, by itself, and for a revoked successor.
+   */
+  replace: publicProcedure
+    .input(z.object({ computerId: z.string(), successorId: z.string() }))
+    .mutation(async ({ ctx, input, path }) => {
+      await requireManager(ctx, path, input.computerId)
+      await requireManager(ctx, path, input.successorId)
+      const former = await storeGetComputer(ctx.db, input.computerId)
+      if (!former) throw noSuchComputer()
+      const deps = getComputersDepsOrNull()
+      const live = new Set((deps?.getGateway()?.listComputers() ?? []).map((r) => r.computerId))
+      const refusal = replaceRefusal(
+        { isConnected: (id) => live.has(id), localComputerId: deps?.localComputerId ?? null },
+        former,
+        input.successorId
+      )
+      if (refusal) throw stateRefusal(refusal.code, refusal.error)
+      try {
+        await storeReplaceComputer(ctx.db, input)
+      } catch (err) {
+        if (isComputerStateError(err)) throw stateRefusal('BAD_REQUEST', err)
+        throw err
+      }
+      auditComputer('computer.replace', input.computerId, 'success', {
+        successorId: input.successorId
+      })
+      // Placement's default pick changes with the moved bindings.
+      notifyComputerBindingChanged()
       return { ok: true as const }
     }),
 

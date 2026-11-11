@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
-import { createChatRecovery } from './hub-recovery'
+import { ChatHeldByAnotherComputerError, createChatRecovery } from './hub-recovery'
 
 test('restored hub adopts committed computer ownership; conflicting active owner is fenced', async () => {
   const h = await createTestHarness()
@@ -367,6 +367,98 @@ test('a chat the hub deleted is queued for deletion on a computer that still hol
     expect(await owners.pendingDeletions('other-pc')).toEqual([
       { conversationId: 'live', epoch: 2 }
     ])
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a computer holding the chat of another registered computer is a takeover candidate, never adopted', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      `INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0);
+      INSERT INTO computers(id,name,platform,version,capabilities_json,created_at) VALUES('old-0000-id','ci-box','linux','1','{}',1),('new-1111-id','ci-box','linux','1','{}',2)`
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'conv',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'old-0000-id',
+      epoch: 1
+    })
+    const failures: Error[] = []
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [
+        {
+          identity: { id: 'conv', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+          state: 'active',
+          migrationId: null,
+          migrationHash: null,
+          bootstrapRevision: 0
+        }
+      ],
+      onConversationFailure: (_pc, _id, error) => failures.push(error)
+    })
+    await recovery.reconcile('new-1111-id')
+    expect(failures).toHaveLength(1)
+    const failure = failures[0]
+    expect(failure).toBeInstanceOf(ChatHeldByAnotherComputerError)
+    expect(failure).toMatchObject({
+      conversationId: 'conv',
+      taskId: 't',
+      ownerComputerId: 'old-0000-id',
+      holderComputerId: 'new-1111-id'
+    })
+    // Names both (told apart by id when their names are equal) and the way out.
+    expect(failure.message).toContain('ci-box (new-1111)')
+    expect(failure.message).toContain('ci-box (old-0000)')
+    expect(failure.message).toMatch(/replace/i)
+    // Never adopted without the user's confirmation.
+    expect(await owners.forTab('tab')).toMatchObject({ computerId: 'old-0000-id' })
+    errors.mockRestore()
+  } finally {
+    h.cleanup()
+  }
+})
+
+test('a different conversation in the tab is a plain conflict, not a takeover candidate', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','Project','#000'); INSERT INTO tasks(id,project_id,title) VALUES('t','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','t','claude-chat',0)"
+    )
+    const owners = createChatOwnershipStore(h.slayDb)
+    await owners.register({
+      id: 'conv',
+      taskId: 't',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'old',
+      epoch: 1
+    })
+    const failures: Error[] = []
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const recovery = createChatRecovery({
+      db: h.slayDb,
+      request: async () => [
+        {
+          identity: { id: 'other-conv', taskId: 't', tabId: 'tab', mode: 'claude-chat', epoch: 1 },
+          state: 'active',
+          migrationId: null,
+          migrationHash: null,
+          bootstrapRevision: 0
+        }
+      ],
+      onConversationFailure: (_pc, _id, error) => failures.push(error)
+    })
+    await recovery.reconcile('new')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).not.toBeInstanceOf(ChatHeldByAnotherComputerError)
+    errors.mockRestore()
   } finally {
     h.cleanup()
   }

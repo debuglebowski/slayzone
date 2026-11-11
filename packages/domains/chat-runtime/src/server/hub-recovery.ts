@@ -33,6 +33,65 @@ export interface ComputerChatInventory extends ChatOwnership {
   /** The computer cannot read this conversation (recorded in its item_faults): leave it as is. */
   unreadable?: boolean
 }
+/**
+ * A computer holds a conversation (the same one, as new or newer) that the hub
+ * assigns to another computer that is not retired. When that owner is the same
+ * machine re-enrolled under a new id, the user can replace it with the holder
+ * (`computers.replace`), which moves its work and lets the next recovery adopt
+ * the chat. Recovery collects these as takeover candidates; it never decides.
+ */
+export class ChatHeldByAnotherComputerError extends Error {
+  readonly conversationId: string
+  readonly taskId: string
+  readonly ownerComputerId: string
+  readonly holderComputerId: string
+  constructor(
+    info: {
+      conversationId: string
+      taskId: string
+      ownerComputerId: string
+      holderComputerId: string
+    },
+    names: { owner: string; holder: string }
+  ) {
+    super(
+      `${names.holder} holds this chat, but the hub assigns it to another computer, ${names.owner}. ` +
+        `If ${names.holder} is ${names.owner} enrolled again, replace ${names.owner} with it ` +
+        '(Settings → Connections, or `slay hub computers replace`); otherwise reconnect ' +
+        `${names.owner}.`
+    )
+    this.name = 'ChatHeldByAnotherComputerError'
+    this.conversationId = info.conversationId
+    this.taskId = info.taskId
+    this.ownerComputerId = info.ownerComputerId
+    this.holderComputerId = info.holderComputerId
+  }
+
+  /** With both computers' names; equal names are told apart by their ids. */
+  static async describe(
+    db: SlayzoneDb,
+    info: ConstructorParameters<typeof ChatHeldByAnotherComputerError>[0]
+  ): Promise<ChatHeldByAnotherComputerError> {
+    const rows = await db.all<{ id: string; name: string }>(
+      'SELECT id,name FROM computers WHERE id IN (?,?)',
+      [info.ownerComputerId, info.holderComputerId]
+    )
+    const nameOf = (id: string) => rows.find((r) => r.id === id)?.name
+    const owner = nameOf(info.ownerComputerId)
+    const holder = nameOf(info.holderComputerId)
+    const label = (id: string, name: string | undefined) =>
+      name === undefined
+        ? `computer ${id.slice(0, 8)}`
+        : owner === holder
+          ? `${name} (${id.slice(0, 8)})`
+          : name
+    return new ChatHeldByAnotherComputerError(info, {
+      owner: label(info.ownerComputerId, owner),
+      holder: label(info.holderComputerId, holder)
+    })
+  }
+}
+
 /** Computer commits and tombstones survive restoring an older hub database. */
 export function createChatRecovery(opts: {
   db: SlayzoneDb
@@ -291,8 +350,19 @@ export function createChatRecovery(opts: {
             previous?.computerId &&
             !adopting &&
             (previous.computerId !== computerId || previous.id !== i.id)
-          )
+          ) {
+            // The same conversation, as new or newer, on another computer than the
+            // hub's: possibly that computer re-enrolled under a new id. Only the user
+            // can say so (host ids are shared, a credential is gone): never adopted here.
+            if (previous.id === i.id && previous.epoch <= i.epoch)
+              throw await ChatHeldByAnotherComputerError.describe(db, {
+                conversationId: i.id,
+                taskId: i.taskId,
+                ownerComputerId: previous.computerId,
+                holderComputerId: computerId
+              })
             throw new Error('Chat tab has another active owner')
+          }
           if (previous && previous.epoch > i.epoch)
             throw new Error('Computer chat ownership is behind the hub')
           if (

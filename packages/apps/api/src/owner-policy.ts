@@ -868,6 +868,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'computers.renameMachine': none(COMPUTER),
   'computers.setVisibility': none(COMPUTER),
   'computers.delete': none(COMPUTER),
+  // Both computers' manager (handler); the offers list only computers the caller manages.
+  'computers.replace': none(COMPUTER),
+  'computers.takeovers': none(COMPUTER),
   'computers.onStatusChange': none(COMPUTER),
   'computers.revokeComputer': none(COMPUTER),
   'computers.setDisabled': none(COMPUTER),

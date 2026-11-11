@@ -1,5 +1,5 @@
 /**
- * `slay hub break-glass start|end` and `slay hub computers ls|revoke|unrevoke` — the
+ * `slay hub break-glass start|end` and `slay hub computers ls|revoke|unrevoke|takeovers|replace` — the
  * laptop side of break-glass v2 (hub `break-glass.ts`), and the computer management a
  * break-glass session (or any admin) does from the CLI.
  *
@@ -219,7 +219,7 @@ function hubComputersRequest<T>(
 /** `slay hub computers` — the computers enrolled on a hub, as its admin manages them. */
 export function hubComputersCommand(): Command {
   const computers = new Command('computers')
-    .description('List, revoke and restore the computers enrolled on a hub (admin)')
+    .description('List, revoke, restore and replace the computers enrolled on a hub (admin)')
     .showHelpAfterError(true)
 
   computers
@@ -245,6 +245,18 @@ export function hubComputersCommand(): Command {
           `${r.id.padEnd(idW)}  ${r.name.padEnd(nameW)}  ${(r.connected ? 'yes' : 'no').padEnd(9)}  ${seen}`
         )
       }
+      // Say so where the stale row is listed: a re-enrolled computer's old row stays,
+      // offline, still owning its chats. Best effort — the offers are the admin's.
+      const offers = await hubComputersRequest<ComputerTakeoverRow[]>(
+        'GET',
+        '/api/hub/computers/takeovers'
+      ).catch(() => [])
+      if (offers.length > 0)
+        console.log(
+          '\nA computer holds the chats of an offline computer (enrolled again?): ' +
+            `${offers.length} takeover${offers.length === 1 ? '' : 's'} offered. ` +
+            'See `slay hub computers takeovers`.'
+        )
     })
 
   computers
@@ -263,5 +275,61 @@ export function hubComputersCommand(): Command {
       console.log(`Restored computer ${id}.`)
     })
 
+  // A computer enrolled again (its credential lost) gets a new id, and the old row stays,
+  // offline, still owning its chats. The hub offers a takeover when the new one holds them.
+  computers
+    .command('takeovers')
+    .description('List computers that hold the chats of an offline computer (re-enrolled?)')
+    .option('--json', 'Output as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const offers = await hubComputersRequest<ComputerTakeoverRow[]>(
+        'GET',
+        '/api/hub/computers/takeovers'
+      )
+      if (opts.json) {
+        console.log(JSON.stringify(offers, null, 2))
+        return
+      }
+      if (offers.length === 0) {
+        console.log('No computer holds the chats of an offline one.')
+        return
+      }
+      for (const o of offers) {
+        const chats = `${o.conversations} chat${o.conversations === 1 ? '' : 's'}`
+        const tasks = `${o.tasks} task${o.tasks === 1 ? '' : 's'}`
+        console.log(
+          `${o.successor.name} (${o.successor.id}) holds ${chats} in ${tasks} of ` +
+            `${o.former.name} (${o.former.id}), which is offline${o.former.revoked ? ' and revoked' : ''}.`
+        )
+        console.log(
+          `  If it is that computer enrolled again, replace it:  ` +
+            `slay hub computers replace ${o.former.id} --with ${o.successor.id}`
+        )
+      }
+    })
+
+  computers
+    .command('replace <id>')
+    .description(
+      'Replace an offline computer with the same machine enrolled again: its tasks, ' +
+        'folders and chats move to the successor, and the old one is deleted'
+    )
+    .requiredOption('--with <successor-id>', 'The computer that takes over (the re-enrolled one)')
+    .action(async (id: string, opts: { with: string }) => {
+      await hubComputersRequest('POST', '/api/hub/computers/replace', {
+        id,
+        successorId: opts.with
+      })
+      console.log(`Replaced computer ${id} with ${opts.with}; ${id} is deleted.`)
+    })
+
   return computers
+}
+
+/** One `GET /api/hub/computers/takeovers` offer (`ComputerTakeover`). */
+interface ComputerTakeoverRow {
+  former: { id: string; name: string; lastSeenAt: number | null; revoked: boolean }
+  successor: { id: string; name: string; connected: boolean }
+  conversations: number
+  tasks: number
 }

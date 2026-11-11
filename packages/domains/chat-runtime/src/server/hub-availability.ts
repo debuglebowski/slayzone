@@ -22,6 +22,11 @@ export function createChatAvailability(opts: {
   historyGeneration?(computerId: string, conversationId: string, epoch: number): string
   hasLiveTask(taskId: string): Promise<boolean>
   gate?(computerId: string, taskId: string): Promise<void>
+  /**
+   * The computer that reported holding this conversation while the hub assigns it to
+   * `ownerId` (a takeover candidate: possibly the owner enrolled again), or null.
+   */
+  heldBy?(conversationId: string, ownerId: string): string | null
 }) {
   return async (tabId: string): Promise<ChatAvailability> => {
     const tab = await opts.db.get<{ task_id: string; state: string | null }>(
@@ -62,7 +67,19 @@ export function createChatAvailability(opts: {
       const missing = await opts.ownership.unavailable(owner.id)
       return { state: 'unavailable', computer, reason: missing?.reason ?? REMOVED_COMPUTER_REASON }
     }
-    if (!opts.connected(computer.id)) return { state: 'offline', computer }
+    if (!opts.connected(computer.id)) {
+      // Said where the user is stuck: another computer holds this chat, so replacing
+      // the offline one with it (if it is the same machine) is the way out.
+      const holder = owner?.computerId === computer.id ? opts.heldBy?.(owner.id, computer.id) : null
+      const held = holder
+        ? await opts.db.get<{ name: string }>('SELECT name FROM computers WHERE id=?', [holder])
+        : undefined
+      return {
+        state: 'offline',
+        computer,
+        ...(holder && held ? { heldBy: { id: holder, name: held.name } } : {})
+      }
+    }
     if (opts.chatRuntimeReady?.(computer.id) === false) return { state: 'upgrading', computer }
     if (!owner) return { state: 'preparing', computer }
     if (await opts.ownership.unavailable(owner.id)) return { state: 'unavailable', computer }

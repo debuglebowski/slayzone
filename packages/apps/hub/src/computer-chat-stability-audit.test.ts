@@ -9,7 +9,7 @@ import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
-import { deleteComputer } from '@slayzone/computers/server'
+import { deleteComputer, replaceComputer, revokeComputer } from '@slayzone/computers/server'
 import { REMOVED_COMPUTER_REASON } from '@slayzone/chat-runtime/hub'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
@@ -322,12 +322,111 @@ test('audit control: re-enrollment with a new computer identity cannot appropria
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     // Refused for that conversation alone; the new computer's recovery completes.
     await expect(after.recoverComputer('new-computer-id')).resolves.toBeUndefined()
-    expect(String(errors.mock.calls.flat().join(' '))).toMatch('Chat tab has another active owner')
+    expect(String(errors.mock.calls.flat().join(' '))).toMatch(
+      'holds this chat, but the hub assigns it to another computer'
+    )
     errors.mockRestore()
     expect(await after.ownership.forTab('tab')).toMatchObject({
       id: original!.id,
       computerId: 'pc',
       epoch: original!.epoch
+    })
+    // Offered to the user as a takeover, never taken on its own.
+    expect(after.takeoverCandidates()).toEqual([
+      {
+        conversationId: original!.id,
+        taskId: 'task',
+        ownerComputerId: 'pc',
+        holderComputerId: 'new-computer-id'
+      }
+    ])
+  } finally {
+    await f.close()
+  }
+})
+
+/** The re-enrollment above, up to the refused recovery of the new computer. */
+async function reEnrolled(f: Awaited<ReturnType<typeof fixture>>) {
+  f.db
+    .prepare(
+      "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    .run()
+  f.db
+    .prepare(
+      "INSERT INTO computers(id,name,platform,version,capabilities_json,created_at) VALUES('pc','ci-box','linux','1','{}',1),('new-computer-id','ci-box','linux','1','{}',2)"
+    )
+    .run()
+  const before = f.services()
+  await before.relay.ops.saveTabDraft('tab', { text: 'original computer draft', attachments: [] })
+  const original = (await before.ownership.forTab('tab'))!
+  await f.restartComputer()
+  // Its old id never connects again: the machine dials under the new one.
+  f.disconnect('pc')
+  const after = f.services('new-computer-id')
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  await after.recoverComputer('new-computer-id')
+  errors.mockRestore()
+  expect(after.takeoverCandidates()).toHaveLength(1)
+  // The chat says who holds it, where the user is stuck.
+  expect(await after.availability('tab')).toMatchObject({
+    state: 'offline',
+    computer: { id: 'pc' },
+    heldBy: { id: 'new-computer-id', name: 'ci-box' }
+  })
+  return { after, original }
+}
+
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
+test('audit: replacing the old computer with the re-enrolled one hands it the chat at once', async () => {
+  const f = await fixture()
+  try {
+    const { after, original } = await reEnrolled(f)
+    await replaceComputer(f.slayDb, { computerId: 'pc', successorId: 'new-computer-id' })
+    // What the hub's removed-computer listener runs: no reconnect needed.
+    await after.computerRemoved('pc')
+    expect(await after.ownership.forTab('tab')).toMatchObject({
+      id: original.id,
+      computerId: 'new-computer-id'
+    })
+    expect(after.takeoverCandidates()).toEqual([])
+    await expect(after.relay.ops.getTabState('tab')).resolves.toMatchObject({
+      draft: { text: 'original computer draft' }
+    })
+  } finally {
+    await f.close()
+  }
+})
+
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
+test('audit: revoking the old computer moves nothing: its chats wait for it, still offered', async () => {
+  const f = await fixture()
+  try {
+    const { after, original } = await reEnrolled(f)
+    await revokeComputer(f.slayDb, 'pc')
+    // What the hub's removed-computer listener runs (it fires on revoke too).
+    await after.computerRemoved('pc')
+    expect(await after.ownership.forTab('tab')).toMatchObject({ id: original.id, computerId: 'pc' })
+    expect(after.takeoverCandidates()).toHaveLength(1)
+  } finally {
+    await f.close()
+  }
+})
+
+// Keep this real hub/computer storage recovery integration: mocks cannot prove persisted ownership, activation and content survive reopening together. Operations are awaited and fixtures are isolated. A rare outer watchdog timeout under deliberately oversubscribed host load is acceptable as an infrastructure signal; investigate isolated failure before declaring a storage regression.
+test('audit: deleting the old computer lets the re-enrolled one adopt the chat at once', async () => {
+  const f = await fixture()
+  try {
+    const { after, original } = await reEnrolled(f)
+    await deleteComputer(f.slayDb, 'pc')
+    await after.computerRemoved('pc')
+    expect(await after.ownership.forTab('tab')).toMatchObject({
+      id: original.id,
+      computerId: 'new-computer-id'
+    })
+    expect(after.takeoverCandidates()).toEqual([])
+    await expect(after.relay.ops.getTabState('tab')).resolves.toMatchObject({
+      draft: { text: 'original computer draft' }
     })
   } finally {
     await f.close()

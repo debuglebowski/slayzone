@@ -1939,7 +1939,10 @@ export function composeServer(opts: {
       // Who a join token is for (T-20): the same lookup as `computers.mintJoinToken`.
       findAccount: joinTokenAccounts,
       // What the desktop's main process may add to its CSP (direct-link-gate.ts).
-      directAddresses: (userId) => directLinkIssuer?.issuedAddresses(userId) ?? []
+      directAddresses: (userId) => directLinkIssuer?.issuedAddresses(userId) ?? [],
+      // `slay hub computers takeovers|replace`: the same offers and refusals as tRPC.
+      takeoverCandidates: () => computerChat.takeoverCandidates(),
+      localComputerId: supervised ? deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME) : null
     },
     // Operator account management for the `/api/hub/users` routes
     // (`slay hub users add|ls|disable|enable|role`) — the ONLY way to create an
@@ -2128,6 +2131,9 @@ export function composeServer(opts: {
     // computer itself. Not connected yet (gateway still starting) = nothing runs.
     runningWorkOn: async (computerId) =>
       computerGatewayRef ? countRunningWork(computerGatewayRef, computerId) : 0,
+    // Chats a computer holds that the hub assigns to another (a re-enrolled machine):
+    // offered to the user as "replace <old> with <new>" (`computers.takeovers`).
+    takeoverCandidates: () => computerChat.takeoverCandidates(),
     // Live status for the Settings list, from the events the gateway ALREADY
     // emits. Their only consumer until now was exec-proxies disposing pty
     // sessions, so every signal about a computer going away was computed and
@@ -2421,7 +2427,8 @@ export function composeServer(opts: {
     // REST, a departing user's cleanup): the runs it kept are forgotten.
     setComputerRemovedListener((computerId) => {
       processesComputerRemoved(computerId)
-      // Chat work addressed to a deleted computer is retired now (a revoked one waits).
+      // Chat work addressed to a deleted or replaced computer moves or is retired now
+      // (a revoked one waits), and the computers holding its chats adopt them now.
       void computerChat
         .computerRemoved(computerId)
         .catch((error: unknown) => console.error('[chat] computer retirement failed:', error))

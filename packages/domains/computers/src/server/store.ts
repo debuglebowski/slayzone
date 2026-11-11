@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { SlayzoneDb } from '@slayzone/platform'
+import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import type { ComputerRecord } from '../shared/types'
 import { listVisibleComputerIds, type ComputerViewer } from './visibility'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
+import {
+  COMPUTER_REPLACE_REFUSED,
+  ComputerStateError,
+  computerReplacesItselfError
+} from './computer-state-errors'
 
 /**
  * Computer store: CRUD over the v149 computer tables (`computers`,
@@ -171,56 +176,90 @@ export async function retireStaleLocalComputers(
   if (stale.length === 0) return 0
 
   const staleIds = stale.map((r) => r.id)
-  const placeholders = staleIds.map(() => '?').join(', ')
-  // Atomic collapse: repoint task + project bindings off the orphan ids onto the
-  // survivor, THEN delete the orphan computer rows — one transaction so a task can
-  // never observe a dangling computer_id mid-collapse.
-  const results = (await db.batchTxn([
-    {
-      type: 'run',
-      sql: `UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    // The same machine re-enrolled: the worktrees it made are the survivor's.
-    {
-      type: 'run',
-      sql: `UPDATE tasks SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    {
-      type: 'run',
-      sql: `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    // Folders follow too. `OR IGNORE` keeps the survivor's own row where both hold
-    // the project (it is the current one); the orphan's leftovers then go.
-    {
-      type: 'run',
-      sql: `UPDATE OR IGNORE project_placements SET computer_id = ? WHERE computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    {
-      type: 'run',
-      sql: `DELETE FROM project_placements WHERE computer_id IN (${placeholders})`,
-      params: staleIds
-    },
-    // Chat bookkeeping names computers too; the chat domain repoints it onto the
-    // survivor from this record (applyComputerRetirements), whenever it next runs.
-    {
-      type: 'run',
-      sql: `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
-        SELECT id,?,'re-enrolled',? FROM computers WHERE id IN (${placeholders})
-        ON CONFLICT(computer_id) DO UPDATE SET successor_id=excluded.successor_id,reason=excluded.reason`,
-      params: [opts.keepComputerId, Date.now(), ...staleIds]
-    },
-    {
-      type: 'run',
-      sql: `DELETE FROM computers WHERE id IN (${placeholders})`,
-      params: staleIds
-    }
-  ])) as Array<{ changes: number }>
+  const results = (await db.batchTxn(successionOps(staleIds, opts.keepComputerId))) as Array<{
+    changes: number
+  }>
   // The DELETE is the last op; its `changes` is the number of computer rows removed.
   return results[results.length - 1]?.changes ?? staleIds.length
+}
+
+/**
+ * The same machine, enrolled again under `successorId`: everything that named the
+ * `formerIds` rows moves to it, and the rows go. One transaction (`batchTxn`), the
+ * DELETE of the computer rows last. Shared by the local-computer collapse
+ * ({@link retireStaleLocalComputers}) and a user's {@link replaceComputer}.
+ *
+ * Bindings, worktrees and placements are repointed rather than nulled (there is a
+ * survivor); grants go — they said who could use the former row, the successor keeps
+ * its own. `tasks.computer_id` / `projects.default_computer_id` are plain TEXT with no
+ * FK, so a bare DELETE would leave them dangling.
+ */
+function successionOps(formerIds: readonly string[], successorId: string): BatchOp[] {
+  const placeholders = formerIds.map(() => '?').join(', ')
+  const run = (sql: string, params: unknown[]): BatchOp => ({ type: 'run', sql, params })
+  return [
+    run(`UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`, [
+      successorId,
+      ...formerIds
+    ]),
+    // The same machine: the worktrees it made are the successor's.
+    run(
+      `UPDATE tasks SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    run(
+      `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    // Folders follow too. `OR IGNORE` keeps the successor's own row where both hold
+    // the project (it is the current one); the former's leftovers then go.
+    run(
+      `UPDATE OR IGNORE project_placements SET computer_id = ? WHERE computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    run(`DELETE FROM project_placements WHERE computer_id IN (${placeholders})`, [...formerIds]),
+    run(`DELETE FROM computer_grants WHERE computer_id IN (${placeholders})`, [...formerIds]),
+    // Chat bookkeeping names computers too; the chat domain repoints it onto the
+    // successor from this record (applyComputerRetirements), whenever it next runs.
+    // 're-enrolled' is what both callers mean: the same machine under a new id.
+    run(
+      `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT id,?,'re-enrolled',? FROM computers WHERE id IN (${placeholders})
+        ON CONFLICT(computer_id) DO UPDATE SET successor_id=excluded.successor_id,reason=excluded.reason`,
+      [successorId, Date.now(), ...formerIds]
+    ),
+    run(`DELETE FROM computers WHERE id IN (${placeholders})`, [...formerIds])
+  ]
+}
+
+/**
+ * Replace a computer with its successor: the user confirmed `successorId` is the same
+ * machine as `computerId`, enrolled again under a new id (its credential was lost, so
+ * the hub could not tell). Its work moves there ({@link successionOps}) and the former
+ * row is deleted; the chat domain then repoints its chats (applyComputerRetirements),
+ * and the successor's next recovery adopts the ones it holds.
+ *
+ * Refuses a replacement by itself, a missing computer and a revoked successor. Whether
+ * the former may go now (it must not be connected; the desktop's own computer never
+ * goes) is the caller's: only it knows the live connections.
+ */
+export async function replaceComputer(
+  db: SlayzoneDb,
+  opts: { computerId: string; successorId: string }
+): Promise<void> {
+  if (opts.computerId === opts.successorId) throw computerReplacesItselfError()
+  const [former, successor] = await Promise.all([
+    getComputer(db, opts.computerId),
+    getComputer(db, opts.successorId)
+  ])
+  if (!former || !successor) throw new Error('no such computer, or you do not have access to it')
+  if (successor.revoked_at !== null)
+    throw new ComputerStateError(
+      COMPUTER_REPLACE_REFUSED,
+      `"${successor.name}" is revoked, so it cannot take over another computer's work.`
+    )
+  await db.batchTxn(successionOps([opts.computerId], opts.successorId))
+  computerRemoved(opts.computerId)
 }
 
 /**

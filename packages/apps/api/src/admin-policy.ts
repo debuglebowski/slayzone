@@ -60,6 +60,7 @@ export const CONDITIONAL_ADMIN: Readonly<Record<string, string>> = {
   // A user manages their own computer; anyone else's (or an unowned one) is the
   // admin's (`computer-access.ts` mayManageComputer, T-19).
   'computers.delete': 'the caller does not own the computer',
+  'computers.replace': 'the caller does not own both computers',
   'computers.revokeComputer': 'the caller does not own the computer',
   'computers.setDisabled': 'the caller does not own the computer',
   'computers.rename': 'the caller does not own the computer',
@@ -494,6 +495,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'computers.mintJoinToken': 'user',
   'computers.onStatusChange': 'user',
   'computers.rename': 'user',
+  'computers.replace': 'user',
   'computers.renameMachine': 'user',
   'computers.resolveTaskComputer': 'user',
   'computers.retryFault': 'user',
@@ -502,6 +504,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'computers.setProjectDefaultComputer': 'user',
   'computers.setTaskComputer': 'user',
   'computers.setVisibility': 'user',
+  'computers.takeovers': 'user',
   'computers.unrevoke': 'admin',
   'diagnostics.exportBundle': 'admin',
   'diagnostics.getConfig': 'admin',
@@ -899,6 +902,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
  *                                 twin: everyone enrolls their own computer; naming
  *                                 someone else is the admin's (`join-token-policy.ts`).
  * `PATCH /api/hub/computers`      revoke / unrevoke any computer (`slay hub computers`).
+ * `/api/hub/computers/takeovers`, `/replace`  replace a re-enrolled computer.
  * `/api/hub/content-erasure`      erase a disabled account's content (`slay hub users
  *                                 erase-content …`). Behind the bearer gate, off the
  *                                 break-glass allowlist (O-6).
@@ -1051,6 +1055,10 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'PATCH /api/templates/:id': 'user',
   // Break-glass v2 (added): revoke / unrevoke any computer, the REST twin of the tRPC pair.
   'PATCH /api/hub/computers': 'admin',
+  // Replace a re-enrolled computer (`slay hub computers takeovers|replace`), the REST twin
+  // of `computers.takeovers` / `computers.replace`.
+  'GET /api/hub/computers/takeovers': 'admin',
+  'POST /api/hub/computers/replace': 'admin',
   // Content erasure (added): GET reads a preview or reports, POST erases/retries/exports.
   'GET /api/hub/content-erasure': 'admin',
   'POST /api/hub/content-erasure': 'admin'

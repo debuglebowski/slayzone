@@ -35,6 +35,11 @@ type Kids = { children?: React.ReactNode }
 
 /** Per-hub computer lists, keyed by hub id. */
 let computersByHub: Record<string, MockComputer[]> = {}
+/** Per-hub `computers.takeovers` offers (a re-enrolled computer holding an offline one's chats). */
+let takeoversByHub: Record<string, unknown[]> = {}
+const replaceSpy = vi.fn((_input: { computerId: string; successorId: string }, _hub?: string) =>
+  Promise.resolve({ ok: true as const })
+)
 /** Query lifecycle, so the loading / error / empty summaries can be exercised. */
 let queryState: 'success' | 'loading' | 'error' = 'success'
 /** Where this app's own computer stands on each remote hub (main-process state). */
@@ -109,6 +114,11 @@ vi.mock('@slayzone/transport/client', () => ({
           mutationOptions: () => ({ __key: 'computers.renameMachine' })
         },
         delete: { mutationOptions: () => ({ __key: 'delete', __hub: hub }) },
+        takeovers: {
+          queryOptions: () => ({ __queryFn: () => takeoversByHub[hub] ?? [] }),
+          queryFilter: () => ({ __key: 'computers.takeovers' })
+        },
+        replace: { mutationOptions: () => ({ __key: 'replace', __hub: hub }) },
         setDisabled: { mutationOptions: () => ({ __key: 'setDisabled', __hub: hub }) },
         rename: { mutationOptions: () => ({ __key: 'rename', __hub: hub }) },
         // Needs attention: no faults in these tests (the list renders nothing).
@@ -197,6 +207,13 @@ vi.mock('@tanstack/react-query', () => ({
   },
   useMutation: (opts: { __key?: string; __hub?: string }) => {
     const remote = opts?.__hub !== undefined && opts.__hub !== 'local'
+    if (opts?.__key === 'replace') {
+      return {
+        mutateAsync: (input: { computerId: string; successorId: string }) =>
+          replaceSpy(input, opts.__hub),
+        isPending: false
+      }
+    }
     if (opts?.__key === 'setDisabled') {
       return {
         mutateAsync: (input: { computerId: string; disabled: boolean }) =>
@@ -353,6 +370,8 @@ async function renderTwoHubs(): Promise<void> {
 
 beforeEach(() => {
   computersByHub = {}
+  takeoversByHub = {}
+  replaceSpy.mockClear()
   queryState = 'success'
   // Reset per test: a readiness answer left over from a previous case would make
   // an unrelated row sprout a marker.
@@ -371,6 +390,67 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('HubCard', () => {
+  // A computer enrolled again under a new id (its credentials lost) leaves its old row
+  // offline, still owning its chats. The hub offers the takeover; the user confirms.
+  it('offers replacing an offline computer with the one holding its chats', async () => {
+    computersByHub['hub-b'] = [
+      makeComputer({ id: 'old-0000-id', name: 'ci-box', connected: false, connectedAt: null }),
+      makeComputer({ id: 'new-1111-id', name: 'ci-box' })
+    ]
+    takeoversByHub['hub-b'] = [
+      {
+        former: { id: 'old-0000-id', name: 'ci-box', lastSeenAt: 1, revoked: false },
+        successor: { id: 'new-1111-id', name: 'ci-box', connected: true },
+        conversations: 2,
+        tasks: 1
+      }
+    ]
+    await renderRemote()
+    const offer = screen.getByTestId('computer-takeover')
+    // Equal names are told apart by their ids.
+    expect(offer.textContent).toContain('ci-box (new-1111) holds 2 chats of ci-box (old-0000)')
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-takeover-replace'))
+    })
+    // The successor is preselected from the offer; confirming replaces.
+    expect(
+      (screen.getByTestId('computer-replace-option-new-1111-id') as HTMLInputElement).checked
+    ).toBe(true)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-replace-confirm'))
+    })
+    expect(replaceSpy).toHaveBeenCalledWith(
+      { computerId: 'old-0000-id', successorId: 'new-1111-id' },
+      'hub-b'
+    )
+  })
+
+  it('offers "replace with…" on an offline computer only, choosing among the others', async () => {
+    computersByHub['hub-b'] = [
+      makeComputer({ id: 'old', name: 'build-old', connected: false, connectedAt: null }),
+      makeComputer({ id: 'new', name: 'build-new' }),
+      makeComputer({ id: 'other', name: 'laptop' })
+    ]
+    await renderRemote()
+    // Only the offline row: a connected computer is still itself.
+    expect(screen.getAllByTestId('computer-replace')).toHaveLength(1)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-replace'))
+    })
+    expect(screen.queryByTestId('computer-replace-option-old')).toBeNull()
+    // Nothing preselected without evidence: confirm waits for a choice.
+    expect((screen.getByTestId('computer-replace-confirm') as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-replace-option-new'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('computer-replace-confirm'))
+    })
+    expect(replaceSpy).toHaveBeenCalledWith({ computerId: 'old', successorId: 'new' }, 'hub-b')
+  })
+
   it('offers enrollment with no mode to enable and no hub picker', async () => {
     await renderRemote()
     expect(screen.getByTestId('computer-add-open').hasAttribute('disabled')).toBe(false)

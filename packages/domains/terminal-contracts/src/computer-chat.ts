@@ -117,6 +117,11 @@ export interface ChatAvailability {
   /** 'unavailable' only: why, when the hub knows (e.g. its computer was removed). */
   reason?: string
   waitingForAgents?: boolean
+  /**
+   * `offline` only: a connected computer reported holding this chat — possibly the
+   * offline one enrolled again under a new id (`computers.replace` moves its work).
+   */
+  heldBy?: { id: string; name: string }
   /** Hub recovery watermark. A ready computer can have missed live notifications. */
   recoveryGeneration?: string
 }
@@ -131,6 +136,14 @@ export function chatAvailabilityMessage(
     case 'preparing':
       return null
     case 'offline':
+      if (status.heldBy)
+        return {
+          title: `${name} is offline`,
+          detail:
+            status.heldBy.name === name
+              ? `Another computer named ${name} holds this chat, possibly this one enrolled again. If so, replace the offline ${name} with it in Settings → Connections.`
+              : `${status.heldBy.name} holds this chat. If ${status.heldBy.name} is ${name} enrolled again, replace ${name} with it in Settings → Connections.`
+        }
       return {
         title: `${name} is offline`,
         detail: 'Chat is stored there. Connect that computer to load history and send messages.'

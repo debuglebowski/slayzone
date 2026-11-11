@@ -11,7 +11,7 @@ import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '@slayzone/trpc-server'
-import type { FindJoinTokenAccount } from '@slayzone/computers/server'
+import type { FindJoinTokenAccount, TakeoverCandidate } from '@slayzone/computers/server'
 import type { Scope } from '@slayzone/transport/scopes'
 
 /**
@@ -332,6 +332,11 @@ export interface RestApiDeps {
     /** Listener addresses of the caller's live direct-link grants
      *  (`GET /api/computers/direct-addresses`). Absent: this hub issues none. */
     directAddresses?: (userId: string | null) => string[]
+    /** Chats a computer holds that the hub assigns to another (`ComputersDeps.takeoverCandidates`),
+     *  for `GET /api/hub/computers/takeovers`. Absent: none. */
+    takeoverCandidates?: () => readonly TakeoverCandidate[]
+    /** The desktop app's own computer on its own hub, never replaced (`ComputersDeps.localComputerId`). */
+    localComputerId?: string | null
   }
   /**
    * Operator account management, powering the `/api/hub/users` routes behind

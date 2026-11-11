@@ -1,5 +1,13 @@
-import type { Express } from 'express'
-import { getComputer, revokeComputer, unrevokeComputer } from '@slayzone/computers/server'
+import type { Express, Request } from 'express'
+import {
+  getComputer,
+  isComputerStateError,
+  listComputerTakeovers,
+  replaceComputer,
+  replaceRefusal,
+  revokeComputer,
+  unrevokeComputer
+} from '@slayzone/computers/server'
 import { peerAddress, routeOf, securityEvent } from '@slayzone/platform/security-log'
 import { getAuthGate } from '@slayzone/trpc-server'
 import { mayManageComputer } from '../../../computer-access'
@@ -26,6 +34,118 @@ import type { RestApiDeps } from '../types'
  * email. One `computer.revoke` / `computer.unrevoke` line, actor from the request.
  */
 export function registerHubComputersRoute(app: Express, deps: RestApiDeps): void {
+  const managerOf = (req: Request) => {
+    const principal = restPrincipalOf(req)
+    const access = {
+      ...httpAccessRequest(principal?.userId ?? null),
+      authRequired: getAuthGate(),
+      role: principal?.role ?? null
+    }
+    return { principal, mayManage: (id: string) => mayManageComputer(deps.db, access, id) }
+  }
+  const connected = (): Set<string> =>
+    new Set((deps.computers?.getGateway?.()?.listComputers() ?? []).map((r) => r.computerId))
+
+  /**
+   * `GET /api/hub/computers/takeovers` — the REST twin of `computers.takeovers`
+   * (`slay hub computers takeovers`): computers holding chats the hub assigns to an
+   * offline computer, each an offer to replace that one with it. Admin only, as the
+   * other `/api/hub/computers` routes; within that, the computers it manages.
+   */
+  app.get('/api/hub/computers/takeovers', async (req, res) => {
+    try {
+      const live = connected()
+      const data = await listComputerTakeovers(
+        {
+          db: deps.db,
+          isConnected: (id) => live.has(id),
+          localComputerId: deps.computers?.localComputerId ?? null,
+          mayManage: managerOf(req).mayManage
+        },
+        deps.computers?.takeoverCandidates?.() ?? []
+      )
+      res.json({ ok: true, data })
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: 'failed to list takeovers',
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
+  })
+
+  /**
+   * `POST /api/hub/computers/replace` `{ id, successorId }` — the REST twin of
+   * `computers.replace` (`slay hub computers replace <id> --with <successor>`): the
+   * former computer's work moves to its successor (the same machine enrolled again),
+   * and its row goes. 409 while the former is connected; 400 for the desktop app's own
+   * computer, itself or a revoked successor (`code` names which).
+   */
+  app.post('/api/hub/computers/replace', async (req, res) => {
+    const body = (req.body ?? {}) as { id?: unknown; successorId?: unknown }
+    if (
+      typeof body.id !== 'string' ||
+      !body.id ||
+      typeof body.successorId !== 'string' ||
+      !body.successorId
+    ) {
+      res.status(400).json({ ok: false, error: 'send { id, successorId }' })
+      return
+    }
+    const { id, successorId } = body
+    try {
+      const { principal, mayManage } = managerOf(req)
+      for (const which of [id, successorId]) {
+        if (!(await mayManage(which)) || !(await getComputer(deps.db, which))) {
+          res.status(404).json({ ok: false, error: `no computer with id ${which}` })
+          return
+        }
+      }
+      const former = (await getComputer(deps.db, id))!
+      const live = connected()
+      const refusal = replaceRefusal(
+        {
+          isConnected: (c) => live.has(c),
+          localComputerId: deps.computers?.localComputerId ?? null
+        },
+        former,
+        successorId
+      )
+      const refuse = (status: number, err: { code: string; message: string }) =>
+        res.status(status).json({ ok: false, code: err.code, error: err.message })
+      if (refusal) {
+        refuse(refusal.code === 'PRECONDITION_FAILED' ? 409 : 400, refusal.error)
+        return
+      }
+      try {
+        await replaceComputer(deps.db, { computerId: id, successorId })
+      } catch (err) {
+        if (isComputerStateError(err)) {
+          refuse(400, err)
+          return
+        }
+        throw err
+      }
+      securityEvent({
+        event: 'computer.replace',
+        outcome: 'success',
+        actor: principal?.userId ?? null,
+        ip: peerAddress(req),
+        route: routeOf(req.method, req.originalUrl ?? req.url),
+        targetKind: 'computer',
+        targetId: id,
+        detail: { successorId }
+      })
+      res.json({ ok: true, data: { id, successorId } })
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: 'failed to replace the computer',
+        message: err instanceof Error ? err.message : String(err)
+      })
+    }
+  })
+
   app.patch('/api/hub/computers', async (req, res) => {
     const body = (req.body ?? {}) as { id?: unknown; revoked?: unknown }
     if (typeof body.id !== 'string' || !body.id || typeof body.revoked !== 'boolean') {

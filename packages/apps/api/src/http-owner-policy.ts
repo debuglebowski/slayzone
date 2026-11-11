@@ -458,6 +458,14 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'PATCH /api/hub/computers': none(
     'computer lifecycle (revoked or not): management metadata, decided in the handler by computer-access.ts mayManageComputer (T-19); no content'
   ),
+  // Replacing a re-enrolled computer: both computers' lifecycle, decided in the handler
+  // by mayManageComputer (T-19), else 404. Offers name computers and counts; no content.
+  'GET /api/hub/computers/takeovers': none(
+    'computer lifecycle offers: management metadata (names, counts), filtered in the handler by computer-access.ts mayManageComputer (T-19); no content'
+  ),
+  'POST /api/hub/computers/replace': none(
+    'computer lifecycle (one computer replaced by another): decided in the handler by computer-access.ts mayManageComputer for both (T-19); no content'
+  ),
   // Content erasure (added): another account's content is ERASED, never read. The
   // service decides (content-erasure admin.ts: admin + full session, a disabled target,
   // the typed email); it answers counts, ids and receipts only.

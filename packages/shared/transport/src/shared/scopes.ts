@@ -589,6 +589,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'computers.onStatusChange': 'read',
   'computers.rename': 'never',
   'computers.renameMachine': 'never',
+  'computers.replace': 'never',
   'computers.resolveTaskComputer': 'read',
   'computers.retryFault': 'never',
   'computers.revokeComputer': 'never',
@@ -596,6 +597,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'computers.setProjectDefaultComputer': 'never',
   'computers.setTaskComputer': 'never',
   'computers.setVisibility': 'never',
+  // Offers to replace a re-enrolled computer: as listing the computers.
+  'computers.takeovers': 'read',
   'computers.unrevoke': 'never',
   'diagnostics.exportBundle': 'never',
   'diagnostics.getConfig': 'never',
