@@ -112,7 +112,7 @@ overrides:
   'node-forge': '^1.4.1'
   'posix>nan': '^2.29.0'
   'electron-chrome-web-store>adm-zip': '^0.6.1'
-  'prosemirror-view': '^1.42.3'
+  'prosemirror-view': '^1.42.6'
   'prosemirror-model': '^1.25.12'
 
 # expo-router depends on react-native-drawer-layout for `expo-router/drawer` only, which
