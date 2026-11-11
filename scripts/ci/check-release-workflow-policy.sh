@@ -97,8 +97,18 @@ require_contains \
 
 require_contains \
   ".github/workflows/release-foundation.yml" \
-  "container: ubuntu:22.04" \
-  "release-foundation.yml must build Linux in the pinned glibc-floor container (#165)"
+  "container: ghcr.io/debuglebowski/slayzone-linux-build@sha256:" \
+  "release-foundation.yml must build Linux in the digest-pinned build image (#165)"
+
+require_contains \
+  "scripts/release/linux-build-image/Dockerfile" \
+  "FROM ubuntu:22.04@sha256:" \
+  "the Linux build image must stay on ubuntu:22.04, the glibc 2.35 floor (#165)"
+
+require_contains \
+  ".github/workflows/release-foundation.yml" \
+  "slayzone-linux-build-inputs.sha256" \
+  "release-foundation.yml must check the build image matches its toolchain inputs"
 
 # shellcheck disable=SC2016 # a literal GitHub expression, not a shell one
 require_contains \

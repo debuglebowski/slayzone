@@ -1,0 +1,37 @@
+name: Linux build image
+
+# Builds and pushes ghcr.io/debuglebowski/slayzone-linux-build, the container the Linux
+# release build runs in (release-foundation.yml, linux-x64): ubuntu:22.04 with
+# scripts/release/linux-build-env.sh preinstalled, so a release never needs Ubuntu's
+# apt servers. Same as running scripts/release/linux-build-image/build.sh locally.
+#
+# Run it after changing linux-build-env.sh or the Dockerfile, then pin the digest it
+# prints in release-foundation.yml. A release whose image does not match its
+# checkout's toolchain inputs fails its "Check build image matches the toolchain" step.
+#
+# Manual only: building needs Ubuntu's apt servers, and a push-triggered build would
+# go red on main whenever those are down, though nothing a user runs is affected.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Build and push
+        run: |
+          bash scripts/release/linux-build-image/build.sh | tee build-output.txt
+          { echo '```'; tail -3 build-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
