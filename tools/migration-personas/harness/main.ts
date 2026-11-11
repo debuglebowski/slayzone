@@ -1175,10 +1175,10 @@ interface LifecycleFacts {
   archivedTask: string
   liveTask: string
   deletedArtifact: string
-  /** Exercise the re-enroll escape hatch after the upgrade: remove the stale old computer
-   *  (`reEnrolledOld`), reconnect `computer` (the new id), and its chat on `tab` must be
-   *  adopted there and start again. See exerciseEscapeHatch. */
-  escapeHatch?: { tab: string; computer: string }
+  /** After the initial offline/refused checks, explicitly replace `reEnrolledOld` with
+   *  `reEnrolledNew`: its chat on `tab` must become ready and start again on `computer`.
+   *  See exerciseEscapeHatch. */
+  escapeHatch?: { tab: string; computer: string; availability: 'ready' }
 }
 
 /**
@@ -1328,14 +1328,15 @@ function checkLifecycle(
   const oldWork = bindings(ref, l.reEnrolledOld)
   if (oldWork === '') fail(`${rel}: input has no work on the re-enrolled computer's old id`)
   if (l.escapeHatch) {
-    // The user removed the stale old row after the upgrade (exerciseEscapeHatch).
+    // The user confirmed its replacement after the upgrade (exerciseEscapeHatch).
     const r = retired.get(l.reEnrolledOld)
     ;(!computers.has(l.reEnrolledOld) &&
-      r?.reason === 'deleted' &&
+      r?.reason === 're-enrolled' &&
+      r?.successor_id === l.reEnrolledNew &&
       bindings(db, l.reEnrolledOld) === ''
       ? pass
       : fail)(
-      `${rel}: re-enrolled computer's old id ${short(l.reEnrolledOld)} removed by the user: retired (${r?.reason ?? 'NOT retired'}), nothing names it`
+      `${rel}: re-enrolled computer's old id ${short(l.reEnrolledOld)} replaced by the user: retired (${r?.reason ?? 'NOT retired'}) → ${r?.successor_id ? short(r.successor_id) : 'NO successor'}, nothing names it`
     )
     const owner = one<{ computer_id: string | null }>(
       db,
@@ -1621,9 +1622,9 @@ async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promis
 /**
  * The re-enroll escape hatch (p11, after every tab was continued): a computer re-enrolled
  * under a new id holds its old chat, which the hub still assigns to the old, offline row.
- * The user removes that stale row (Settings → Computers → Remove: `computers.delete`); on
- * the new computer's next recovery pass (it reconnects) the chat must be adopted there,
- * read `ready`, and its agent start again — resuming its own session.
+ * After proving no auto-adoption, the user confirms `computers.replace`. The connected
+ * successor must adopt the chat without a reconnect, read `ready`, and start its agent
+ * again — resuming its own session.
  */
 async function exerciseEscapeHatch(
   h: { port: number; db: string },
@@ -1648,29 +1649,15 @@ async function exerciseEscapeHatch(
     }
   }
   try {
-    await trpc(h.port, 'mutation', 'computers.delete', { computerId: l.reEnrolledOld })
-    say(true, `removed the stale old ${e.computer} (computers.delete)`)
+    await trpc(h.port, 'mutation', 'computers.replace', {
+      computerId: l.reEnrolledOld,
+      successorId: l.reEnrolledNew
+    })
+    say(true, `replaced the stale old ${e.computer} with its new id (computers.replace)`)
   } catch (err) {
-    say(false, `removing the old ${e.computer} failed: ${(err as Error).message}`)
+    say(false, `replacing the old ${e.computer} failed: ${(err as Error).message}`)
     return notes
   }
-  // Its next recovery pass: reconnect it, as restarting the computer does.
-  const root = persona.topology.computers.find((c) => c.name === e.computer)?.root
-  const label = root ? `computer-${root.replace(/\W+/g, '-')}` : ''
-  const proc = procs.find(
-    (p) => p.label === label && p.child.exitCode === null && p.child.signalCode === null
-  )
-  if (!proc) {
-    say(false, `no running process for ${e.computer} to reconnect`)
-    return notes
-  }
-  proc.child.kill('SIGTERM')
-  await proc.exit
-  for (let i = 0; i < 60 && (await connectedNames(h.port)).includes(e.computer); i++)
-    await sleep(500)
-  proc.respawn()
-  for (let i = 0; i < 240 && !(await connectedNames(h.port)).includes(e.computer); i++)
-    await sleep(500)
   for (let i = 0; i < 120 && owner() !== l.reEnrolledNew; i++) await sleep(500)
   const now = owner()
   say(
@@ -1680,7 +1667,7 @@ async function exerciseEscapeHatch(
   const availability = await trpc(h.port, 'query', 'chat.availability', { tabId: e.tab })
     .then((a) => (a as { state?: string } | null)?.state ?? 'none')
     .catch((err: Error) => `error: ${err.message}`)
-  say(availability === 'ready', `availability ${availability} (want ready)`)
+  say(availability === e.availability, `availability ${availability} (want ${e.availability})`)
   const db = new Database(h.db, { readonly: true, fileMustExist: true })
   const tab = db
     .prepare(

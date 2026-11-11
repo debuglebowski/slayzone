@@ -1374,7 +1374,7 @@ computers/c3/computer-runtime/current-config-seen  (text)
     
 computers/c3/computer-runtime/generations.json  (json)
     {
-      "ws://127.0.0.1:51100/computers": 4
+      "ws://127.0.0.1:51100/computers": 3
     }
 computers/c3/computer-runtime/hook-assets/0.38.0/notify.sh  (text)
     #!/bin/sh
@@ -1982,10 +1982,6 @@ computers/c3/computer-runtime/launch.cjs  (text)
     }
     for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {stopping = true; child?.kill(signal);});
     launch();
-computers/c3/computer-runtime/pty-history/91a1f7d3496b6185e3baa8d9/dc07fae9-36f4-407d-a39c-d1168571ae9e/<new-token>.txt  (text)
-    
-    [SlayZone] claude-code exited with code 1. Switched to interactive shell for recovery.
-    [?2004h[01;32mpersona@<run-host>[00m:[01;34m~/repos/lab[00m$ 
 computers/c3/computer-runtime/supervisor-config.json  (json)
     {
       "currentFileSeen": true,

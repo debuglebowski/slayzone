@@ -96,8 +96,7 @@ trigger task_artifacts_state_version_delete: CREATE TRIGGER task_artifacts_state
 trigger task_artifacts_state_version_insert: CREATE TRIGGER task_artifacts_state_version_insert AFTER INSERT ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state_version_update AFTER UPDATE ON task_artifacts BEGIN INSERT INTO task_state_versions(task_id,version) SELECT NEW.task_id,1 WHERE NEW.task_id IS NOT NULL ON CONFLICT(task_id) DO UPDATE SET version=version+1; END
 
-## agent_sessions (3)
-{"id":"<new-uuid>","mode":"claude-code","cwd":null,"task_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","tab_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","conversation_id":"<new-uuid>","origin":"pending-spawn","status":"bound","pending_meta":"{\"usedResume\":false,\"spawnedAt\":<run-ms>,\"spawnToken\":\"<new-uuid>\"}","created_at":<run-ms>,"bound_at":<run-ms>,"ended_at":null}
+## agent_sessions (2)
 {"id":"<new-uuid>","mode":"claude-code","cwd":null,"task_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","tab_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":<run-ms>,"bound_at":<run-ms>,"ended_at":null}
 {"id":"chat:0c9ca89d-eda2-40c1-bc73-a4dd6fd2e24d:223ac4dc-feda-4045-844f-8798ed6c7db1:1794395084258","mode":"claude-chat","cwd":null,"task_id":"4fbb1396-c063-442c-a65b-6a2b8cf83756","tab_id":"4fbb1396-c063-442c-a65b-6a2b8cf83756","conversation_id":"96f4bb05-f911-4343-b9b4-463997838d61","origin":"slay-spawned-fresh","status":"dead","pending_meta":null,"created_at":1794395084258,"bound_at":1794395084258,"ended_at":null}
 
@@ -233,8 +232,7 @@ trigger task_artifacts_state_version_update: CREATE TRIGGER task_artifacts_state
 
 ## task_cleanup_pending (0)
 
-## task_conversations (3)
-{"id":"<new-uuid>","task_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","mode":"claude-code","tab_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","conversation_id":"<new-uuid>","origin":"pending-spawn","pending_meta":"{\"usedResume\":false,\"spawnedAt\":<run-ms>,\"spawnToken\":\"<new-uuid>\"}","created_at":<run-ms>}
+## task_conversations (2)
 {"id":"<new-uuid>","task_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","mode":"claude-code","tab_id":"dc07fae9-36f4-407d-a39c-d1168571ae9e","conversation_id":"<new-uuid>","origin":"slay-spawned-fresh","pending_meta":null,"created_at":<run-ms>}
 {"id":"chat:0c9ca89d-eda2-40c1-bc73-a4dd6fd2e24d:223ac4dc-feda-4045-844f-8798ed6c7db1:1794395084258","task_id":"4fbb1396-c063-442c-a65b-6a2b8cf83756","mode":"claude-chat","tab_id":"4fbb1396-c063-442c-a65b-6a2b8cf83756","conversation_id":"96f4bb05-f911-4343-b9b4-463997838d61","origin":"slay-spawned-fresh","pending_meta":null,"created_at":1794395084258}
 

@@ -108,7 +108,7 @@ REMOVED="Its computer was removed"
 cat > /tmp/facts.json <<J
 {"lifecycle":{"disabled":"$IDLE","reEnrolledOld":"$CI","reEnrolledNew":"$CI2","deleted":"$OLD",
 "trashedTask":"$TTRASH","restoredTask":"$TBACK","archivedTask":"$TARCH","liveTask":"$TLIVE","deletedArtifact":"$GONE",
-"escapeHatch":{"tab":"$TLAB","computer":"ci-box"}},
+"escapeHatch":{"tab":"$TLAB","computer":"ci-box","availability":"ready"}},
 "expect":{
 "$TOPS":{"refused":"is disabled, so it takes no new work","availability":"ready","why":"its computer idle-box is disabled; history stays readable"},
 "$TLAB":{"refused":"is not connected","availability":"offline","why":"ran on ci-box's old id: that row stays, offline (v0.38 re-enroll links no successor)"},

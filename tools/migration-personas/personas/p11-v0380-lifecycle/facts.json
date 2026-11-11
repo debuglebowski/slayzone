@@ -9,7 +9,7 @@
     "archivedTask": "ee5705c5-cb7b-4e69-9271-751fd7f64334",
     "liveTask": "c13468fa-a7df-4935-875e-fdfd0a5b1220",
     "deletedArtifact": "d01a3dc2-e87d-4e93-b33a-714cb6f60694",
-    "escapeHatch": { "tab": "4fbb1396-c063-442c-a65b-6a2b8cf83756", "computer": "ci-box" }
+    "escapeHatch": { "tab": "4fbb1396-c063-442c-a65b-6a2b8cf83756", "computer": "ci-box", "availability": "ready" }
   },
   "expect": {
     "3563b77a-018e-4839-8772-fea05895b93e": {

@@ -10,7 +10,7 @@ ok   use :51100: continuing claude-chat tab d18ae771-20ef-47b7-bc57-726cb1f5ea56
 ok   use :51100: continuing claude-code tab ee5705c5-cb7b-4e69-9271-751fd7f64334 refused as it must (archived): paused or deleted
 ok   use :51100: continuing claude-code tab f18b04be-e413-468d-bb6e-d9fc850ee0ce refused as it must (trashed at v0.38: archived since Trash was removed (v198)): paused or deleted
 note use :51100: continued 3/9 agent tab(s) (chat.start / pty.create)
-ok   use :51100: re-enroll escape hatch: removed the stale old ci-box (computers.delete)
+ok   use :51100: re-enroll escape hatch: replaced the stale old ci-box with its new id (computers.replace)
 ok   use :51100: re-enroll escape hatch: chat of tab 4fbb1396-c063-442c-a65b-6a2b8cf83756 adopted by the new ci-box (owner new id)
 ok   use :51100: re-enroll escape hatch: availability ready (want ready)
 ok   use :51100: re-enroll escape hatch: agent start no longer refused
@@ -41,7 +41,8 @@ ok   .slayzone/stable/hub/slayzone.data.sqlite: chat bookkeeping names gone comp
 ok   .slayzone/stable/hub/slayzone.data.sqlite: retired computer ac3e035b (missing) has 0 undeliverable item(s) left (applyComputerRetirements)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 70140abf on retired ac3e035b is shown unavailable (waits for ac3e035b)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 30d3cc34 on retired ac3e035b is shown unavailable (waits for ac3e035b)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: retired computer 30f4e0e0 (deleted) has 0 undeliverable item(s) left (applyComputerRetirements)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: retired computer 30f4e0e0 (re-enrolled) has 0 undeliverable item(s) left (applyComputerRetirements)
+ok   .slayzone/stable/hub/slayzone.data.sqlite: retired 30f4e0e0 → successor 15c5c16f: 0 chat(s) left on the old id
 ok   .slayzone/stable/hub/slayzone.data.sqlite: deleted computer ac3e035b has no row and is retired (missing)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 70140abf that ran on the deleted computer is kept (active)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: chat 30d3cc34 that ran on the deleted computer is kept (active)
@@ -49,7 +50,7 @@ ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer b47ac68e stays
 ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer b47ac68e is not retired
 ok   .slayzone/stable/hub/slayzone.data.sqlite: disabled computer keeps its work (4 binding(s)/folder(s)/chat(s))
 ok   .slayzone/stable/hub/slayzone.data.sqlite: no chat on the disabled computer is marked unavailable (0)
-ok   .slayzone/stable/hub/slayzone.data.sqlite: re-enrolled computer's old id 30f4e0e0 removed by the user: retired (deleted), nothing names it
+ok   .slayzone/stable/hub/slayzone.data.sqlite: re-enrolled computer's old id 30f4e0e0 replaced by the user: retired (re-enrolled) → 15c5c16f, nothing names it
 ok   .slayzone/stable/hub/slayzone.data.sqlite: chat of tab 4fbb1396 is owned by the new id 15c5c16f (15c5c16f)
 ok   .slayzone/stable/hub/slayzone.data.sqlite: re-enrolled computer's new id 15c5c16f is registered and live
 ok   .slayzone/stable/hub/slayzone.data.sqlite: no task left in Trash (0)
