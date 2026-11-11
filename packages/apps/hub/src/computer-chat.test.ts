@@ -325,3 +325,71 @@ test('Trash state and final deletion remain durable after task rows disappear', 
     h.cleanup()
   }
 })
+
+test('a retirement asked for while a pass runs is applied: the caller never joins a pass that read before its change', async () => {
+  const h = await createTestHarness()
+  try {
+    h.db.exec(
+      "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+    )
+    // The hub-start pass reads computer_retirements, and its answer is held until the
+    // computer below was deleted: it read the table before that deletion.
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    let held = false
+    const db = new Proxy(h.slayDb, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver)
+        if (key !== 'all' || typeof value !== 'function') return value
+        return async (sql: string, ...rest: unknown[]) => {
+          const rows = await value.call(target, sql, ...rest)
+          if (!held && sql.includes('FROM computer_retirements')) {
+            held = true
+            await gate
+          }
+          return rows
+        }
+      }
+    }) as typeof h.slayDb
+    const services = createComputerChatServices({
+      db,
+      legacyData: {
+        ...createDbChatDataOps(h.slayDb, taskSessionStore),
+        buildMcpEnv: async () => ({})
+      },
+      attachments: { read: async () => Buffer.alloc(0) },
+      request: async (pc) => {
+        throw new Error(`computer '${pc}' is not connected`)
+      },
+      resolveComputer: async () => 'gone',
+      defaultComputer: async () => 'gone',
+      hasLiveTask: async () => false
+    })
+    await vi.waitFor(() => expect(held).toBe(true))
+    await services.ownership.register({
+      id: 'store',
+      taskId: 'task',
+      tabId: 'tab',
+      mode: 'claude-chat',
+      computerId: 'gone',
+      epoch: 1
+    })
+    h.db
+      .prepare(
+        "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+      )
+      .run()
+    const asked = services.retireComputers()
+    release()
+    await asked
+    expect(
+      h.db
+        .prepare('SELECT 1 AS ok FROM chat_unavailable_owners WHERE conversation_id=?')
+        .get('store')
+    ).toEqual({ ok: 1 })
+  } finally {
+    h.cleanup()
+  }
+})

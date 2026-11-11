@@ -2423,7 +2423,7 @@ export function composeServer(opts: {
       processesComputerRemoved(computerId)
       // Chat work addressed to a deleted computer is retired now (a revoked one waits).
       void computerChat
-        .retireComputers()
+        .computerRemoved(computerId)
         .catch((error: unknown) => console.error('[chat] computer retirement failed:', error))
       // Its direct-link grants go with it, whoever removed it (docs/direct-link.md).
       void directLinkIssuer

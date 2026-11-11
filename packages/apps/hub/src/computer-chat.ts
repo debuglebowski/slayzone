@@ -201,13 +201,36 @@ export function createComputerChatServices(opts: {
     recoverTabTransitions: (computerId, identity, transitions) =>
       relay.recoverProviderTransitions(computerId, identity, transitions)
   })
-  /** Idempotent; one pass at a time, so concurrent callers share it. */
+  /**
+   * Idempotent; one pass at a time. A caller arriving while a pass runs gets another
+   * pass after it: the running one may have read the retirements before the caller's
+   * change (a computer just deleted), so joining it could skip that change.
+   */
   let retiring: Promise<void> | null = null
+  let retireAgain = false
   function retireComputers(): Promise<void> {
-    retiring ??= applyComputerRetirements(opts.db).finally(() => {
+    if (retiring) {
+      retireAgain = true
+      return retiring
+    }
+    retiring = (async () => {
+      do {
+        retireAgain = false
+        await applyComputerRetirements(opts.db)
+      } while (retireAgain)
+    })().finally(() => {
       retiring = null
     })
     return retiring
+  }
+  /**
+   * A computer was deleted or re-enrolled: its cached recovery pass is stale (a later
+   * recovery must apply its retirement, not return the old result), and the chat work
+   * naming it is moved or retired now.
+   */
+  function computerRemoved(computerId: string): Promise<void> {
+    invalidateRecovery(computerId)
+    return retireComputers()
   }
   // Hub start: a computer removed while the hub was down stops blocking now.
   void retireComputers().catch((error: unknown) =>
@@ -1009,6 +1032,7 @@ export function createComputerChatServices(opts: {
     computers,
     /** A computer was deleted or re-enrolled: move or retire the chat work naming it. */
     retireComputers,
+    computerRemoved,
     availability: createChatAvailability({
       historyGeneration,
       db: opts.db,
