@@ -2,8 +2,7 @@ import React, { useCallback, useImperativeHandle, useMemo, useRef, useState, typ
 import { useTRPCClient } from './trpc'
 import { useUndo } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'
-import { defaultProjectRoot, resolveRepoPath, type Project } from '@slayzone/projects-contracts'
-import { useProjectRepos } from '@slayzone/worktrees/hooks'
+import type { Project } from '@slayzone/projects-contracts'
 import {
   useTasksData,
   useFilterState,
@@ -184,35 +183,6 @@ function HomeContainerImpl({
     [projects, selectedProjectId]
   )
 
-  // Multi-repo detection for the git panel — same source as the task git panel.
-  const { repos: homeViewableRepos } = useProjectRepos(
-    defaultProjectRoot(selectedProject),
-    null,
-    selectedProject?.id
-  )
-  const homeDetectedRepos = useMemo(
-    () => homeViewableRepos.map((r) => ({ name: r.name, path: r.path, kind: r.kind })),
-    [homeViewableRepos]
-  )
-  const homeResolvedRepo = useMemo(
-    () =>
-      resolveRepoPath(
-        defaultProjectRoot(selectedProject),
-        homeDetectedRepos,
-        selectedProject?.selected_repo ?? null
-      ),
-    [selectedProject, homeDetectedRepos]
-  )
-  const handleHomeRepoChange = useCallback(
-    (repoName: string) => {
-      if (!selectedProject) return
-      void trpcClient.projects.update
-        .mutate({ id: selectedProject.id, selectedRepo: repoName })
-        .then((updated) => updateProject(updated as Project))
-    },
-    [selectedProject, trpcClient, updateProject]
-  )
-
   // Filtered board data for the selected project.
   const projectTasks = useMemo(
     () => (selectedProjectId ? tasks.filter((t) => t.project_id === selectedProjectId) : []),
@@ -321,10 +291,6 @@ function HomeContainerImpl({
       resetPanelSize={resetPanelSize}
       testsPanelEnabled={testsPanelEnabled}
       testGroupBy={testGroupBy}
-      homeResolvedRepo={homeResolvedRepo}
-      homeDetectedRepos={homeDetectedRepos}
-      homeSelectedProject={selectedProject ?? undefined}
-      handleHomeRepoChange={handleHomeRepoChange}
       isViewActive={isActive}
       isHomeTabActive={isActive}
       tasks={tasks}

@@ -35,7 +35,9 @@ const client = makeClient()
 
 vi.mock('./trpc', () => ({
   useTRPCClient: () => client,
-  getTrpcClient: () => client
+  getTrpcClient: () => client,
+  // Every project here is the default hub's.
+  getClientForHub: () => client
 }))
 vi.mock('@slayzone/file-editor/client/useWatchedFile', () => ({
   useWatchedFile: () => ({

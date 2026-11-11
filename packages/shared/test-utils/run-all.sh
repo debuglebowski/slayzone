@@ -1377,6 +1377,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/projects/src/client/useProjectLockState.test.tsx \
   packages/domains/terminal/src/client/BackgroundJobsBanner.test.tsx \
   packages/domains/ai-config/src/client/state-sync-hooks.test.tsx \
+  packages/domains/ai-config/src/client/stale-skill-counts.hub.test.tsx \
   packages/domains/ai-config/src/client/state-sync-components.test.tsx \
   packages/domains/ai-config/src/client/context-manager-slots.test.tsx \
   packages/domains/settings/src/client/tabs/settings-state-sync.test.tsx \
@@ -1388,6 +1389,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/useSharedCardHeights.test.tsx \
   packages/apps/app/src/renderer/src/components/SecondaryTaskWindow.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/project-path-diagnostics.test.tsx \
+  packages/apps/app/src/renderer/src/app-shell/useProjectPathGuard.hub.test.tsx \
   packages/apps/app/src/renderer/src/app-shell/ActiveTabSync.read-clear.test.tsx \
   packages/apps/renderer-app/src/ExtensionsModal.test.tsx \
   packages/domains/agent-panels/src/agent-status/agent-status-hooks.test.tsx \

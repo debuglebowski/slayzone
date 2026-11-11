@@ -22,7 +22,7 @@ import { Button, PanelToggle, cn } from '@slayzone/ui'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
-import { defaultProjectRoot, placementOn, resolveRepoPath } from '@slayzone/projects-contracts'
+import { defaultProjectRoot, placementOn } from '@slayzone/projects-contracts'
 import {
   ProjectLockPopover,
   ProjectLockScreen,
@@ -40,6 +40,7 @@ import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 import { getViewConfig } from '@slayzone/tasks/hooks'
 import { ProjectTaskLibrary } from '@slayzone/tasks/client'
 import { useHomePanel, HOME_PANEL_SIZE_KEY } from './useHomePanel'
+import { useHomeRepos } from './useHomeRepos'
 import {
   FilterBar,
   KanbanBoard,
@@ -60,7 +61,6 @@ type ProjectSettingsTab = string
 
 type KanbanProps = ComponentProps<typeof KanbanBoard>
 type FilterBarProps = ComponentProps<typeof FilterBar>
-type GitPanelProps = ComponentProps<typeof UnifiedGitPanel>
 type PanelSizesApi = ReturnType<typeof useGlobalPanelSizes>
 type PanelConfigApi = ReturnType<typeof usePanelConfig>
 type HomePanelApi = ReturnType<typeof useHomePanel>
@@ -95,10 +95,6 @@ export interface HomeDetailProps {
   resetPanelSize: PanelSizesApi[2]
   testsPanelEnabled: boolean
   testGroupBy: ComponentProps<typeof TestPanel>['groupBy']
-  homeResolvedRepo: ReturnType<typeof resolveRepoPath>
-  homeDetectedRepos: GitPanelProps['detectedRepos']
-  homeSelectedProject: Project | undefined
-  handleHomeRepoChange: GitPanelProps['onRepoChange']
   isViewActive: boolean
   isHomeTabActive: boolean
   tasks: Task[]
@@ -161,10 +157,6 @@ export function HomeDetail({
   resetPanelSize,
   testsPanelEnabled,
   testGroupBy,
-  homeResolvedRepo,
-  homeDetectedRepos,
-  homeSelectedProject,
-  handleHomeRepoChange,
   isViewActive,
   isHomeTabActive,
   tasks,
@@ -195,6 +187,11 @@ export function HomeDetail({
   panelAutomationsShortcut
 }: HomeDetailProps): React.JSX.Element {
   const trpcClient = useTRPCClient()
+  // Here, not in the caller: inside the Home view's hub scope (the selected project's hub).
+  const { homeResolvedRepo, homeDetectedRepos, handleHomeRepoChange } = useHomeRepos(
+    selectedProject,
+    updateProject
+  )
   const {
     homeContainerRef,
     homeContainerWidth,
@@ -564,7 +561,7 @@ export function HomeDetail({
                               })
                             }
                             detectedRepos={homeDetectedRepos}
-                            selectedRepoName={homeSelectedProject?.selected_repo}
+                            selectedRepoName={selectedProject?.selected_repo}
                             isRepoStale={homeResolvedRepo.stale}
                             onRepoChange={handleHomeRepoChange}
                           />

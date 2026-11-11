@@ -7,4 +7,6 @@ import type { AiConfigMounts } from '../server/ai-config-router'
  * This domain's typed view of the shared tRPC client (one runtime, one socket per hub),
  * typed against only the routers ai-config calls: its own `aiConfig` and `settings`.
  */
-export const { useTRPCClient, getTrpcClient } = typedTrpc<AiConfigMounts & SettingsMounts>()
+export const { useTRPCClient, getTrpcClient, getClientForHub } = typedTrpc<
+  AiConfigMounts & SettingsMounts
+>()

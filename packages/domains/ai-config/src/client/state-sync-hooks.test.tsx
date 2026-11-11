@@ -40,6 +40,8 @@ let client = makeClient()
 
 vi.mock('./trpc', () => ({
   useTRPCClient: () => client,
+  // Every project here is the default hub's.
+  getClientForHub: (_hubId: string | undefined, fallback: unknown) => fallback ?? client,
   // useContextManagerStore hydrates at import and persists on a 500ms debounce through
   // the vanilla client. Not under test here: an inert client keeps those calls out of
   // `calls`, and a debounce firing after its test can't throw on a missing export.

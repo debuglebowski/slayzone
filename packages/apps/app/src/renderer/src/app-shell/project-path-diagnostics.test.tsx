@@ -50,7 +50,9 @@ const client = {
 
 vi.mock('@/trpc', () => ({
   useTRPCClient: () => client,
-  getTrpcClient: () => client
+  getTrpcClient: () => client,
+  // Every project here is the default hub's.
+  getClientForHub: (_hubId: string | undefined, fallback: unknown) => fallback ?? client
 }))
 vi.mock('@slayzone/tabs-state', () => {
   const state = { activeTabIndex: 0, setSelectedProjectId: () => {} }

@@ -14,6 +14,8 @@ import {
   useSubscription,
   useFederationOrNull,
   getHubIdForProject,
+  getHubIdForTask,
+  HubScope,
   useHubOwnershipStore
 } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient, getClientForHub } from './trpc'
@@ -22,12 +24,7 @@ import { useAppBadge } from './hooks/useAppBadge'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project, ColumnConfig } from '@slayzone/projects-contracts'
 import { globalAgentPanelSessionId } from '@slayzone/terminal-contracts'
-import {
-  isCompletedStatus,
-  resolveRepoPath,
-  defaultProjectRoot,
-  placementOn
-} from '@slayzone/projects-contracts'
+import { isCompletedStatus, defaultProjectRoot, placementOn } from '@slayzone/projects-contracts'
 // Domains
 import {
   useTasksData,
@@ -49,7 +46,6 @@ import { usePanelConfig } from '@slayzone/task/client/usePanelConfig'
 // Same module TabPanes' task fallback comes from (eager either way).
 import { markTerminalFirst } from '@slayzone/task/client/TerminalFirstShell'
 import { buildTaskDetailSnapshot, taskDetailCache } from '@slayzone/task/client/taskDetailCache'
-import { useProjectRepos } from '@slayzone/worktrees/hooks'
 import type { ProjectCreationContext } from '@slayzone/projects'
 import {
   isRateLimited,
@@ -318,47 +314,16 @@ function App(): React.JSX.Element {
     () => hubIdByProject.get(selectedProjectId) ?? defaultHubId,
     [hubIdByProject, selectedProjectId, defaultHubId]
   )
-  // Path existence and repo detection used to be gated to the local hub, because
-  // they ran against whichever hub the client was talking to and so said nothing
-  // true about a project whose files live elsewhere. They now route to the computer
-  // that owns the workspace, so the gate is gone — the answer is correct for
-  // every hub. `selectedProjectHubId` remains for routing the queries themselves.
-
-  // Multi-repo detection for home tab
-  const homeSelectedProject = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId),
-    [projects, selectedProjectId]
+  // Project-scoped calls made HERE (the shell, under the default hub's client) go to
+  // the hub that OWNS the project / task: `clientForProject` / `clientForTask`. The
+  // Home view's own calls (repos, git, editor…) run inside its HubScope instead.
+  const clientForProject = useCallback(
+    (projectId: string) => getClientForHub(getHubIdForProject(projectId), trpcClient),
+    [trpcClient]
   )
-  // Same data source as task git panel — flat list of project-root + child repos + recursive submodules.
-  const { repos: homeViewableRepos } = useProjectRepos(
-    defaultProjectRoot(homeSelectedProject),
-    null,
-    homeSelectedProject?.id
-  )
-  const homeDetectedRepos = useMemo(
-    () => homeViewableRepos.map((r) => ({ name: r.name, path: r.path, kind: r.kind })),
-    [homeViewableRepos]
-  )
-  const homeResolvedRepo = useMemo(
-    () =>
-      resolveRepoPath(
-        defaultProjectRoot(homeSelectedProject),
-        homeDetectedRepos,
-        homeSelectedProject?.selected_repo ?? null
-      ),
-    [homeSelectedProject, homeDetectedRepos]
-  )
-  const homeSelectedProjectId = homeSelectedProject?.id
-  const handleHomeRepoChange = useCallback(
-    (repoName: string) => {
-      if (!homeSelectedProjectId) return
-      trpcClient.projects.update
-        .mutate({ id: homeSelectedProjectId, selectedRepo: repoName })
-        .then((updated) => {
-          updateProject(updated)
-        })
-    },
-    [homeSelectedProjectId, updateProject, trpcClient]
+  const clientForTask = useCallback(
+    (taskId: string) => getClientForHub(getHubIdForTask(taskId), trpcClient),
+    [trpcClient]
   )
 
   // Project path validation (extracted — validates on select + window focus)
@@ -788,7 +753,7 @@ function App(): React.JSX.Element {
   )
 
   const handleTaskTagsChange = async (taskId: string, tagIds: string[]) => {
-    await trpcClient.tags.setForTask.mutate({ taskId, tagIds })
+    await clientForTask(taskId).tags.setForTask.mutate({ taskId, tagIds })
     setTaskTags((prev) => {
       const next = new Map(prev)
       next.set(taskId, tagIds)
@@ -1103,13 +1068,13 @@ function App(): React.JSX.Element {
       const project = useTabStore
         .getState()
         ._taskLookup.projects.find((item) => item.id === task.project_id)
-      const converted = await trpcClient.task.update.mutate(
+      const converted = await clientForTask(task.id).task.update.mutate(
         keepScratchTaskInput(task.id, project?.columns_config)
       )
       updateTask(converted)
       return converted
     },
-    [updateTask, trpcClient]
+    [updateTask, clientForTask]
   )
 
   // The dialog already ran `deleteTask` (onDeleteTask) and only calls this once the
@@ -1243,7 +1208,7 @@ function App(): React.JSX.Element {
     const project = projects.find((p) => p.id === selectedProjectId)
     if (project && trimmed !== project.name) {
       try {
-        const updated = await trpcClient.projects.update.mutate({
+        const updated = await clientForProject(selectedProjectId).projects.update.mutate({
           id: selectedProjectId,
           name: trimmed,
           color: project.color
@@ -1334,10 +1299,6 @@ function App(): React.JSX.Element {
       resetPanelSize={resetPanelSize}
       testsPanelEnabled={testsPanelEnabled}
       testGroupBy={testGroupBy}
-      homeResolvedRepo={homeResolvedRepo}
-      homeDetectedRepos={homeDetectedRepos}
-      homeSelectedProject={homeSelectedProject}
-      handleHomeRepoChange={handleHomeRepoChange}
       isViewActive={isViewActive}
       isHomeTabActive={isHomeTabActive}
       tasks={tasks}
@@ -1582,7 +1543,10 @@ function App(): React.JSX.Element {
                     onTabClose={(i) => closeTab(toFullIndex(i))}
                     onTabReorder={(from, to) => reorderTabs(toFullIndex(from), toFullIndex(to))}
                     onTabRename={async (taskId, title) => {
-                      const t = await trpcClient.task.update.mutate({ id: taskId, title })
+                      const t = await clientForTask(taskId).task.update.mutate({
+                        id: taskId,
+                        title
+                      })
                       updateTask(t)
                     }}
                     leftContent={
@@ -1897,26 +1861,29 @@ function App(): React.JSX.Element {
               than inside the guard hook (a hook cannot render), and browsing the
               COMPUTER that owns the project — the native dialog it replaces browsed
               this desktop, so on a remote computer it returned a path that did not
-              exist there. */}
-          <WorkspaceDirPicker
-            open={fixPickerOpen}
-            onOpenChange={setFixPickerOpen}
-            onSelect={(path) =>
-              applyFixedPath(path).catch((err: unknown) =>
-                toast.error("Couldn't use that folder", {
-                  description: err instanceof Error ? err.message : String(err)
-                })
-              )
-            }
-            target={{ projectId: selectedProjectId }}
-            title="Select project directory"
-            defaultPath={
-              placementOn(
-                projects.find((p) => p.id === selectedProjectId),
-                projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
-              )?.path ?? null
-            }
-          />
+              exist there. In the project's OWN hub's scope: the shell's default
+              hub does not know another hub's project. */}
+          <HubScope hubId={selectedProjectHubId}>
+            <WorkspaceDirPicker
+              open={fixPickerOpen}
+              onOpenChange={setFixPickerOpen}
+              onSelect={(path) =>
+                applyFixedPath(path).catch((err: unknown) =>
+                  toast.error("Couldn't use that folder", {
+                    description: err instanceof Error ? err.message : String(err)
+                  })
+                )
+              }
+              target={{ projectId: selectedProjectId }}
+              title="Select project directory"
+              defaultPath={
+                placementOn(
+                  projects.find((p) => p.id === selectedProjectId),
+                  projects.find((p) => p.id === selectedProjectId)?.resolved_computer_id
+                )?.path ?? null
+              }
+            />
+          </HubScope>
         </div>
       </SidebarProvider>
     </AppearanceProvider>

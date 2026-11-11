@@ -1,8 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { defaultProjectRoot, type Project } from '@slayzone/projects-contracts'
-import { useTRPCClient } from './trpc'
+import { getHubIdForProject } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 
 type Pair = { projectId: string; projectPath: string }
+type Client = ReturnType<typeof useTRPCClient>
+
+/**
+ * Count `batch` on the hub that OWNS each project (multi-hub federation: the sidebar
+ * lists every hub's projects, and the hub this hook runs under does not know another
+ * hub's). One query per hub; a hub that fails leaves its projects uncounted, the
+ * others' counts stand. Rejects only when every hub failed.
+ */
+async function countOnOwningHubs(
+  batch: readonly Pair[],
+  ambient: Client
+): Promise<Record<string, number>> {
+  const byHub = new Map<string | undefined, Pair[]>()
+  for (const p of batch) {
+    const hubId = getHubIdForProject(p.projectId)
+    const group = byHub.get(hubId)
+    if (group) group.push(p)
+    else byHub.set(hubId, [p])
+  }
+  const results = await Promise.allSettled(
+    [...byHub].map(([hubId, group]) =>
+      getClientForHub(hubId, ambient).aiConfig.getProjectsStaleSkillCounts.query(group)
+    )
+  )
+  const ok = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+  if (ok.length === 0 && results.length > 0) throw (results[0] as PromiseRejectedResult).reason
+  return Object.assign({}, ...ok)
+}
 
 interface CountScheduler {
   /** The projects listed now: projectId → path. */
@@ -103,11 +132,7 @@ export function useStaleSkillCounts(
         sched.queue.set(p.projectId, p.projectPath)
         sched.counted.set(p.projectId, p.projectPath)
       }
-      pump(
-        sched,
-        (batch) => trpcClient.aiConfig.getProjectsStaleSkillCounts.query(batch),
-        setCounts
-      )
+      pump(sched, (batch) => countOnOwningHubs(batch, trpcClient), setCounts)
     },
     [trpcClient]
   )
