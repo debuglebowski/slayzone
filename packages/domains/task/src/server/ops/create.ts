@@ -19,7 +19,6 @@ import {
   parseTask,
   type OpDeps
 } from './shared.js'
-import { resolveTaskComputerId } from '@slayzone/computers/server'
 import { insertTaskRow } from './insert.js'
 
 /** `err.code` on the create-time "this hub has no such project" error. */
@@ -170,10 +169,12 @@ export async function createTaskOp(
       // it takes the parent's pin too: its work runs where those folders are, and a
       // subtask left unpinned in a project defaulting elsewhere named a folder its
       // computer did not have (found by tools/migration-personas, p10-v0380-worktrees).
-      // Its holder is the computer holding the parent's folders (the one resolver:
-      // holder, else pin, else the project default).
+      // Its holder is the parent's recorded holder as is: the same folders, wherever
+      // they are. Not recorded yet stays unrecorded (it resolves like the parent, by
+      // the copied pin); a deleted holder stays deleted, never a live computer that
+      // never had the folder.
       const inherits = parent.has_worktree === 1 || parent.has_base_dir === 1
-      const holder = inherits ? await resolveTaskComputerId(db, data.parentId) : null
+      const holder = inherits ? parent.worktree_computer_id : null
       await db.run(
         `
         UPDATE tasks

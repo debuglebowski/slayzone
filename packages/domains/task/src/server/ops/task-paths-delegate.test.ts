@@ -225,7 +225,8 @@ test('a subtask that inherits its parent’s folders takes the parent’s comput
       worktree_computer_id: 'bb',
       has_worktree: 1
     })
-    // Holder not recorded yet: the parent's pin holds the folders, the subtask's too.
+    // Holder not recorded yet: the subtask mirrors that (nothing guessed). It resolves
+    // like its parent: the copied pin.
     h.db.prepare('UPDATE tasks SET worktree_computer_id=NULL WHERE id=?').run(parent.id)
     const child2 = (await createTaskOp(
       h.slayDb,
@@ -234,7 +235,33 @@ test('a subtask that inherits its parent’s folders takes the parent’s comput
     ))!
     expect(row(child2.id)).toEqual({
       computer_id: 'bb',
-      worktree_computer_id: 'bb',
+      worktree_computer_id: null,
+      has_worktree: 1
+    })
+    // The parent's holder was deleted: the subtask's folder is on that gone computer
+    // too. It must not be recorded on a live computer that never had the folder (that
+    // would lock the subtask to it: assertTaskMovable).
+    h.db
+      .prepare(
+        `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at)
+         VALUES ('gone', 'old-box', 'linux', '1', '[]', 0)`
+      )
+      .run()
+    h.db.prepare("UPDATE tasks SET worktree_computer_id='gone' WHERE id=?").run(parent.id)
+    h.db.prepare("DELETE FROM computers WHERE id='gone'").run()
+    h.db
+      .prepare(
+        "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+      )
+      .run()
+    const orphan = (await createTaskOp(
+      h.slayDb,
+      { projectId, title: 'Orphan', parentId: parent.id },
+      {}
+    ))!
+    expect(row(orphan.id)).toEqual({
+      computer_id: 'bb',
+      worktree_computer_id: 'gone',
       has_worktree: 1
     })
     // No folder to inherit: the subtask keeps its own (no) pin.
