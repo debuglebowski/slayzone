@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
+import { createFakeClaude } from '../../../shared/test-utils/fake-claude'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import {
   notifyTaskPaths,
@@ -88,6 +89,9 @@ const soakData: DataImportKinds = {
 test('normal use across repeated hub and computer restarts never leaves a task unusable', async () => {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-soak-'))
+  // Any provider spawn resolves `claude` to the scripted fake, never to a real
+  // CLI that happens to be on this machine's PATH (CI has none; dev boxes do).
+  const fakeClaude = createFakeClaude({ root: join(dir, 'fake-claude') })
   /** The computer's current enrollment id: re-enrolling or deleting it changes it. */
   let pcId = 'pc'
   const openComputer = () =>
@@ -107,7 +111,8 @@ test('normal use across repeated hub and computer restarts never leaves a task u
           hubUrl: 'ws://hub/computers',
           name: 'pc',
           allowedRoots: [realpathSync(tmpdir())],
-          capabilities: ['proc']
+          capabilities: ['proc'],
+          binOverrideDir: fakeClaude.binDir
         },
         dialer: { notify: () => true },
         log: () => {}
@@ -926,6 +931,7 @@ test('normal use across repeated hub and computer restarts never leaves a task u
     warnings.mockRestore()
     errors.mockRestore()
     await pc.close()
+    fakeClaude.dispose()
     h.cleanup()
     rmSync(dir, { recursive: true, force: true })
   }

@@ -19,7 +19,11 @@
     ],
     "computers": [
       { "name": "build-box", "root": "computers/c2" },
-      { "name": "gpu-box", "root": "computers/c3", "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110" } }
+      {
+        "name": "gpu-box",
+        "root": "computers/c3",
+        "env": { "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110" }
+      }
     ]
   }
 }

@@ -4,10 +4,7 @@
   "summary": "v0.36.2 user (schema v171) with two hubs and four computers: the desktop hub + local computer, a standalone team hub registered in the app, build-box on both hubs, gpu-box on the team hub; projects/tasks bound to specific computers on both hubs.",
   "topology": {
     "desktop": true,
-    "desktopComputers": [
-      "local-computer",
-      "build-box"
-    ],
+    "desktopComputers": ["local-computer", "build-box"],
     "hubs": [
       {
         "name": "team-hub",
@@ -17,10 +14,7 @@
           "SLAYZONE_HUB_NAME": "team-hub",
           "SLAYZONE_HUB_ENABLE_TELEMETRY": "0"
         },
-        "computers": [
-          "build-box",
-          "gpu-box"
-        ]
+        "computers": ["build-box", "gpu-box"]
       }
     ],
     "computers": [

@@ -4,9 +4,7 @@
   "summary": "v0.36.2 desktop user (schema v171) mixing agents: Codex chat history (hub-held at this release) \u2014 a two-turn chat and a done one-turn chat \u2014 plus a Claude chat in the same project.",
   "topology": {
     "desktop": true,
-    "desktopComputers": [
-      "local-computer"
-    ],
+    "desktopComputers": ["local-computer"],
     "hubs": [],
     "computers": []
   }

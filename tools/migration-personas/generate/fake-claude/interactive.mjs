@@ -16,7 +16,12 @@ const [sessionId, source] = process.argv.slice(2)
 if (!sessionId) process.exit(0)
 const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude')
 const cwd = process.cwd()
-const file = path.join(configDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`)
+const file = path.join(
+  configDir,
+  'projects',
+  cwd.replace(/[^a-zA-Z0-9]/g, '-'),
+  `${sessionId}.jsonl`
+)
 if (!fs.existsSync(file)) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const at = new Date().toISOString()
@@ -28,14 +33,27 @@ if (!fs.existsSync(file)) {
 let settings = {}
 try {
   settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf8'))
-} catch {}
+} catch {
+  // No (readable) settings.json: no hooks configured.
+}
 // The hooks a real session fires: it starts, and on a fresh start the user types a
 // prompt and the turn ends (what makes the session the tab's current one).
 function fire(event, extra) {
-  const payload = JSON.stringify({ session_id: sessionId, transcript_path: file, cwd, hook_event_name: event, ...extra })
+  const payload = JSON.stringify({
+    session_id: sessionId,
+    transcript_path: file,
+    cwd,
+    hook_event_name: event,
+    ...extra
+  })
   for (const group of settings.hooks?.[event] ?? [])
     for (const h of group.hooks ?? [])
-      if (h.type === 'command') spawnSync('/bin/sh', ['-c', h.command], { input: payload, stdio: ['pipe', 'ignore', 'ignore'], timeout: 10_000 })
+      if (h.type === 'command')
+        spawnSync('/bin/sh', ['-c', h.command], {
+          input: payload,
+          stdio: ['pipe', 'ignore', 'ignore'],
+          timeout: 10_000
+        })
 }
 fire('SessionStart', { source: source === 'resume' ? 'resume' : 'startup' })
 if (source !== 'resume') {

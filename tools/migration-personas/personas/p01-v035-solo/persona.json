@@ -6,8 +6,6 @@
     "desktop": true,
     "hubs": [],
     "computers": [],
-    "desktopComputers": [
-      "local-computer"
-    ]
+    "desktopComputers": ["local-computer"]
   }
 }

@@ -757,7 +757,7 @@ function checkComputerChats(
           .all(c.id) as Array<{ event: string }>
       ).map((e) => canonicalEvent(e.event))
       // The old events must still open the conversation, in order. Continuing the chat
-      // after the upgrade (useTheApp) appends new ones after them.
+      // after the upgrade (exerciseTheApp) appends new ones after them.
       const kept = (chats.get(c.tab_id) ?? []).find(
         (x) =>
           x.store === rel &&
@@ -885,7 +885,7 @@ function checkInvariants(processProblems: string[], settle: string[]): string[] 
           )
         }
       }
-      // Lazy migrations, after the user has used the app (useTheApp): drained.
+      // Lazy migrations, after the user has used the app (exerciseTheApp): drained.
       const tabRecovery = count(db, 'session_tab_recovery')
       if (tabRecovery !== null)
         ((tabRecovery === 0 ? pass : fail) as (m: string) => void)(
@@ -955,7 +955,7 @@ function trpc(
  * sessions are first consulted). Returns `note` lines; the queues those steps drain are
  * checked as invariants after the stop.
  */
-async function useTheApp(hubs: Array<{ port: number; db: string }>): Promise<string[]> {
+async function exerciseTheApp(hubs: Array<{ port: number; db: string }>): Promise<string[]> {
   const notes: string[] = []
   for (const h of hubs) {
     try {
@@ -1121,7 +1121,7 @@ function inputChatSessions(): Map<string, string> {
 /**
  * After the upgrade, continuing a tab does what it must: resume ITS OWN pre-upgrade
  * agent session, or start fresh when it never had one of its own. Judged on the
- * process started for that tab (useTheApp's exact tab ↔ spawn map). Expectations: a
+ * process started for that tab (exerciseTheApp's exact tab ↔ spawn map). Expectations: a
  * chat tab resumes its last `turn-init` session in the input; the generator's ground
  * truth (facts.json `expect`, e.g. terminal tabs) overrides.
  */
@@ -1227,7 +1227,7 @@ async function main(): Promise<void> {
 
   const settle = await waitSettled(expect).catch((e: Error) => `TIMEOUT: ${e.message}`)
   log(`settle: ${settle}`)
-  const used = settle.startsWith('TIMEOUT') ? [] : await useTheApp(hubs)
+  const used = settle.startsWith('TIMEOUT') ? [] : await exerciseTheApp(hubs)
   const settle2 = used.length
     ? await waitSettled(expect).catch((e: Error) => `TIMEOUT: ${e.message}`)
     : 'settled'
