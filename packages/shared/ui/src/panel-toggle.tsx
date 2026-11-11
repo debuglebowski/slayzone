@@ -90,6 +90,7 @@ function PanelButton({
           style={style}
           {...dragProps}
           onClick={() => onChange(panel.id, !panel.active)}
+          aria-pressed={panel.active}
           disabled={panel.disabled}
           className={cn(
             'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors',

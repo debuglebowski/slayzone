@@ -31,13 +31,20 @@ const diffPanel = (page: Page) => page.locator('[data-testid="git-diff-panel"]:v
 async function openTaskDiff(page: Page, taskId: string) {
   await openTaskById(page, taskId)
   const gitPanel = page.locator('[data-testid="task-git-panel"]:visible')
-  // The panel's open state carries over between tasks: toggle it only when it stays shut.
-  const open = await gitPanel
-    .waitFor({ state: 'visible', timeout: 2_000 })
-    .then(() => true)
-    .catch(() => false)
-  if (!open) await page.keyboard.press('Meta+g')
-  await expect(gitPanel).toBeVisible({ timeout: 5_000 })
+  // The panel's open state carries over between tasks: open it only when its toggle
+  // says it is shut (a blind ⌘G closes a panel that was still mounting).
+  const toggle = page
+    .getByRole('button', { name: /^Git(?:\s|$)/ })
+    .locator('visible=true')
+    .first()
+  await expect(toggle).toBeVisible({ timeout: 10_000 })
+  // A click right after the tab opens can be undone by the task's panel layout
+  // loading after it: click again until the toggle stays on AND the panel shows.
+  await expect(async () => {
+    if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 1_000 })
+    await expect(gitPanel).toBeVisible({ timeout: 3_000 })
+  }).toPass({ timeout: 25_000 })
   await gitPanel.getByRole('button', { name: /^Diff(?:\s|$)/ }).click()
   await expect(diffPanel(page)).toBeVisible({ timeout: 5_000 })
 }
