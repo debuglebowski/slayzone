@@ -346,8 +346,9 @@ export function ComputerActionsProvider({ children }: { children: ReactNode }) {
             <AlertDialogDescription>
               Replace <strong>{replaceTarget?.former.label}</strong> with the same machine, enrolled
               again under a new id. Its tasks, project defaults, folders, worktrees and chats move
-              to the computer you pick, and {replaceTarget?.former.label} is deleted. Only for the
-              same machine: another one does not have its folders.
+              to the computer you pick, and {replaceTarget?.former.label} is deleted. Access shared
+              with other users is not carried over. Only for the same machine: another one does not
+              have its folders.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex flex-col gap-1" role="radiogroup" aria-label="Successor">
