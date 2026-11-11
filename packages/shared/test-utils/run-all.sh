@@ -551,6 +551,7 @@ run_harness packages/shared/db-migrations/src/v208-drop-provider-bindings-queue-
 run_harness packages/shared/db-migrations/src/v209-usage-cursors-to-computer-migration.test.ts
 run_harness packages/shared/db-migrations/src/v210-task-paths-to-computer-migration.test.ts
 run_harness packages/shared/db-migrations/src/v211-drop-hub-task-paths-migration.test.ts
+run_harness packages/shared/db-migrations/src/v214-task-path-handoff-repair-migration.test.ts
 run_harness packages/shared/db-migrations/src/v212-project-folder-bound-computers-migration.test.ts
 run_harness packages/shared/db-migrations/src/v213-drop-chat-session-tab-recovery-migration.test.ts
 run_harness packages/apps/api/src/owner-policy-path-ratchet.test.ts
@@ -1209,6 +1210,7 @@ run_harness packages/domains/task/src/shared/main-terminal.test.ts
 run_harness packages/domains/task/src/server/main-agent.test.ts
 # agentSessions.current: its computer offline is PRECONDITION_FAILED, never "no session" (S8).
 run_harness packages/domains/task/src/server/agent-sessions-router.test.ts
+run_harness packages/domains/task-contracts/src/api/update.test.ts
 run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
@@ -1270,6 +1272,8 @@ run_harness packages/domains/terminal-contracts/src/chat-model.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-model-catalog.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-mode.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-capabilities.test.ts
+# The chat availability message: a known unavailable reason (a removed computer) is shown.
+run_harness packages/domains/terminal-contracts/src/computer-chat.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-provider.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-attachments.test.ts
 run_harness packages/domains/terminal-contracts/src/chat-pinned-message.test.ts

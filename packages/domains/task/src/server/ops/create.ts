@@ -19,6 +19,7 @@ import {
   parseTask,
   type OpDeps
 } from './shared.js'
+import { resolveTaskComputerId } from '@slayzone/computers/server'
 import { insertTaskRow } from './insert.js'
 
 /** `err.code` on the create-time "this hub has no such project" error. */
@@ -158,26 +159,37 @@ export async function createTaskOp(
       worktree_parent_branch: string | null
       worktree_computer_id: string | null
       has_base_dir: number
+      computer_id: string | null
     }>(
-      'SELECT repo_name, has_worktree, worktree_parent_branch, worktree_computer_id, has_base_dir FROM tasks WHERE id = ?',
+      'SELECT repo_name, has_worktree, worktree_parent_branch, worktree_computer_id, has_base_dir, computer_id FROM tasks WHERE id = ?',
       [data.parentId]
     )
 
     if (parent) {
-      // The subtask's folders are its parent's, on the same computer.
+      // The subtask's folders are its parent's, on the same computer. Inheriting them,
+      // it takes the parent's pin too: its work runs where those folders are, and a
+      // subtask left unpinned in a project defaulting elsewhere named a folder its
+      // computer did not have (found by tools/migration-personas, p10-v0380-worktrees).
+      // Its holder is the computer holding the parent's folders (the one resolver:
+      // holder, else pin, else the project default).
+      const inherits = parent.has_worktree === 1 || parent.has_base_dir === 1
+      const holder = inherits ? await resolveTaskComputerId(db, data.parentId) : null
       await db.run(
         `
         UPDATE tasks
         SET repo_name = ?, has_worktree = ?, worktree_parent_branch = ?, worktree_computer_id = ?,
-            has_base_dir = ?, updated_at = datetime('now')
+            has_base_dir = ?, computer_id = CASE WHEN ? THEN ? ELSE computer_id END,
+            updated_at = datetime('now')
         WHERE id = ?
       `,
         [
           parent.repo_name,
           parent.has_worktree,
           parent.worktree_parent_branch,
-          parent.worktree_computer_id,
+          holder,
           parent.has_base_dir,
+          inherits ? 1 : 0,
+          parent.computer_id,
           id
         ]
       )

@@ -62,3 +62,31 @@ test('stages every task path for its computer; columns stay', () => {
     db.close()
   }
 })
+
+test("a path cleared to '' is unset: never staged as '' (p10-v0380-worktrees)", () => {
+  const db = new Database(':memory:')
+  try {
+    runRange(db, 0, 209)
+    db.exec(`
+      INSERT INTO projects (id, name, color) VALUES ('p', 'P', '#000');
+      INSERT INTO tasks (id, project_id, title, worktree_path, base_dir)
+        VALUES ('both', 'p', 'Both cleared', '', ''),
+               ('wt', 'p', 'Worktree cleared', '', '/custom/dir'),
+               ('bd', 'p', 'Base dir cleared', '/repo-workspaces/x', '');
+    `)
+    runRange(db, 209, 210)
+    const staged = Object.fromEntries(
+      (
+        db
+          .prepare("SELECT item_key, payload FROM computer_data_handoff WHERE kind='task-path'")
+          .all() as Array<{ item_key: string; payload: string }>
+      ).map((r) => [r.item_key, JSON.parse(r.payload)])
+    )
+    // Nothing set: nothing to hand over.
+    expect(Object.keys(staged).sort()).toEqual(['bd', 'wt'])
+    expect(staged.wt).toMatchObject({ worktreePath: null, baseDir: '/custom/dir' })
+    expect(staged.bd).toMatchObject({ worktreePath: '/repo-workspaces/x', baseDir: null })
+  } finally {
+    db.close()
+  }
+})

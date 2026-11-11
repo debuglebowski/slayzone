@@ -106,6 +106,19 @@ export async function recordHolder(db: SlayzoneDb, taskId: string, computerId: s
   )
 }
 
+/**
+ * A path given as '' is unset (null): a computer takes only absolute paths, and a ''
+ * it refuses would fault the task's staged row for good (found by the migration persona
+ * suite, tools/migration-personas, p10-v0380-worktrees). Absent stays absent.
+ */
+function unsetEmpty<T extends { worktreePath?: string | null; baseDir?: string | null }>(p: T): T {
+  return {
+    ...p,
+    ...(p.worktreePath === '' ? { worktreePath: null } : {}),
+    ...(p.baseDir === '' ? { baseDir: null } : {})
+  }
+}
+
 export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsDelegate {
   const { db } = deps
   let last = 0
@@ -255,7 +268,8 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
       return out
     },
 
-    async changed(taskId, change) {
+    async changed(taskId, given) {
+      const change = given.op === 'set' ? unsetEmpty(given) : given
       const at = now()
       const row = await projectOf(taskId)
       if (!row) return
@@ -279,7 +293,8 @@ export function createComputerTaskPaths(deps: ComputerTaskPathsDeps): TaskPathsD
       return { ...answer, computerId }
     },
 
-    async apply(taskId, patch) {
+    async apply(taskId, given) {
+      const patch = unsetEmpty(given)
       // A task with no folder has no holder, nor one on a computer removed for good
       // (its folders went with it): a stale one goes, so the new folder is on the
       // computer the task's work runs on now.

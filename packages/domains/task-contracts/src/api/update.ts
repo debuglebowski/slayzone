@@ -5,6 +5,13 @@ import { z } from 'zod'
 // panelVisibility, browserTabs, webPanelUrls, editorOpenFiles, mergeState,
 // mergeContext, loopConfig) are passthrough — their structure is defined
 // and validated in their own domain modules.
+/** A worktree path / base dir: '' is unset (null) — a computer takes only absolute paths. */
+const taskPath = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => (v === '' ? null : v))
+
 export const updateTaskInputSchema = z
   .object({
     id: z.string().uuid(),
@@ -33,11 +40,11 @@ export const updateTaskInputSchema = z
     panelVisibility: z.unknown().nullable().optional(),
 
     // Worktree
-    worktreePath: z.string().nullable().optional(),
+    worktreePath: taskPath,
     worktreeParentBranch: z.string().nullable().optional(),
 
     // Working dir + browser
-    baseDir: z.string().nullable().optional(),
+    baseDir: taskPath,
     browserUrl: z.string().nullable().optional(),
     browserTabs: z.unknown().nullable().optional(),
     webPanelUrls: z.unknown().nullable().optional(),

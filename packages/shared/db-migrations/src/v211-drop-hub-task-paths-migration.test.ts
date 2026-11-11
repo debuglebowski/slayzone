@@ -99,3 +99,38 @@ test('drops the path columns, keeps has-flags and the folder computer', () => {
     db.close()
   }
 })
+
+test('a subtask holding its parent’s folder gets the parent’s computer (p10-v0380-worktrees)', () => {
+  const db = new Database(':memory:')
+  try {
+    runRange(db, 0, 210)
+    db.exec(`
+      INSERT INTO computers (id, name, platform, version, capabilities_json, created_at)
+        VALUES ('local', 'L', 'linux', '1', '[]', 0), ('bb', 'BB', 'linux', '1', '[]', 0);
+      INSERT INTO projects (id, name, color, default_computer_id) VALUES ('p', 'P', '#000', 'local');
+      INSERT INTO tasks (id, project_id, title, parent_id, computer_id, worktree_path, base_dir, worktree_computer_id)
+        VALUES ('pinned', 'p', 'Pinned', NULL, 'bb', '/wt/pinned', NULL, NULL),
+               ('child', 'p', 'Child', 'pinned', NULL, '/wt/pinned', NULL, NULL),
+               ('grandchild', 'p', 'Grandchild', 'child', NULL, '/wt/pinned', NULL, NULL),
+               ('own', 'p', 'Own', 'pinned', NULL, '/wt/own', NULL, NULL),
+               ('bdparent', 'p', 'BD parent', NULL, 'bb', NULL, '/api', NULL),
+               ('bdchild', 'p', 'BD child', 'bdparent', NULL, '', '/api', NULL),
+               ('recorded', 'p', 'Recorded', 'pinned', NULL, '/wt/pinned', NULL, 'local');
+    `)
+    runRange(db, 210, 211)
+    const holder = (id: string) =>
+      (
+        db.prepare('SELECT worktree_computer_id AS c FROM tasks WHERE id=?').get(id) as {
+          c: string
+        }
+      ).c
+    expect(holder('pinned')).toBe('bb')
+    expect(holder('child')).toBe('bb')
+    expect(holder('grandchild')).toBe('bb')
+    expect(holder('own')).toBe('local') // its own folder: its own computer, else the project's
+    expect(holder('bdchild')).toBe('bb') // '' is unset: the same folders as its parent
+    expect(holder('recorded')).toBe('local') // a recorded holder is ground truth: kept
+  } finally {
+    db.close()
+  }
+})

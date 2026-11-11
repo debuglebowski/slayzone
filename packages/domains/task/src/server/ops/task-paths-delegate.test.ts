@@ -194,3 +194,63 @@ test('§9 7d/7e: a task row never carries a path out of the hub, only whether on
     h.cleanup()
   }
 })
+
+test('a subtask that inherits its parent’s folders takes the parent’s computer and holder (p10)', async () => {
+  const { h, projectId } = await setup()
+  try {
+    h.db
+      .prepare(
+        `INSERT INTO computers (id, name, platform, version, capabilities_json, created_at)
+         VALUES ('bb', 'build-box', 'linux', '1', '[]', 0)`
+      )
+      .run()
+    // A parent pinned to build-box whose worktree is there (as its computer recorded).
+    const parent = (await createTaskOp(h.slayDb, { projectId, title: 'Pinned' }, {}))!
+    h.db
+      .prepare(
+        "UPDATE tasks SET computer_id='bb', has_worktree=1, worktree_computer_id='bb' WHERE id=?"
+      )
+      .run(parent.id)
+    const child = (await createTaskOp(
+      h.slayDb,
+      { projectId, title: 'Child', parentId: parent.id },
+      {}
+    ))!
+    const row = (id: string) =>
+      h.db
+        .prepare('SELECT computer_id, worktree_computer_id, has_worktree FROM tasks WHERE id=?')
+        .get(id)
+    expect(row(child.id)).toEqual({
+      computer_id: 'bb',
+      worktree_computer_id: 'bb',
+      has_worktree: 1
+    })
+    // Holder not recorded yet: the parent's pin holds the folders, the subtask's too.
+    h.db.prepare('UPDATE tasks SET worktree_computer_id=NULL WHERE id=?').run(parent.id)
+    const child2 = (await createTaskOp(
+      h.slayDb,
+      { projectId, title: 'Child 2', parentId: parent.id },
+      {}
+    ))!
+    expect(row(child2.id)).toEqual({
+      computer_id: 'bb',
+      worktree_computer_id: 'bb',
+      has_worktree: 1
+    })
+    // No folder to inherit: the subtask keeps its own (no) pin.
+    const plain = (await createTaskOp(h.slayDb, { projectId, title: 'Plain' }, {}))!
+    h.db.prepare("UPDATE tasks SET computer_id='bb' WHERE id=?").run(plain.id)
+    const child3 = (await createTaskOp(
+      h.slayDb,
+      { projectId, title: 'Child 3', parentId: plain.id },
+      {}
+    ))!
+    expect(row(child3.id)).toEqual({
+      computer_id: null,
+      worktree_computer_id: null,
+      has_worktree: 0
+    })
+  } finally {
+    h.cleanup()
+  }
+})

@@ -5460,14 +5460,17 @@ export const migrations: Migration[] = [
       // The hub columns stay until Phase 7e: until every path-taking request names a
       // task or project, they are the hub's authorization input, written alongside
       // the computer's row (consistency rule `task-path-hub-computer-drift`).
-      // Erased tasks' paths are not staged.
+      // Erased tasks' paths are not staged. A path cleared to '' (the API accepted it)
+      // is unset, as v211 counts it: the computer takes only absolute paths, and a ''
+      // row faulted for good (found by tools/migration-personas, p10-v0380-worktrees;
+      // v214 repairs a database that already ran this).
       db.prepare(
         `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
          SELECT 'task-path', t.id, t.id, json_object(
-           'projectId', t.project_id, 'worktreePath', t.worktree_path,
-           'baseDir', t.base_dir, 'at', ?), ?
+           'projectId', t.project_id, 'worktreePath', NULLIF(t.worktree_path, ''),
+           'baseDir', NULLIF(t.base_dir, ''), 'at', ?), ?
          FROM tasks t
-         WHERE (t.worktree_path IS NOT NULL OR t.base_dir IS NOT NULL)
+         WHERE (NULLIF(t.worktree_path, '') IS NOT NULL OR NULLIF(t.base_dir, '') IS NOT NULL)
            AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = t.id)`
       ).run(Date.now(), Date.now())
     }
@@ -5483,12 +5486,32 @@ export const migrations: Migration[] = [
       // 1. Where the folders are: a task holding a path but no recorded computer gets
       //    its task's computer, else its project's (where its work ran). Still none:
       //    the hand-off picks one at delivery (hub computer-task-paths.ts) and records it.
+      //    A subtask holding its parent's folders (it inherited them: the same worktree
+      //    and base dir) is where its parent's are, not where its own pin or project
+      //    points — the subtask inherited the folder, not the pin (found by
+      //    tools/migration-personas, p10-v0380-worktrees; v214 repairs a database that
+      //    already ran this). A holder recorded before this (v197 on) is kept.
       db.exec(`
+        CREATE TEMP TABLE v211_derived AS SELECT id FROM tasks
+         WHERE worktree_computer_id IS NULL
+           AND (NULLIF(worktree_path, '') IS NOT NULL OR NULLIF(base_dir, '') IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id);
         UPDATE tasks SET worktree_computer_id = COALESCE(computer_id,
           (SELECT p.default_computer_id FROM projects p WHERE p.id = tasks.project_id))
-        WHERE worktree_computer_id IS NULL
-          AND ((worktree_path IS NOT NULL AND worktree_path <> '') OR (base_dir IS NOT NULL AND base_dir <> ''))
-          AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id);`)
+        WHERE id IN (SELECT id FROM v211_derived);`)
+      const followParent = db.prepare(`
+        UPDATE tasks SET worktree_computer_id = (
+            SELECT p.worktree_computer_id FROM tasks p WHERE p.id = tasks.parent_id)
+         WHERE id IN (SELECT id FROM v211_derived)
+           AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = tasks.parent_id
+             AND p.worktree_computer_id IS NOT NULL
+             AND p.worktree_computer_id IS NOT tasks.worktree_computer_id
+             AND NULLIF(p.worktree_path, '') IS NULLIF(tasks.worktree_path, '')
+             AND NULLIF(p.base_dir, '') IS NULLIF(tasks.base_dir, ''))`)
+      // One generation per pass (a grandchild follows its corrected parent); a task
+      // tree is acyclic, the bound only guards.
+      for (let i = 0; i < 1000 && followParent.run().changes > 0; i++);
+      db.exec('DROP TABLE v211_derived')
       // 2. Staged once more at `at` 0 (the oldest): a computer already holding the row
       //    keeps its own; one that never took it (a quarantined v210 item, a computer
       //    restored from an older backup) gets it. A row still pending is newer: kept.
@@ -5550,6 +5573,57 @@ export const migrations: Migration[] = [
       // persona suite (tools/migration-personas, p08-v0380-tabs-usage).
       // The chat modes as of this migration (CHAT_SUPPORTED_MODES), frozen.
       db.exec(`DELETE FROM session_tab_recovery WHERE mode IN ('claude-chat', 'codex-chat')`)
+    }
+  },
+  {
+    version: 214,
+    up: (db) => {
+      // Repairs the task-path hand-off of v210/v211 (both unreleased then), from the
+      // staged `task-path` rows — the only copy of the paths left on the hub. Found by
+      // the migration persona suite (tools/migration-personas, p10-v0380-worktrees).
+      //
+      // 1. A path cleared to '' (the pre-v210 API accepted it) was staged by v210 as ''.
+      //    The computer takes only absolute paths, so the row faulted for good and
+      //    never drained. '' is unset (as v211 already counts it): staged as null.
+      const notErased = `NOT EXISTS (SELECT 1 FROM content_erasure_tasks e
+        WHERE e.task_id = computer_data_handoff.task_id)`
+      for (const field of ['worktreePath', 'baseDir'])
+        db.exec(`
+          UPDATE computer_data_handoff SET payload = json_set(payload, '$.${field}', json('null'))
+           WHERE kind = 'task-path' AND json_extract(payload, '$.${field}') = '' AND ${notErased};`)
+      // 2. A subtask inherits its parent's worktree and base dir — the parent's folder,
+      //    on the parent's computer — but not the parent's pin. v211 recorded its holder
+      //    as its own pin, else its project's default computer: not where the folder is
+      //    when the parent was pinned elsewhere. A task whose staged paths equal its
+      //    parent's (both fields given in both rows, one set) takes the parent's holder;
+      //    repeated so a grandchild follows its corrected parent.
+      //    Not derivable: a hub that delivered its staged rows (ran v211 with computers
+      //    connected) before this migration keeps no path to compare — the holder v211
+      //    chose stays there (no release shipped v210/v211 before this one).
+      const both = (alias: string) =>
+        `json_type(${alias}.payload, '$.worktreePath') IS NOT NULL
+         AND json_type(${alias}.payload, '$.baseDir') IS NOT NULL
+         AND json_type(${alias}.payload, '$.inheritFrom') IS NULL`
+      const inherit = db.prepare(`
+        UPDATE tasks SET worktree_computer_id = (
+            SELECT p.worktree_computer_id FROM tasks p WHERE p.id = tasks.parent_id)
+         WHERE tasks.parent_id IS NOT NULL
+           AND (tasks.has_worktree = 1 OR tasks.has_base_dir = 1)
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)
+           AND EXISTS (
+             SELECT 1 FROM tasks p
+               JOIN computer_data_handoff hp ON hp.kind = 'task-path' AND hp.item_key = p.id
+               JOIN computer_data_handoff hc ON hc.kind = 'task-path' AND hc.item_key = tasks.id
+              WHERE p.id = tasks.parent_id
+                AND p.worktree_computer_id IS NOT NULL
+                AND p.worktree_computer_id IS NOT tasks.worktree_computer_id
+                AND ${both('hp')} AND ${both('hc')}
+                AND json_extract(hc.payload, '$.worktreePath') IS json_extract(hp.payload, '$.worktreePath')
+                AND json_extract(hc.payload, '$.baseDir') IS json_extract(hp.payload, '$.baseDir')
+                AND COALESCE(json_extract(hc.payload, '$.worktreePath'),
+                             json_extract(hc.payload, '$.baseDir')) IS NOT NULL)`)
+      // Each pass moves one generation; a task tree is acyclic, the bound only guards.
+      for (let i = 0; i < 1000 && inherit.run().changes > 0; i++);
     }
   }
 ]

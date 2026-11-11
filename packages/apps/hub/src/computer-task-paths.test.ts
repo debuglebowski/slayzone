@@ -301,3 +301,34 @@ test('S3: a process restarted on connect finds its staged worktree on the comput
   expect(seen).toEqual([expect.objectContaining({ taskId: 't1', worktreePath: W('w-restart') })])
   expect(f.staged()).toEqual([])
 })
+
+test("a path given as '' is unset: no '' ever reaches a computer, live or staged (p10)", async () => {
+  const f = await fixture()
+  // Live: `changed` and `apply` on the connected computer.
+  await f.set('t1', W('w-one'), W('base'))
+  await f.paths.changed('t1', { op: 'set', worktreePath: '', baseDir: '' })
+  expect(await f.onComputer('pc', ['t1'])).toEqual([
+    expect.objectContaining({ taskId: 't1', worktreePath: null, baseDir: null })
+  ])
+  await f.set('t1', W('w-one'))
+  await f.paths.apply('t1', { worktreePath: '' })
+  expect(await f.onComputer('pc', ['t1'])).toEqual([
+    expect.objectContaining({ taskId: 't1', worktreePath: null })
+  ])
+  // Staged while away, then delivered on reconnect.
+  await f.set('parent', W('w-parent'), W('b-parent'))
+  f.online.delete('pc')
+  await f.paths.changed('parent', { op: 'set', worktreePath: '', baseDir: '' })
+  const row = f.h.db
+    .prepare(
+      "SELECT payload FROM computer_data_handoff WHERE kind='task-path' AND item_key='parent'"
+    )
+    .get() as { payload: string }
+  expect(JSON.parse(row.payload)).toMatchObject({ worktreePath: null, baseDir: null })
+  f.online.add('pc')
+  await f.handoff.flushTask('parent', 'pc')
+  expect(f.staged()).toEqual([])
+  expect(await f.onComputer('pc', ['parent'])).toEqual([
+    expect.objectContaining({ taskId: 'parent', worktreePath: null, baseDir: null })
+  ])
+})
