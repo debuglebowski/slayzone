@@ -3,6 +3,7 @@ import { resolveId } from './_shared'
 
 export interface DoneOpts {
   close?: boolean
+  force?: boolean
 }
 
 export async function doneAction(idPrefix: string | undefined, opts: DoneOpts): Promise<void> {
@@ -28,7 +29,12 @@ export async function doneAction(idPrefix: string | undefined, opts: DoneOpts): 
   const { data: task } = await apiPost<{
     ok: true
     data: { id: string; title: string; status: string; closed: boolean }
-  }>(`/api/tasks/${encodeURIComponent(idPrefix)}/done`, opts.close ? { close: true } : {})
+  }>(`/api/tasks/${encodeURIComponent(idPrefix)}/done`, {
+    ...(opts.close ? { close: true } : {}),
+    // Completion stops every agent of the task; the hub refuses (409) while one
+    // is mid-reply — this command's own agent included — unless --force.
+    ...(opts.force ? { force: true } : {})
+  })
 
   console.log(`Done: ${task.id.slice(0, 8)}  ${task.title}`)
 

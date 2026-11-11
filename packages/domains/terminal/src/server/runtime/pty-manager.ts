@@ -90,7 +90,6 @@ import { decideFreshReuse, resolveSpawnConversation } from '../spawn-conversatio
 import { locateClaudeTranscripts, type ClaudeTranscriptLocated } from './claude-transcript-locator'
 import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../mcp-env'
 import { localChatRuntime } from './local-chat-runtime'
-import type { TaskAgentStopReason } from '../task-events'
 import {
   conversationInUseMessage,
   conversationInOtherTabMessage,
@@ -4113,14 +4112,12 @@ export function requestEnsureAlive(
   })
 }
 
-/** Local agent lifecycle handler. Completion preserves chats so an agent can
- * finish its own turn; explicit task closure stops all agents. */
-export function onTaskReachedTerminal(
-  taskId: string,
-  reason: TaskAgentStopReason = 'terminal-status'
-): void {
+/** Single invariant entry point for "task reached a terminal status". Called from
+ *  every status-write path (updateTask via runtimeAdapter, integrations sync/pull,
+ *  bulk remap, project automation). Add new side-effects here, not at call sites. */
+export function onTaskReachedTerminal(taskId: string): void {
   killPtysByTaskId(taskId)
-  if (reason === 'explicit-stop') localChatRuntime()?.killByTaskId(taskId)
+  localChatRuntime()?.killByTaskId(taskId)
 }
 
 export function killPtysByTaskId(taskId: string): void {

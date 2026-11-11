@@ -202,6 +202,7 @@ import {
   onTaskReachedTerminal,
   runtimeOnTaskReachedTerminal,
   setTaskAgentsStopper,
+  midReplySessionIds,
   broadcastRespawnRequest,
   initWarmProcessManager,
   createDbWarmPoolDataOps,
@@ -747,11 +748,13 @@ export function composeServer(opts: {
     // typecheck — unwired, it silently falls back to its no-computer default.
   } satisfies TaskRuntimeAdapters
   configureTaskRuntimeAdapters(baseTaskAdapters)
-  // Status completion preserves chats: an agent may mark its own task done
-  // before its turn ends. Explicit task closure still stops every agent.
-  setTaskAgentsStopper(async (taskId, reason) => {
-    runtimeOnTaskReachedTerminal(taskId, reason)
-    if (reason === 'terminal-status') return
+  // Wire the cross-domain "stop a task's agents" seam to the REAL teardown: PTYs
+  // + chat transports in THIS process, plus chats owned by a computer. Callers:
+  // status→terminal (task-ops onReachedTerminal above, integrations sync/pull)
+  // and pty.killTask (closing a scratch terminal's tab). The Electron host's
+  // handler only sees its own (empty) session maps post-cutover.
+  setTaskAgentsStopper(async (taskId) => {
+    runtimeOnTaskReachedTerminal(taskId)
     await computerChat.stopTask(taskId).catch(() => {
       /* Disconnected computers reconcile on reconnect. */
     })
@@ -2055,6 +2058,11 @@ export function composeServer(opts: {
       subscribeToStateChange,
       onSessionChange,
       getState
+    },
+    // CLI completion guard: PTYs + chats (every computer) of the task mid-reply.
+    taskAgents: {
+      midReplySessionIds: async (taskId) =>
+        midReplySessionIds(taskId, [...(await listPtys()), ...computerChat.relay.sessions.list()])
     },
     // `slay chat` / `slay agent`: the chat relay, the state bus chat states share
     // with ptys, and the task's main-agent resolution (`task.startMainAgent`'s).

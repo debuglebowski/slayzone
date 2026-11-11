@@ -30,7 +30,8 @@ function createMcpServer(deps: RestApiDeps): McpServer {
     notifyRenderer: deps.notifyRenderer,
     taskBus: deps.taskBus,
     menu: deps.menu,
-    legacyBroadcast: deps.legacyBroadcast
+    legacyBroadcast: deps.legacyBroadcast,
+    taskAgents: deps.taskAgents
   })
   return server
 }

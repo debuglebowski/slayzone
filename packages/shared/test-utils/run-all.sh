@@ -966,6 +966,8 @@ run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
+# Which of a task's agents are mid-reply: the CLI completion guard.
+run_harness packages/domains/terminal/src/server/task-agent-activity.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-robustness.test.ts
 # Spawn CLI-version hint (summarized thinking) + command tasks through the transport (chat plan 3.2 / 3.9).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-command-tasks.test.ts

@@ -4,13 +4,15 @@ Manages PTY sessions for task execution. Supports multiple agents (Claude Code, 
 
 ## Architecture
 
-### Task completion and chat lifecycle
+### Task completion and agent lifecycle
 
-Reaching a terminal task status stops PTYs but preserves chat agents. An agent
-may mark its own task done before sending its final answer; its turn still ends
-normally and the session stays idle. Explicit task closure stops every agent,
-including computer-owned chats. Messages sent during a turn queue until it ends;
-only explicit steering adds them to the running turn.
+A done task keeps no agent: reaching a terminal task status stops every agent of
+the task — PTYs, hub chats and computer-owned chats — even mid-turn. The desktop
+(⌘⇧D, board moves) completes immediately. The CLI (`slay tasks done`,
+`slay tasks update --status <terminal>`) refuses while any of the task's agents
+is mid-reply (state `running`), its own included, unless `--force`. Messages sent
+during a turn queue until it ends; only explicit steering adds them to the running
+turn.
 
 ### Codex silence and cancellation provenance
 

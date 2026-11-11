@@ -67,6 +67,10 @@ export function tasksCommand(): Command {
     .command('done [id]')
     .description('Mark a task as done (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
     .option('--close', 'Also close the task tab in the app')
+    .option(
+      '--force',
+      'Complete even while an agent of the task is mid-reply (completion stops every agent)'
+    )
     .action(doneAction)
 
   // slay tasks reset-conversation
@@ -108,6 +112,10 @@ export function tasksCommand(): Command {
     .option(
       '--worktree-path <path>',
       'Link a git worktree to this task (auto-derives parent branch + repo from project layout)'
+    )
+    .option(
+      '--force',
+      'With a done/canceled --status: complete even while an agent of the task is mid-reply (completion stops every agent)'
     )
     .action(updateAction)
 

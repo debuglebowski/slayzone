@@ -38,6 +38,8 @@ h.db
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Session ids the stub reports mid-reply, per task. */
+const midReply = new Map<string, string[]>()
 const app = express()
 app.use(express.json())
 registerUpdateTaskRoute(app, {
@@ -45,7 +47,8 @@ registerUpdateTaskRoute(app, {
   taskBus: ipcMain,
   notifyRenderer: () => {
     notifyCount++
-  }
+  },
+  taskAgents: { midReplySessionIds: async (taskId) => midReply.get(taskId) ?? [] }
 })
 const rest = await mountRestApp(app)
 
@@ -185,6 +188,52 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.error).toBe(`Unknown status "nonsense-status" for this task's project.`)
     const row = h.db.prepare('SELECT status FROM tasks WHERE id = ?').get(id) as { status: string }
     expect(row.status).toBe('todo')
+  })
+
+  test('409: a terminal status while an agent is mid-reply is refused, nothing written; force completes', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      for (const status of ['done', 'canceled']) {
+        const res = await rest.request<{ ok: boolean; code: string; error: string }>(
+          'PATCH',
+          `/api/tasks/${id}`,
+          { status, title: 'renamed' }
+        )
+        expect(res.status).toBe(409)
+        expect(res.body.code).toBe('agent_mid_reply')
+        expect(res.body.error).toContain('--force')
+      }
+      expect(h.db.prepare('SELECT status, title FROM tasks WHERE id = ?').get(id)).toEqual({
+        status: 'todo',
+        title: 'T'
+      })
+      const forced = await rest.request<{ ok: boolean; data: { status: string } }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { status: 'done', force: true }
+      )
+      expect(forced.status).toBe(200)
+      expect(forced.body.data.status).toBe('done')
+    } finally {
+      midReply.delete(id)
+    }
+  })
+
+  test('a non-terminal status (or no status) is never blocked by a mid-reply agent', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      const res = await rest.request<{ ok: boolean; data: { status: string } }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { status: 'in_progress', title: 'still working' }
+      )
+      expect(res.status).toBe(200)
+      expect(res.body.data.status).toBe('in_progress')
+    } finally {
+      midReply.delete(id)
+    }
   })
 
   test('parentId: a unique prefix resolves to the full parent id', async () => {

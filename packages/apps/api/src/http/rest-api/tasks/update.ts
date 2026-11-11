@@ -7,12 +7,13 @@ import {
   TaskFoldersUnavailableError,
   updateTaskOp
 } from '@slayzone/task/server'
-import { parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
+import { isTerminalStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { resolveAgentIdAlias } from '../../agent-id-alias'
 import { respondComputerRefusal } from '../computer-refusal'
+import { refuseCompletionWhileMidReply } from './_agent-guard'
 
 /**
  * PATCH /api/tasks/:id — update a task (CLI `slay tasks update`, plus the
@@ -40,6 +41,10 @@ import { respondComputerRefusal } from '../computer-refusal'
  *   Unknown/disabled agent = 400. Runs after the other fields validate.
  *   `terminalMode` is accepted as its deprecated old name (`resolveAgentIdAlias`).
  *
+ * - A `status` in a terminal category (completed/canceled) stops every agent of
+ *   the task, so it is refused with 409 while one is mid-reply unless `force`
+ *   (CLI `--force`) — the same guard as `POST /api/tasks/:id/done`.
+ *
  * `appendDescription` is resolved to a concrete `description` before the domain
  * schema parses, so the strict `updateTaskInputSchema` stays free of
  * CLI-shaped fields.
@@ -47,6 +52,8 @@ import { respondComputerRefusal } from '../computer-refusal'
 export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
   app.patch('/api/tasks/:id', async (req, res) => {
     const body = { ...((req.body ?? {}) as Record<string, unknown>) }
+    const force = body.force === true
+    delete body.force
 
     const alias = resolveAgentIdAlias(body)
     if (!alias.ok) {
@@ -80,12 +87,19 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
           `SELECT columns_config FROM projects WHERE id = ? LIMIT 1`,
           [task.project_id]
         )
-        const statusId = resolveStatusId(body.status, parseColumnsConfig(row?.columns_config))
+        const columns = parseColumnsConfig(row?.columns_config)
+        const statusId = resolveStatusId(body.status, columns)
         if (!statusId) {
           res.status(400).json({
             ok: false,
             error: `Unknown status "${body.status}" for this task's project.`
           })
+          return
+        }
+        if (
+          isTerminalStatus(statusId, columns) &&
+          (await refuseCompletionWhileMidReply(deps, res, task.id, force))
+        ) {
           return
         }
         body.status = statusId

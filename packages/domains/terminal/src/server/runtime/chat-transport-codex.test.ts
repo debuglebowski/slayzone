@@ -330,34 +330,24 @@ async function openWithServer(
   return h.children[0]
 }
 
-test.each(['task-events', 'status-adapter'])(
-  'self-completion via %s (including repeated done writes) leaves Codex alive and idle after completion',
+// A done task keeps no agent: completion stops chats too, even mid-turn. The CLI
+// refuses `slay tasks done` on a task whose agent is mid-reply unless `--force`
+// (REST done/update routes), so reaching this teardown mid-turn is deliberate.
+test.each(['task-events', 'status-adapter', 'explicit-stop'])(
+  'completion via %s stops a Codex chat, even mid-turn',
   async (path) => {
     const server = turnServer()
-    const c = await openWithServer(server, 'tab-self-done')
+    const c = await openWithServer(server, 'tab-done')
     setTaskAgentsStopper(stopRuntimeTaskAgents)
-    mgr.dispatchUserMessage('tab-self-done', {
+    mgr.dispatchUserMessage('tab-done', {
       id: 'go-ahead',
       content: [{ type: 'text', text: 'Go ahead' }]
     })
     await until(() => c.requests('turn/start').length === 1)
-    // The status hook called by `slay tasks done <own id>`, before the
-    // command returns and Codex can emit its final answer / turn completion.
-    const complete = path === 'task-events' ? onTaskReachedTerminal : stopRuntimeTaskAgents
-    complete('task-codex')
-    complete('task-codex')
-    await wait(30)
-    expect(mgr.getTurnStatus('tab-self-done')).toMatchObject({ state: 'running', turnOpen: true })
-    c.send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } })
-    await until(() => mgr.getSessionTerminalState('tab-self-done') === 'idle')
-    expect(mgr.getTurnStatus('tab-self-done')).toMatchObject({ state: 'idle', turnOpen: false })
-    expect(formatChatTranscript(chatTranscriptFromEvents(h.events))).toContain('-- turn done')
-    expect(formatChatTranscript(chatTranscriptFromEvents(h.events))).not.toContain('-- interrupted')
-    expect(c.requests('turn/interrupt')).toHaveLength(0)
-    expect(h.children).toHaveLength(1)
-    // Closing/stopping a task explicitly must still tear down its chat.
-    await stopTaskAgents('task-codex')
-    await until(() => mgr.getSessionTerminalState('tab-self-done') === 'dead')
+    if (path === 'task-events') onTaskReachedTerminal('task-codex')
+    else if (path === 'status-adapter') stopRuntimeTaskAgents('task-codex')
+    else await stopTaskAgents('task-codex')
+    await until(() => mgr.getSessionTerminalState('tab-done') === 'dead')
   }
 )
 

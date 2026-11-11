@@ -157,7 +157,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
 
 - \`slay tasks view [id]\` — show task details including status, priority, description, tags, and subtasks.
 
-- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]\` — update a task. \`--agent\` switches the task's agent (e.g. \`claude-code\`, \`codex\`, \`claude-chat\`): stops the running one and starts a fresh conversation.
+- \`slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>] [--force]\` — update a task. \`--agent\` switches the task's agent (e.g. \`claude-code\`, \`codex\`, \`claude-chat\`): stops the running one and starts a fresh conversation. A done/canceled \`--status\` stops every agent of the task and is refused while one is mid-reply unless \`--force\` (same as \`tasks done\`).
   - \`--append-description\` adds text after a newline separator (mutually exclusive with \`--description\`)
   - \`--no-due\` clears the due date
   - \`--parent <id>\` reparents under another task in the same project; \`--no-parent\` makes it top-level
@@ -167,7 +167,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional \`[
   - Two-arg form: \`slay tasks progress <id> <value>\`
   - One-arg form: \`slay tasks progress <value>\` — id defaults to \`$SLAYZONE_TASK_ID\`
 
-- \`slay tasks done [id] [--close]\` — mark task complete using the project's configured "done" status.
+- \`slay tasks done [id] [--close] [--force]\` — mark task complete using the project's configured "done" status. Completing stops every agent of the task, so it is refused while any of them is mid-reply — including your own, when you complete your own task — unless \`--force\`. Completing your own task with \`--force\` ends your session immediately: make it your last action.
   - \`--close\` also closes the task tab in the app
 
 - \`slay tasks archive <id>\` — hide from kanban but keep in database.

@@ -126,6 +126,11 @@ export {
   setTaskAgentsStopper
 } from './task-events'
 export {
+  isMidReplyState,
+  midReplySessionIds,
+  type TaskAgentSessionEntry
+} from './task-agent-activity'
+export {
   type AppUsageMounts,
   appUsageRouter
 } from './usage-router'

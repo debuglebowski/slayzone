@@ -1,10 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { updateTaskOp } from '@slayzone/task/server'
-import { isKnownStatus } from '@slayzone/projects-contracts'
+import { isKnownStatus, isTerminalStatus } from '@slayzone/projects-contracts'
 import { getProjectColumns, getAllowedStatusesText } from './shared'
 import { NOOP_TASK_BUS } from '../rest-api/types'
 import type { McpToolsDeps } from './types'
+import { completionRefusal } from '../task-completion-guard'
 
 export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): void {
   server.tool(
@@ -28,9 +29,15 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
         .describe(
           'Reparent task. String = new parent id (must be in same project, no cycles, not archived). null = detach to root.'
         ),
-      close: z.boolean().optional().describe('Close the task tab in the UI')
+      close: z.boolean().optional().describe('Close the task tab in the UI'),
+      force: z
+        .boolean()
+        .optional()
+        .describe(
+          'With a done/canceled status: complete even while an agent of the task is mid-reply (yours included). Completion stops every agent of the task.'
+        )
     },
-    async ({ task_id, due_date, parent_id, close, ...fields }) => {
+    async ({ task_id, due_date, parent_id, close, force, ...fields }) => {
       if (!task_id) {
         return {
           content: [
@@ -65,6 +72,15 @@ export function registerUpdateTaskTool(server: McpServer, deps: McpToolsDeps): v
               }
             ],
             isError: true
+          }
+        }
+        if (isTerminalStatus(fields.status, projectColumns)) {
+          const refusal = await completionRefusal(deps.taskAgents, task_id, {
+            force: force === true,
+            forceHint: 'Pass force: true to complete anyway.'
+          })
+          if (refusal) {
+            return { content: [{ type: 'text' as const, text: refusal }], isError: true }
           }
         }
       }

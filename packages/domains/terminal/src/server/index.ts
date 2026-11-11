@@ -59,6 +59,11 @@ export { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 // Cross-domain seam: server-side callers (integrations sync, pty.killTask) invoke
 // the no-op default; the host injects the real agent teardown at boot.
 export { onTaskReachedTerminal, setTaskAgentsStopper, stopTaskAgents } from './task-events'
+export {
+  isMidReplyState,
+  midReplySessionIds,
+  type TaskAgentSessionEntry
+} from './task-agent-activity'
 
 // PTY/chat runtime (slice 6c inversion: electron-free, host-bridged). The
 // Electron entry configures the real window/theme/bus bridge at import time;
@@ -207,8 +212,11 @@ export {
   // version-gated notify.sh installer just-in-time, so a hook-driven spawn can't
   // fire through a stale cross-release-channel copy left on disk between boots.
   setReinstallHooks,
-  // Local lifecycle handler; status completion preserves chats, explicit stop
-  // tears them down. Aliased to avoid colliding with the cross-host seam above.
+  // The real "task reached terminal status" teardown (kill
+  // PTYs + kill chat transports). Aliased to avoid colliding with the seam
+  // `onTaskReachedTerminal` (task-events) exported above; the side-car wires
+  // THIS as the seam handler so status→done actually tears down sessions in
+  // this process (where the PTYs/chats live post-cutover).
   onTaskReachedTerminal as runtimeOnTaskReachedTerminal,
   // Idle-close (hibernation) seams: the config getter, the sweep that reads it,
   // and the bare-taskId engagement touch. All were exported only from the

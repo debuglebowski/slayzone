@@ -4,6 +4,7 @@ import { getDoneStatus, parseColumnsConfig } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { refuseCompletionWhileMidReply } from './_agent-guard'
 
 /**
  * POST /api/tasks/:id/done — mark a task done (CLI `slay tasks done [--close]`).
@@ -36,10 +37,14 @@ import { isResolveFailure, resolveByIdPrefix } from '../resolve'
  * close was actually dispatched (`closed`), so a host with no UI to close (the
  * standalone hub: no `menu`, no `legacyBroadcast`) is reported honestly instead of
  * silently claiming success.
+ *
+ * `{ force: true }` (CLI `--force`) skips the mid-reply guard: without it a task
+ * with an agent mid-reply — the caller's own included — is refused with 409
+ * (`refuseCompletionWhileMidReply`), since completion stops every agent.
  */
 export function registerDoneTaskRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks/:id/done', async (req, res) => {
-    const body = (req.body ?? {}) as { close?: unknown }
+    const body = (req.body ?? {}) as { close?: unknown; force?: unknown }
     try {
       const resolved = await resolveByIdPrefix<{ id: string; title: string; project_id: string }>(
         deps.db,
@@ -53,6 +58,7 @@ export function registerDoneTaskRoute(app: Express, deps: RestApiDeps): void {
         return
       }
       const task = resolved.row
+      if (await refuseCompletionWhileMidReply(deps, res, task.id, body.force === true)) return
 
       const projectRow = await deps.db.get<{ columns_config: string | null }>(
         `SELECT columns_config FROM projects WHERE id = ? LIMIT 1`,

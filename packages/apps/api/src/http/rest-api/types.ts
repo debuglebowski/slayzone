@@ -111,6 +111,13 @@ export interface PtyAccess {
   getState: (sessionId: string) => TerminalState | null
 }
 
+/** A task's agents as the CLI completion guard sees them (PTYs + chats, every
+ *  computer). */
+export interface TaskAgentsAccess {
+  /** Session ids of the task's agents that are mid-reply (`isMidReplyState`). */
+  midReplySessionIds: (taskId: string) => Promise<string[]>
+}
+
 /**
  * Chat runtime access for the `/api/chat/*` and `/api/agent/*` routes — the hub's
  * chat relay (`getChatDeps()`: ops, queue, events), the shared state bus chat
@@ -296,6 +303,9 @@ export interface RestApiDeps {
   taskBus?: TaskOpsBus
   pty?: PtyAccess
   chat?: ChatAccess
+  /** Completion guard for the CLI's done/update routes. Absent → this host runs
+   *  no agents, so none can be mid-reply. */
+  taskAgents?: TaskAgentsAccess
   terminalStateBridge?: TerminalStateBridge
   processes?: ProcessesAccess
   browser?: BrowserAccess

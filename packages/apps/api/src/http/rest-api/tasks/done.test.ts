@@ -18,11 +18,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import {
-  onTaskReachedTerminal,
-  setTaskAgentsStopper,
-  stopTaskAgents
-} from '@slayzone/terminal/server'
+import { onTaskReachedTerminal, setTaskAgentsStopper } from '@slayzone/terminal/server'
 import { registerDoneTaskRoute } from './done.js'
 
 const h = await createTestHarness()
@@ -55,6 +51,8 @@ h.db
   )
 
 let notifyCount = 0
+/** Session ids the stub reports mid-reply, per task. */
+const midReply = new Map<string, string[]>()
 const closeEmits: string[] = []
 const legacySends: Array<{ channel: string; args: unknown[] }> = []
 
@@ -74,7 +72,8 @@ registerDoneTaskRoute(app, {
   },
   legacyBroadcast: (channel: string, ...args: unknown[]) => {
     legacySends.push({ channel, args })
-  }
+  },
+  taskAgents: { midReplySessionIds: async (taskId: string) => midReply.get(taskId) ?? [] }
 } as never)
 const rest = await mountRestApp(app)
 
@@ -126,49 +125,91 @@ type DoneBody = {
 }
 
 describe('POST /api/tasks/:id/done', () => {
-  test('CLI self-completion signals status completion, including repeat done; explicit stop stays distinct', async () => {
+  test('CLI self-completion while its agent is mid-reply: refused without --force; --force completes and stops agents', async () => {
     const id = seedTask()
     h.db.prepare("UPDATE tasks SET agent_id='codex-chat' WHERE id=?").run(id)
+    midReply.set(id, [`${id}:${id}`])
     const root = mkdtempSync(join(tmpdir(), 'slay-self-done-'))
-    const stops: Array<[string, string]> = []
-    setTaskAgentsStopper((taskId, reason) => {
-      stops.push([taskId, reason])
+    const stops: string[] = []
+    setTaskAgentsStopper((taskId) => {
+      stops.push(taskId)
     })
     configureTaskRuntimeAdapters({
       getDataRoot: () => root,
       onReachedTerminal: onTaskReachedTerminal
     })
-    try {
-      for (let i = 0; i < 2; i++) {
-        await promisify(execFile)(
-          process.execPath,
-          [resolve(import.meta.dirname, '../../../../../cli/dist/slay.js'), 'tasks', 'done'],
-          {
-            env: {
-              ...process.env,
-              ELECTRON_RUN_AS_NODE: '1',
-              SLAYZONE_ROOT: root,
-              SLAYZONE_DEV: '1',
-              SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`,
-              SLAYZONE_TASK_ID: id
-            }
+    const slay = (...args: string[]) =>
+      promisify(execFile)(
+        process.execPath,
+        [resolve(import.meta.dirname, '../../../../../cli/dist/slay.js'), 'tasks', 'done', ...args],
+        {
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: '1',
+            SLAYZONE_ROOT: root,
+            SLAYZONE_DEV: '1',
+            SLAYZONE_HUB_ADDRESS: `127.0.0.1:${rest.port}`,
+            SLAYZONE_TASK_ID: id
           }
-        )
-      }
-      expect(stops).toEqual([
-        [id, 'terminal-status'],
-        [id, 'terminal-status']
-      ])
+        }
+      )
+    try {
+      const refused = await slay().then(
+        () => null,
+        (err: { code: number; stderr: string }) => err
+      )
+      expect(refused?.code).toBe(1)
+      expect(refused?.stderr).toContain('mid-reply')
+      expect(refused?.stderr).toContain('--force')
+      expect(stops).toEqual([])
+      expect(h.db.prepare('SELECT status FROM tasks WHERE id=?').get(id)).toEqual({
+        status: 'todo'
+      })
+
+      await slay('--force')
+      expect(stops).toEqual([id])
       expect(h.db.prepare('SELECT status FROM tasks WHERE id=?').get(id)).toEqual({
         status: 'done'
       })
-      await stopTaskAgents(id)
-      expect(stops.at(-1)).toEqual([id, 'explicit-stop'])
     } finally {
+      midReply.delete(id)
       configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
       setTaskAgentsStopper(() => {})
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  test('409: an agent mid-reply refuses done and writes nothing; force completes', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:a`, `${id}:b`])
+    try {
+      reset()
+      const refused = await rest.request<DoneBody & { code: string }>(
+        'POST',
+        `/api/tasks/${id}/done`,
+        { close: true }
+      )
+      expect(refused.status).toBe(409)
+      expect(refused.body.code).toBe('agent_mid_reply')
+      expect(refused.body.error).toContain('2 agents mid-reply')
+      expect(closeEmits).toEqual([])
+      expect(h.db.prepare('SELECT status FROM tasks WHERE id=?').get(id)).toEqual({
+        status: 'todo'
+      })
+      const forced = await rest.request<DoneBody>('POST', `/api/tasks/${id}/done`, {
+        force: true
+      })
+      expect(forced.status).toBe(200)
+      expect(forced.body.data.status).toBe('done')
+    } finally {
+      midReply.delete(id)
+    }
+  })
+
+  test('an idle agent (nothing mid-reply) does not block done', async () => {
+    const id = seedTask()
+    const res = await rest.request<DoneBody>('POST', `/api/tasks/${id}/done`, {})
+    expect(res.status).toBe(200)
   })
 
   test('happy: writes the project default-columns done status + dual-emits', async () => {

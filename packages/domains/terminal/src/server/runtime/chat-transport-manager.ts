@@ -3988,7 +3988,9 @@ export function createChatTransport(
     }
   }
 
-  /** Kill every live chat session on explicit task closure, never status completion. */
+  /** Kill every live chat session bound to a given taskId. Mirrors
+   *  `killPtysByTaskId` for chat transports — invoked when a task reaches a
+   *  terminal status (e.g. `done`) so the agent panel can't keep showing it. */
   function killByTaskId(taskId: string): void {
     for (const [tabId, tab] of tabs) {
       if (tab.taskId === taskId && !tab.ended) kill(tabId)
