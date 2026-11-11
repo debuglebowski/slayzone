@@ -352,7 +352,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_runtime_state (0)
 
 ## computers (1)
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"VUdQU3d6aG5Shkgz110gvBOhWyESJQFu","last_seen_at":<run-ms>,"created_at":1794341881425,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"VUdQU3d6aG5Shkgz110gvBOhWyESJQFu","last_seen_at":<run-ms>,"created_at":1794341881425,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 

@@ -377,11 +377,11 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_retirements (0)
 
 ## computer_runtime_state (1)
-{"computer_id":"6e7e2079-cc02-4abb-8ddc-0d0e50de1146","connector_generation":2,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
+{"computer_id":"6e7e2079-cc02-4abb-8ddc-0d0e50de1146","connector_generation":2,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.39.0\",\"hostVersion\":\"0.39.0\",\"version\":\"0.39.0\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
 
 ## computers (2)
-{"id":"6e7e2079-cc02-4abb-8ddc-0d0e50de1146","name":"build-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"krG0tRyvkkJiS43IwoEFhZj6eAvhESCx","last_seen_at":<run-ms>,"created_at":1794393285593,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"TFgYOQ2kuMe0D9bhg1rqQo8eHkwsN1Y5","last_seen_at":<run-ms>,"created_at":1794393269418,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"6e7e2079-cc02-4abb-8ddc-0d0e50de1146","name":"build-box","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"krG0tRyvkkJiS43IwoEFhZj6eAvhESCx","last_seen_at":<run-ms>,"created_at":1794393285593,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"TFgYOQ2kuMe0D9bhg1rqQo8eHkwsN1Y5","last_seen_at":<run-ms>,"created_at":1794393269418,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 

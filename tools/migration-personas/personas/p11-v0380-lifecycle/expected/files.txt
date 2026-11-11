@@ -993,7 +993,7 @@ computers/c2/computer-runtime/hook-assets/0.38.0/opencode-plugin.mjs  (text)
         }
       }
     }
-computers/c2/computer-runtime/hook-assets/0.38.2/notify.sh  (text)
+computers/c2/computer-runtime/hook-assets/0.39.0/notify.sh  (text)
     #!/bin/sh
     # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
     #
@@ -1151,14 +1151,14 @@ computers/c2/computer-runtime/hook-assets/0.38.2/notify.sh  (text)
     fi
     
     exit 0
-computers/c2/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
+computers/c2/computer-runtime/hook-assets/0.39.0/opencode-plugin.mjs  (text)
     // SlayZone opencode plugin v1
     //
     // Forwards OpenCode SDK session lifecycle events to the SlayZone agent-hook
     // notify script over a local shell exec. Plugin is loaded by OpenCode from
     //   ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/slayzone-notify.js
     //
-    // The /home/persona/computers/c2/computer-runtime/hook-assets/0.38.2/notify.sh placeholder is substituted by the SlayZone installer
+    // The /home/persona/computers/c2/computer-runtime/hook-assets/0.39.0/notify.sh placeholder is substituted by the SlayZone installer
     // (packages/apps/app/src/main/agent-hooks/opencode-plugin-installer.ts) at
     // install time with the absolute path to `~/.slayzone/hooks/notify.sh`.
     //
@@ -1177,7 +1177,7 @@ computers/c2/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
       globalThis.__slayzoneOpencodePluginV1 = true
       if (!process?.env?.SLAYZONE_TASK_ID) return {}
     
-      const notifyPath = '/home/persona/computers/c2/computer-runtime/hook-assets/0.38.2/notify.sh'
+      const notifyPath = '/home/persona/computers/c2/computer-runtime/hook-assets/0.39.0/notify.sh'
       let currentState = 'idle' // 'idle' | 'busy'
       let rootSessionID = null // first non-child session we see
       let stopSent = false // dedup Stop emits
@@ -1281,11 +1281,11 @@ computers/c2/computer-runtime/host-release.json  (json)
     }
 computers/c2/computer-runtime/hubs/127.0.0.1_51100/upgrade-status.json  (json)
     {
-      "currentVersion": "0.38.2",
-      "hostVersion": "0.38.2",
+      "currentVersion": "0.39.0",
+      "hostVersion": "0.39.0",
       "phase": "connected",
       "updatedAt": "<run-time>",
-      "version": "0.38.2"
+      "version": "0.39.0"
     }
 computers/c2/computer-runtime/launch.cjs  (text)
     #!/usr/bin/env node
@@ -1647,7 +1647,7 @@ computers/c3/computer-runtime/hook-assets/0.38.0/opencode-plugin.mjs  (text)
         }
       }
     }
-computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh  (text)
+computers/c3/computer-runtime/hook-assets/0.39.0/notify.sh  (text)
     #!/bin/sh
     # SlayZone agent lifecycle hook — BENIGN DUMB FORWARDER.
     #
@@ -1805,14 +1805,14 @@ computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh  (text)
     fi
     
     exit 0
-computers/c3/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
+computers/c3/computer-runtime/hook-assets/0.39.0/opencode-plugin.mjs  (text)
     // SlayZone opencode plugin v1
     //
     // Forwards OpenCode SDK session lifecycle events to the SlayZone agent-hook
     // notify script over a local shell exec. Plugin is loaded by OpenCode from
     //   ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin/slayzone-notify.js
     //
-    // The /home/persona/computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh placeholder is substituted by the SlayZone installer
+    // The /home/persona/computers/c3/computer-runtime/hook-assets/0.39.0/notify.sh placeholder is substituted by the SlayZone installer
     // (packages/apps/app/src/main/agent-hooks/opencode-plugin-installer.ts) at
     // install time with the absolute path to `~/.slayzone/hooks/notify.sh`.
     //
@@ -1831,7 +1831,7 @@ computers/c3/computer-runtime/hook-assets/0.38.2/opencode-plugin.mjs  (text)
       globalThis.__slayzoneOpencodePluginV1 = true
       if (!process?.env?.SLAYZONE_TASK_ID) return {}
     
-      const notifyPath = '/home/persona/computers/c3/computer-runtime/hook-assets/0.38.2/notify.sh'
+      const notifyPath = '/home/persona/computers/c3/computer-runtime/hook-assets/0.39.0/notify.sh'
       let currentState = 'idle' // 'idle' | 'busy'
       let rootSessionID = null // first non-child session we see
       let stopSent = false // dedup Stop emits
@@ -1937,11 +1937,11 @@ computers/c3/computer-runtime/host-release.json  (json)
     }
 computers/c3/computer-runtime/hubs/127.0.0.1_51100/upgrade-status.json  (json)
     {
-      "currentVersion": "0.38.2",
-      "hostVersion": "0.38.2",
+      "currentVersion": "0.39.0",
+      "hostVersion": "0.39.0",
       "phase": "connected",
       "updatedAt": "<run-time>",
-      "version": "0.38.2"
+      "version": "0.39.0"
     }
 computers/c3/computer-runtime/launch.cjs  (text)
     #!/usr/bin/env node

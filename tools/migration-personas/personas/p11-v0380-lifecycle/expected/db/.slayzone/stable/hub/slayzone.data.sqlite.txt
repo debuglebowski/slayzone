@@ -413,13 +413,13 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 {"computer_id":"ac3e035b-1e3d-46af-ab78-bcd1ee59a0e1","successor_id":null,"reason":"missing","retired_at":<run-ms>}
 
 ## computer_runtime_state (2)
-{"computer_id":"15c5c16f-4fd9-41ea-af03-319e68eb2406","connector_generation":4,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
-{"computer_id":"b47ac68e-8a59-4855-a04a-3e24b44faaae","connector_generation":3,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.38.2\",\"hostVersion\":\"0.38.2\",\"version\":\"0.38.2\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
+{"computer_id":"15c5c16f-4fd9-41ea-af03-319e68eb2406","connector_generation":4,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.39.0\",\"hostVersion\":\"0.39.0\",\"version\":\"0.39.0\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
+{"computer_id":"b47ac68e-8a59-4855-a04a-3e24b44faaae","connector_generation":3,"upgrade_status_json":"{\"phase\":\"connected\",\"currentVersion\":\"0.39.0\",\"hostVersion\":\"0.39.0\",\"version\":\"0.39.0\",\"updatedAt\":\"<run-time>\"}","reported_at":<run-ms>}
 
 ## computers (3)
-{"id":"15c5c16f-4fd9-41ea-af03-319e68eb2406","name":"ci-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"n1Q3qFgNFFWuyC52lE6xXZgKgCUZhMLq","last_seen_at":<run-ms>,"created_at":1794395159164,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
-{"id":"b47ac68e-8a59-4855-a04a-3e24b44faaae","name":"idle-box","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"sNZu9X0WESJOpwyF4YgSb6t5PBTbcZik","last_seen_at":<run-ms>,"created_at":1794395001687,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":1794395145519}
-{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"d88TrUFSxfUmvhpWIcFduzfq8yzo2GAi","last_seen_at":<run-ms>,"created_at":1794394990012,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"15c5c16f-4fd9-41ea-af03-319e68eb2406","name":"ci-box","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"n1Q3qFgNFFWuyC52lE6xXZgKgCUZhMLq","last_seen_at":<run-ms>,"created_at":1794395159164,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"b47ac68e-8a59-4855-a04a-3e24b44faaae","name":"idle-box","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"sNZu9X0WESJOpwyF4YgSb6t5PBTbcZik","last_seen_at":<run-ms>,"created_at":1794395001687,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":1794395145519}
+{"id":"f01a216a-4803-4214-98eb-f9e28951e1bb","name":"local-computer","platform":"linux-x64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"d88TrUFSxfUmvhpWIcFduzfq8yzo2GAi","last_seen_at":<run-ms>,"created_at":1794394990012,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 

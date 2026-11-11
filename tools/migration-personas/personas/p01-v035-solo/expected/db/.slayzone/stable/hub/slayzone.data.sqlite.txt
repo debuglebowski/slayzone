@@ -348,7 +348,7 @@ trigger erasing_task_has_no_updated_artifacts: CREATE TRIGGER erasing_task_has_n
 ## computer_runtime_state (0)
 
 ## computers (1)
-{"id":"<new-uuid>","name":"local-computer","platform":"linux-arm64","version":"0.38.2","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"<new-token>","last_seen_at":<run-ms>,"created_at":<run-ms>,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
+{"id":"<new-uuid>","name":"local-computer","platform":"linux-arm64","version":"0.39.0","capabilities_json":"{\"pty\":true,\"git\":true,\"fs\":true,\"proc\":true}","auth_key_id":"<new-token>","last_seen_at":<run-ms>,"created_at":<run-ms>,"revoked_at":null,"owner_user_id":null,"visibility":"private","disabled_at":null}
 
 ## content_erasure_artifacts (0)
 
