@@ -32,6 +32,7 @@ import {
 } from '../shared'
 import type { ChatBootstrap, ChatMetadataUpdate, ChatMetadataSnapshot } from './local-data'
 import { retiredComputerSql, type ChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
+import { REMOVED_COMPUTER_REASON } from './hub-retirements'
 import type { ChatComputerRequest } from './migration'
 import { createHistoryProgress } from './hub-history-progress'
 import { createChatFolderDeletions } from './hub-folders'
@@ -425,7 +426,9 @@ export function createHubChatRelay(opts: {
         owner?.computerId ??
         owner?.destinationComputerId ??
         (taskId ? await opts.resolveComputer(taskId) : null)
-      if (pc)
+      // A removed computer has nothing to recover from: asking it only fails as a
+      // transport error. Its chats are refused below with the removal reason.
+      if (pc && !(await ownership.isRetired(pc)))
         await opts.recoverComputer(
           pc,
           !!(
@@ -453,6 +456,13 @@ export function createHubChatRelay(opts: {
     if (owner.state === 'deleted') throw new Error('Chat conversation deleted')
     const unavailable = await ownership.unavailable(owner.id)
     if (unavailable) throw new Error(unavailable.reason)
+    // Retired, its work not yet retired (applyComputerRetirements runs on recovery).
+    if (
+      owner.state === 'active' &&
+      owner.computerId &&
+      (await ownership.isRetired(owner.computerId))
+    )
+      throw new Error(REMOVED_COMPUTER_REASON)
     const fence = opts.conversationFence?.(owner.id)
     if (fence) throw fence
     if (owner.state !== 'active' || owner.cleanupPending) {

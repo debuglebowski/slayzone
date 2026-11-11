@@ -273,80 +273,89 @@ export function createComputerChatServices(opts: {
     let restoredMetadata: ReadonlySet<string> = new Set()
     // Work still addressed to a re-enrolled or removed computer moves or is
     // retired first: this pass must never wait on a computer that is gone.
-    const work = retireComputers()
-      .then(() => relay.resumeProviderTransitions(computerId))
-      .then(() => recovery.reconcile(computerId))
-      .then((items) => {
-        // An entry without a valid identity was already skipped (and logged).
-        inventory = items.filter((entry) => typeof entry?.identity?.id === 'string')
-      })
-      // Every task's lifecycle the computer holds, against the hub's (tasks
-      // without chats too): rebases either side's restore before delivery.
-      .then(() => lifecycle.reconcile(computerId))
-      .then(() => lifecycle.sync(computerId))
-      .then(() => relay.resumeInitializations(computerId))
-      .then(async () => {
-        // A hub CAS can commit before the destination receives activation. Do
-        // not request active metadata from that still-prepared destination.
-        const owners = await opts.db.all<{ id: string }>(
-          `SELECT id FROM chat_ownership o WHERE (
-            (destination_computer_id=? AND state IN ('copying','verified')) OR
-            (computer_id=? AND state='active' AND cleanup_pending=1)) AND NOT EXISTS(
-              SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
-          [computerId, computerId]
-        )
-        for (const owner of owners)
-          await isolateItem(
-            `migration of conversation ${owner.id} to computer ${computerId}`,
-            () => migration.ensure(owner.id, computerId),
-            () => unfinished.add(owner.id)
+    // The pass on a computer that can answer: reconcile, deliver, configure.
+    const connectedPass = (): Promise<void> =>
+      Promise.resolve()
+        .then(() => relay.resumeProviderTransitions(computerId))
+        .then(() => recovery.reconcile(computerId))
+        .then((items) => {
+          // An entry without a valid identity was already skipped (and logged).
+          inventory = items.filter((entry) => typeof entry?.identity?.id === 'string')
+        })
+        // Every task's lifecycle the computer holds, against the hub's (tasks
+        // without chats too): rebases either side's restore before delivery.
+        .then(() => lifecycle.reconcile(computerId))
+        .then(() => lifecycle.sync(computerId))
+        .then(() => relay.resumeInitializations(computerId))
+        .then(async () => {
+          // A hub CAS can commit before the destination receives activation. Do
+          // not request active metadata from that still-prepared destination.
+          const owners = await opts.db.all<{ id: string }>(
+            `SELECT id FROM chat_ownership o WHERE (
+              (destination_computer_id=? AND state IN ('copying','verified')) OR
+              (computer_id=? AND state='active' AND cleanup_pending=1)) AND NOT EXISTS(
+                SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
+            [computerId, computerId]
           )
-      })
-      // Migrated chats hold their settings now: the hub's starting values go.
-      .then(() => relay.settleStartingValues(computerId))
-      .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
-      .then(async () => {
-        const reported = new Map(inventory.map((entry) => [entry.identity.id, entry]))
-        restoredMetadata = await relay.drainMetadata(
-          computerId,
-          true,
-          new Set([
-            ...unfinished,
-            ...[...fences].filter(([, f]) => f.computerId === computerId).map(([id]) => id)
-          ]),
-          reported
-        )
-      })
-      .then(() => lifecycle.sync(computerId))
-      .then(async () => {
-        await opts.request(computerId, {
-          kind: 'diagnostics.configure',
-          ...(opts.diagnosticsConfig?.() ?? { enabled: true, verbose: false })
-        })
-        await opts.request(computerId, {
-          kind: 'retention.configure',
-          days: opts.retentionDays ?? 0
-        })
-        // Drift the passes failed to prevent or repair shows in the logs, not
-        // only later as a tab that will not open. Never blocks recovery.
-        await checkHubChatConsistency(opts.db)
-          .then((violations) => {
-            for (const v of violations)
-              console.warn(`[chat] consistency: ${v.rule} (${v.ids.join(', ')}): ${v.detail}`)
-          })
-          .catch((error: unknown) => console.warn('[chat] consistency check failed:', error))
-        if (recovered.get(computerId) === work) {
-          const first = !recoveredOnce.has(computerId)
-          const changed = changedConversations(inventory, restoredMetadata)
-          recoveredOnce.add(computerId)
-          recoveryFinished.add(computerId)
-          if (!first) {
-            for (const id of changed) historyMarks.set(id, (historyMarks.get(id) ?? 0) + 1)
-            await relay.notifyReplayRequired(computerId, changed, (id, epoch) =>
-              historyGeneration(computerId, id, epoch)
+          for (const owner of owners)
+            await isolateItem(
+              `migration of conversation ${owner.id} to computer ${computerId}`,
+              () => migration.ensure(owner.id, computerId),
+              () => unfinished.add(owner.id)
             )
+        })
+        // Migrated chats hold their settings now: the hub's starting values go.
+        .then(() => relay.settleStartingValues(computerId))
+        .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
+        .then(async () => {
+          const reported = new Map(inventory.map((entry) => [entry.identity.id, entry]))
+          restoredMetadata = await relay.drainMetadata(
+            computerId,
+            true,
+            new Set([
+              ...unfinished,
+              ...[...fences].filter(([, f]) => f.computerId === computerId).map(([id]) => id)
+            ]),
+            reported
+          )
+        })
+        .then(() => lifecycle.sync(computerId))
+        .then(async () => {
+          await opts.request(computerId, {
+            kind: 'diagnostics.configure',
+            ...(opts.diagnosticsConfig?.() ?? { enabled: true, verbose: false })
+          })
+          await opts.request(computerId, {
+            kind: 'retention.configure',
+            days: opts.retentionDays ?? 0
+          })
+          // Drift the passes failed to prevent or repair shows in the logs, not
+          // only later as a tab that will not open. Never blocks recovery.
+          await checkHubChatConsistency(opts.db)
+            .then((violations) => {
+              for (const v of violations)
+                console.warn(`[chat] consistency: ${v.rule} (${v.ids.join(', ')}): ${v.detail}`)
+            })
+            .catch((error: unknown) => console.warn('[chat] consistency check failed:', error))
+          if (recovered.get(computerId) === work) {
+            const first = !recoveredOnce.has(computerId)
+            const changed = changedConversations(inventory, restoredMetadata)
+            recoveredOnce.add(computerId)
+            recoveryFinished.add(computerId)
+            if (!first) {
+              for (const id of changed) historyMarks.set(id, (historyMarks.get(id) ?? 0) + 1)
+              await relay.notifyReplayRequired(computerId, changed, (id, epoch) =>
+                historyGeneration(computerId, id, epoch)
+              )
+            }
           }
-        }
+        })
+    const work: Promise<void> = retireComputers()
+      .then(async () => {
+        // Removed for good (deleted, or gone missing): there is nothing to reconcile
+        // and nothing can be delivered. Its chats wait visibly (applyComputerRetirements).
+        if (await ownership.isRetired(computerId)) return
+        await connectedPass()
       })
       .catch((error) => {
         if (recovered.get(computerId) === work) invalidateRecovery(computerId)

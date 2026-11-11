@@ -9,6 +9,8 @@ import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { taskSessionStore } from './test-session-store'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
+import { deleteComputer } from '@slayzone/computers/server'
+import { REMOVED_COMPUTER_REASON } from '@slayzone/chat-runtime/hub'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { createFakeClaude, echoTurn } from '../../../shared/test-utils/fake-claude'
@@ -45,6 +47,8 @@ async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
     })
   let pc = openComputer()
   let failActivation = false
+  // Computers with no connection: the hub gateway refuses every request to them.
+  const disconnected = new Set<string>()
   const services = (computerId = 'pc', buildMcpEnv = async () => ({})) =>
     createComputerChatServices({
       db: h.slayDb,
@@ -53,7 +57,8 @@ async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
         buildMcpEnv
       },
       attachments: { read: async () => new Uint8Array() },
-      request: async (_id, raw) => {
+      request: async (id, raw) => {
+        if (disconnected.has(id)) throw new Error(`computer '${id}' is not connected`)
         if ((raw as { kind: string }).kind === 'migration.activate' && failActivation) {
           failActivation = false
           throw new Error('Disconnected before migration activation')
@@ -62,10 +67,12 @@ async function fixture(opts: { spawnProcess?: typeof spawn } = {}) {
       },
       resolveComputer: async () => computerId,
       defaultComputer: async () => computerId,
-      hasLiveTask: async () => false
+      hasLiveTask: async () => false,
+      connected: (id) => !disconnected.has(id)
     })
   return {
     ...h,
+    disconnect: (id: string) => disconnected.add(id),
     dir,
     fakeClaude,
     request: (raw: unknown) => pc.request(JSON.parse(JSON.stringify(raw))),
@@ -670,6 +677,45 @@ test('a delayed bootstrap cannot mint a newer revision for configuration capture
         ).provider_config
       )['claude-chat']?.chatModel
     ).toBeUndefined()
+  } finally {
+    await f.close()
+  }
+})
+
+test('a computer deleted on this build: its chat reads unavailable and refuses with the removal reason, never a transport error', async () => {
+  const f = await fixture()
+  try {
+    f.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      .run()
+    f.db
+      .prepare(
+        "INSERT INTO computers(id,name,platform,version,capabilities_json,auth_key_id,created_at) VALUES('pc','laptop','linux-x64','1','{}','k',1)"
+      )
+      .run()
+    const before = f.services()
+    await before.relay.ops.saveTabDraft('tab', { text: 'draft on the laptop', attachments: [] })
+    const owner = (await before.ownership.forTab('tab'))!
+    // The laptop is deleted (Settings → Computers): gone for good, never connects again.
+    await deleteComputer(f.slayDb, 'pc')
+    f.disconnect('pc')
+    const after = f.services('pc')
+    await after.retireComputers()
+    expect(await after.availability('tab')).toMatchObject({
+      state: 'unavailable',
+      reason: REMOVED_COMPUTER_REASON
+    })
+    await expect(after.relay.ops.getTabState('tab')).rejects.toThrow(REMOVED_COMPUTER_REASON)
+    // Recovering a removed computer asks it nothing: there is nothing to reconcile.
+    await expect(after.recoverComputer('pc')).resolves.toBeUndefined()
+    // The chat is kept, waiting for a computer that holds it.
+    expect(await after.ownership.forTab('tab')).toMatchObject({
+      id: owner.id,
+      state: 'active',
+      computerId: 'pc'
+    })
   } finally {
     await f.close()
   }

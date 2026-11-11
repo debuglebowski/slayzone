@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness'
 import { createChatOwnershipStore } from './hub-ownership'
 import { createChatAvailability } from './hub-availability'
+import { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
 
 async function setup() {
   const h = await createTestHarness()
@@ -172,3 +173,40 @@ test("a legacy chat's computer is its recorded one (backfilled), never read from
     h.cleanup()
   }
 })
+test.each([false, true])(
+  'a chat whose computer was removed reads unavailable with the removal reason, never offline (retirement applied=%s)',
+  async (applied) => {
+    const { h, owners } = await setup()
+    try {
+      await owners.register({
+        id: 'c',
+        taskId: 't',
+        tabId: 'tab',
+        mode: 'claude-chat',
+        computerId: 'gone',
+        epoch: 1
+      })
+      h.db
+        .prepare(
+          "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+        )
+        .run()
+      if (applied) await applyComputerRetirements(h.slayDb)
+      const availability = createChatAvailability({
+        db: h.slayDb,
+        ownership: owners,
+        resolveComputer: async () => null,
+        // A removed computer is never connected: that must not decide the answer.
+        connected: () => false,
+        hasLiveTask: async () => false
+      })
+      expect(await availability('tab')).toMatchObject({
+        state: 'unavailable',
+        reason: REMOVED_COMPUTER_REASON,
+        computer: { id: 'gone' }
+      })
+    } finally {
+      h.cleanup()
+    }
+  }
+)

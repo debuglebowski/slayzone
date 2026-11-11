@@ -7,6 +7,7 @@ import { createComputerChatRuntime } from './computer-runtime'
 import { createChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
 import type { ChatComputerRequest } from './migration'
 import { createHubChatRelay } from './hub-relay'
+import { applyComputerRetirements, REMOVED_COMPUTER_REASON } from './hub-retirements'
 
 test.each([false, true])(
   'history reads initialize new storage once and avoid repeated setup, existing=%s',
@@ -924,3 +925,58 @@ test('a placeholder folder resolves once every chat that referenced it was re-re
     h.cleanup()
   }
 })
+
+test.each([false, true])(
+  'opening a chat whose computer was removed refuses with the removal reason, without asking the gone computer (retirement applied=%s)',
+  async (applied) => {
+    const h = await createTestHarness()
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const ownership = createChatOwnershipStore(h.slayDb)
+      await ownership.register({
+        id: 'store',
+        taskId: 'task',
+        tabId: 'tab',
+        mode: 'claude-chat',
+        computerId: 'gone',
+        epoch: 1
+      })
+      h.db
+        .prepare(
+          "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+        )
+        .run()
+      if (applied) await applyComputerRetirements(h.slayDb)
+      // What the hub gateway answers for a computer with no connection.
+      const notConnected = (id: string) => new Error(`computer '${id}' is not connected`)
+      const request = vi.fn<ChatComputerRequest>(async (pc) => {
+        throw notConnected(pc)
+      })
+      const recoverComputer = vi.fn(async (pc: string) => {
+        throw notConnected(pc)
+      })
+      const relay = createHubChatRelay({
+        db: h.slayDb,
+        ownership,
+        bootstrap: async () => {
+          throw new Error('Must not bootstrap on a removed computer')
+        },
+        request,
+        recoverComputer,
+        resolveComputer: async () => null,
+        defaultComputer: async () => null,
+        migrate: async () => {
+          throw new Error('No legacy content to migrate')
+        },
+        onSessionsChanged: () => {}
+      })
+      await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow(REMOVED_COMPUTER_REASON)
+      expect(recoverComputer).not.toHaveBeenCalled()
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      h.cleanup()
+    }
+  }
+)

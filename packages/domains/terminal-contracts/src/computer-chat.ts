@@ -114,6 +114,8 @@ export interface ChatAvailability {
     | 'unavailable'
     | 'upgrading'
   computer: { id: string; name: string } | null
+  /** 'unavailable' only: why, when the hub knows (e.g. its computer was removed). */
+  reason?: string
   waitingForAgents?: boolean
   /** Hub recovery watermark. A ready computer can have missed live notifications. */
   recoveryGeneration?: string
@@ -136,7 +138,10 @@ export function chatAvailabilityMessage(
     case 'unavailable':
       return {
         title: 'Chat history unavailable',
-        detail: `${name} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
+        // A known reason repeats the title as its first sentence: show the rest.
+        detail: status.reason
+          ? status.reason.replace(/^Chat history unavailable\.\s*/, '')
+          : `${name} did not return this conversation. Recover saved history from its chat backups, or reconnect the original computer. No empty history was created.`
       }
     case 'upgrading':
       return {

@@ -2,6 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { ChatAvailability } from '@slayzone/terminal-contracts'
 import type { ChatOwnershipStore } from './hub-ownership'
 import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
+import { REMOVED_COMPUTER_REASON } from './hub-retirements'
 
 /**
  * A client's loaded history is stale when this changes: a recovery that found
@@ -51,6 +52,16 @@ export function createChatAvailability(opts: {
     if (tab.state === 'deleted' || owner?.state === 'deleted') return { state: 'deleted', computer }
     if (tab.state === 'paused') return { state: 'paused', computer }
     if (!computer) return { state: 'unassigned', computer: null }
+    // Removed for good (deleted, or gone missing): it never connects again, so this is
+    // decided before "offline" — which would ask the user to connect it.
+    if (
+      owner?.state === 'active' &&
+      owner.computerId === computer.id &&
+      (await opts.ownership.isRetired(computer.id))
+    ) {
+      const missing = await opts.ownership.unavailable(owner.id)
+      return { state: 'unavailable', computer, reason: missing?.reason ?? REMOVED_COMPUTER_REASON }
+    }
     if (!opts.connected(computer.id)) return { state: 'offline', computer }
     if (opts.chatRuntimeReady?.(computer.id) === false) return { state: 'upgrading', computer }
     if (!owner) return { state: 'preparing', computer }
