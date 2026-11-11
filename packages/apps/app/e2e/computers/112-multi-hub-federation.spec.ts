@@ -1087,140 +1087,151 @@ base.describe('Multi-hub federation (2 hubs)', () => {
     }
   })
 
-  base('bulk update/archive/delete across hubs reach EVERY owning hub, and undo too', async () => {
-    base.setTimeout(180_000)
+  base(
+    'bulk update/archive/delete across hubs reach EVERY owning hub (undo for update/archive)',
+    async () => {
+      base.setTimeout(180_000)
 
-    // A multi-selection can span hubs (the tree lists every hub's projects). Each
-    // hub only writes its own tasks — ids sent to another hub are silently skipped
-    // — so the bulk actions must fan out per owning hub, and undo must reach the
-    // hub that owned the task even after it has left the board.
-    const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
-    let hub: SecondHub | null = null
-    let hubComputer: HubComputer | null = null
-    let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
-    try {
-      hub = await spawnSecondHub(secondStore)
-      await waitForHubHealth(hub.port)
-      const remoteHubUrl = hub.url
-      hubComputer = await attachDefaultComputer(hub, secondStore)
+      // A multi-selection can span hubs (the tree lists every hub's projects). Each
+      // hub only writes its own tasks — ids sent to another hub are silently skipped
+      // — so the bulk actions must fan out per owning hub, and undo must reach the
+      // hub that owned the task even after it has left the board.
+      const secondStore = fs.mkdtempSync(path.join(APP_DIR, 'e2e-second-hub-'))
+      let hub: SecondHub | null = null
+      let hubComputer: HubComputer | null = null
+      let launched: Awaited<ReturnType<typeof launchIsolatedElectron>> | null = null
+      try {
+        hub = await spawnSecondHub(secondStore)
+        await waitForHubHealth(hub.port)
+        const remoteHubUrl = hub.url
+        hubComputer = await attachDefaultComputer(hub, secondStore)
 
-      const remoteTaskId = await withHubClient(remoteHubUrl, async (c) => {
-        const project = (await c.projects.create.mutate({
-          name: 'Remote-P',
-          color: '#22c55e'
-        })) as { id: string }
-        const task = (await c.task.create.mutate({
-          projectId: project.id,
-          title: 'remote bulk task',
-          status: 'todo'
-        })) as { id: string }
-        return task.id
-      })
+        const remoteTaskId = await withHubClient(remoteHubUrl, async (c) => {
+          const project = (await c.projects.create.mutate({
+            name: 'Remote-P',
+            color: '#22c55e'
+          })) as { id: string }
+          const task = (await c.task.create.mutate({
+            projectId: project.id,
+            title: 'remote bulk task',
+            status: 'todo'
+          })) as { id: string }
+          return task.id
+        })
 
-      launched = await launchIsolatedElectron({
-        name: 'multi-hub-bulk',
-        seedUserData: (userDataDir) => {
-          fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
-          fs.writeFileSync(
-            bootConfigPath(userDataDir),
-            JSON.stringify(
-              {
-                server_mode: 'local',
-                multi_hub: true,
-                hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
-                default_hub_id: 'local'
-              },
-              null,
-              2
+        launched = await launchIsolatedElectron({
+          name: 'multi-hub-bulk',
+          seedUserData: (userDataDir) => {
+            fs.mkdirSync(path.dirname(bootConfigPath(userDataDir)), { recursive: true })
+            fs.writeFileSync(
+              bootConfigPath(userDataDir),
+              JSON.stringify(
+                {
+                  server_mode: 'local',
+                  multi_hub: true,
+                  hubs: [{ id: 'remote-b', kind: 'remote', label: 'B', url: remoteHubUrl }],
+                  default_hub_id: 'local'
+                },
+                null,
+                2
+              )
             )
-          )
-        },
-        extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
-      })
-
-      const page = launched.page
-      await page.waitForSelector('#root', { timeout: 20_000 })
-      await authorizeHubInApp(page, 'remote-b', hub.token)
-      // A project lives on a computer: the local hub refuses one until its
-      // auto-enrolled computer is up. The worker fixture's gate doesn't cover
-      // this isolated launch.
-      expect(await waitForUsableComputer(page)).toBe(true)
-
-      const localTaskId = await page.evaluate(async () => {
-        const c = window.getTrpcVanillaClient()
-        const project = await c.projects.create.mutate({
-          name: 'Local-P',
-          color: '#3b82f6'
-        })
-        const task = await c.task.create.mutate({
-          projectId: project.id,
-          title: 'local bulk task',
-          status: 'todo'
-        })
-        return task!.id as string
-      })
-      await page.evaluate(() => (window as unknown as FederationWindow).__slayzone_refreshData?.())
-      // Both hubs' boards merged → both tasks' owners are known to the client.
-      await expect(projectBlob(page, 'LO')).toBeVisible({ timeout: 30_000 })
-      await expect(projectBlob(page, 'RE')).toBeVisible({ timeout: 30_000 })
-
-      // LOCAL first: the old code sent the whole batch to the FIRST task's hub.
-      const ids = [localTaskId, remoteTaskId]
-      type Row = { status: string; archived_at: string | null; deleted_at: string | null }
-      const localTask = () =>
-        page.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }) as Promise<Row | null>,
-          localTaskId
-        )
-      const remoteTask = () =>
-        withHubClient(
-          remoteHubUrl,
-          (c) => c.task.get.query({ id: remoteTaskId }) as Promise<Row | null>
-        )
-      const act = (action: 'update' | 'archive' | 'delete' | 'undo', updates?: unknown) =>
-        page.evaluate(
-          ({ action, ids, updates }) => {
-            const a = (
-              window as unknown as {
-                __slayzone_bulkTaskActionsForTest: Record<
-                  string,
-                  (...args: unknown[]) => Promise<unknown>
-                >
-              }
-            ).__slayzone_bulkTaskActionsForTest
-            return action === 'undo' ? a.undo() : a[action](ids, updates)
           },
-          { action, ids, updates }
+          extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+        })
+
+        const page = launched.page
+        await page.waitForSelector('#root', { timeout: 20_000 })
+        await authorizeHubInApp(page, 'remote-b', hub.token)
+        // A project lives on a computer: the local hub refuses one until its
+        // auto-enrolled computer is up. The worker fixture's gate doesn't cover
+        // this isolated launch.
+        expect(await waitForUsableComputer(page)).toBe(true)
+
+        const localTaskId = await page.evaluate(async () => {
+          const c = window.getTrpcVanillaClient()
+          const project = await c.projects.create.mutate({
+            name: 'Local-P',
+            color: '#3b82f6'
+          })
+          const task = await c.task.create.mutate({
+            projectId: project.id,
+            title: 'local bulk task',
+            status: 'todo'
+          })
+          return task!.id as string
+        })
+        await page.evaluate(() =>
+          (window as unknown as FederationWindow).__slayzone_refreshData?.()
         )
-      const poll = { timeout: 15_000, intervals: [250, 500, 1_000] }
+        // Both hubs' boards merged → both tasks' owners are known to the client.
+        await expect(projectBlob(page, 'LO')).toBeVisible({ timeout: 30_000 })
+        await expect(projectBlob(page, 'RE')).toBeVisible({ timeout: 30_000 })
 
-      // (1) bulk UPDATE lands on both hubs.
-      await act('update', { status: 'in_progress' })
-      await expect.poll(async () => (await localTask())?.status, poll).toBe('in_progress')
-      await expect.poll(async () => (await remoteTask())?.status, poll).toBe('in_progress')
+        // LOCAL first: the old code sent the whole batch to the FIRST task's hub.
+        const ids = [localTaskId, remoteTaskId]
+        type Row = { status: string; archived_at: string | null; deleted_at: string | null }
+        const localTask = () =>
+          page.evaluate(
+            (id) => window.getTrpcVanillaClient().task.get.query({ id }) as Promise<Row | null>,
+            localTaskId
+          )
+        const remoteTask = () =>
+          withHubClient(
+            remoteHubUrl,
+            (c) => c.task.get.query({ id: remoteTaskId }) as Promise<Row | null>
+          )
+        const act = (action: 'update' | 'archive' | 'delete' | 'undo', updates?: unknown) =>
+          page.evaluate(
+            ({ action, ids, updates }) => {
+              const a = (
+                window as unknown as {
+                  __slayzone_bulkTaskActionsForTest: Record<
+                    string,
+                    (...args: unknown[]) => Promise<unknown>
+                  >
+                }
+              ).__slayzone_bulkTaskActionsForTest
+              return action === 'undo' ? a.undo() : a[action](ids, updates)
+            },
+            { action, ids, updates }
+          )
+        const poll = { timeout: 15_000, intervals: [250, 500, 1_000] }
 
-      // (2) bulk ARCHIVE lands on both hubs; UNDO un-archives on both.
-      await act('archive')
-      await expect.poll(async () => !!(await localTask())?.archived_at, poll).toBe(true)
-      await expect.poll(async () => !!(await remoteTask())?.archived_at, poll).toBe(true)
-      await act('undo')
-      await expect.poll(async () => (await localTask())?.archived_at ?? null, poll).toBeNull()
-      await expect.poll(async () => (await remoteTask())?.archived_at ?? null, poll).toBeNull()
+        // (1) bulk UPDATE lands on both hubs.
+        await act('update', { status: 'in_progress' })
+        await expect.poll(async () => (await localTask())?.status, poll).toBe('in_progress')
+        await expect.poll(async () => (await remoteTask())?.status, poll).toBe('in_progress')
 
-      // (3) bulk DELETE lands on both hubs; UNDO restores on both.
-      await act('delete')
-      await expect.poll(async () => !!(await localTask())?.deleted_at, poll).toBe(true)
-      await expect.poll(async () => !!(await remoteTask())?.deleted_at, poll).toBe(true)
-      await act('undo')
-      await expect.poll(async () => (await localTask())?.deleted_at ?? null, poll).toBeNull()
-      await expect.poll(async () => (await remoteTask())?.deleted_at ?? null, poll).toBeNull()
-    } finally {
-      if (launched) await launched.close()
-      if (hubComputer) await hubComputer.stop()
-      if (hub) await hub.stop()
-      fs.rmSync(secondStore, { recursive: true, force: true })
+        // (2) bulk ARCHIVE lands on both hubs; UNDO un-archives on both.
+        await act('archive')
+        await expect.poll(async () => !!(await localTask())?.archived_at, poll).toBe(true)
+        await expect.poll(async () => !!(await remoteTask())?.archived_at, poll).toBe(true)
+        await act('undo')
+        await expect.poll(async () => (await localTask())?.archived_at ?? null, poll).toBeNull()
+        await expect.poll(async () => (await remoteTask())?.archived_at ?? null, poll).toBeNull()
+
+        // (3) bulk DELETE lands on both hubs. Delete is permanent erasure (76700b05f):
+        // the row is gone on its own hub, and there is no undo.
+        const gone = (read: () => Promise<Row | null>) =>
+          read().then(
+            (row) => row === null,
+            (err: unknown) => {
+              if (/not.?found/i.test(String(err))) return true
+              throw err
+            }
+          )
+        await act('delete')
+        await expect.poll(() => gone(localTask), poll).toBe(true)
+        await expect.poll(() => gone(remoteTask), poll).toBe(true)
+      } finally {
+        if (launched) await launched.close()
+        if (hubComputer) await hubComputer.stop()
+        if (hub) await hub.stop()
+        fs.rmSync(secondStore, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   base('Complete & Close Tab on a remote-hub task writes to THAT hub, and undo too', async () => {
     base.setTimeout(180_000)
