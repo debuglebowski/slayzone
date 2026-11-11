@@ -202,35 +202,45 @@ export function createComputerChatServices(opts: {
       relay.recoverProviderTransitions(computerId, identity, transitions)
   })
   /**
-   * Idempotent; one pass at a time. A caller arriving while a pass runs gets another
-   * pass after it: the running one may have read the retirements before the caller's
-   * change (a computer just deleted), so joining it could skip that change.
+   * Idempotent; one pass at a time, shared by concurrent callers. `fresh`: the caller
+   * just changed the retirements (a computer was removed), so a pass already running
+   * may have read them before the change: another pass follows it. Recovery callers
+   * change nothing and share the running pass.
    */
   let retiring: Promise<void> | null = null
   let retireAgain = false
-  function retireComputers(): Promise<void> {
+  function retireComputers(retire: { fresh?: boolean } = {}): Promise<void> {
     if (retiring) {
-      retireAgain = true
+      if (retire.fresh) retireAgain = true
       return retiring
     }
     retiring = (async () => {
-      do {
-        retireAgain = false
-        await applyComputerRetirements(opts.db)
-      } while (retireAgain)
-    })().finally(() => {
-      retiring = null
-    })
+      try {
+        do {
+          retireAgain = false
+          try {
+            await applyComputerRetirements(opts.db)
+          } catch (error) {
+            // A fresh pass asked meanwhile still runs; otherwise the callers see it.
+            if (!retireAgain) throw error
+          }
+        } while (retireAgain)
+      } finally {
+        // In the body, not a later `.finally`: a caller arriving after the last check
+        // starts a new pass instead of joining one that already ended.
+        retiring = null
+      }
+    })()
     return retiring
   }
   /**
-   * A computer was deleted or re-enrolled: its cached recovery pass is stale (a later
-   * recovery must apply its retirement, not return the old result), and the chat work
-   * naming it is moved or retired now.
+   * A computer was removed (deleted, or revoked): its cached recovery pass is stale (a
+   * later recovery must apply its retirement, not return the old result), and the chat
+   * work naming it is moved or retired now.
    */
   function computerRemoved(computerId: string): Promise<void> {
     invalidateRecovery(computerId)
-    return retireComputers()
+    return retireComputers({ fresh: true })
   }
   // Hub start: a computer removed while the hub was down stops blocking now.
   void retireComputers().catch((error: unknown) =>

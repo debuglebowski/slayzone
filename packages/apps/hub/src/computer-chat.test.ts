@@ -381,7 +381,7 @@ test('a retirement asked for while a pass runs is applied: the caller never join
         "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
       )
       .run()
-    const asked = services.retireComputers()
+    const asked = services.computerRemoved('gone')
     release()
     await asked
     expect(
@@ -393,3 +393,68 @@ test('a retirement asked for while a pass runs is applied: the caller never join
     h.cleanup()
   }
 })
+
+test.each(Array.from({ length: 30 }, (_, depth) => depth))(
+  'a removal arriving while a retirement pass ends still gets its own pass (no lost wakeup, %i microtasks in)',
+  async (depth) => {
+    const h = await createTestHarness()
+    try {
+      h.db.exec(
+        "INSERT INTO projects(id,name,color) VALUES('p','P','#000'); INSERT INTO tasks(id,project_id,title) VALUES('task','p','Task'); INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
+      )
+      const services = createComputerChatServices({
+        db: h.slayDb,
+        legacyData: {
+          ...createDbChatDataOps(h.slayDb, taskSessionStore),
+          buildMcpEnv: async () => ({})
+        },
+        attachments: { read: async () => Buffer.alloc(0) },
+        request: async (pc) => {
+          throw new Error(`computer '${pc}' is not connected`)
+        },
+        resolveComputer: async () => 'gone',
+        defaultComputer: async () => 'gone',
+        hasLiveTask: async () => false
+      })
+      await services.ownership.register({
+        id: 'store',
+        taskId: 'task',
+        tabId: 'tab',
+        mode: 'claude-chat',
+        computerId: 'gone',
+        epoch: 1
+      })
+      // The pass that reads no retirement yet; the removal lands `depth` microtasks
+      // after its last read resolves, so one depth falls between the pass's final
+      // check and the moment it stops counting as running.
+      let lastRead!: Promise<unknown>
+      const read = h.slayDb.all.bind(h.slayDb)
+      h.slayDb.all = ((sql: string, ...rest: unknown[]) => {
+        const p = (read as (s: string, ...r: unknown[]) => Promise<unknown>)(sql, ...rest)
+        if (sql.includes('FROM computer_retirements')) lastRead = p
+        return p
+      }) as typeof h.slayDb.all
+      const running = services.retireComputers()
+      await vi.waitFor(() => expect(lastRead).toBeDefined())
+      let chain: Promise<unknown> = lastRead
+      for (let i = 0; i < depth; i++) chain = chain.then(() => {})
+      const removal = chain.then(() => {
+        h.db
+          .prepare(
+            "INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at) VALUES('gone',NULL,'deleted',1)"
+          )
+          .run()
+        return services.computerRemoved('gone')
+      })
+      await running
+      await removal
+      expect(
+        h.db
+          .prepare('SELECT 1 AS ok FROM chat_unavailable_owners WHERE conversation_id=?')
+          .get('store')
+      ).toEqual({ ok: 1 })
+    } finally {
+      h.cleanup()
+    }
+  }
+)
