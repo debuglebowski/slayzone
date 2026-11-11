@@ -426,9 +426,10 @@ export function createHubChatRelay(opts: {
         owner?.computerId ??
         owner?.destinationComputerId ??
         (taskId ? await opts.resolveComputer(taskId) : null)
-      // A removed computer has nothing to recover from: asking it only fails as a
-      // transport error. Its chats are refused below with the removal reason.
-      if (pc && !(await ownership.isRetired(pc)))
+      // Also for a removed computer: recovery applies its retirement first (repointing
+      // or retiring the work that names it) and never asks it. Its chats are refused
+      // below with the removal reason.
+      if (pc)
         await opts.recoverComputer(
           pc,
           !!(

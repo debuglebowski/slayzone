@@ -927,7 +927,7 @@ test('a placeholder folder resolves once every chat that referenced it was re-re
 })
 
 test.each([false, true])(
-  'opening a chat whose computer was removed refuses with the removal reason, without asking the gone computer (retirement applied=%s)',
+  'opening a chat whose computer was removed refuses with the removal reason; recovery applies the retirement and never asks the gone computer (retirement applied=%s)',
   async (applied) => {
     const h = await createTestHarness()
     try {
@@ -954,7 +954,11 @@ test.each([false, true])(
       const request = vi.fn<ChatComputerRequest>(async (pc) => {
         throw notConnected(pc)
       })
+      // The hub's recoverComputer: it applies pending retirements first, and a
+      // removed computer then has nothing to reconcile (it never asks it).
       const recoverComputer = vi.fn(async (pc: string) => {
+        await applyComputerRetirements(h.slayDb)
+        if (await ownership.isRetired(pc)) return
         throw notConnected(pc)
       })
       const relay = createHubChatRelay({
@@ -973,8 +977,13 @@ test.each([false, true])(
         onSessionsChanged: () => {}
       })
       await expect(relay.ops.getReplay('tab', -1)).rejects.toThrow(REMOVED_COMPUTER_REASON)
-      expect(recoverComputer).not.toHaveBeenCalled()
+      // The relay must not skip recovery for a removed computer: skipping it also
+      // skipped applying the retirement (a legacy chat bound for it stayed bound).
+      expect(recoverComputer).toHaveBeenCalledWith('gone', expect.any(Boolean))
       expect(request).not.toHaveBeenCalled()
+      expect(
+        h.db.prepare('SELECT 1 FROM chat_unavailable_owners WHERE conversation_id=?').get('store')
+      ).toBeTruthy()
     } finally {
       h.cleanup()
     }
