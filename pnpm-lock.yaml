@@ -165,7 +165,7 @@ settings:
 overrides:
   zod: ^4.6.6
   d3-shape>d3-path: ^3.1.0
-  node-abi: ^4.35.0
+  node-abi: ^4.37.0
   node-forge: ^1.4.1
   posix>nan: ^2.29.0
   electron-chrome-web-store>adm-zip: ^0.6.1
