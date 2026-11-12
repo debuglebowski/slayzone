@@ -19,6 +19,10 @@ import {
   sessionsChunkInputSchema,
   sessionsDiscardInputSchema,
   sessionsExportInputSchema,
+  sessionsFileReadInputSchema,
+  sessionsFileWriteInputSchema,
+  sessionsFilesInputSchema,
+  sessionsFilesMissingInputSchema,
   sessionsFinishInputSchema,
   sessionsImportLedgerInputSchema,
   sessionsPutAttachmentInputSchema,
@@ -209,6 +213,12 @@ export const taskMovesRouter = router({
       await taskMoveSessions().discard(input.moveId, move.taskIds)
     })
   ),
+  sessionsFiles: publicProcedure
+    .input(sessionsFilesInputSchema)
+    .query(({ input }) => mapped(() => taskMoveSessions().files(input.moveId, input.taskId))),
+  sessionsFileRead: publicProcedure
+    .input(sessionsFileReadInputSchema)
+    .query(({ input }) => mapped(() => taskMoveSessions().readFile(input))),
   // Target hub: stage each chat on the task's computer, then take it as this hub's own.
   sessionsBegin: publicProcedure
     .input(sessionsBeginInputSchema)
@@ -233,6 +243,16 @@ export const taskMovesRouter = router({
   sessionsActivate: publicProcedure.input(sessionsActivateInputSchema).mutation(({ input }) =>
     mapped(async () => {
       await taskMoveSessions().activate(input)
+    })
+  ),
+  sessionsFilesMissing: publicProcedure
+    .input(sessionsFilesMissingInputSchema)
+    .mutation(({ input }) =>
+      mapped(() => taskMoveSessions().missingFiles(input.taskId, input.entries))
+    ),
+  sessionsFileWrite: publicProcedure.input(sessionsFileWriteInputSchema).mutation(({ input }) =>
+    mapped(async () => {
+      await taskMoveSessions().writeFile(input)
     })
   ),
   sessionsImportLedger: publicProcedure

@@ -3,6 +3,8 @@ import type {
   TaskMoveAttachmentRef,
   TaskMoveBundle,
   TaskMoveChatTransfer,
+  TaskMoveSessionFile,
+  TaskMoveSessionFileRef,
   TaskMoveSessionsExport
 } from '@slayzone/task-contracts'
 import type { TaskMoveStepRunner, TaskMoveWorkStep } from './task-move-engine'
@@ -50,6 +52,16 @@ export interface TaskMoveSourceApi {
   }): Promise<string>
   /** The exports go (their work is done, or the move was canceled). */
   sessionsDiscard(moveId: string): Promise<void>
+  /** The files beside the task's chats (Claude transcripts, terminal scrollback). */
+  sessionsFiles(moveId: string, taskId: string): Promise<TaskMoveSessionFile[]>
+  sessionsFileRead(input: {
+    moveId: string
+    taskId: string
+    computerId: string
+    ref: TaskMoveSessionFileRef
+    offset: number
+    length: number
+  }): Promise<{ data: string; eof: boolean }>
   addRemoteBlockers(moveId: string, links: TaskMoveRemoteBlockerLink[]): Promise<void>
   fileManifest(moveId: string): Promise<TaskMoveFileEntry[]>
   readFile(
@@ -98,6 +110,19 @@ export interface TaskMoveTargetApi {
     hash: string
   }): Promise<void>
   sessionsImportLedger(moveId: string, taskId: string, ledger: unknown): Promise<void>
+  sessionsFilesMissing(
+    moveId: string,
+    taskId: string,
+    entries: Array<Omit<TaskMoveSessionFile, 'computerId'>>
+  ): Promise<Array<Omit<TaskMoveSessionFile, 'computerId'> & { offset: number }>>
+  sessionsFileWrite(input: {
+    moveId: string
+    taskId: string
+    ref: TaskMoveSessionFileRef
+    offset: number
+    data: string
+    complete?: { size: number; hash: string }
+  }): Promise<void>
   /** The hub owns the chats the computer now holds. */
   sessionsRegister(
     moveId: string,
@@ -198,7 +223,7 @@ export function createTaskMoveSteps(opts: {
       const exports = new Map<string, TaskMoveSessionsExport>()
       for (const taskId of move.taskIds)
         exports.set(taskId, await opts.source.sessionsExport(move.id, taskId))
-      const total = [...exports.values()]
+      let total = [...exports.values()]
         .flatMap((e) => e.transfers)
         .reduce((n, t) => n + t.manifest.bytes, 0)
       let done = 0
@@ -266,6 +291,41 @@ export function createTaskMoveSteps(opts: {
             mode: identity.mode,
             epoch: staged.epoch
           })
+        }
+        // The files beside the chats: transcripts (so the CLI session resumes) and scrollback.
+        const files = await opts.source.sessionsFiles(move.id, taskId)
+        const missing = await opts.target.sessionsFilesMissing(
+          move.id,
+          taskId,
+          files.map(({ ref, size, hash }) => ({ ref, size, hash }))
+        )
+        total += missing.reduce((n, f) => n + f.size - f.offset, 0)
+        for (const file of missing) {
+          const computerId = files.find((f) => JSON.stringify(f.ref) === JSON.stringify(file.ref))!
+            .computerId!
+          let offset = file.offset
+          for (;;) {
+            const chunk = await opts.source.sessionsFileRead({
+              moveId: move.id,
+              taskId,
+              computerId,
+              ref: file.ref,
+              offset,
+              length: TASK_MOVE_SESSION_CHUNK_BYTES
+            })
+            await opts.target.sessionsFileWrite({
+              moveId: move.id,
+              taskId,
+              ref: file.ref,
+              offset,
+              data: chunk.data,
+              ...(chunk.eof ? { complete: { size: file.size, hash: file.hash } } : {})
+            })
+            offset += base64Bytes(chunk.data)
+            done += base64Bytes(chunk.data)
+            await reportProgress(done, total)
+            if (chunk.eof) break
+          }
         }
         await opts.target.sessionsImportLedger(move.id, taskId, exported.ledger)
         await opts.target.sessionsRegister(move.id, taskId, chats)

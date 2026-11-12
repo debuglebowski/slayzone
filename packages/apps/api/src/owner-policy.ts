@@ -1220,6 +1220,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.sessionsActivate': checked(taskMove('moveId'), task('taskId')),
   'taskMoves.sessionsImportLedger': checked(taskMove('moveId'), task('taskId')),
   'taskMoves.sessionsRegister': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsFiles': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsFileRead': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsFilesMissing': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsFileWrite': checked(taskMove('moveId'), task('taskId')),
   // A move's artifact bytes: the move decides (its tasks; once gone, who began it).
   'artifacts.moveManifest': checked(taskMove('moveId')),
   'artifacts.moveRead': checked(taskMove('moveId')),

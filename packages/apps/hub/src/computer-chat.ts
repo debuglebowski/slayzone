@@ -975,6 +975,15 @@ export function createComputerChatServices(opts: {
     await recoverComputer(computerId)
     return request(computerId, body)
   }
+  /** The project a task is in on this hub (the computer finds its folder for it). */
+  async function moveProjectOf(taskId: string): Promise<string> {
+    const row = await opts.db.get<{ project_id: string }>(
+      'SELECT project_id FROM tasks WHERE id = ?',
+      [taskId]
+    )
+    if (!row) throw new Error(`Task ${taskId} is not on this hub`)
+    return row.project_id
+  }
   /** The computer this hub keeps a moved-in task's sessions on. */
   async function moveComputerOf(taskId: string): Promise<string> {
     const computerId = await opts.resolveComputer(taskId)
@@ -1159,6 +1168,64 @@ export function createComputerChatServices(opts: {
           await computerRequest(computerId, { kind: 'sessionMove.discard', moveId }).catch(
             () => undefined
           )
+      },
+      async files(moveId, taskId) {
+        void moveId
+        const projectId = await moveProjectOf(taskId)
+        const computers = new Set<string>()
+        for (const o of await ownership.forTask(taskId))
+          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+        const home = await opts.resolveComputer(taskId)
+        if (home) computers.add(home)
+        const files: Awaited<ReturnType<TaskMoveSessionsDelegate['files']>> = []
+        const seen = new Set<string>()
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const listed = (await computerRequest(computerId, {
+            kind: 'sessionMove.files',
+            taskId,
+            projectId
+          })) as { files: Array<Omit<(typeof files)[number], 'computerId'>> }
+          for (const file of listed.files) {
+            const key = JSON.stringify(file.ref)
+            if (seen.has(key)) continue
+            seen.add(key)
+            files.push({ ...file, computerId })
+          }
+        }
+        return files
+      },
+      async readFile(input) {
+        return (await computerRequest(input.computerId, {
+          kind: 'sessionMove.fileRead',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string; eof: boolean }
+      },
+      async missingFiles(taskId, entries) {
+        const pc = await moveComputerOf(taskId)
+        const answer = (await computerRequest(pc, {
+          kind: 'sessionMove.fileMissing',
+          taskId,
+          projectId: await moveProjectOf(taskId),
+          entries
+        })) as { missing: Awaited<ReturnType<TaskMoveSessionsDelegate['missingFiles']>> }
+        return answer.missing
+      },
+      async writeFile(input) {
+        const pc = await moveComputerOf(input.taskId)
+        await computerRequest(pc, {
+          kind: 'sessionMove.fileWrite',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          data: input.data,
+          ...(input.complete ? { complete: input.complete } : {})
+        })
       },
       computerOf: moveComputerOf,
       async begin(taskId, manifest) {

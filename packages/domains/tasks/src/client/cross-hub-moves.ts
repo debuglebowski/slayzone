@@ -94,6 +94,8 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
           source.taskMoves.sessionsExport.mutate({ moveId, taskId }),
         sessionsRead: (input) => source.taskMoves.sessionsRead.query(input),
         sessionsReadAttachment: (input) => source.taskMoves.sessionsReadAttachment.query(input),
+        sessionsFiles: (moveId, taskId) => source.taskMoves.sessionsFiles.query({ moveId, taskId }),
+        sessionsFileRead: (input) => source.taskMoves.sessionsFileRead.query(input),
         sessionsDiscard: (moveId) =>
           source.taskMoves.sessionsDiscard.mutate({ moveId }).then(() => undefined)
       },
@@ -115,6 +117,10 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
           target.taskMoves.sessionsPutAttachment.mutate(input).then(() => undefined),
         sessionsActivate: (input) =>
           target.taskMoves.sessionsActivate.mutate(input).then(() => undefined),
+        sessionsFilesMissing: (moveId, taskId, entries) =>
+          target.taskMoves.sessionsFilesMissing.mutate({ moveId, taskId, entries }),
+        sessionsFileWrite: (input) =>
+          target.taskMoves.sessionsFileWrite.mutate(input).then(() => undefined),
         sessionsImportLedger: (moveId, taskId, ledger) =>
           target.taskMoves.sessionsImportLedger
             .mutate({ moveId, taskId, ledger })

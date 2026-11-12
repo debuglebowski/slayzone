@@ -194,6 +194,28 @@ export function createSessionMoves(store: ChatStorage) {
       return exported
     },
 
+    /**
+     * The CLI session ids the task's ledger knows (Claude's transcript file names):
+     * every id a session, a conversation, a chat's settings or the pre-ledger history
+     * names. The computer finds their files outside this store.
+     */
+    cliSessionIds(taskId: string): string[] {
+      const ledger = readLedger(taskId)
+      const ids = new Set<string>()
+      for (const r of [...ledger.agentSessions, ...ledger.taskConversations])
+        if (r.conversationId) ids.add(r.conversationId)
+      for (const h of ledger.legacyHistory) for (const id of h.ids) ids.add(id)
+      for (const c of ledger.providerConfigs) {
+        try {
+          const id = (JSON.parse(c.value) as { chatConversationId?: unknown }).chatConversationId
+          if (typeof id === 'string' && id) ids.add(id)
+        } catch {
+          /* A value this computer cannot read names no session. */
+        }
+      }
+      return [...ids]
+    },
+
     /** Bytes `[offset, offset + length)` of a chat's transfer, base64 (empty past the end). */
     read(moveId: string, conversationId: string, offset: number, length: number): string {
       const path = fileOf(moveId, conversationId)

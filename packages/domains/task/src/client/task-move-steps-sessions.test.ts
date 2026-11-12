@@ -34,7 +34,14 @@ const manifest = (id: string, bytes: number, epoch = 3): TaskMoveChatTransfer['m
 })
 
 /** The app between two fakes: what the source exports, what the target was told. */
-function harness(opts: { transfers: TaskMoveChatTransfer[]; resumeAt?: number; missing?: number }) {
+function harness(opts: {
+  transfers: TaskMoveChatTransfer[]
+  resumeAt?: number
+  missing?: number
+  /** Files beside the chats: name → bytes (a transcript each), and how much the target has staged. */
+  files?: Record<string, Buffer>
+  stagedFiles?: number
+}) {
   const calls: string[] = []
   const written = new Map<string, Buffer[]>()
   const payload = new Map(
@@ -45,8 +52,26 @@ function harness(opts: { transfers: TaskMoveChatTransfer[]; resumeAt?: number; m
   )
   const source: Pick<
     TaskMoveSourceApi,
-    'sessionsExport' | 'sessionsRead' | 'sessionsReadAttachment' | 'sessionsDiscard'
+    | 'sessionsExport'
+    | 'sessionsRead'
+    | 'sessionsReadAttachment'
+    | 'sessionsDiscard'
+    | 'sessionsFiles'
+    | 'sessionsFileRead'
   > = {
+    sessionsFiles: async () =>
+      Object.entries(opts.files ?? {}).map(([sessionId, bytes]) => ({
+        ref: { kind: 'claude-transcript' as const, sessionId },
+        size: bytes.length,
+        hash: 'b'.repeat(64),
+        computerId: 'pc-a'
+      })),
+    sessionsFileRead: async (i) => {
+      const bytes = opts.files![(i.ref as { sessionId: string }).sessionId]
+      calls.push(`fileRead ${(i.ref as { sessionId: string }).sessionId}@${i.offset}`)
+      const part = bytes.subarray(i.offset, i.offset + i.length)
+      return { data: part.toString('base64'), eof: i.offset + part.length >= bytes.length }
+    },
     sessionsExport: async (_m, taskId) => {
       calls.push(`export ${taskId}`)
       return { transfers: opts.transfers, ledger: { rows: taskId } }
@@ -70,6 +95,16 @@ function harness(opts: { transfers: TaskMoveChatTransfer[]; resumeAt?: number; m
     TaskMoveTargetApi,
     'importBundle' | 'addRemoteBlockers' | 'missingFiles' | 'writeFile' | 'clearStaging' | 'commit'
   > = {
+    sessionsFilesMissing: async (_m, _t, entries) =>
+      entries.map((e) => ({ ...e, offset: opts.stagedFiles ?? 0 })),
+    sessionsFileWrite: async (i) => {
+      const id = (i.ref as { sessionId: string }).sessionId
+      calls.push(`fileWrite ${id}@${i.offset}${i.complete ? ' complete' : ''}`)
+      written.set(`file:${id}`, [
+        ...(written.get(`file:${id}`) ?? []),
+        Buffer.from(i.data, 'base64')
+      ])
+    },
     sessionsBegin: async (_m, _t, m) => {
       calls.push(`begin ${m.header.identity.id}`)
       return { transferId: `x-${m.header.identity.id}`, offset: opts.resumeAt ?? 0 }
@@ -204,5 +239,43 @@ describe('copy-sessions', () => {
       h.steps['copy-sessions']({ move: move(), reportProgress: progress().report })
     ).rejects.toThrow(/ended early/)
     expect(h.calls.some((c) => c.startsWith('activate'))).toBe(false)
+  })
+
+  test('transcripts and scrollback are copied after the chats and before the ledger', async () => {
+    const bytes = Buffer.alloc(300_000, 'z')
+    const h = harness({
+      transfers: [{ computerId: 'pc-a', manifest: manifest('c1', 10) }],
+      files: { 'cli-session': bytes }
+    })
+    const p = progress()
+    await h.steps['copy-sessions']({ move: move(), reportProgress: p.report })
+    const order = h.calls.filter(
+      (c) => c.startsWith('activate') || c.startsWith('file') || c.startsWith('ledger')
+    )
+    expect(order).toEqual([
+      'activate c1 epoch 4',
+      'fileRead cli-session@0',
+      'fileWrite cli-session@0',
+      'fileRead cli-session@262144',
+      'fileWrite cli-session@262144 complete',
+      'ledger t1 {"rows":"t1"}'
+    ])
+    expect(Buffer.concat(h.written.get('file:cli-session')!).equals(bytes)).toBe(true)
+    // The file's bytes are part of the progress.
+    expect(p.seen.at(-1)).toEqual([300_010, 300_010])
+  })
+
+  test('a file continues where the target’s staged copy stands', async () => {
+    const bytes = Buffer.alloc(300_000, 'z')
+    const h = harness({
+      transfers: [],
+      files: { 'cli-session': bytes },
+      stagedFiles: 262_144
+    })
+    await h.steps['copy-sessions']({ move: move(), reportProgress: progress().report })
+    expect(h.calls.filter((c) => c.startsWith('file'))).toEqual([
+      'fileRead cli-session@262144',
+      'fileWrite cli-session@262144 complete'
+    ])
   })
 })

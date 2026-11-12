@@ -6,6 +6,7 @@ import {
   bootConfigPath,
   clickProject,
   launchIsolatedElectron,
+  newRuntimeDir,
   waitForUsableComputer
 } from '../fixtures/electron'
 import {
@@ -17,11 +18,14 @@ import {
   type SecondHub
 } from '../fixtures/second-hub'
 import { readChatEvents, seedChatEvents } from '../fixtures/chat-seed'
+import { chatDb, openChatTaskCore } from '../fixtures/chat-task-core'
+import { closeAllTaskTabs } from '../fixtures/terminal'
+import { createFakeClaude, echoTurn, sessionFilePath } from '@slayzone/test-utils/fake-claude'
 
 type Launched = Awaited<ReturnType<typeof launchIsolatedElectron>>
 
 /** The app (multi-hub, its own hub `local`) beside hub B, with a project on hub B. */
-async function setUp(name: string, store: string) {
+async function setUp(name: string, store: string, env: Record<string, string> = {}) {
   const hub = await spawnSecondHub(store)
   let launched: Launched | null = null
   try {
@@ -41,7 +45,7 @@ async function setUp(name: string, store: string) {
           })
         )
       },
-      extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir })
+      extraEnv: (userDataDir) => ({ SLAYZONE_ROOT: userDataDir, ...env })
     })
     const page = launched.page
     await page.waitForSelector('#root', { timeout: 20_000 })
@@ -63,7 +67,7 @@ async function setUp(name: string, store: string) {
         { timeout: 90_000, message: 'a project on hub B' }
       )
       .toBe(true)
-    return { hub, launched, page, targetProjectId }
+    return { hub, launched, page, targetProjectId, folderB }
   } catch (error) {
     if (launched) await launched.close()
     await hub.stop()
@@ -88,10 +92,24 @@ async function projectOnA(page: Page, name: string) {
 /** Board of `projectAbbrev` → the card's menu → Move to → `target`: the open dialog. */
 async function openMoveDialog(page: Page, projectAbbrev: string, title: string, target: RegExp) {
   await clickProject(page, projectAbbrev)
-  const card = page.getByText(title, { exact: true }).first()
+  // `last`: an open task tab shows the title too, ahead of the board in the page.
+  const card = page.getByText(title, { exact: true }).filter({ visible: true }).last()
   await expect(card).toBeVisible({ timeout: 20_000 })
-  await card.click({ button: 'right' })
-  await page.getByRole('menuitem', { name: 'Move to' }).first().hover()
+  // The menu sometimes does not open on the first right click (the board is still
+  // settling after a reload): close whatever is open and click again.
+  const moveTo = page.getByRole('menuitem', { name: 'Move to' }).first()
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await card.click({ button: 'right' })
+    if (
+      await moveTo.waitFor({ timeout: 4_000 }).then(
+        () => true,
+        () => false
+      )
+    )
+      break
+    await page.keyboard.press('Escape')
+  }
+  await moveTo.hover()
   await page.getByRole('menuitemradio', { name: target }).first().click()
   const dialog = page.getByTestId('move-task-dialog')
   await expect(dialog.getByTestId('move-task-cross-hub-summary')).toBeVisible({
@@ -139,12 +157,13 @@ function hubDbAll<T>(app: ElectronApplication, sql: string, params: unknown[] = 
 /** Run `fn` with the app beside hub B; the app, the hub and its store are torn down after. */
 async function inTwoHubs(
   name: string,
-  fn: (env: Awaited<ReturnType<typeof setUp>>) => Promise<void>
+  fn: (env: Awaited<ReturnType<typeof setUp>>) => Promise<void>,
+  appEnv: Record<string, string> = {}
 ) {
   const store = fs.mkdtempSync(path.join(APP_DIR, `e2e-move-hub-${name}-`))
   let env: Awaited<ReturnType<typeof setUp>> | null = null
   try {
-    env = await setUp(`move-task-${name}`, store)
+    env = await setUp(`move-task-${name}`, store, appEnv)
     await fn(env)
   } finally {
     if (env) {
@@ -703,4 +722,68 @@ base.describe('move a task to another hub', () => {
       })
     }
   )
+
+  /**
+   * A real chat turn (against the scripted fake `claude`) leaves a session transcript in
+   * the CLI's folder for the task's project; the move puts it under the project folder on
+   * hub B, so `claude --resume` from there finds it. The app's one computer serves both
+   * hubs, so the transcript is the same file on one disk — copied to the other folder.
+   */
+  base('a chat’s Claude transcript is placed under the project folder on hub B', async () => {
+    base.setTimeout(300_000)
+    const fake = createFakeClaude({ root: newRuntimeDir('fake-claude-move') })
+    const claudeConfigDir = newRuntimeDir('claude-config-move')
+    await inTwoHubs(
+      'transcript',
+      async ({ page, launched, hub, targetProjectId, folderB }) => {
+        const epoch = fake.setScenario({ processes: [{ defaultTurn: echoTurn() }] })
+        const chat = await openChatTaskCore({
+          page,
+          electronApp: launched.app,
+          db: chatDb(launched.app),
+          mode: 'claude-chat',
+          repoName: `move-transcript-${Date.now()}`,
+          project: { name: 'Chat Source', color: '#22d3ee' },
+          title: 'Chat with a transcript',
+          waitForFirstRun: () => epoch.waitForRun(0)
+        })
+        await chat.send('hello before the move')
+        const run = await epoch.waitForRun(0, (r) => r.userMessages().length === 1)
+        const sessionFile = sessionFilePath(
+          claudeConfigDir,
+          fs.realpathSync(chat.cwd),
+          run.sessionId!
+        )
+        await expect.poll(() => fs.existsSync(sessionFile), { timeout: 20_000 }).toBe(true)
+        const transcript = fs.readFileSync(sessionFile, 'utf8')
+
+        // Move it to hub B (the target project's folder there is where it must land).
+        // After a reload (which reopens the task's tab): close it, the board's card is
+        // what the menu is opened on.
+        await page.reload()
+        await page.waitForSelector('#root', { timeout: 30_000 })
+        await closeAllTaskTabs(page)
+        // A quick-pick the keyboard opened while the chat was typed into: closed.
+        await page.keyboard.press('Escape')
+        await expect(page.locator('[role="dialog"]')).toHaveCount(0)
+        await openMoveDialog(page, 'CH', 'Chat with a transcript', /Target On B/)
+        await confirmMove(page)
+        await expect
+          .poll(async () => (await tasksOnB(hub)).find((t) => t.id === chat.taskId)?.project_id, {
+            timeout: 90_000,
+            message: 'the task on hub B'
+          })
+          .toBe(targetProjectId)
+        await expect(page.getByTestId('task-moves-panel')).toHaveCount(0, { timeout: 30_000 })
+
+        // Under the target project's folder on the computer: where `claude --resume` looks.
+        const landed = sessionFilePath(claudeConfigDir, fs.realpathSync(folderB), run.sessionId!)
+        expect(fs.readFileSync(landed, 'utf8')).toBe(transcript)
+      },
+      {
+        SLAYZONE_COMPUTER_BIN_OVERRIDE_DIR: fake.binDir,
+        CLAUDE_CONFIG_DIR: claudeConfigDir
+      }
+    )
+  })
 })

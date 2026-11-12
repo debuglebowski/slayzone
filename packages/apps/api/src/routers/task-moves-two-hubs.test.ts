@@ -57,6 +57,10 @@ const computers = {
   >(),
   /** transferId → what the target computer received of it. */
   staged: new Map<string, { id: string; epoch: number; chunks: Buffer[] }>(),
+  /** taskId → the files beside the chats the source computer holds (a transcript each). */
+  fileHolds: new Map<string, Array<{ sessionId: string; bytes: Buffer }>>(),
+  /** What the target computer received of each file, by session id. */
+  fileChunks: new Map<string, Buffer[]>(),
   activated: [] as string[],
   ledgers: [] as Array<{ taskId: string; ledger: unknown }>,
   discarded: [] as string[],
@@ -83,6 +87,28 @@ const fakeDelegate: TaskMoveSessionsDelegate = {
     return chat.bytes.subarray(i.offset, i.offset + i.length).toString('base64')
   },
   readAttachment: async () => '',
+  files: async (_moveId, taskId) =>
+    (computers.fileHolds.get(taskId) ?? []).map((f) => ({
+      ref: { kind: 'claude-transcript' as const, sessionId: f.sessionId },
+      size: f.bytes.length,
+      hash: crypto.createHash('sha256').update(f.bytes).digest('hex'),
+      computerId: 'computer-a'
+    })),
+  readFile: async (i) => {
+    const file = [...computers.fileHolds.values()]
+      .flat()
+      .find((f) => f.sessionId === (i.ref as { sessionId: string }).sessionId)!
+    const part = file.bytes.subarray(i.offset, i.offset + i.length)
+    return { data: part.toString('base64'), eof: i.offset + part.length >= file.bytes.length }
+  },
+  missingFiles: async (_taskId, entries) => entries.map((e) => ({ ...e, offset: 0 })),
+  writeFile: async (i) => {
+    const id = (i.ref as { sessionId: string }).sessionId
+    computers.fileChunks.set(id, [
+      ...(computers.fileChunks.get(id) ?? []),
+      Buffer.from(i.data, 'base64')
+    ])
+  },
   discard: async (moveId) => {
     computers.discarded.push(moveId)
   },
@@ -172,6 +198,8 @@ async function move(
         sessionsExport: (moveId, taskId) => from.hub.taskMoves.sessionsExport({ moveId, taskId }),
         sessionsRead: (input) => from.hub.taskMoves.sessionsRead(input),
         sessionsReadAttachment: (input) => from.hub.taskMoves.sessionsReadAttachment(input),
+        sessionsFiles: (moveId, taskId) => from.hub.taskMoves.sessionsFiles({ moveId, taskId }),
+        sessionsFileRead: (input) => from.hub.taskMoves.sessionsFileRead(input),
         sessionsDiscard: (moveId) => from.hub.taskMoves.sessionsDiscard({ moveId })
       },
       target: {
@@ -188,6 +216,9 @@ async function move(
           to.hub.taskMoves.sessionsFinish({ moveId, taskId, transferId }),
         sessionsPutAttachment: (input) => to.hub.taskMoves.sessionsPutAttachment(input),
         sessionsActivate: (input) => to.hub.taskMoves.sessionsActivate(input),
+        sessionsFilesMissing: (moveId, taskId, entries) =>
+          to.hub.taskMoves.sessionsFilesMissing({ moveId, taskId, entries }),
+        sessionsFileWrite: (input) => to.hub.taskMoves.sessionsFileWrite(input),
         sessionsImportLedger: (moveId, taskId, ledger) =>
           to.hub.taskMoves.sessionsImportLedger({ moveId, taskId, ledger }),
         sessionsRegister: (moveId, taskId, chats) =>
@@ -515,6 +546,9 @@ describe('a move from hub A to hub B', () => {
     computers.holds.set(t.id, [
       { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes }
     ])
+    // A Claude transcript beside it: 300 KB, two chunks.
+    const transcript = crypto.randomBytes(300_000)
+    computers.fileHolds.set(t.id, [{ sessionId: 'cli-1', bytes: transcript }])
 
     const done = await move(
       { hub: hubA, id: 'hub-a' },
@@ -527,6 +561,7 @@ describe('a move from hub A to hub B', () => {
     const staged = computers.staged.get(`t-${conversation}`)!
     expect(Buffer.concat(staged.chunks).equals(bytes)).toBe(true)
     expect(computers.activated).toContain(conversation)
+    expect(Buffer.concat(computers.fileChunks.get('cli-1')!).equals(transcript)).toBe(true)
     expect(computers.ledgers.find((l) => l.taskId === t.id)?.ledger).toEqual({ sessions: 1 })
     expect(computers.discarded).toContain(done.id)
     expect(computers.settled).toContain(TARGET_COMPUTER)

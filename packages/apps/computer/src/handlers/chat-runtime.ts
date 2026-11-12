@@ -65,6 +65,11 @@ import {
 } from '../path-jail'
 import { createProcHandlers, type ProcHandlerOptions } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
+import {
+  createSessionMoveFiles,
+  sessionMoveFileRefSchema,
+  type SessionMoveFiles
+} from './session-move-files'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
 import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
@@ -328,6 +333,46 @@ const requestSchema = z.discriminatedUnion('kind', [
     length: z.number().int().min(1).max(262144)
   }),
   z.object({ kind: z.literal('sessionMove.discard'), moveId: z.string().min(1).max(80) }),
+  // The files beside the chat (Claude transcripts, terminal scrollback), copied like a
+  // move's artifact files.
+  z.object({
+    kind: z.literal('sessionMove.files'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileRead'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    ref: sessionMoveFileRefSchema,
+    offset: z.number().int().nonnegative(),
+    length: z.number().int().min(1).max(262144)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileMissing'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    entries: z
+      .array(
+        z.object({
+          ref: sessionMoveFileRefSchema,
+          size: z.number().int().nonnegative(),
+          hash: z.string().regex(/^[a-f0-9]{64}$/)
+        })
+      )
+      .max(10_000)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileWrite'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    ref: sessionMoveFileRefSchema,
+    offset: z.number().int().nonnegative(),
+    data: z.string().max(350000),
+    complete: z
+      .object({ size: z.number().int().nonnegative(), hash: z.string().regex(/^[a-f0-9]{64}$/) })
+      .optional()
+  }),
   z.object({
     kind: z.literal('migration.activate'),
     id: z.string(),
@@ -395,6 +440,15 @@ export function createChatRuntimeHandlers(opts: {
   let closed = false,
     resetting = false
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
+  let moveFilesInstance: SessionMoveFiles | null = null
+  /** A moved task's session files here (Claude transcripts, scrollback): see session-move-files.ts. */
+  const moveFiles = (_r: ReturnType<typeof createComputerChatRuntime>): SessionMoveFiles =>
+    (moveFilesInstance ??= createSessionMoveFiles({
+      stateDir: opts.stateDir,
+      hubScope: opts.hubScope,
+      projectFolder: (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
+      sessionIds: (taskId) => runtime().sessionMoves.cliSessionIds(taskId)
+    }))
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
   const directFanout = createDirectChatFanout()
   /** Which tabs' full events this hub wants (`relay.watch`); all until it says. */
@@ -912,6 +966,14 @@ export function createChatRuntimeHandlers(opts: {
       case 'sessionMove.discard':
         r.sessionMoves.discard(req.moveId)
         return { ok: true }
+      case 'sessionMove.files':
+        return { files: await moveFiles(r).list(req.taskId, req.projectId) }
+      case 'sessionMove.fileRead':
+        return moveFiles(r).read(req.taskId, req.projectId, req.ref, req.offset, req.length)
+      case 'sessionMove.fileMissing':
+        return { missing: moveFiles(r).missing(req.taskId, req.projectId, req.entries) }
+      case 'sessionMove.fileWrite':
+        return moveFiles(r).write(req)
       case 'migration.verify':
         return { missing: r.attachments.missing(req.id) }
       case 'migration.prepared': {

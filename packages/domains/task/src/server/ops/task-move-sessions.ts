@@ -2,6 +2,8 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   TaskMoveAttachmentRef,
   TaskMoveChatTransfer,
+  TaskMoveSessionFile,
+  TaskMoveSessionFileRef,
   TaskMoveSessionsExport
 } from '@slayzone/task-contracts'
 import { TaskMoveRefusedError } from './task-moves.js'
@@ -37,6 +39,17 @@ export interface TaskMoveSessionsDelegate {
   }): Promise<string>
   /** The move's exports go, on every computer that made one. */
   discard(moveId: string, taskIds: readonly string[]): Promise<void>
+  /** The files beside the task's chats (Claude transcripts, scrollback), with their computers. */
+  files(moveId: string, taskId: string): Promise<TaskMoveSessionFile[]>
+  /** A chunk (base64) of one of them; `eof` on the last. */
+  readFile(input: {
+    moveId: string
+    taskId: string
+    computerId: string
+    ref: TaskMoveSessionFileRef
+    offset: number
+    length: number
+  }): Promise<{ data: string; eof: boolean }>
 
   // --- The hub the task arrives at ---
   /** The computer this hub keeps the task's sessions on. */
@@ -66,6 +79,18 @@ export interface TaskMoveSessionsDelegate {
     hash: string
   }): Promise<void>
   importLedger(taskId: string, ledger: unknown): Promise<void>
+  /** Of these files, the ones the task's computer here lacks, and where its staged copy stands. */
+  missingFiles(
+    taskId: string,
+    entries: Array<Omit<TaskMoveSessionFile, 'computerId'>>
+  ): Promise<Array<Omit<TaskMoveSessionFile, 'computerId'> & { offset: number }>>
+  writeFile(input: {
+    taskId: string
+    ref: TaskMoveSessionFileRef
+    offset: number
+    data: string
+    complete?: { size: number; hash: string }
+  }): Promise<void>
   /** After the chats were registered: have the computer's chats read again (recovery). */
   settle(computerId: string): Promise<void>
 }

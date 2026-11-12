@@ -210,7 +210,50 @@ export interface TaskMoveAttachmentRef {
   mediaType: string
   size: number
 }
+/**
+ * A file beside a task's chats that a move copies (`copy-sessions`): a Claude session
+ * transcript or a terminal's scrollback. The computers check each reference and hash.
+ */
+export type TaskMoveSessionFileRef =
+  | { kind: 'claude-transcript'; sessionId: string }
+  | { kind: 'pty-history'; name: string }
+export interface TaskMoveSessionFile {
+  ref: TaskMoveSessionFileRef
+  size: number
+  hash: string
+  /** Source side: the computer that holds it. */
+  computerId?: string
+}
+const sessionFileRef = z.custom<TaskMoveSessionFileRef>(
+  (v) => typeof v === 'object' && v !== null && typeof (v as { kind?: unknown }).kind === 'string'
+)
+const sessionFileEntry = z.object({
+  ref: sessionFileRef,
+  size: z.number().int().min(0),
+  hash: z.string().regex(/^[a-f0-9]{64}$/)
+})
 const sessionTask = { moveId: z.string().min(1), taskId: z.string().min(1) }
+export const sessionsFilesInputSchema = z.object(sessionTask)
+export const sessionsFileReadInputSchema = z.object({
+  ...sessionTask,
+  computerId: z.string().min(1),
+  ref: sessionFileRef,
+  offset: z.number().int().min(0),
+  length: z.number().int().min(1).max(262144)
+})
+export const sessionsFilesMissingInputSchema = z.object({
+  ...sessionTask,
+  entries: z.array(sessionFileEntry).max(10_000)
+})
+export const sessionsFileWriteInputSchema = z.object({
+  ...sessionTask,
+  ref: sessionFileRef,
+  offset: z.number().int().min(0),
+  data: z.string().max(350000),
+  complete: z
+    .object({ size: z.number().int().min(0), hash: z.string().regex(/^[a-f0-9]{64}$/) })
+    .optional()
+})
 const transferManifest = z.custom<TaskMoveChatTransfer['manifest']>(
   (v) =>
     typeof v === 'object' &&
