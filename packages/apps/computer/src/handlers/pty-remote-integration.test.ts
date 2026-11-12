@@ -1,5 +1,6 @@
 import { userInfo } from 'node:os'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { setShellOverride } from '@slayzone/platform'
 import { TypedEventEmitter } from '@slayzone/computer-transport/shared'
 import { createRoutingPtyBackend, type RoutingGateway } from '@slayzone/computer-transport/server'
 import type { ComputerGatewayEvents } from '@slayzone/computer-transport/server'
@@ -69,6 +70,11 @@ function setup() {
 }
 
 describe('desktop hub to remote computer PTY', () => {
+  // The computer's login shell is this machine's own: a user's rc files (an
+  // oh-my-zsh "update? [Y/n]" prompt) blocked the command. /bin/sh reads none.
+  beforeAll(() => setShellOverride('/bin/sh'))
+  afterAll(() => setShellOverride(null))
+
   it('uses computer identity and keeps one live process across reload', async () => {
     const { backend, computer, spec } = setup()
     try {
