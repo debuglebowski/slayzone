@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   TaskMoveAttachmentRef,
@@ -6,6 +7,11 @@ import type {
   TaskMoveSessionFileRef,
   TaskMoveSessionsExport
 } from '@slayzone/task-contracts'
+import {
+  copyMovedSessions,
+  type SessionsSourceApi,
+  type SessionsTargetApi
+} from '../../shared/copy-sessions.js'
 import { TaskMoveRefusedError } from './task-moves.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
@@ -20,8 +26,15 @@ import type {} from '../task-txns.js'
  */
 export interface TaskMoveSessionsDelegate {
   // --- The hub the task leaves ---
-  /** Each of the task's computers exports its chats (frozen only for one read); one answer. */
-  exportTask(moveId: string, taskId: string): Promise<TaskMoveSessionsExport>
+  /**
+   * Each of the task's computers (or, with `computers`, just those) exports its chats
+   * (frozen only for one read); one answer.
+   */
+  exportTask(
+    moveId: string,
+    taskId: string,
+    computers?: readonly string[]
+  ): Promise<TaskMoveSessionsExport>
   /** A chunk (base64) of a chat's exported transfer. */
   read(input: {
     moveId: string
@@ -46,7 +59,15 @@ export interface TaskMoveSessionsDelegate {
    */
   forget(taskIds: readonly string[]): Promise<void>
   /** The files beside the task's chats (Claude transcripts, scrollback), with their computers. */
-  files(moveId: string, taskId: string): Promise<TaskMoveSessionFile[]>
+  files(
+    moveId: string,
+    taskId: string,
+    computers?: readonly string[]
+  ): Promise<TaskMoveSessionFile[]>
+  /** The computers that hold anything of the task's sessions (its chats, its ledger). */
+  holders(taskId: string): Promise<string[]>
+  /** One computer lets go of the task's sessions (no tombstone). */
+  forgetOn(taskId: string, computerId: string): Promise<void>
   /** A chunk (base64) of one of them; `eof` on the last. */
   readFile(input: {
     moveId: string
@@ -135,4 +156,61 @@ export async function registerMovedChats(
     chats: input.chats
   })
   await sessions.settle(computerId)
+}
+
+/**
+ * A task whose project now runs on another computer of THIS hub: its sessions follow.
+ * The chats, the files beside them (transcripts, scrollback) and the ledger are copied
+ * from the computers that hold them to the task's computer (the same steps a move
+ * between hubs runs through the app), the hub owns them there, and the old computers
+ * let go. Run after the project changed and the task's agents stopped. On a failure
+ * the copy is forgotten again, the hub's ownership is untouched (it only changes with
+ * the last step) and the error is thrown. Answers whether anything moved.
+ */
+export async function moveSessionsToTaskComputer(
+  db: SlayzoneDb,
+  taskId: string
+): Promise<{ moved: boolean }> {
+  const d = taskMoveSessions()
+  const to = await d.computerOf(taskId)
+  const from = (await d.holders(taskId)).filter((c) => c !== to)
+  if (from.length === 0) return { moved: false }
+  const moveId = `computers-${randomUUID()}`
+  const taskIds = [taskId]
+  const source: SessionsSourceApi = {
+    sessionsExport: (id, task) => d.exportTask(id, task, from),
+    sessionsRead: (i) => d.read(i),
+    sessionsReadAttachment: (i) => d.readAttachment(i),
+    sessionsFiles: (id, task) => d.files(id, task, from),
+    sessionsFileRead: (i) => d.readFile(i),
+    sessionsDiscard: (id) => d.discard(id, taskIds).catch(() => undefined)
+  }
+  const target: SessionsTargetApi = {
+    sessionsBegin: (_id, task, manifest) => d.begin(task, manifest),
+    sessionsChunk: (i) => d.chunk(i.taskId, i.transferId, i.offset, i.data),
+    sessionsFinish: (_id, task, transferId) => d.finish(task, transferId),
+    sessionsPutAttachment: (i) => d.putAttachment(i),
+    sessionsActivate: (i) => d.activate(i),
+    sessionsImportLedger: (_id, task, ledger) => d.importLedger(task, ledger),
+    sessionsFilesMissing: (_id, task, entries) => d.missingFiles(task, entries),
+    sessionsFileWrite: (i) => d.writeFile(i),
+    sessionsRegister: (_id, task, chats) => registerMovedChats(db, { taskId: task, chats })
+  }
+  try {
+    await copyMovedSessions({
+      move: { id: moveId, taskIds },
+      source,
+      target,
+      reportProgress: async () => undefined
+    })
+  } catch (error) {
+    await d.forgetOn(taskId, to).catch(() => undefined)
+    await d.discard(moveId, taskIds).catch(() => undefined)
+    throw error
+  }
+  for (const computerId of from)
+    await d.forgetOn(taskId, computerId).catch((error: unknown) => {
+      console.warn(`[task] sessions of ${taskId} not forgotten on ${computerId}:`, error)
+    })
+  return { moved: true }
 }

@@ -19,7 +19,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { beforeEach, describe, expect, test } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import type { CreateTaskInput, Task, TasksChange, UpdateTaskInput } from '@slayzone/task-contracts'
 import {
   taskRouter,
@@ -35,6 +35,7 @@ import {
 } from '@slayzone/worktrees/server'
 import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
 import { installTaskPathsComputer } from '../../../../shared/test-utils/task-paths-computer.js'
+import { setTaskMoveSessionsDelegate, type TaskMoveSessionsDelegate } from '@slayzone/task/server'
 
 const h = await createTestHarness()
 const computer = createSessionLedgerHarness({ db: h.slayDb })
@@ -490,6 +491,121 @@ describe('keeping agent sessions (same computer)', () => {
       keepSessionTabIds: [main]
     })
     // Nothing could be kept: the whole task resets.
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null }])
+  })
+})
+
+describe('keeping agent sessions (another computer of this hub)', () => {
+  /** The hub's computers, in memory: what each call asked for, in order. */
+  const calls: string[] = []
+  let failLedger = false
+  const delegate: TaskMoveSessionsDelegate = {
+    exportTask: async (_m, taskId, computers) => {
+      calls.push(`export ${taskId} from ${computers?.join(',')}`)
+      return { transfers: [], ledger: { rows: taskId } }
+    },
+    read: async () => '',
+    readAttachment: async () => '',
+    discard: async () => {
+      calls.push('discard')
+    },
+    forget: async () => undefined,
+    holders: async () => ['computer-a'],
+    forgetOn: async (taskId, computerId) => {
+      calls.push(`forget ${taskId} on ${computerId}`)
+    },
+    files: async (_m, taskId, computers) => {
+      calls.push(`files ${taskId} from ${computers?.join(',')}`)
+      return []
+    },
+    readFile: async () => ({ data: '', eof: true }),
+    computerOf: async () => 'computer-b',
+    begin: async () => ({ transferId: 'x', offset: 0 }),
+    chunk: async () => undefined,
+    finish: async () => ({ conversationId: 'c', epoch: 2, missing: [] }),
+    putAttachment: async () => undefined,
+    activate: async () => undefined,
+    importLedger: async (taskId) => {
+      if (failLedger) throw new Error('computer-b is not reachable')
+      calls.push(`ledger ${taskId}`)
+    },
+    missingFiles: async () => [],
+    writeFile: async () => undefined,
+    settle: async (computerId) => {
+      calls.push(`settle ${computerId}`)
+    }
+  }
+  beforeAll(() => setTaskMoveSessionsDelegate(delegate))
+  afterAll(() => setTaskMoveSessionsDelegate(null))
+  beforeEach(() => {
+    calls.length = 0
+    failLedger = false
+  })
+
+  const setup = async (name: string) => {
+    const a = project(`${name}A`)
+    const b = project(`${name}B`)
+    h.db.prepare('UPDATE projects SET default_computer_id = ? WHERE id = ?').run('computer-a', a)
+    h.db.prepare('UPDATE projects SET default_computer_id = ? WHERE id = ?').run('computer-b', b)
+    const t = await create(a, name)
+    const main = agentTab(t.id, 'claude-code', { main: true })
+    const codex = agentTab(t.id, 'codex')
+    await seedSession(t.id, 'claude-code', main)
+    await seedSession(t.id, 'codex', codex)
+    return { a, b, t, main, codex }
+  }
+
+  test('preview: Claude can follow to the other computer, Codex in a terminal cannot', async () => {
+    const { b, t, main, codex } = await setup('FollowPreview')
+    const preview = await caller.movePreview({ taskIds: [t.id], targetProjectId: b })
+    const byTab = new Map(preview.sessions.map((x) => [x.tabId, x]))
+    expect(byTab.get(main)).toMatchObject({ canKeep: true })
+    expect(byTab.get(codex)).toMatchObject({ canKeep: false })
+  })
+
+  test('a kept session copies to the task’s new computer, the old one lets go, the rest resets', async () => {
+    const { b, t, main, codex } = await setup('FollowMove')
+    quiet()
+    await caller.moveToProject({
+      taskIds: [t.id],
+      targetProjectId: b,
+      includeSubtasks: true,
+      keepSessionTabIds: [main, codex]
+    })
+    // Only the computers that held the task are exported; the new one is the target.
+    expect(calls).toEqual([
+      `export ${t.id} from computer-a`,
+      `files ${t.id} from computer-a`,
+      `ledger ${t.id}`,
+      'settle computer-b',
+      'discard',
+      `forget ${t.id} on computer-a`
+    ])
+    // Codex could not follow: its tab alone resets, as on one computer.
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: codex }])
+    // The agents stopped before anything was copied.
+    expect(stopped).toEqual([t.id])
+  })
+
+  test('nothing kept: no copy is made', async () => {
+    const { b, t } = await setup('FollowNone')
+    await caller.moveToProject({ taskIds: [t.id], targetProjectId: b, includeSubtasks: true })
+    expect(calls).toEqual([])
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null }])
+  })
+
+  test('a copy that fails is forgotten on the new computer and the whole task resets', async () => {
+    const { b, t, main } = await setup('FollowFail')
+    failLedger = true
+    await caller.moveToProject({
+      taskIds: [t.id],
+      targetProjectId: b,
+      includeSubtasks: true,
+      keepSessionTabIds: [main]
+    })
+    expect(calls).toContain(`forget ${t.id} on computer-b`)
+    // The old computer keeps what it had.
+    expect(calls).not.toContain(`forget ${t.id} on computer-a`)
     expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null }])
   })
 })

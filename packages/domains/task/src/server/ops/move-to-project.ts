@@ -18,6 +18,7 @@ import { DEFAULT_AGENTS, sessionFollowsFolderChange } from '@slayzone/terminal-c
 import { buildTaskProjectChangedEvents, buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { resetConversation } from './task-conversations.js'
+import { moveSessionsToTaskComputer, taskMoveSessionsOrNull } from './task-move-sessions.js'
 import {
   getRuntimeAdapters,
   notifyTaskPaths,
@@ -77,6 +78,13 @@ interface MovePlan {
   sessionTabs: SessionTab[]
 }
 
+/**
+ * Agent modes whose session can follow its task to another COMPUTER: the chat and the
+ * files beside it travel (`moveSessionsToTaskComputer`) — a Claude transcript is a
+ * file the target computer can resume from.
+ */
+const SESSION_FOLLOWS_COMPUTER_MODES: readonly string[] = ['claude-code', 'claude-chat']
+
 interface SessionTab {
   taskId: string
   taskTitle: string
@@ -85,6 +93,8 @@ interface SessionTab {
   mode: string
   canKeep: boolean
   reason?: string
+  /** Kept, the session copies to another computer of this hub. */
+  crossComputer?: boolean
 }
 
 const placeholders = (n: number): string => Array(n).fill('?').join(', ')
@@ -211,9 +221,10 @@ async function planMove(
 /**
  * Each moved row's agent tabs (plain shells hold no agent session) and whether the
  * tab's session can follow the task: only when its agent resumes by id from another
- * folder (`sessionFollowsFolderChange`), and only on the SAME computer — a task
- * whose work moves to another computer (the target project's default) leaves its
- * transcripts on the old one's disk.
+ * folder (`sessionFollowsFolderChange`). A task whose work moves to another computer
+ * (the target project's default) takes them along when this hub can copy sessions
+ * between its computers and the agent resumes from a file that travels
+ * (`SESSION_FOLLOWS_COMPUTER_MODES`).
  */
 async function planSessionTabs(
   db: SlayzoneDb,
@@ -258,8 +269,11 @@ async function planSessionTabs(
       tabLabel: tab.label ?? (tab.is_main ? agentLabel : `${agentLabel} tab`),
       mode: tab.mode
     }
-    if (before !== after)
-      return { ...base, canKeep: false, reason: `Runs on another computer in ${ctx.targetName}` }
+    if (before !== after) {
+      if (!taskMoveSessionsOrNull() || !SESSION_FOLLOWS_COMPUTER_MODES.includes(tab.mode))
+        return { ...base, canKeep: false, reason: `Runs on another computer in ${ctx.targetName}` }
+      return { ...base, canKeep: true, crossComputer: true }
+    }
     return follows.ok
       ? { ...base, canKeep: true }
       : { ...base, canKeep: false, reason: follows.reason }
@@ -339,6 +353,21 @@ export async function moveTasksToProject(
   )
   for (const m of plan.moves) {
     const id = m.before.id
+    // Every agent of the task ran in the old folder: all stop — PTYs and chats. A
+    // kept session resumes in the new folder when its agent starts again.
+    runtime.killPtysByTaskId(id)
+    await runtime.stopTaskAgents(id).catch((error: unknown) => {
+      console.warn(`[task] agents of moved task ${id} not stopped:`, error)
+    })
+    // Its project runs on another computer and a session is kept: the sessions copy
+    // there first (nothing writes to them now). A copy that fails resets them instead.
+    const keptHere = new Set(kept)
+    if (plan.sessionTabs.some((t) => t.taskId === id && t.crossComputer && kept.has(t.tabId))) {
+      await moveSessionsToTaskComputer(db, id).catch((error: unknown) => {
+        console.warn(`[task] sessions of moved task ${id} not moved to its computer:`, error)
+        for (const t of plan.sessionTabs) if (t.taskId === id) keptHere.delete(t.tabId)
+      })
+    }
     // The old project's folder is not this one: the task's computer forgets its paths.
     await notifyTaskPaths(id, { op: 'set', worktreePath: null, baseDir: null })
     if (options.resetSessions !== false) {
@@ -346,17 +375,11 @@ export async function moveTasksToProject(
         db,
         id,
         plan.sessionTabs.filter((t) => t.taskId === id),
-        kept
+        keptHere
       ).catch(() => {
         /* best-effort: the move is committed */
       })
     }
-    // Every agent of the task ran in the old folder: all stop — PTYs and chats. A
-    // kept session resumes in the new folder when its agent starts again.
-    runtime.killPtysByTaskId(id)
-    await runtime.stopTaskAgents(id).catch((error: unknown) => {
-      console.warn(`[task] agents of moved task ${id} not stopped:`, error)
-    })
   }
 
   const touched = [...plan.moves.map((m) => m.before), ...plan.detached]

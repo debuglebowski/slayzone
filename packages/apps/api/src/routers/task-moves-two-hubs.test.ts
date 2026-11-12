@@ -117,6 +117,8 @@ const fakeDelegate: TaskMoveSessionsDelegate = {
   forget: async (taskIds) => {
     computers.forgotten.push([...taskIds])
   },
+  holders: async () => [],
+  forgetOn: async () => undefined,
   computerOf: async () => TARGET_COMPUTER,
   begin: async (_taskId, manifest) => {
     const id = manifest.header.identity.id

@@ -1112,12 +1112,14 @@ export function createComputerChatServices(opts: {
      * through the same admission and recovery every computer request here passes.
      */
     taskMoveSessions: {
-      async exportTask(moveId, taskId) {
-        const computers = new Set<string>()
-        for (const o of await ownership.forTask(taskId))
-          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
-        const home = await opts.resolveComputer(taskId)
-        if (home) computers.add(home)
+      async exportTask(moveId, taskId, only) {
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
         const transfers: Array<{
           computerId: string
           manifest: Parameters<TaskMoveSessionsDelegate['begin']>[1]
@@ -1169,6 +1171,21 @@ export function createComputerChatServices(opts: {
             () => undefined
           )
       },
+      async holders(taskId) {
+        const computers = new Set<string>()
+        for (const o of await ownership.forTask(taskId))
+          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+        const tracked = await opts.db.all<{ computer_id: string }>(
+          'SELECT computer_id FROM chat_task_computers WHERE task_id = ?',
+          [taskId]
+        )
+        for (const r of tracked) computers.add(r.computer_id)
+        return [...computers].sort()
+      },
+      async forgetOn(taskId, computerId) {
+        await opts.gate?.(computerId, taskId)
+        await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+      },
       async forget(taskIds) {
         for (const taskId of taskIds) {
           const computers = new Set<string>()
@@ -1180,14 +1197,16 @@ export function createComputerChatServices(opts: {
             await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
         }
       },
-      async files(moveId, taskId) {
+      async files(moveId, taskId, only) {
         void moveId
         const projectId = await moveProjectOf(taskId)
-        const computers = new Set<string>()
-        for (const o of await ownership.forTask(taskId))
-          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
-        const home = await opts.resolveComputer(taskId)
-        if (home) computers.add(home)
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
         const files: Awaited<ReturnType<TaskMoveSessionsDelegate['files']>> = []
         const seen = new Set<string>()
         for (const computerId of [...computers].sort()) {

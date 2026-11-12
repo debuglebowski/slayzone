@@ -179,3 +179,87 @@ export async function authorizeHubInApp(page: Page, hubId: string, token: string
   await page.reload()
   await page.waitForSelector('#root', { timeout: 30_000 })
 }
+
+const COMPUTER_BIN = path.resolve(APP_DIR, '..', 'computer', 'dist', 'bin.cjs')
+
+/** A real computer enrolled with a hub (not the app's own), and how to stop it. */
+export interface HubComputer {
+  proc: ChildProcess
+  computerId: string
+  stop: () => Promise<void>
+}
+
+/**
+ * Enroll and spawn a computer against `hub`, jailed to `allowedRoot`, and wait until the
+ * hub reports it usable. Where a project's folder lands decides which computer runs its
+ * tasks, so give each computer its own root. The computer runs the chat test seams
+ * (`PLAYWRIGHT=1`), like the app's own.
+ */
+export async function attachComputerToHub(
+  hub: SecondHub,
+  opts: { storeDir: string; name: string; allowedRoot: string }
+): Promise<HubComputer> {
+  if (!fs.existsSync(COMPUTER_BIN))
+    throw new Error(`computer bin missing: ${COMPUTER_BIN} (run pnpm build)`)
+  const minted = (await withHubClient(hub, (c) =>
+    c.computers.mintJoinToken.mutate({ label: opts.name, forUser: hub.email })
+  )) as { token: string }
+  const payload = JSON.parse(
+    Buffer.from(minted.token.slice(minted.token.indexOf('.') + 1), 'base64url').toString('utf8')
+  ) as { hubUrl: string }
+  const rootDir = path.join(opts.storeDir, `${opts.name}-root`)
+  fs.mkdirSync(rootDir, { recursive: true })
+  fs.mkdirSync(opts.allowedRoot, { recursive: true })
+  fs.writeFileSync(
+    path.join(rootDir, 'computer.config.json'),
+    JSON.stringify({ computerName: opts.name, allowedRoots: [opts.allowedRoot] })
+  )
+  const cleanEnv: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v == null || /^(ELECTRON_|SLAYZONE_)/.test(k)) continue
+    cleanEnv[k] = v
+  }
+  const proc = spawn(require('electron') as unknown as string, [COMPUTER_BIN], {
+    env: {
+      ...cleanEnv,
+      ELECTRON_RUN_AS_NODE: '1',
+      PLAYWRIGHT: '1',
+      SLAYZONE_SUPERVISED: '',
+      SLAYZONE_ROOT: rootDir,
+      SLAYZONE_HUB_ADDRESS: new URL(payload.hubUrl).host,
+      SLAYZONE_HUB_JOIN_TOKEN: minted.token,
+      SLAYZONE_COMPUTER_CREDENTIALS_DIR: path.join(opts.storeDir, `${opts.name}-creds`)
+    },
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
+  proc.stdout?.on('data', () => undefined)
+  proc.stderr?.on('data', () => undefined)
+  const stop = () =>
+    new Promise<void>((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode !== null) return resolve()
+      const t = setTimeout(() => proc.kill('SIGKILL'), 3_000)
+      proc.once('exit', () => {
+        clearTimeout(t)
+        resolve()
+      })
+      proc.kill('SIGTERM')
+    })
+  // Usable = authenticated and heard from inside the heartbeat window.
+  const deadline = Date.now() + 60_000
+  for (;;) {
+    const rows = (await withHubClient(hub, (c) => c.computers.list.query()).catch(
+      () => []
+    )) as Array<{
+      id: string
+      name: string
+      usable: boolean
+    }>
+    const mine = rows.find((r) => r.usable && r.name === opts.name)
+    if (mine) return { proc, computerId: mine.id, stop }
+    if (Date.now() > deadline) {
+      await stop()
+      throw new Error(`computer ${opts.name} not usable on the hub within 60s`)
+    }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+}
