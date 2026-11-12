@@ -201,3 +201,15 @@ it('previews legacy image references on keyboard focus; missing images show a fa
   fireEvent.error(image)
   expect(within(tooltip).getByText('Preview unavailable')).toBeDefined()
 })
+
+it('clicking the hover preview opens the image full size', async () => {
+  renderWith([IMG])
+  fireEvent.pointerMove(screen.getByRole('button', { name: 'Open red.png' }), {
+    pointerType: 'mouse'
+  })
+  const tooltip = await screen.findByRole('tooltip')
+  await within(tooltip).findByAltText('red.png')
+  fireEvent.click(within(tooltip).getByRole('button', { name: 'Open red.png full size' }))
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByAltText('red.png').getAttribute('src')).toContain('slz-file://app/')
+})

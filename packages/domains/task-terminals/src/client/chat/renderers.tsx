@@ -1,5 +1,5 @@
 import { MessageDetails } from './MessageDetails'
-import { useContext, useDeferredValue, useEffect, useId, useMemo } from 'react'
+import { useContext, useDeferredValue, useEffect, useId, useMemo, useState } from 'react'
 import {
   CODEX_AGENT_TOOL_PREFIX,
   apiRetryReason,
@@ -38,6 +38,9 @@ import {
   type ToolInvocation
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
+import { readImageSrc } from './tool-cards/read-image'
+import { AttachmentHoverPreview } from './attachments/AttachmentHoverPreview'
+import { ImageLightbox, ImageOpenButton } from './attachments/ImageLightbox'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
 import { WorkspaceChangesRow } from './files-changed/WorkspaceChangesRow'
 import { HistoryGapRow } from './HistoryGapRow'
@@ -618,9 +621,22 @@ export function ToolCallRead({ invocation, timestamp }: ToolProps) {
   const structured = invocation.result?.structured as {
     file?: { content?: string; numLines?: number }
   } | null
-  const summary = input?.file_path
+  const imageSrc = invocation.result
+    ? readImageSrc(invocation.result.rawContent, invocation.result.structured)
+    : null
+  const [fullSrc, setFullSrc] = useState<string | null>(null)
+  const pathText = input?.file_path
     ? `${shortenPath(input.file_path)}${input.limit ? ` · L${input.offset ?? 1}–${(input.offset ?? 1) + input.limit - 1}` : ''}`
     : ''
+  const imageName = input?.file_path?.split('/').pop() || 'image'
+  const summary =
+    imageSrc && pathText ? (
+      <AttachmentHoverPreview name={imageName} source={{ url: imageSrc }}>
+        <span>{pathText}</span>
+      </AttachmentHoverPreview>
+    ) : (
+      pathText
+    )
   return (
     <ToolShell
       icon={<FileText className="size-3" />}
@@ -629,10 +645,22 @@ export function ToolCallRead({ invocation, timestamp }: ToolProps) {
       timestamp={timestamp}
       summary={summary}
     >
-      {structured?.file?.content && (
-        <pre className="p-3 text-xs font-mono whitespace-pre overflow-x-auto max-h-64 bg-muted/30">
-          <LinkText text={structured.file.content} />
-        </pre>
+      {imageSrc ? (
+        <div className="p-3">
+          <ImageOpenButton
+            name={imageName}
+            src={imageSrc}
+            onOpen={setFullSrc}
+            className="block max-h-64 max-w-full rounded border border-border/50 object-contain"
+          />
+          <ImageLightbox name={imageName} src={fullSrc} onClose={() => setFullSrc(null)} />
+        </div>
+      ) : (
+        structured?.file?.content && (
+          <pre className="p-3 text-xs font-mono whitespace-pre overflow-x-auto max-h-64 bg-muted/30">
+            <LinkText text={structured.file.content} />
+          </pre>
+        )
       )}
     </ToolShell>
   )
