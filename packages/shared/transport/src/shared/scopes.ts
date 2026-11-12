@@ -842,6 +842,8 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.unarchive': 'tasks',
   'task.update': 'tasks',
   'task.updateMany': 'tasks',
+  'task.moveToProject': 'tasks',
+  'task.movePreview': 'tasks',
   'taskTerminals.create': 'tasks',
   'taskTerminals.delete': 'tasks',
   'taskTerminals.ensureMain': 'tasks',
