@@ -1204,6 +1204,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.import': checked(project('targetProjectId')),
   'taskMoves.commit': checked(taskMove('id')),
   'taskMoves.abort': checked(taskMove('id')),
+  // A move's artifact bytes: the move decides (its tasks; once gone, who began it).
+  'artifacts.moveManifest': checked(taskMove('moveId')),
+  'artifacts.moveRead': checked(taskMove('moveId')),
+  'artifacts.moveMissing': checked(taskMove('moveId')),
+  'artifacts.moveWrite': checked(taskMove('moveId')),
+  'artifacts.moveClearStaging': checked(taskMove('moveId')),
   'task.movePreview': checked(task('taskIds[]'), project('targetProjectId')),
   'task.delete': checked(task('id')),
   'task.deleteMany': checked(task('ids[]')),

@@ -11,6 +11,9 @@ export {
 } from './task-move-engine'
 export {
   createTaskMoveSteps,
+  TASK_MOVE_CHUNK_BYTES,
+  type TaskMoveFileEntry,
+  type TaskMoveFileRef,
   type TaskMoveSourceApi,
   type TaskMoveTargetApi
 } from './task-move-steps'

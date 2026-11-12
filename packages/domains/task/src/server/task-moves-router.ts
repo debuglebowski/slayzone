@@ -98,7 +98,7 @@ export const taskMovesRouter = router({
 
   release: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => releaseTaskMove(ctx.db, input.id))),
+    .mutation(({ ctx, input }) => mapped(() => releaseTaskMove(ctx.db, input.id, ctx.dataRoot))),
 
   redirects: publicProcedure
     .input(taskMoveRedirectsInputSchema)

@@ -313,7 +313,12 @@ export async function cancelTaskMove(db: SlayzoneDb, id: string): Promise<TaskMo
  * The last step: the tasks are the target hub's now. Each leaves a redirect to that
  * hub and the lock is lifted. Released again: the same answer.
  */
-export async function releaseTaskMove(db: SlayzoneDb, id: string): Promise<TaskMove> {
+export async function releaseTaskMove(
+  db: SlayzoneDb,
+  id: string,
+  /** This hub's data root (its `artifacts/`); default: the runtime's. */
+  dataRoot?: string
+): Promise<TaskMove> {
   const move = await getTaskMove(db, id)
   if (move.status === 'done') return move
   if (move.step !== 'release' || move.status !== 'running')
@@ -327,7 +332,7 @@ export async function releaseTaskMove(db: SlayzoneDb, id: string): Promise<TaskM
     await Promise.resolve()
       .then(() =>
         runtime.worktrees.removeArtifactDir(
-          artifactTaskDir(artifactsDirOf(runtime.getDataRoot()), taskId)
+          artifactTaskDir(artifactsDirOf(dataRoot ?? runtime.getDataRoot()), taskId)
         )
       )
       .catch((error: unknown) => {

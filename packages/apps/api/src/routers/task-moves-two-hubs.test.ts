@@ -9,7 +9,7 @@
  *   --config packages/shared/test-utils/vitest.harness.config.ts \
  *   packages/apps/api/src/routers/task-moves-two-hubs.test.ts
  */
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
@@ -26,15 +26,17 @@ import { appRouter } from '../router'
 
 const A = await createTestHarness()
 const B = await createTestHarness()
-const dataRoot = mkdtempSync(join(tmpdir(), 'task-moves-two-hubs-'))
+// Each hub its own storage: artifact files really travel.
+const rootA = mkdtempSync(join(tmpdir(), 'task-moves-hub-a-'))
+const rootB = mkdtempSync(join(tmpdir(), 'task-moves-hub-b-'))
 setTaskDeps({ ops: taskOps })
 configureTaskRuntimeAdapters({
-  getDataRoot: () => dataRoot,
+  getDataRoot: () => rootA,
   worktrees: defaultWorktreeExecAdapters,
   worktreePolicy: defaultWorktreePolicyAdapters
 })
-const hubA = appRouter.createCaller({ db: A.slayDb, dataRoot } as never)
-const hubB = appRouter.createCaller({ db: B.slayDb, dataRoot } as never)
+const hubA = appRouter.createCaller({ db: A.slayDb, dataRoot: rootA } as never)
+const hubB = appRouter.createCaller({ db: B.slayDb, dataRoot: rootB } as never)
 
 const COLUMNS_A = [
   { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
@@ -82,9 +84,17 @@ async function move(
     },
     steps: createTaskMoveSteps({
       sourceHubId: from.id,
-      source: { exportBundle: (id) => from.hub.taskMoves.export({ id }) },
+      source: {
+        exportBundle: (id) => from.hub.taskMoves.export({ id }),
+        fileManifest: (moveId) => from.hub.artifacts.moveManifest({ moveId }),
+        readFile: (moveId, ref, offset, length) =>
+          from.hub.artifacts.moveRead({ moveId, ref, offset, length })
+      },
       target: {
         importBundle: (input) => to.hub.taskMoves.import(input).then(() => undefined),
+        missingFiles: (moveId, entries) => to.hub.artifacts.moveMissing({ moveId, entries }),
+        writeFile: (input) => to.hub.artifacts.moveWrite(input).then(() => undefined),
+        clearStaging: (moveId) => to.hub.artifacts.moveClearStaging({ moveId }),
         commit: (id) => to.hub.taskMoves.commit({ id }).then(() => undefined)
       }
     }),
@@ -135,10 +145,14 @@ describe('a move from hub A to hub B', () => {
     A.db
       .prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)')
       .run(stays.id, parent.id)
-    const artifact = crypto.randomUUID()
-    A.db
-      .prepare(`INSERT INTO task_artifacts (id, task_id, title) VALUES (?, ?, 'notes.md')`)
-      .run(artifact, parent.id)
+    // A real artifact: a blob and a working copy on A's disk, more than two chunks.
+    const big = 'x'.repeat(1_300_000)
+    const created = await hubA.artifacts.create({
+      taskId: parent.id,
+      title: 'notes.md',
+      content: `final ${big}`
+    })
+    const artifact = created!.id
     A.db
       .prepare(`INSERT INTO usage_records (id, provider, model, task_id, input_tokens, output_tokens, timestamp, source_file)
                 VALUES (?, 'claude', 'm', ?, 1, 2, '2026-11-12T00:00:00Z', 'f.jsonl')`)
@@ -180,6 +194,11 @@ describe('a move from hub A to hub B', () => {
       count(B, 'SELECT COUNT(*) AS n FROM task_dependencies WHERE task_id = ?', stays.id)
     ).toBe(0)
     expect(count(B, 'SELECT COUNT(*) AS n FROM task_artifacts WHERE id = ?', artifact)).toBe(1)
+    // Its bytes came along, checked by hash: the content and every version's blob.
+    expect(await hubB.artifacts.readContent({ id: artifact })).toBe(`final ${big}`)
+    const versions = await hubB.artifacts.versionsList({ artifactId: artifact })
+    expect(versions.length).toBeGreaterThanOrEqual(1)
+    expect(existsSync(join(rootA, 'artifacts', parent.id))).toBe(false)
     expect(count(B, 'SELECT COUNT(*) AS n FROM usage_records WHERE task_id = ?', parent.id)).toBe(1)
     // Its history came along, plus the move itself.
     expect(

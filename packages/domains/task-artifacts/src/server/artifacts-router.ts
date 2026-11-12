@@ -27,6 +27,15 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
 import { getArtifactsRouterDeps, signalTasksChanged } from './artifacts-router-deps'
+import { TRPCError } from '@trpc/server'
+import {
+  clearMoveStaging,
+  missingMoveFiles,
+  moveFilesManifest,
+  MoveFilesRefusedError,
+  readMoveFile,
+  writeMoveFile
+} from './move-files'
 
 // Mirrors the 27 `db:artifacts:*` + 6 `db:artifactFolders:*` IPC handlers
 // (task/src/main/handlers.ts) plus the `artifacts:content-changed` broadcast. The
@@ -243,7 +252,69 @@ function downloadSource(
   }
 }
 
+// ── a move between hubs: the artifacts' bytes (move-files.ts) ──
+const moveFileRef = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('blob'), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  z.object({ kind: z.literal('file'), taskId: z.string().min(1), path: z.string().min(1) })
+])
+const moveFileEntry = z.object({
+  ref: moveFileRef,
+  size: z.number().int().min(0),
+  hash: z.string().regex(/^[0-9a-f]{64}$/)
+})
+/** A move's file step asked of the wrong hub, or out of order: the app's to fix. */
+async function moveFiles<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof MoveFilesRefusedError)
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err })
+    throw err
+  }
+}
+
 export const artifactsRouter = router({
+  // --- Moving tasks to another hub: copying their artifact files ---
+  /** Source: every file the move's tasks own here (blobs and working copies). */
+  moveManifest: publicProcedure
+    .input(z.object({ moveId: z.string().min(1) }))
+    .query(({ ctx, input }) =>
+      moveFiles(() => moveFilesManifest(ctx.db, ctx.dataRoot, input.moveId))
+    ),
+  /** Source: one chunk of such a file, base64. */
+  moveRead: publicProcedure
+    .input(
+      z.object({
+        moveId: z.string().min(1),
+        ref: moveFileRef,
+        offset: z.number().int().min(0),
+        length: z.number().int().min(1)
+      })
+    )
+    .query(({ ctx, input }) => moveFiles(() => readMoveFile(ctx.db, ctx.dataRoot, input))),
+  /** Target: the files still to copy, each with where its copy stands. */
+  moveMissing: publicProcedure
+    .input(z.object({ moveId: z.string().min(1), entries: z.array(moveFileEntry) }))
+    .mutation(({ ctx, input }) => moveFiles(() => missingMoveFiles(ctx.db, ctx.dataRoot, input))),
+  /** Target: write one chunk; the last one (`complete`) checks the file and places it. */
+  moveWrite: publicProcedure
+    .input(
+      z.object({
+        moveId: z.string().min(1),
+        ref: moveFileRef,
+        offset: z.number().int().min(0),
+        data: z.string(),
+        complete: z.object({ size: z.number().int().min(0), hash: z.string() }).optional()
+      })
+    )
+    .mutation(({ ctx, input }) => moveFiles(() => writeMoveFile(ctx.db, ctx.dataRoot, input))),
+  /** Target: drop the move's partial copies (after the step, or a canceled move). */
+  moveClearStaging: publicProcedure
+    .input(z.object({ moveId: z.string().min(1) }))
+    .mutation(({ ctx, input }) => {
+      clearMoveStaging(ctx.dataRoot, input.moveId)
+    }),
+
   // --- Artifact CRUD / read ---
   getByTask: publicProcedure
     .input(z.object({ taskId: z.string() }))
