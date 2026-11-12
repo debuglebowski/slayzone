@@ -110,6 +110,7 @@ import { useHomePanel } from '@slayzone/home/client'
 import { useTabLifecycle } from '@/hooks/useTabLifecycle'
 import { useTabColors } from '@/hooks/useTabColors'
 import { useVisibleTabs } from '@/hooks/useVisibleTabs'
+import { usePrimeOpenTaskDetails } from '@/hooks/usePrimeOpenTaskDetails'
 // Extracted shell: lazy components, types/constants, hooks, panels (see ./app-shell)
 import {
   TabPanes,
@@ -310,6 +311,8 @@ function App(): React.JSX.Element {
   // stays a bare id). `local`-fallback when single-hub / not yet resolved.
   const fed = useFederationOrNull()
   const defaultHubId = fed?.defaultHubId ?? 'local'
+  // Restored tabs render their detail from the board data, not 5 hub round trips each.
+  usePrimeOpenTaskDetails({ tabs, tasks, projects, tags, taskTags, hubIdByTask, defaultHubId })
   const selectedProjectHubId = useMemo(
     () => hubIdByProject.get(selectedProjectId) ?? defaultHubId,
     [hubIdByProject, selectedProjectId, defaultHubId]

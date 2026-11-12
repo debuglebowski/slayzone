@@ -58,6 +58,7 @@ import { RowUiStateContext, RowUiStateStore, collapseAllRows } from './row-ui-st
 import { ComposerSubAgents } from './ComposerSubAgents'
 import { flashRow, TimelineRevealContext, useRevealTimelineItem } from './timeline-reveal'
 import { useChatMode } from './useChatMode'
+import { useChatSettingsGeneration } from './useChatSettingsGeneration'
 import { useChatDefaults } from './useChatDefaults'
 import { useChatModel } from './useChatModel'
 import { useChatModels } from './useChatModels'
@@ -206,19 +207,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const finalOnly = false
     const showLastMessageTools = false
 
+    // One settings subscription for the panel; its five pills re-read together.
+    const settingsGeneration = useChatSettingsGeneration(taskId)
     const { chatMode, handleModeChange, autoCapability } = useChatMode({
       taskId,
       mode,
       tabId,
       cwd,
-      livePermissionMode: permissionMode
+      livePermissionMode: permissionMode,
+      settingsGeneration
     })
     const chatDefaults = useChatDefaults(mode)
     const { chatModel, modelChanging, handleModelChange } = useChatModel({
       taskId,
       mode,
       tabId,
-      cwd
+      cwd,
+      settingsGeneration
     })
     const models = useChatModels({ taskId, mode, sessionKey: state.sessionId })
     const effortLevels = chatModel ? models.effortLevels(chatModel) : undefined
@@ -226,7 +231,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       taskId,
       mode,
       tabId,
-      cwd
+      cwd,
+      settingsGeneration
     })
     const {
       chatCollaboration,
@@ -237,7 +243,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       taskId,
       mode,
       tabId,
-      cwd
+      cwd,
+      settingsGeneration
     })
     const backgroundJobs = selectBackgroundJobs(state)
     const backgroundSubAgents = selectBackgroundSubAgents(state)
@@ -249,7 +256,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       taskId,
       mode,
       tabId,
-      cwd
+      cwd,
+      settingsGeneration
     })
     const promptCards = chatCapabilitiesForMode(mode).promptCards
     // The prompt dock's key handler, consulted first by the panel's keys.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
-import { useChatSettingsChanged } from './useChatSettingsChanged'
+import { readChatInfo } from './chat-info-read'
 import { toast, useStableCallback, type AgentModel } from '@slayzone/ui'
 
 interface SessionInfoLite {
@@ -12,6 +12,8 @@ interface UseChatModelOpts {
   mode: string
   tabId: string
   cwd: string
+  /** `useChatSettingsGeneration` of the panel: re-read when it moves. */
+  settingsGeneration: number
 }
 
 type TRPCClient = ReturnType<typeof useTRPCClient>
@@ -22,11 +24,12 @@ type TRPCClient = ReturnType<typeof useTRPCClient>
 async function hydrateChatModel(
   trpcClient: TRPCClient,
   { taskId, mode, tabId }: { taskId: string; mode: string; tabId: string },
+  generation: number,
   isCancelled: () => boolean,
   setChatModelState: (v: AgentModel) => void
 ): Promise<void> {
   try {
-    const info = (await trpcClient.chat.getInfo.query({ tabId, mode })) as SessionInfoLite | null
+    const info = (await readChatInfo(trpcClient, tabId, mode, generation)) as SessionInfoLite | null
     if (isCancelled()) return
     if (info?.chatModel) {
       setChatModelState(info.chatModel)
@@ -63,28 +66,31 @@ async function applyChatModel(
  * takes effect. Initial value is `null` until hydrated — caller should hide
  * or skeletonize the pill while loading.
  */
-export function useChatModel({ taskId, mode, tabId, cwd }: UseChatModelOpts) {
+export function useChatModel({ taskId, mode, tabId, cwd, settingsGeneration }: UseChatModelOpts) {
   const trpcClient = useTRPCClient()
   const [chatModel, setChatModelState] = useState<AgentModel | null>(null)
   const [modelChanging, setModelChanging] = useState(false)
 
-  // Reads the latest trpcClient; hydration re-runs only on task/mode/tab change.
+  // Reads the latest trpcClient; re-runs on a task/mode/tab or settings-generation change.
   const hydrate = useStableCallback(
-    (ids: { taskId: string; mode: string; tabId: string }, isCancelled: () => boolean) => {
-      void hydrateChatModel(trpcClient, ids, isCancelled, setChatModelState)
+    (
+      ids: { taskId: string; mode: string; tabId: string },
+      generation: number,
+      isCancelled: () => boolean
+    ) => {
+      void hydrateChatModel(trpcClient, ids, generation, isCancelled, setChatModelState)
     }
   )
 
+  // On mount, and again when the task's saved settings change (a restored chat's
+  // settings landed on its computer after it opened).
   useEffect(() => {
     let cancelled = false
-    hydrate({ taskId, mode, tabId }, () => cancelled)
+    hydrate({ taskId, mode, tabId }, settingsGeneration, () => cancelled)
     return () => {
       cancelled = true
     }
-  }, [taskId, mode, tabId, hydrate])
-
-  // Saved settings of a restored chat landed after it opened: re-read them.
-  useChatSettingsChanged(taskId, () => hydrate({ taskId, mode, tabId }, () => false))
+  }, [taskId, mode, tabId, settingsGeneration, hydrate])
 
   const handleModelChange = useCallback(
     async (next: AgentModel) => {

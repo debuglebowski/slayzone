@@ -35,8 +35,6 @@ const m = vi.hoisted(() => {
     setMode,
     getAutoEligibility,
     toast: vi.fn(),
-    /** The latest `useChatSettingsChanged` listener: fire it as the hub would. */
-    settingsChanged: { taskId: '', fire: () => {} },
     // One identity for the hook's lifetime, like the real client.
     client: {
       chat: {
@@ -50,12 +48,6 @@ const m = vi.hoisted(() => {
 })
 
 vi.mock('../trpc', () => ({ useTRPCClient: () => m.client }))
-vi.mock('./useChatSettingsChanged', () => ({
-  useChatSettingsChanged: (taskId: string, onChanged: () => void) => {
-    m.settingsChanged.taskId = taskId
-    m.settingsChanged.fire = onChanged
-  }
-}))
 vi.mock('@slayzone/ui', async () => ({
   ...(await vi.importActual<object>('../../../../../shared/ui/src/use-stable-callback')),
   toast: m.toast
@@ -69,8 +61,11 @@ interface Props {
   tabId: string
   cwd: string
   livePermissionMode?: string | null
+  settingsGeneration: number
 }
-const base: Props = { taskId: 'task1', mode: 'claude-chat', tabId: 'tab1', cwd: '/repo' }
+/** What `setMode` is called with: the tab's ids, never the settings generation. */
+const ids = { taskId: 'task1', mode: 'claude-chat', tabId: 'tab1', cwd: '/repo' }
+const base: Props = { ...ids, settingsGeneration: 0 }
 
 /** Let resolved IPC promises (and their state updates) land. */
 const flush = () =>
@@ -205,12 +200,11 @@ describe('useChatMode hydration', () => {
 
 describe('useChatMode restored settings (S4)', () => {
   it('re-reads the mode when the task’s saved settings land after the chat opened', async () => {
-    const { result } = await setup()
+    const { result, rerender } = await setup()
     expect(result.current.chatMode).toBe('auto-accept')
-    expect(m.settingsChanged.taskId).toBe('task1')
     // The hub's staged settings were imported on the computer: auto-accept → bypass.
     m.getMode.mockResolvedValue('bypass')
-    act(() => m.settingsChanged.fire())
+    rerender({ ...base, settingsGeneration: 1 })
     await flush()
     expect(result.current.chatMode).toBe('bypass')
   })
@@ -218,12 +212,12 @@ describe('useChatMode restored settings (S4)', () => {
   it('a user change in flight wins over a re-read', async () => {
     const first = deferred<unknown>()
     m.setMode.mockReturnValueOnce(first.promise)
-    const { result } = await setup()
+    const { result, rerender } = await setup()
     act(() => {
       void result.current.handleModeChange('plan')
     })
     m.getMode.mockResolvedValue('bypass')
-    act(() => m.settingsChanged.fire())
+    rerender({ ...base, settingsGeneration: 1 })
     await flush()
     expect(result.current.chatMode).toBe('plan')
     await act(async () => first.resolve({ chatMode: 'plan' }))
@@ -331,7 +325,7 @@ describe('useChatMode handleModeChange', () => {
     const { result } = await setup({ mode: 'codex-chat' })
     await act(() => result.current.handleModeChange('full-access', { stopAndResume: true }))
     expect(m.setMode).toHaveBeenCalledWith({
-      ...base,
+      ...ids,
       mode: 'codex-chat',
       chatMode: 'full-access',
       stopAndResume: true

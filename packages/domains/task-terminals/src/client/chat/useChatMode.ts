@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTRPCClient } from '../trpc'
-import { useChatSettingsChanged } from './useChatSettingsChanged'
+import { readChatInfo } from './chat-info-read'
 import { toast, useStableCallback, type AgentMode, type AutoModeCapability } from '@slayzone/ui'
 import { rawPermissionModeToChatMode } from '@slayzone/terminal-contracts'
 
@@ -25,6 +25,8 @@ interface UseChatModeOpts {
    * start / kill+respawn (turn-init).
    */
   livePermissionMode?: string | null
+  /** `useChatSettingsGeneration` of the panel: re-read when it moves. */
+  settingsGeneration: number
 }
 
 type TRPCClient = ReturnType<typeof useTRPCClient>
@@ -48,12 +50,13 @@ interface ModeRefs {
 async function hydrateChatMode(
   trpcClient: TRPCClient,
   { taskId, mode, tabId }: { taskId: string; mode: string; tabId: string },
+  generation: number,
   isCancelled: () => boolean,
   confirmedModeRef: RefObject<AgentMode>,
   setChatModeState: (v: AgentMode) => void
 ): Promise<void> {
   try {
-    const info = (await trpcClient.chat.getInfo.query({ tabId, mode })) as SessionInfoLite | null
+    const info = (await readChatInfo(trpcClient, tabId, mode, generation)) as SessionInfoLite | null
     if (isCancelled()) return
     if (info?.chatMode) {
       setChatModeState(info.chatMode)
@@ -165,7 +168,14 @@ async function runModeChange(
  * Extracted from ChatPanel to keep the panel component focused on layout and
  * keep mode wiring testable in isolation.
  */
-export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: UseChatModeOpts) {
+export function useChatMode({
+  taskId,
+  mode,
+  tabId,
+  cwd,
+  livePermissionMode,
+  settingsGeneration
+}: UseChatModeOpts) {
   const trpcClient = useTRPCClient()
   const [chatMode, setChatModeState] = useState<AgentMode>('auto-accept')
   const [autoCapability, setAutoCapability] = useState<AutoModeCapability>({
@@ -185,16 +195,23 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
   const confirmedModeRef = useRef<AgentMode>('auto-accept')
 
   // Hydrate on mount. Live session > DB cache. Reads the latest trpcClient;
-  // re-runs only on task/mode/tab change.
-  const hydrate = useStableCallback(
-    (ids: { taskId: string; mode: string; tabId: string }, isCancelled: () => boolean) => {
-      void hydrateChatMode(trpcClient, ids, isCancelled, confirmedModeRef, setChatModeState)
-    }
-  )
+  // re-runs on a task/mode/tab change.
+  // Reads this render's ids and settings generation (a stable callback runs the
+  // latest committed render's body), so each effect below lists only its trigger.
+  const hydrate = useStableCallback((isCancelled: () => boolean) => {
+    void hydrateChatMode(
+      trpcClient,
+      { taskId, mode, tabId },
+      settingsGeneration,
+      isCancelled,
+      confirmedModeRef,
+      setChatModeState
+    )
+  })
 
   useEffect(() => {
     let cancelled = false
-    hydrate({ taskId, mode, tabId }, () => cancelled)
+    hydrate(() => cancelled)
     return () => {
       cancelled = true
     }
@@ -202,9 +219,14 @@ export function useChatMode({ taskId, mode, tabId, cwd, livePermissionMode }: Us
 
   // Saved settings of a restored chat landed after it opened: re-read them, unless
   // the user's own change is in flight (it wins).
-  useChatSettingsChanged(taskId, () => {
-    if (pendingModeRef.current === null) hydrate({ taskId, mode, tabId }, () => false)
-  })
+  useEffect(() => {
+    if (settingsGeneration === 0 || pendingModeRef.current !== null) return
+    let cancelled = false
+    hydrate(() => cancelled)
+    return () => {
+      cancelled = true
+    }
+  }, [settingsGeneration, hydrate])
 
   // Drift sync: apply live permission mode only on transitions. A stale
   // render where livePermissionMode equals the last-applied value is a no-op,

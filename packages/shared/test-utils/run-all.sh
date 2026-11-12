@@ -1444,6 +1444,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/conversation-actions.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
+  packages/domains/task-terminals/src/client/chat/chat-info-read.test.tsx \
   packages/domains/task-terminals/src/client/chat/useFollowBottom.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatComposer.test.tsx \
   packages/domains/task-terminals/src/client/TerminalSplitGroup.test.tsx \
