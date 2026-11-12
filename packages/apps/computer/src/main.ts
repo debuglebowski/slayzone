@@ -78,6 +78,7 @@ import { createProcHandlers } from './handlers/proc'
 import { createProjectHandlers } from './handlers/project'
 import { createPtyHandlers } from './handlers/pty'
 import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
+import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
@@ -680,7 +681,8 @@ export function startComputer(
     join(stateDir, 'config.json'),
     credentialsFilePath(stateDir),
     join(stateDir, 'computer-runtime'),
-    join(stateDir, REQUEST_LOG_DIR_NAME)
+    join(stateDir, REQUEST_LOG_DIR_NAME),
+    join(stateDir, COMPUTER_LOG_DIR_NAME)
   ])
   const requestLog = createRequestLog({
     stateDir,
@@ -718,8 +720,11 @@ export function startComputer(
   }
 
   // ONE admission queue for every hub connection: agent starts contend for this
-  // machine, whichever hub asked for them.
-  const admission = createSpawnAdmission()
+  // machine, whichever hub asked for them. Each start's wait goes to the log (the
+  // computer's log file): the record a slow restore is diagnosed from.
+  const admission = createSpawnAdmission({
+    onEvent: (event) => log(`agent start ${event.type}`, { ...event })
+  })
   // ONE direct-link grant table: one listener serves every hub, and each hub's
   // grants stay keyed by the link that registered them.
   const directGrants = createDirectGrantStore()

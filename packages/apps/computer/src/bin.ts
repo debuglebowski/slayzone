@@ -56,6 +56,7 @@ import {
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { StructuralFaultError } from '@slayzone/platform/isolation'
 import { readJsonTolerant } from '@slayzone/platform/quarantine'
+import { createComputerFileLog } from './file-log'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -353,9 +354,12 @@ async function main(): Promise<void> {
     return
   }
 
+  // Also kept on disk (file-log.ts): a supervising app drops this process's stdout.
+  const fileLog = createComputerFileLog(dirname(getComputerConfigFilePath()))
   const log = (message: string, meta?: Record<string, unknown>): void => {
     const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
     process.stdout.write(`[computer] ${message}${suffix}\n`)
+    fileLog(`${message}${suffix}`)
   }
 
   // A certificate pin from an older release is ignored, never enforced (see

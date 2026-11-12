@@ -72,10 +72,27 @@ export function defaultAdmissionConcurrency(cores = availableParallelism()): num
   return Math.max(2, Math.min(4, Math.floor(cores / 2)))
 }
 
+/**
+ * What happened to one start, for the computer's log: how long it waited for its
+ * slot, and how long it held it (and whether the agent let it go or the cap took it).
+ */
+export type AdmissionEvent =
+  | {
+      type: 'admitted'
+      lane: AdmissionLane
+      waitedMs: number
+      /** Starts still waiting after this one. */
+      queued: number
+      active: number
+    }
+  | { type: 'released'; lane: AdmissionLane; heldMs: number; by: 'agent' | 'cap' }
+
 export interface SpawnAdmissionOptions {
   concurrency?: number
   startCapMs?: number
   warmQuietMs?: number
+  /** Told of every admission and release. Must not throw (it is guarded anyway). */
+  onEvent?: (event: AdmissionEvent) => void
   now?: () => number
   setTimer?: (fn: () => void, ms: number) => unknown
   clearTimer?: (handle: unknown) => void
@@ -85,6 +102,8 @@ interface Ticket extends AdmissionTicket {
   lane: AdmissionLane
   /** Sort key within the lane: arrival order, negative once promoted (newest first). */
   order: number
+  /** When it was queued. */
+  at: number
   start: (slot: AdmissionSlot) => void
 }
 
@@ -110,6 +129,13 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
       return t
     })
   const clearTimer = opts.clearTimer ?? ((h: unknown) => clearTimeout(h as NodeJS.Timeout))
+  const report = (event: AdmissionEvent): void => {
+    try {
+      opts.onEvent?.(event)
+    } catch {
+      /* a log line must never break a start */
+    }
+  }
 
   const queue: Ticket[] = []
   const active = new Set<ActiveSlot>()
@@ -156,20 +182,29 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
     queue.splice(queue.indexOf(ticket), 1)
     const warm = ticket.lane === 'warm'
     const held: ActiveSlot = { warm, released: false, cap: null }
-    const release = (): void => {
+    const admittedAt = now()
+    const release = (by: 'agent' | 'cap' = 'agent'): void => {
       if (held.released) return
       held.released = true
       clearTimer(held.cap)
       active.delete(held)
       if (!warm) lastAgentActivity = now()
+      report({ type: 'released', lane: ticket.lane, heldMs: now() - admittedAt, by })
       pump()
     }
-    held.cap = setTimer(release, startCapMs)
+    held.cap = setTimer(() => release('cap'), startCapMs)
     active.add(held)
+    report({
+      type: 'admitted',
+      lane: ticket.lane,
+      waitedMs: admittedAt - ticket.at,
+      queued: queue.length,
+      active: active.size
+    })
     try {
-      ticket.start({ release })
+      ticket.start({ release: () => release('agent') })
     } catch {
-      release()
+      release('agent')
     }
   }
 
@@ -192,7 +227,7 @@ export function createSpawnAdmission(opts: SpawnAdmissionOptions = {}): SpawnAdm
 
   return {
     enqueue(lane, start) {
-      const ticket: Ticket = { lane, order: ++arrivals, start }
+      const ticket: Ticket = { lane, order: ++arrivals, at: now(), start }
       queue.push(ticket)
       if (lane !== 'warm') lastAgentActivity = now()
       pump()

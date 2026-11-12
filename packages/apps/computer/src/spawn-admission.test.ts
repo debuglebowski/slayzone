@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createSpawnAdmission,
   defaultAdmissionConcurrency,
+  type AdmissionEvent,
   type AdmissionLane,
   type AdmissionSlot
 } from './spawn-admission'
@@ -39,10 +40,12 @@ function fakeTime() {
 
 function harness(opts: { concurrency?: number; startCapMs?: number; warmQuietMs?: number } = {}) {
   const time = fakeTime()
+  const events: AdmissionEvent[] = []
   const admission = createSpawnAdmission({
     concurrency: opts.concurrency ?? 2,
     startCapMs: opts.startCapMs ?? 5_000,
     warmQuietMs: opts.warmQuietMs ?? 3_000,
+    onEvent: (e) => events.push(e),
     now: time.now,
     setTimer: time.setTimer,
     clearTimer: time.clearTimer
@@ -54,10 +57,39 @@ function harness(opts: { concurrency?: number; startCapMs?: number; warmQuietMs?
       started.push(name)
       slots.set(name, slot)
     })
-  return { time, admission, started, slots, enqueue }
+  return { time, admission, started, slots, enqueue, events }
 }
 
 describe('spawn admission', () => {
+  // The record a slow restore is diagnosed from (computer.log): each start's wait
+  // for its slot, how long it held it, and whether the agent or the cap freed it.
+  it('reports each start: its wait, its hold, and what released it', () => {
+    const h = harness({ concurrency: 1, startCapMs: 5_000 })
+    h.enqueue('a', 'background')
+    h.enqueue('b', 'background')
+    h.time.advance(1_200)
+    h.slots.get('a')!.release()
+    h.time.advance(5_000)
+    expect(h.events).toEqual([
+      { type: 'admitted', lane: 'background', waitedMs: 0, queued: 0, active: 1 },
+      { type: 'released', lane: 'background', heldMs: 1_200, by: 'agent' },
+      { type: 'admitted', lane: 'background', waitedMs: 1_200, queued: 0, active: 1 },
+      { type: 'released', lane: 'background', heldMs: 5_000, by: 'cap' }
+    ])
+  })
+
+  it('a throwing listener never breaks a start', () => {
+    const admission = createSpawnAdmission({
+      concurrency: 1,
+      onEvent: () => {
+        throw new Error('log sink down')
+      }
+    })
+    const started: string[] = []
+    admission.enqueue('foreground', () => started.push('a'))
+    expect(started).toEqual(['a'])
+  })
+
   it('starts at most `concurrency` agents; the next one starts when a slot is released', () => {
     const h = harness({ concurrency: 2 })
     for (const n of ['a', 'b', 'c', 'd']) h.enqueue(n, 'background')
