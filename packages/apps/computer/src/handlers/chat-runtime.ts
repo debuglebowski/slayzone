@@ -313,6 +313,21 @@ const requestSchema = z.discriminatedUnion('kind', [
     data: z.string().max(350000)
   }),
   z.object({ kind: z.literal('transfer.finish'), id: z.string() }),
+  // A task's sessions leaving for another hub (slice 4a): this computer hands out its
+  // chats as transfers + its ledger; the target takes them with transfer.* above.
+  z.object({
+    kind: z.literal('sessionMove.export'),
+    moveId: z.string().min(1).max(80),
+    taskId: z.string().min(1).max(200)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.read'),
+    moveId: z.string().min(1).max(80),
+    conversationId: z.string().min(1).max(500),
+    offset: z.number().int().nonnegative(),
+    length: z.number().int().min(1).max(262144)
+  }),
+  z.object({ kind: z.literal('sessionMove.discard'), moveId: z.string().min(1).max(80) }),
   z.object({
     kind: z.literal('migration.activate'),
     id: z.string(),
@@ -883,8 +898,20 @@ export function createChatRuntimeHandlers(opts: {
         return r.transfers.begin(req.manifest)
       case 'transfer.chunk':
         return r.transfers.chunk(req.id, req.offset, Buffer.from(req.data, 'base64'))
-      case 'transfer.finish':
+      case 'transfer.finish': {
+        // A move's copy replaces this store's older one of the same chat: the tab must
+        // not hold the old conversation in a live session.
+        const moving = r.transfers.manifestOf(req.id)
+        if (moving?.header.move) await r.transport.removeSession(moving.header.identity.tabId)
         return r.transfers.finish(req.id)
+      }
+      case 'sessionMove.export':
+        return r.sessionMoves.exportTask(req.moveId, req.taskId)
+      case 'sessionMove.read':
+        return { data: r.sessionMoves.read(req.moveId, req.conversationId, req.offset, req.length) }
+      case 'sessionMove.discard':
+        r.sessionMoves.discard(req.moveId)
+        return { ok: true }
       case 'migration.verify':
         return { missing: r.attachments.missing(req.id) }
       case 'migration.prepared': {

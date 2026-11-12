@@ -369,7 +369,8 @@ export const chatTransferManifestSchema = z.object({
     identity: chatIdentitySchema,
     events: z.number().int().nonnegative(),
     records: z.number().int().nonnegative(),
-    receipts: z.number().int().nonnegative()
+    receipts: z.number().int().nonnegative(),
+    move: z.literal(true).optional()
   }),
   hash: z.string().regex(/^[a-f0-9]{64}$/),
   bytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER)

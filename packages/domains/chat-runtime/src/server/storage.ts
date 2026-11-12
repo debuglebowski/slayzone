@@ -1080,7 +1080,23 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             ['active', 'prepared'].includes(previous.state)
           )
             return
-          throw new Error('Transfer would overwrite existing ownership')
+          // A task's move to this hub again: the copy this store kept from the task's
+          // earlier stay is older (its epoch is lower than the incoming one) — replaced.
+          // Only a move's own export may ask for it, and only for the same chat.
+          if (
+            !(
+              h.move &&
+              previous.state === 'active' &&
+              previous.task_id === h.identity.taskId &&
+              previous.tab_id === h.identity.tabId &&
+              previous.mode === h.identity.mode &&
+              previous.epoch < h.identity.epoch + 1
+            )
+          )
+            throw new Error('Transfer would overwrite existing ownership')
+          for (const table of ['events', 'records', 'receipts', 'queue_message_identities'])
+            db.prepare(`DELETE FROM ${table} WHERE conversation_id=?`).run(h.identity.id)
+          db.prepare('DELETE FROM conversations WHERE id=?').run(h.identity.id)
         }
         const i = h.identity,
           hash = createHash('sha256')

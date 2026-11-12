@@ -4,6 +4,7 @@ import { createLocalArtifacts } from './artifacts'
 import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
 import { createChatTransfers } from './transfers'
+import { createSessionMoves, sessionLedgerMoveImport } from './session-moves'
 import { createLocalWorkspaceStore } from './workspace-store'
 import { createChatInvoker } from './invocation'
 import { createLocalAttachments } from './attachments'
@@ -103,7 +104,8 @@ export function createComputerChatRuntime(opts: {
       ...sessionLedgerImports,
       ...historyImports,
       'task-path': taskPathImport,
-      'chat-settings': chatSettingsImport
+      'chat-settings': chatSettingsImport,
+      'session-ledger-move': sessionLedgerMoveImport
     },
     providerConfig: local.providerConfig,
     taskPath: taskPaths.get
@@ -113,6 +115,7 @@ export function createComputerChatRuntime(opts: {
   local.cancelPendingQueueAdmissions()
   const transfers = createChatTransfers(storage)
   transfers.collectActivated()
+  const sessionMoves = createSessionMoves(storage)
   const attachments = createLocalAttachments(storage, local)
   const artifacts = createLocalArtifacts(storage, local, attachments)
   const backups = createChatBackups(storage, { automatic: !opts.maintenance })
@@ -272,6 +275,7 @@ export function createComputerChatRuntime(opts: {
     promptSummaries: prompts.summaries,
     storage,
     transfers,
+    sessionMoves,
     attachments,
     backups,
     artifacts,
