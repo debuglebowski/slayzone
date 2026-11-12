@@ -222,6 +222,7 @@ function releaseMove(db: Database, p: { id: string; now: number }): void {
         WHERE parent_id IN (${moved}) AND id NOT IN (${moved})`
     ).run(p.id, p.id)
     db.prepare(`DELETE FROM tasks WHERE id IN (${moved})`).run(p.id)
+    keepMovedChats(db, moved, p.id)
     db.prepare("UPDATE task_moves SET status = 'done', updated_at = ? WHERE id = ?").run(
       p.now,
       p.id
@@ -309,14 +310,32 @@ function abortImport(db: Database, p: { id: string; now: number }): void {
       .prepare("SELECT status FROM task_moves WHERE id = ? AND direction = 'in'")
       .get(p.id) as { status: string } | undefined
     if (!move || move.status === 'done' || move.status === 'canceled') return
-    db.prepare(
-      'DELETE FROM tasks WHERE id IN (SELECT task_id FROM task_move_tasks WHERE move_id = ?)'
-    ).run(p.id)
+    const moved = 'SELECT task_id FROM task_move_tasks WHERE move_id = ?'
+    db.prepare(`DELETE FROM tasks WHERE id IN (${moved})`).run(p.id)
+    keepMovedChats(db, moved, p.id)
     db.prepare("UPDATE task_moves SET status = 'canceled', updated_at = ? WHERE id = ?").run(
       p.now,
       p.id
     )
   })()
+}
+
+/**
+ * Rows leaving this hub by a move are not deleted content: undo what the delete
+ * triggers (`chat_task_purge`, `chat_tab_purge`) queued for them, in the same
+ * transaction, so this hub's computers are never told to erase the tasks' chats and
+ * terminal history, nor to tombstone the task ids (which would refuse the tasks for
+ * good, a move back included). Their ownership rows stay, marked deleted: this hub no
+ * longer owns those chats. Run right after the DELETE, with the moved ids in
+ * `movedSql` (a SELECT of task ids, one `?` bound to `param`).
+ */
+function keepMovedChats(db: Database, movedSql: string, param: string): void {
+  const conversations = `SELECT id FROM chat_ownership WHERE task_id IN (${movedSql})`
+  db.prepare(`DELETE FROM chat_deletion_targets WHERE conversation_id IN (${conversations})`).run(
+    param
+  )
+  for (const table of ['chat_task_lifecycle', 'chat_lifecycle_acks', 'chat_task_computers'])
+    db.prepare(`DELETE FROM ${table} WHERE task_id IN (${movedSql})`).run(param)
 }
 
 export const taskTxns = {

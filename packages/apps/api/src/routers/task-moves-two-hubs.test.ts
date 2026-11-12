@@ -162,12 +162,40 @@ describe('a move from hub A to hub B', () => {
                 VALUES (?, 'claude', 'm', ?, 1, 2, '2026-11-12T00:00:00Z', 'f.jsonl')`)
       .run(crypto.randomUUID(), parent.id)
 
+    // A chat of the task, owned by A's computer.
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 1, 'active')`
+      )
+      .run(conversation, parent.id, parent.id)
+    A.db
+      .prepare(`INSERT OR REPLACE INTO chat_task_lifecycle (task_id, state) VALUES (?, 'active')`)
+      .run(parent.id)
+
     const done = await move(
       { hub: hubA, id: 'hub-a' },
       { hub: hubB, id: 'hub-b', projectId: projectB },
       [parent.id]
     )
     expect(done.status).toBe('done')
+    // Released, not deleted: A never tells its computer to erase the task's chats (a
+    // tombstone there would refuse the task for good, so it could never move back).
+    expect(
+      count(
+        A,
+        'SELECT COUNT(*) AS n FROM chat_deletion_targets WHERE conversation_id = ?',
+        conversation
+      )
+    ).toBe(0)
+    expect(
+      count(
+        A,
+        "SELECT COUNT(*) AS n FROM chat_task_lifecycle WHERE task_id = ? AND state = 'deleted'",
+        parent.id
+      )
+    ).toBe(0)
 
     // On B, with the same ids, in B's project, statuses re-homed, hierarchy kept.
     expect(row(B, parent.id)).toMatchObject({
@@ -296,6 +324,14 @@ describe('a move from hub A to hub B', () => {
     // Canceled: the target's copy goes away, the source's lock lifts.
     await hubB.taskMoves.abort({ id: begun.id })
     expect(row(B, t.id)).toBeUndefined()
+    // Dropped, not deleted: no tombstone on B's side either.
+    expect(
+      count(
+        B,
+        "SELECT COUNT(*) AS n FROM chat_task_lifecycle WHERE task_id = ? AND state = 'deleted'",
+        t.id
+      )
+    ).toBe(0)
     await hubA.taskMoves.cancel({ id: begun.id })
     await hubA.task.update({ id: t.id, title: 'still on A' } as unknown as UpdateTaskInput)
   })
