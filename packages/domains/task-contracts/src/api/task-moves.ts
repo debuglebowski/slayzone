@@ -124,8 +124,9 @@ export interface TaskMoveBundle {
   rows: Record<TaskMoveTable, Array<Record<string, unknown>>>
   /** The tags `task_tags` names: the target uses its own of the same name, or makes one. */
   tags: Array<{ id: string; name: string; color: string; text_color: string }>
-  /** Blockers between a moved task and one staying on the source (cross-hub links, 3d). */
-  externalDependencies: Array<{ task_id: string; blocks_task_id: string }>
+  /** Blockers between a moved task and one staying on the source (cross-hub links, 3d),
+   *  with the staying task's title. */
+  externalDependencies: Array<{ task_id: string; blocks_task_id: string; staying_title: string }>
 }
 
 export const exportTaskMoveInputSchema = z.object({ id: z.string().min(1) })
@@ -144,3 +145,30 @@ export const importTaskMoveInputSchema = z.object({
   )
 })
 export type ImportTaskMoveInput = z.infer<typeof importTaskMoveInputSchema>
+
+/**
+ * A blocker between a task here and one on another hub (a move split them). `role`
+ * is this task's side: it `blocks` the remote task, or is `blocked_by` it.
+ */
+export interface TaskRemoteBlocker {
+  taskId: string
+  role: 'blocks' | 'blocked_by'
+  remoteHubId: string
+  remoteTaskId: string
+  /** The remote task's title when the link was made (for display). */
+  remoteTitle: string | null
+  createdAt: number
+}
+
+const remoteBlockerKey = {
+  taskId: z.string().min(1),
+  role: z.enum(['blocks', 'blocked_by']),
+  remoteHubId: z.string().min(1),
+  remoteTaskId: z.string().min(1)
+}
+export const addRemoteBlockersInputSchema = z.object({
+  moveId: z.string().min(1),
+  links: z.array(z.object({ ...remoteBlockerKey, remoteTitle: z.string().nullable() })).max(1000)
+})
+export const removeRemoteBlockerInputSchema = z.object(remoteBlockerKey)
+export const remoteBlockersInputSchema = z.object({ taskId: z.string().min(1) })

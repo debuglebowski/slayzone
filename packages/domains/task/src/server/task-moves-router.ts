@@ -1,7 +1,10 @@
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import {
+  addRemoteBlockersInputSchema,
   advanceTaskMoveInputSchema,
+  removeRemoteBlockerInputSchema,
+  remoteBlockersInputSchema,
   beginTaskMoveInputSchema,
   exportTaskMoveInputSchema,
   importTaskMoveInputSchema,
@@ -13,6 +16,9 @@ import {
 } from '@slayzone/task-contracts'
 import {
   abortTaskMoveIn,
+  addRemoteBlockers,
+  listRemoteBlockers,
+  removeRemoteBlocker,
   advanceTaskMove,
   beginTaskMove,
   commitTaskMoveIn,
@@ -119,6 +125,20 @@ export const taskMovesRouter = router({
   commit: publicProcedure
     .input(taskMoveIdInputSchema)
     .mutation(({ ctx, input }) => mapped(() => commitTaskMoveIn(ctx.db, input.id))),
+
+  // ── blockers across hubs (slice 3d) ──
+  /** Either hub: its side of blockers a move split (the `links` step). Idempotent. */
+  addRemoteBlockers: publicProcedure
+    .input(addRemoteBlockersInputSchema)
+    .mutation(({ ctx, input }) => mapped(() => addRemoteBlockers(ctx.db, input))),
+  /** A task's blockers on other hubs. */
+  remoteBlockers: publicProcedure
+    .input(remoteBlockersInputSchema)
+    .query(({ ctx, input }) => listRemoteBlockers(ctx.db, input.taskId)),
+  /** Remove this hub's side of one. */
+  removeRemoteBlocker: publicProcedure
+    .input(removeRemoteBlockerInputSchema)
+    .mutation(({ ctx, input }) => removeRemoteBlocker(ctx.db, input)),
 
   /** Target: a canceled move — drop what was taken (before commit). */
   abort: publicProcedure

@@ -12,8 +12,18 @@ export interface TaskMoveFileEntry {
 }
 
 /** The hub the tasks leave. */
+/** One hub's side of a blocker a move splits between two hubs. */
+export interface TaskMoveRemoteBlockerLink {
+  taskId: string
+  role: 'blocks' | 'blocked_by'
+  remoteHubId: string
+  remoteTaskId: string
+  remoteTitle: string | null
+}
+
 export interface TaskMoveSourceApi {
   exportBundle(moveId: string): Promise<TaskMoveBundle>
+  addRemoteBlockers(moveId: string, links: TaskMoveRemoteBlockerLink[]): Promise<void>
   fileManifest(moveId: string): Promise<TaskMoveFileEntry[]>
   readFile(
     moveId: string,
@@ -26,6 +36,7 @@ export interface TaskMoveSourceApi {
 /** The hub the tasks go to. */
 export interface TaskMoveTargetApi {
   importBundle(input: ImportTaskMoveInput): Promise<void>
+  addRemoteBlockers(moveId: string, links: TaskMoveRemoteBlockerLink[]): Promise<void>
   missingFiles(
     moveId: string,
     entries: TaskMoveFileEntry[]
@@ -104,8 +115,38 @@ export function createTaskMoveSteps(opts: {
       }
       await opts.target.clearStaging(move.id)
     },
-    // Cross-hub blocker links (slice 3d).
-    links: () => Promise.resolve(),
+    // A blocker between a moved task and one staying behind: each hub keeps its side.
+    links: async ({ move }) => {
+      const bundle = await bundleOf(move.id)
+      if (bundle.externalDependencies.length === 0) return
+      const titles = new Map(
+        (bundle.rows.tasks ?? []).map((t) => [t.id as string, (t.title as string) ?? null])
+      )
+      const onTarget: TaskMoveRemoteBlockerLink[] = []
+      const onSource: TaskMoveRemoteBlockerLink[] = []
+      for (const d of bundle.externalDependencies) {
+        // `task_id` blocks `blocks_task_id`; one of them moved.
+        const movedBlocks = titles.has(d.task_id)
+        const moved = movedBlocks ? d.task_id : d.blocks_task_id
+        const staying = movedBlocks ? d.blocks_task_id : d.task_id
+        onTarget.push({
+          taskId: moved,
+          role: movedBlocks ? 'blocks' : 'blocked_by',
+          remoteHubId: opts.sourceHubId,
+          remoteTaskId: staying,
+          remoteTitle: d.staying_title || null
+        })
+        onSource.push({
+          taskId: staying,
+          role: movedBlocks ? 'blocked_by' : 'blocks',
+          remoteHubId: move.peerHubId,
+          remoteTaskId: moved,
+          remoteTitle: titles.get(moved) ?? null
+        })
+      }
+      await opts.target.addRemoteBlockers(move.id, onTarget)
+      await opts.source.addRemoteBlockers(move.id, onSource)
+    },
     commit: async ({ move }) => {
       await opts.target.commit(move.id)
       bundles.delete(move.id)

@@ -5723,7 +5723,21 @@ export const migrations: Migration[] = [
           created_at INTEGER NOT NULL
         );
       `)
-      // task_move_tasks / task_move_redirects carry a task_id: fenced like every such table.
+      // A blocker between tasks on two hubs (a move split them): each hub keeps its
+      // side — its own task, and whether it blocks or is blocked by the other hub's.
+      db.exec(`
+        CREATE TABLE task_remote_blockers (
+          task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          role           TEXT NOT NULL CHECK (role IN ('blocks', 'blocked_by')),
+          remote_hub_id  TEXT NOT NULL,
+          remote_task_id TEXT NOT NULL,
+          remote_title   TEXT,
+          created_at     INTEGER NOT NULL,
+          PRIMARY KEY (task_id, role, remote_hub_id, remote_task_id)
+        );
+      `)
+      // task_move_tasks / task_move_redirects / task_remote_blockers carry a task_id:
+      // fenced like every such table.
       installContentErasureFences(db)
     }
   }

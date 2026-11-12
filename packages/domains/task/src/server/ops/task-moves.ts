@@ -9,6 +9,7 @@ import {
   type BeginTaskMoveInput,
   type ImportTaskMoveInput,
   type TaskMoveBundle,
+  type TaskRemoteBlocker,
   type TaskMove,
   type TaskMoveRedirects,
   type TaskMoveStatus,
@@ -423,9 +424,13 @@ export async function exportTaskMove(db: SlayzoneDb, id: string): Promise<TaskMo
          FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE tt.task_id IN (${ph})`,
       ids
     ),
-    externalDependencies: dependencies
-      .filter((d) => !both(d))
-      .map((d) => ({ task_id: d.task_id as string, blocks_task_id: d.blocks_task_id as string }))
+    externalDependencies: await withStayingTitles(
+      db,
+      dependencies
+        .filter((d) => !both(d))
+        .map((d) => ({ task_id: d.task_id as string, blocks_task_id: d.blocks_task_id as string })),
+      inside
+    )
   }
 }
 
@@ -532,4 +537,88 @@ export async function abortTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskM
   if (move.status === 'done') throw new TaskMoveStateError('The move is committed here')
   await db.namedTxn('task:abort-import', { id, now: Date.now() })
   return getTaskMove(db, id)
+}
+
+async function withStayingTitles(
+  db: SlayzoneDb,
+  deps: Array<{ task_id: string; blocks_task_id: string }>,
+  moved: ReadonlySet<string>
+): Promise<TaskMoveBundle['externalDependencies']> {
+  const staying = [
+    ...new Set(deps.map((d) => (moved.has(d.task_id) ? d.blocks_task_id : d.task_id)))
+  ]
+  const titles = staying.length
+    ? new Map(
+        (
+          await db.all<{ id: string; title: string }>(
+            `SELECT id, title FROM tasks WHERE id IN (${placeholders(staying.length)})`,
+            staying
+          )
+        ).map((r) => [r.id, r.title])
+      )
+    : new Map<string, string>()
+  return deps.map((d) => ({
+    ...d,
+    staying_title: titles.get(moved.has(d.task_id) ? d.blocks_task_id : d.task_id) ?? ''
+  }))
+}
+
+// ── blockers across hubs (slice 3d) ────────────────────────────────────────────
+
+/**
+ * Record this hub's side of blockers a move split (the `links` step, on both hubs).
+ * Each link's task must be here. Repeated: nothing changes.
+ */
+export async function addRemoteBlockers(
+  db: SlayzoneDb,
+  input: {
+    moveId: string
+    links: Array<Omit<TaskRemoteBlocker, 'createdAt'>>
+  }
+): Promise<void> {
+  await getTaskMove(db, input.moveId)
+  const now = Date.now()
+  for (const l of input.links) {
+    await db.run(
+      `INSERT OR IGNORE INTO task_remote_blockers
+         (task_id, role, remote_hub_id, remote_task_id, remote_title, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [l.taskId, l.role, l.remoteHubId, l.remoteTaskId, l.remoteTitle, now]
+    )
+  }
+}
+
+/** A task's blockers on other hubs (both roles). */
+export async function listRemoteBlockers(
+  db: SlayzoneDb,
+  taskId: string
+): Promise<TaskRemoteBlocker[]> {
+  const rows = await db.all<{
+    task_id: string
+    role: TaskRemoteBlocker['role']
+    remote_hub_id: string
+    remote_task_id: string
+    remote_title: string | null
+    created_at: number
+  }>('SELECT * FROM task_remote_blockers WHERE task_id = ? ORDER BY created_at', [taskId])
+  return rows.map((r) => ({
+    taskId: r.task_id,
+    role: r.role,
+    remoteHubId: r.remote_hub_id,
+    remoteTaskId: r.remote_task_id,
+    remoteTitle: r.remote_title,
+    createdAt: r.created_at
+  }))
+}
+
+/** Remove this hub's side of one cross-hub blocker. */
+export async function removeRemoteBlocker(
+  db: SlayzoneDb,
+  key: Pick<TaskRemoteBlocker, 'taskId' | 'role' | 'remoteHubId' | 'remoteTaskId'>
+): Promise<void> {
+  await db.run(
+    `DELETE FROM task_remote_blockers
+      WHERE task_id = ? AND role = ? AND remote_hub_id = ? AND remote_task_id = ?`,
+    [key.taskId, key.role, key.remoteHubId, key.remoteTaskId]
+  )
 }

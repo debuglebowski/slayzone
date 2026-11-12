@@ -86,12 +86,16 @@ async function move(
       sourceHubId: from.id,
       source: {
         exportBundle: (id) => from.hub.taskMoves.export({ id }),
+        addRemoteBlockers: (moveId, links) =>
+          from.hub.taskMoves.addRemoteBlockers({ moveId, links }).then(() => undefined),
         fileManifest: (moveId) => from.hub.artifacts.moveManifest({ moveId }),
         readFile: (moveId, ref, offset, length) =>
           from.hub.artifacts.moveRead({ moveId, ref, offset, length })
       },
       target: {
         importBundle: (input) => to.hub.taskMoves.import(input).then(() => undefined),
+        addRemoteBlockers: (moveId, links) =>
+          to.hub.taskMoves.addRemoteBlockers({ moveId, links }).then(() => undefined),
         missingFiles: (moveId, entries) => to.hub.artifacts.moveMissing({ moveId, entries }),
         writeFile: (input) => to.hub.artifacts.moveWrite(input).then(() => undefined),
         clearStaging: (moveId) => to.hub.artifacts.moveClearStaging({ moveId }),
@@ -189,10 +193,36 @@ describe('a move from hub A to hub B', () => {
     expect(
       count(B, 'SELECT COUNT(*) AS n FROM task_dependencies WHERE task_id = ?', child.id)
     ).toBe(1)
-    // The blocker to a task left on A is not a row on B (a cross-hub link, 3d).
+    // The blocker left on A is no local row on B: a cross-hub link on both hubs, and
+    // the moved task still counts as blocked.
     expect(
       count(B, 'SELECT COUNT(*) AS n FROM task_dependencies WHERE task_id = ?', stays.id)
     ).toBe(0)
+    expect(await hubB.taskMoves.remoteBlockers({ taskId: parent.id })).toEqual([
+      expect.objectContaining({
+        role: 'blocked_by',
+        remoteHubId: 'hub-a',
+        remoteTaskId: stays.id,
+        remoteTitle: 'Stays on A'
+      })
+    ])
+    expect((await hubB.task.loadBoardData()).blockedTaskIds).toContain(parent.id)
+    expect(await hubA.taskMoves.remoteBlockers({ taskId: stays.id })).toEqual([
+      expect.objectContaining({
+        role: 'blocks',
+        remoteHubId: 'hub-b',
+        remoteTaskId: parent.id,
+        remoteTitle: 'Mover'
+      })
+    ])
+    // A link is removed on its own hub.
+    await hubA.taskMoves.removeRemoteBlocker({
+      taskId: stays.id,
+      role: 'blocks',
+      remoteHubId: 'hub-b',
+      remoteTaskId: parent.id
+    })
+    expect(await hubA.taskMoves.remoteBlockers({ taskId: stays.id })).toEqual([])
     expect(count(B, 'SELECT COUNT(*) AS n FROM task_artifacts WHERE id = ?', artifact)).toBe(1)
     // Its bytes came along, checked by hash: the content and every version's blob.
     expect(await hubB.artifacts.readContent({ id: artifact })).toBe(`final ${big}`)

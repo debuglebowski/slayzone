@@ -14,6 +14,7 @@ export {
   TASK_MOVE_CHUNK_BYTES,
   type TaskMoveFileEntry,
   type TaskMoveFileRef,
+  type TaskMoveRemoteBlockerLink,
   type TaskMoveSourceApi,
   type TaskMoveTargetApi
 } from './task-move-steps'

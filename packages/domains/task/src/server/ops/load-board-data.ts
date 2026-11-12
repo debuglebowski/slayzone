@@ -39,7 +39,9 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
   const blockedRows = await db.all<{ id: string }>(
     `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies
       UNION
-      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL`
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL
+      UNION
+      SELECT task_id AS id FROM task_remote_blockers WHERE role = 'blocked_by'`
   )
 
   // As getAllTasksOp. No paths (§9 Phase 7d: a client reads them from the computer)
@@ -102,8 +104,10 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
   const blockedRows = await db.all<{ id: string }>(
     `SELECT DISTINCT blocks_task_id AS id FROM task_dependencies WHERE blocks_task_id IN (${ph})
       UNION
-      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL AND id IN (${ph})`,
-    [...unique, ...unique]
+      SELECT id FROM tasks WHERE is_blocked = 1 AND deleted_at IS NULL AND id IN (${ph})
+      UNION
+      SELECT task_id AS id FROM task_remote_blockers WHERE role = 'blocked_by' AND task_id IN (${ph})`,
+    [...unique, ...unique, ...unique]
   )
   // LEAD over the board's own ORDER BY, so the successor is exactly the row a
   // full load lists next — including the rowid tie-break SQL alone can see.

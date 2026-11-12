@@ -1204,6 +1204,9 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.import': checked(project('targetProjectId')),
   'taskMoves.commit': checked(taskMove('id')),
   'taskMoves.abort': checked(taskMove('id')),
+  'taskMoves.addRemoteBlockers': checked(taskMove('moveId'), task('links[].taskId')),
+  'taskMoves.remoteBlockers': checked(task('taskId')),
+  'taskMoves.removeRemoteBlocker': checked(task('taskId')),
   // A move's artifact bytes: the move decides (its tasks; once gone, who began it).
   'artifacts.moveManifest': checked(taskMove('moveId')),
   'artifacts.moveRead': checked(taskMove('moveId')),
