@@ -7,4 +7,4 @@
  */
 export { tagsTxns } from './tags-txns'
 // A moved task's tags follow it by name (used inside the task domain's `task:move-project`).
-export { remapTaskTagsToProject } from './remap-task-tags'
+export { projectTagsByName, remapTaskTagsToProject } from './remap-task-tags'

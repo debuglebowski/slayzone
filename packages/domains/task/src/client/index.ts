@@ -10,6 +10,11 @@ export {
   type TaskMoveWorkStep
 } from './task-move-engine'
 export {
+  createTaskMoveSteps,
+  type TaskMoveSourceApi,
+  type TaskMoveTargetApi
+} from './task-move-steps'
+export {
   MoveTaskDialog,
   useProjectsOnTaskHub,
   type MoveTaskDialogProps

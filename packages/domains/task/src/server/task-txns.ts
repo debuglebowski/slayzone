@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/recorder'
 import { recordActivityEvents } from '@slayzone/history/recorder'
-import { remapTaskTagsToProject } from '@slayzone/tags/db'
+import { projectTagsByName, remapTaskTagsToProject } from '@slayzone/tags/db'
 
 /**
  * Named-transaction adapters for the task domain. These are the conditional
@@ -213,7 +213,106 @@ function releaseMove(db: Database, p: { id: string; now: number }): void {
       `INSERT OR REPLACE INTO task_move_redirects (task_id, hub_id, move_id, created_at)
        SELECT task_id, ?, move_id, ? FROM task_move_tasks WHERE move_id = ?`
     ).run(move.peer_hub_id, p.now, p.id)
+    // The tasks are the target's now: their rows go (every child row with them, by
+    // cascade) — removed, NOT erased, so a task can move back. A subtask left behind
+    // (the move did not bring subtasks) is detached first: the cascade would take it.
+    const moved = 'SELECT task_id FROM task_move_tasks WHERE move_id = ?'
+    db.prepare(
+      `UPDATE tasks SET parent_id = NULL, updated_at = datetime('now')
+        WHERE parent_id IN (${moved}) AND id NOT IN (${moved})`
+    ).run(p.id, p.id)
+    db.prepare(`DELETE FROM tasks WHERE id IN (${moved})`).run(p.id)
     db.prepare("UPDATE task_moves SET status = 'done', updated_at = ? WHERE id = ?").run(
+      p.now,
+      p.id
+    )
+  })()
+}
+
+/** The tables a move between hubs writes, in insert order (parents first). */
+const IMPORT_ORDER = [
+  'tasks',
+  'terminal_tabs',
+  'artifact_folders',
+  'task_artifacts',
+  'artifact_versions',
+  'task_tags',
+  'task_dependencies',
+  'activity_events',
+  'usage_records'
+] as const
+
+/**
+ * Take tasks moved here from another hub (`importTaskMove`): every row of the bundle
+ * with its id, in one transaction (foreign keys checked at its end), the tags mapped
+ * onto this project's by name, a redirect left by an earlier move away cleared, and
+ * the move's journal row ('in', waiting to commit). Until the move commits, the
+ * tasks are locked and hidden. Answers `exists` for a move already taken (a retry).
+ * A column this hub does not have is dropped; one it has that the source lacks takes
+ * its default.
+ */
+function importMove(
+  db: Database,
+  p: {
+    moveId: string
+    sourceHubId: string
+    targetProjectId: string
+    rootTaskIds: string[]
+    taskIds: string[]
+    rows: Record<(typeof IMPORT_ORDER)[number], Array<Record<string, unknown>>>
+    tags: Array<{ id: string; name: string; color: string; text_color: string }>
+    events: RecordActivityEventInput[]
+    now: number
+  }
+): { outcome: 'imported' | 'exists' } {
+  return db.transaction(() => {
+    if (db.prepare('SELECT 1 FROM task_moves WHERE id = ?').get(p.moveId))
+      return { outcome: 'exists' as const }
+    db.pragma('defer_foreign_keys = ON')
+    const tagIds = projectTagsByName(db, p.targetProjectId, p.tags)
+    for (const table of IMPORT_ORDER) {
+      const known = new Set(
+        (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map(
+          (c) => c.name
+        )
+      )
+      for (const raw of p.rows[table] ?? []) {
+        const row =
+          table === 'task_tags' ? { ...raw, tag_id: tagIds.get(raw.tag_id as string) } : raw
+        if (row.tag_id === undefined && table === 'task_tags') continue
+        const cols = Object.keys(row).filter((c) => known.has(c))
+        if (cols.length === 0) continue
+        db.prepare(
+          `INSERT INTO "${table}" (${cols.map((c) => `"${c}"`).join(', ')})
+           VALUES (${cols.map(() => '?').join(', ')})`
+        ).run(...cols.map((c) => row[c]))
+      }
+    }
+    const ids = p.taskIds.map(() => '?').join(', ')
+    db.prepare(`DELETE FROM task_move_redirects WHERE task_id IN (${ids})`).run(...p.taskIds)
+    db.prepare(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, step, status, created_at, updated_at)
+       VALUES (?, 'in', ?, ?, ?, 1, 'commit', 'running', ?, ?)`
+    ).run(p.moveId, p.sourceHubId, p.targetProjectId, JSON.stringify(p.rootTaskIds), p.now, p.now)
+    const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
+    for (const taskId of p.taskIds) lock.run(p.moveId, taskId)
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { outcome: 'imported' as const }
+  })()
+}
+
+/** A canceled incoming move: the tasks it brought go again (every row, by cascade). */
+function abortImport(db: Database, p: { id: string; now: number }): void {
+  db.transaction(() => {
+    const move = db
+      .prepare("SELECT status FROM task_moves WHERE id = ? AND direction = 'in'")
+      .get(p.id) as { status: string } | undefined
+    if (!move || move.status === 'done' || move.status === 'canceled') return
+    db.prepare(
+      'DELETE FROM tasks WHERE id IN (SELECT task_id FROM task_move_tasks WHERE move_id = ?)'
+    ).run(p.id)
+    db.prepare("UPDATE task_moves SET status = 'canceled', updated_at = ? WHERE id = ?").run(
       p.now,
       p.id
     )
@@ -228,7 +327,9 @@ export const taskTxns = {
   'task:update': update,
   'task:move-project': moveProject,
   'task:begin-move': beginMove,
-  'task:release-move': releaseMove
+  'task:release-move': releaseMove,
+  'task:import-move': importMove,
+  'task:abort-import': abortImport
 }
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this

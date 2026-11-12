@@ -1199,6 +1199,11 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.release': checked(taskMove('id')),
   // Keyed by task id; each answer names its move, which decides.
   'taskMoves.redirects': listed(redirectsByMove),
+  'taskMoves.export': checked(taskMove('id')),
+  // The tasks do not exist here yet: the project they arrive in decides.
+  'taskMoves.import': checked(project('targetProjectId')),
+  'taskMoves.commit': checked(taskMove('id')),
+  'taskMoves.abort': checked(taskMove('id')),
   'task.movePreview': checked(task('taskIds[]'), project('targetProjectId')),
   'task.delete': checked(task('id')),
   'task.deleteMany': checked(task('ids[]')),

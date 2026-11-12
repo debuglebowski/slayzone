@@ -712,6 +712,8 @@ run_harness packages/apps/api/src/routers/task.test.ts
 run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
 # Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
 run_harness packages/apps/api/src/routers/task-moves.test.ts
+# Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.
+run_harness packages/apps/api/src/routers/task-moves-two-hubs.test.ts
 # Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
 # (they emitted nothing, so other clients never saw them live); a burst stays merged.
 run_harness packages/apps/api/src/routers/task-change-signals.test.ts

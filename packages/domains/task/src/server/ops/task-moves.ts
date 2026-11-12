@@ -1,16 +1,22 @@
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
+import type { RecordActivityEventInput } from '@slayzone/history/server'
+import { getDefaultStatus, isKnownStatus, parseColumnsConfig } from '@slayzone/projects-contracts'
 import {
   nextTaskMoveStep,
   TASK_MOVE_LOCKING_STATUSES,
   TASK_MOVE_STEPS,
   type BeginTaskMoveInput,
+  type ImportTaskMoveInput,
+  type TaskMoveBundle,
   type TaskMove,
   type TaskMoveRedirects,
   type TaskMoveStatus,
   type TaskMoveStep
 } from '@slayzone/task-contracts'
-import { getRuntimeAdapters } from './shared.js'
+import { buildTaskProjectChangedEvents, buildTaskUpdatedEvents } from '../history.js'
+import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
+import { getRuntimeAdapters, parseTask } from './shared.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -315,6 +321,19 @@ export async function releaseTaskMove(db: SlayzoneDb, id: string): Promise<TaskM
       `The move is ${move.status} at "${move.step}": it releases only when running at "release"`
     )
   await db.namedTxn('task:release-move', { id, now: Date.now() })
+  // Their artifact files are the target's now (copied in `copy-files`).
+  const runtime = getRuntimeAdapters()
+  for (const taskId of move.taskIds) {
+    await Promise.resolve()
+      .then(() =>
+        runtime.worktrees.removeArtifactDir(
+          artifactTaskDir(artifactsDirOf(runtime.getDataRoot()), taskId)
+        )
+      )
+      .catch((error: unknown) => {
+        console.warn(`[task] artifact files of moved task ${taskId} not removed:`, error)
+      })
+  }
   return getTaskMove(db, id)
 }
 
@@ -345,4 +364,167 @@ export async function lockedTaskIds(db: SlayzoneDb, taskIds: readonly string[]):
     [...taskIds]
   )
   return rows.map((r) => r.task_id)
+}
+
+// ── the rows a move carries (slice 3b) ─────────────────────────────────────────
+
+type Row = Record<string, unknown>
+
+/**
+ * The bundle of a move's tasks — every row `TASK_MOVE_TABLES` names — read on the
+ * hub they leave. Safe to read again (a retried export); only while the move holds
+ * its lock, so the rows cannot change underneath.
+ */
+export async function exportTaskMove(db: SlayzoneDb, id: string): Promise<TaskMoveBundle> {
+  const move = await getTaskMove(db, id)
+  if (move.direction !== 'out' || !TASK_MOVE_LOCKING_STATUSES.includes(move.status))
+    throw new TaskMoveStateError(`The move is ${move.status}: nothing to export`)
+  if (TASK_MOVE_STEPS.indexOf(move.step) < TASK_MOVE_STEPS.indexOf('export'))
+    throw new TaskMoveStateError('The move has not locked its tasks yet')
+  const ids = move.taskIds
+  const ph = placeholders(ids.length)
+  const all = (sql: string, params: unknown[] = ids): Promise<Row[]> => db.all<Row>(sql, params)
+  const artifacts = await all(`SELECT * FROM task_artifacts WHERE task_id IN (${ph})`)
+  const artifactIds = artifacts.map((a) => a.id as string)
+  const dependencies = await all(
+    `SELECT task_id, blocks_task_id FROM task_dependencies
+      WHERE task_id IN (${ph}) OR blocks_task_id IN (${ph})`,
+    [...ids, ...ids]
+  )
+  const inside = new Set(ids)
+  const both = (d: Row): boolean =>
+    inside.has(d.task_id as string) && inside.has(d.blocks_task_id as string)
+  return {
+    moveId: move.id,
+    rootTaskIds: move.rootTaskIds,
+    rows: {
+      tasks: await all(`SELECT * FROM tasks WHERE id IN (${ph})`),
+      terminal_tabs: await all(`SELECT * FROM terminal_tabs WHERE task_id IN (${ph})`),
+      task_tags: await all(`SELECT * FROM task_tags WHERE task_id IN (${ph})`),
+      task_dependencies: dependencies.filter(both),
+      artifact_folders: await all(`SELECT * FROM artifact_folders WHERE task_id IN (${ph})`),
+      task_artifacts: artifacts,
+      artifact_versions: artifactIds.length
+        ? await all(
+            `SELECT * FROM artifact_versions WHERE artifact_id IN (${placeholders(artifactIds.length)})`,
+            artifactIds
+          )
+        : [],
+      activity_events: await all(`SELECT * FROM activity_events WHERE task_id IN (${ph})`),
+      usage_records: await all(`SELECT * FROM usage_records WHERE task_id IN (${ph})`)
+    },
+    tags: await db.all<TaskMoveBundle['tags'][number]>(
+      `SELECT DISTINCT tg.id, tg.name, tg.color, tg.text_color
+         FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE tt.task_id IN (${ph})`,
+      ids
+    ),
+    externalDependencies: dependencies
+      .filter((d) => !both(d))
+      .map((d) => ({ task_id: d.task_id as string, blocks_task_id: d.blocks_task_id as string }))
+  }
+}
+
+/** Clears what belonged to the source hub's folders and computers (as a same-hub move). */
+const LEFT_BEHIND: Readonly<Row> = {
+  computer_id: null,
+  worktree_computer_id: null,
+  has_worktree: 0,
+  has_base_dir: 0,
+  repo_name: null,
+  worktree_parent_branch: null,
+  merge_state: null,
+  merge_context: null
+}
+
+/**
+ * Take a move's bundle into `targetProjectId` here — the target hub's `import` step.
+ * The same rules as a move within one hub: each status this project lacks re-homes
+ * to its default, a moved task whose parent did not come along is detached, the
+ * paths and computer pins of the old hub are dropped, tabs come back stopped, tags
+ * map by name. One `task.project_changed` entry per task. Retried: nothing changes.
+ */
+export async function importTaskMove(
+  db: SlayzoneDb,
+  input: ImportTaskMoveInput
+): Promise<TaskMove> {
+  const { bundle } = input
+  const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [bundle.moveId])
+  if (existing) return toMove(db, existing)
+  const target = await db.get<{ id: string; name: string; columns_config: string | null }>(
+    'SELECT id, name, columns_config FROM projects WHERE id = ?',
+    [input.targetProjectId]
+  )
+  if (!target) throw new TaskMoveRefusedError(`Project not found: ${input.targetProjectId}`)
+  const columns = parseColumnsConfig(target.columns_config)
+  const tasks = bundle.rows.tasks ?? []
+  const taskIds = tasks.map((t) => t.id as string)
+  if (taskIds.length === 0) throw new TaskMoveRefusedError('The move carries no tasks')
+  const inside = new Set(taskIds)
+
+  const events: RecordActivityEventInput[] = []
+  const movedTasks = tasks.map((raw) => {
+    const status = raw.status as string
+    const next: Row = {
+      ...raw,
+      ...LEFT_BEHIND,
+      project_id: target.id,
+      status: isKnownStatus(status, columns) ? status : getDefaultStatus(columns),
+      parent_id: raw.parent_id && inside.has(raw.parent_id as string) ? raw.parent_id : null
+    }
+    const before = parseTask(raw)!
+    const after = parseTask(next)!
+    events.push(...buildTaskUpdatedEvents(before, after))
+    events.push(
+      ...buildTaskProjectChangedEvents(
+        before,
+        { id: target.id, name: target.name },
+        `another hub (${input.sourceHubId})`
+      )
+    )
+    return next
+  })
+  await db.namedTxn('task:import-move', {
+    moveId: bundle.moveId,
+    sourceHubId: input.sourceHubId,
+    targetProjectId: target.id,
+    rootTaskIds: bundle.rootTaskIds,
+    taskIds,
+    rows: {
+      ...bundle.rows,
+      tasks: movedTasks,
+      // Its history is filed under the project it now lives in.
+      activity_events: (bundle.rows.activity_events ?? []).map((e) => ({
+        ...e,
+        project_id: target.id
+      })),
+      // Nothing runs here yet: every tab comes in stopped.
+      terminal_tabs: (bundle.rows.terminal_tabs ?? []).map((t) => ({
+        ...t,
+        agent_state: 'stopped'
+      }))
+    },
+    tags: bundle.tags,
+    events,
+    now: Date.now()
+  })
+  return getTaskMove(db, bundle.moveId)
+}
+
+/** The target hub takes the tasks as its own: shown, unlocked. Repeated: no change. */
+export async function commitTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskMove> {
+  const move = await getTaskMove(db, id)
+  if (move.direction !== 'in') throw new TaskMoveStateError('Not a move into this hub')
+  if (move.status === 'done') return move
+  if (move.status === 'canceled') throw new TaskMoveStateError('The move was canceled')
+  await setMove(db, id, { status: 'done' }, { status: TASK_MOVE_LOCKING_STATUSES })
+  return getTaskMove(db, id)
+}
+
+/** A canceled move: the target hub drops what it took (before it committed). */
+export async function abortTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskMove> {
+  const move = await getTaskMove(db, id)
+  if (move.direction !== 'in') throw new TaskMoveStateError('Not a move into this hub')
+  if (move.status === 'done') throw new TaskMoveStateError('The move is committed here')
+  await db.namedTxn('task:abort-import', { id, now: Date.now() })
+  return getTaskMove(db, id)
 }

@@ -63,6 +63,18 @@ import type {} from '../task-txns.js'
  */
 export const TASK_ORDER_BY = `ORDER BY t."order" ASC, t.created_at DESC, t.rowid DESC`
 
+/**
+ * Task row `t` is not in transit between hubs: a list shows it. In transit = arriving
+ * from another hub and not yet committed here (an incoming move), or already taken
+ * by the target hub and about to be released here (an outgoing move at `release`).
+ * Either way the other hub's copy is the one to show, so a moving task never appears
+ * twice. Interpolated by every list query (board, rows, all, project, subtasks).
+ */
+export const NOT_IN_TRANSIT = `NOT EXISTS (
+  SELECT 1 FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
+   WHERE mt.task_id = t.id AND m.status IN ('running', 'paused', 'failed')
+     AND (m.direction = 'in' OR m.step = 'release'))`
+
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface DiagnosticEventPayload {

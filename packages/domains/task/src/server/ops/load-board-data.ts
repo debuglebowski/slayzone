@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { attachPlacements, parseProject } from '@slayzone/projects/server'
-import { parseTasks, TASK_ORDER_BY } from './shared.js'
+import { NOT_IN_TRANSIT, parseTasks, TASK_ORDER_BY } from './shared.js'
 
 export interface BoardData {
   tasks: Task[]
@@ -17,7 +17,7 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
     `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-      WHERE t.deleted_at IS NULL
+      WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT}
       ${TASK_ORDER_BY}`
   )
 
@@ -89,7 +89,7 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
     `SELECT t.*, el.external_url AS linear_url
       FROM tasks t
       LEFT JOIN external_links el ON el.task_id = t.id AND el.provider = 'linear'
-      WHERE t.deleted_at IS NULL AND t.id IN (${ph})
+      WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT} AND t.id IN (${ph})
       ${TASK_ORDER_BY}`,
     unique
   )
@@ -110,7 +110,7 @@ export async function loadBoardRowsOp(db: SlayzoneDb, ids: readonly string[]): P
   const nextRows = await db.all<{ id: string; next_id: string | null }>(
     `SELECT id, next_id FROM (
        SELECT t.id, LEAD(t.id) OVER (${TASK_ORDER_BY}) AS next_id
-       FROM tasks t WHERE t.deleted_at IS NULL
+       FROM tasks t WHERE t.deleted_at IS NULL AND ${NOT_IN_TRANSIT}
      ) WHERE id IN (${ph})`,
     unique
   )

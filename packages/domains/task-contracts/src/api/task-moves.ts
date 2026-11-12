@@ -96,3 +96,51 @@ export const taskMoveRedirectsInputSchema = z.object({
 })
 /** Where moved tasks went: task id → the hub, by which move. A task not listed did not move away. */
 export type TaskMoveRedirects = Record<string, { hubId: string; moveId: string }>
+
+/**
+ * What a move carries from hub to hub: the moved tasks' rows in every table that
+ * holds task content on a hub. Ids are kept. Artifact bytes travel in their own step
+ * (`copy-files`), which pins them on the target as it writes them. What a computer holds (sessions, chat,
+ * scrollback) is not here; nor is hub↔computer delivery state, which the target
+ * rebuilds for its own computers.
+ */
+export const TASK_MOVE_TABLES = [
+  'tasks',
+  'terminal_tabs',
+  'task_tags',
+  'task_dependencies',
+  'artifact_folders',
+  'task_artifacts',
+  'artifact_versions',
+  'activity_events',
+  'usage_records'
+] as const
+export type TaskMoveTable = (typeof TASK_MOVE_TABLES)[number]
+
+export interface TaskMoveBundle {
+  moveId: string
+  rootTaskIds: string[]
+  /** Rows per table, as the source stores them (column → value). */
+  rows: Record<TaskMoveTable, Array<Record<string, unknown>>>
+  /** The tags `task_tags` names: the target uses its own of the same name, or makes one. */
+  tags: Array<{ id: string; name: string; color: string; text_color: string }>
+  /** Blockers between a moved task and one staying on the source (cross-hub links, 3d). */
+  externalDependencies: Array<{ task_id: string; blocks_task_id: string }>
+}
+
+export const exportTaskMoveInputSchema = z.object({ id: z.string().min(1) })
+
+export const importTaskMoveInputSchema = z.object({
+  /** The hub the tasks come from (the app's registry id). */
+  sourceHubId: z.string().min(1),
+  targetProjectId: z.string().min(1),
+  bundle: z.custom<TaskMoveBundle>(
+    (v) =>
+      typeof v === 'object' &&
+      v !== null &&
+      typeof (v as TaskMoveBundle).moveId === 'string' &&
+      Array.isArray((v as TaskMoveBundle).rootTaskIds) &&
+      typeof (v as TaskMoveBundle).rows === 'object'
+  )
+})
+export type ImportTaskMoveInput = z.infer<typeof importTaskMoveInputSchema>

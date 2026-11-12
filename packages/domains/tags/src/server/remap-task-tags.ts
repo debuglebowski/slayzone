@@ -104,3 +104,23 @@ export function freeColors(
   }
   throw new Error('No free tag colour pair')
 }
+
+/**
+ * The target project's tag for each of `tags` (tags of another hub's project, by
+ * name): its own of the same name, else one created there (colours as in
+ * {@link remapTaskTagsToProject}). Answers source tag id → target tag id. Runs inside
+ * the caller's transaction (a move between hubs, `task:import-move`).
+ */
+export function projectTagsByName(
+  db: Database,
+  projectId: string,
+  tags: ReadonlyArray<{ id: string; name: string; color: string; text_color: string }>
+): Map<string, string> {
+  const byName = db.prepare('SELECT id FROM tags WHERE project_id = ? AND name = ?')
+  const out = new Map<string, string>()
+  for (const tag of tags) {
+    const existing = byName.get(projectId, tag.name) as { id: string } | undefined
+    out.set(tag.id, existing?.id ?? createTag(db, projectId, tag))
+  }
+  return out
+}

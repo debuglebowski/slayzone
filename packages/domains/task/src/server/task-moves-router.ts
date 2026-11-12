@@ -3,6 +3,8 @@ import { router, publicProcedure } from '@slayzone/trpc-server'
 import {
   advanceTaskMoveInputSchema,
   beginTaskMoveInputSchema,
+  exportTaskMoveInputSchema,
+  importTaskMoveInputSchema,
   failTaskMoveInputSchema,
   listTaskMovesInputSchema,
   reportTaskMoveProgressInputSchema,
@@ -10,8 +12,12 @@ import {
   taskMoveRedirectsInputSchema
 } from '@slayzone/task-contracts'
 import {
+  abortTaskMoveIn,
   advanceTaskMove,
   beginTaskMove,
+  commitTaskMoveIn,
+  exportTaskMove,
+  importTaskMove,
   cancelTaskMove,
   failTaskMove,
   getTaskMove,
@@ -96,5 +102,26 @@ export const taskMovesRouter = router({
 
   redirects: publicProcedure
     .input(taskMoveRedirectsInputSchema)
-    .query(({ ctx, input }) => taskMoveRedirects(ctx.db, input.taskIds))
+    .query(({ ctx, input }) => taskMoveRedirects(ctx.db, input.taskIds)),
+
+  // ── the rows (slice 3b) ──
+  /** Source: the bundle of the move's tasks (a read; safe to repeat). */
+  export: publicProcedure
+    .input(exportTaskMoveInputSchema)
+    .query(({ ctx, input }) => mapped(() => exportTaskMove(ctx.db, input.id))),
+
+  /** Target: take the bundle, hidden and locked until `commit`. Idempotent. */
+  import: publicProcedure
+    .input(importTaskMoveInputSchema)
+    .mutation(({ ctx, input }) => mapped(() => importTaskMove(ctx.db, input))),
+
+  /** Target: the tasks are this hub's now. */
+  commit: publicProcedure
+    .input(taskMoveIdInputSchema)
+    .mutation(({ ctx, input }) => mapped(() => commitTaskMoveIn(ctx.db, input.id))),
+
+  /** Target: a canceled move — drop what was taken (before commit). */
+  abort: publicProcedure
+    .input(taskMoveIdInputSchema)
+    .mutation(({ ctx, input }) => mapped(() => abortTaskMoveIn(ctx.db, input.id)))
 })
