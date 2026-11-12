@@ -93,6 +93,7 @@ import {
 import {
   currentPathScope,
   PathScopeRequiredError,
+  assertKnownTarget,
   pathScopeFor
 } from '@slayzone/platform/path-scope'
 import { createComputerRequestAuthorizer } from './computer-request-authorizer'
@@ -2917,7 +2918,12 @@ export function composeServer(opts: {
       // project's, else the caller's default — see ./computer-placement.ts. While the
       // desktop's local computer is still enrolling after boot, a call waits for it
       // (never the hub's own disk): a file restored at boot opens once it is there.
-      resolveComputer: (target) => {
+      // A task or project this hub does not have is refused (NOT_FOUND) before any
+      // pick: with no row it has no binding, and fell through to the DEFAULT computer
+      // — another hub's project's folder sent to this machine. An explicit computer is
+      // the caller's choice (the create-project picker names one before any row).
+      resolveComputer: async (target) => {
+        if (target.computerId == null) await assertKnownTarget(db, target)
         const gate = localBootGate
         return gate ? gate.settle(() => placement.forTarget(target)) : placement.forTarget(target)
       },

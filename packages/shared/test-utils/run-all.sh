@@ -1542,6 +1542,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/shared/trpc-server/src/wire-bytes.test.ts \
   packages/shared/trpc-server/src/subscription-security-context.test.ts \
   packages/shared/trpc-server/src/computer-refusal.test.ts \
+  packages/shared/trpc-server/src/unknown-scope.test.ts \
   packages/domains/hub-auth/src/server/entra.test.ts \
   packages/domains/hub-auth/src/server/password.test.ts
 

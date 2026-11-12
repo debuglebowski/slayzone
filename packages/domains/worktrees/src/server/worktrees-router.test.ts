@@ -101,6 +101,8 @@ describe('worktrees watcher subscriptions', () => {
 // 2. Req/res procs over real git repos. One caller, shared db + shared repo.
 // ═══════════════════════════════════════════════════════════════════════════
 const h = await createTestHarness()
+// The project every scoped call names: a scope must name a project this hub has.
+h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p-test', 'P', '#000')
 // The hub runs no git itself: the ops run on a (loopback) computer, as in production.
 installLoopbackGitComputer()
 const caller = worktreesRouter.createCaller({ db: h.slayDb, dataRoot: '' } as never)

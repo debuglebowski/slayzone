@@ -17,6 +17,8 @@ import { localAiConfigFs } from './ai-config-fs'
 import { setAiConfigFsRouting, type AiConfigFsCall } from './ai-config-fs-routing'
 
 const h = await createTestHarness()
+// The project the scoped calls name: a scope must name a project this hub has.
+h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p-test', 'P', '#000')
 const projectPath = h.tmpDir()
 const computerHome = h.tmpDir()
 fs.writeFileSync(path.join(projectPath, 'CLAUDE.md'), 'project instructions')
@@ -233,7 +235,7 @@ describe('every AI-config write lands on the computer (siblings of QA 964073b0 5
       projectPath: dir
     })
     expect(fs.existsSync(to) && !fs.existsSync(from)).toBe(true)
-    await caller.deleteContextFile({ filePath: to, projectPath: dir, projectId: 'none' })
+    await caller.deleteContextFile({ filePath: to, projectPath: dir, projectId: 'p-test' })
     expect(fs.existsSync(to)).toBe(false)
   })
 })

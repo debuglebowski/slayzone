@@ -104,6 +104,10 @@ const itemsProjectId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
   .run(itemsProjectId, 'P', '#000')
+// The project the disk tests name: a scope must name a project this hub has.
+h.db
+  .prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)')
+  .run('p-test', 'P test', '#000')
 
 let libraryItemId: string
 let projectItemId: string

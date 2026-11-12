@@ -89,9 +89,9 @@ describe('the router routes by path scope, never by path (§9 Phase 7b)', () => 
     expect(sent.length).toBe(before)
   })
 
-  test('an unknown task: refused', async () => {
+  test('an unknown task: refused, named (NOT_FOUND)', async () => {
     await expect(
       caller.stageAll({ path: '/x', target: { taskId: 'no-such-task' } })
-    ).rejects.toThrow(/must name the task or project/)
+    ).rejects.toThrow(/task no-such-task is not on this hub/)
   })
 })

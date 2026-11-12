@@ -77,7 +77,9 @@ export function currentPathScope(): WirePathScope | undefined {
 
 /**
  * The scope a caller's target names: its task, else its project; null when it
- * names neither, or a task this hub does not have. Task → project is hub data.
+ * names neither, or a task or project this hub does not have (another hub's, in a
+ * multi-hub desktop — a scope for it would send its folder to this hub's computer).
+ * Task → project is hub data.
  */
 export async function pathScopeFor(
   db: Pick<SlayzoneDb, 'get'>,
@@ -109,8 +111,43 @@ export async function pathScopeFor(
     if (target.projectWide === true) return row.project_id ? project(row.project_id) : null
     return { kind: 'task', taskId: target.taskId, projectId: row.project_id, hostReads }
   }
-  if (target.projectId) return project(target.projectId)
+  if (target.projectId)
+    return (await projectExists(db, target.projectId)) ? project(target.projectId) : null
   return null
+}
+
+async function projectExists(db: Pick<SlayzoneDb, 'get'>, projectId: string): Promise<boolean> {
+  return !!(await db.get<{ id: string }>('SELECT id FROM projects WHERE id = ?', [projectId]))
+}
+
+/**
+ * Refuse a target naming a task or project this hub does not have — at the request,
+ * before anything picks a computer for it. Without it, an unknown id fell through to
+ * the hub's DEFAULT computer (no row = no binding) and ran there: another hub's
+ * project's folder sent to this machine. Naming neither passes (the caller decides).
+ */
+export async function assertKnownTarget(
+  db: Pick<SlayzoneDb, 'get'>,
+  target: Pick<PathScopeTarget, 'taskId' | 'projectId'>
+): Promise<void> {
+  if (target.taskId) {
+    const row = await db.get<{ id: string }>('SELECT id FROM tasks WHERE id = ?', [target.taskId])
+    if (!row) throw new UnknownScopeError('task', target.taskId)
+    return
+  }
+  if (target.projectId && !(await projectExists(db, target.projectId)))
+    throw new UnknownScopeError('project', target.projectId)
+}
+
+/** Refused at the router: the request names a task or project this hub does not have. */
+export class UnknownScopeError extends Error {
+  constructor(
+    readonly kind: 'task' | 'project',
+    readonly id: string
+  ) {
+    super(`${kind} ${id} is not on this hub`)
+    this.name = 'UnknownScopeError'
+  }
 }
 
 /**
@@ -125,7 +162,11 @@ export async function inPathScopeOf<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   const scope = target ? await pathScopeFor(db, target) : null
-  if (!scope) throw new PathScopeRequiredError(op)
+  if (!scope) {
+    // Named, but not here: say so (NOT_FOUND), not "name a task or project".
+    if (target) await assertKnownTarget(db, target)
+    throw new PathScopeRequiredError(op)
+  }
   return runInPathScope(scope, fn)
 }
 

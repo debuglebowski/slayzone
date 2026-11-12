@@ -22,6 +22,8 @@ setWorkspaceDeps({
 })
 
 const h = await createTestHarness()
+// The project every call names: a scope must name a project this hub has.
+h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p1', 'P1', '#000')
 const caller = fileEditorRouter.createCaller({ db: h.slayDb, dataRoot: '' })
 const rootPath = h.tmpDir()
 

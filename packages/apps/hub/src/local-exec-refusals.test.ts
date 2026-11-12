@@ -34,6 +34,8 @@ mkdirSync(join(OUTSIDE, '.git'))
 const outsideForms = [OUTSIDE, OUTSIDE.replace(/^\/private\//, '/')]
 
 const h = await createTestHarness()
+// The project the scoped calls name (SCOPE): a scope must name a project this hub has.
+h.db.prepare('INSERT INTO projects (id, name, color) VALUES (?, ?, ?)').run('p-1', 'P', '#000')
 
 // --- Spies: installed BEFORE any module under test is imported -----------------
 const require = createRequire(import.meta.url)

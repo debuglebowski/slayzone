@@ -13,7 +13,8 @@ import { isUnsafePathError } from '@slayzone/platform/safe-path'
 import {
   COMPUTER_REFUSED,
   isComputerRefusal,
-  PathScopeRequiredError
+  PathScopeRequiredError,
+  UnknownScopeError
 } from '@slayzone/platform/path-scope'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './auth-gate'
@@ -336,6 +337,14 @@ const unsafePathRefusal = t.middleware(async ({ next }) => {
   if (!result.ok && result.error.cause instanceof PathScopeRequiredError) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  // Names a task or project this hub does not have (another hub's): NOT_FOUND, named.
+  if (!result.ok && result.error.cause instanceof UnknownScopeError) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
       message: result.error.cause.message,
       cause: result.error.cause
     })

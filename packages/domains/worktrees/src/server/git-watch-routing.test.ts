@@ -38,7 +38,12 @@ beforeAll(() => {
 })
 afterAll(() => setGitOpTransport(null))
 
-const noCheckouts = { get: async () => undefined, all: async () => [] }
+// No checkouts; project p-test exists (a scope must name a project this hub has).
+const noCheckouts = {
+  get: async (sql: string, params?: unknown[]) =>
+    sql.includes('FROM projects') && params?.[0] === 'p-test' ? { id: 'p-test' } : undefined,
+  all: async () => []
+}
 const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot: '' } as never)
 
 describe('routed git watch', () => {

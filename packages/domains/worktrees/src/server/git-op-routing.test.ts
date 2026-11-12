@@ -50,13 +50,23 @@ afterEach(() => {
 
 afterAll(() => setGitOpTransport(null))
 
-// A hub with one task (t1, project p1) and no checkouts.
+// A hub with one task (t1, project p1), projects p1 and p-test, and no checkouts.
 const noRows = {
-  get: async (_sql: string, params?: unknown[]) =>
-    params?.[0] === 't1' ? { project_id: 'p1' } : undefined,
+  get: async (sql: string, params?: unknown[]) =>
+    sql.includes('FROM projects')
+      ? params?.[0] === 'p1' || params?.[0] === 'p-test'
+        ? { id: params[0] }
+        : undefined
+      : params?.[0] === 't1'
+        ? { project_id: 'p1' }
+        : undefined,
   all: async () => []
 }
-const noCheckouts = { ...noRows, prepare: () => noRows }
+// A prepared statement's get takes params, not SQL: no rows.
+const noCheckouts = {
+  ...noRows,
+  prepare: () => ({ get: async () => undefined, all: async () => [] })
+}
 const caller = worktreesRouter.createCaller({ db: noCheckouts as never, dataRoot: '' } as never)
 
 describe('git panel ops routed to the computer', () => {
