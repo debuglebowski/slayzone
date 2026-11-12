@@ -172,3 +172,18 @@ export const addRemoteBlockersInputSchema = z.object({
 })
 export const removeRemoteBlockerInputSchema = z.object(remoteBlockerKey)
 export const remoteBlockersInputSchema = z.object({ taskId: z.string().min(1) })
+
+/** What a move to another hub would carry — the move dialog's summary. Writes nothing. */
+export const crossHubMovePreviewInputSchema = z.object({
+  taskIds: z.array(z.string().min(1)).min(1)
+})
+export interface CrossHubMovePreview {
+  /** Every subtask (any depth, archived included) of the picked tasks. */
+  subtaskCount: number
+  /** A task (or subtask) linked to an integration here: it cannot move to another hub. */
+  linkedToIntegration: boolean
+  /** Blockers to tasks that stay here: they become links between the hubs. */
+  externalBlockerCount: number
+  /** A task is already being moved. */
+  alreadyMoving: boolean
+}

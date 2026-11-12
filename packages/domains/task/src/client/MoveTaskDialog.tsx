@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { HubScope, useHubId, useHubOwnershipStore } from '@slayzone/transport/client'
-import type { MoveTasksToProjectResult, MoveToProjectPreview } from '@slayzone/task-contracts'
+import type {
+  CrossHubMovePreview,
+  MoveTasksToProjectResult,
+  MoveToProjectPreview
+} from '@slayzone/task-contracts'
 import {
   Button,
   Checkbox,
@@ -14,7 +18,9 @@ import {
   Label,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
   toast
@@ -31,6 +37,34 @@ export interface MoveTaskDialogProps {
   initialProjectId?: string
   /** Runs once the move is committed. */
   onMoved?: (result: MoveTasksToProjectResult) => void
+  /** Projects on the app's OTHER hubs, by hub: offered when moving there is possible. */
+  otherHubProjects?: OtherHubProjects[]
+  /**
+   * Starts a move to another hub (the app runs it in the background, with progress,
+   * pause and resume). Absent: only projects of the tasks' own hub are offered.
+   */
+  onMoveToOtherHub?: (input: {
+    targetHubId: string
+    targetProjectId: string
+    includeSubtasks: boolean
+  }) => Promise<void>
+}
+
+export interface OtherHubProjects {
+  hubId: string
+  hubLabel: string
+  projects: ReadonlyArray<{ id: string; name: string; color: string }>
+}
+
+/** A picked project on another hub: `hubId` + project id in one Select value. */
+const OTHER_HUB_SEP = '\u0000'
+const otherHubValue = (hubId: string, projectId: string): string =>
+  `${hubId}${OTHER_HUB_SEP}${projectId}`
+function parseTarget(value: string): { hubId: string | null; projectId: string } {
+  const at = value.indexOf(OTHER_HUB_SEP)
+  return at < 0
+    ? { hubId: null, projectId: value }
+    : { hubId: value.slice(0, at), projectId: value.slice(at + 1) }
 }
 
 /**
@@ -105,11 +139,23 @@ function MoveTaskDialogBody({
   taskIds,
   initialProjectId,
   onOpenChange,
-  onMoved
+  onMoved,
+  otherHubProjects,
+  onMoveToOtherHub
 }: MoveTaskDialogProps): React.JSX.Element {
   const trpc = useTRPC()
   const { trackTask } = useTrack()
-  const [targetId, setTargetId] = useState(initialProjectId ?? '')
+  const otherHubs = onMoveToOtherHub ? (otherHubProjects ?? []) : []
+  const initialOtherHub = otherHubs.find((h) => h.projects.some((p) => p.id === initialProjectId))
+  const [targetValue, setTargetValue] = useState(
+    initialProjectId
+      ? initialOtherHub
+        ? otherHubValue(initialOtherHub.hubId, initialProjectId)
+        : initialProjectId
+      : ''
+  )
+  const { hubId: targetHubId, projectId: targetId } = parseTarget(targetValue)
+  const crossHub = targetHubId !== null
   const [includeSubtasks, setIncludeSubtasks] = useState(true)
   /** Agent tabs the user un-ticked: every other tab that can keep its session does. */
   const [freshTabIds, setFreshTabIds] = useState<ReadonlySet<string>>(new Set())
@@ -117,18 +163,41 @@ function MoveTaskDialogBody({
   const previewQuery = useQuery(
     trpc.task.movePreview.queryOptions(
       { taskIds, targetProjectId: targetId, includeSubtasks },
-      { enabled: targetId !== '' }
+      { enabled: targetId !== '' && !crossHub }
     )
   )
   const preview = previewQuery.data
+  const { data: crossPreview } = useQuery(
+    trpc.taskMoves.preview.queryOptions({ taskIds }, { enabled: crossHub })
+  )
   const move = useMutation(trpc.task.moveToProject.mutationOptions())
-  const target = projects?.find((p) => p.id === targetId)
+  const [starting, setStarting] = useState(false)
+  const otherHub = otherHubs.find((h) => h.hubId === targetHubId)
+  const target = crossHub
+    ? otherHub?.projects.find((p) => p.id === targetId)
+    : projects?.find((p) => p.id === targetId)
   const nothingToMove = preview !== undefined && preview.taskCount === 0
-  const canMove = target !== undefined && preview !== undefined && !nothingToMove && !move.isPending
+  const canMove = crossHub
+    ? target !== undefined &&
+      crossPreview !== undefined &&
+      !crossPreview.linkedToIntegration &&
+      !crossPreview.alreadyMoving &&
+      !starting
+    : target !== undefined && preview !== undefined && !nothingToMove && !move.isPending
 
   const confirm = (): void => {
     if (!canMove) return
     for (const id of taskIds) trackTask(id, 'task_moved_to_project')
+    if (crossHub && targetHubId && onMoveToOtherHub) {
+      setStarting(true)
+      onMoveToOtherHub({ targetHubId, targetProjectId: targetId, includeSubtasks })
+        .then(() => onOpenChange(false))
+        .catch((error: unknown) => {
+          setStarting(false)
+          toast.error(`Couldn't move: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      return
+    }
     move
       .mutateAsync({
         taskIds,
@@ -172,26 +241,52 @@ function MoveTaskDialogBody({
         <DialogDescription>This can't be undone.</DialogDescription>
       </DialogHeader>
 
-      <Select value={targetId} onValueChange={setTargetId}>
+      <Select value={targetValue} onValueChange={setTargetValue}>
         <SelectTrigger className="w-full" data-testid="move-task-project-select">
           <SelectValue placeholder="Choose a project" />
         </SelectTrigger>
         <SelectContent>
-          {(projects ?? []).map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              <span className="flex items-center gap-2">
-                <span
-                  className="inline-block size-2 rounded-full"
-                  style={{ backgroundColor: p.color }}
-                />
-                {p.name}
-              </span>
-            </SelectItem>
-          ))}
+          {otherHubs.length > 0 ? (
+            <>
+              <SelectGroup>
+                <SelectLabel>This hub</SelectLabel>
+                {(projects ?? []).map((p) => (
+                  <ProjectItem key={p.id} value={p.id} name={p.name} color={p.color} />
+                ))}
+              </SelectGroup>
+              {otherHubs.map((h) => (
+                <SelectGroup key={h.hubId}>
+                  <SelectLabel>{h.hubLabel}</SelectLabel>
+                  {h.projects.map((p) => (
+                    <ProjectItem
+                      key={p.id}
+                      value={otherHubValue(h.hubId, p.id)}
+                      name={p.name}
+                      color={p.color}
+                    />
+                  ))}
+                </SelectGroup>
+              ))}
+            </>
+          ) : (
+            (projects ?? []).map((p) => (
+              <ProjectItem key={p.id} value={p.id} name={p.name} color={p.color} />
+            ))
+          )}
         </SelectContent>
       </Select>
 
-      {preview && target && (
+      {crossHub && crossPreview && target && otherHub && (
+        <CrossHubSummary
+          preview={crossPreview}
+          hubLabel={otherHub.hubLabel}
+          targetName={target.name}
+          includeSubtasks={includeSubtasks}
+          onIncludeSubtasksChange={setIncludeSubtasks}
+        />
+      )}
+
+      {!crossHub && preview && target && (
         <MoveSummary
           preview={preview}
           targetName={target.name}
@@ -214,10 +309,92 @@ function MoveTaskDialogBody({
           Cancel
         </Button>
         <Button type="submit" disabled={!canMove} data-testid="move-task-confirm">
-          {move.isPending ? 'Moving…' : 'Move'}
+          {move.isPending || starting ? 'Moving…' : 'Move'}
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+function ProjectItem({
+  value,
+  name,
+  color
+}: {
+  value: string
+  name: string
+  color: string
+}): React.JSX.Element {
+  return (
+    <SelectItem value={value}>
+      <span className="flex items-center gap-2">
+        <span className="inline-block size-2 rounded-full" style={{ backgroundColor: color }} />
+        {name}
+      </span>
+    </SelectItem>
+  )
+}
+
+/** A move to another hub: what it carries, what it leaves, and that it runs on its own. */
+function CrossHubSummary({
+  preview,
+  hubLabel,
+  targetName,
+  includeSubtasks,
+  onIncludeSubtasksChange
+}: {
+  preview: CrossHubMovePreview
+  hubLabel: string
+  targetName: string
+  includeSubtasks: boolean
+  onIncludeSubtasksChange: (value: boolean) => void
+}): React.JSX.Element {
+  if (preview.linkedToIntegration)
+    return (
+      <p className="text-sm text-destructive" data-testid="move-task-cross-hub-refused">
+        A task here is linked to an integration on this hub. Unlink it before moving it to another
+        hub.
+      </p>
+    )
+  if (preview.alreadyMoving)
+    return (
+      <p className="text-sm text-destructive" data-testid="move-task-cross-hub-refused">
+        A task here is already being moved to another hub.
+      </p>
+    )
+  return (
+    <div className="flex flex-col gap-3 text-sm" data-testid="move-task-cross-hub-summary">
+      {preview.subtaskCount > 0 && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="move-task-include-subtasks"
+            checked={includeSubtasks}
+            onCheckedChange={(v) => onIncludeSubtasksChange(v === true)}
+            data-testid="move-task-include-subtasks"
+          />
+          <Label htmlFor="move-task-include-subtasks">
+            Bring subtasks ({preview.subtaskCount})
+          </Label>
+        </div>
+      )}
+      <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
+        <li>
+          Moves to {targetName} on {hubLabel}: the tasks, their tabs, tags, files and history.
+        </li>
+        <li>Running agents stop; agent sessions start fresh on the other hub.</li>
+        {preview.externalBlockerCount > 0 && (
+          <li>
+            {preview.externalBlockerCount === 1
+              ? 'A blocker with a task that stays here becomes a link between the hubs.'
+              : `${preview.externalBlockerCount} blockers with tasks that stay here become links between the hubs.`}
+          </li>
+        )}
+        <li>
+          The move runs in the background: you can pause and resume it. Until it is done, the tasks
+          are locked.
+        </li>
+      </ul>
+    </div>
   )
 }
 

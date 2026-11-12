@@ -766,6 +766,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'taskMoves.import': 'user',
   'taskMoves.list': 'user',
   'taskMoves.pause': 'user',
+  'taskMoves.preview': 'user',
   'taskMoves.progress': 'user',
   'taskMoves.redirects': 'user',
   'taskMoves.release': 'user',

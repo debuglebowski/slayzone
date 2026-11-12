@@ -28,6 +28,7 @@
     "@slayzone/tabs-state": "workspace:*",
     "@slayzone/tags": "workspace:*",
     "@slayzone/task": "workspace:*",
+    "@slayzone/task-artifacts": "workspace:*",
     "@slayzone/task-contracts": "workspace:*",
     "@slayzone/telemetry": "workspace:*",
     "@slayzone/terminal": "workspace:*",

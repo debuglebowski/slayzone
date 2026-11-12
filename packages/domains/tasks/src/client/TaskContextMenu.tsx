@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,6 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
   ContextMenuRadioGroup,
+  ContextMenuLabel,
   ContextMenuRadioItem,
   buildStatusOptions,
   getColumnStatusStyle,
@@ -53,6 +54,7 @@ import {
   Bell
 } from 'lucide-react'
 import { useTrack } from '@slayzone/telemetry/client'
+import { useCrossHubMoveTargets } from './useCrossHubMoveTargets'
 import { format } from 'date-fns'
 import {
   getSnoozePresets,
@@ -125,6 +127,8 @@ export function TaskContextMenu({
   const statusOptions = buildStatusOptions(columns)
   // A task moves only between projects of its own hub.
   const moveTargets = useProjectsOnTaskHub(projects, [task.id])
+  // Other hubs' projects: a move there copies the task over, in the background.
+  const { otherHubProjects, onMoveToOtherHub } = useCrossHubMoveTargets(projects, [task.id])
 
   const handleStatusChange = (status: string): void => {
     trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
@@ -416,6 +420,23 @@ export function TaskContextMenu({
                     {p.name}
                   </ContextMenuRadioItem>
                 ))}
+                {otherHubProjects.map((h) => (
+                  <Fragment key={h.hubId}>
+                    <ContextMenuSeparator />
+                    <ContextMenuLabel className="text-xs text-muted-foreground">
+                      {h.hubLabel}
+                    </ContextMenuLabel>
+                    {h.projects.map((p) => (
+                      <ContextMenuRadioItem key={p.id} value={p.id}>
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-2"
+                          style={{ backgroundColor: p.color }}
+                        />
+                        {p.name}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </Fragment>
+                ))}
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>
@@ -527,6 +548,8 @@ export function TaskContextMenu({
           }}
           taskIds={[task.id]}
           initialProjectId={moveTargetId ?? undefined}
+          otherHubProjects={otherHubProjects}
+          onMoveToOtherHub={onMoveToOtherHub}
         />
       </MountWhenOpened>
 

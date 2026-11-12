@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useIsTaskMoving } from '@slayzone/tasks/hooks'
 import { Ban, ChevronDown, ChevronRight, GitBranch, Pin, Power, X } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -279,6 +280,7 @@ function TaskRowView({
         {ctx.blockedBadgeTaskIds.has(task.id) && (
           <Ban aria-label="Blocked" className="size-3.5 shrink-0 text-warning-foreground" />
         )}
+        <MovingMark taskId={task.id} />
         {task.needs_attention && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
             Unread
@@ -423,4 +425,14 @@ function PlainTaskRow(props: TaskRowProps): ReactNode {
  */
 export function TaskRow(props: TaskRowProps): ReactNode {
   return props.inTempGroup ? <PlainTaskRow {...props} /> : <SortableTaskRow {...props} />
+}
+
+/** "Moving…" while the task is being moved to another hub (locked until done). */
+function MovingMark({ taskId }: { taskId: string }): React.JSX.Element | null {
+  if (!useIsTaskMoving(taskId)) return null
+  return (
+    <span className="shrink-0 text-[10px] font-medium text-primary" data-testid="task-moving-mark">
+      Moving…
+    </span>
+  )
 }

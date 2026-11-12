@@ -7,6 +7,7 @@ import {
   TASK_MOVE_LOCKING_STATUSES,
   TASK_MOVE_STEPS,
   type BeginTaskMoveInput,
+  type CrossHubMovePreview,
   type ImportTaskMoveInput,
   type TaskMoveBundle,
   type TaskRemoteBlocker,
@@ -621,4 +622,41 @@ export async function removeRemoteBlocker(
       WHERE task_id = ? AND role = ? AND remote_hub_id = ? AND remote_task_id = ?`,
     [key.taskId, key.role, key.remoteHubId, key.remoteTaskId]
   )
+}
+
+/** The move dialog's summary of a move to another hub (with subtasks). */
+export async function previewCrossHubMove(
+  db: SlayzoneDb,
+  rootIds: readonly string[]
+): Promise<CrossHubMovePreview> {
+  const roots = [...new Set(rootIds)]
+  const rph = placeholders(roots.length)
+  const all = (
+    await db.all<{ id: string }>(
+      `WITH RECURSIVE sub(id) AS (
+         SELECT id FROM tasks WHERE id IN (${rph})
+         UNION
+         SELECT t.id FROM tasks t JOIN sub s ON t.parent_id = s.id
+       )
+       SELECT id FROM sub`,
+      roots
+    )
+  ).map((r) => r.id)
+  const ph = placeholders(all.length || 1)
+  const ids = all.length ? all : ['']
+  const linked = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM external_links WHERE task_id IN (${ph})`,
+    ids
+  )
+  const external = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM task_dependencies
+      WHERE (task_id IN (${ph})) <> (blocks_task_id IN (${ph}))`,
+    [...ids, ...ids]
+  )
+  return {
+    subtaskCount: Math.max(0, all.length - roots.length),
+    linkedToIntegration: (linked?.n ?? 0) > 0,
+    externalBlockerCount: external?.n ?? 0,
+    alreadyMoving: (await lockedTaskIds(db, all)).length > 0
+  }
 }

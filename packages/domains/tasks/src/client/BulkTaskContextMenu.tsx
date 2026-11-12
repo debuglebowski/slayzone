@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, Fragment } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,6 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
   ContextMenuRadioGroup,
+  ContextMenuLabel,
   ContextMenuRadioItem,
   buildStatusOptions,
   getColumnStatusStyle,
@@ -41,6 +42,7 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { getSnoozePresets, MoveTaskDialog, useProjectsOnTaskHub } from '@slayzone/task/client'
+import { useCrossHubMoveTargets } from './useCrossHubMoveTargets'
 
 interface BulkTaskContextMenuProps {
   taskIds: string[]
@@ -90,6 +92,8 @@ export function BulkTaskContextMenu({
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   // Tasks move only between projects of their own hub (the dialog refuses a mix).
   const moveTargets = useProjectsOnTaskHub(projects, taskIds)
+  // Other hubs' projects: a move there copies the tasks over, in the background.
+  const { otherHubProjects, onMoveToOtherHub } = useCrossHubMoveTargets(projects, taskIds)
   // Offer only statuses EVERY selected task's project has — the backend rejects
   // the whole batch otherwise. None shared → the Status submenu is disabled.
   const statusColumns = useMemo(() => {
@@ -343,6 +347,23 @@ export function BulkTaskContextMenu({
                     {p.name}
                   </ContextMenuRadioItem>
                 ))}
+                {otherHubProjects.map((h) => (
+                  <Fragment key={h.hubId}>
+                    <ContextMenuSeparator />
+                    <ContextMenuLabel className="text-xs text-muted-foreground">
+                      {h.hubLabel}
+                    </ContextMenuLabel>
+                    {h.projects.map((p) => (
+                      <ContextMenuRadioItem key={p.id} value={p.id}>
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-2"
+                          style={{ backgroundColor: p.color }}
+                        />
+                        {p.name}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </Fragment>
+                ))}
               </ContextMenuRadioGroup>
             </ContextMenuSubContent>
           </ContextMenuSub>
@@ -372,6 +393,8 @@ export function BulkTaskContextMenu({
           }}
           taskIds={taskIds}
           initialProjectId={moveTargetId}
+          otherHubProjects={otherHubProjects}
+          onMoveToOtherHub={onMoveToOtherHub}
         />
       )}
 

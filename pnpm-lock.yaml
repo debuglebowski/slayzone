@@ -3036,6 +3036,9 @@ importers:
       '@slayzone/task':
         specifier: workspace:*
         version: link:../task
+      '@slayzone/task-artifacts':
+        specifier: workspace:*
+        version: link:../task-artifacts
       '@slayzone/task-contracts':
         specifier: workspace:*
         version: link:../task-contracts

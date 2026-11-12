@@ -12,6 +12,7 @@ import { TagsCard } from './TagsCard'
 import { BlockedBySection } from './BlockedBySection'
 
 export { BlockerStatusIcon } from './BlockerStatusIcon'
+import { RemoteBlockersSection } from './RemoteBlockersSection'
 
 interface TaskMetadataSidebarProps {
   task: Task
@@ -94,6 +95,7 @@ export function TaskMetadataSidebar({
         addBlockerSearch={addBlockerSearch}
         setAddBlockerSearch={setAddBlockerSearch}
       />
+      <RemoteBlockersSection taskId={task.id} />
     </div>
   )
 }

@@ -72,6 +72,9 @@ export const electronBootstrap = {
   // No app icon outside Electron — a no-op elsewhere.
   setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) =>
     api().app.setAppBadge?.(badge) ?? Promise.resolve(),
+  // Only the desktop app quits as a whole; elsewhere nothing to guard.
+  setQuitGuard: (guard: { message: string } | null) =>
+    api().app.setQuitGuard?.(guard) ?? Promise.resolve(),
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'
     remote_server_url?: string

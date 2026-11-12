@@ -75,6 +75,8 @@ const webApiTarget: ElectronAPI = {
     getWindowId: async () => resolveWindowId(),
     // A browser tab has no app icon to badge.
     setAppBadge: async () => undefined,
+    // A browser tab has no app-wide quit to guard.
+    setQuitGuard: async () => undefined,
     relaunch: async () => {
       window.location.reload()
     },

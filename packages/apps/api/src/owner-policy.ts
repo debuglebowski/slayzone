@@ -1188,6 +1188,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // ── moving tasks to another hub (this hub's journal) ──
   // The target project is on the other hub: that hub checks it on import.
   'taskMoves.begin': checked(task('taskIds[]')),
+  'taskMoves.preview': checked(task('taskIds[]')),
   'taskMoves.get': checked(taskMove('id')),
   'taskMoves.list': listed(rows('id', 'taskMove')),
   'taskMoves.advance': checked(taskMove('id')),

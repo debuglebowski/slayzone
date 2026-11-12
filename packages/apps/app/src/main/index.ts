@@ -3588,6 +3588,16 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
       })
     }
     ipcMain.handle('app:get-window-id', (event) => taskWindowsOps.getWindowId(event.sender.id))
+    // Work a quit would interrupt (a task moving to another hub): the main window's
+    // renderer names it; quitting then asks first (before-quit below).
+    ipcMain.handle('app:set-quit-guard', (event, raw: unknown) => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+      const message =
+        raw && typeof raw === 'object' && typeof (raw as { message?: unknown }).message === 'string'
+          ? (raw as { message: string }).message
+          : null
+      quitGuardMessage = message
+    })
     // App icon badge. Only the main window's renderer drives it (it holds the
     // full task list); secondary task windows never send, but guard anyway.
     ipcMain.handle('app:set-badge', (event, raw: unknown) => {
@@ -4928,7 +4938,40 @@ app.on('window-all-closed', () => {
   }
 })
 
+/** Set by the renderer while a quit would interrupt work (`app:set-quit-guard`). */
+let quitGuardMessage: string | null = null
+
 app.on('before-quit', (event) => {
+  // Work a quit would interrupt: ask first. Quit anyway → the guard is lifted and the
+  // quit goes on (the work resumes at the next start); Cancel → nothing happens.
+  if (quitGuardMessage && !quitRequested) {
+    event.preventDefault()
+    const message = quitGuardMessage
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    const ask = parent
+      ? dialog.showMessageBox(parent, {
+          type: 'warning',
+          buttons: ['Cancel', 'Quit anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          message: 'Quit SlayZone?',
+          detail: message
+        })
+      : dialog.showMessageBox({
+          type: 'warning',
+          buttons: ['Cancel', 'Quit anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          message: 'Quit SlayZone?',
+          detail: message
+        })
+    void ask.then(({ response }) => {
+      if (response !== 1) return
+      quitGuardMessage = null
+      app.quit()
+    })
+    return
+  }
   // From the first quit request on, a hub/computer that exits stays down: the
   // drain below can take seconds, and a respawn in that window outlives a quit
   // that stalls (see QUIT_WATCHDOG_MS).

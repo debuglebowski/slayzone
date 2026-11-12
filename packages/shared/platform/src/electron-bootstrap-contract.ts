@@ -65,6 +65,9 @@ export interface ElectronBootstrapApp {
   /** App icon badge (dock / taskbar overlay / launcher count). text '' = clear.
    *  overlayPng: PNG data URL drawn by the renderer for the Windows overlay. */
   setAppBadge: (badge: { text: string; count: number; overlayPng: string | null }) => Promise<void>
+  /** Work quitting would interrupt (a task moving to another hub): quitting asks first,
+   *  naming `message`. null = nothing to guard. */
+  setQuitGuard: (guard: { message: string } | null) => Promise<void>
   relaunch: () => Promise<void>
   setBootSettings: (payload: {
     server_mode?: 'local' | 'remote'

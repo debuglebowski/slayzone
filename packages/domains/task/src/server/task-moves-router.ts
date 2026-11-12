@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import {
   addRemoteBlockersInputSchema,
+  crossHubMovePreviewInputSchema,
   advanceTaskMoveInputSchema,
   removeRemoteBlockerInputSchema,
   remoteBlockersInputSchema,
@@ -18,6 +19,7 @@ import {
   abortTaskMoveIn,
   addRemoteBlockers,
   listRemoteBlockers,
+  previewCrossHubMove,
   removeRemoteBlocker,
   advanceTaskMove,
   beginTaskMove,
@@ -38,6 +40,17 @@ import {
   TaskMoveRefusedError,
   TaskMoveStateError
 } from './ops/task-moves'
+import { getTaskOnMutation } from './task-router-deps'
+
+/**
+ * A move step that changes what boards show (a task locked or unlocked, arriving,
+ * shown, gone): every client reloads its board. Names no rows — the set changed.
+ */
+async function boardChanged<T>(run: () => Promise<T>): Promise<T> {
+  const result = await run()
+  getTaskOnMutation()?.()
+  return result
+}
 
 /** Each move error as the tRPC code a client can act on. */
 async function mapped<T>(run: () => Promise<T>): Promise<T> {
@@ -67,8 +80,15 @@ export const taskMovesRouter = router({
   begin: publicProcedure
     .input(beginTaskMoveInputSchema)
     .mutation(({ ctx, input }) =>
-      mapped(() => beginTaskMove(ctx.db, input, { createdBy: ctx.principal?.userId ?? null }))
+      boardChanged(() =>
+        mapped(() => beginTaskMove(ctx.db, input, { createdBy: ctx.principal?.userId ?? null }))
+      )
     ),
+
+  /** What a move of these tasks to another hub would carry (the dialog). */
+  preview: publicProcedure
+    .input(crossHubMovePreviewInputSchema)
+    .query(({ ctx, input }) => previewCrossHubMove(ctx.db, input.taskIds)),
 
   get: publicProcedure
     .input(taskMoveIdInputSchema)
@@ -88,23 +108,31 @@ export const taskMovesRouter = router({
 
   pause: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => pauseTaskMove(ctx.db, input.id))),
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => pauseTaskMove(ctx.db, input.id)))
+    ),
 
   resume: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => resumeTaskMove(ctx.db, input.id))),
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => resumeTaskMove(ctx.db, input.id)))
+    ),
 
   fail: publicProcedure
     .input(failTaskMoveInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => failTaskMove(ctx.db, input))),
+    .mutation(({ ctx, input }) => boardChanged(() => mapped(() => failTaskMove(ctx.db, input)))),
 
   cancel: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => cancelTaskMove(ctx.db, input.id))),
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => cancelTaskMove(ctx.db, input.id)))
+    ),
 
   release: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => releaseTaskMove(ctx.db, input.id, ctx.dataRoot))),
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => releaseTaskMove(ctx.db, input.id, ctx.dataRoot)))
+    ),
 
   redirects: publicProcedure
     .input(taskMoveRedirectsInputSchema)
@@ -119,12 +147,14 @@ export const taskMovesRouter = router({
   /** Target: take the bundle, hidden and locked until `commit`. Idempotent. */
   import: publicProcedure
     .input(importTaskMoveInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => importTaskMove(ctx.db, input))),
+    .mutation(({ ctx, input }) => boardChanged(() => mapped(() => importTaskMove(ctx.db, input)))),
 
   /** Target: the tasks are this hub's now. */
   commit: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => commitTaskMoveIn(ctx.db, input.id))),
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => commitTaskMoveIn(ctx.db, input.id)))
+    ),
 
   // ── blockers across hubs (slice 3d) ──
   /** Either hub: its side of blockers a move split (the `links` step). Idempotent. */
@@ -143,5 +173,7 @@ export const taskMovesRouter = router({
   /** Target: a canceled move — drop what was taken (before commit). */
   abort: publicProcedure
     .input(taskMoveIdInputSchema)
-    .mutation(({ ctx, input }) => mapped(() => abortTaskMoveIn(ctx.db, input.id)))
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => abortTaskMoveIn(ctx.db, input.id)))
+    )
 })

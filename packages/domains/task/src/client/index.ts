@@ -21,7 +21,8 @@ export {
 export {
   MoveTaskDialog,
   useProjectsOnTaskHub,
-  type MoveTaskDialogProps
+  type MoveTaskDialogProps,
+  type OtherHubProjects
 } from './MoveTaskDialog'
 export {
   settleDeleteTaskResult,

@@ -38,7 +38,8 @@ import {
   applyFilters,
   getViewConfig,
   useSnoozeWakeUp,
-  BulkTaskContextMenu
+  BulkTaskContextMenu,
+  TaskMovesPanel
 } from '@slayzone/tasks/hooks'
 import { keepScratchTaskInput, scratchTaskInput } from '@slayzone/tasks/board'
 import { useGlobalPanelSizes } from '@slayzone/task/client/usePanelSizes'
@@ -1794,6 +1795,12 @@ function App(): React.JSX.Element {
             taskCount={tasks.length}
             displayTaskCount={displayTasks.length}
             selectedProjectPathMissing={selectedProjectPathMissing}
+          />
+          {/* Moves of tasks to another hub: progress, pause/resume, resumed at start. */}
+          <TaskMovesPanel
+            hubIds={[...registeredHubIds]}
+            hubName={(hubId) => fed?.hubs.find((h) => h.id === hubId)?.label ?? hubId}
+            syncKey={tasks}
           />
           <AppDialogs
             shouldMount={shouldMount}

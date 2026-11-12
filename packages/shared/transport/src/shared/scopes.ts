@@ -861,6 +861,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'taskMoves.get': 'tasks',
   'taskMoves.list': 'tasks',
   'taskMoves.pause': 'tasks',
+  'taskMoves.preview': 'tasks',
   'taskMoves.progress': 'tasks',
   'taskMoves.redirects': 'tasks',
   'taskMoves.release': 'tasks',

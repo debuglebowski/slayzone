@@ -18,3 +18,15 @@ export { getViewConfig, type FilterState, type ViewConfig, type SortKey } from '
 export { useSnoozeWakeUp } from './useSnoozeWakeUp'
 export { TaskContextMenu } from './TaskContextMenu'
 export { BulkTaskContextMenu } from './BulkTaskContextMenu'
+// Moving tasks to another hub: the progress panel, and which tasks are moving.
+export { TaskMovesPanel } from './TaskMovesPanel'
+export {
+  useIsTaskMoving,
+  useTaskMovesStore,
+  startCrossHubMove,
+  pauseCrossHubMove,
+  resumeCrossHubMove,
+  cancelCrossHubMove,
+  syncCrossHubMoves,
+  type TrackedMove
+} from './cross-hub-moves'
