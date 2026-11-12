@@ -181,6 +181,7 @@ export function createTaskMoveSteps(opts: {
       await opts.target.importBundle({
         sourceHubId: opts.sourceHubId,
         targetProjectId: move.targetProjectId,
+        includeSessions: move.includeSessions,
         bundle: await bundleOf(move.id)
       })
     },

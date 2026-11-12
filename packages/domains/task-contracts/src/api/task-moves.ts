@@ -140,6 +140,8 @@ export const importTaskMoveInputSchema = z.object({
   /** The hub the tasks come from (the app's registry id). */
   sourceHubId: z.string().min(1),
   targetProjectId: z.string().min(1),
+  /** The move carries the tasks' agent sessions: a canceled import forgets what it copied. */
+  includeSessions: z.boolean().default(true),
   bundle: z.custom<TaskMoveBundle>(
     (v) =>
       typeof v === 'object' &&

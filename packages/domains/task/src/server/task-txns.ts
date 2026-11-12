@@ -224,6 +224,8 @@ function releaseMove(db: Database, p: { id: string; now: number }): void {
         WHERE parent_id IN (${moved}) AND id NOT IN (${moved})`
     ).run(p.id, p.id)
     removeMovedTasks(db, moved, p.id)
+    // Their sessions went along (the computers forgot them): no chat of theirs is owned here.
+    if (movedSessions(db, p.id)) dropMovedChatOwnership(db, moved, p.id)
     db.prepare("UPDATE task_moves SET status = 'done', updated_at = ? WHERE id = ?").run(
       p.now,
       p.id
@@ -259,6 +261,7 @@ function importMove(
     moveId: string
     sourceHubId: string
     targetProjectId: string
+    includeSessions: boolean
     rootTaskIds: string[]
     taskIds: string[]
     rows: Record<(typeof IMPORT_ORDER)[number], Array<Record<string, unknown>>>
@@ -304,9 +307,17 @@ function importMove(
     db.prepare(`DELETE FROM task_move_parked_chats WHERE task_id IN (${ids})`).run(...p.taskIds)
     db.prepare(
       `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
-         include_subtasks, step, status, created_at, updated_at)
-       VALUES (?, 'in', ?, ?, ?, 1, 'commit', 'running', ?, ?)`
-    ).run(p.moveId, p.sourceHubId, p.targetProjectId, JSON.stringify(p.rootTaskIds), p.now, p.now)
+         include_subtasks, include_sessions, step, status, created_at, updated_at)
+       VALUES (?, 'in', ?, ?, ?, 1, ?, 'commit', 'running', ?, ?)`
+    ).run(
+      p.moveId,
+      p.sourceHubId,
+      p.targetProjectId,
+      JSON.stringify(p.rootTaskIds),
+      p.includeSessions ? 1 : 0,
+      p.now,
+      p.now
+    )
     const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
     for (const taskId of p.taskIds) lock.run(p.moveId, taskId)
     if (p.events.length > 0) recordActivityEvents(db, p.events)
@@ -323,6 +334,8 @@ function abortImport(db: Database, p: { id: string; now: number }): void {
     if (!move || move.status === 'done' || move.status === 'canceled') return
     const moved = 'SELECT task_id FROM task_move_tasks WHERE move_id = ?'
     removeMovedTasks(db, moved, p.id)
+    // What the move copied here is forgotten by the computers: nothing to own.
+    if (movedSessions(db, p.id)) dropMovedChatOwnership(db, moved, p.id)
     db.prepare("UPDATE task_moves SET status = 'canceled', updated_at = ? WHERE id = ?").run(
       p.now,
       p.id
@@ -372,6 +385,45 @@ function registerMovedChats(
       if (hasTab.get(chat.tabId, p.taskId)) bind.run(chat.tabId, chat.id)
     }
   })()
+}
+
+/** Whether move `id` carries the tasks' agent sessions. */
+function movedSessions(db: Database, id: string): boolean {
+  const row = db.prepare('SELECT include_sessions FROM task_moves WHERE id = ?').get(id) as
+    | { include_sessions: number }
+    | undefined
+  return row?.include_sessions === 1
+}
+
+/**
+ * The tasks' chats are kept on another hub (or nowhere: a canceled import): this hub
+ * keeps no ownership of them — not the rows, nor what binds them to tabs, nor what
+ * `removeMovedTasks` parked for a return. The computers forgot the chats themselves.
+ */
+function dropMovedChatOwnership(db: Database, movedSql: string, param: string): void {
+  const conversations = `SELECT id FROM chat_ownership WHERE task_id IN (${movedSql})`
+  const ids = (db.prepare(conversations).all(param) as Array<{ id: string }>).map((r) => r.id)
+  if (ids.length > 0) {
+    const json = JSON.stringify(ids)
+    // Every table that points at a conversation (bindings, routes, locations, …).
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as Array<{ name: string }>
+    for (const { name } of tables) {
+      if (name === 'chat_ownership') continue
+      const refs = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as Array<{
+        table: string
+        from: string
+      }>
+      for (const ref of refs)
+        if (ref.table === 'chat_ownership')
+          db.prepare(
+            `DELETE FROM "${name}" WHERE "${ref.from}" IN (SELECT value FROM json_each(?))`
+          ).run(json)
+    }
+    db.prepare('DELETE FROM chat_ownership WHERE id IN (SELECT value FROM json_each(?))').run(json)
+  }
+  db.prepare(`DELETE FROM task_move_parked_chats WHERE task_id IN (${movedSql})`).run(param)
 }
 
 /**

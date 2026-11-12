@@ -333,6 +333,8 @@ const requestSchema = z.discriminatedUnion('kind', [
     length: z.number().int().min(1).max(262144)
   }),
   z.object({ kind: z.literal('sessionMove.discard'), moveId: z.string().min(1).max(80) }),
+  // The task's sessions are kept elsewhere now: this computer lets go of them (no tombstone).
+  z.object({ kind: z.literal('sessionMove.forget'), taskId: z.string().min(1).max(200) }),
   // The files beside the chat (Claude transcripts, terminal scrollback), copied like a
   // move's artifact files.
   z.object({
@@ -966,6 +968,19 @@ export function createChatRuntimeHandlers(opts: {
       case 'sessionMove.discard':
         r.sessionMoves.discard(req.moveId)
         return { ok: true }
+      case 'sessionMove.forget': {
+        // Live sessions first, so nothing writes into what is being removed.
+        for (const owner of r.storage.listForTask(req.taskId)) {
+          await r.transport.removeSession(owner.identity.tabId).catch(() => undefined)
+          directFanout.end(owner.identity.tabId, 'deleted')
+        }
+        const tabs = r.sessionMoves.forgetTask(req.taskId)
+        r.transfers.removeTask(req.taskId)
+        r.attachments.collectGarbage()
+        moveFiles(r).forgetScrollback(req.taskId)
+        r.storage.checkpoint()
+        return { forgotten: tabs.length }
+      }
       case 'sessionMove.files':
         return { files: await moveFiles(r).list(req.taskId, req.projectId) }
       case 'sessionMove.fileRead':

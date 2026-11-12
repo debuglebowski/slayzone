@@ -1328,6 +1328,7 @@ export function composeServer(opts: {
       read: afterBoot(d.read),
       readAttachment: afterBoot(d.readAttachment),
       discard: afterBoot(d.discard),
+      forget: afterBoot(d.forget),
       files: afterBoot(d.files),
       readFile: afterBoot(d.readFile),
       missingFiles: afterBoot(d.missingFiles),

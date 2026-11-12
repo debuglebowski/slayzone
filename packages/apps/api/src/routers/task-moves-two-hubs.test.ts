@@ -64,6 +64,8 @@ const computers = {
   activated: [] as string[],
   ledgers: [] as Array<{ taskId: string; ledger: unknown }>,
   discarded: [] as string[],
+  /** Each `forget` call: the tasks a computer was told to let go of. */
+  forgotten: [] as string[][],
   settled: [] as string[]
 }
 const TARGET_COMPUTER = 'computer-b'
@@ -111,6 +113,9 @@ const fakeDelegate: TaskMoveSessionsDelegate = {
   },
   discard: async (moveId) => {
     computers.discarded.push(moveId)
+  },
+  forget: async (taskIds) => {
+    computers.forgotten.push([...taskIds])
   },
   computerOf: async () => TARGET_COMPUTER,
   begin: async (_taskId, manifest) => {
@@ -505,12 +510,23 @@ describe('a move from hub A to hub B', () => {
     const parked = () =>
       count(A, 'SELECT COUNT(*) AS n FROM task_move_parked_chats WHERE task_id = ?', t.id)
 
-    await move({ hub: hubA, id: 'hub-a' }, { hub: hubB, id: 'hub-b', projectId: projectB }, [t.id])
+    const stay = { includeSessions: false }
+    await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id],
+      stay
+    )
     // Away: not A's (the delete trigger marked it), parked as it was.
     expect(owner()).toMatchObject({ state: 'deleted' })
     expect(parked()).toBe(1)
 
-    await move({ hub: hubB, id: 'hub-b' }, { hub: hubA, id: 'hub-a', projectId: projectA }, [t.id])
+    await move(
+      { hub: hubB, id: 'hub-b' },
+      { hub: hubA, id: 'hub-a', projectId: projectA },
+      [t.id],
+      stay
+    )
     // Back: the same ownership its computer still holds (same epoch), nothing parked.
     expect(owner()).toEqual({ state: 'active', epoch: 3, cleanup_pending: 0 })
     expect(parked()).toBe(0)
@@ -525,8 +541,19 @@ describe('a move from hub A to hub B', () => {
          VALUES (?, ?, ?, 'claude-chat', 'computer-a', 2, 'deleted')`
       )
       .run(conversation, t.id, `gone-${t.id}`)
-    await move({ hub: hubA, id: 'hub-a' }, { hub: hubB, id: 'hub-b', projectId: projectB }, [t.id])
-    await move({ hub: hubB, id: 'hub-b' }, { hub: hubA, id: 'hub-a', projectId: projectA }, [t.id])
+    const stay = { includeSessions: false }
+    await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id],
+      stay
+    )
+    await move(
+      { hub: hubB, id: 'hub-b' },
+      { hub: hubA, id: 'hub-a', projectId: projectA },
+      [t.id],
+      stay
+    )
     expect(
       A.db.prepare('SELECT state, epoch FROM chat_ownership WHERE id = ?').get(conversation)
     ).toEqual({ state: 'deleted', epoch: 2 })
@@ -643,5 +670,118 @@ describe('a move from hub A to hub B', () => {
     expect(done.status).toBe('done')
     expect(computers.staged.has(`t-${conversation}`)).toBe(false)
     expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(0)
+  })
+
+  test('once the sessions went with the task, the source forgets them and owns nothing of them', async () => {
+    const t = await createOn(hubA, projectA, 'Sessions leave the source')
+    const tab = crypto.randomUUID()
+    A.db
+      .prepare(
+        "INSERT INTO terminal_tabs (id, task_id, label, mode, position) VALUES (?, ?, 'Chat', 'claude-chat', 0)"
+      )
+      .run(tab, t.id)
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 3, 'active')`
+      )
+      .run(conversation, t.id, tab)
+    A.db
+      .prepare('INSERT INTO chat_tab_bindings (tab_id, conversation_id) VALUES (?, ?)')
+      .run(tab, conversation)
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes: Buffer.from('x') }
+    ])
+    computers.forgotten.length = 0
+
+    const done = await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id]
+    )
+    expect(done.status).toBe('done')
+
+    // The computers were told once, for these tasks; the hub keeps no trace of the chat.
+    expect(computers.forgotten).toEqual([[t.id]])
+    expect(count(A, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE task_id = ?', t.id)).toBe(0)
+    expect(count(A, 'SELECT COUNT(*) AS n FROM chat_tab_bindings WHERE tab_id = ?', tab)).toBe(0)
+    expect(
+      count(A, 'SELECT COUNT(*) AS n FROM task_move_parked_chats WHERE task_id = ?', t.id)
+    ).toBe(0)
+    // Never a deletion: nothing queued for the computers, no tombstone.
+    expect(
+      count(
+        A,
+        'SELECT COUNT(*) AS n FROM chat_deletion_targets WHERE conversation_id = ?',
+        conversation
+      )
+    ).toBe(0)
+    expect(
+      count(
+        A,
+        "SELECT COUNT(*) AS n FROM chat_task_lifecycle WHERE task_id = ? AND state = 'deleted'",
+        t.id
+      )
+    ).toBe(0)
+    // The target owns it.
+    expect(
+      count(
+        B,
+        'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ? AND state = ?',
+        conversation,
+        'active'
+      )
+    ).toBe(1)
+  })
+
+  test('a canceled move forgets what it copied to the target and leaves the source as it was', async () => {
+    const t = await createOn(hubA, projectA, 'Canceled after the sessions')
+    const tab = crypto.randomUUID()
+    A.db
+      .prepare(
+        "INSERT INTO terminal_tabs (id, task_id, label, mode, position) VALUES (?, ?, 'Chat', 'claude-chat', 0)"
+      )
+      .run(tab, t.id)
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 3, 'active')`
+      )
+      .run(conversation, t.id, tab)
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes: Buffer.from('x') }
+    ])
+    computers.forgotten.length = 0
+    computers.discarded.length = 0
+
+    // Stopped right before the target would take the task: the chat is copied and registered there.
+    const paused = await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id],
+      { pauseAfter: 'commit' }
+    )
+    expect(paused.status).toBe('paused')
+    expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(1)
+
+    await hubB.taskMoves.abort({ id: paused.id })
+    await hubA.taskMoves.cancel({ id: paused.id })
+
+    // The target let go of it and owns nothing; the source kept everything.
+    expect(computers.forgotten).toEqual([[t.id]])
+    expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(0)
+    expect(
+      count(B, 'SELECT COUNT(*) AS n FROM task_move_parked_chats WHERE task_id = ?', t.id)
+    ).toBe(0)
+    expect(
+      A.db.prepare('SELECT state, epoch FROM chat_ownership WHERE id = ?').get(conversation)
+    ).toEqual({
+      state: 'active',
+      epoch: 3
+    })
+    // The source's exports are discarded.
+    expect(computers.discarded).toContain(paused.id)
   })
 })

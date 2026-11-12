@@ -19,6 +19,7 @@ import {
 import { buildTaskProjectChangedEvents, buildTaskUpdatedEvents } from '../history.js'
 import { artifactsDirOf, artifactTaskDir } from '../artifact-paths.js'
 import { getRuntimeAdapters, parseTask } from './shared.js'
+import { taskMoveSessionsOrNull } from './task-move-sessions.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
@@ -311,6 +312,12 @@ export async function cancelTaskMove(db: SlayzoneDb, id: string): Promise<TaskMo
   if (TASK_MOVE_STEPS.indexOf(move.step) > TASK_MOVE_STEPS.indexOf('commit'))
     throw new TaskMoveStateError('The target hub took the tasks: the move can only finish now')
   await setMove(db, id, { status: 'canceled' }, { status: TASK_MOVE_LOCKING_STATUSES })
+  // The exports made for the copy are of no use now.
+  await taskMoveSessionsOrNull()
+    ?.discard(id, move.taskIds)
+    .catch((error: unknown) => {
+      console.warn(`[task] session exports of canceled move ${id} not removed:`, error)
+    })
   return getTaskMove(db, id)
 }
 
@@ -330,6 +337,17 @@ export async function releaseTaskMove(
     throw new TaskMoveStateError(
       `The move is ${move.status} at "${move.step}": it releases only when running at "release"`
     )
+  // The sessions went with the tasks: their computers let go of them (best effort — a
+  // computer that is away keeps a copy nobody reads; the hub forgets them either way).
+  if (move.includeSessions)
+    await taskMoveSessionsOrNull()
+      ?.forget(move.taskIds)
+      .catch((error: unknown) => {
+        console.warn(
+          `[task] sessions of moved tasks ${move.taskIds.join(', ')} not forgotten:`,
+          error
+        )
+      })
   await db.namedTxn('task:release-move', { id, now: Date.now() })
   // Their artifact files are the target's now (copied in `copy-files`).
   const runtime = getRuntimeAdapters()
@@ -501,6 +519,7 @@ export async function importTaskMove(
     moveId: bundle.moveId,
     sourceHubId: input.sourceHubId,
     targetProjectId: target.id,
+    includeSessions: input.includeSessions ?? true,
     rootTaskIds: bundle.rootTaskIds,
     taskIds,
     rows: {
@@ -539,6 +558,13 @@ export async function abortTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskM
   const move = await getTaskMove(db, id)
   if (move.direction !== 'in') throw new TaskMoveStateError('Not a move into this hub')
   if (move.status === 'done') throw new TaskMoveStateError('The move is committed here')
+  // The sessions the move copied here go again.
+  if (move.includeSessions && move.status !== 'canceled')
+    await taskMoveSessionsOrNull()
+      ?.forget(move.taskIds)
+      .catch((error: unknown) => {
+        console.warn(`[task] sessions of canceled move ${id} not forgotten:`, error)
+      })
   await db.namedTxn('task:abort-import', { id, now: Date.now() })
   return getTaskMove(db, id)
 }

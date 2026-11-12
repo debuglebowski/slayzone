@@ -584,7 +584,7 @@ base.describe('move a task to another hub', () => {
     'a task’s chat moves to hub B with it, and comes back with what was added there',
     async () => {
       base.setTimeout(300_000)
-      await inTwoHubs('sessions', async ({ page, hub, targetProjectId }) => {
+      await inTwoHubs('sessions', async ({ page, launched, hub, targetProjectId }) => {
         const projectId = await projectOnA(page, 'Source On A')
         const taskId = await createTaskOnA(page, projectId, 'Chat that travels', {
           agentId: 'claude-chat'
@@ -629,6 +629,16 @@ base.describe('move a task to another hub', () => {
             message: 'the chat history on hub B'
           })
           .toEqual(['user-message', 'assistant-text'])
+
+        // Hub A let go of the chat: it owns nothing of it, and keeps nothing parked.
+        expect(
+          await hubDbAll(launched.app, 'SELECT id FROM chat_ownership WHERE task_id = ?', [taskId])
+        ).toEqual([])
+        expect(
+          await hubDbAll(launched.app, 'SELECT * FROM task_move_parked_chats WHERE task_id = ?', [
+            taskId
+          ])
+        ).toEqual([])
 
         // On hub B the chat grows.
         await withHubClient(hub, (c) =>

@@ -39,6 +39,12 @@ export interface TaskMoveSessionsDelegate {
   }): Promise<string>
   /** The move's exports go, on every computer that made one. */
   discard(moveId: string, taskIds: readonly string[]): Promise<void>
+  /**
+   * The tasks' sessions are kept elsewhere now (the move released them here, or a
+   * canceled move had brought them): every computer of theirs lets go of them — no
+   * tombstone, so a task can come back.
+   */
+  forget(taskIds: readonly string[]): Promise<void>
   /** The files beside the task's chats (Claude transcripts, scrollback), with their computers. */
   files(moveId: string, taskId: string): Promise<TaskMoveSessionFile[]>
   /** A chunk (base64) of one of them; `eof` on the last. */
@@ -98,6 +104,10 @@ export interface TaskMoveSessionsDelegate {
 let delegate: TaskMoveSessionsDelegate | null = null
 export function setTaskMoveSessionsDelegate(value: TaskMoveSessionsDelegate | null): void {
   delegate = value
+}
+/** The delegate, or null where this hub has none (cleanup then has nothing to do). */
+export function taskMoveSessionsOrNull(): TaskMoveSessionsDelegate | null {
+  return delegate
 }
 export function taskMoveSessions(): TaskMoveSessionsDelegate {
   if (!delegate)

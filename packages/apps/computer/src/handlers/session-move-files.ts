@@ -261,6 +261,11 @@ export function createSessionMoveFiles(opts: {
       return { placed: true }
     },
 
+    /** The task's terminal scrollback goes (its sessions live elsewhere now). Idempotent. */
+    forgetScrollback(taskId: string): void {
+      rmSync(scrollbackDir(taskId), { recursive: true, force: true })
+    },
+
     /** Drop staged copies of files a move will not finish (canceled). */
     discardStaging(taskId: string, projectId: string, refs: SessionMoveFileRef[]): void {
       for (const ref of refs) {

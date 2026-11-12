@@ -1169,6 +1169,17 @@ export function createComputerChatServices(opts: {
             () => undefined
           )
       },
+      async forget(taskIds) {
+        for (const taskId of taskIds) {
+          const computers = new Set<string>()
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+          for (const computerId of [...computers].sort())
+            await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+        }
+      },
       async files(moveId, taskId) {
         void moveId
         const projectId = await moveProjectOf(taskId)

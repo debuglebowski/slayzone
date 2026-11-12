@@ -229,4 +229,44 @@ describe('a task’s sessions leaving a computer', () => {
     A.moves.discard('m')
     expect(() => A.moves.read('m', 'c1', 0, 10)).toThrow(/Unknown session export/)
   })
+
+  test('forgetting a task’s sessions removes its chats and ledger, not another task’s, and leaves no tombstone', () => {
+    const A = computer('hub-a')
+    const B = computer('hub-b')
+    chat(A, 'mine', ['one', 'two'])
+    chat(A, 'files', ['store'], 1, 'artifact-store:task-1')
+    ledgerRows(A, { conversationId: 'mine' })
+    A.store.createConversation({
+      id: 'other',
+      taskId: 'task-2',
+      tabId: 'tab-other',
+      mode: 'claude-chat',
+      epoch: 1
+    })
+    A.store.append('other', 1, { kind: 'assistant-text', messageId: 'o', text: 'not yours' }, 1)
+    const exported = A.moves.exportTask('m', TASK)
+    carry(A, B, 'm', exported)
+
+    expect(A.moves.forgetTask(TASK)).toEqual(['tab-mine'])
+    expect(A.store.conversation('mine')).toBeNull()
+    expect(A.store.read('mine', -1)).toEqual([])
+    // Another task's chat and the artifact store are untouched.
+    expect(events(A, 'other')).toEqual(['not yours'])
+    expect(A.store.conversation('files')).not.toBeNull()
+    A.store.compose((db) => {
+      for (const table of [
+        'agent_sessions',
+        'task_conversations',
+        'provider_configs',
+        'session_turns'
+      ])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 })
+    })
+    // Not a deletion: the task is not tombstoned here, so its sessions can come back.
+    expect(A.store.taskLifecycle(TASK).state).toBe('active')
+    carry(B, A, 'back', B.moves.exportTask('back', TASK))
+    expect(events(A, 'mine')).toEqual(['one', 'two'])
+    // Repeating the forget changes nothing.
+    expect(A.moves.forgetTask('nothing-here')).toEqual([])
+  })
 })

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -193,6 +193,17 @@ describe('a moved task’s session files', () => {
     B.files.write({ taskId: TASK, projectId: 'p', ref: entry.ref, offset: 0, data: part.data })
     B.files.discardStaging(TASK, 'p', [entry.ref])
     expect(B.files.missing(TASK, 'p', [entry])).toEqual([{ ...entry, offset: 0 }])
+  })
+
+  test('forgetting a task’s scrollback removes its folder and nothing else', () => {
+    const A = side('a', { sessions: ['sess-1'] })
+    putScrollback(A, 'out')
+    putTranscript(A.folder!, 'sess-1', 'kept\n')
+    A.files.forgetScrollback(TASK)
+    expect(existsSync(A.scrollbackDir)).toBe(false)
+    expect(readFileSync(claudeTranscriptPath(A.folder!, 'sess-1'), 'utf8')).toBe('kept\n')
+    // Nothing there to forget is fine.
+    expect(() => A.files.forgetScrollback(TASK)).not.toThrow()
   })
 
   test('references that could leave the folders are refused', () => {

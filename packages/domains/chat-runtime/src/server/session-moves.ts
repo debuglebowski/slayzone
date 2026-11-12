@@ -240,6 +240,59 @@ export function createSessionMoves(store: ChatStorage) {
     /** Forget a move's export (its files). Idempotent. */
     discard(moveId: string): void {
       rmSync(dirOf(moveId), { recursive: true, force: true })
+    },
+
+    /**
+     * The task's sessions are not kept on this computer any more (they live where the
+     * task moved to, or the move that brought them was canceled): every chat the export
+     * would have carried, and the task's ledger, go — rows removed with secure delete,
+     * NOT erased: no tombstone, no lifecycle change, so the task can come here again.
+     * What is path-bound stays (turn snapshots, worktree paths). Returns the tabs whose
+     * chats went, for the caller to stop their live sessions first or after.
+     */
+    forgetTask(taskId: string): string[] {
+      store.compose((db) => db.pragma('secure_delete=ON'))
+      return store.transaction(() =>
+        store.compose((db) => {
+          const owners = db
+            .prepare(
+              `SELECT id, tab_id FROM conversations
+                WHERE task_id = ? AND state <> 'deleted' AND tab_id NOT LIKE 'artifact-store:%'`
+            )
+            .all(taskId) as Array<{ id: string; tab_id: string }>
+          const ids = owners.map((o) => o.id)
+          const ledgerConversations = (
+            db
+              .prepare(
+                `SELECT conversation_id AS c FROM agent_sessions WHERE task_id = ? AND conversation_id IS NOT NULL
+                 UNION SELECT conversation_id FROM task_conversations WHERE task_id = ? AND conversation_id IS NOT NULL`
+              )
+              .all(taskId, taskId) as Array<{ c: string }>
+          ).map((r) => r.c)
+          db.prepare(
+            'DELETE FROM session_turns WHERE conversation_id IN (SELECT value FROM json_each(?))'
+          ).run(JSON.stringify([...ledgerConversations, ...ids]))
+          for (const table of [
+            'agent_sessions',
+            'task_conversations',
+            'session_resets',
+            'session_deletions',
+            'legacy_conversation_history',
+            'provider_configs',
+            'provider_config_seeds'
+          ])
+            db.prepare(`DELETE FROM ${table} WHERE task_id = ?`).run(taskId)
+          for (const id of ids) {
+            for (const table of ['events', 'records', 'receipts', 'queue_message_identities'])
+              db.prepare(`DELETE FROM ${table} WHERE conversation_id = ?`).run(id)
+            db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+          }
+          db.prepare(
+            "DELETE FROM migration_checkpoints WHERE json_extract(identity, '$.taskId') = ?"
+          ).run(taskId)
+          return owners.map((o) => o.tab_id)
+        })
+      )
     }
   }
 }
