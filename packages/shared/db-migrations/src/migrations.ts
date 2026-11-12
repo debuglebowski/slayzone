@@ -5736,7 +5736,21 @@ export const migrations: Migration[] = [
           PRIMARY KEY (task_id, role, remote_hub_id, remote_task_id)
         );
       `)
-      // task_move_tasks / task_move_redirects / task_remote_blockers carry a task_id:
+      // The chats of tasks that moved away: their computer still holds them (a move
+      // never erases them), so a task moving back takes them up again — each with the
+      // ownership it had when it left (the delete triggers mark it deleted meanwhile).
+      db.exec(`
+        CREATE TABLE task_move_parked_chats (
+          conversation_id TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          state           TEXT NOT NULL,
+          epoch           INTEGER NOT NULL,
+          cleanup_pending INTEGER NOT NULL
+        );
+        CREATE INDEX idx_task_move_parked_chats_task ON task_move_parked_chats(task_id);
+      `)
+      // task_move_tasks / task_move_redirects / task_remote_blockers /
+      // task_move_parked_chats carry a task_id:
       // fenced like every such table.
       installContentErasureFences(db)
     }

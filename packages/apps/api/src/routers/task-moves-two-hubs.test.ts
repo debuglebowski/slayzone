@@ -364,4 +364,47 @@ describe('a move from hub A to hub B', () => {
     expect(row(A, t.id)).toMatchObject({ project_id: projectA })
     expect(row(B, t.id)).toBeUndefined()
   })
+
+  test('and back again: the chat A kept on its computer is A’s again, as it was', async () => {
+    const t = await createOn(hubA, projectA, 'Round trip with a chat')
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 3, 'active')`
+      )
+      .run(conversation, t.id, t.id)
+    const owner = () =>
+      A.db
+        .prepare('SELECT state, epoch, cleanup_pending FROM chat_ownership WHERE id = ?')
+        .get(conversation)
+    const parked = () =>
+      count(A, 'SELECT COUNT(*) AS n FROM task_move_parked_chats WHERE task_id = ?', t.id)
+
+    await move({ hub: hubA, id: 'hub-a' }, { hub: hubB, id: 'hub-b', projectId: projectB }, [t.id])
+    // Away: not A's (the delete trigger marked it), parked as it was.
+    expect(owner()).toMatchObject({ state: 'deleted' })
+    expect(parked()).toBe(1)
+
+    await move({ hub: hubB, id: 'hub-b' }, { hub: hubA, id: 'hub-a', projectId: projectA }, [t.id])
+    // Back: the same ownership its computer still holds (same epoch), nothing parked.
+    expect(owner()).toEqual({ state: 'active', epoch: 3, cleanup_pending: 0 })
+    expect(parked()).toBe(0)
+  })
+
+  test('a chat deleted before the move stays deleted when the task comes back', async () => {
+    const t = await createOn(hubA, projectA, 'Round trip, chat deleted first')
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 2, 'deleted')`
+      )
+      .run(conversation, t.id, `gone-${t.id}`)
+    await move({ hub: hubA, id: 'hub-a' }, { hub: hubB, id: 'hub-b', projectId: projectB }, [t.id])
+    await move({ hub: hubB, id: 'hub-b' }, { hub: hubA, id: 'hub-a', projectId: projectA }, [t.id])
+    expect(
+      A.db.prepare('SELECT state, epoch FROM chat_ownership WHERE id = ?').get(conversation)
+    ).toEqual({ state: 'deleted', epoch: 2 })
+  })
 })
