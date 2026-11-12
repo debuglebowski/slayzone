@@ -2,6 +2,11 @@ export { CreateTaskDialog } from './CreateTaskDialog'
 export { EditTaskDialog } from './EditTaskDialog'
 export { DeleteTaskDialog } from './DeleteTaskDialog'
 export {
+  MoveTaskDialog,
+  useProjectsOnTaskHub,
+  type MoveTaskDialogProps
+} from './MoveTaskDialog'
+export {
   settleDeleteTaskResult,
   reportDeleteTaskError,
   TaskNotDeletedError,

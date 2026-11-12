@@ -6,6 +6,7 @@ export {
   updateTask,
   InvalidTaskUpdateError,
   TaskFoldersUnavailableError,
+  ProjectNotFoundError,
   parseTask,
   parseTasks,
   getProjectColumns,
@@ -37,6 +38,14 @@ export { restoreTaskOp } from './restore.js'
 export { archiveTaskOp } from './archive.js'
 export { archiveManyTasksOp } from './archive-many.js'
 export { updateManyTasksOp, type UpdateManyTasksInput } from './update-many.js'
+export {
+  moveTasksToProject,
+  moveTasksToProjectOp,
+  moveTasksToProjectRequestOp,
+  previewMoveToProjectOp,
+  type MoveOutcome,
+  type MoveOptions
+} from './move-to-project.js'
 export { deleteManyTasksOp, type DeleteManyTasksResult } from './delete-many.js'
 export { unarchiveTaskOp } from './unarchive.js'
 export { reorderTasksOp, reorderPinnedTasksOp } from './reorder.js'

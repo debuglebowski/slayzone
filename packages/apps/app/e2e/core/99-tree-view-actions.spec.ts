@@ -75,6 +75,16 @@ async function hoverSubmenu(page: Page, label: string) {
   await page.waitForTimeout(150)
 }
 
+/** The move dialog the "Move to" pick opens: confirm it (a move can't be undone). */
+async function confirmMove(page: Page) {
+  const dialog = page.getByTestId('move-task-dialog')
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const confirm = dialog.getByTestId('move-task-confirm')
+  await expect(confirm).toBeEnabled({ timeout: 5_000 })
+  await confirm.click()
+  await expect(dialog).toBeHidden({ timeout: 5_000 })
+}
+
 async function getTaskById(page: Page, id: string) {
   const tasks = await seed(page).getTasks()
   return tasks.find((t: { id: string }) => t.id === id)
@@ -292,6 +302,7 @@ test.describe('TreeView actions', () => {
     await rightClickRow(mainWindow, rootA)
     await hoverSubmenu(mainWindow, 'Move to')
     await radioItem(mainWindow, new RegExp(otherName)).click()
+    await confirmMove(mainWindow)
 
     await expect
       .poll(
@@ -304,6 +315,75 @@ test.describe('TreeView actions', () => {
         { timeout: 5_000 }
       )
       .toEqual([otherProjectId, otherProjectId, projectId])
+  })
+
+  test('move-to-project brings the subtasks along after the dialog confirms', async ({
+    mainWindow
+  }) => {
+    const child = (
+      await seed(mainWindow).createTask({
+        projectId,
+        title: 'TA A child',
+        status: 'in_progress',
+        parentId: rootA
+      })
+    ).id
+    await rightClickRow(mainWindow, rootA)
+    await hoverSubmenu(mainWindow, 'Move to')
+    await radioItem(mainWindow, new RegExp(otherName)).click()
+
+    const dialog = mainWindow.getByTestId('move-task-dialog')
+    await expect(dialog.getByText('Bring subtasks (1)')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('move-task-include-subtasks')).toBeChecked()
+    // Nothing moves before the confirm.
+    expect((await getTaskById(mainWindow, rootA))?.project_id).toBe(projectId)
+    await confirmMove(mainWindow)
+
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const c = await getTaskById(mainWindow, child)
+          return [a?.project_id, c?.project_id, c?.parent_id]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, otherProjectId, rootA])
+  })
+
+  test('moving a subtask alone explains the detach, then detaches it', async ({ mainWindow }) => {
+    const child = (
+      await seed(mainWindow).createTask({
+        projectId,
+        title: 'TA lone child',
+        status: 'in_progress',
+        parentId: rootB
+      })
+    ).id
+    await seed(mainWindow).refreshData()
+    await expect(taskRow(mainWindow, child)).toBeVisible({ timeout: 5_000 })
+    await rightClickRow(mainWindow, child)
+    await hoverSubmenu(mainWindow, 'Move to')
+    await radioItem(mainWindow, new RegExp(otherName)).click()
+
+    const notice = mainWindow.getByTestId('move-task-detach-notice')
+    await expect(notice).toBeVisible({ timeout: 5_000 })
+    await expect(notice).toContainText('TA B')
+    // Enter confirms (focus starts on the dialog's form, not the project picker).
+    const dialog = mainWindow.getByTestId('move-task-dialog')
+    await expect(dialog.getByTestId('move-task-confirm')).toBeEnabled({ timeout: 5_000 })
+    await mainWindow.keyboard.press('Enter')
+    await expect(dialog).toBeHidden({ timeout: 5_000 })
+
+    await expect
+      .poll(
+        async () => {
+          const c = await getTaskById(mainWindow, child)
+          return [c?.project_id, c?.parent_id]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, null])
   })
 
   test('single delete via context menu removes only that row', async ({ mainWindow }) => {

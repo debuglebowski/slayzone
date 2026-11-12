@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import { useTRPC, useTRPCClient } from './trpc'
+import { MoveTaskDialog } from './MoveTaskDialog'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
 import { isTerminalStatus } from '@slayzone/projects-contracts'
@@ -21,6 +23,9 @@ export function ProjectStatusCard({
 }: ProjectStatusCardProps): React.JSX.Element {
   const { trackTask } = useTrack()
   const trpc = useTRPC()
+  const trpcClient = useTRPCClient()
+  /** The project picked: the move dialog confirms it (a move can't be undone). */
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const updateTask = useMutation(trpc.task.update.mutationOptions())
   const statusOptions = buildStatusOptions(columnsConfig)
 
@@ -36,17 +41,35 @@ export function ProjectStatusCard({
     onUpdate(updated)
   }
 
-  const handleProjectChange = async (projectId: string): Promise<void> => {
-    trackTask(task.id, 'task_moved_to_project')
-    const updated = await updateTask.mutateAsync({ id: task.id, projectId })
-    onUpdate(updated)
+  const handleProjectChange = (projectId: string): void => {
+    if (projectId !== task.project_id) setMoveTargetId(projectId)
   }
 
   return (
     <div className="grid grid-cols-2 gap-2">
-      <div>
+      <div data-testid="task-project-field">
         <label className="mb-1 block text-sm text-muted-foreground">Project</label>
         <ProjectSelect value={task.project_id} onChange={handleProjectChange} />
+        {moveTargetId !== null && (
+          <MoveTaskDialog
+            open
+            onOpenChange={(open) => {
+              if (!open) setMoveTargetId(null)
+            }}
+            taskIds={[task.id]}
+            initialProjectId={moveTargetId}
+            onMoved={() => {
+              trpcClient.task.get
+                .query({ id: task.id })
+                .then((moved) => {
+                  if (moved) onUpdate(moved)
+                })
+                .catch(() => {
+                  /* the board's tasks-changed refresh brings it anyway */
+                })
+            }}
+          />
+        )}
       </div>
       <div>
         <label className="mb-1 block text-sm text-muted-foreground">Status</label>

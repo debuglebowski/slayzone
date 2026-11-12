@@ -1172,6 +1172,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.switchConversation': checked(task('id')),
   'task.deleteConversation': checked(task('id')),
   'task.updateMany': checked(task('ids[]'), project('updates.projectId'), task('updates.parentId')),
+  'task.moveToProject': checked(task('taskIds[]'), project('targetProjectId')),
+  'task.movePreview': checked(task('taskIds[]'), project('targetProjectId')),
   'task.delete': checked(task('id')),
   'task.deleteMany': checked(task('ids[]')),
   'task.restore': checked(task('id')),

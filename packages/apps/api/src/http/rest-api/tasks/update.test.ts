@@ -190,6 +190,33 @@ describe('PATCH /api/tasks/:id', () => {
     expect(row.status).toBe('todo')
   })
 
+  test('projectId + status: the status resolves against the TARGET project', async () => {
+    const targetId = crypto.randomUUID()
+    h.db
+      .prepare(
+        'INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        targetId,
+        'RestMoveTarget',
+        '#111',
+        '/tmp/rest-move-target',
+        JSON.stringify([
+          { id: 'backlog', label: 'Backlog', color: 'gray', position: 0, category: 'unstarted' },
+          { id: 'shipping', label: 'Shipping', color: 'blue', position: 1, category: 'started' },
+          { id: 'shipped', label: 'Shipped', color: 'green', position: 2, category: 'completed' }
+        ])
+      )
+    const id = seedTask({ status: 'todo' })
+    const res = await rest.request<{ ok: boolean; data: { project_id: string; status: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { projectId: targetId, status: 'Shipping' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ project_id: targetId, status: 'shipping' })
+  })
+
   test('409: a terminal status while an agent is mid-reply is refused, nothing written; force completes', async () => {
     const id = seedTask()
     midReply.set(id, [`${id}:${id}`])

@@ -1,11 +1,8 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
-import type { RecordActivityEventInput } from '@slayzone/history/server'
-import { buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { parseTask, updateTask, validateTaskUpdate, type OpDeps } from './shared.js'
-// Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
-import type {} from '../task-txns.js'
+import { applyProjectChange, hasUpdateFields } from './move-to-project.js'
 
 export interface UpdateManyTasksInput {
   ids: string[]
@@ -25,26 +22,31 @@ export async function updateManyTasksOp(
   // project lacks) rejects the batch before a single row is written.
   for (const id of ids) await validateTaskUpdate(db, { ...updates, id } as UpdateTaskInput)
 
+  // A project change is ONE move for every listed task (subtasks, tags, detach),
+  // with its own transaction and events; the rest then applies in the new project.
+  const { rest, moved } = await applyProjectChange(db, ids, updates, deps)
+  if (moved && !hasUpdateFields(rest)) {
+    const rows = await db.all<Record<string, unknown>>(
+      `SELECT * FROM tasks WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      ids
+    )
+    return rows.flatMap((r) => {
+      const t = parseTask(r)
+      return t ? [t] : []
+    })
+  }
+
   // `updateTask` is a conditional read-modify-write with runtime side effects, so
-  // each update runs as its own awaited call rather than inside a worker named-txn.
-  // The diff-derived activity events are accumulated and recorded together via the
-  // `task:record-events` named transaction.
+  // each update runs as its own awaited call. Each records its own activity
+  // events in the same transaction as its write (`task:update`).
   const results: Array<{ id: string; previous: Task | null; next: Task | null }> = []
-  const events: RecordActivityEventInput[] = []
   for (const id of ids) {
     const previousRow = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [
       id
     ])
     const previousTask = parseTask(previousRow)
-    const nextTask = await updateTask(db, { ...updates, id } as UpdateTaskInput)
-    if (previousTask && nextTask) {
-      events.push(...buildTaskUpdatedEvents(previousTask, nextTask))
-    }
+    const nextTask = await updateTask(db, { ...rest, id } as UpdateTaskInput)
     results.push({ id, previous: previousTask, next: nextTask })
-  }
-
-  if (events.length > 0) {
-    await db.namedTxn('task:record-events', { events })
   }
 
   for (const r of results) {

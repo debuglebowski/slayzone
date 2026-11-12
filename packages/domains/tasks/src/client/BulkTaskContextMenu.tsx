@@ -40,7 +40,7 @@ import {
   ShieldAlert
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { getSnoozePresets } from '@slayzone/task/client'
+import { getSnoozePresets, MoveTaskDialog, useProjectsOnTaskHub } from '@slayzone/task/client'
 
 interface BulkTaskContextMenuProps {
   taskIds: string[]
@@ -86,6 +86,10 @@ export function BulkTaskContextMenu({
 }: BulkTaskContextMenuProps): React.JSX.Element {
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  // Tasks move only between projects of their own hub (the dialog refuses a mix).
+  const moveTargets = useProjectsOnTaskHub(projects, taskIds)
   // Offer only statuses EVERY selected task's project has — the backend rejects
   // the whole batch otherwise. None shared → the Status submenu is disabled.
   const statusColumns = useMemo(() => {
@@ -127,7 +131,7 @@ export function BulkTaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    onBulkUpdate(taskIds, { project_id: projectId })
+    setMoveTargetId(projectId)
   }
 
   const handleToggleBlocked = (): void => {
@@ -330,7 +334,7 @@ export function BulkTaskContextMenu({
                 value={commonProject === MIXED ? '' : (commonProject as string)}
                 onValueChange={handleProjectChange}
               >
-                {projects.map((p) => (
+                {moveTargets.map((p) => (
                   <ContextMenuRadioItem key={p.id} value={p.id}>
                     <span
                       className="inline-block w-2 h-2 rounded-full mr-2"
@@ -359,6 +363,17 @@ export function BulkTaskContextMenu({
           )}
         </ContextMenuContent>
       </ContextMenu>
+
+      {moveTargetId !== null && (
+        <MoveTaskDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setMoveTargetId(null)
+          }}
+          taskIds={taskIds}
+          initialProjectId={moveTargetId}
+        />
+      )}
 
       <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
         <AlertDialogContent>

@@ -18,7 +18,7 @@ interface TaskMutations {
   archiveTasks: (taskIds: string[]) => Promise<string[]>
   deleteTask: (taskId: string) => Promise<void>
   bulkDelete: (taskIds: string[]) => Promise<string[]>
-  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
+  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<boolean>
   bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<string[]>
 }
 
@@ -62,7 +62,7 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
   const { push: pushUndo, undo: runUndo } = undo
 
   const contextMenuUpdate = useCallback(
-    async (taskId: string, updates: Partial<Task>) => {
+    async (taskId: string, updates: Partial<Task>): Promise<boolean> => {
       const task = tasksRef.current.find((t) => t.id === taskId)
       if (!task) return rawContextMenuUpdate(taskId, updates)
 
@@ -72,7 +72,8 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
         ;(prev as Record<string, unknown>)[key] = task[key]
       }
 
-      await rawContextMenuUpdate(taskId, updates)
+      // A failed update was rolled back and said so: nothing to undo.
+      if (!(await rawContextMenuUpdate(taskId, updates))) return false
 
       const desc = updates.status
         ? `Changed "${task.title}" → ${updates.status}`
@@ -82,12 +83,17 @@ export function useUndoableTaskActions(mutations: TaskMutations, undo: UndoAPI) 
 
       pushUndo({
         label: desc,
-        undo: () => rawContextMenuUpdate(taskId, prev),
-        redo: () => rawContextMenuUpdate(taskId, updates)
+        undo: async () => {
+          await rawContextMenuUpdate(taskId, prev)
+        },
+        redo: async () => {
+          await rawContextMenuUpdate(taskId, updates)
+        }
       })
       toast(desc, {
         action: { label: 'Undo', onClick: () => void runUndo() }
       })
+      return true
     },
     [rawContextMenuUpdate, pushUndo, runUndo]
   )

@@ -720,6 +720,8 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'task.deleteConversation': 'user',
   'task.deleteMany': 'user',
   'task.get': 'user',
+  'task.movePreview': 'user',
+  'task.moveToProject': 'user',
   'task.paths': 'user',
   'task.getAll': 'user',
   'task.getAllBlockedTaskIds': 'user',

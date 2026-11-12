@@ -2,6 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
 import { taskEvents } from '../events.js'
 import { parseTask, updateTask, type OpDeps } from './shared.js'
+import { applyProjectChange, hasUpdateFields } from './move-to-project.js'
 
 export async function updateTaskOp(
   db: SlayzoneDb,
@@ -9,6 +10,15 @@ export async function updateTaskOp(
   deps: OpDeps
 ): Promise<Task | null> {
   const { ipcMain, onMutation } = deps
+  // A project change is a move (subtasks, tags, detach): it runs first, as its own
+  // transaction with its own events; the rest of the update then applies in the
+  // new project.
+  const { rest, moved } = await applyProjectChange(db, [data.id], data, deps)
+  const remaining = { ...rest, id: data.id } as UpdateTaskInput
+  if (moved && !hasUpdateFields(remaining)) {
+    const row = await db.get<Record<string, unknown>>('SELECT * FROM tasks WHERE id = ?', [data.id])
+    return parseTask(row)
+  }
   // `updateTask` commits its field UPDATE + the diff-derived activity events
   // atomically (worker `task:update` txn) — a failed event insert rolls back the
   // field write. We still read the prior row here for the post-mutation
@@ -17,7 +27,7 @@ export async function updateTaskOp(
     data.id
   ])
   const previousTask = parseTask(previousRow)
-  const nextTask = await updateTask(db, data)
+  const nextTask = await updateTask(db, remaining)
 
   const result = { previousTask, nextTask }
 

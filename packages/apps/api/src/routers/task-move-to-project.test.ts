@@ -1,0 +1,406 @@
+/**
+ * Moving tasks to another project (same hub): `task.moveToProject`, its read-only
+ * `task.movePreview`, and the `task.update` / `task.updateMany` project changes that
+ * now go through the same move.
+ *
+ *   - the whole subtree moves (archived subtasks too), in one transaction;
+ *   - a task moved without its parent is detached; subtasks left behind are detached;
+ *   - tags come along: the target's tag of the same name, else a new one there;
+ *   - each moved row's status re-homes to the target's columns, its worktree,
+ *     repo and base dir are cleared, and its sessions reset;
+ *   - a missing target project is a named BAD_REQUEST, nothing written;
+ *   - one activity entry per move (plus the status change), never duplicated.
+ *
+ * Run with: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron node_modules/vitest/vitest.mjs run \
+ *   --config packages/shared/test-utils/vitest.harness.config.ts \
+ *   packages/apps/api/src/routers/task-move-to-project.test.ts
+ */
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import crypto from 'node:crypto'
+import { beforeEach, describe, expect, test } from 'vitest'
+import type { CreateTaskInput, Task, TasksChange, UpdateTaskInput } from '@slayzone/task-contracts'
+import {
+  taskRouter,
+  setTaskDeps,
+  taskOps,
+  configureTaskRuntimeAdapters,
+  setTaskSessionLedger
+} from '@slayzone/task/server'
+import { createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
+import {
+  defaultWorktreeExecAdapters,
+  defaultWorktreePolicyAdapters
+} from '@slayzone/worktrees/server'
+import { createTestHarness } from '../../../../shared/test-utils/ipc-harness.js'
+import { installTaskPathsComputer } from '../../../../shared/test-utils/task-paths-computer.js'
+
+const h = await createTestHarness()
+const computer = createSessionLedgerHarness({ db: h.slayDb })
+setTaskSessionLedger(computer.ledger)
+const signals: Array<string[] | null> = []
+setTaskDeps({
+  ops: taskOps,
+  onMutation: (change?: TasksChange) => {
+    signals.push(change ? [...change.taskIds].sort() : null)
+  }
+})
+const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-task-move-')) }
+const killed: string[] = []
+configureTaskRuntimeAdapters({
+  getDataRoot: () => ctx.dataRoot,
+  worktrees: defaultWorktreeExecAdapters,
+  worktreePolicy: defaultWorktreePolicyAdapters,
+  killPtysByTaskId: (taskId: string) => void killed.push(taskId)
+})
+const folders = installTaskPathsComputer()
+const caller = taskRouter.createCaller(ctx)
+
+beforeEach(() => {
+  signals.length = 0
+  killed.length = 0
+})
+
+const COLUMNS_A = [
+  { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
+  { id: 'doing', label: 'Doing', color: 'blue', position: 1, category: 'started' },
+  { id: 'done', label: 'Done', color: 'green', position: 2, category: 'completed' }
+]
+const COLUMNS_B = [
+  { id: 'triage', label: 'Triage', color: 'gray', position: 0, category: 'triage' },
+  { id: 'done', label: 'Done', color: 'green', position: 1, category: 'completed' }
+]
+function project(name: string, columns: unknown[] = COLUMNS_A): string {
+  const id = crypto.randomUUID()
+  h.db
+    .prepare('INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)')
+    .run(id, name, '#000', `/tmp/${name}`, JSON.stringify(columns))
+  return id
+}
+const create = (projectId: string, title: string, extra: Record<string, unknown> = {}) =>
+  caller.create({ projectId, title, ...extra } as unknown as CreateTaskInput) as Promise<Task>
+const row = (id: string) =>
+  h.db
+    .prepare(
+      'SELECT project_id, parent_id, status, repo_name, has_worktree, archived_at FROM tasks WHERE id = ?'
+    )
+    .get(id) as {
+    project_id: string
+    parent_id: string | null
+    status: string
+    repo_name: string | null
+    has_worktree: number
+    archived_at: string | null
+  }
+const tagsOf = (taskId: string) =>
+  h.db
+    .prepare(
+      'SELECT tg.project_id, tg.name, tg.color, tg.text_color FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tt.task_id = ? ORDER BY tg.name'
+    )
+    .all(taskId) as { project_id: string; name: string; color: string; text_color: string }[]
+// Colours are unique per project (tags_project_color_unique): a random pair unless given.
+const randomHex = (): string => `#${crypto.randomBytes(3).toString('hex')}`
+function tag(projectId: string, name: string, color = randomHex(), textColor = '#ffffff'): string {
+  const id = crypto.randomUUID()
+  h.db
+    .prepare(
+      'INSERT INTO tags (id, project_id, name, color, text_color, sort_order) VALUES (?, ?, ?, ?, ?, 0)'
+    )
+    .run(id, projectId, name, color, textColor)
+  return id
+}
+const tagTask = (taskId: string, tagId: string) =>
+  h.db.prepare('INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)').run(taskId, tagId)
+const resetsOf = (taskId: string) =>
+  h.db.prepare('SELECT mode, tab_id FROM session_resets WHERE task_id = ?').all(taskId)
+const eventsOf = (taskId: string) =>
+  h.db
+    .prepare('SELECT kind, payload_json FROM activity_events WHERE task_id = ? ORDER BY created_at')
+    .all(taskId) as { kind: string; payload_json: string | null }[]
+/** A session that ran on the task's computer, so a reset has something to cut off. */
+const seedSession = (taskId: string) =>
+  computer.service.handle({
+    op: 'recordConversation',
+    args: {
+      taskId,
+      mode: 'claude-code',
+      conversationId: crypto.randomUUID(),
+      origin: 'slay-spawned-resume',
+      createdAt: Date.now()
+    }
+  })
+/** Forget what the setup signalled and killed; the move's own come after. */
+const quiet = () => {
+  signals.length = 0
+  killed.length = 0
+}
+const errOf = async (fn: () => Promise<unknown>): Promise<{ code?: string; message: string }> => {
+  try {
+    await fn()
+    return { message: '' }
+  } catch (e) {
+    return { code: (e as { code?: string }).code, message: (e as Error).message }
+  }
+}
+
+describe('task.moveToProject', () => {
+  test('moves the whole subtree, archived subtasks included, and names every row', async () => {
+    const a = project('SubtreeA')
+    const b = project('SubtreeB', COLUMNS_B)
+    const parent = await create(a, 'Parent', { status: 'doing' })
+    const child = await create(a, 'Child', { parentId: parent.id, status: 'done' })
+    const grandchild = await create(a, 'Grandchild', { parentId: child.id })
+    const archivedChild = await create(a, 'Archived child', { parentId: parent.id })
+    h.db
+      .prepare("UPDATE tasks SET archived_at = datetime('now') WHERE id = ?")
+      .run(archivedChild.id)
+    const bystander = await create(a, 'Bystander')
+    quiet()
+
+    await caller.moveToProject({ taskIds: [parent.id], targetProjectId: b, includeSubtasks: true })
+
+    for (const id of [parent.id, child.id, grandchild.id, archivedChild.id])
+      expect(row(id).project_id).toBe(b)
+    expect(row(bystander.id).project_id).toBe(a)
+    // The hierarchy is kept.
+    expect(row(child.id).parent_id).toBe(parent.id)
+    expect(row(grandchild.id).parent_id).toBe(child.id)
+    // Each row's status re-homes on its own: 'done' exists in B, the others do not.
+    expect(row(parent.id).status).toBe('triage')
+    expect(row(child.id).status).toBe('done')
+    expect(row(grandchild.id).status).toBe('triage')
+    expect(row(archivedChild.id).archived_at).not.toBeNull()
+    expect(signals).toEqual([[parent.id, child.id, grandchild.id, archivedChild.id].sort()])
+    expect(killed.sort()).toEqual([parent.id, child.id, grandchild.id, archivedChild.id].sort())
+  })
+
+  test('without subtasks: the subtasks stay and are detached from the moved parent', async () => {
+    const a = project('NoSubA')
+    const b = project('NoSubB')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    quiet()
+    await caller.moveToProject({ taskIds: [parent.id], targetProjectId: b, includeSubtasks: false })
+    expect(row(parent.id).project_id).toBe(b)
+    expect(row(child.id)).toMatchObject({ project_id: a, parent_id: null })
+    expect(signals).toEqual([[parent.id, child.id].sort()])
+  })
+
+  test('a subtask moved on its own is detached from its parent', async () => {
+    const a = project('LoneA')
+    const b = project('LoneB')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    await caller.moveToProject({ taskIds: [child.id], targetProjectId: b, includeSubtasks: true })
+    expect(row(child.id)).toMatchObject({ project_id: b, parent_id: null })
+    expect(row(parent.id).project_id).toBe(a)
+  })
+
+  test('parent and child both selected: moved once, hierarchy kept', async () => {
+    const a = project('BothA')
+    const b = project('BothB')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    await caller.moveToProject({
+      taskIds: [child.id, parent.id],
+      targetProjectId: b,
+      includeSubtasks: false
+    })
+    expect(row(child.id)).toMatchObject({ project_id: b, parent_id: parent.id })
+    expect(eventsOf(child.id).filter((e) => e.kind === 'task.project_changed')).toHaveLength(1)
+  })
+
+  test('tags come along: same name reused in the target, missing ones created there', async () => {
+    const a = project('TagsA')
+    const b = project('TagsB')
+    const bug = tag(a, 'bug', '#ff0000', '#000000')
+    const ui = tag(a, 'ui', '#00ff00', '#111111')
+    const bugInB = tag(b, 'bug', '#990000')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    tagTask(parent.id, bug)
+    tagTask(parent.id, ui)
+    tagTask(child.id, ui)
+    quiet()
+
+    await caller.moveToProject({ taskIds: [parent.id], targetProjectId: b, includeSubtasks: true })
+
+    expect(tagsOf(parent.id)).toEqual([
+      { project_id: b, name: 'bug', color: '#990000', text_color: '#ffffff' },
+      { project_id: b, name: 'ui', color: '#00ff00', text_color: '#111111' }
+    ])
+    // One 'ui' tag was created in B and both tasks use it.
+    expect(tagsOf(child.id)).toEqual([
+      { project_id: b, name: 'ui', color: '#00ff00', text_color: '#111111' }
+    ])
+    const uiTagsInB = h.db
+      .prepare("SELECT COUNT(*) AS n FROM tags WHERE project_id = ? AND name = 'ui'")
+      .get(b) as { n: number }
+    expect(uiTagsInB.n).toBe(1)
+    expect(bugInB).toBeTruthy()
+    // A tag was created: the board's tag list changed, so a full reload.
+    expect(signals).toEqual([null])
+  })
+
+  test('a created tag whose colours the target already uses gets a free pair', async () => {
+    const a = project('ColorA')
+    const b = project('ColorB')
+    const red = tag(a, 'red-one', '#ef4444', '#ffffff')
+    tag(b, 'other-name', '#ef4444', '#ffffff')
+    const t = await create(a, 'Colourful')
+    tagTask(t.id, red)
+    await caller.moveToProject({ taskIds: [t.id], targetProjectId: b, includeSubtasks: true })
+    const [moved] = tagsOf(t.id)
+    expect(moved).toMatchObject({ project_id: b, name: 'red-one' })
+    expect(`${moved.color}:${moved.text_color}`).not.toBe('#ef4444:#ffffff')
+  })
+
+  test('clears worktree, repo and base dir and resets the sessions of every moved row', async () => {
+    const a = project('ClearA')
+    const b = project('ClearB')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    await seedSession(parent.id)
+    await seedSession(child.id)
+    await caller.update({
+      id: parent.id,
+      worktreePath: '/tmp/ClearA/wt',
+      repoName: 'r'
+    } as unknown as UpdateTaskInput)
+    const resetsBefore = resetsOf(parent.id).length
+    await caller.moveToProject({ taskIds: [parent.id], targetProjectId: b, includeSubtasks: true })
+    expect(row(parent.id)).toMatchObject({ repo_name: null, has_worktree: 0 })
+    expect(folders.get(parent.id).worktreePath).toBeNull()
+    expect(resetsOf(parent.id)).toHaveLength(resetsBefore + 1)
+    expect(resetsOf(child.id)).toHaveLength(1)
+  })
+
+  test('one project_changed entry per moved row, the status change beside it', async () => {
+    const a = project('HistA')
+    const b = project('HistB', COLUMNS_B)
+    const t = await create(a, 'Hist', { status: 'doing' })
+    await caller.moveToProject({ taskIds: [t.id], targetProjectId: b, includeSubtasks: true })
+    const kinds = eventsOf(t.id).map((e) => e.kind)
+    expect(kinds.filter((k) => k === 'task.project_changed')).toHaveLength(1)
+    expect(kinds.filter((k) => k === 'task.status_changed')).toHaveLength(1)
+    const moved = eventsOf(t.id).find((e) => e.kind === 'task.project_changed')
+    expect(JSON.parse(moved?.payload_json ?? '{}')).toMatchObject({ from: a, to: b })
+  })
+
+  test('a target project that does not exist is a named BAD_REQUEST and writes nothing', async () => {
+    const a = project('MissingA')
+    const t = await create(a, 'Stay')
+    const err = await errOf(() =>
+      caller.moveToProject({
+        taskIds: [t.id],
+        targetProjectId: crypto.randomUUID(),
+        includeSubtasks: true
+      })
+    )
+    expect(err.code).toBe('BAD_REQUEST')
+    expect(err.message).toMatch(/project not found/i)
+    expect(row(t.id).project_id).toBe(a)
+  })
+
+  test('rows already in the target are left untouched', async () => {
+    const b = project('AlreadyB')
+    const t = await create(b, 'Here', { status: 'doing' })
+    quiet()
+    await caller.moveToProject({ taskIds: [t.id], targetProjectId: b, includeSubtasks: true })
+    expect(row(t.id)).toMatchObject({ project_id: b, status: 'doing' })
+    expect(eventsOf(t.id).filter((e) => e.kind === 'task.project_changed')).toHaveLength(0)
+    expect(signals).toEqual([])
+  })
+})
+
+describe('task.movePreview', () => {
+  test('counts subtasks, names the parent, and lists tags and status changes', async () => {
+    const a = project('PreviewA')
+    const b = project('PreviewB', COLUMNS_B)
+    tag(b, 'bug')
+    const bug = tag(a, 'bug')
+    const ui = tag(a, 'ui')
+    const parent = await create(a, 'Parent', { status: 'doing' })
+    const child = await create(a, 'Child', { parentId: parent.id, status: 'done' })
+    const grandchild = await create(a, 'Grandchild', { parentId: child.id })
+    tagTask(child.id, bug)
+    tagTask(child.id, ui)
+
+    const forParent = await caller.movePreview({ taskIds: [parent.id], targetProjectId: b })
+    expect(forParent).toMatchObject({
+      taskCount: 1,
+      subtaskCount: 2,
+      detachedFrom: [],
+      tagsToCreate: ['ui']
+    })
+    // Child keeps 'done' (B has it); parent and grandchild re-home.
+    expect(forParent.statusChanges.map((c) => [c.taskId, c.from, c.to]).sort()).toEqual(
+      [
+        [parent.id, 'doing', 'triage'],
+        [grandchild.id, 'queued', 'triage']
+      ].sort()
+    )
+
+    const forChild = await caller.movePreview({ taskIds: [child.id], targetProjectId: b })
+    expect(forChild.subtaskCount).toBe(1)
+    expect(forChild.detachedFrom).toEqual([
+      { taskId: child.id, title: 'Child', parentId: parent.id, parentTitle: 'Parent' }
+    ])
+  })
+})
+
+describe('task.update / task.updateMany with a projectId go through the move', () => {
+  test('update: subtasks come along', async () => {
+    const a = project('UpdA')
+    const b = project('UpdB')
+    const parent = await create(a, 'Parent')
+    const child = await create(a, 'Child', { parentId: parent.id })
+    const moved = (await caller.update({
+      id: parent.id,
+      projectId: b
+    } as unknown as UpdateTaskInput)) as Task
+    expect(moved.project_id).toBe(b)
+    expect(row(child.id)).toMatchObject({ project_id: b, parent_id: parent.id })
+  })
+
+  test('update: a status known in the target is applied after the move', async () => {
+    const a = project('UpdStatusA')
+    const b = project('UpdStatusB', COLUMNS_B)
+    const t = await create(a, 'S', { status: 'doing' })
+    const moved = (await caller.update({
+      id: t.id,
+      projectId: b,
+      status: 'done'
+    } as unknown as UpdateTaskInput)) as Task
+    expect(moved).toMatchObject({ project_id: b, status: 'done' })
+  })
+
+  test('update: one project_changed entry, never a duplicate status entry', async () => {
+    const a = project('UpdHistA')
+    const b = project('UpdHistB', COLUMNS_B)
+    const t = await create(a, 'H', { status: 'doing' })
+    await caller.update({ id: t.id, projectId: b } as unknown as UpdateTaskInput)
+    const kinds = eventsOf(t.id).map((e) => e.kind)
+    expect(kinds.filter((k) => k === 'task.project_changed')).toHaveLength(1)
+    expect(kinds.filter((k) => k === 'task.status_changed')).toHaveLength(1)
+  })
+
+  test('updateMany: every task moves once, with its subtasks', async () => {
+    const a = project('ManyA')
+    const b = project('ManyB')
+    const p1 = await create(a, 'P1')
+    const c1 = await create(a, 'C1', { parentId: p1.id })
+    const p2 = await create(a, 'P2')
+    await caller.updateMany({ ids: [p1.id, p2.id], updates: { projectId: b } })
+    for (const id of [p1.id, c1.id, p2.id]) expect(row(id).project_id).toBe(b)
+    expect(eventsOf(p1.id).filter((e) => e.kind === 'task.project_changed')).toHaveLength(1)
+  })
+
+  test('updateMany: a status change records its activity entry once', async () => {
+    const a = project('ManyStatusA')
+    const t = await create(a, 'Once', { status: 'queued' })
+    await caller.updateMany({ ids: [t.id], updates: { status: 'doing' } })
+    expect(eventsOf(t.id).filter((e) => e.kind === 'task.status_changed')).toHaveLength(1)
+  })
+})

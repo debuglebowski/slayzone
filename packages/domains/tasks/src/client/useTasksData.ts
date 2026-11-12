@@ -113,7 +113,9 @@ function toastBulkFailure(verb: string, total: number, outcome: PerHubOutcome): 
  * Maps a snake_case `Partial<Task>` patch to the camelCase fields accepted by
  * `updateTask` / `updateTasks`. Single source of truth for the context-menu
  * update paths — a field omitted here is silently dropped before it reaches
- * the DB, so every editable task field must be listed.
+ * the DB, so every editable task field must be listed. Except the project: a
+ * move goes only through the move dialog (`MoveTaskDialog` → `task.moveToProject`),
+ * which says what it does and can't be undone.
  */
 function toUpdateTaskFields(updates: Partial<Task>) {
   return {
@@ -121,7 +123,6 @@ function toUpdateTaskFields(updates: Partial<Task>) {
     status: updates.status,
     priority: updates.priority,
     progress: updates.progress,
-    projectId: updates.project_id,
     snoozedUntil: updates.snoozed_until,
     isBlocked: updates.is_blocked,
     blockedComment: updates.blocked_comment,
@@ -177,7 +178,8 @@ interface UseTasksDataReturn {
   archiveTasks: (taskIds: string[]) => Promise<string[]>
   deleteTask: (taskId: string) => Promise<void>
   bulkDelete: (taskIds: string[]) => Promise<string[]>
-  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
+  /** Answers whether the hub took the update (on failure: rolled back, toasted). */
+  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<boolean>
   bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<string[]>
   setTaskPinned: (taskId: string, pinned: boolean) => void
   setTasksPinned: (taskIds: string[], pinned: boolean) => void
@@ -990,7 +992,7 @@ export function useTasksData(): UseTasksDataReturn {
   // Snapshot pattern keeps deps empty so the callback ref stays stable across
   // renders — prevents fanout re-renders in consumers (e.g. useUndoableTaskActions).
   const contextMenuUpdate = useCallback(
-    async (taskId: string, updates: Partial<Task>) => {
+    async (taskId: string, updates: Partial<Task>): Promise<boolean> => {
       let previousTasks: Task[] = []
       setTasks((prev) => {
         previousTasks = prev
@@ -1011,7 +1013,12 @@ export function useTasksData(): UseTasksDataReturn {
           id: taskId,
           ...toUpdateTaskFields(updates)
         })
-      } catch {
+        return true
+      } catch (error) {
+        // Never a silent snap-back (nor, through the undo wrapper, a false "Updated").
+        toast.error(
+          `Couldn't update the task: ${error instanceof Error ? error.message : String(error)}`
+        )
         setTasks(previousTasks)
         if (updates.is_blocked !== undefined) {
           setBlockedTaskIds((prev) => {
@@ -1021,6 +1028,7 @@ export function useTasksData(): UseTasksDataReturn {
             return next
           })
         }
+        return false
       }
     },
     [clientForTask]

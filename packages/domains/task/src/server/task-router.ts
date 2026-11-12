@@ -11,6 +11,7 @@ import {
 } from './ops'
 import {
   InvalidTaskUpdateError,
+  ProjectNotFoundError,
   readTaskPaths,
   TaskFoldersUnavailableError,
   type OpDeps
@@ -18,6 +19,8 @@ import {
 import { startMainAgent, switchMainAgentMode } from './main-agent'
 import {
   TASK_PATHS_MAX,
+  moveTasksToProjectInputSchema,
+  movePreviewInputSchema,
   type CreateTaskInput,
   type UpdateTaskInput
 } from '@slayzone/task-contracts'
@@ -86,7 +89,7 @@ const asBadRequest = async <T>(run: () => Promise<T>): Promise<T> => {
   try {
     return await run()
   } catch (err) {
-    if (err instanceof InvalidTaskUpdateError) {
+    if (err instanceof InvalidTaskUpdateError || err instanceof ProjectNotFoundError) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err })
     }
     if (err instanceof TaskFoldersUnavailableError) {
@@ -319,6 +322,23 @@ export const taskRouter = router({
     .mutation(({ ctx, input }) =>
       asBadRequest(() => ops().updateManyTasksOp(ctx.db, input as never, deps()))
     ),
+
+  // Move tasks to another project on this hub: subtasks, tags, detaching, status
+  // re-homing — one transaction (ops/move-to-project.ts). `update` / `updateMany`
+  // with a `projectId` take the same path.
+  moveToProject: publicProcedure
+    .input(moveTasksToProjectInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const result = await asBadRequest(() =>
+        ops().moveTasksToProjectRequestOp(ctx.db, input, deps())
+      )
+      return result
+    }),
+
+  // What a move would do (the move dialog's summary). Writes nothing.
+  movePreview: publicProcedure
+    .input(movePreviewInputSchema)
+    .query(({ ctx, input }) => asBadRequest(() => ops().previewMoveToProjectOp(ctx.db, input))),
 
   delete: publicProcedure
     .input(z.object({ id: z.string() }))

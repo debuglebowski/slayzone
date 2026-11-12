@@ -706,6 +706,8 @@ run_harness packages/domains/terminal/src/server/chat-threads-store.test.ts
 run_harness packages/domains/terminal/src/server/pty-router.test.ts
 # Transport routers P13 — task + template + artifacts (createCaller contract tests)
 run_harness packages/apps/api/src/routers/task.test.ts
+# Moving tasks to another project: subtree, detach, tags, re-home; update/updateMany delegate to it.
+run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
 # Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
 # (they emitted nothing, so other clients never saw them live); a burst stays merged.
 run_harness packages/apps/api/src/routers/task-change-signals.test.ts

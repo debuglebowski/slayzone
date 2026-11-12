@@ -795,6 +795,18 @@ export class TaskFoldersUnavailableError extends Error {
   override name = 'TaskFoldersUnavailableError'
 }
 
+/**
+ * A move names a project this hub does not have (a stale picker, another hub's
+ * project). A caller error — transports map it to "bad request" — never the raw
+ * foreign-key failure it would otherwise be.
+ */
+export class ProjectNotFoundError extends Error {
+  override name = 'ProjectNotFoundError'
+  constructor(projectId: string) {
+    super(`Project not found: ${projectId}`)
+  }
+}
+
 interface UpdateTarget {
   existing: { project_id: string; status: string; is_temporary: number } | undefined
   targetProjectId: string | undefined
@@ -809,7 +821,8 @@ async function readUpdateTarget(db: SlayzoneDb, data: UpdateTaskInput): Promise<
   )
   const targetProjectId = data.projectId ?? existing?.project_id
   const targetColumns = targetProjectId ? await getProjectColumns(db, targetProjectId) : null
-  const projectChanged = data.projectId !== undefined && existing?.project_id !== data.projectId
+  const projectChanged =
+    existing !== undefined && data.projectId !== undefined && existing.project_id !== data.projectId
   return { existing, targetProjectId, targetColumns, projectChanged }
 }
 
@@ -943,6 +956,11 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   const target = await readUpdateTarget(db, data)
   assertValidTaskUpdate(data, target)
   const { existing, targetProjectId, targetColumns, projectChanged } = target
+  // A project change is a move — subtasks, tags, detaching — and has exactly one
+  // path: `applyProjectChange` / `moveTasksToProject` (ops/move-to-project.ts),
+  // which the update ops run before handing the rest of the update here.
+  if (projectChanged)
+    throw new Error('A project change goes through moveTasksToProject, not updateTask')
 
   // Auto-promote a temporary task when its title is renamed. Mirrors "Turn into task" behavior:
   // clears is_temporary and moves status into the `started` category. Caller can opt out by
@@ -952,27 +970,22 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
 
   let normalizedStatusForWrite: string | undefined
   if (data.status !== undefined) {
-    // Unknown here only on a project move (assertValidTaskUpdate) — re-home it.
-    normalizedStatusForWrite = isKnownStatus(data.status, targetColumns)
-      ? data.status
-      : getDefaultStatus(targetColumns)
+    normalizedStatusForWrite = data.status
   } else if (shouldPromoteFromTemp) {
     normalizedStatusForWrite =
       getStatusByCategory('started', targetColumns) ?? getDefaultStatus(targetColumns)
-  } else if (projectChanged && existing?.status && !isKnownStatus(existing.status, targetColumns)) {
-    normalizedStatusForWrite = getDefaultStatus(targetColumns)
   }
 
   // Status-regression telemetry — catches an unexpected demotion of a task back
   // into the project's default/triage column (the "task keeps jumping to inbox"
   // class of bug). Fires only on the signature — a write that moves the task
-  // from a MORE-advanced workflow category down to `getDefaultStatus`, without a
-  // project change (which legitimately re-homes out-of-range statuses). The
+  // from a MORE-advanced workflow category down to `getDefaultStatus` (a project
+  // move, which legitimately re-homes statuses, never comes through here). The
   // stack trace (built only in this rare branch, so the common path pays
   // nothing) names the offending caller. level:'error' forces an immediate
   // diagnostics flush so a crash/restart can't lose it. Query via:
   //   SELECT * FROM diagnostics_events WHERE event='task.status_regression'
-  if (normalizedStatusForWrite !== undefined && !projectChanged && existing?.status) {
+  if (normalizedStatusForWrite !== undefined && existing?.status) {
     const defaultStatus = getDefaultStatus(targetColumns)
     const categoryRank = (statusId: string): number => {
       const category = getColumnById(statusId, targetColumns)?.category
@@ -1006,7 +1019,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   /** The paths this update writes, for the computer holding the task's folders. */
   const pathPatch: { worktreePath?: string | null; baseDir?: string | null } = {}
   const chatSettingsPushes: Array<{ mode: string; settings: Record<string, unknown> }> = []
-  /** A worktree / base-dir / project change: every tab's session resets (below). */
+  /** A worktree / base-dir change: every tab's session resets (below). */
   let resetsWholeTask = false
 
   if (data.title !== undefined) {
@@ -1036,23 +1049,6 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   if (data.dueDate !== undefined) {
     fields.push('due_date = ?')
     values.push(data.dueDate)
-  }
-  if (data.projectId !== undefined) {
-    fields.push('project_id = ?')
-    values.push(data.projectId)
-    if (projectChanged) {
-      // Clear repo/worktree/base_dir fields — child repos and worktrees may differ across projects
-      if (data.repoName === undefined) {
-        fields.push('repo_name = ?')
-        values.push(null)
-      }
-      if (data.worktreePath === undefined) pathPatch.worktreePath = null
-      if (data.worktreeParentBranch === undefined) {
-        fields.push('worktree_parent_branch = ?')
-        values.push(null)
-      }
-      if (data.baseDir === undefined) pathPatch.baseDir = null
-    }
   }
   if (data.parentId !== undefined) {
     // `validateReparent` does synchronous `lookup(id)` calls (task, parent, and the
@@ -1142,7 +1138,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     ]
     const hasLegacyUpdate = legacyMappings.some((m) => m.hasFlags)
     const shouldResetConversationIds =
-      (data.worktreePath !== undefined || data.baseDir !== undefined || projectChanged) &&
+      (data.worktreePath !== undefined || data.baseDir !== undefined) &&
       data.providerConfig === undefined &&
       !hasLegacyUpdate
     resetsWholeTask = shouldResetConversationIds
@@ -1235,7 +1231,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     fields.push('panel_sizes = ?')
     values.push(data.panelSizes ? JSON.stringify(data.panelSizes) : null)
   }
-  // Note: these also get cleared to null on project change (see projectChanged block above)
+  // A project move clears these too (`moveTasksToProject`).
   if (data.worktreePath !== undefined) pathPatch.worktreePath = data.worktreePath || null
   if (data.worktreeParentBranch !== undefined) {
     fields.push('worktree_parent_branch = ?')
@@ -1445,7 +1441,7 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   // A path the user set was written on its computer above (`apply`): clients re-read it.
   else if (userPaths) taskEvents.emit('task:paths-changed', { taskId: data.id })
 
-  // A worktree / base-dir / project change: every tab's agent ran in the old folder,
+  // A worktree / base-dir change: every tab's agent ran in the old folder,
   // so the WHOLE task resets — every tab, every mode (a reset intent the hub
   // delivers to the task's computers, robustness plan §9).
   if (resetsWholeTask) {
@@ -1473,17 +1469,13 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
   const effectiveStatus = normalizedStatusForWrite
   const reachedTerminal =
     effectiveStatus !== undefined && isTerminalStatus(effectiveStatus, targetColumns)
-  // `previouslyTerminal` uses the PRE-write status. Compute before project-change
-  // logic may invalidate the old status's known-ness. Use same column config (pre-change)
-  // only when project didn't change; otherwise semantics are ambiguous and we skip respawn.
-  const previouslyTerminal =
-    !projectChanged && existing?.status ? isTerminalStatus(existing.status, targetColumns) : false
+  // `previouslyTerminal` uses the PRE-write status.
+  const previouslyTerminal = existing?.status
+    ? isTerminalStatus(existing.status, targetColumns)
+    : false
   const revived = effectiveStatus !== undefined && !reachedTerminal && previouslyTerminal
   if (reachedTerminal) {
     runtimeAdapters.onReachedTerminal(data.id)
-  } else if (projectChanged) {
-    // Project change rehomes the task — kill its PTYs but no other "terminal" semantics.
-    runtimeAdapters.killPtysByTaskId(data.id)
   }
   // Clear snooze when task reaches terminal status
   if (reachedTerminal && !fields.some((f) => f.startsWith('snoozed_until'))) {

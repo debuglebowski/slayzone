@@ -87,6 +87,7 @@ export {
   restoreTaskOp,
   unarchiveTaskOp,
   updateTaskOp,
+  moveTasksToProjectOp,
   setTaskSessionLedger,
   taskSessionLedger,
   SessionsOfflineError,
@@ -119,7 +120,8 @@ export {
   type TaskPathChange,
   type TaskPathRelease,
   InvalidTaskUpdateError,
-  TaskFoldersUnavailableError
+  TaskFoldersUnavailableError,
+  ProjectNotFoundError
 } from './ops/shared'
 // The in-process implementations (`defaultWorktreeExecAdapters`,
 // `defaultWorktreePolicyAdapters`) live in `worktrees/server`.

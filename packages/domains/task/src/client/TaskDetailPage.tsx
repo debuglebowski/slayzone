@@ -101,6 +101,7 @@ import {
   ContextMenuRadioItem
 } from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
+import { MoveTaskDialog } from './MoveTaskDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -546,6 +547,8 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Delete/archive dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  /** The project picked in the palette's "Move to project…": the move dialog confirms it. */
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   // Custom snooze date/time, opened from Cmd+K (Snooze → Pick date & time…).
   const [snoozeDialogOpen, setSnoozeDialogOpen] = useState(false)
@@ -1843,6 +1846,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     canRenameInline: !compact && !zenMode,
     onTaskUpdated: handleTaskUpdate,
     onTagsChange: handleTagsChange,
+    onMoveToProject: setMoveTargetId,
     onRenameInline: () => {
       setEditingTitle(true)
       titleInputRef.current?.focus()
@@ -3865,6 +3869,27 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           setLoopDialogOpen(false)
         }}
       />
+
+      {task && moveTargetId !== null && (
+        <MoveTaskDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setMoveTargetId(null)
+          }}
+          taskIds={[task.id]}
+          initialProjectId={moveTargetId}
+          onMoved={() => {
+            trpcClient.task.get
+              .query({ id: task.id })
+              .then((moved) => {
+                if (moved) handleTaskUpdate(moved)
+              })
+              .catch(() => {
+                /* the board's tasks-changed refresh brings it anyway */
+              })
+          }}
+        />
+      )}
 
       <DeleteTaskDialog
         task={task}

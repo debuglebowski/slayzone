@@ -20,7 +20,7 @@ test('permanent deletion never adds a restore action to Undo', async () => {
     archiveTasks: vi.fn(async () => []),
     deleteTask: remove,
     bulkDelete: vi.fn(async () => ['task']),
-    contextMenuUpdate: vi.fn(async () => undefined),
+    contextMenuUpdate: vi.fn(async () => true),
     bulkContextMenuUpdate: vi.fn(async () => [])
   }
   const { result } = renderHook(() =>

@@ -58,7 +58,9 @@ import {
   getSnoozePresets,
   CustomSnoozeDialog,
   BlockerDialog,
-  reportDeleteTaskError
+  MoveTaskDialog,
+  reportDeleteTaskError,
+  useProjectsOnTaskHub
 } from '@slayzone/task/client'
 
 interface TaskContextMenuProps {
@@ -118,7 +120,11 @@ export function TaskContextMenu({
   const [blockerDialogOpen, setBlockerDialogOpen] = useState(false)
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
+  /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const statusOptions = buildStatusOptions(columns)
+  // A task moves only between projects of its own hub.
+  const moveTargets = useProjectsOnTaskHub(projects, [task.id])
 
   const handleStatusChange = (status: string): void => {
     trackTask(task.id, 'task_status_changed', { from: task.status, to: status })
@@ -138,8 +144,7 @@ export function TaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    trackTask(task.id, 'task_moved_to_project')
-    onUpdateTask(task.id, { project_id: projectId })
+    if (projectId !== task.project_id) setMoveTargetId(projectId)
   }
 
   const handleSnooze = (date: Date): void => {
@@ -402,7 +407,7 @@ export function TaskContextMenu({
             </ContextMenuSubTrigger>
             <ContextMenuSubContent>
               <ContextMenuRadioGroup value={task.project_id} onValueChange={handleProjectChange}>
-                {projects.map((p) => (
+                {moveTargets.map((p) => (
                   <ContextMenuRadioItem key={p.id} value={p.id}>
                     <span
                       className="inline-block w-2 h-2 rounded-full mr-2"
@@ -512,6 +517,18 @@ export function TaskContextMenu({
           />
         </MountWhenOpened>
       )}
+
+      {/* Move to project: confirms the pick, says what the move does */}
+      <MountWhenOpened open={moveTargetId !== null}>
+        <MoveTaskDialog
+          open={moveTargetId !== null}
+          onOpenChange={(open) => {
+            if (!open) setMoveTargetId(null)
+          }}
+          taskIds={[task.id]}
+          initialProjectId={moveTargetId ?? undefined}
+        />
+      </MountWhenOpened>
 
       {/* Blocking task dialog */}
       <MountWhenOpened open={blockerDialogOpen}>

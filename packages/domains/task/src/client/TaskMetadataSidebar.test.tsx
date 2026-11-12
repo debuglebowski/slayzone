@@ -294,6 +294,8 @@ vi.mock('@slayzone/transport/client', () => ({
       setForTask: { mutationOptions: () => ({ __mutationKey: 'tags.setForTask' }) }
     }
   }),
+  // ProjectStatusCard re-reads a moved task through the vanilla client.
+  useTRPCClient: () => ({ task: { get: { query: async () => null } } }),
   useSubscription: () => undefined
 }))
 

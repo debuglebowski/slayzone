@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/recorder'
 import { recordActivityEvents } from '@slayzone/history/recorder'
+import { remapTaskTagsToProject } from '@slayzone/tags/db'
 
 /**
  * Named-transaction adapters for the task domain. These are the conditional
@@ -108,11 +109,42 @@ function update(
   })()
 }
 
-/** Record an arbitrary, already-built activity-event list inside its own txn. */
-function recordEvents(db: Database, p: { events: RecordActivityEventInput[] }): void {
-  if (p.events.length === 0) return
-  db.transaction(() => {
-    recordActivityEvents(db, p.events)
+/**
+ * Move tasks to another project in one transaction (`moveTasksToProject`): each
+ * moved row gets the target project, its re-homed status, and loses what belonged
+ * to the old project's folder (repo, worktree, base dir); a moved row whose parent
+ * stays behind is detached (`detach`), as are subtasks left behind (`detachIds`).
+ * Tags follow by name (`remapTaskTagsToProject`). Answers the tags it created.
+ */
+function moveProject(
+  db: Database,
+  p: {
+    targetProjectId: string
+    moves: { id: string; status: string; detach: boolean }[]
+    detachIds: string[]
+    events: RecordActivityEventInput[]
+  }
+): { createdTagIds: string[] } {
+  return db.transaction(() => {
+    const move = db.prepare(
+      `UPDATE tasks SET project_id = ?, status = ?, repo_name = NULL, worktree_parent_branch = NULL,
+         has_worktree = 0, has_base_dir = 0,
+         parent_id = CASE WHEN ? = 1 THEN NULL ELSE parent_id END,
+         updated_at = datetime('now')
+       WHERE id = ?`
+    )
+    for (const m of p.moves) move.run(p.targetProjectId, m.status, m.detach ? 1 : 0, m.id)
+    const detach = db.prepare(
+      "UPDATE tasks SET parent_id = NULL, updated_at = datetime('now') WHERE id = ?"
+    )
+    for (const id of p.detachIds) detach.run(id)
+    const createdTagIds = remapTaskTagsToProject(
+      db,
+      p.moves.map((m) => m.id),
+      p.targetProjectId
+    )
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { createdTagIds }
   })()
 }
 
@@ -122,7 +154,7 @@ export const taskTxns = {
   'task:soft-delete-many': softDeleteMany,
   'task:archive': archive,
   'task:update': update,
-  'task:record-events': recordEvents
+  'task:move-project': moveProject
 }
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this

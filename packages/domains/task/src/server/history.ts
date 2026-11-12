@@ -105,6 +105,22 @@ export function buildTaskUpdatedEvents(before: Task, after: Task): RecordActivit
   return events
 }
 
+/** A move to another project: one entry, filed under the project it moved to. */
+export function buildTaskProjectChangedEvents(
+  before: Pick<Task, 'id' | 'project_id'>,
+  target: { id: string; name: string },
+  sourceName: string
+): RecordActivityEventInput[] {
+  return [
+    buildTaskEvent(
+      { id: before.id, project_id: target.id },
+      'task.project_changed',
+      `Moved from ${sourceName} to ${target.name}`,
+      { from: before.project_id, to: target.id }
+    )
+  ]
+}
+
 export function buildTaskArchivedEvents(tasks: Task[]): RecordActivityEventInput[] {
   return tasks.map((task) => buildTaskEvent(task, 'task.archived', 'Task archived'))
 }

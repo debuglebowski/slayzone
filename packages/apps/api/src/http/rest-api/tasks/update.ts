@@ -5,6 +5,7 @@ import {
   getTaskOp,
   switchMainAgentMode,
   TaskFoldersUnavailableError,
+  ProjectNotFoundError,
   updateTaskOp
 } from '@slayzone/task/server'
 import { isTerminalStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
@@ -83,9 +84,12 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       body.id = task.id
 
       if (typeof body.status === 'string') {
+        // With a project change the status belongs to the project the task moves to.
+        const statusProjectId =
+          typeof body.projectId === 'string' ? body.projectId : task.project_id
         const row = await deps.db.get<{ columns_config: string | null }>(
           `SELECT columns_config FROM projects WHERE id = ? LIMIT 1`,
-          [task.project_id]
+          [statusProjectId]
         )
         const columns = parseColumnsConfig(row?.columns_config)
         const statusId = resolveStatusId(body.status, columns)
@@ -178,7 +182,13 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       // The computer refused the folder by its own policy (B3): 409, its message.
       if (respondComputerRefusal(res, err)) return
       // A path no connected computer can take now (§9 7e): the caller can fix it.
-      const status = err instanceof TaskFoldersUnavailableError ? 409 : 500
+      // A projectId this hub has no project for: the caller's mistake.
+      const status =
+        err instanceof TaskFoldersUnavailableError
+          ? 409
+          : err instanceof ProjectNotFoundError
+            ? 400
+            : 500
       res
         .status(status)
         .json({ ok: false, error: err instanceof Error ? err.message : String(err) })
