@@ -28,23 +28,33 @@ const REFUSED = /outside the folders of|has no folder on this computer|refused/
 /** The visible git diff panel (other tabs keep hidden ones mounted). */
 const diffPanel = (page: Page) => page.locator('[data-testid="git-diff-panel"]:visible')
 
-async function openTaskDiff(page: Page, taskId: string) {
+async function openTaskDiff(page: Page, taskId: string, title: string) {
   await openTaskById(page, taskId)
+  // THIS task's page is up (its title field shows). Before that, the visible Git
+  // button can still be the previous view's: a click there lands on the old page.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (t) =>
+            [...document.querySelectorAll('textarea,input')].some(
+              (el) => (el as HTMLInputElement).value === t && el.getClientRects().length > 0
+            ),
+          title
+        ),
+      { timeout: 15_000 }
+    )
+    .toBe(true)
   const gitPanel = page.locator('[data-testid="task-git-panel"]:visible')
   // The panel's open state carries over between tasks: open it only when its toggle
-  // says it is shut (a blind ⌘G closes a panel that was still mounting).
+  // says it is shut.
   const toggle = page
     .getByRole('button', { name: /^Git(?:\s|$)/ })
     .locator('visible=true')
     .first()
-  await expect(toggle).toBeVisible({ timeout: 10_000 })
-  // A click right after the tab opens can be undone by the task's panel layout
-  // loading after it: click again until the toggle stays on AND the panel shows.
-  await expect(async () => {
-    if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 1_000 })
-    await expect(gitPanel).toBeVisible({ timeout: 3_000 })
-  }).toPass({ timeout: 25_000 })
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(gitPanel).toBeVisible({ timeout: 10_000 })
   await gitPanel.getByRole('button', { name: /^Diff(?:\s|$)/ }).click()
   await expect(diffPanel(page)).toBeVisible({ timeout: 5_000 })
 }
@@ -70,10 +80,10 @@ test.describe('git diff panels in different scopes (one renderer load)', () => {
   })
 
   test("a second task's diff (another project) reads its own checkout", async ({ mainWindow }) => {
-    await openTaskDiff(mainWindow, taskA)
+    await openTaskDiff(mainWindow, taskA, 'Scope A task')
     await expect(diffPanel(mainWindow).getByText('only-in-a.txt')).toBeVisible({ timeout: 10_000 })
 
-    await openTaskDiff(mainWindow, taskB)
+    await openTaskDiff(mainWindow, taskB, 'Scope B task')
     await expect(diffPanel(mainWindow).getByText('only-in-b.txt')).toBeVisible({ timeout: 10_000 })
     await expect(diffPanel(mainWindow).getByText(REFUSED)).toHaveCount(0)
   })
