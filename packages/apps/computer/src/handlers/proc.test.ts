@@ -451,6 +451,44 @@ describe('createProcHandlers — agent-start admission', () => {
     }
   })
 
+  // The hub restores every chat that ran at shutdown in the background lane; the
+  // one the user opens meanwhile must not wait its FIFO turn.
+  it('prioritize moves a queued chat agent start to the front', async () => {
+    const { ctx } = makeCtx(roots)
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 10_000 })
+    const children = [controlledChild(), controlledChild(), controlledChild()]
+    const started: string[] = []
+    let next = 0
+    const spawnProcess = vi.fn(() => children[next++].child) as unknown as typeof spawn
+    const proc = createProcHandlers(ctx, undefined, { admission, spawnProcess })
+    const spawnOf = (sessionId: string) =>
+      Promise.resolve(
+        proc.handlers[ProcMethods.procSpawn]({ sessionId, command: 'sh', admission: 'background' })
+      ).then(() => started.push(sessionId))
+    try {
+      await spawnOf('b1')
+      const queued = [spawnOf('b2'), spawnOf('b3')]
+      await new Promise((r) => setImmediate(r))
+      expect(await proc.handlers[ProcMethods.procPrioritize]({ sessionId: 'b3' })).toEqual({
+        ok: true,
+        queued: true
+      })
+      children[0].print('up')
+      await new Promise((r) => setImmediate(r))
+      expect(started).toEqual(['b1', 'b3'])
+      children[1].print('up')
+      await Promise.all(queued)
+      expect(started).toEqual(['b1', 'b3', 'b2'])
+      // Already started: nothing to move.
+      expect(await proc.handlers[ProcMethods.procPrioritize]({ sessionId: 'b3' })).toEqual({
+        ok: true,
+        queued: false
+      })
+    } finally {
+      proc.disposeAll()
+    }
+  })
+
   it('a spawn with an admission lane waits for a free start slot (real processes)', async () => {
     const { notifies, until, ctx } = makeCtx(roots)
     const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 60_000 })

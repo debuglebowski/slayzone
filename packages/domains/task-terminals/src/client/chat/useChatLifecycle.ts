@@ -211,13 +211,18 @@ export function useChatLifecycle({
   const loading = startDecision === null && !loadFailed
   useEffect(() => (loading ? trackChatLoading() : undefined), [loading])
   const startFiredRef = useRef(false)
+  /** The start went out as a restore (hidden tab) and has not been re-asked as the user's. */
+  const restoreStartRef = useRef(false)
   useEffect(() => {
     if (startDecision === null || startDecision === 'none') return
     if (startDecision === 'shown' && !shown) return
     if (startFiredRef.current) return
     startFiredRef.current = true
-    // 'now' = reopening the workspace (a restore: the computer starts these a few
-    // at a time); 'shown' = the user is looking at it.
+    // 'now' off screen = reopening the workspace (a restore: the computer starts
+    // these a few at a time, after anything a user asked for). On screen, or
+    // 'shown', the user is looking at it: it goes first.
+    const restore = startDecision === 'now' && !shown
+    restoreStartRef.current = restore
     chatApi
       .start({
         tabId,
@@ -225,13 +230,35 @@ export function useChatLifecycle({
         mode,
         cwd,
         providerFlagsOverride: providerFlagsOverride ?? null,
-        reason: startDecision === 'now' ? 'restore' : 'user'
+        reason: restore ? 'restore' : 'user'
       })
       .catch((err: unknown) => {
         // Also shown in the chat itself (the start failure card); never silent.
         toast(`Couldn't start the agent: ${err instanceof Error ? err.message : String(err)}`)
       })
   }, [startDecision, shown, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
+
+  // Revealed while its restore still waits for an agent-start slot (the hub
+  // restores every chat that ran at shutdown, a few at a time): ask again as the
+  // user's start, which moves the queued start to the front. Once; idempotent for
+  // an agent that is up meanwhile, and its failure is the first start's to show.
+  const notStarted = state.notStarted
+  useEffect(() => {
+    if (!shown || !restoreStartRef.current || !notStarted) return
+    restoreStartRef.current = false
+    chatApi
+      .start({
+        tabId,
+        taskId,
+        mode,
+        cwd,
+        providerFlagsOverride: providerFlagsOverride ?? null,
+        reason: 'user'
+      })
+      .catch(() => {
+        /* reported by the first start */
+      })
+  }, [shown, notStarted, chatApi, tabId, taskId, mode, cwd, providerFlagsOverride])
 
   const handleRestart = useCallback(async () => {
     if (restarting) return

@@ -2496,10 +2496,22 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
     return spawnError('spawn-failed', detail)
   }
 
+  /** Where each session's agent is waiting to start: `prioritize` asks there. */
+  const queuedOn = new Map<string, string>()
+
   return {
+    prioritize(sessionId: string): void {
+      const computerId = queuedOn.get(sessionId)
+      if (computerId == null) return
+      // A computer that predates `proc.prioritize` answers `unimplemented`: FIFO.
+      void gateway
+        .request(computerId, HubToComputerMethods.procPrioritize, { sessionId })
+        .catch(() => undefined)
+    },
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
       const computerId = resolveComputerId(spec)
       if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
+      queuedOn.set(spec.sessionId, computerId)
       if (gate) await gate(computerId, { kind: 'task', id: spec.taskId })
 
       const procHandle = channel.spawnRouted(
@@ -2537,6 +2549,8 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
       let started = false
       procHandle.onSpawned(() => {
         started = true
+        // Started: nothing left to move up the queue.
+        if (queuedOn.get(spec.sessionId) === computerId) queuedOn.delete(spec.sessionId)
       })
       const failed = new Latch<Error>()
       procHandle.onExit(() => {

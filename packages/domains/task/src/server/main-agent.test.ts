@@ -28,6 +28,7 @@ import {
   setTaskPathsDelegate
 } from './ops/shared'
 import { resolveChatAgentLaunch, setMainAgentDeps } from './main-agent'
+import { openTasksFromViewState, restoreRunningChatAgents } from './agent-restore'
 import { setTaskSessionLedger, type SessionLedgerClient } from './ops'
 
 const h = await createTestHarness()
@@ -488,5 +489,142 @@ describe('task.switchMode', () => {
     await expect(caller.switchMode({ taskId: 'nope', mode: 'codex' })).rejects.toMatchObject({
       code: 'NOT_FOUND'
     })
+  })
+})
+
+// --- boot restore (agent-restore.ts) ---------------------------------------------
+describe('boot restore of running chat agents', () => {
+  const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+  const everywhere = async () => true
+  const setSetting = (key: string, value: string | null) => {
+    h.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    if (value !== null)
+      h.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, value)
+  }
+  /** A task whose main tab (id = task id) ran `mode` at shutdown. */
+  function runningTask(mode: string, state = 'running'): string {
+    const taskId = seedTask(seedProject('/p'), { mode, baseDir: '/base' })
+    h.db
+      .prepare(
+        'INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,1,0,?)'
+      )
+      .run(taskId, taskId, mode, state)
+    return taskId
+  }
+  function extraTab(taskId: string, state = 'running'): string {
+    const tabId = crypto.randomUUID()
+    h.db
+      .prepare(
+        'INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,0,1,?)'
+      )
+      .run(tabId, taskId, 'claude-chat', state)
+    return tabId
+  }
+  const viewState = (taskIds: string[], active: number) =>
+    JSON.stringify({
+      tabs: [
+        { type: 'home' },
+        ...taskIds.map((taskId) => ({ type: 'task', taskId, hubId: 'local' }))
+      ],
+      activeTabIndex: active
+    })
+
+  beforeEach(() => {
+    // Only this block's tabs count as running.
+    h.db.prepare("UPDATE terminal_tabs SET agent_state = 'stopped'").run()
+    setSetting('viewState', null)
+    setSetting('terminal_agent_startup', 'auto')
+  })
+
+  test('starts every chat agent that ran, the active tab first in the foreground lane', async () => {
+    const a = runningTask('claude-chat')
+    const b = runningTask('codex-chat')
+    const extra = extraTab(b)
+    runningTask('claude-code') // a terminal agent: its tab starts it, not the hub
+    runningTask('claude-chat', 'stopped')
+    setSetting('viewState', viewState([a, b], 2))
+
+    const result = await restoreRunningChatAgents(h.slayDb, {
+      getTask,
+      belongsHere: everywhere,
+      concurrency: 1
+    })
+
+    expect(result).toMatchObject({ tabs: 3, started: 3, alreadyLive: 0, failed: 0 })
+    expect(chatStarts.map((s) => [s.tabId, s.reason])).toEqual([
+      [b, 'user'],
+      [extra, 'user'],
+      [a, 'restore']
+    ])
+    expect(chatStarts[0]).toMatchObject({ taskId: b, mode: 'codex-chat', cwd: '/base' })
+    expect(ptyCreates).toEqual([])
+  })
+
+  test('a live agent is answered, never started again', async () => {
+    const a = runningTask('claude-chat')
+    liveChats.set(`${a}:${a}`, 'idle')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result).toMatchObject({ started: 0, alreadyLive: 1 })
+    expect(chatStarts).toEqual([])
+  })
+
+  test('the manual startup mode restores nothing', async () => {
+    runningTask('claude-chat')
+    setSetting('terminal_agent_startup', 'manual')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.tabs).toBe(0)
+    expect(chatStarts).toEqual([])
+  })
+
+  test('a task on another computer is left to it', async () => {
+    const a = runningTask('claude-chat')
+    const result = await restoreRunningChatAgents(h.slayDb, {
+      getTask,
+      belongsHere: async (taskId) => taskId !== a
+    })
+    expect(result).toMatchObject({ tabs: 1, elsewhere: 1, started: 0 })
+    expect(chatStarts).toEqual([])
+  })
+
+  test('another tab restores only when its task is open or its main agent restores', async () => {
+    const quiet = runningTask('claude-chat', 'stopped')
+    const hidden = extraTab(quiet)
+    let result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.tabs).toBe(0)
+    setSetting('viewState', viewState([quiet], 1))
+    result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result.started).toBe(1)
+    expect(chatStarts.map((s) => s.tabId)).toEqual([hidden])
+  })
+
+  test('one tab that cannot start does not stop the others', async () => {
+    const broken = seedTask(seedProject(null), { mode: 'claude-chat' })
+    h.db
+      .prepare(
+        "INSERT INTO terminal_tabs(id,task_id,mode,is_main,position,agent_state) VALUES(?,?,?,1,0,'running')"
+      )
+      .run(broken, broken, 'claude-chat')
+    const ok = runningTask('claude-chat')
+    const result = await restoreRunningChatAgents(h.slayDb, { getTask, belongsHere: everywhere })
+    expect(result).toMatchObject({ tabs: 2, started: 1, failed: 1 })
+    expect(chatStarts.map((s) => s.taskId)).toEqual([ok])
+  })
+
+  test("the saved view: only this hub's task tabs, and which is active", () => {
+    expect(
+      openTasksFromViewState(
+        JSON.stringify({
+          tabs: [
+            { type: 'home' },
+            { type: 'task', taskId: 'a', hubId: 'local' },
+            { type: 'task', taskId: 'r', hubId: 'remote' },
+            { type: 'task', taskId: 'b' }
+          ],
+          activeTabIndex: 3
+        })
+      )
+    ).toEqual({ order: ['a', 'b'], active: 'b' })
+    expect(openTasksFromViewState('not json')).toEqual({ order: [], active: null })
+    expect(openTasksFromViewState(null)).toEqual({ order: [], active: null })
   })
 })

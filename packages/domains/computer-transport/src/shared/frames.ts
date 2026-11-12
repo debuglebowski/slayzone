@@ -666,6 +666,8 @@ export const HubToComputerMethods = {
   fsWatchStop: 'fs.watchStop',
   // child-process ops (routed ProcessBackend + routed chat agents)
   procSpawn: 'proc.spawn',
+  /** Move a chat agent's spawn still waiting for an agent-start slot to the front. */
+  procPrioritize: 'proc.prioritize',
   procKill: 'proc.kill',
   procWrite: 'proc.write',
   procGetBufferSince: 'proc.getBufferSince',
@@ -899,6 +901,19 @@ export const ptyPrioritizeResultSchema = z.object({
   queued: z.boolean()
 })
 export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
+
+/**
+ * Someone is waiting on this chat agent now (its tab was revealed, or a message was
+ * sent): if its `proc.spawn` is still waiting for an agent-start slot, start it next.
+ * A no-op (`queued: false`) for a process that already started or never queued.
+ */
+export const procPrioritizeParamsSchema = z.object({
+  sessionId: z.string().min(1)
+})
+export type ProcPrioritizeParams = z.infer<typeof procPrioritizeParamsSchema>
+
+export const procPrioritizeResultSchema = ptyPrioritizeResultSchema
+export type ProcPrioritizeResult = z.infer<typeof procPrioritizeResultSchema>
 
 /**
  * Which of a claude session's background jobs (`Bash` run_in_background /

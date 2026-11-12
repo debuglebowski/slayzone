@@ -2254,8 +2254,15 @@ export function createChatTransport(
    *
    * Throws if the tab has no hydrated session (caller must hydrate first), or if
    * the agent could not be started (the error is also shown in the chat).
+   *
+   * `prioritize`: someone is waiting on it now (a user start). A start already
+   * queued for an agent-start slot on its computer — e.g. the hub's boot restore —
+   * is moved to the front instead of waiting its FIFO turn.
    */
-  async function ensureSpawned(tabId: string): Promise<ChatSessionInfo> {
+  async function ensureSpawned(
+    tabId: string,
+    opts: { prioritize?: boolean } = {}
+  ): Promise<ChatSessionInfo> {
     if (isShuttingDown) {
       throw new ChatTransportError('Cannot spawn chat session while app is shutting down.')
     }
@@ -2277,7 +2284,10 @@ export function createChatTransport(
       return toInfo(tab)
     }
     const pending = inFlightSpawns.get(tabId)
-    if (pending) return pending
+    if (pending) {
+      if (opts.prioritize) deps.backend?.prioritize?.(stateKey(tab))
+      return pending
+    }
     const promise = (async (): Promise<ChatSessionInfo> => {
       try {
         const started = await startProcess(tab)

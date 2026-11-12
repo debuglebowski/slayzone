@@ -62,6 +62,8 @@ const COMPUTER_FS_CALL_TIMEOUT_MS = 60_000
 const PTY_FORGET_TIMEOUT_MS = 10_000
 /** Longest a call needing a computer waits for the desktop's local computer to enroll after boot. */
 const LOCAL_COMPUTER_BOOT_WAIT_MS = 30_000
+/** Longest the warm pool waits for the boot restore before warming anyway. */
+const WARM_HOLD_FOR_RESTORE_MAX_MS = 5 * 60_000
 /** A turn snapshot writes a tree of a whole worktree. */
 const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 /** `gh` with no limit of its own: the computer then ends it at its 30 s default. */
@@ -158,6 +160,7 @@ import {
   resolveMainAgentLaunch,
   resolveChatAgentLaunch,
   startMainAgent,
+  restoreRunningChatAgents,
   type TaskRuntimeAdapters
 } from '@slayzone/task/server'
 import type { TasksChange } from '@slayzone/task-contracts'
@@ -207,6 +210,7 @@ import {
   initWarmProcessManager,
   createDbWarmPoolDataOps,
   reapOrphanWarms,
+  reconcileWarmPool,
   reserveWarmTaskId,
   onGlobalStateChange,
   hasSessionUserInput,
@@ -1015,6 +1019,18 @@ export function composeServer(opts: {
     }
   }
   void refreshPrewarm()
+  // Boot restore (task/server/agent-restore.ts) brings back the chat agents that ran
+  // at shutdown as each computer connects. The pool holds NEW warm agents until the
+  // first pass is done, so it never boots agents in front of the ones coming back
+  // (on 2026-11-11 it booted 7 before any restore had even been asked for). Never
+  // held for good: a computer that never connects restores nothing.
+  let warmHeldForRestore = true
+  const releaseWarmPool = (): void => {
+    if (!warmHeldForRestore) return
+    warmHeldForRestore = false
+    reconcileWarmPool()
+  }
+  setTimeout(releaseWarmPool, WARM_HOLD_FOR_RESTORE_MAX_MS).unref()
   // Every `settings.set` signals its key now: re-read only for this setting (or an
   // unscoped ping, which may have written anything).
   notifyEvents.on('settings-changed', (change) => {
@@ -1033,7 +1049,8 @@ export function composeServer(opts: {
     // Warm on the computer this project's tasks will actually resolve to. Reads the
     // project's default binding through the SAME resolver a spawn uses, so a warm
     // agent is never booted on a machine no task will land on.
-    resolveComputerId: (projectId) => resolveComputerForProject(projectId)
+    resolveComputerId: (projectId) => resolveComputerForProject(projectId),
+    spawnsAllowed: () => !warmHeldForRestore
   })
 
   // Chat content and provider processes belong to the owning computer.
@@ -2404,6 +2421,24 @@ export function composeServer(opts: {
           console.error('[chat] computer reconciliation pending')
         )
       void reapOrphanWarms(computer.computerId)
+    })
+    // Bring back the chat agents that ran at shutdown on this computer — once per
+    // computer per hub run, whatever any client is doing (agent-restore.ts).
+    const restoredComputers = new Set<string>()
+    computerGateway.events.on('computer-connected', ({ computer }) => {
+      const id = computer.computerId
+      if (resettingForTest || restoredComputers.has(id)) return
+      restoredComputers.add(id)
+      void restoreRunningChatAgents(db, {
+        getTask: (taskId) => getTaskOp(db, taskId),
+        belongsHere: async (taskId) => {
+          try {
+            return (await resolveComputerForTask(taskId)) === id
+          } catch {
+            return false
+          }
+        }
+      }).finally(releaseWarmPool)
     })
     // Background processes run on the computer that owns their task / project, like
     // every other workspace exec (docs/exec-boundary.md). The manager resolves the

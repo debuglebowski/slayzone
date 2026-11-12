@@ -6,7 +6,9 @@ export type { TabsChangedPayload, TabsEventMap } from './events'
 export {
   setTabAgentState,
   listHibernatedSessionIds,
-  listAutoRestoreTaskIds
+  listAutoRestoreTaskIds,
+  listAutoRestoreChatTabs,
+  type AutoRestoreChatTab
 } from './tab-flags'
 export {
   rowToTab,

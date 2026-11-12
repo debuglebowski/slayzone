@@ -177,6 +177,13 @@ interface WarmDeps {
   resolveComputerId: (projectId: string) => Promise<string | null>
   /** Override of {@link DEFAULT_RESERVE_TTL_MS} (tests). */
   reserveTtlMs?: number
+  /**
+   * False holds NEW warm spawns (existing warm agents stay): the hub holds them
+   * while its boot restore brings back the agents that ran at shutdown, so the
+   * pool never boots agents in front of them. Call {@link reconcileWarmPool} when
+   * it turns true. Omitted = always allowed.
+   */
+  spawnsAllowed?: () => boolean
 }
 
 type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
@@ -227,6 +234,11 @@ export function setProjectTabCounts(windowId: number, counts: Record<string, num
 }
 
 /** Drop a window's contribution (on window close) and reconcile. */
+/** Reconcile the pool now (debounced) — e.g. once `spawnsAllowed` turned true. */
+export function reconcileWarmPool(): void {
+  scheduleReconcile()
+}
+
 export function clearWindowTabCounts(windowId: number): void {
   if (tabCountsByWindow.delete(windowId)) scheduleReconcile()
 }
@@ -482,6 +494,10 @@ async function reconcile(): Promise<void> {
   for (const projectId of [...warm.keys()]) {
     if (!desired.has(projectId)) killWarm(projectId)
   }
+  if (deps.spawnsAllowed && !deps.spawnsAllowed()) {
+    recordDiagnosticEvent({ level: 'info', source: 'pty', event: 'warm.reconcile_held' })
+    return
+  }
   // Spawn warm shells for newly active projects.
   for (const projectId of desired) {
     if (!warm.has(projectId) && !spawning.has(projectId)) void spawnWarm(projectId)
@@ -490,6 +506,8 @@ async function reconcile(): Promise<void> {
 
 async function spawnWarm(projectId: string): Promise<void> {
   if (!deps || shuttingDown || !deps.isEnabled()) return
+  // Held (see `spawnsAllowed`): the reconcile on release spawns what is missing.
+  if (deps.spawnsAllowed && !deps.spawnsAllowed()) return
   if (warm.has(projectId) || spawning.has(projectId)) return
   spawning.add(projectId)
   const spawnEpoch = epoch

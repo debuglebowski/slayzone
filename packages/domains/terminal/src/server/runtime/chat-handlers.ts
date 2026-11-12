@@ -981,7 +981,8 @@ export function createChatOps(opts: ChatHandlerOpts) {
           ...built,
           admission: o.reason === 'restore' ? 'background' : 'foreground'
         })
-        return ensureSpawned(o.tabId)
+        // A user start joining a queued restore moves it to the front.
+        return ensureSpawned(o.tabId, { prioritize: o.reason !== 'restore' })
       }),
 
     /** Replace the running process while retaining this tab's conversation and events. */

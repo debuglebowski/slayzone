@@ -61,6 +61,17 @@ export interface StartMainAgentInput {
   /** Terminal size to start a terminal agent at; omitted = the runtime default. */
   cols?: number
   rows?: number
+  /**
+   * The computer's admission lane: `foreground` (default) = someone asked for it
+   * now; `restore` = the hub bringing back what ran at shutdown — it starts after
+   * every foreground start (`computer/spawn-admission.ts`).
+   */
+  admission?: 'foreground' | 'restore'
+  /**
+   * Start only an agent of this kind; a task whose main agent is the other kind is
+   * left alone (answered `started: false`). The boot restore starts chat agents only.
+   */
+  kind?: 'pty' | 'chat'
 }
 
 export interface StartMainAgentResult {
@@ -209,13 +220,14 @@ async function resolveTaskAgentCwd(
 
 async function startOnce(
   db: SlayzoneDb,
-  { taskId, cols, rows }: StartMainAgentInput,
+  { taskId, cols, rows, admission = 'foreground', kind: onlyKind }: StartMainAgentInput,
   getTask: (taskId: string) => Promise<Task | null>
 ): Promise<StartMainAgentResult> {
   const launch = await resolveMainAgentLaunch(db, taskId, getTask)
   const { sessionId, kind, props } = launch
   const pty = getPtyDeps().ops
   const base = { sessionId, tabId: launch.tabId, mode: launch.mode, kind } as const
+  if (onlyKind && kind !== onlyKind) return { ...base, cwd: null, state: null, started: false }
 
   // Live already: answer it. Starting again would replace it — a pty create kills
   // the session at this id; a chat hydrate with any other cwd tears the tab down.
@@ -232,8 +244,8 @@ async function startOnce(
       cwd,
       // What the desktop's main chat tab passes (`pane.providerFlags ?? null`).
       providerFlagsOverride: launch.providerFlagsOverride,
-      // Asked for now: the computer's foreground admission lane.
-      reason: 'user'
+      // `user` = the computer's foreground admission lane; `restore` = after it.
+      reason: admission === 'restore' ? 'restore' : 'user'
     })
   } else {
     const ids = spawnConversationIds(
@@ -256,7 +268,7 @@ async function startOnce(
       cols,
       rows,
       // Asked for now: starts ahead of agents a workspace restore queued.
-      foreground: true
+      foreground: admission !== 'restore'
     })
     if (!result.success) {
       throw new TRPCError({

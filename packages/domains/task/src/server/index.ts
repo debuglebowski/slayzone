@@ -28,6 +28,12 @@ export {
   type StartMainAgentInput,
   type StartMainAgentResult
 } from './main-agent'
+// The hub's boot restore of the chat agents that ran at shutdown.
+export {
+  restoreRunningChatAgents,
+  type AgentRestorePassOptions,
+  type AgentRestorePassResult
+} from './agent-restore'
 export type { TaskRouter, TaskMounts } from './router-mounts'
 
 export {

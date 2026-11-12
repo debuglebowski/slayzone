@@ -92,6 +92,8 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'pty.clearBuffer': null,
   'pty.list': null,
   'pty.prioritize': null,
+  // An ordering hint for a queued chat agent start; starts nothing by itself.
+  'proc.prioritize': null,
   'pty.backgroundJobs': null,
   'pty.doctor': null,
   // Runs `<binary> --version` on the computer; starts no session, changes nothing.

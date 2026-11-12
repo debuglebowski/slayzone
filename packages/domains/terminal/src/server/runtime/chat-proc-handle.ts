@@ -184,6 +184,11 @@ export interface ChatSpawnSpec {
 
 export interface ChatBackend {
   spawn(spec: ChatSpawnSpec): ChatProcHandle | Promise<ChatProcHandle>
+  /**
+   * Someone is waiting on this agent now: if its spawn is still queued for an
+   * agent-start slot on its computer, start it next. Best-effort; absent = FIFO.
+   */
+  prioritize?(sessionId: string): void
 }
 
 /**

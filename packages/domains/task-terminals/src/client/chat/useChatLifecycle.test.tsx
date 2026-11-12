@@ -204,7 +204,7 @@ describe('useChatLifecycle displaySessionEnded', () => {
 
 describe('useChatLifecycle startup (non-main tab)', () => {
   it('restores an agent that was running', async () => {
-    const { chatApi } = setup({ agentState: 'running' })
+    const { chatApi } = setup({ agentState: 'running', shown: false })
     await flush()
     expect(chatApi.start).toHaveBeenCalledTimes(1)
     // A restore: the computer starts these a few at a time (background lane).
@@ -233,7 +233,11 @@ describe('useChatLifecycle startup (non-main tab)', () => {
   })
 
   it('passes the provider flags override through', async () => {
-    const { chatApi } = setup({ agentState: 'running', providerFlagsOverride: '--verbose' })
+    const { chatApi } = setup({
+      agentState: 'running',
+      providerFlagsOverride: '--verbose',
+      shown: false
+    })
     await flush()
     expect(chatApi.start).toHaveBeenCalledWith({
       ...TARGET,
@@ -330,7 +334,7 @@ describe('useChatLifecycle startup decision', () => {
     const start = leakable<Parameters<ChatActions['start']>[0]>('spawn failed')
     const chatApi: ChatActions = { ...makeChatApi(), start: start.fn }
     const leaked = await unhandledRejectionsDuring(async () => {
-      setup({ agentState: 'running', chatApi })
+      setup({ agentState: 'running', chatApi, shown: false })
       await flush()
     })
     expect(start.calls).toEqual([{ ...TARGET, reason: 'restore' }])
@@ -647,5 +651,36 @@ describe('useChatLifecycle inFlight diagnostics', () => {
     })
     expect(record.calls).toHaveLength(2)
     expect(leaked).toEqual([])
+  })
+})
+
+// The hub restores every chat that ran at shutdown, a few at a time. The tab the
+// user is looking at must not wait its FIFO turn behind the hidden ones.
+describe('useChatLifecycle restore of the tab on screen', () => {
+  it('a restored tab on screen asks as a user start (foreground lane)', async () => {
+    const { chatApi } = setup({ agentState: 'running', shown: true })
+    await flush()
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
+    expect(chatApi.start).toHaveBeenCalledWith({ ...TARGET, reason: 'user' })
+  })
+
+  it('revealed while its restore still waits: asks once more as a user start', async () => {
+    const waiting = timelineState({ notStarted: true })
+    const { chatApi, update } = setup({ agentState: 'running', shown: false, state: waiting })
+    await flush()
+    expect(chatApi.start).toHaveBeenLastCalledWith({ ...TARGET, reason: 'restore' })
+    update({ shown: true, state: waiting })
+    expect(chatApi.start).toHaveBeenCalledTimes(2)
+    expect(chatApi.start).toHaveBeenLastCalledWith({ ...TARGET, reason: 'user' })
+    update({ shown: false, state: waiting })
+    update({ shown: true, state: waiting })
+    expect(chatApi.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('revealed after its agent is up: no second start', async () => {
+    const { chatApi, update } = setup({ agentState: 'running', shown: false })
+    await flush()
+    update({ shown: true })
+    expect(chatApi.start).toHaveBeenCalledTimes(1)
   })
 })

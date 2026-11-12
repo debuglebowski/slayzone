@@ -140,6 +140,7 @@ export {
   clearWindowTabCounts,
   createDbWarmPoolDataOps,
   initWarmProcessManager,
+  reconcileWarmPool,
   reapOrphanWarms,
   reserveWarmTaskId,
   teardownAllWarm,

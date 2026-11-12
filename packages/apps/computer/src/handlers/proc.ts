@@ -54,6 +54,8 @@ import {
   ProcRefusalReasons,
   type ProcSpawnParams,
   procSpawnParamsSchema,
+  procPrioritizeParamsSchema,
+  type ProcPrioritizeResult,
   procStatsParamsSchema,
   type ProcStatsResult,
   type ProcWriteResult,
@@ -84,6 +86,7 @@ const MAX_BUFFER_SIZE = 750 * 1024
 /** Re-exported for tests + main.ts wiring. Values come from the shared contract. */
 export const ProcMethods = {
   procSpawn: HubToComputerMethods.procSpawn,
+  procPrioritize: HubToComputerMethods.procPrioritize,
   procKill: HubToComputerMethods.procKill,
   procWrite: HubToComputerMethods.procWrite,
   procGetBufferSince: HubToComputerMethods.procGetBufferSince,
@@ -262,6 +265,16 @@ export function createProcHandlers(
       }
     })
     return promise
+  }
+
+  /**
+   * Someone is waiting on this agent now: a spawn still queued for an agent-start
+   * slot goes next (the chat counterpart of `pty.prioritize`).
+   */
+  function procPrioritize(rawParams: unknown): ProcPrioritizeResult {
+    const { sessionId } = procPrioritizeParamsSchema.parse(rawParams)
+    const item = queued.get(sessionId)
+    return { ok: true, queued: item ? admission.prioritize(item.ticket) : false }
   }
 
   function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
@@ -630,6 +643,7 @@ export function createProcHandlers(
 
   const handlers: HubMethodTable = {
     [ProcMethods.procSpawn]: procSpawn,
+    [ProcMethods.procPrioritize]: procPrioritize,
     [ProcMethods.procKill]: procKill,
     [ProcMethods.procWrite]: procWrite,
     [ProcMethods.procGetBufferSince]: procGetBufferSince,
