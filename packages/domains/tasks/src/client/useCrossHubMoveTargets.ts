@@ -17,6 +17,7 @@ export function useCrossHubMoveTargets(
     targetHubId: string
     targetProjectId: string
     includeSubtasks: boolean
+    includeSessions: boolean
   }) => Promise<void>
 } {
   const federation = useFederationOrNull()

@@ -481,6 +481,12 @@ base.describe('move a task to another hub', () => {
             message: 'the interrupted move finishes on hub B after the restart'
           })
           .toBe(targetProjectId)
+          .catch(async (error: Error) => {
+            const journal = await relaunched.page
+              .evaluate(() => window.getTrpcVanillaClient().taskMoves.list.query({}))
+              .catch((e: Error) => e.message)
+            throw new Error(`${error.message}\njournal: ${JSON.stringify(journal)}`)
+          })
         await expect
           .poll(() => projectOnAppHub(relaunched.page, taskId), { timeout: 30_000 })
           .toBe(null)
@@ -549,4 +555,152 @@ base.describe('move a task to another hub', () => {
       expect(onA).toEqual([expect.objectContaining({ role: 'blocks', remoteTaskId: moved })])
     })
   })
+
+  /**
+   * The chat goes with the task (Keep agent sessions, on by default): its history is on
+   * hub B's computer and read through hub B; what is added there comes back with the
+   * task. The app's one computer serves both hubs, each from its own store.
+   */
+  base(
+    'a task’s chat moves to hub B with it, and comes back with what was added there',
+    async () => {
+      base.setTimeout(300_000)
+      await inTwoHubs('sessions', async ({ page, hub, targetProjectId }) => {
+        const projectId = await projectOnA(page, 'Source On A')
+        const taskId = await createTaskOnA(page, projectId, 'Chat that travels', {
+          agentId: 'claude-chat'
+        })
+        const tabId = await page.evaluate(async (id) => {
+          const tab = await window
+            .getTrpcVanillaClient()
+            .taskTerminals.ensureMain.mutate({ taskId: id, mode: 'claude-chat' })
+          return tab.id
+        }, taskId)
+        const said = [
+          { kind: 'user-message', id: 'u1', text: 'asked on hub A' },
+          { kind: 'assistant-text', messageId: 'm1', text: 'answered on hub A' }
+        ]
+        await seedChatEvents(page, tabId, said)
+        await page.reload()
+        await page.waitForSelector('#root', { timeout: 30_000 })
+
+        const kindsOnB = () =>
+          withHubClient(hub, async (c) =>
+            (
+              (await c.chat.testReadEvents.query({ tabId, afterSeq: -1, limit: 100 })) as Array<{
+                event: { kind: string; text?: string }
+              }>
+            ).map((e) => e.event.kind)
+          )
+
+        // Away: the dialog keeps sessions by default.
+        const dialog = await openMoveDialog(page, 'SO', 'Chat that travels', /Target On B/)
+        await expect(dialog.getByTestId('move-task-include-sessions')).toBeChecked()
+        await confirmMove(page)
+        await expect
+          .poll(async () => (await tasksOnB(hub)).find((t) => t.id === taskId)?.project_id, {
+            timeout: 90_000,
+            message: 'the task on hub B'
+          })
+          .toBe(targetProjectId)
+        await expect(page.getByTestId('task-moves-panel')).toHaveCount(0, { timeout: 30_000 })
+        await expect
+          .poll(() => kindsOnB().catch((e: Error) => [e.message]), {
+            timeout: 60_000,
+            message: 'the chat history on hub B'
+          })
+          .toEqual(['user-message', 'assistant-text'])
+
+        // On hub B the chat grows.
+        await withHubClient(hub, (c) =>
+          c.chat.testSeedEvents.mutate({
+            tabId,
+            fromSeq: 2,
+            events: [{ kind: 'assistant-text', messageId: 'm2', text: 'added on hub B' }]
+          })
+        )
+
+        // And back: hub A's chat is the one that grew.
+        await openMoveDialog(page, 'TA', 'Chat that travels', /Source On A/)
+        await confirmMove(page)
+        await expect
+          .poll(() => projectOnAppHub(page, taskId), {
+            timeout: 90_000,
+            message: 'the task on hub A'
+          })
+          .toBe(projectId)
+        await expect(page.getByTestId('task-moves-panel')).toHaveCount(0, { timeout: 30_000 })
+        await expect
+          .poll(
+            async () =>
+              (await readChatEvents(page, tabId).catch((e: Error) => [e.message])).map((e) =>
+                typeof e === 'string' ? e : e.event.kind
+              ),
+            { timeout: 60_000, message: 'the grown chat on hub A' }
+          )
+          .toEqual(['user-message', 'assistant-text', 'assistant-text'])
+      })
+    }
+  )
+
+  base(
+    'with “Keep agent sessions” off the task starts fresh on hub B; hub A keeps the chat',
+    async () => {
+      base.setTimeout(300_000)
+      await inTwoHubs('fresh', async ({ page, hub, targetProjectId }) => {
+        const projectId = await projectOnA(page, 'Source On A')
+        const taskId = await createTaskOnA(page, projectId, 'Chat that stays', {
+          agentId: 'claude-chat'
+        })
+        const tabId = await page.evaluate(async (id) => {
+          const tab = await window
+            .getTrpcVanillaClient()
+            .taskTerminals.ensureMain.mutate({ taskId: id, mode: 'claude-chat' })
+          return tab.id
+        }, taskId)
+        await seedChatEvents(page, tabId, [
+          { kind: 'user-message', id: 'u1', text: 'private to hub A' }
+        ])
+        await page.reload()
+        await page.waitForSelector('#root', { timeout: 30_000 })
+
+        const dialog = await openMoveDialog(page, 'SO', 'Chat that stays', /Target On B/)
+        await dialog.getByTestId('move-task-include-sessions').click()
+        await expect(dialog.getByTestId('move-task-include-sessions')).not.toBeChecked()
+        await confirmMove(page)
+        await expect
+          .poll(async () => (await tasksOnB(hub)).find((t) => t.id === taskId)?.project_id, {
+            timeout: 90_000,
+            message: 'the task on hub B'
+          })
+          .toBe(targetProjectId)
+        await expect(page.getByTestId('task-moves-panel')).toHaveCount(0, { timeout: 30_000 })
+
+        // Hub B has no history of it: its chat there is a new, empty one.
+        const onB = await withHubClient(hub, async (c) => {
+          const events = (await c.chat.testReadEvents.query({
+            tabId,
+            afterSeq: -1,
+            limit: 100
+          })) as unknown[]
+          return events.length
+        }).catch((e: Error) => e.message)
+        expect(onB).toBe(0)
+
+        // And back, sessions left behind again: hub A's chat is as it was.
+        const back = await openMoveDialog(page, 'TA', 'Chat that stays', /Source On A/)
+        await back.getByTestId('move-task-include-sessions').click()
+        await confirmMove(page)
+        await expect
+          .poll(() => projectOnAppHub(page, taskId), {
+            timeout: 90_000,
+            message: 'the task on hub A'
+          })
+          .toBe(projectId)
+        expect((await readChatEvents(page, tabId)).map((e) => e.event.kind)).toEqual([
+          'user-message'
+        ])
+      })
+    }
+  )
 })

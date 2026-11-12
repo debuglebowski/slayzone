@@ -47,6 +47,7 @@ export interface MoveTaskDialogProps {
     targetHubId: string
     targetProjectId: string
     includeSubtasks: boolean
+    includeSessions: boolean
   }) => Promise<void>
 }
 
@@ -157,6 +158,8 @@ function MoveTaskDialogBody({
   const { hubId: targetHubId, projectId: targetId } = parseTarget(targetValue)
   const crossHub = targetHubId !== null
   const [includeSubtasks, setIncludeSubtasks] = useState(true)
+  /** A move to another hub: the agent sessions (chats, history) travel with the tasks. */
+  const [includeSessions, setIncludeSessions] = useState(true)
   /** Agent tabs the user un-ticked: every other tab that can keep its session does. */
   const [freshTabIds, setFreshTabIds] = useState<ReadonlySet<string>>(new Set())
   const { data: projects } = useQuery(trpc.projects.list.queryOptions())
@@ -190,7 +193,12 @@ function MoveTaskDialogBody({
     for (const id of taskIds) trackTask(id, 'task_moved_to_project')
     if (crossHub && targetHubId && onMoveToOtherHub) {
       setStarting(true)
-      onMoveToOtherHub({ targetHubId, targetProjectId: targetId, includeSubtasks })
+      onMoveToOtherHub({
+        targetHubId,
+        targetProjectId: targetId,
+        includeSubtasks,
+        includeSessions
+      })
         .then(() => onOpenChange(false))
         .catch((error: unknown) => {
           setStarting(false)
@@ -283,6 +291,8 @@ function MoveTaskDialogBody({
           targetName={target.name}
           includeSubtasks={includeSubtasks}
           onIncludeSubtasksChange={setIncludeSubtasks}
+          includeSessions={includeSessions}
+          onIncludeSessionsChange={setIncludeSessions}
         />
       )}
 
@@ -341,13 +351,17 @@ function CrossHubSummary({
   hubLabel,
   targetName,
   includeSubtasks,
-  onIncludeSubtasksChange
+  onIncludeSubtasksChange,
+  includeSessions,
+  onIncludeSessionsChange
 }: {
   preview: CrossHubMovePreview
   hubLabel: string
   targetName: string
   includeSubtasks: boolean
   onIncludeSubtasksChange: (value: boolean) => void
+  includeSessions: boolean
+  onIncludeSessionsChange: (value: boolean) => void
 }): React.JSX.Element {
   if (preview.linkedToIntegration)
     return (
@@ -377,11 +391,24 @@ function CrossHubSummary({
           </Label>
         </div>
       )}
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="move-task-include-sessions"
+          checked={includeSessions}
+          onCheckedChange={(v) => onIncludeSessionsChange(v === true)}
+          data-testid="move-task-include-sessions"
+        />
+        <Label htmlFor="move-task-include-sessions">Keep agent sessions</Label>
+      </div>
       <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
         <li>
           Moves to {targetName} on {hubLabel}: the tasks, their tabs, tags, files and history.
         </li>
-        <li>Running agents stop; agent sessions start fresh on the other hub.</li>
+        <li>
+          {includeSessions
+            ? 'Running agents stop. Their chats and session history go with the tasks and resume on the other hub.'
+            : 'Running agents stop; agent sessions start fresh on the other hub.'}
+        </li>
         {preview.externalBlockerCount > 0 && (
           <li>
             {preview.externalBlockerCount === 1

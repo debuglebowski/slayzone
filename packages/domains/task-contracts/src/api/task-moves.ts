@@ -16,6 +16,8 @@ export const TASK_MOVE_STEPS = [
   'import',
   /** Copy the artifact files, checked by hash. */
   'copy-files',
+  /** Copy the agent sessions (chats, session ledger) from the tasks' computers to the target's. */
+  'copy-sessions',
   /** Blockers between a moved task and one staying behind become cross-hub links. */
   'links',
   /** The target hub takes the tasks as its own. */
@@ -47,6 +49,8 @@ export interface TaskMove {
   /** Every task the move carries (the roots and, if brought, their subtasks). */
   taskIds: string[]
   includeSubtasks: boolean
+  /** The tasks' agent sessions travel with them (else the tasks start fresh on the target). */
+  includeSessions: boolean
   /** The step to run next (the last one finished: status 'done'). */
   step: TaskMoveStep
   status: TaskMoveStatus
@@ -63,7 +67,8 @@ export const beginTaskMoveInputSchema = z.object({
   taskIds: z.array(z.string().min(1)).min(1),
   targetHubId: z.string().min(1),
   targetProjectId: z.string().min(1),
-  includeSubtasks: z.boolean().default(true)
+  includeSubtasks: z.boolean().default(true),
+  includeSessions: z.boolean().default(true)
 })
 export type BeginTaskMoveInput = z.input<typeof beginTaskMoveInputSchema>
 
@@ -172,6 +177,106 @@ export const addRemoteBlockersInputSchema = z.object({
 })
 export const removeRemoteBlockerInputSchema = z.object(remoteBlockerKey)
 export const remoteBlockersInputSchema = z.object({ taskId: z.string().min(1) })
+
+/**
+ * One chat of a moved task, as its source computer exports it (`copy-sessions`):
+ * the transfer's manifest (its header names the conversation, its hash and size
+ * check the bytes). The app relays it chunk by chunk; the computers verify it.
+ */
+export interface TaskMoveChatTransfer {
+  /** The computer the chat is exported from. */
+  computerId: string
+  manifest: {
+    header: {
+      migrationId: string
+      identity: { id: string; taskId: string; tabId: string; mode: string; epoch: number }
+    } & Record<string, unknown>
+    hash: string
+    bytes: number
+  }
+}
+/** What the source hub answers a task's session export with. */
+export interface TaskMoveSessionsExport {
+  transfers: TaskMoveChatTransfer[]
+  /** The task's session ledger, merged over its computers (opaque to the app). */
+  ledger: unknown
+}
+/** A chat's attachment, as the transfer's records name it. */
+export interface TaskMoveAttachmentRef {
+  artifactId: string
+  contentHash: string
+  name: string
+  kind: string
+  mediaType: string
+  size: number
+}
+const sessionTask = { moveId: z.string().min(1), taskId: z.string().min(1) }
+const transferManifest = z.custom<TaskMoveChatTransfer['manifest']>(
+  (v) =>
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as TaskMoveChatTransfer['manifest']).hash === 'string' &&
+    typeof (v as TaskMoveChatTransfer['manifest']).bytes === 'number' &&
+    typeof (v as TaskMoveChatTransfer['manifest']).header === 'object'
+)
+const attachmentRef = z.custom<TaskMoveAttachmentRef>(
+  (v) =>
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as TaskMoveAttachmentRef).artifactId === 'string'
+)
+export const sessionsExportInputSchema = z.object(sessionTask)
+export const sessionsReadInputSchema = z.object({
+  ...sessionTask,
+  computerId: z.string().min(1),
+  conversationId: z.string().min(1),
+  offset: z.number().int().min(0),
+  length: z.number().int().min(1).max(262144)
+})
+export const sessionsReadAttachmentInputSchema = z.object({
+  ...sessionTask,
+  computerId: z.string().min(1),
+  conversationId: z.string().min(1),
+  epoch: z.number().int().positive(),
+  ref: attachmentRef
+})
+export const sessionsDiscardInputSchema = z.object({ moveId: z.string().min(1) })
+export const sessionsBeginInputSchema = z.object({ ...sessionTask, manifest: transferManifest })
+export const sessionsChunkInputSchema = z.object({
+  ...sessionTask,
+  transferId: z.string().min(1),
+  offset: z.number().int().min(0),
+  data: z.string().max(350000)
+})
+export const sessionsFinishInputSchema = z.object({ ...sessionTask, transferId: z.string().min(1) })
+export const sessionsPutAttachmentInputSchema = z.object({
+  ...sessionTask,
+  conversationId: z.string().min(1),
+  epoch: z.number().int().positive(),
+  ref: attachmentRef,
+  data: z.string().max(14_000_000)
+})
+export const sessionsActivateInputSchema = z.object({
+  ...sessionTask,
+  conversationId: z.string().min(1),
+  migrationId: z.string().min(1),
+  epoch: z.number().int().positive(),
+  hash: z.string().regex(/^[a-f0-9]{64}$/)
+})
+export const sessionsImportLedgerInputSchema = z.object({ ...sessionTask, ledger: z.unknown() })
+export const sessionsRegisterInputSchema = z.object({
+  ...sessionTask,
+  chats: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        tabId: z.string().min(1),
+        mode: z.string().min(1),
+        epoch: z.number().int().positive()
+      })
+    )
+    .max(1000)
+})
 
 /** What a move to another hub would carry — the move dialog's summary. Writes nothing. */
 export const crossHubMovePreviewInputSchema = z.object({

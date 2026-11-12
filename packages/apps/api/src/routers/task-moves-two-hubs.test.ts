@@ -15,7 +15,13 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import type { CreateTaskInput, Task, TaskMove, UpdateTaskInput } from '@slayzone/task-contracts'
-import { configureTaskRuntimeAdapters, setTaskDeps, taskOps } from '@slayzone/task/server'
+import {
+  configureTaskRuntimeAdapters,
+  setTaskDeps,
+  setTaskMoveSessionsDelegate,
+  taskOps,
+  type TaskMoveSessionsDelegate
+} from '@slayzone/task/server'
 import { createTaskMoveSteps, runTaskMove } from '@slayzone/task/client'
 import {
   defaultWorktreeExecAdapters,
@@ -37,6 +43,77 @@ configureTaskRuntimeAdapters({
 })
 const hubA = appRouter.createCaller({ db: A.slayDb, dataRoot: rootA } as never)
 const hubB = appRouter.createCaller({ db: B.slayDb, dataRoot: rootB } as never)
+
+/**
+ * The two hubs' computers, in memory: what the source's computer would export and what the
+ * target's computer received. One object serves both sides (the source-side calls and the
+ * target-side calls are disjoint), standing in for each hub's real delegate.
+ */
+const computers = {
+  /** taskId → the chats the source computer holds. */
+  holds: new Map<
+    string,
+    Array<{ id: string; tabId: string; mode: string; epoch: number; bytes: Buffer }>
+  >(),
+  /** transferId → what the target computer received of it. */
+  staged: new Map<string, { id: string; epoch: number; chunks: Buffer[] }>(),
+  activated: [] as string[],
+  ledgers: [] as Array<{ taskId: string; ledger: unknown }>,
+  discarded: [] as string[],
+  settled: [] as string[]
+}
+const TARGET_COMPUTER = 'computer-b'
+const fakeDelegate: TaskMoveSessionsDelegate = {
+  exportTask: async (moveId, taskId) => ({
+    transfers: (computers.holds.get(taskId) ?? []).map((c) => ({
+      computerId: 'computer-a',
+      manifest: {
+        header: {
+          migrationId: `move:${moveId}`,
+          identity: { id: c.id, taskId, tabId: c.tabId, mode: c.mode, epoch: c.epoch }
+        },
+        hash: crypto.createHash('sha256').update(c.bytes).digest('hex'),
+        bytes: c.bytes.length
+      }
+    })),
+    ledger: { sessions: (computers.holds.get(taskId) ?? []).length }
+  }),
+  read: async (i) => {
+    const chat = [...computers.holds.values()].flat().find((c) => c.id === i.conversationId)!
+    return chat.bytes.subarray(i.offset, i.offset + i.length).toString('base64')
+  },
+  readAttachment: async () => '',
+  discard: async (moveId) => {
+    computers.discarded.push(moveId)
+  },
+  computerOf: async () => TARGET_COMPUTER,
+  begin: async (_taskId, manifest) => {
+    const id = manifest.header.identity.id
+    computers.staged.set(`t-${id}`, { id, epoch: manifest.header.identity.epoch + 1, chunks: [] })
+    return { transferId: `t-${id}`, offset: 0 }
+  },
+  chunk: async (_taskId, transferId, offset, data) => {
+    const staged = computers.staged.get(transferId)!
+    const received = staged.chunks.reduce((n, c) => n + c.length, 0)
+    if (offset !== received) throw new Error(`chunk at ${offset}, expected ${received}`)
+    staged.chunks.push(Buffer.from(data, 'base64'))
+  },
+  finish: async (_taskId, transferId) => {
+    const staged = computers.staged.get(transferId)!
+    return { conversationId: staged.id, epoch: staged.epoch, missing: [] }
+  },
+  putAttachment: async () => undefined,
+  activate: async (i) => {
+    computers.activated.push(i.conversationId)
+  },
+  importLedger: async (taskId, ledger) => {
+    computers.ledgers.push({ taskId, ledger })
+  },
+  settle: async (computerId) => {
+    computers.settled.push(computerId)
+  }
+}
+setTaskMoveSessionsDelegate(fakeDelegate)
 
 const COLUMNS_A = [
   { id: 'queued', label: 'Queued', color: 'gray', position: 0, category: 'unstarted' },
@@ -65,12 +142,13 @@ async function move(
   from: { hub: typeof hubA; id: string },
   to: { hub: typeof hubA; id: string; projectId: string },
   taskIds: string[],
-  opts: { pauseAfter?: TaskMove['step'] } = {}
+  opts: { pauseAfter?: TaskMove['step']; includeSessions?: boolean } = {}
 ): Promise<TaskMove> {
   const begun = await from.hub.taskMoves.begin({
     taskIds,
     targetHubId: to.id,
-    targetProjectId: to.projectId
+    targetProjectId: to.projectId,
+    includeSessions: opts.includeSessions ?? true
   })
   let lastStep: TaskMove['step'] = begun.step
   return runTaskMove(begun.id, {
@@ -90,7 +168,11 @@ async function move(
           from.hub.taskMoves.addRemoteBlockers({ moveId, links }).then(() => undefined),
         fileManifest: (moveId) => from.hub.artifacts.moveManifest({ moveId }),
         readFile: (moveId, ref, offset, length) =>
-          from.hub.artifacts.moveRead({ moveId, ref, offset, length })
+          from.hub.artifacts.moveRead({ moveId, ref, offset, length }),
+        sessionsExport: (moveId, taskId) => from.hub.taskMoves.sessionsExport({ moveId, taskId }),
+        sessionsRead: (input) => from.hub.taskMoves.sessionsRead(input),
+        sessionsReadAttachment: (input) => from.hub.taskMoves.sessionsReadAttachment(input),
+        sessionsDiscard: (moveId) => from.hub.taskMoves.sessionsDiscard({ moveId })
       },
       target: {
         importBundle: (input) => to.hub.taskMoves.import(input).then(() => undefined),
@@ -99,6 +181,17 @@ async function move(
         missingFiles: (moveId, entries) => to.hub.artifacts.moveMissing({ moveId, entries }),
         writeFile: (input) => to.hub.artifacts.moveWrite(input).then(() => undefined),
         clearStaging: (moveId) => to.hub.artifacts.moveClearStaging({ moveId }),
+        sessionsBegin: (moveId, taskId, manifest) =>
+          to.hub.taskMoves.sessionsBegin({ moveId, taskId, manifest }),
+        sessionsChunk: (input) => to.hub.taskMoves.sessionsChunk(input),
+        sessionsFinish: (moveId, taskId, transferId) =>
+          to.hub.taskMoves.sessionsFinish({ moveId, taskId, transferId }),
+        sessionsPutAttachment: (input) => to.hub.taskMoves.sessionsPutAttachment(input),
+        sessionsActivate: (input) => to.hub.taskMoves.sessionsActivate(input),
+        sessionsImportLedger: (moveId, taskId, ledger) =>
+          to.hub.taskMoves.sessionsImportLedger({ moveId, taskId, ledger }),
+        sessionsRegister: (moveId, taskId, chats) =>
+          to.hub.taskMoves.sessionsRegister({ moveId, taskId, chats }),
         commit: (id) => to.hub.taskMoves.commit({ id }).then(() => undefined)
       }
     }),
@@ -406,5 +499,114 @@ describe('a move from hub A to hub B', () => {
     expect(
       A.db.prepare('SELECT state, epoch FROM chat_ownership WHERE id = ?').get(conversation)
     ).toEqual({ state: 'deleted', epoch: 2 })
+  })
+
+  test('the agent sessions arrive owned by the target hub, and the bytes are the same', async () => {
+    const t = await createOn(hubA, projectA, 'With sessions')
+    const tab = crypto.randomUUID()
+    A.db
+      .prepare(
+        "INSERT INTO terminal_tabs (id, task_id, label, mode, position) VALUES (?, ?, 'Chat', 'claude-chat', 0)"
+      )
+      .run(tab, t.id)
+    const conversation = crypto.randomUUID()
+    // 600 KB: over two 256 KB chunks.
+    const bytes = crypto.randomBytes(600_000)
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes }
+    ])
+
+    const done = await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id]
+    )
+    expect(done.status).toBe('done')
+
+    // The computer received every byte, in order, and staged the chat one epoch up.
+    const staged = computers.staged.get(`t-${conversation}`)!
+    expect(Buffer.concat(staged.chunks).equals(bytes)).toBe(true)
+    expect(computers.activated).toContain(conversation)
+    expect(computers.ledgers.find((l) => l.taskId === t.id)?.ledger).toEqual({ sessions: 1 })
+    expect(computers.discarded).toContain(done.id)
+    expect(computers.settled).toContain(TARGET_COMPUTER)
+    // Hub B owns it: active on that computer at the staged epoch, bound to the tab.
+    expect(
+      B.db
+        .prepare('SELECT computer_id, epoch, state, tab_id, mode FROM chat_ownership WHERE id = ?')
+        .get(conversation)
+    ).toEqual({
+      computer_id: TARGET_COMPUTER,
+      epoch: 4,
+      state: 'active',
+      tab_id: tab,
+      mode: 'claude-chat'
+    })
+    expect(
+      B.db.prepare('SELECT conversation_id FROM chat_tab_bindings WHERE tab_id = ?').get(tab)
+    ).toEqual({ conversation_id: conversation })
+    expect(
+      B.db.prepare('SELECT state FROM chat_task_lifecycle WHERE task_id = ?').get(t.id)
+    ).toEqual({ state: 'active' })
+  })
+
+  test('a task that comes back finds its chat owned again at the newer epoch', async () => {
+    const t = await createOn(hubA, projectA, 'Sessions back and forth')
+    const tab = crypto.randomUUID()
+    A.db
+      .prepare(
+        "INSERT INTO terminal_tabs (id, task_id, label, mode, position) VALUES (?, ?, 'Chat', 'claude-chat', 0)"
+      )
+      .run(tab, t.id)
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 3, 'active')`
+      )
+      .run(conversation, t.id, tab)
+    A.db
+      .prepare('INSERT INTO chat_tab_bindings (tab_id, conversation_id) VALUES (?, ?)')
+      .run(tab, conversation)
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes: Buffer.from('one') }
+    ])
+    await move({ hub: hubA, id: 'hub-a' }, { hub: hubB, id: 'hub-b', projectId: projectB }, [t.id])
+
+    // On B the chat grew (the computer there is at epoch 4 -> the next export says 4).
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 4, bytes: Buffer.from('one two') }
+    ])
+    await move({ hub: hubB, id: 'hub-b' }, { hub: hubA, id: 'hub-a', projectId: projectA }, [t.id])
+
+    expect(
+      A.db
+        .prepare('SELECT computer_id, epoch, state FROM chat_ownership WHERE id = ?')
+        .get(conversation)
+    ).toEqual({ computer_id: TARGET_COMPUTER, epoch: 5, state: 'active' })
+    expect(
+      count(
+        A,
+        'SELECT COUNT(*) AS n FROM chat_deletion_targets WHERE conversation_id = ?',
+        conversation
+      )
+    ).toBe(0)
+  })
+
+  test('a move that leaves the sessions behind copies none and registers none', async () => {
+    const t = await createOn(hubA, projectA, 'Fresh sessions')
+    const conversation = crypto.randomUUID()
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: 'x', mode: 'claude-chat', epoch: 1, bytes: Buffer.from('private') }
+    ])
+    const done = await move(
+      { hub: hubA, id: 'hub-a' },
+      { hub: hubB, id: 'hub-b', projectId: projectB },
+      [t.id],
+      { includeSessions: false }
+    )
+    expect(done.status).toBe('done')
+    expect(computers.staged.has(`t-${conversation}`)).toBe(false)
+    expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(0)
   })
 })

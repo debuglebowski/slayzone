@@ -10,7 +10,10 @@ import {
   toError
 } from '@slayzone/platform/isolation'
 import { AgentHistoryOfflineError } from '@slayzone/agent-turns/server'
-import { legacyCodexChatPromptSummaries } from '@slayzone/task/server'
+import {
+  legacyCodexChatPromptSummaries,
+  type TaskMoveSessionsDelegate
+} from '@slayzone/task/server'
 import {
   defaultChatModeSettingKey,
   defaultChatModelSettingKey,
@@ -49,6 +52,8 @@ import {
   type ChatBootstrap,
   type LegacyChatDiagnostics,
   createChatMigrationAttachmentReader,
+  mergeSessionLedgers,
+  type SessionLedgerBundle,
   isolateItem,
   isComputerUnreachable,
   checkHubChatConsistency
@@ -970,6 +975,13 @@ export function createComputerChatServices(opts: {
     await recoverComputer(computerId)
     return request(computerId, body)
   }
+  /** The computer this hub keeps a moved-in task's sessions on. */
+  async function moveComputerOf(taskId: string): Promise<string> {
+    const computerId = await opts.resolveComputer(taskId)
+    if (!computerId) throw new Error('This task has no computer to keep its sessions on.')
+    await opts.gate?.(computerId, taskId)
+    return computerId
+  }
   const computers: ChatComputerOps = {
     listBackups: (pc) =>
       computerRequest(pc, { kind: 'backup.list' }) as ReturnType<ChatComputerOps['listBackups']>,
@@ -1085,6 +1097,134 @@ export function createComputerChatServices(opts: {
      * update carrying them (a template applied) changes them there; the hub keeps
      * no copy. Installed as the task domain's `ChatSettingsDelegate`.
      */
+    /**
+     * A moved task's agent sessions, between this hub's computers and another hub's
+     * (cross-hub move, `copy-sessions`): the app relays; each call asks one computer,
+     * through the same admission and recovery every computer request here passes.
+     */
+    taskMoveSessions: {
+      async exportTask(moveId, taskId) {
+        const computers = new Set<string>()
+        for (const o of await ownership.forTask(taskId))
+          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+        const home = await opts.resolveComputer(taskId)
+        if (home) computers.add(home)
+        const transfers: Array<{
+          computerId: string
+          manifest: Parameters<TaskMoveSessionsDelegate['begin']>[1]
+        }> = []
+        const ledgers: SessionLedgerBundle[] = []
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const exported = (await computerRequest(computerId, {
+            kind: 'sessionMove.export',
+            moveId,
+            taskId
+          })) as {
+            transfers: (typeof transfers)[number]['manifest'][]
+            ledger: SessionLedgerBundle
+          }
+          for (const manifest of exported.transfers) transfers.push({ computerId, manifest })
+          ledgers.push(exported.ledger)
+        }
+        return { transfers, ledger: mergeSessionLedgers(ledgers) }
+      },
+      async read(input) {
+        const r = (await computerRequest(input.computerId, {
+          kind: 'sessionMove.read',
+          moveId: input.moveId,
+          conversationId: input.conversationId,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string }
+        return r.data
+      },
+      async readAttachment(input) {
+        const r = (await computerRequest(input.computerId, {
+          kind: 'attachment.read',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref
+        })) as { data: string }
+        return r.data
+      },
+      async discard(moveId, taskIds) {
+        const computers = new Set<string>()
+        for (const taskId of taskIds) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+        }
+        for (const computerId of computers)
+          await computerRequest(computerId, { kind: 'sessionMove.discard', moveId }).catch(
+            () => undefined
+          )
+      },
+      computerOf: moveComputerOf,
+      async begin(taskId, manifest) {
+        const pc = await moveComputerOf(taskId)
+        const begun = (await computerRequest(pc, { kind: 'transfer.begin', manifest })) as {
+          id: string
+          offset: number
+        }
+        return { transferId: begun.id, offset: begun.offset }
+      },
+      async chunk(taskId, transferId, offset, data) {
+        const pc = await moveComputerOf(taskId)
+        await computerRequest(pc, { kind: 'transfer.chunk', id: transferId, offset, data })
+      },
+      async finish(taskId, transferId) {
+        const pc = await moveComputerOf(taskId)
+        const staged = (await computerRequest(pc, { kind: 'transfer.finish', id: transferId })) as {
+          id: string
+          epoch: number
+        }
+        const verified = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: staged.id
+        })) as { missing: Array<Parameters<TaskMoveSessionsDelegate['putAttachment']>[0]['ref']> }
+        return { conversationId: staged.id, epoch: staged.epoch, missing: verified.missing }
+      },
+      async putAttachment(input) {
+        const pc = await moveComputerOf(input.taskId)
+        await computerRequest(pc, {
+          kind: 'attachment.put',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref,
+          data: input.data
+        })
+      },
+      async activate(input) {
+        const pc = await moveComputerOf(input.taskId)
+        const left = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: input.conversationId
+        })) as { missing: unknown[] }
+        if (left.missing.length) throw new Error('The chat is still missing attachments.')
+        await computerRequest(pc, {
+          kind: 'migration.activate',
+          id: input.conversationId,
+          epoch: input.epoch,
+          migrationId: input.migrationId,
+          hash: input.hash
+        })
+      },
+      async importLedger(taskId, ledger) {
+        const pc = await moveComputerOf(taskId)
+        const result = (await computerRequest(pc, {
+          kind: 'data.import',
+          value: {
+            kind: 'session-ledger-move',
+            items: [{ key: `session-ledger-move:${taskId}`, taskId, value: ledger }]
+          }
+        })) as { rejected: Array<{ message: string }> }
+        if (result.rejected.length) throw new Error(result.rejected[0].message)
+      },
+      async settle(computerId) {
+        invalidateRecovery(computerId)
+        await recoverComputer(computerId, true)
+      }
+    } satisfies TaskMoveSessionsDelegate,
     chatSettings: {
       async ownedModes(taskId: string): Promise<ReadonlySet<string>> {
         const rows = await opts.db.all<{ mode: string }>(

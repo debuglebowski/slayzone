@@ -56,6 +56,7 @@ interface MoveRow {
   target_project_id: string
   root_task_ids: string
   include_subtasks: number
+  include_sessions: number
   step: TaskMoveStep
   status: TaskMoveStatus
   error: string | null
@@ -80,6 +81,7 @@ async function toMove(db: SlayzoneDb, row: MoveRow): Promise<TaskMove> {
     rootTaskIds: JSON.parse(row.root_task_ids) as string[],
     taskIds: tasks.map((t) => t.task_id),
     includeSubtasks: row.include_subtasks === 1,
+    includeSessions: row.include_sessions === 1,
     step: row.step,
     status: row.status,
     error: row.error,
@@ -167,6 +169,7 @@ export async function beginTaskMove(
     rootTaskIds: rootIds,
     taskIds,
     includeSubtasks,
+    includeSessions: input.includeSessions ?? true,
     createdBy: opts.createdBy ?? null,
     now: Date.now()
   })

@@ -1,4 +1,10 @@
-import type { ImportTaskMoveInput, TaskMoveBundle } from '@slayzone/task-contracts'
+import type {
+  ImportTaskMoveInput,
+  TaskMoveAttachmentRef,
+  TaskMoveBundle,
+  TaskMoveChatTransfer,
+  TaskMoveSessionsExport
+} from '@slayzone/task-contracts'
 import type { TaskMoveStepRunner, TaskMoveWorkStep } from './task-move-engine'
 
 /** One artifact file a move copies (`artifacts.move*`): a version blob or a working copy. */
@@ -23,6 +29,27 @@ export interface TaskMoveRemoteBlockerLink {
 
 export interface TaskMoveSourceApi {
   exportBundle(moveId: string): Promise<TaskMoveBundle>
+  /** `copy-sessions`: each computer of the task exports its chats; one answer. */
+  sessionsExport(moveId: string, taskId: string): Promise<TaskMoveSessionsExport>
+  /** A chunk (base64) of one exported chat. Empty past its end. */
+  sessionsRead(input: {
+    moveId: string
+    taskId: string
+    computerId: string
+    conversationId: string
+    offset: number
+    length: number
+  }): Promise<string>
+  sessionsReadAttachment(input: {
+    moveId: string
+    taskId: string
+    computerId: string
+    conversationId: string
+    epoch: number
+    ref: TaskMoveAttachmentRef
+  }): Promise<string>
+  /** The exports go (their work is done, or the move was canceled). */
+  sessionsDiscard(moveId: string): Promise<void>
   addRemoteBlockers(moveId: string, links: TaskMoveRemoteBlockerLink[]): Promise<void>
   fileManifest(moveId: string): Promise<TaskMoveFileEntry[]>
   readFile(
@@ -36,6 +63,47 @@ export interface TaskMoveSourceApi {
 /** The hub the tasks go to. */
 export interface TaskMoveTargetApi {
   importBundle(input: ImportTaskMoveInput): Promise<void>
+  /** `copy-sessions`: stage a chat on the task's computer, chunk by chunk, then take it. */
+  sessionsBegin(
+    moveId: string,
+    taskId: string,
+    manifest: TaskMoveChatTransfer['manifest']
+  ): Promise<{ transferId: string; offset: number }>
+  sessionsChunk(input: {
+    moveId: string
+    taskId: string
+    transferId: string
+    offset: number
+    data: string
+  }): Promise<void>
+  sessionsFinish(
+    moveId: string,
+    taskId: string,
+    transferId: string
+  ): Promise<{ conversationId: string; epoch: number; missing: TaskMoveAttachmentRef[] }>
+  sessionsPutAttachment(input: {
+    moveId: string
+    taskId: string
+    conversationId: string
+    epoch: number
+    ref: TaskMoveAttachmentRef
+    data: string
+  }): Promise<void>
+  sessionsActivate(input: {
+    moveId: string
+    taskId: string
+    conversationId: string
+    migrationId: string
+    epoch: number
+    hash: string
+  }): Promise<void>
+  sessionsImportLedger(moveId: string, taskId: string, ledger: unknown): Promise<void>
+  /** The hub owns the chats the computer now holds. */
+  sessionsRegister(
+    moveId: string,
+    taskId: string,
+    chats: Array<{ id: string; tabId: string; mode: string; epoch: number }>
+  ): Promise<void>
   addRemoteBlockers(moveId: string, links: TaskMoveRemoteBlockerLink[]): Promise<void>
   missingFiles(
     moveId: string,
@@ -54,6 +122,11 @@ export interface TaskMoveTargetApi {
 
 /** Bytes per chunk the app relays from one hub to the other. */
 export const TASK_MOVE_CHUNK_BYTES = 512 * 1024
+/** Bytes per chunk of a chat transfer (the computers' own chunk limit). */
+export const TASK_MOVE_SESSION_CHUNK_BYTES = 256 * 1024
+
+const base64Bytes = (data: string): number =>
+  Math.ceil((data.length * 3) / 4) - (data.match(/=*$/)?.[0].length ?? 0)
 
 /**
  * The work of each step of a move between hubs, for {@link runTaskMove}. Each is
@@ -114,6 +187,90 @@ export function createTaskMoveSteps(opts: {
         }
       }
       await opts.target.clearStaging(move.id)
+    },
+    // The tasks' agent sessions: every chat of every task, from the computer that holds
+    // it to the target's computer, then the session ledger, then the target hub owns
+    // them. Resumable at any point (each call is idempotent: a transfer continues
+    // where the target's copy stands, an activated chat is answered as it is). The
+    // source computers keep their copy: the task can move back, or the move be canceled.
+    'copy-sessions': async ({ move, reportProgress }) => {
+      if (!move.includeSessions) return
+      const exports = new Map<string, TaskMoveSessionsExport>()
+      for (const taskId of move.taskIds)
+        exports.set(taskId, await opts.source.sessionsExport(move.id, taskId))
+      const total = [...exports.values()]
+        .flatMap((e) => e.transfers)
+        .reduce((n, t) => n + t.manifest.bytes, 0)
+      let done = 0
+      await reportProgress(done, total)
+      for (const taskId of move.taskIds) {
+        const exported = exports.get(taskId)!
+        const chats: Array<{ id: string; tabId: string; mode: string; epoch: number }> = []
+        for (const transfer of exported.transfers) {
+          const { manifest } = transfer
+          const identity = manifest.header.identity
+          const begun = await opts.target.sessionsBegin(move.id, taskId, manifest)
+          let offset = begun.offset
+          done += offset
+          while (offset < manifest.bytes) {
+            const data = await opts.source.sessionsRead({
+              moveId: move.id,
+              taskId,
+              computerId: transfer.computerId,
+              conversationId: identity.id,
+              offset,
+              length: TASK_MOVE_SESSION_CHUNK_BYTES
+            })
+            if (!data) throw new Error(`The export of chat ${identity.id} ended early.`)
+            await opts.target.sessionsChunk({
+              moveId: move.id,
+              taskId,
+              transferId: begun.transferId,
+              offset,
+              data
+            })
+            offset += base64Bytes(data)
+            done += base64Bytes(data)
+            await reportProgress(done, total)
+          }
+          const staged = await opts.target.sessionsFinish(move.id, taskId, begun.transferId)
+          for (const ref of staged.missing) {
+            const data = await opts.source.sessionsReadAttachment({
+              moveId: move.id,
+              taskId,
+              computerId: transfer.computerId,
+              conversationId: identity.id,
+              epoch: identity.epoch,
+              ref
+            })
+            await opts.target.sessionsPutAttachment({
+              moveId: move.id,
+              taskId,
+              conversationId: staged.conversationId,
+              epoch: staged.epoch,
+              ref,
+              data
+            })
+          }
+          await opts.target.sessionsActivate({
+            moveId: move.id,
+            taskId,
+            conversationId: staged.conversationId,
+            migrationId: manifest.header.migrationId,
+            epoch: staged.epoch,
+            hash: manifest.hash
+          })
+          chats.push({
+            id: staged.conversationId,
+            tabId: identity.tabId,
+            mode: identity.mode,
+            epoch: staged.epoch
+          })
+        }
+        await opts.target.sessionsImportLedger(move.id, taskId, exported.ledger)
+        await opts.target.sessionsRegister(move.id, taskId, chats)
+      }
+      await opts.source.sessionsDiscard(move.id)
     },
     // A blocker between a moved task and one staying behind: each hub keeps its side.
     links: async ({ move }) => {

@@ -16,6 +16,10 @@ export {
 export { taskRouter } from './task-router'
 export { taskMovesRouter } from './task-moves-router'
 export { anyTaskMoveLocking, lockedTaskIds } from './ops/task-moves'
+export {
+  setTaskMoveSessionsDelegate,
+  type TaskMoveSessionsDelegate
+} from './ops/task-move-sessions'
 export { setTaskDeps, getTaskOps } from './task-router-deps'
 // `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
 export {

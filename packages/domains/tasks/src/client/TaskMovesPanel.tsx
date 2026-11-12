@@ -16,6 +16,7 @@ const STEP_LABELS: Record<TaskMoveStep, string> = {
   export: 'Reading',
   import: 'Writing to the other hub',
   'copy-files': 'Copying files',
+  'copy-sessions': 'Copying agent sessions',
   links: 'Linking blockers',
   commit: 'Handing over',
   release: 'Finishing'

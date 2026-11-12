@@ -82,7 +82,9 @@ export async function spawnSecondHub(storeDir: string): Promise<SecondHub> {
       ELECTRON_RUN_AS_NODE: '1',
       SLAYZONE_HUB_LISTEN_ADDRESS: `127.0.0.1:${port}`,
       SLAYZONE_HUB_REQUIRE_LOGIN: '1',
-      SLAYZONE_ROOT: hubRoot
+      SLAYZONE_ROOT: hubRoot,
+      // The hub's test-only chat seams (seed / read a conversation) answer only under it.
+      PLAYWRIGHT: '1'
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })

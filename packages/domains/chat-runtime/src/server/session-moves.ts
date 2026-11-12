@@ -39,60 +39,14 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { z } from 'zod'
 import type { ChatTransferManifest } from '../shared'
 import type { DataImportKind } from './task-data'
 import type { ChatStorage } from './storage'
 import { encodeTransfer } from './transfers'
 
-const id = z.string().min(1).max(500)
-const ts = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-const text = z.string().max(1_000_000)
+import { sessionLedgerBundleSchema, type SessionLedgerBundle } from './session-ledger-bundle'
 
-const agentSessionRow = z.object({
-  id,
-  mode: id,
-  tabId: id.nullable(),
-  conversationId: id.nullable(),
-  origin: id,
-  status: z.enum(['pooled', 'bound', 'dead']),
-  pendingMeta: z.string().max(10_000).nullable(),
-  createdAt: ts,
-  boundAt: ts.nullable(),
-  endedAt: ts.nullable()
-})
-const taskConversationRow = z.object({
-  id,
-  mode: id,
-  tabId: id.nullable(),
-  conversationId: id.nullable(),
-  origin: id,
-  pendingMeta: z.string().max(10_000).nullable(),
-  createdAt: ts
-})
-const sessionResetRow = z.object({
-  id,
-  mode: id,
-  tabId: id.nullable(),
-  exceptChat: z.number().int().min(0).max(1),
-  createdAt: ts
-})
-const sessionDeletionRow = z.object({ id, mode: id, conversationId: id, createdAt: ts })
-const legacyHistoryRow = z.object({ mode: id, ids: z.array(id).max(10_000) })
-const providerConfigRow = z.object({ mode: id, revision: ts, value: text })
-const sessionTurnRow = z.object({ conversationId: id, firstTurnAt: ts })
-
-/** A task's session ledger on one computer, without what is bound to this computer's paths. */
-export const sessionLedgerBundleSchema = z.object({
-  agentSessions: z.array(agentSessionRow).max(100_000),
-  taskConversations: z.array(taskConversationRow).max(100_000),
-  sessionTurns: z.array(sessionTurnRow).max(100_000),
-  sessionResets: z.array(sessionResetRow).max(100_000),
-  sessionDeletions: z.array(sessionDeletionRow).max(100_000),
-  legacyHistory: z.array(legacyHistoryRow).max(100),
-  providerConfigs: z.array(providerConfigRow).max(100)
-})
-export type SessionLedgerBundle = z.infer<typeof sessionLedgerBundleSchema>
+export { sessionLedgerBundleSchema, type SessionLedgerBundle }
 
 export interface SessionMoveExport {
   /** One transfer per chat, in the order the target must take them. */

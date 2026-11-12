@@ -81,7 +81,7 @@ run_harness packages/apps/computer/src/boot-isolation.test.ts
 run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
 run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
 run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
-run_vitest_files 'cross-hub move engine: steps, pause, fail, crash recovery' packages/domains/task/src/client/task-move-engine.test.ts
+run_vitest_files 'cross-hub move engine: steps, pause, fail, crash recovery' packages/domains/task/src/client/task-move-engine.test.ts packages/domains/task/src/client/task-move-steps-sessions.test.ts
 # Every client delete asks first (subtasks too) and reports blocked/incomplete/failed
 # results instead of dropping them; a refused delete keeps the task (and its window).
 run_vitest_files 'task delete confirmation + result handling' \
@@ -863,6 +863,7 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-manager.
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance.test.ts
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
+run_harness packages/domains/chat-runtime/src/server/session-moves.test.ts
 run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/thread-close.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts

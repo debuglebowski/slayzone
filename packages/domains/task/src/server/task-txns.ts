@@ -163,6 +163,7 @@ function beginMove(
     rootTaskIds: string[]
     taskIds: string[]
     includeSubtasks: boolean
+    includeSessions: boolean
     createdBy: string | null
     now: number
   }
@@ -181,14 +182,15 @@ function beginMove(
       return { outcome: 'conflict' as const, taskIds: busy.map((r) => r.task_id) }
     db.prepare(
       `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
-         include_subtasks, step, status, created_by, created_at, updated_at)
-       VALUES (?, 'out', ?, ?, ?, ?, 'lock', 'running', ?, ?, ?)`
+         include_subtasks, include_sessions, step, status, created_by, created_at, updated_at)
+       VALUES (?, 'out', ?, ?, ?, ?, ?, 'lock', 'running', ?, ?, ?)`
     ).run(
       p.id,
       p.peerHubId,
       p.targetProjectId,
       JSON.stringify(p.rootTaskIds),
       p.includeSubtasks ? 1 : 0,
+      p.includeSessions ? 1 : 0,
       p.createdBy,
       p.now,
       p.now
@@ -329,6 +331,50 @@ function abortImport(db: Database, p: { id: string; now: number }): void {
 }
 
 /**
+ * The chats of a moved task, now held by `computerId` (the move's `copy-sessions`
+ * step copied them there at `epoch`): this hub owns them — a row per chat, bound to its
+ * tab when the task has that tab. Overwrites what an earlier stay of the task left
+ * (restored from `task_move_parked_chats`, at an older epoch, maybe another computer).
+ * Idempotent. A chat the hub never owns (`hook-inbox:*`) is skipped.
+ */
+function registerMovedChats(
+  db: Database,
+  p: {
+    taskId: string
+    computerId: string
+    chats: Array<{ id: string; tabId: string; mode: string; epoch: number }>
+  }
+): void {
+  db.transaction(() => {
+    if (!db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(p.taskId))
+      throw new Error(`Task ${p.taskId} is not on this hub`)
+    db.prepare(
+      "INSERT OR IGNORE INTO chat_task_lifecycle (task_id, state) VALUES (?, 'active')"
+    ).run(p.taskId)
+    const owner = db.prepare(
+      `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state, cleanup_pending)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', 0)
+       ON CONFLICT(id) DO UPDATE SET
+         task_id = excluded.task_id, tab_id = excluded.tab_id, mode = excluded.mode,
+         computer_id = excluded.computer_id, epoch = excluded.epoch, state = 'active',
+         migration_id = NULL, destination_computer_id = NULL, source_computer_id = NULL,
+         manifest_hash = NULL, cleanup_pending = 0`
+    )
+    const bind = db.prepare(
+      `INSERT INTO chat_tab_bindings (tab_id, conversation_id) VALUES (?, ?)
+       ON CONFLICT(tab_id) DO UPDATE SET conversation_id = excluded.conversation_id,
+         revision = revision + 1`
+    )
+    const hasTab = db.prepare('SELECT 1 FROM terminal_tabs WHERE id = ? AND task_id = ?')
+    for (const chat of p.chats) {
+      if (chat.id.startsWith('hook-inbox:')) continue
+      owner.run(chat.id, p.taskId, chat.tabId, chat.mode, p.computerId, chat.epoch)
+      if (hasTab.get(chat.tabId, p.taskId)) bind.run(chat.tabId, chat.id)
+    }
+  })()
+}
+
+/**
  * Remove tasks leaving this hub by a move (`movedSql`: a SELECT of their ids, one `?`
  * bound to `param`). Every row goes (child rows by cascade), but this is no deletion:
  * - Their chats stay on this hub's computers. Each chat's ownership is parked first
@@ -365,6 +411,7 @@ export const taskTxns = {
   'task:begin-move': beginMove,
   'task:release-move': releaseMove,
   'task:import-move': importMove,
+  'task:register-moved-chats': registerMovedChats,
   'task:abort-import': abortImport
 }
 

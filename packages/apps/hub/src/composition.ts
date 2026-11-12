@@ -70,6 +70,7 @@ const TURN_GIT_OP_TIMEOUT_MS = 5 * 60_000
 const GH_DEFAULT_TIMEOUT_MS = 30_000
 import {
   setChatSettingsDelegate,
+  setTaskMoveSessionsDelegate,
   setTaskPathsDelegate,
   setTaskSessionPromptReader,
   agentSessionsEvents
@@ -1312,6 +1313,31 @@ export function composeServer(opts: {
   )
   // A computer-owned chat's settings change on its computer, never in a hub copy.
   setChatSettingsDelegate(computerChat.chatSettings)
+  // A moved task's agent sessions copy between this hub's computers and another hub's.
+  // A move the app resumes at its own start asks computers that are still connecting:
+  // like a prompt read, each call waits out the local computer's boot.
+  {
+    const d = computerChat.taskMoveSessions
+    const bootOffline = { offline: isComputerUnreachable }
+    const afterBoot =
+      <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+      (...args: A): Promise<R> =>
+        throughLocalBoot(() => call(...args), bootOffline)
+    setTaskMoveSessionsDelegate({
+      exportTask: afterBoot(d.exportTask),
+      read: afterBoot(d.read),
+      readAttachment: afterBoot(d.readAttachment),
+      discard: afterBoot(d.discard),
+      computerOf: afterBoot(d.computerOf),
+      begin: afterBoot(d.begin),
+      chunk: afterBoot(d.chunk),
+      finish: afterBoot(d.finish),
+      putAttachment: afterBoot(d.putAttachment),
+      activate: afterBoot(d.activate),
+      importLedger: afterBoot(d.importLedger),
+      settle: afterBoot(d.settle)
+    })
+  }
   setTaskSessionPromptReader((_db, taskId, ids) =>
     throughLocalBoot(() => computerChat.promptSummaries(taskId, ids), promptsOffline)
   )

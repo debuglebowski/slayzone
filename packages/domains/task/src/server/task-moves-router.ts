@@ -13,7 +13,18 @@ import {
   listTaskMovesInputSchema,
   reportTaskMoveProgressInputSchema,
   taskMoveIdInputSchema,
-  taskMoveRedirectsInputSchema
+  taskMoveRedirectsInputSchema,
+  sessionsActivateInputSchema,
+  sessionsBeginInputSchema,
+  sessionsChunkInputSchema,
+  sessionsDiscardInputSchema,
+  sessionsExportInputSchema,
+  sessionsFinishInputSchema,
+  sessionsImportLedgerInputSchema,
+  sessionsPutAttachmentInputSchema,
+  sessionsReadAttachmentInputSchema,
+  sessionsReadInputSchema,
+  sessionsRegisterInputSchema
 } from '@slayzone/task-contracts'
 import {
   abortTaskMoveIn,
@@ -41,6 +52,8 @@ import {
   TaskMoveStateError
 } from './ops/task-moves'
 import { getTaskOnMutation } from './task-router-deps'
+import { registerMovedChats, taskMoveSessions } from './ops/task-move-sessions'
+import { getTaskMove as moveOf } from './ops/task-moves'
 
 /**
  * A move step that changes what boards show (a task locked or unlocked, arriving,
@@ -175,5 +188,63 @@ export const taskMovesRouter = router({
     .input(taskMoveIdInputSchema)
     .mutation(({ ctx, input }) =>
       boardChanged(() => mapped(() => abortTaskMoveIn(ctx.db, input.id)))
+    ),
+
+  // --- `copy-sessions`: a moved task's agent sessions, computer to computer through
+  // the app (ops/task-move-sessions.ts). Source hub: export, read, readAttachment, discard.
+  sessionsExport: publicProcedure
+    .input(sessionsExportInputSchema)
+    .mutation(({ input }) =>
+      mapped(() => taskMoveSessions().exportTask(input.moveId, input.taskId))
+    ),
+  sessionsRead: publicProcedure
+    .input(sessionsReadInputSchema)
+    .query(({ input }) => mapped(() => taskMoveSessions().read(input))),
+  sessionsReadAttachment: publicProcedure
+    .input(sessionsReadAttachmentInputSchema)
+    .query(({ input }) => mapped(() => taskMoveSessions().readAttachment(input))),
+  sessionsDiscard: publicProcedure.input(sessionsDiscardInputSchema).mutation(({ ctx, input }) =>
+    mapped(async () => {
+      const move = await moveOf(ctx.db, input.moveId)
+      await taskMoveSessions().discard(input.moveId, move.taskIds)
+    })
+  ),
+  // Target hub: stage each chat on the task's computer, then take it as this hub's own.
+  sessionsBegin: publicProcedure
+    .input(sessionsBeginInputSchema)
+    .mutation(({ input }) => mapped(() => taskMoveSessions().begin(input.taskId, input.manifest))),
+  sessionsChunk: publicProcedure.input(sessionsChunkInputSchema).mutation(({ input }) =>
+    mapped(async () => {
+      await taskMoveSessions().chunk(input.taskId, input.transferId, input.offset, input.data)
+    })
+  ),
+  sessionsFinish: publicProcedure
+    .input(sessionsFinishInputSchema)
+    .mutation(({ input }) =>
+      mapped(() => taskMoveSessions().finish(input.taskId, input.transferId))
+    ),
+  sessionsPutAttachment: publicProcedure
+    .input(sessionsPutAttachmentInputSchema)
+    .mutation(({ input }) =>
+      mapped(async () => {
+        await taskMoveSessions().putAttachment(input)
+      })
+    ),
+  sessionsActivate: publicProcedure.input(sessionsActivateInputSchema).mutation(({ input }) =>
+    mapped(async () => {
+      await taskMoveSessions().activate(input)
+    })
+  ),
+  sessionsImportLedger: publicProcedure
+    .input(sessionsImportLedgerInputSchema)
+    .mutation(({ input }) =>
+      mapped(async () => {
+        await taskMoveSessions().importLedger(input.taskId, input.ledger)
+      })
+    ),
+  sessionsRegister: publicProcedure
+    .input(sessionsRegisterInputSchema)
+    .mutation(({ ctx, input }) =>
+      mapped(() => registerMovedChats(ctx.db, { taskId: input.taskId, chats: input.chats }))
     )
 })

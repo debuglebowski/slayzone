@@ -5700,6 +5700,7 @@ export const migrations: Migration[] = [
           target_project_id TEXT NOT NULL,
           root_task_ids     TEXT NOT NULL,
           include_subtasks  INTEGER NOT NULL,
+          include_sessions  INTEGER NOT NULL DEFAULT 1,
           step              TEXT NOT NULL,
           status            TEXT NOT NULL
                             CHECK (status IN ('running', 'paused', 'failed', 'canceled', 'done')),

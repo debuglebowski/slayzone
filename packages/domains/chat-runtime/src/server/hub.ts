@@ -30,6 +30,8 @@ export {
 } from './hub-recovery'
 
 export { computerArtifactRequestSchema } from './artifacts'
+export { mergeSessionLedgers } from './session-ledger-merge'
+export { sessionLedgerBundleSchema, type SessionLedgerBundle } from './session-ledger-bundle'
 
 export { createChatAvailability, chatHistoryGeneration } from './hub-availability'
 export { createChatFolderDeletions } from './hub-folders'

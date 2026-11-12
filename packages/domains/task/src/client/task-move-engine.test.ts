@@ -26,6 +26,7 @@ function fakeJournal(start: Partial<TaskMove> = {}) {
     rootTaskIds: ['t1'],
     taskIds: ['t1'],
     includeSubtasks: true,
+    includeSessions: true,
     step: 'export',
     status: 'running',
     error: null,
@@ -60,7 +61,14 @@ function fakeJournal(start: Partial<TaskMove> = {}) {
   }
 }
 
-const WORK: TaskMoveWorkStep[] = ['export', 'import', 'copy-files', 'links', 'commit']
+const WORK: TaskMoveWorkStep[] = [
+  'export',
+  'import',
+  'copy-files',
+  'copy-sessions',
+  'links',
+  'commit'
+]
 
 function recordingSteps(
   ran: string[],
@@ -139,7 +147,15 @@ describe('runTaskMove', () => {
     j.resume()
     const done = await runTaskMove('m1', { journal: j.journal, steps, pauseRequested: () => false })
     expect(done.status).toBe('done')
-    expect(ran).toEqual(['export', 'import', 'copy-files', 'copy-files', 'links', 'commit'])
+    expect(ran).toEqual([
+      'export',
+      'import',
+      'copy-files',
+      'copy-files',
+      'copy-sessions',
+      'links',
+      'commit'
+    ])
   })
 
   test('crash recovery is the same call: a journal mid-way continues from its step', async () => {

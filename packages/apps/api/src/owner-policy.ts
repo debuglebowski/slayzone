@@ -1208,6 +1208,18 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.addRemoteBlockers': checked(taskMove('moveId'), task('links[].taskId')),
   'taskMoves.remoteBlockers': checked(task('taskId')),
   'taskMoves.removeRemoteBlocker': checked(task('taskId')),
+  // A moved task's agent sessions: the move decides, and each names its task.
+  'taskMoves.sessionsExport': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsRead': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsReadAttachment': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsDiscard': checked(taskMove('moveId')),
+  'taskMoves.sessionsBegin': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsChunk': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsFinish': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsPutAttachment': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsActivate': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsImportLedger': checked(taskMove('moveId'), task('taskId')),
+  'taskMoves.sessionsRegister': checked(taskMove('moveId'), task('taskId')),
   // A move's artifact bytes: the move decides (its tasks; once gone, who began it).
   'artifacts.moveManifest': checked(taskMove('moveId')),
   'artifacts.moveRead': checked(taskMove('moveId')),

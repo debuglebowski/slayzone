@@ -89,7 +89,13 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
           source.taskMoves.addRemoteBlockers.mutate({ moveId, links }).then(() => undefined),
         fileManifest: (moveId) => source.artifacts.moveManifest.query({ moveId }),
         readFile: (moveId, ref, offset, length) =>
-          source.artifacts.moveRead.query({ moveId, ref, offset, length })
+          source.artifacts.moveRead.query({ moveId, ref, offset, length }),
+        sessionsExport: (moveId, taskId) =>
+          source.taskMoves.sessionsExport.mutate({ moveId, taskId }),
+        sessionsRead: (input) => source.taskMoves.sessionsRead.query(input),
+        sessionsReadAttachment: (input) => source.taskMoves.sessionsReadAttachment.query(input),
+        sessionsDiscard: (moveId) =>
+          source.taskMoves.sessionsDiscard.mutate({ moveId }).then(() => undefined)
       },
       target: {
         importBundle: (input) => target.taskMoves.import.mutate(input).then(() => undefined),
@@ -99,6 +105,22 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
         writeFile: (input) => target.artifacts.moveWrite.mutate(input).then(() => undefined),
         clearStaging: (moveId) =>
           target.artifacts.moveClearStaging.mutate({ moveId }).then(() => undefined),
+        sessionsBegin: (moveId, taskId, manifest) =>
+          target.taskMoves.sessionsBegin.mutate({ moveId, taskId, manifest }),
+        sessionsChunk: (input) =>
+          target.taskMoves.sessionsChunk.mutate(input).then(() => undefined),
+        sessionsFinish: (moveId, taskId, transferId) =>
+          target.taskMoves.sessionsFinish.mutate({ moveId, taskId, transferId }),
+        sessionsPutAttachment: (input) =>
+          target.taskMoves.sessionsPutAttachment.mutate(input).then(() => undefined),
+        sessionsActivate: (input) =>
+          target.taskMoves.sessionsActivate.mutate(input).then(() => undefined),
+        sessionsImportLedger: (moveId, taskId, ledger) =>
+          target.taskMoves.sessionsImportLedger
+            .mutate({ moveId, taskId, ledger })
+            .then(() => undefined),
+        sessionsRegister: (moveId, taskId, chats) =>
+          target.taskMoves.sessionsRegister.mutate({ moveId, taskId, chats }).then(() => undefined),
         commit: (moveId) => target.taskMoves.commit.mutate({ id: moveId }).then(() => undefined)
       }
     }),
@@ -130,6 +152,7 @@ export async function startCrossHubMove(input: {
   targetProjectId: string
   taskIds: string[]
   includeSubtasks: boolean
+  includeSessions?: boolean
 }): Promise<TaskMove> {
   const source = getClientForHub(input.sourceHubId) as unknown as TasksTrpcClient
   const move = await source.taskMoves.begin.mutate({
@@ -137,7 +160,8 @@ export async function startCrossHubMove(input: {
     taskIds: input.taskIds,
     targetHubId: input.targetHubId,
     targetProjectId: input.targetProjectId,
-    includeSubtasks: input.includeSubtasks
+    includeSubtasks: input.includeSubtasks,
+    includeSessions: input.includeSessions ?? true
   })
   setMove(move.id, { move, sourceHubId: input.sourceHubId, running: false, pauseRequested: false })
   void drive(move.id, input.sourceHubId)
