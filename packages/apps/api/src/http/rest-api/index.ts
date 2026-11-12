@@ -82,12 +82,15 @@ import { registerHubComputersRoute } from './hub/computers'
 import { registerHubContentErasureRoutes } from './hub/content-erasure'
 import { registerWebLoginRoute } from './hub/web-login'
 
+import { withMoveLockGate } from '../move-lock-gates'
+
 export type { RestApiDeps } from './types'
 
 export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // Every route below gets the account-role guard for its own `METHOD path` (T-15),
   // then the owner guard (T-18): a `user` route touches only the caller's content.
-  const app = withOwnerGate(withAdminGate(rawApp), deps.db)
+  // Then the move lock: a write to a task moving to another hub is refused (409).
+  const app = withMoveLockGate(withOwnerGate(withAdminGate(rawApp), deps.db), deps.db)
 
   // Notify
   registerNotifyRoute(app, deps)

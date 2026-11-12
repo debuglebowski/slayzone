@@ -209,6 +209,8 @@ export interface Owned {
   readonly pathTree: string
   /** A file in that worktree, opened on the hub's own disk (N1: `ownedPath`). */
   readonly ownedPath: string
+  /** A move of one of the owner's tasks (its own task, so the lock blocks no other case). */
+  readonly taskMove: string
 }
 
 export function ownedBy(mark: string, userId: string | null, root: string): Owned {
@@ -235,7 +237,8 @@ export function ownedBy(mark: string, userId: string | null, root: string): Owne
     automation: id('automation'),
     computer: id('computer'),
     pathTree: join(root, 'work', `${mark}_worktree`),
-    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md')
+    ownedPath: join(root, 'work', `${mark}_worktree`, 'README.md'),
+    taskMove: id('taskMove')
   }
 }
 
@@ -317,6 +320,26 @@ export function seedOwned(dbPath: string, o: Owned): void {
       `${o.mark}_TAG`
     )
     run(`INSERT INTO task_tags (task_id, tag_id) VALUES (?, ?)`, o.task, o.tag)
+    // A task on its way to another hub: locked, so it is its own task, not `o.task`.
+    run(
+      `INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)`,
+      `moving_${o.mark}`,
+      o.project,
+      `${o.mark}_TASK_MOVING_TITLE`
+    )
+    run(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, step, status, created_by, created_at, updated_at)
+       VALUES (?, 'out', 'other-hub', 'other-project', ?, 1, 'export', 'running', ?, 0, 0)`,
+      o.taskMove,
+      JSON.stringify([`moving_${o.mark}`]),
+      o.userId
+    )
+    run(
+      `INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)`,
+      o.taskMove,
+      `moving_${o.mark}`
+    )
     run(
       `INSERT INTO task_templates (id, project_id, name) VALUES (?, ?, ?)`,
       o.template,

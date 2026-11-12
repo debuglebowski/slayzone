@@ -74,6 +74,7 @@ import { settingsRouter, type SettingsMounts } from '@slayzone/settings-core/ser
 import { tagsRouter, type TagsMounts } from '@slayzone/tags/server'
 import {
   taskRouter,
+  taskMovesRouter,
   agentSessionsRouter,
   templateRouter,
   type AgentSessionsMounts,
@@ -112,6 +113,8 @@ export const appRouter = router({
   workspace: workspaceRouter,
   tags: tagsRouter,
   task: taskRouter,
+  // Moving tasks to another hub: this hub's journal of its tasks' moves.
+  taskMoves: taskMovesRouter,
   telemetry: telemetryRouter,
   template: templateRouter,
   taskTerminals: taskTerminalsRouter,

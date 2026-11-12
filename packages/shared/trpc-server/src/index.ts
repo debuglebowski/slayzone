@@ -25,6 +25,7 @@ export {
 export {
   setProcedurePolicy,
   procedurePolicy,
+  registeredProcedurePolicy,
   type ProcedurePolicy,
   type OwnerCheckRequest,
   type OwnedResultFilter

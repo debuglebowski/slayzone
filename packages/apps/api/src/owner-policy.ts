@@ -115,6 +115,7 @@ const aiItem = ref('aiConfigItem')
 const group = ref('projectGroup')
 const automation = ref('automation')
 const computer = ref('computer')
+const taskMove = ref('taskMove')
 
 const checked = (...ids: Ref[]): OwnerRule => ({ mark: 'id-checked', ids })
 /**
@@ -203,6 +204,17 @@ const ids =
   (kind: ResourceKind): OutputFilter =>
   (data, scope) =>
     Array.isArray(data) ? scope.filter(data, (id) => res(kind, id)) : Promise.resolve(data)
+
+/** `taskMoves.redirects`: task id → { hubId, moveId }; the move decides each entry. */
+const redirectsByMove: OutputFilter = async (data, scope) => {
+  if (!isRecord(data)) return data
+  const out: Record<string, unknown> = {}
+  for (const [taskId, v] of Object.entries(data)) {
+    const r = isRecord(v) ? res('taskMove', v.moveId) : null
+    if (r && (await scope.allows(r))) out[taskId] = v
+  }
+  return out
+}
 
 /** A record keyed by ids. */
 const keyed =
@@ -1173,6 +1185,20 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.deleteConversation': checked(task('id')),
   'task.updateMany': checked(task('ids[]'), project('updates.projectId'), task('updates.parentId')),
   'task.moveToProject': checked(task('taskIds[]'), project('targetProjectId')),
+  // ── moving tasks to another hub (this hub's journal) ──
+  // The target project is on the other hub: that hub checks it on import.
+  'taskMoves.begin': checked(task('taskIds[]')),
+  'taskMoves.get': checked(taskMove('id')),
+  'taskMoves.list': listed(rows('id', 'taskMove')),
+  'taskMoves.advance': checked(taskMove('id')),
+  'taskMoves.progress': checked(taskMove('id')),
+  'taskMoves.pause': checked(taskMove('id')),
+  'taskMoves.resume': checked(taskMove('id')),
+  'taskMoves.fail': checked(taskMove('id')),
+  'taskMoves.cancel': checked(taskMove('id')),
+  'taskMoves.release': checked(taskMove('id')),
+  // Keyed by task id; each answer names its move, which decides.
+  'taskMoves.redirects': listed(redirectsByMove),
   'task.movePreview': checked(task('taskIds[]'), project('targetProjectId')),
   'task.delete': checked(task('id')),
   'task.deleteMany': checked(task('ids[]')),

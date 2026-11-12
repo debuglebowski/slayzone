@@ -84,6 +84,11 @@ sql(
 )
 sql(`INSERT INTO artifact_folders (id, task_id, name) VALUES ('fA', 'tA', 'f')`)
 sql(`INSERT INTO task_artifacts (id, task_id, title) VALUES ('arA', 'tA', 't')`)
+// A move of A's task to another hub (its tasks' owner decides; `created_by` once they left).
+sql(`INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+  include_subtasks, step, status, created_by, created_at, updated_at)
+  VALUES ('mvA', 'out', 'hub-b', 'pX', '["tA"]', 1, 'export', 'running', 'a', 0, 0)`)
+sql(`INSERT INTO task_move_tasks (move_id, task_id) VALUES ('mvA', 'tA')`)
 sql(`INSERT INTO processes (id, task_id, project_id, label, command) VALUES
   ('prcTask', 'tA', NULL, 'l', 'c'), ('prcProject', NULL, 'pA', 'l', 'c'), ('prcGlobal', NULL, NULL, 'l', 'c')`)
 sql(`INSERT INTO tags (id, project_id, name) VALUES ('tagA', 'pA', 'x')`)
@@ -149,7 +154,8 @@ const OF_A: Record<ResourceKind, string> = {
   automation: 'auA',
   computer: 'cA',
   pathTree: aWorktree,
-  ownedPath: join(aRoot, 'README.md')
+  ownedPath: join(aRoot, 'README.md'),
+  taskMove: 'mvA'
 }
 
 describe('every kind: the owner, and nobody else', () => {

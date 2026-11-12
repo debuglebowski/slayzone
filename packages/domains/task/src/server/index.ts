@@ -14,6 +14,8 @@ export {
 // `task.*` tRPC router + the host-injected deps it calls. Composed by `@slayzone/api`;
 // the deps are injected by the composition roots (hub, Electron main).
 export { taskRouter } from './task-router'
+export { taskMovesRouter } from './task-moves-router'
+export { anyTaskMoveLocking, lockedTaskIds } from './ops/task-moves'
 export { setTaskDeps, getTaskOps } from './task-router-deps'
 // `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
 export {

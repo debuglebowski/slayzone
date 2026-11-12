@@ -106,6 +106,7 @@ export type ResourceKind =
   | 'computer'
   | 'pathTree'
   | 'ownedPath'
+  | 'taskMove'
 
 export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'project',
@@ -126,7 +127,8 @@ export const RESOURCE_KINDS: readonly ResourceKind[] = [
   'automation',
   'computer',
   'pathTree',
-  'ownedPath'
+  'ownedPath',
+  'taskMove'
 ]
 
 /** The kinds whose id is a filesystem path. A path can carry a user's directory
@@ -767,6 +769,16 @@ async function resolvePathTree(
   return own
 }
 
+async function resolveTaskMove(db: SlayzoneDb, id: string): Promise<Ownership> {
+  const here = await db.get<{ task_id: string }>(
+    `SELECT mt.task_id FROM task_move_tasks mt JOIN tasks t ON t.id = mt.task_id
+      WHERE mt.move_id = ? LIMIT 1`,
+    [id]
+  )
+  if (here) return viaTask(db, here.task_id)
+  return viaQuery('SELECT created_by AS owner_user_id FROM task_moves WHERE id = ?')(db, id)
+}
+
 // ── the resolvers ─────────────────────────────────────────────────────────────
 
 type Resolver = (db: SlayzoneDb, id: string, req: AccessRequest) => Promise<Ownership>
@@ -799,7 +811,10 @@ const RESOLVERS: Record<ResourceKind, Resolver> = {
   // A path the hub opens on its own disk for the caller: a root of theirs, or nothing (N1).
   // Read on the hub's disk: no computer breaks a tie there (P2).
   ownedPath: (db, id, req) =>
-    resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', null, 'hub-disk')
+    resolvePathResource(db, id, req.hubRoots ?? [], 'nobody', null, 'hub-disk'),
+  // A move to another hub: its tasks' while they are here; once they left (released),
+  // whoever began it.
+  taskMove: resolveTaskMove
 }
 
 /** What a resource belongs to. Exported for tests and for callers that need the facts. */

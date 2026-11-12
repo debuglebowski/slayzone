@@ -5683,6 +5683,49 @@ export const migrations: Migration[] = [
         'Chat history unavailable. Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
       )
     }
+  },
+  {
+    version: 216,
+    up: (db) => {
+      // Moving tasks to another hub (cross-hub move, slice 3a). The hub the tasks
+      // leave keeps the move's journal: every step is recorded, so a paused or
+      // interrupted move resumes from any device. While a move is running or paused,
+      // its tasks are locked (writes refused). Once released, a redirect names the hub
+      // each task went to, so old links and open tabs find it.
+      db.exec(`
+        CREATE TABLE task_moves (
+          id                TEXT PRIMARY KEY,
+          direction         TEXT NOT NULL CHECK (direction IN ('out', 'in')),
+          peer_hub_id       TEXT NOT NULL,
+          target_project_id TEXT NOT NULL,
+          root_task_ids     TEXT NOT NULL,
+          include_subtasks  INTEGER NOT NULL,
+          step              TEXT NOT NULL,
+          status            TEXT NOT NULL
+                            CHECK (status IN ('running', 'paused', 'failed', 'canceled', 'done')),
+          error             TEXT,
+          progress          TEXT,
+          created_by        TEXT,
+          created_at        INTEGER NOT NULL,
+          updated_at        INTEGER NOT NULL
+        );
+        CREATE INDEX idx_task_moves_status ON task_moves(status);
+        CREATE TABLE task_move_tasks (
+          move_id TEXT NOT NULL REFERENCES task_moves(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL,
+          PRIMARY KEY (move_id, task_id)
+        );
+        CREATE INDEX idx_task_move_tasks_task ON task_move_tasks(task_id);
+        CREATE TABLE task_move_redirects (
+          task_id    TEXT PRIMARY KEY,
+          hub_id     TEXT NOT NULL,
+          move_id    TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `)
+      // task_move_tasks / task_move_redirects carry a task_id: fenced like every such table.
+      installContentErasureFences(db)
+    }
   }
 ]
 

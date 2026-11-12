@@ -2,6 +2,14 @@ export { CreateTaskDialog } from './CreateTaskDialog'
 export { EditTaskDialog } from './EditTaskDialog'
 export { DeleteTaskDialog } from './DeleteTaskDialog'
 export {
+  runTaskMove,
+  type RunTaskMoveOptions,
+  type TaskMoveJournal,
+  type TaskMoveStepContext,
+  type TaskMoveStepRunner,
+  type TaskMoveWorkStep
+} from './task-move-engine'
+export {
   MoveTaskDialog,
   useProjectsOnTaskHub,
   type MoveTaskDialogProps

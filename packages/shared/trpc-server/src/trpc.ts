@@ -22,7 +22,7 @@ import { trpcTransformer } from './trpc-transformer'
 import { ADMIN_ONLY, roleAllows } from './access-class'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
 import { registeredAppCodes } from './app-codes'
-import { procedurePolicy } from './procedure-policy'
+import { procedurePolicy, registeredProcedurePolicy } from './procedure-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
   // superjson on the wire; responses skip superjson's walk when they are plain
@@ -308,6 +308,19 @@ const ownerGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) =>
 })
 
 /**
+ * Move lock — the decision is `@slayzone/api`'s `move-lock.ts`, through the registered
+ * policy. A mutation that writes to a task being moved to another hub is refused
+ * (PRECONDITION_FAILED), login or not: the task's rows are on their way out. The
+ * move's own journal (`taskMoves.*`) is what runs the move, so it is never refused.
+ */
+const moveLockGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) => {
+  if (type === 'mutation' && !path.startsWith('taskMoves.')) {
+    await registeredProcedurePolicy()?.moveLockCheck?.({ ctx, path, type, getRawInput })
+  }
+  return next()
+})
+
+/**
  * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
  * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
  * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
@@ -391,6 +404,7 @@ export const publicProcedure = t.procedure
   .use(adminGate)
   .use(scopeGate)
   .use(ownerGate)
+  .use(moveLockGate)
   .use(switchRefusal)
   .use(unsafePathRefusal)
   .use(computerRefusal)

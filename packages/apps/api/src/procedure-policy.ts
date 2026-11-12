@@ -11,12 +11,15 @@
  *
  * @module api/procedure-policy
  */
+import { TRPCError } from '@trpc/server'
 import { setProcedurePolicy } from '@slayzone/trpc-server'
 import { isPathAllowed } from '@slayzone/transport/scopes'
 import { TRPC_ADMIN_POLICY } from './admin-policy'
 import { checkOwnership, ownedResult } from './owner-gate'
 import { confineTaskFileCall } from './task-file-confinement'
 import { getAuthGate } from '@slayzone/trpc-server'
+import { TRPC_OWNER_POLICY, resourcesIn } from './owner-policy'
+import { assertNotMoving, TaskMovingError } from './move-lock'
 
 setProcedurePolicy({
   scopeAllows: isPathAllowed,
@@ -33,5 +36,17 @@ setProcedurePolicy({
       })
     }
     return check ? (data) => ownedResult(check, data) : null
+  },
+  // The move lock (move-lock.ts): the resources the owner rule lists, login or not.
+  moveLockCheck: async (req) => {
+    const rule = TRPC_OWNER_POLICY[req.path]
+    if (!rule) return
+    try {
+      await assertNotMoving(req.ctx.db, resourcesIn(await req.getRawInput(), rule))
+    } catch (err) {
+      if (err instanceof TaskMovingError)
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err })
+      throw err
+    }
   }
 })

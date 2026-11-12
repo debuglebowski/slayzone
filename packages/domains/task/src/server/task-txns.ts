@@ -148,13 +148,87 @@ function moveProject(
   })()
 }
 
+/**
+ * Begin a move to another hub (`beginTaskMove`): unless one of the tasks is already
+ * locked by an unfinished move, write the journal row and lock the tasks — in one
+ * transaction, so two moves never lock the same task. A begin retried with its id
+ * answers the existing move. Answers `conflict` with the tasks already moving.
+ */
+function beginMove(
+  db: Database,
+  p: {
+    id: string
+    peerHubId: string
+    targetProjectId: string
+    rootTaskIds: string[]
+    taskIds: string[]
+    includeSubtasks: boolean
+    createdBy: string | null
+    now: number
+  }
+): { outcome: 'created' | 'exists' } | { outcome: 'conflict'; taskIds: string[] } {
+  return db.transaction(() => {
+    if (db.prepare('SELECT 1 FROM task_moves WHERE id = ?').get(p.id))
+      return { outcome: 'exists' as const }
+    const placeholders = p.taskIds.map(() => '?').join(', ')
+    const busy = db
+      .prepare(
+        `SELECT DISTINCT mt.task_id FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
+          WHERE m.status IN ('running', 'paused', 'failed') AND mt.task_id IN (${placeholders})`
+      )
+      .all(...p.taskIds) as Array<{ task_id: string }>
+    if (busy.length > 0)
+      return { outcome: 'conflict' as const, taskIds: busy.map((r) => r.task_id) }
+    db.prepare(
+      `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
+         include_subtasks, step, status, created_by, created_at, updated_at)
+       VALUES (?, 'out', ?, ?, ?, ?, 'lock', 'running', ?, ?, ?)`
+    ).run(
+      p.id,
+      p.peerHubId,
+      p.targetProjectId,
+      JSON.stringify(p.rootTaskIds),
+      p.includeSubtasks ? 1 : 0,
+      p.createdBy,
+      p.now,
+      p.now
+    )
+    const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
+    for (const taskId of p.taskIds) lock.run(p.id, taskId)
+    return { outcome: 'created' as const }
+  })()
+}
+
+/**
+ * Release a move's tasks (`releaseTaskMove`): a redirect per task (where it went),
+ * the move done — its lock lifted. Retried after it is done: nothing changes.
+ */
+function releaseMove(db: Database, p: { id: string; now: number }): void {
+  db.transaction(() => {
+    const move = db.prepare('SELECT peer_hub_id FROM task_moves WHERE id = ?').get(p.id) as
+      | { peer_hub_id: string }
+      | undefined
+    if (!move) return
+    db.prepare(
+      `INSERT OR REPLACE INTO task_move_redirects (task_id, hub_id, move_id, created_at)
+       SELECT task_id, ?, move_id, ? FROM task_move_tasks WHERE move_id = ?`
+    ).run(move.peer_hub_id, p.now, p.id)
+    db.prepare("UPDATE task_moves SET status = 'done', updated_at = ? WHERE id = ?").run(
+      p.now,
+      p.id
+    )
+  })()
+}
+
 export const taskTxns = {
   'task:insert-row': insertRow,
   'task:soft-delete': softDelete,
   'task:soft-delete-many': softDeleteMany,
   'task:archive': archive,
   'task:update': update,
-  'task:move-project': moveProject
+  'task:move-project': moveProject,
+  'task:begin-move': beginMove,
+  'task:release-move': releaseMove
 }
 
 // Types `db.namedTxn(...)` for these names. Every file that calls one imports this

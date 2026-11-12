@@ -81,6 +81,7 @@ run_harness packages/apps/computer/src/boot-isolation.test.ts
 run_harness packages/apps/cli/src/commands/hub-erasure.test.ts
 run_vitest_files 'hub user erasure confirmations' packages/domains/settings/src/client/tabs/HubUsersView.test.tsx
 run_vitest_files 'permanent deletion has no undo' packages/domains/tasks/src/client/permanent-delete-undo.test.tsx
+run_vitest_files 'cross-hub move engine: steps, pause, fail, crash recovery' packages/domains/task/src/client/task-move-engine.test.ts
 # Every client delete asks first (subtasks too) and reports blocked/incomplete/failed
 # results instead of dropping them; a refused delete keeps the task (and its window).
 run_vitest_files 'task delete confirmation + result handling' \
@@ -709,6 +710,8 @@ run_harness packages/domains/terminal/src/server/pty-router.test.ts
 run_harness packages/apps/api/src/routers/task.test.ts
 # Moving tasks to another project: subtree, detach, tags, re-home; update/updateMany delegate to it.
 run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
+# Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
+run_harness packages/apps/api/src/routers/task-moves.test.ts
 # Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
 # (they emitted nothing, so other clients never saw them live); a burst stays merged.
 run_harness packages/apps/api/src/routers/task-change-signals.test.ts
