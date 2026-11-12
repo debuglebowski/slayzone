@@ -11,6 +11,10 @@
  *    project folder the task has on the TARGET computer, so `claude --resume <id>`
  *    from there finds it. The transcript only grows: an older copy already there is
  *    replaced; a copy that is not a prefix of the incoming one is left alone.
+ *  - A Codex rollout (`<CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`)
+ *    is found by its thread id and written at the same place under the target's Codex
+ *    home: `thread/resume` finds a rollout by id wherever its date folder is. It only
+ *    grows, like a transcript.
  *  - Terminal scrollback (`<stateDir>/computer-runtime/pty-history/<hub>/<task>/*.txt`)
  *    is named by a hash of the terminal's session id, which a move keeps (task and
  *    tab ids stay), so each file keeps its name. The incoming copy is the task's
@@ -24,6 +28,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import {
   closeSync,
   existsSync,
@@ -46,10 +51,19 @@ import { ptyHistoryDir } from '../pty-history'
 const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const SAFE_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/
 const SCROLLBACK_NAME = /^[a-f0-9]{40}\.txt$/
+const ROLLOUT_NAME = /^rollout-[A-Za-z0-9._:-]{1,120}\.jsonl$/
+const ROLLOUT_DATE = /^\d{4}\/\d{2}\/\d{2}$/
 
 export const sessionMoveFileRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('claude-transcript'), sessionId: z.string().regex(SAFE_SESSION_ID) }),
-  z.object({ kind: z.literal('pty-history'), name: z.string().regex(SCROLLBACK_NAME) })
+  z.object({ kind: z.literal('pty-history'), name: z.string().regex(SCROLLBACK_NAME) }),
+  z.object({
+    kind: z.literal('codex-rollout'),
+    sessionId: z.string().regex(SAFE_SESSION_ID),
+    /** `YYYY/MM/DD` under the Codex sessions folder. */
+    date: z.string().regex(ROLLOUT_DATE),
+    name: z.string().regex(ROLLOUT_NAME)
+  })
 ])
 export type SessionMoveFileRef = z.infer<typeof sessionMoveFileRefSchema>
 
@@ -57,6 +71,35 @@ export interface SessionMoveFileEntry {
   ref: SessionMoveFileRef
   size: number
   hash: string
+}
+
+/** Where Codex keeps its state: `CODEX_HOME` when set, else `~/.codex`. Read per call. */
+const codexHome = (): string => process.env.CODEX_HOME || join(homedir(), '.codex')
+
+/** The rollout of Codex thread `sessionId` on this computer, by its place in the date folders. */
+function findCodexRollout(sessionId: string): { date: string; name: string; path: string } | null {
+  const root = join(codexHome(), 'sessions')
+  const dirs = (path: string): string[] => {
+    try {
+      return readdirSync(path)
+    } catch {
+      return []
+    }
+  }
+  let best: { date: string; name: string; path: string; mtime: number } | null = null
+  for (const year of dirs(root))
+    for (const month of dirs(join(root, year)))
+      for (const day of dirs(join(root, year, month)))
+        for (const name of dirs(join(root, year, month, day))) {
+          if (!name.endsWith(`-${sessionId}.jsonl`) || !ROLLOUT_NAME.test(name)) continue
+          const path = join(root, year, month, day, name)
+          const mtime = statSync(path).mtimeMs
+          if (!best || mtime > best.mtime)
+            best = { date: `${year}/${month}/${day}`, name, path, mtime }
+        }
+  return best && ROLLOUT_DATE.test(best.date)
+    ? { date: best.date, name: best.name, path: best.path }
+    : null
 }
 
 const sha256File = (path: string): string => {
@@ -120,6 +163,10 @@ export function createSessionMoveFiles(opts: {
       const path = join(scrollbackDir(taskId), ref.name)
       return existsSync(path) ? path : null
     }
+    if (ref.kind === 'codex-rollout') {
+      const found = findCodexRollout(ref.sessionId)
+      return found && found.name === ref.name && found.date === ref.date ? found.path : null
+    }
     const found = await locateClaudeTranscript(ref.sessionId, opts.projectFolder(projectId) ?? '')
     return found?.path ?? null
   }
@@ -127,6 +174,7 @@ export function createSessionMoveFiles(opts: {
   /** Where `ref` goes on THIS computer (null = no place for it here). */
   function targetPath(taskId: string, projectId: string, ref: SessionMoveFileRef): string | null {
     if (ref.kind === 'pty-history') return join(scrollbackDir(taskId), ref.name)
+    if (ref.kind === 'codex-rollout') return join(codexHome(), 'sessions', ref.date, ref.name)
     const folder = opts.projectFolder(projectId)
     return folder ? claudeTranscriptPath(folder, ref.sessionId) : null
   }
@@ -156,6 +204,17 @@ export function createSessionMoveFiles(opts: {
           ref: { kind: 'claude-transcript', sessionId },
           size: statSync(path).size,
           hash: sha256File(path)
+        })
+      }
+      // A Codex thread id names its rollout the same way: found by the id, wherever dated.
+      for (const sessionId of [...new Set(opts.sessionIds(taskId))].sort()) {
+        if (!SAFE_SESSION_ID.test(sessionId)) continue
+        const found = findCodexRollout(sessionId)
+        if (!found) continue
+        entries.push({
+          ref: { kind: 'codex-rollout', sessionId, date: found.date, name: found.name },
+          size: statSync(found.path).size,
+          hash: sha256File(found.path)
         })
       }
       return entries
@@ -247,10 +306,10 @@ export function createSessionMoveFiles(opts: {
         rmSync(staging, { force: true })
         throw new Error('The copied session file does not match its hash')
       }
-      // A transcript only grows: replace an older copy; leave one that is not the start
-      // of this (the two diverged — which is right is not ours to say).
+      // A transcript or rollout only grows: replace an older copy; leave one that is not
+      // the start of this (the two diverged — which is right is not ours to say).
       if (
-        input.ref.kind === 'claude-transcript' &&
+        (input.ref.kind === 'claude-transcript' || input.ref.kind === 'codex-rollout') &&
         existsSync(target) &&
         !isPrefixOf(target, staging)
       ) {

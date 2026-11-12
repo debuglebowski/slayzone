@@ -80,10 +80,15 @@ interface MovePlan {
 
 /**
  * Agent modes whose session can follow its task to another COMPUTER: the chat and the
- * files beside it travel (`moveSessionsToTaskComputer`) — a Claude transcript is a
- * file the target computer can resume from.
+ * files beside it travel (`moveSessionsToTaskComputer`) — a Claude transcript or a
+ * Codex rollout is a file the target computer can resume from. Codex in a terminal
+ * is not here: it asks which folder to use when it resumes elsewhere.
  */
-const SESSION_FOLLOWS_COMPUTER_MODES: readonly string[] = ['claude-code', 'claude-chat']
+const SESSION_FOLLOWS_COMPUTER_MODES: readonly string[] = [
+  'claude-code',
+  'claude-chat',
+  'codex-chat'
+]
 
 interface SessionTab {
   taskId: string

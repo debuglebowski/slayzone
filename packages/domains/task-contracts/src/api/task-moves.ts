@@ -214,10 +214,11 @@ export interface TaskMoveAttachmentRef {
 }
 /**
  * A file beside a task's chats that a move copies (`copy-sessions`): a Claude session
- * transcript or a terminal's scrollback. The computers check each reference and hash.
+ * transcript, a Codex rollout or a terminal's scrollback. The computers check each reference and hash.
  */
 export type TaskMoveSessionFileRef =
   | { kind: 'claude-transcript'; sessionId: string }
+  | { kind: 'codex-rollout'; sessionId: string; date: string; name: string }
   | { kind: 'pty-history'; name: string }
 export interface TaskMoveSessionFile {
   ref: TaskMoveSessionFileRef

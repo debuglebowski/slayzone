@@ -18,16 +18,26 @@ const SCROLLBACK = `${'a'.repeat(40)}.txt`
 
 let root: string
 let savedConfigDir: string | undefined
+let savedCodexHome: string | undefined
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'slz-move-files-'))
   savedConfigDir = process.env.CLAUDE_CONFIG_DIR
+  savedCodexHome = process.env.CODEX_HOME
   process.env.CLAUDE_CONFIG_DIR = join(root, 'claude')
 })
 afterEach(() => {
   if (savedConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
   else process.env.CLAUDE_CONFIG_DIR = savedConfigDir
+  if (savedCodexHome === undefined) delete process.env.CODEX_HOME
+  else process.env.CODEX_HOME = savedCodexHome
   rmSync(root, { recursive: true, force: true })
 })
+
+/** Run `work` as `s`'s computer: its own Codex home (the Claude folder is shared by name). */
+async function onSide<T>(s: { codexHome: string }, work: () => T | Promise<T>): Promise<T> {
+  process.env.CODEX_HOME = s.codexHome
+  return await work()
+}
 
 /** One computer's side of one hub: its own state dir, project folders and ledger. */
 function side(name: string, opts: { folder?: string | null; sessions?: string[] } = {}) {
@@ -44,6 +54,7 @@ function side(name: string, opts: { folder?: string | null; sessions?: string[] 
     files,
     stateDir,
     folder,
+    codexHome: join(root, `${name}-codex`),
     scrollbackDir: join(ptyHistoryDir(stateDir, `hub-${name}`), TASK)
   }
 }
@@ -61,20 +72,22 @@ function putScrollback(s: Side, text: string) {
 
 /** What the app does: ask what the target lacks, read it in chunks, write it. */
 async function copy(from: Side, to: Side, chunk = 7) {
-  const listed = await from.files.list(TASK, 'p')
-  const missing = to.files.missing(TASK, 'p', listed)
+  const listed = await onSide(from, () => from.files.list(TASK, 'p'))
+  const missing = await onSide(to, () => to.files.missing(TASK, 'p', listed))
   for (const file of missing) {
     let offset = file.offset
     for (;;) {
-      const part = await from.files.read(TASK, 'p', file.ref, offset, chunk)
-      to.files.write({
-        taskId: TASK,
-        projectId: 'p',
-        ref: file.ref,
-        offset,
-        data: part.data,
-        ...(part.eof ? { complete: { size: file.size, hash: file.hash } } : {})
-      })
+      const part = await onSide(from, () => from.files.read(TASK, 'p', file.ref, offset, chunk))
+      await onSide(to, () =>
+        to.files.write({
+          taskId: TASK,
+          projectId: 'p',
+          ref: file.ref,
+          offset,
+          data: part.data,
+          ...(part.eof ? { complete: { size: file.size, hash: file.hash } } : {})
+        })
+      )
       offset += Buffer.from(part.data, 'base64').length
       if (part.eof) break
     }
@@ -82,6 +95,13 @@ async function copy(from: Side, to: Side, chunk = 7) {
   return { listed, missing }
 }
 const transcriptRef = (sessionId: string) => ({ kind: 'claude-transcript' as const, sessionId })
+const THREAD = '0199c1d2-aaaa-7bbb-8ccc-0123456789ab'
+const ROLLOUT = `rollout-2026-11-12T10-11-12-${THREAD}.jsonl`
+function putRollout(s: Side, date: string, name: string, text: string) {
+  const dir = join(s.codexHome, 'sessions', date)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, name), text)
+}
 
 describe('a moved task’s session files', () => {
   test('a transcript goes under the target’s project folder, the scrollback keeps its name', async () => {
@@ -204,6 +224,51 @@ describe('a moved task’s session files', () => {
     expect(readFileSync(claudeTranscriptPath(A.folder!, 'sess-1'), 'utf8')).toBe('kept\n')
     // Nothing there to forget is fine.
     expect(() => A.files.forgetScrollback(TASK)).not.toThrow()
+  })
+
+  test('a Codex rollout is found by its thread id and lands at the same dated place in the target’s Codex home', async () => {
+    const A = side('a', { sessions: [THREAD, 'not-a-codex-thread'] })
+    const B = side('b')
+    const rollout = '{"type":"session_meta"}\n{"type":"event_msg"}\n'
+    putRollout(A, '2026/11/12', ROLLOUT, rollout)
+    // Another thread's rollout, which this task's ledger does not name.
+    putRollout(A, '2026/11/12', 'rollout-2026-11-12T10-11-12-someone-else.jsonl', 'x\n')
+
+    const { listed } = await copy(A, B)
+    expect(listed.map((f) => f.ref)).toEqual([
+      { kind: 'codex-rollout', sessionId: THREAD, date: '2026/11/12', name: ROLLOUT }
+    ])
+    expect(readFileSync(join(B.codexHome, 'sessions', '2026/11/12', ROLLOUT), 'utf8')).toBe(rollout)
+  })
+
+  test('a Codex rollout that grew replaces the older copy; a diverged one stays', async () => {
+    const A = side('a', { sessions: [THREAD] })
+    const B = side('b', { sessions: [THREAD] })
+    putRollout(A, '2026/11/12', ROLLOUT, 'line 1\n')
+    putRollout(B, '2026/11/12', ROLLOUT, 'line 1\nline 2 on B\n')
+    await copy(B, A)
+    expect(readFileSync(join(A.codexHome, 'sessions', '2026/11/12', ROLLOUT), 'utf8')).toBe(
+      'line 1\nline 2 on B\n'
+    )
+    // Now they differ from the start: the copy already there is kept.
+    putRollout(B, '2026/11/12', ROLLOUT, 'B went another way\n')
+    await copy(B, A)
+    expect(readFileSync(join(A.codexHome, 'sessions', '2026/11/12', ROLLOUT), 'utf8')).toBe(
+      'line 1\nline 2 on B\n'
+    )
+  })
+
+  test('Codex references that could leave the sessions folder are refused', () => {
+    const ok = { kind: 'codex-rollout', sessionId: THREAD, date: '2026/11/12', name: ROLLOUT }
+    expect(sessionMoveFileRefSchema.safeParse(ok).success).toBe(true)
+    for (const bad of [
+      { ...ok, date: '../../etc' },
+      { ...ok, date: '2026/11/12/../..' },
+      { ...ok, name: '../rollout-x.jsonl' },
+      { ...ok, name: 'not-a-rollout.jsonl' },
+      { ...ok, sessionId: '../x' }
+    ])
+      expect(sessionMoveFileRefSchema.safeParse(bad).success).toBe(false)
   })
 
   test('references that could leave the folders are refused', () => {
