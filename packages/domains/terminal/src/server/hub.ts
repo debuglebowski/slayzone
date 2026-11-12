@@ -124,7 +124,8 @@ export {
 } from './runtime/warm-process-manager'
 export {
   onTaskReachedTerminal,
-  setTaskAgentsStopper
+  setTaskAgentsStopper,
+  stopTaskAgents
 } from './task-events'
 export {
   isMidReplyState,

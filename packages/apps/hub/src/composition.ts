@@ -206,6 +206,7 @@ import {
   onTaskReachedTerminal,
   runtimeOnTaskReachedTerminal,
   setTaskAgentsStopper,
+  stopTaskAgents,
   midReplySessionIds,
   broadcastRespawnRequest,
   initWarmProcessManager,
@@ -736,6 +737,8 @@ export function composeServer(opts: {
         ?.revoke({ by: 'task', taskId }, 'task_closed')
         .then(reportDirectRevokeFailures)
     },
+    // PTYs + chats here, and chats a computer owns (the stopper wired below).
+    stopTaskAgents,
     recordDiagnosticEvent,
     // PTY lifecycle now lives in THIS process (slice 9), so the task-status
     // hooks must run here: status→terminal kills the task's PTYs (→ pty:exit

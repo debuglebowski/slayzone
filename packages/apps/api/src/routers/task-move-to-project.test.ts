@@ -48,11 +48,14 @@ setTaskDeps({
 })
 const ctx = { db: h.slayDb, dataRoot: mkdtempSync(join(tmpdir(), 'trpc-task-move-')) }
 const killed: string[] = []
+/** Tasks whose agents (PTYs and chats) the move stopped. */
+const stopped: string[] = []
 configureTaskRuntimeAdapters({
   getDataRoot: () => ctx.dataRoot,
   worktrees: defaultWorktreeExecAdapters,
   worktreePolicy: defaultWorktreePolicyAdapters,
-  killPtysByTaskId: (taskId: string) => void killed.push(taskId)
+  killPtysByTaskId: (taskId: string) => void killed.push(taskId),
+  stopTaskAgents: async (taskId: string) => void stopped.push(taskId)
 })
 const folders = installTaskPathsComputer()
 const caller = taskRouter.createCaller(ctx)
@@ -60,6 +63,7 @@ const caller = taskRouter.createCaller(ctx)
 beforeEach(() => {
   signals.length = 0
   killed.length = 0
+  stopped.length = 0
 })
 
 const COLUMNS_A = [
@@ -119,17 +123,28 @@ const eventsOf = (taskId: string) =>
     .prepare('SELECT kind, payload_json FROM activity_events WHERE task_id = ? ORDER BY created_at')
     .all(taskId) as { kind: string; payload_json: string | null }[]
 /** A session that ran on the task's computer, so a reset has something to cut off. */
-const seedSession = (taskId: string) =>
+const seedSession = (taskId: string, mode = 'claude-code', tabId?: string) =>
   computer.service.handle({
     op: 'recordConversation',
     args: {
       taskId,
-      mode: 'claude-code',
+      mode,
+      ...(tabId ? { tabId } : {}),
       conversationId: crypto.randomUUID(),
       origin: 'slay-spawned-resume',
       createdAt: Date.now()
     }
   })
+/** An agent tab of the task (the main tab's id is the task id). */
+function agentTab(taskId: string, mode: string, opts: { main?: boolean; label?: string } = {}) {
+  const id = opts.main ? taskId : crypto.randomUUID()
+  h.db
+    .prepare(
+      'INSERT OR REPLACE INTO terminal_tabs (id, task_id, label, mode, is_main, position) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    .run(id, taskId, opts.label ?? null, mode, opts.main ? 1 : 0, opts.main ? 0 : 1)
+  return id
+}
 /** Forget what the setup signalled and killed; the move's own come after. */
 const quiet = () => {
   signals.length = 0
@@ -402,5 +417,79 @@ describe('task.update / task.updateMany with a projectId go through the move', (
     const t = await create(a, 'Once', { status: 'queued' })
     await caller.updateMany({ ids: [t.id], updates: { status: 'doing' } })
     expect(eventsOf(t.id).filter((e) => e.kind === 'task.status_changed')).toHaveLength(1)
+  })
+})
+
+describe('keeping agent sessions (same computer)', () => {
+  test('preview: Claude can keep its session, Codex in a terminal cannot (and says why)', async () => {
+    const a = project('KeepPreviewA')
+    const b = project('KeepPreviewB')
+    const t = await create(a, 'Keep preview')
+    const main = agentTab(t.id, 'claude-code', { main: true })
+    const codex = agentTab(t.id, 'codex', { label: 'Review' })
+    agentTab(t.id, 'terminal', { label: 'Shell' })
+
+    const preview = await caller.movePreview({ taskIds: [t.id], targetProjectId: b })
+    const byTab = new Map(preview.sessions.map((x) => [x.tabId, x]))
+    // Plain shells have no agent session: not listed.
+    expect(preview.sessions).toHaveLength(2)
+    expect(byTab.get(main)).toMatchObject({ taskId: t.id, mode: 'claude-code', canKeep: true })
+    expect(byTab.get(codex)).toMatchObject({ mode: 'codex', canKeep: false, tabLabel: 'Review' })
+    expect(byTab.get(codex)?.reason).toMatch(/codex/i)
+  })
+
+  test('kept tabs keep their session; the rest reset per tab; every agent stops', async () => {
+    const a = project('KeepA')
+    const b = project('KeepB')
+    const t = await create(a, 'Keeper')
+    const main = agentTab(t.id, 'claude-code', { main: true })
+    const codex = agentTab(t.id, 'codex')
+    await seedSession(t.id, 'claude-code', main)
+    await seedSession(t.id, 'codex', codex)
+    quiet()
+
+    await caller.moveToProject({
+      taskIds: [t.id],
+      targetProjectId: b,
+      includeSubtasks: true,
+      // Codex is asked for too: it cannot follow, so it resets anyway.
+      keepSessionTabIds: [main, codex]
+    })
+
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: codex }])
+    // The kept session resumes in the new folder only once its agent restarts there.
+    expect(stopped).toEqual([t.id])
+  })
+
+  test('no tab kept: the whole task resets, as before', async () => {
+    const a = project('KeepNoneA')
+    const b = project('KeepNoneB')
+    const t = await create(a, 'Fresh')
+    agentTab(t.id, 'claude-code', { main: true })
+    await seedSession(t.id)
+    await caller.moveToProject({ taskIds: [t.id], targetProjectId: b, includeSubtasks: true })
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null }])
+  })
+
+  test('another computer in the target project: no session can follow', async () => {
+    const a = project('KeepComputerA')
+    const b = project('KeepComputerB')
+    h.db.prepare('UPDATE projects SET default_computer_id = ? WHERE id = ?').run('computer-b', b)
+    const t = await create(a, 'Elsewhere')
+    const main = agentTab(t.id, 'claude-code', { main: true })
+    await seedSession(t.id, 'claude-code', main)
+
+    const preview = await caller.movePreview({ taskIds: [t.id], targetProjectId: b })
+    expect(preview.sessions[0]).toMatchObject({ tabId: main, canKeep: false })
+    expect(preview.sessions[0].reason).toMatch(/computer/i)
+
+    await caller.moveToProject({
+      taskIds: [t.id],
+      targetProjectId: b,
+      includeSubtasks: true,
+      keepSessionTabIds: [main]
+    })
+    // Nothing could be kept: the whole task resets.
+    expect(resetsOf(t.id)).toEqual([{ mode: '*', tab_id: null }])
   })
 })

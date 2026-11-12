@@ -14,6 +14,7 @@ import {
   parseColumnsConfig
 } from '@slayzone/projects-contracts'
 import type { ColumnConfig } from '@slayzone/projects-contracts'
+import { DEFAULT_AGENTS, sessionFollowsFolderChange } from '@slayzone/terminal-contracts'
 import { buildTaskProjectChangedEvents, buildTaskUpdatedEvents } from '../history.js'
 import { taskEvents } from '../events.js'
 import { resetConversation } from './task-conversations.js'
@@ -72,6 +73,18 @@ interface MovePlan {
   subtaskCount: number
   /** Parent rows (id → title) of moved rows that are detached. */
   parentTitles: Map<string, string>
+  /** The agent tabs of the moved rows, and whether each one's session can follow. */
+  sessionTabs: SessionTab[]
+}
+
+interface SessionTab {
+  taskId: string
+  taskTitle: string
+  tabId: string
+  tabLabel: string
+  mode: string
+  canKeep: boolean
+  reason?: string
 }
 
 const placeholders = (n: number): string => Array(n).fill('?').join(', ')
@@ -80,10 +93,14 @@ async function planMove(
   db: SlayzoneDb,
   input: { taskIds: readonly string[]; targetProjectId: string; includeSubtasks: boolean }
 ): Promise<MovePlan> {
-  const target = await db.get<{ id: string; name: string; columns_config: string | null }>(
-    'SELECT id, name, columns_config FROM projects WHERE id = ?',
-    [input.targetProjectId]
-  )
+  const target = await db.get<{
+    id: string
+    name: string
+    columns_config: string | null
+    default_computer_id: string | null
+  }>('SELECT id, name, columns_config, default_computer_id FROM projects WHERE id = ?', [
+    input.targetProjectId
+  ])
   if (!target) throw new ProjectNotFoundError(input.targetProjectId)
   const targetColumns = parseColumnsConfig(target.columns_config)
 
@@ -103,7 +120,8 @@ async function planMove(
     moves: [],
     detached: [],
     subtaskCount: 0,
-    parentTitles: new Map()
+    parentTitles: new Map(),
+    sessionTabs: []
   }
   if (selected.length === 0) return empty
 
@@ -157,11 +175,23 @@ async function planMove(
 
   const sourceIds = [...new Set(moves.map((m) => m.before.project_id))]
   const sources = sourceIds.length
-    ? await db.all<{ id: string; name: string; columns_config: string | null }>(
-        `SELECT id, name, columns_config FROM projects WHERE id IN (${placeholders(sourceIds.length)})`,
+    ? await db.all<{
+        id: string
+        name: string
+        columns_config: string | null
+        default_computer_id: string | null
+      }>(
+        `SELECT id, name, columns_config, default_computer_id FROM projects WHERE id IN (${placeholders(sourceIds.length)})`,
         sourceIds
       )
     : []
+  const sourceById = new Map(sources.map((p) => [p.id, p]))
+
+  const sessionTabs = await planSessionTabs(db, moves, {
+    targetName: target.name,
+    targetComputer: target.default_computer_id,
+    sourceComputer: (projectId) => sourceById.get(projectId)?.default_computer_id ?? null
+  })
 
   return {
     targetProjectId: target.id,
@@ -173,8 +203,67 @@ async function planMove(
     moves,
     detached,
     subtaskCount: subtasks.length,
-    parentTitles: new Map(parents.map((p) => [p.id, p.title]))
+    parentTitles: new Map(parents.map((p) => [p.id, p.title])),
+    sessionTabs
   }
+}
+
+/**
+ * Each moved row's agent tabs (plain shells hold no agent session) and whether the
+ * tab's session can follow the task: only when its agent resumes by id from another
+ * folder (`sessionFollowsFolderChange`), and only on the SAME computer — a task
+ * whose work moves to another computer (the target project's default) leaves its
+ * transcripts on the old one's disk.
+ */
+async function planSessionTabs(
+  db: SlayzoneDb,
+  moves: readonly PlanRow[],
+  ctx: {
+    targetName: string
+    targetComputer: string | null
+    sourceComputer: (projectId: string) => string | null
+  }
+): Promise<SessionTab[]> {
+  if (moves.length === 0) return []
+  const ids = moves.map((m) => m.before.id)
+  const pins = await db.all<{ id: string; computer_id: string | null }>(
+    `SELECT id, computer_id FROM tasks WHERE id IN (${placeholders(ids.length)})`,
+    ids
+  )
+  const pinOf = new Map(pins.map((r) => [r.id, r.computer_id]))
+  const tabs = await db.all<{
+    id: string
+    task_id: string
+    label: string | null
+    mode: string
+    is_main: number
+  }>(
+    `SELECT id, task_id, label, mode, is_main FROM terminal_tabs
+      WHERE task_id IN (${placeholders(ids.length)}) AND mode != 'terminal'
+      ORDER BY task_id, is_main DESC, position`,
+    ids
+  )
+  const byId = new Map(moves.map((m) => [m.before.id, m.before]))
+  return tabs.map((tab) => {
+    const task = byId.get(tab.task_id)!
+    const pin = pinOf.get(tab.task_id) ?? null
+    const before = pin ?? ctx.sourceComputer(task.project_id)
+    const after = pin ?? ctx.targetComputer
+    const agentLabel = DEFAULT_AGENTS.find((a) => a.id === tab.mode)?.label ?? tab.mode
+    const follows = sessionFollowsFolderChange(tab.mode)
+    const base = {
+      taskId: task.id,
+      taskTitle: task.title,
+      tabId: tab.id,
+      tabLabel: tab.label ?? (tab.is_main ? agentLabel : `${agentLabel} tab`),
+      mode: tab.mode
+    }
+    if (before !== after)
+      return { ...base, canKeep: false, reason: `Runs on another computer in ${ctx.targetName}` }
+    return follows.ok
+      ? { ...base, canKeep: true }
+      : { ...base, canKeep: false, reason: follows.reason }
+  })
 }
 
 export interface MoveChange {
@@ -197,6 +286,12 @@ export interface MoveOptions {
   includeSubtasks?: boolean
   /** Default true. `false` keeps the sessions (a caller setting provider config). */
   resetSessions?: boolean
+  /**
+   * Agent tabs whose session follows the task to the new project (the move
+   * dialog's choice). A tab whose session cannot follow (see `planSessionTabs`)
+   * resets regardless. Empty / absent: the whole task resets.
+   */
+  keepSessionTabIds?: readonly string[]
 }
 
 /** The move itself: the transaction and every per-row consequence, no op events. */
@@ -238,20 +333,30 @@ export async function moveTasksToProject(
   })
 
   const runtime = getRuntimeAdapters()
+  const keepRequested = new Set(options.keepSessionTabIds ?? [])
+  const kept = new Set(
+    plan.sessionTabs.filter((t) => t.canKeep && keepRequested.has(t.tabId)).map((t) => t.tabId)
+  )
   for (const m of plan.moves) {
     const id = m.before.id
     // The old project's folder is not this one: the task's computer forgets its paths.
     await notifyTaskPaths(id, { op: 'set', worktreePath: null, baseDir: null })
-    // Every tab's agent ran in the old folder: the whole task resets — every tab,
-    // every mode (a reset intent the hub delivers to the task's computers).
     if (options.resetSessions !== false) {
-      try {
-        await resetConversation(db, { taskId: id, scope: 'all-tabs' })
-      } catch {
+      await resetMovedSessions(
+        db,
+        id,
+        plan.sessionTabs.filter((t) => t.taskId === id),
+        kept
+      ).catch(() => {
         /* best-effort: the move is committed */
-      }
+      })
     }
+    // Every agent of the task ran in the old folder: all stop — PTYs and chats. A
+    // kept session resumes in the new folder when its agent starts again.
     runtime.killPtysByTaskId(id)
+    await runtime.stopTaskAgents(id).catch((error: unknown) => {
+      console.warn(`[task] agents of moved task ${id} not stopped:`, error)
+    })
   }
 
   const touched = [...plan.moves.map((m) => m.before), ...plan.detached]
@@ -272,6 +377,26 @@ export async function moveTasksToProject(
       ...plan.detached.map((t) => t.id)
     ],
     createdTags: createdTagIds.length > 0
+  }
+}
+
+/**
+ * The sessions a move resets (reset intents the hub delivers to the task's
+ * computers). Nothing kept: the whole task — every tab, every mode. Otherwise each
+ * agent tab not kept, on its own.
+ */
+async function resetMovedSessions(
+  db: SlayzoneDb,
+  taskId: string,
+  tabs: readonly SessionTab[],
+  kept: ReadonlySet<string>
+): Promise<void> {
+  if (!tabs.some((t) => kept.has(t.tabId))) {
+    await resetConversation(db, { taskId, scope: 'all-tabs' })
+    return
+  }
+  for (const tab of tabs) {
+    if (!kept.has(tab.tabId)) await resetConversation(db, { taskId, scope: { tabId: tab.tabId } })
   }
 }
 
@@ -314,7 +439,8 @@ export async function moveTasksToProjectRequestOp(
     {
       taskIds: input.taskIds,
       targetProjectId: input.targetProjectId,
-      includeSubtasks: input.includeSubtasks ?? true
+      includeSubtasks: input.includeSubtasks ?? true,
+      keepSessionTabIds: input.keepSessionTabIds ?? []
     },
     deps
   )
@@ -366,7 +492,8 @@ export async function previewMoveToProjectOp(
             ?.label ?? m.before.status,
         toLabel: getColumnById(m.status, plan.targetColumns)?.label ?? m.status
       })),
-    worktreeCount: plan.moves.filter((m) => m.before.has_worktree).length
+    worktreeCount: plan.moves.filter((m) => m.before.has_worktree).length,
+    sessions: plan.sessionTabs
   }
 }
 

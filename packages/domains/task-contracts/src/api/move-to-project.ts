@@ -8,7 +8,13 @@ import { z } from 'zod'
 export const moveTasksToProjectInputSchema = z.object({
   taskIds: z.array(z.string().min(1)).min(1),
   targetProjectId: z.string().min(1),
-  includeSubtasks: z.boolean().default(true)
+  includeSubtasks: z.boolean().default(true),
+  /**
+   * Agent tabs whose session follows the task (resumed in the new folder). Only a
+   * tab the preview marks `canKeep` can; any other resets. Empty: every session
+   * starts fresh.
+   */
+  keepSessionTabIds: z.array(z.string().min(1)).default([])
 })
 export type MoveTasksToProjectInput = z.input<typeof moveTasksToProjectInputSchema>
 
@@ -43,4 +49,15 @@ export interface MoveToProjectPreview {
   }>
   /** Moved rows with a worktree, which they lose. */
   worktreeCount: number
+  /** The agent tabs of the moved rows: can each one's session follow the task? */
+  sessions: Array<{
+    taskId: string
+    taskTitle: string
+    tabId: string
+    tabLabel: string
+    mode: string
+    canKeep: boolean
+    /** Why it can't, when it can't. */
+    reason?: string
+  }>
 }

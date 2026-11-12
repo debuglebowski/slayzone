@@ -2288,6 +2288,8 @@ app
       recordDiagnosticEvent,
       requestPtyRespawn: broadcastRespawnRequest,
       onReachedTerminal: onTaskReachedTerminal,
+      // The same teardown the agents stopper below runs (PTYs + chats of this host).
+      stopTaskAgents: async (taskId: string) => onTaskReachedTerminal(taskId),
       // Data-root seam so task ops/ stays server-pure. MUST be the resolved
       // storage dir (this app's channel-scoped hub root), NOT
       // app.getPath('userData') — post-migration artifacts live under

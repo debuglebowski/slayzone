@@ -55,6 +55,37 @@ export function isChatSupported(mode: string): mode is ChatSupportedMode {
 }
 
 /**
+ * Agent modes whose session can follow its task to another folder on the SAME
+ * computer (a move to another project): resumed by id from the new folder, the
+ * conversation goes on there.
+ *
+ *   - Claude (terminal and chat): `claude --resume <id>` finds a session stored
+ *     under another project's dir and continues it in the current folder
+ *     (verified on 2.1.322: same session id, history kept, new records carry the
+ *     new cwd and append to the original transcript).
+ *   - Codex chat: `thread/resume` takes the folder explicitly.
+ *
+ * Every other mode starts fresh, for the reason given.
+ */
+export const SESSION_FOLLOWS_FOLDER_MODES = ['claude-code', 'claude-chat', 'codex-chat'] as const
+const SESSION_STAYS_REASONS: Readonly<Record<string, string>> = {
+  codex: 'Codex in a terminal asks which folder to use when it resumes elsewhere',
+  gemini: 'Gemini resumes its latest session per folder',
+  'qwen-code': 'Qwen Code resumes its sessions per folder',
+  'cursor-agent': 'Cursor Agent keeps its sessions per folder'
+}
+export function sessionFollowsFolderChange(
+  mode: string
+): { ok: true } | { ok: false; reason: string } {
+  if ((SESSION_FOLLOWS_FOLDER_MODES as readonly string[]).includes(mode)) return { ok: true }
+  const label = DEFAULT_AGENTS.find((a) => a.id === mode)?.label ?? mode
+  return {
+    ok: false,
+    reason: SESSION_STAYS_REASONS[mode] ?? `${label} can't resume a session in another folder`
+  }
+}
+
+/**
  * Terminal (PTY) agent modes whose user prompts CAN be captured cleanly — they
  * emit a `UserPromptSubmit` hook carrying the prompt text (see
  * `@slayzone/agent-turns/server` `capturePrompt`). Claude Code + Codex are

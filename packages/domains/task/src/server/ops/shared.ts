@@ -192,6 +192,10 @@ export type WorktreeCleanup = 'none' | 'removed' | 'failed'
 
 export interface TaskRuntimeAdapters {
   killPtysByTaskId: (taskId: string) => void
+  /** Stop every agent of the task — its PTYs and its chats, also a chat a computer
+   *  owns (terminal's `stopTaskAgents`). A task moved to another project stops them
+   *  so none keeps running in the old folder. */
+  stopTaskAgents: (taskId: string) => Promise<void>
   removeTaskProcesses: (taskId: string) => void
   recordDiagnosticEvent: (event: DiagnosticEventPayload) => void
   /** Broadcast a respawn request to the renderer when a task transitions from a
@@ -295,6 +299,9 @@ const unconfiguredWorktreePolicyAdapters: WorktreePolicyAdapters = {
 const defaultRuntimeAdapters: TaskRuntimeAdapters = {
   killPtysByTaskId: () => {
     // Unwired: no PTYs to kill.
+  },
+  stopTaskAgents: async () => {
+    // Unwired: no agents to stop.
   },
   removeTaskProcesses: () => {
     // Unwired: no processes to kill.

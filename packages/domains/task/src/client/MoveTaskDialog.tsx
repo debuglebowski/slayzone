@@ -111,6 +111,8 @@ function MoveTaskDialogBody({
   const { trackTask } = useTrack()
   const [targetId, setTargetId] = useState(initialProjectId ?? '')
   const [includeSubtasks, setIncludeSubtasks] = useState(true)
+  /** Agent tabs the user un-ticked: every other tab that can keep its session does. */
+  const [freshTabIds, setFreshTabIds] = useState<ReadonlySet<string>>(new Set())
   const { data: projects } = useQuery(trpc.projects.list.queryOptions())
   const previewQuery = useQuery(
     trpc.task.movePreview.queryOptions(
@@ -128,7 +130,14 @@ function MoveTaskDialogBody({
     if (!canMove) return
     for (const id of taskIds) trackTask(id, 'task_moved_to_project')
     move
-      .mutateAsync({ taskIds, targetProjectId: targetId, includeSubtasks })
+      .mutateAsync({
+        taskIds,
+        targetProjectId: targetId,
+        includeSubtasks,
+        keepSessionTabIds: (preview?.sessions ?? [])
+          .filter((t) => t.canKeep && !freshTabIds.has(t.tabId))
+          .map((t) => t.tabId)
+      })
       .then((result) => {
         onOpenChange(false)
         onMoved?.(result)
@@ -188,6 +197,15 @@ function MoveTaskDialogBody({
           targetName={target.name}
           includeSubtasks={includeSubtasks}
           onIncludeSubtasksChange={setIncludeSubtasks}
+          freshTabIds={freshTabIds}
+          onKeepSessionChange={(tabId, keep) =>
+            setFreshTabIds((prev) => {
+              const next = new Set(prev)
+              if (keep) next.delete(tabId)
+              else next.add(tabId)
+              return next
+            })
+          }
         />
       )}
 
@@ -207,12 +225,16 @@ function MoveSummary({
   preview,
   targetName,
   includeSubtasks,
-  onIncludeSubtasksChange
+  onIncludeSubtasksChange,
+  freshTabIds,
+  onKeepSessionChange
 }: {
   preview: MoveToProjectPreview
   targetName: string
   includeSubtasks: boolean
   onIncludeSubtasksChange: (value: boolean) => void
+  freshTabIds: ReadonlySet<string>
+  onKeepSessionChange: (tabId: string, keep: boolean) => void
 }): React.JSX.Element {
   if (preview.taskCount === 0)
     return (
@@ -264,8 +286,46 @@ function MoveSummary({
         </div>
       )}
 
+      {preview.sessions.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-testid="move-task-sessions">
+          <span className="font-medium">Agent sessions</span>
+          <div className="flex max-h-40 flex-col gap-1.5 overflow-y-auto">
+            {preview.sessions.map((tab) => {
+              const id = `move-task-keep-${tab.tabId}`
+              const multiTask = new Set(preview.sessions.map((t) => t.taskId)).size > 1
+              return (
+                <div key={tab.tabId} className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={id}
+                      checked={tab.canKeep && !freshTabIds.has(tab.tabId)}
+                      disabled={!tab.canKeep}
+                      onCheckedChange={(v) => onKeepSessionChange(tab.tabId, v === true)}
+                      data-testid={`move-task-keep-session-${tab.tabId}`}
+                    />
+                    <Label
+                      htmlFor={id}
+                      className={tab.canKeep ? undefined : 'text-muted-foreground'}
+                    >
+                      Keep {tab.tabLabel}
+                      {multiTask ? ` (${tab.taskTitle})` : ''}
+                    </Label>
+                  </div>
+                  {tab.reason && <p className="pl-6 text-muted-foreground">{tab.reason}.</p>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <ul className="flex list-disc flex-col gap-1 pl-5 text-muted-foreground">
-        <li>Agent sessions start fresh in {targetName}; running terminals stop.</li>
+        <li>
+          Running agents stop.
+          {preview.sessions.length > 0
+            ? ' A kept session continues in the new folder when its agent starts again; the others start fresh.'
+            : ''}
+        </li>
         {preview.worktreeCount > 0 && (
           <li>
             {preview.worktreeCount === 1
