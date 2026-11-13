@@ -52,6 +52,8 @@ vi.mock('@slayzone/task/server', async () => {
     agentSessionsRouter: router({}),
     templateRouter: router({}),
     taskMovesRouter: router({}),
+    // The automation engine builds its not-moving filter from this at load.
+    projectMovingSql: (await import('@slayzone/projects/server')).projectMovingSql,
     // api wires `task.startMainAgent`'s repo-discovery seam at load.
     setMainAgentDeps: () => {},
     artifactsDirOf: (dataDir: string) => `${dataDir}/artifacts`
