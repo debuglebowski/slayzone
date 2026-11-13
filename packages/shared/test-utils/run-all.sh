@@ -1446,6 +1446,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/renderers.collapse.test.tsx \
   packages/domains/task-terminals/src/client/chat/renderers.api-retry.test.tsx \
   packages/domains/task-terminals/src/client/chat/AssistantAnswer.test.tsx \
+  packages/domains/task-terminals/src/client/chat/codex-file-citations.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatSearch.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-activity.test.ts \

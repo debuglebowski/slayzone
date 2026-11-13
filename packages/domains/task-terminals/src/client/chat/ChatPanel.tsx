@@ -13,6 +13,7 @@ import { CornerDownLeft } from 'lucide-react'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
 import { ChatOpenFailure } from './ChatOpenFailure'
+import { resolveCitedPath } from './codex-file-citations'
 import { useTRPCClient } from '../trpc'
 import { useAnswerThreads } from './useAnswerThreads'
 import { useSideQuestions } from './side-questions/useSideQuestions'
@@ -883,6 +884,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           const id = href.slice('#chat-thread:'.length)
                           const thread = threadApi.threads.find((thread) => thread.id === id)
                           if (thread) void threadApi.view?.open(thread)
+                          return
+                        }
+                        // Codex file-citation chip pointing at a local file → editor.
+                        const citedPath = anchor.dataset.fileCitationPath
+                        if (citedPath && !/^https?:\/\//i.test(citedPath)) {
+                          e.preventDefault()
+                          const absPath = resolveCitedPath(citedPath, cwd)
+                          if (handleOpenFile) handleOpenFile(absPath)
+                          else navigate.openFile(absPath)
                           return
                         }
                         if (!/^https?:\/\//i.test(href)) return

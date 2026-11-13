@@ -30,6 +30,7 @@ import {
 import { cn, useDepsChanged, useNow, useAppearance } from '@slayzone/ui'
 import { ChatDiffView } from './diff-comments/ChatDiffView'
 import { GhMarkdown } from '@slayzone/markdown/client'
+import { renderCodexFileCitations } from './codex-file-citations'
 import {
   parsePartialJson,
   streamKeyOf,
@@ -137,7 +138,7 @@ export function AssistantMessageBody({ item }: { item: Extract<TimelineItem, { k
         data-streaming={streaming ? 'true' : undefined}
         className="text-sm leading-relaxed [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_ul]:my-2 [&_ol]:my-2 [&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mt-3 [&_h3]:text-sm [&_h3]:font-medium [&_code]:font-mono [&_code]:text-[0.85em]"
       >
-        <GhMarkdown>{text}</GhMarkdown>
+        <GhMarkdown>{renderCodexFileCitations(text)}</GhMarkdown>
         {streaming && <StreamCaret />}
       </div>
     </div>
