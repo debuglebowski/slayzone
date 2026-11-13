@@ -787,7 +787,11 @@ async function runSteps(steps, signal) {
       await new Promise((resolve) => process.stderr.write(text, () => resolve()))
       log('stderr', { text })
     } else if ('sleep' in step) await sleep(step.sleep, signal)
-    else if ('hang' in step) await sleep(2 ** 31 - 1, signal)
+    else if ('waitForFile' in step) {
+      const file = substitute(step.waitForFile)
+      log('waiting-for-file', { file })
+      while (!fs.existsSync(file)) await sleep(20, signal)
+    } else if ('hang' in step) await sleep(2 ** 31 - 1, signal)
     else if ('request' in step) await request(step, signal)
     else if ('hostRequest' in step) await hostRequest(step, signal)
     else if ('exit' in step) {

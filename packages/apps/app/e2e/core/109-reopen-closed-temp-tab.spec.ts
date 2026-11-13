@@ -160,13 +160,19 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
     expect(await tabState(mainWindow, temp.id)).toBe('background temporary')
   })
 
-  test('saved scratch terminals can be reopened, trashed, restored, and saved as tasks', async ({
+  test('saved scratch terminals can be reopened, saved as tasks, and permanently deleted', async ({
     mainWindow
   }) => {
     const s = seed(mainWindow)
     const task = await s.createTask({
       projectId,
       title: 'Saved scratch',
+      isTemporary: true,
+      agentId: 'terminal'
+    })
+    const toDelete = await s.createTask({
+      projectId,
+      title: 'Delete scratch',
       isTemporary: true,
       agentId: 'terminal'
     })
@@ -186,12 +192,6 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
       .locator('#home-detail')
       .getByRole('button', { name: /^Scratch terminals/ })
       .click()
-    await row.getByRole('button', { name: 'Delete', exact: true }).click()
-    await expect(row).not.toBeVisible()
-    await dialog.getByRole('button', { name: 'Trash', exact: true }).click()
-    await row.getByRole('button', { name: 'Restore', exact: true }).click()
-    await expect(row).not.toBeVisible()
-    await dialog.getByRole('button', { name: 'Scratch terminals', exact: true }).click()
     await row.getByRole('button', { name: 'Save as task', exact: true }).click()
     await expect(row).not.toBeVisible()
     await expect
@@ -208,5 +208,23 @@ test.describe('Reopen closed temporary tab (⌘⇧T)', () => {
         poll
       )
       .toBe(false)
+
+    const deleteRow = dialog.getByText('Delete scratch', { exact: true }).locator('..')
+    await deleteRow.getByRole('button', { name: 'Delete', exact: true }).click()
+    const confirmation = mainWindow.getByRole('alertdialog', {
+      name: 'Delete terminal permanently?'
+    })
+    await expect(confirmation).toContainText('This permanently erases “Delete scratch”')
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(confirmation).not.toBeVisible()
+    await expect(deleteRow).toBeVisible()
+    expect(await isDeleted(mainWindow, toDelete.id)).toBe(false)
+
+    await deleteRow.getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirmation.getByRole('button', { name: 'Delete permanently', exact: true }).click()
+    await expect(confirmation).not.toBeVisible()
+    await expect(deleteRow).not.toBeVisible()
+    await expect.poll(() => isDeleted(mainWindow, toDelete.id), poll).toBe(true)
+    await expect(dialog.getByRole('button', { name: 'Trash', exact: true })).toHaveCount(0)
   })
 })

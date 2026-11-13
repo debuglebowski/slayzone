@@ -248,28 +248,30 @@ export function usePanelSettings(activeTab: string, navigateTo: (tab: string) =>
     })
   )
 
-  // Opening a web panel's tab, or a new panel config, seeds that panel's edit form
-  // (which typing overrides in between) — adjusted while rendering, on an
-  // [activeTab, panelConfig] effect's triggers.
-  const [seenEditSource, setSeenEditSource] = useState<{
-    activeTab: string
-    panelConfig: PanelConfig
-  }>()
-  if (
-    !seenEditSource ||
-    seenEditSource.activeTab !== activeTab ||
-    seenEditSource.panelConfig !== panelConfig
-  ) {
-    setSeenEditSource({ activeTab, panelConfig })
-    const wp = activeTab.startsWith('panels/web:')
-      ? panelConfig.webPanels.find((p) => p.id === activeTab.slice(7))
-      : undefined
-    if (wp) {
-      setEditPanelName(wp.name)
-      setEditPanelUrl(wp.baseUrl)
-      setEditPanelShortcut(wp.shortcut || '')
-      setEditPanelBlockDesktopHandoff(wp.blockDesktopHandoff ?? false)
-      setEditPanelHandoffProtocol(wp.handoffProtocol ?? inferProtocolFromUrl(wp.baseUrl) ?? '')
+  // Seed on opening the panel or a change to its saved editable fields. An echo
+  // of a scope toggle / reorder has a new config identity but must keep drafts.
+  const wp = activeTab.startsWith('panels/web:')
+    ? panelConfig.webPanels.find((p) => p.id === activeTab.slice(7))
+    : undefined
+  const editSource = wp
+    ? {
+        name: wp.name,
+        url: wp.baseUrl,
+        shortcut: wp.shortcut || '',
+        blockDesktopHandoff: wp.blockDesktopHandoff ?? false,
+        handoffProtocol: wp.handoffProtocol ?? inferProtocolFromUrl(wp.baseUrl) ?? ''
+      }
+    : null
+  const editSourceKey = JSON.stringify([activeTab, editSource])
+  const [seenEditSource, setSeenEditSource] = useState<string>()
+  if (seenEditSource !== editSourceKey) {
+    setSeenEditSource(editSourceKey)
+    if (editSource) {
+      setEditPanelName(editSource.name)
+      setEditPanelUrl(editSource.url)
+      setEditPanelShortcut(editSource.shortcut)
+      setEditPanelBlockDesktopHandoff(editSource.blockDesktopHandoff)
+      setEditPanelHandoffProtocol(editSource.handoffProtocol)
       setEditPanelProtocolError('')
       setEditShortcutError('')
     }

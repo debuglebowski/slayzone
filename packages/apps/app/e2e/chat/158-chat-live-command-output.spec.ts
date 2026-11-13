@@ -179,6 +179,8 @@ test.describe('Chat live command output', () => {
       .poll(() => run.controlRequests().filter((r) => r.subtype === 'background_tasks'))
       .toEqual([{ subtype: 'background_tasks', tool_use_id: 'toolu_158m' }])
     await expect(t.panel.getByText('Moved on.')).toBeVisible({ timeout: 5_000 })
+    // The text streams before the result settles the turn and regroups its activities.
+    await expect(t.stopButton).not.toBeVisible()
     await openActivityTool(t.panel, 'tool-bash')
     await expect(card).toHaveAttribute('data-task-state', 'background', { timeout: 5_000 })
     // Still live after the turn ended.

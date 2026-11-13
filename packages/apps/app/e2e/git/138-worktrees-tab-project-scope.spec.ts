@@ -140,8 +140,8 @@ test.describe('Worktrees tab reaches every worktree of its project (B1)', () => 
   test('Home git panel → Worktrees: the dirty dot shows and an orphan worktree is deleted', async ({
     mainWindow
   }) => {
-    // The dirty poll ticks every 10s and checks ONE random background worktree per
-    // tick: the dot may need several ticks, past the default test timeout.
+    // The dirty poll rotates through one background worktree every 10s:
+    // a full sweep can extend past the default test timeout.
     test.setTimeout(150_000)
     await goHome(mainWindow)
     await clickProject(mainWindow, projectAbbrev)
@@ -165,7 +165,7 @@ test.describe('Worktrees tab reaches every worktree of its project (B1)', () => 
     await worktreesTab.click()
 
     // The sibling (dirty) worktree's card shows the "Uncommitted changes" dot. The
-    // poll checks one background worktree per tick at random: give it several ticks.
+    // poll checks one background worktree per tick: allow a full sweep.
     const siblingCard = mainWindow
       // The card's body (`p-3`): it holds the folder icon's dirty dot and the actions
       // menu; the innermost div with the path holds neither.

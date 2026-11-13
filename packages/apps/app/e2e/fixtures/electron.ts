@@ -397,7 +397,16 @@ async function launchElectronWithRetry(args: {
       ensureDir(attemptArtifactsDir)
 
       app = await electron.launch({
-        args: [MAIN_JS],
+        // Supplying executablePath skips Playwright's Electron loader, including
+        // its usual Chromium switches. Parallel test windows occlude each other:
+        // keep their timers, rendering and process priority at foreground behavior.
+        // App-level hidden tabs and their Activity lifecycles remain under test.
+        args: [
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          MAIN_JS
+        ],
         executablePath: args.executablePath,
         env: {
           ...launchEnv,

@@ -113,7 +113,19 @@ test.describe('Custom folder: a refused folder keeps the running terminal (B3)',
       .toBe(sibling)
     const sessionId = getMainSessionId(taskId)
     await waitForPtySession(mainWindow, sessionId)
-    await runCommand(mainWindow, sessionId, 'pwd')
-    await waitForBufferContains(mainWindow, sessionId, 'b3-custom-sibling')
+    // The saved folder changes before the replacement shell finishes starting.
+    // Existence can still describe the old PTY; retry a harmless command until
+    // the NEW shell executes it. Neither the command echo nor its prompt can
+    // satisfy this marker + actual working-directory check.
+    const marker = `B3_CWD_${Date.now()}:`
+    await expect
+      .poll(
+        async () => {
+          await runCommand(mainWindow, sessionId, `printf '${marker}%s\\n' "$PWD"`)
+          return (await readFullBuffer(mainWindow, sessionId)).includes(`${marker}${sibling}`)
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true)
   })
 })

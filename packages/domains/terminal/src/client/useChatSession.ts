@@ -458,11 +458,20 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // still the newest saved event here and it is newer than the last live one.
   // Otherwise it is stale (the saved event it led to is already applied). A
   // saved event's rows show `at`, when it was saved.
+  const applyCliMetadata = useStableCallback((event: AgentEvent) => {
+    if (event.kind !== 'cli-models') return
+    const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
+    // Initialize can beat both the subscription and an older empty metadata query.
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData(queryKey, event.models)
+    })
+  })
   const applyLive = useCallback(
     (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
         if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
         lastLiveRef.current = live
+        applyCliMetadata(event)
         pendingLiveRef.current.push(event)
         if (frameRef.current === null) {
           frameRef.current = requestFrame(() => {
@@ -477,7 +486,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       flushLive()
       dispatch({ type: 'event', event, at, seq })
     },
-    [flushLive]
+    [flushLive, applyCliMetadata]
   )
   // Stable: refs + dispatch only. Saved events in seq order as one batch — the
   // same as applying each through `applyLive` (fragments waiting for a frame
@@ -676,15 +685,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     }) => {
       if (tabId !== opts.tabId) return
       const agentEvent = event as AgentEvent
-      if (agentEvent.kind === 'cli-models') {
-        const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
-        // The session can start before its model/list handshake finishes. Use
-        // the advertised list directly; an older empty DB query must not win.
-        void queryClient.cancelQueries({ queryKey }).then(() => {
-          queryClient.setQueryData(queryKey, agentEvent.models)
-        })
-      }
       if (!hydratedRef.current) {
+        applyCliMetadata(agentEvent)
         liveQueueRef.current.push({ event: event as AgentEvent, seq, live, at })
         return
       }
@@ -696,9 +698,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
       if (afterSeq !== lastSeqRef.current) return
       lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
+      for (const event of events) applyCliMetadata(event)
       if (events.length > 0) dispatch({ type: 'events', events })
     },
-    []
+    [applyCliMetadata]
   )
   // The lease whose computer stream has started (onStarted). Make-before-break: the
   // hub stream stays on until then, so an event saved while the direct subscription

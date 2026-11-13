@@ -75,6 +75,7 @@ fake.setScenario({
 | `{ emitRaw: 'text' }` | Write a raw line (malformed output). |
 | `{ stderr: 'text' }` | Write to stderr. |
 | `{ sleep: ms }` | Wait. An interrupt aborts the wait. |
+| `step.waitForFile(path)` | Hold a turn until the test creates the file; interruptible. Use for assertions before releasing a stream, without timing a sleep. |
 | `{ hang: true }` | Wait until the turn is interrupted or the process is killed. |
 | `step.request({tool_name, input, tool_use_id, …}, {allow, deny})` | Emit `control_request{subtype:'can_use_tool'}` (any CLI field: `description`, `permission_suggestions`, `agent_id`, `mcp_server`, `decision_reason`, …) and block until the app answers it. Then run the branch that matches `behavior` (an error reply runs `deny`). |
 | `step.hostRequest({subtype, …}, timeoutMs?)` | Emit a control_request the app does not implement (`hook_callback`, `mcp_message`) and wait for its reply (default 30 s, the CLI's hook timeout; then withdrawn). Read it with `run.hostReplies()`. |

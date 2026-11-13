@@ -188,7 +188,7 @@ function StripScrollButton({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute inset-y-0 flex items-center w-12',
+        'pointer-events-none absolute inset-y-0 z-20 flex items-center w-12',
         side === 'left'
           ? 'left-0 justify-start bg-gradient-to-r from-sidebar from-40% to-transparent'
           : 'right-0 justify-end bg-gradient-to-l from-sidebar from-40% to-transparent'

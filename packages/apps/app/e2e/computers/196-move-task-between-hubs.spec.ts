@@ -759,6 +759,12 @@ base.describe('move a task to another hub', () => {
         })
         await chat.send('hello before the move')
         const run = await epoch.waitForRun(0, (r) => r.userMessages().length === 1)
+        // Receiving the user message creates the file; the assistant appends its
+        // response before the turn completes. Snapshot the finished transcript.
+        await expect(
+          chat.panel.getByText('echo: hello before the move', { exact: true })
+        ).toBeVisible()
+        await expect(chat.stopButton).toBeHidden()
         const sessionFile = sessionFilePath(
           claudeConfigDir,
           fs.realpathSync(chat.cwd),

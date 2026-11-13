@@ -321,6 +321,34 @@ describe('hub → direct link switch', () => {
 })
 
 describe('live CLI model lists', () => {
+  it('keeps newer queued model metadata over an older replay snapshot', async () => {
+    setup()
+    const queryKey = modelQueryKey({ taskId: 't1', mode: 'claude-chat' })
+    const models = [{ id: 'model-new', label: 'New model' }]
+    liveOnly(-1, 2, { kind: 'cli-models', models })
+    await finishLoad(0, {
+      events: [],
+      live: { afterSeq: -1, liveSeq: 1, events: [{ kind: 'cli-models', models: [] }] }
+    })
+    expect(queryClient.getQueryData(queryKey)).toEqual(models)
+  })
+
+  it('restores model metadata from a replay when initialize preceded the subscription', async () => {
+    setup()
+    const queryKey = modelQueryKey({ taskId: 't1', mode: 'claude-chat' })
+    queryClient.setQueryData(queryKey, [])
+    const models = [{ id: 'model-new', label: 'New model' }]
+    await finishLoad(0, {
+      events: HISTORY,
+      live: {
+        afterSeq: HISTORY[HISTORY.length - 1].seq,
+        liveSeq: 1,
+        events: [{ kind: 'cli-models', models }]
+      }
+    })
+    expect(queryClient.getQueryData(queryKey)).toEqual(models)
+  })
+
   it('updates the picker cache and prevents an older empty query overwriting it', async () => {
     setup()
     const queryKey = modelQueryKey({ taskId: 't1', mode: 'claude-chat' })

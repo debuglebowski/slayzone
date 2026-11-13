@@ -90,12 +90,29 @@ function ContextMenuSubContent({
 
 function ContextMenuContent({
   className,
+  onPointerMoveCapture,
+  onPointerUpCapture,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  const rightDragMoved = React.useRef(false)
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
+        onPointerMoveCapture={(event) => {
+          onPointerMoveCapture?.(event)
+          if ((event.buttons & 2) !== 0 && (event.movementX !== 0 || event.movementY !== 0)) {
+            rightDragMoved.current = true
+          }
+        }}
+        onPointerUpCapture={(event) => {
+          onPointerUpCapture?.(event)
+          // Collision positioning can put an item under the original right
+          // click. Radix selects it on release even though no drag took place.
+          // Keep deliberate press-drag-release selection working.
+          if (event.button === 2 && !rightDragMoved.current) event.preventDefault()
+          rightDragMoved.current = false
+        }}
         className={cn(
           'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 grid max-h-(--radix-context-menu-content-available-height) min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) grid-cols-[auto_1fr_auto_auto] gap-x-2 overflow-x-hidden overflow-y-auto rounded-md border p-1 shadow-md',
           className

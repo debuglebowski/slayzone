@@ -102,6 +102,7 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
   // Optimized dirty-status polling — already dedups setState via prev[path] check.
   // Wrap in stable poll for backoff timing; the per-call fetch returns a string
   // hash so the hook can detect identical results across ticks.
+  const lastBackgroundPathRef = useRef<string | null>(null)
   const pollDirty = useCallback(async () => {
     if (worktrees.length === 0) return null
     // A worktree not read from its computer yet: poll the main checkout meanwhile.
@@ -120,14 +121,20 @@ export const WorktreesTab = forwardRef<WorktreesTabHandle, WorktreesTabProps>(fu
     let bgKey: string | null = null
     let bgDirty: boolean | null = null
     if (backgroundWts.length > 0) {
-      const randomWt = backgroundWts[Math.floor(Math.random() * backgroundWts.length)]
-      bgKey = randomWt.path
+      // One background query per tick, without randomly starving a checkout.
+      // Resume at the start if the previously visited checkout was removed.
+      const previousIndex = backgroundWts.findIndex(
+        (wt) => wt.path === lastBackgroundPathRef.current
+      )
+      const nextWt = backgroundWts[(previousIndex + 1) % backgroundWts.length]
+      lastBackgroundPathRef.current = nextWt.path
+      bgKey = nextWt.path
       bgDirty = await queryClient.fetchQuery(
-        trpc.worktrees.isDirty.queryOptions({ path: randomWt.path })
+        trpc.worktrees.isDirty.queryOptions({ path: nextWt.path })
       )
       setDirtyStatuses((prev) => {
-        if (prev[randomWt.path] === bgDirty) return prev
-        return { ...prev, [randomWt.path]: bgDirty as boolean }
+        if (prev[nextWt.path] === bgDirty) return prev
+        return { ...prev, [nextWt.path]: bgDirty as boolean }
       })
     }
     return JSON.stringify({ activePath, activeDirty, bgKey, bgDirty })
