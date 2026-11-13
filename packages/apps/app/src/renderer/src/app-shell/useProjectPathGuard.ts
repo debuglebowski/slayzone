@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useTRPCClient } from '../trpc'
+import { getHubIdForProject } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from '../trpc'
 import { placementOn, type Project, type ProjectPlacement } from '@slayzone/projects-contracts'
 
 export interface ProjectPathGuardApi {
@@ -86,6 +87,11 @@ function toCheck(next: PathCheck): (prev: PathCheck) => PathCheck {
 // probe goes through `workspace.pathExists`, which runs on that computer, not on
 // whichever hub the client happens to be talking to.
 //
+// Every call goes to the hub that OWNS the project (multi-hub federation): this hook
+// runs in the app shell, under the default hub's client, and the default hub does
+// not know another hub's project — it sent that project's folder to this machine's
+// computer, which refused it.
+//
 // `reachable: false` (computer offline) is deliberately NOT "missing": we could not
 // ask, which is a different thing to tell the user than "your path is gone".
 export function useProjectPathGuard(
@@ -94,6 +100,11 @@ export function useProjectPathGuard(
   updateProject: (project: Project) => void
 ): ProjectPathGuardApi {
   const trpcClient = useTRPCClient()
+  /** The client of the hub that owns `projectId` (the default hub's when unknown). */
+  const clientFor = useCallback(
+    (projectId: string) => getClientForHub(getHubIdForProject(projectId), trpcClient),
+    [trpcClient]
+  )
   // A folder the computer already turned down is known from the first render.
   const [check, setCheck] = useState<PathCheck>(
     () => knownCheck(projects.find((p) => p.id === selectedProjectId)) ?? NOT_CHECKED
@@ -101,12 +112,14 @@ export function useProjectPathGuard(
 
   const probe = useCallback(
     (projectId: string, path: string): Promise<void> =>
-      trpcClient.workspace.pathExists.query({ projectId, path }).then((res) => {
-        setCheck(
-          toCheck({ projectId, path, missing: res.reachable && !res.exists, refused: false })
-        )
-      }),
-    [trpcClient]
+      clientFor(projectId)
+        .workspace.pathExists.query({ projectId, path })
+        .then((res) => {
+          setCheck(
+            toCheck({ projectId, path, missing: res.reachable && !res.exists, refused: false })
+          )
+        }),
+    [clientFor]
   )
 
   const validateProjectPath = useCallback(
@@ -165,11 +178,11 @@ export function useProjectPathGuard(
       const project = projects.find((p) => p.id === selectedProjectId)
       if (!project) return
       // Recorded on the project's computer (the hub routes a path update there).
-      const updated = await trpcClient.projects.update.mutate({ id: project.id, path })
+      const updated = await clientFor(project.id).projects.update.mutate({ id: project.id, path })
       updateProject(updated)
       validateProjectPath(updated)
     },
-    [selectedProjectId, projects, updateProject, validateProjectPath, trpcClient]
+    [selectedProjectId, projects, updateProject, validateProjectPath, clientFor]
   )
 
   // Only an answer about the selected project AND its current folder counts as the

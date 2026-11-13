@@ -1,13 +1,16 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import { taskEvents } from '../events.js'
-import { buildTaskDeletedEvents } from '../history.js'
-import { cleanupTaskImmediate, parseTask, type OpDeps } from './shared.js'
+import { eraseContent } from '@slayzone/content-erasure/server'
+import { isErasureDoneOrCompacting, type ErasureReport } from '@slayzone/content-erasure'
+import { cleanupTaskImmediate, getRuntimeAdapters, parseTask, type OpDeps } from './shared.js'
+import { announceSurvivingSubtasks, survivingSubtasks } from './surviving-subtasks.js'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '../task-txns.js'
 
 export interface DeleteManyTasksResult {
   deletedIds: string[]
   blockedIds: string[]
+  erasure?: ErasureReport
 }
 
 export async function deleteManyTasksOp(
@@ -36,27 +39,27 @@ export async function deleteManyTasksOp(
       blockedIds.push(id)
       continue
     }
-    deletable.push({ id, previous: previousTask })
+    if (previousTask) deletable.push({ id, previous: previousTask })
   }
+  if (!deletable.length) return { deletedIds: [], blockedIds }
+  const adapters = getRuntimeAdapters()
+  const deletedIds = deletable.map((task) => task.id)
+  const survivors = await survivingSubtasks(db, deletedIds)
+  const report = await eraseContent(
+    db,
+    adapters.getDataRoot(),
+    { kind: 'tasks', ids: deletedIds },
+    {
+      beforeDelete: (taskIds) => {
+        for (const taskId of taskIds) {
+          cleanupTaskImmediate(taskId)
+          adapters.removeTaskProcesses(taskId)
+        }
+      }
+    }
+  )
 
-  for (const { id } of deletable) {
-    cleanupTaskImmediate(id)
-  }
-
-  // Soft-delete every deletable task + record deletion events in one transaction.
-  // The named txn records events only for rows whose UPDATE actually changed a row
-  // and returns the ids that were deleted.
-  const { deletedIds } = await db.namedTxn('task:soft-delete-many', {
-    ops: deletable.map(({ id, previous }) => ({
-      id,
-      sql: `
-        UPDATE tasks SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
-      `,
-      params: [id],
-      events: previous ? buildTaskDeletedEvents(previous) : []
-    }))
-  })
-
+  await announceSurvivingSubtasks(db, survivors)
   for (const { id, previous } of deletable) {
     if (!deletedIds.includes(id)) continue
     ipcMain?.emit('db:tasks:delete:done', null, id)
@@ -66,5 +69,9 @@ export async function deleteManyTasksOp(
   }
   if (deletedIds.length > 0) onMutation?.()
 
-  return { deletedIds, blockedIds }
+  return {
+    deletedIds,
+    blockedIds,
+    ...(isErasureDoneOrCompacting(report) ? {} : { erasure: report })
+  }
 }

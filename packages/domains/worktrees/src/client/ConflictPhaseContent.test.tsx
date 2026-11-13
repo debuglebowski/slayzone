@@ -63,6 +63,16 @@ const trpc = {
 // The domain's typed view (`./trpc`) re-types the transport client: serve
 // it the transport mock below.
 vi.mock('./trpc', async () => await import('@slayzone/transport/client'))
+// A task's folders come from its computer (§9 Phase 7d): the fake reads the test
+// task's own `worktree_path` / `base_dir` (test-only fields; real tasks carry none).
+vi.mock('@slayzone/task/client/useTaskPath', () => ({
+  useTaskPath: (t: { worktree_path?: string | null; base_dir?: string | null } | null) => ({
+    state: 'ok',
+    worktreePath: t?.worktree_path ?? null,
+    baseDir: t?.base_dir ?? null
+  }),
+  useTaskWorktreePaths: () => new Map()
+}))
 vi.mock('@slayzone/transport/client', () => ({ useTRPC: () => trpc }))
 
 const { ConflictPhaseContent } = await import('./ConflictPhaseContent')
@@ -70,6 +80,7 @@ const { ConflictPhaseContent } = await import('./ConflictPhaseContent')
 const task = {
   id: 't1',
   worktree_path: '/wt',
+  has_worktree: true,
   worktree_parent_branch: 'main',
   agent_id: 'claude-code',
   merge_context: { type: 'merge', sourceBranch: 'feature', targetBranch: 'main' }

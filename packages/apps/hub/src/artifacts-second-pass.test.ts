@@ -2,11 +2,11 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 
 async function fixture() {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'artifact-rpc-second-review-'))
-  const pc = createChatRuntimeHandlers({
+  const pc = createFixtureChatRuntime({
     stateDir: dir,
     hubScope: 'audit',
     computerId: () => 'pc',

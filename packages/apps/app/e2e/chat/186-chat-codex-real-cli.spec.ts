@@ -13,7 +13,14 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { expect, openTaskById, resetApp, seed, test as base } from '../fixtures/electron'
+import {
+  expect,
+  ledgerConversations,
+  openTaskById,
+  resetApp,
+  seed,
+  test as base
+} from '../fixtures/electron'
 import { closeAllTaskTabs } from '../fixtures/terminal'
 import { readChatEvents } from '../fixtures/chat-seed'
 
@@ -44,21 +51,10 @@ test.describe('Codex chat — real codex app-server', () => {
   })
 
   test('a turn runs end to end; a restart resumes the same thread', async ({
-    mainWindow: page,
-    electronApp
+    mainWindow: page
   }) => {
     test.setTimeout(240_000)
     fs.mkdirSync(WORK_DIR, { recursive: true })
-    const db = <T>(sql: string, params: unknown[] = []) =>
-      electronApp.evaluate(
-        async ({}, { q, p }) =>
-          (
-            (globalThis as Record<string, unknown>).__db as {
-              all: (sql: string, params?: unknown[]) => Promise<unknown[]>
-            }
-          ).all(q, p),
-        { q: sql, p: params }
-      ) as Promise<T[]>
     await closeAllTaskTabs(page)
     const s = seed(page)
     const project = await s.createProject({ name: 'Codex real', color: '#a78bfa', path: WORK_DIR })
@@ -132,11 +128,10 @@ test.describe('Codex chat — real codex app-server', () => {
     )
     expect(after1.some((e) => e.kind === 'context-usage')).toBe(true)
     const thread = String(after1.find((e) => e.kind === 'turn-init')!.sessionId)
-    const ledger = await db<{ id: string; origin: string }>(
-      `SELECT conversation_id AS id, origin FROM task_conversations
-         WHERE task_id = ? AND mode = 'codex-chat' ORDER BY created_at, rowid`,
-      [task.id]
-    )
+    const ledger = (await ledgerConversations(page, task.id, 'codex-chat')).map((r) => ({
+      id: r.conversationId,
+      origin: r.origin
+    }))
     expect(ledger).toContainEqual({ id: thread, origin: 'slay-spawned-fresh' })
 
     // Restart: the same thread resumes, and Codex still has the conversation.

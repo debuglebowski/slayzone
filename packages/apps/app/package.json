@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/app",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "repository": "github:debuglebowski/slayzone",
   "type": "module",
@@ -39,7 +39,7 @@
     "node-datachannel": "^0.33.4",
     "node-pty": "^1.1.0",
     "ws": "^8.22.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@convex-dev/auth": "^0.0.96",

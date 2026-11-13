@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/test-panel",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -23,7 +23,7 @@
     "@slayzone/ui": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
     "picomatch": "^4.0.7",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "react": "^19.3.1"

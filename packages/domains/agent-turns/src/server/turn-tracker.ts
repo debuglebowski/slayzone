@@ -1,10 +1,29 @@
-import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { recordedProjectRoot } from '@slayzone/computers/server'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
-import { computerForTurnTask, runTurnGitOp } from './turn-git-routing'
-import { insertTurn, deleteTurn, getLatestTurnForWorktree, findTurnsToPrune } from './db'
+import { computerForTurnTask, recordTurnOnComputer } from './turn-git-routing'
 import { agentTurnsEvents } from './events'
+
+/**
+ * The task of a tab and the computer its checkout is on. Which checkout (its
+ * worktree, else its project's folder there) the computer knows itself (§9 Phase
+ * 7c: the hub keeps no task path). Null without a computer.
+ */
+async function resolveTabContext(
+  db: SlayzoneDb,
+  tabId: string
+): Promise<{ taskId: string; projectId: string | null; computerId: string } | null> {
+  const row = (await db
+    .prepare(
+      `SELECT t.id AS task_id, t.project_id FROM terminal_tabs tt JOIN tasks t ON t.id = tt.task_id WHERE tt.id = ?`
+    )
+    .get(tabId)) as { task_id: string; project_id: string | null } | undefined
+  if (!row) return null
+  const computerId = await computerForTurnTask(row.task_id)
+  // No computer: the snapshot has nowhere to run (the hub runs no git). Skipped
+  // quietly — this fires on every agent turn.
+  if (computerId == null) return null
+  return { taskId: row.task_id, projectId: row.project_id, computerId }
+}
 
 /**
  * Check whether a prompt text is "clean" enough to store as a preview.
@@ -17,64 +36,20 @@ function isCleanPrompt(text: string): boolean {
   return !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x1b]/.test(text)
 }
 
-/**
- * Lookup task_id, the computer its checkout is on, and the canonical repo path
- * THERE for a chat tab. Falls back to the project's folder on that computer (no
- * computer: the local computer's) when task.worktree_path is empty. Returns null
- * if no usable repo path.
- */
-async function resolveTabContext(
-  db: SlayzoneDb,
-  tabId: string
-): Promise<{ taskId: string; worktreePath: string; computerId: string } | null> {
-  const tab = (await db.prepare(`SELECT task_id FROM terminal_tabs WHERE id = ?`).get(tabId)) as
-    | { task_id: string }
-    | undefined
-  if (!tab) return null
-  const row = (await db
-    .prepare(`SELECT worktree_path, project_id FROM tasks WHERE id = ?`)
-    .get(tab.task_id)) as { worktree_path: string | null; project_id: string | null } | undefined
-  if (!row) return null
-  const computerId = await computerForTurnTask(tab.task_id)
-  // No computer: the snapshot has nowhere to run (the hub runs no git). Skipped
-  // quietly — this fires on every agent turn.
-  if (computerId == null) return null
-  const projectRoot = row.project_id
-    ? await recordedProjectRoot(db, row.project_id, computerId)
-    : null
-  const repoPath = row.worktree_path || projectRoot
-  if (!repoPath) return null
-  const worktreePath = await runTurnGitOp(computerId, 'canonical', { repoPath })
-  return { taskId: tab.task_id, worktreePath, computerId }
-}
-
-/**
- * The task's chat is owned by a computer (any owner past `legacy`): its prompts
- * live on that computer, never on the hub — migration v187's trigger refuses a
- * preview here. The turn itself still records, with no preview, like a terminal's.
- */
-async function promptStaysOnComputer(db: SlayzoneDb, taskId: string): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT 1 AS owned FROM chat_ownership WHERE task_id = ? AND state <> 'legacy' LIMIT 1`
-    )
-    .get(taskId)
-  return Boolean(row)
-}
-
-function broadcastChange(worktreePath: string): void {
+function broadcastChange(worktreePath: string, taskId: string): void {
   // Pure domain signal — electron-free so this module lives in `server/`. The
   // tRPC `agentTurns.onChanged` subscription wraps this emitter; the Electron-
   // only `initAgentTurnsBroadcast()` subscriber (../electron/agent-turns-broadcast.ts)
   // mirrors each change onto the legacy `agent-turns:changed` + `tasks:changed`
   // webContents.send channels until the renderer drops IPC (slice 5).
-  agentTurnsEvents.emit('agent-turns:changed', worktreePath)
+  agentTurnsEvents.emit('agent-turns:changed', { worktreePath, taskId })
 }
 
 /**
- * Record a turn boundary. Snapshots the worktree, dedupes against the prev
- * snapshot for the same worktree, prunes oldest beyond cap. Stores task_id
- * for attribution but groups by worktree_path.
+ * Record a turn boundary. The computer holding the checkout snapshots it, drops a
+ * turn that changed nothing, keeps the newest per checkout and stores the row: turns
+ * live only there (robustness plan §9, P0; hub v207). The hub keeps what it uses
+ * itself: the task's "last interaction" (tree-view sort).
  */
 export async function recordTurnBoundary(
   db: SlayzoneDb,
@@ -83,74 +58,21 @@ export async function recordTurnBoundary(
 ): Promise<void> {
   const ctx = await resolveTabContext(db, tabId)
   if (!ctx) return
-  // The checkout's git runs on its computer (none: this hub's disk).
-  const git = <K extends Parameters<typeof runTurnGitOp>[1]>(
-    op: K,
-    input: Parameters<typeof runTurnGitOp<K>>[2]
-  ) => runTurnGitOp(ctx.computerId, op, input)
-  const deleteTurnRef = (repoPath: string, turnId: string) =>
-    git('deleteTurnRef', { repoPath, turnId })
-  const id = randomUUID()
-  const snap = await git('snapshot', { repoPath: ctx.worktreePath, turnId: id })
-  if (!snap) return
-  const { snapshotSha: sha, headSha } = snap
-
-  const prev = await getLatestTurnForWorktree(db, ctx.worktreePath)
-  // Dedupe semantically — commit SHA always differs (commit message includes
-  // turn id). Compare actual diff content.
-  if (
-    prev &&
-    (await git('diffIsEmpty', {
-      repoPath: ctx.worktreePath,
-      from: prev.snapshot_sha,
-      to: sha,
-      cached: true
-    }))
-  ) {
-    await deleteTurnRef(ctx.worktreePath, id)
-    return
-  }
-  // Also drop if first turn but identical to HEAD (no actual changes).
-  if (!prev) {
-    const parentRes = await git('diffIsEmpty', {
-      repoPath: ctx.worktreePath,
-      from: `${sha}^`,
-      to: sha
-    })
-    if (parentRes) {
-      await deleteTurnRef(ctx.worktreePath, id)
-      return
-    }
-  }
-
-  try {
-    await insertTurn(db, {
-      id,
-      worktree_path: ctx.worktreePath,
-      task_id: ctx.taskId,
-      terminal_tab_id: tabId,
-      snapshot_sha: sha,
-      head_sha_at_snap: headSha,
-      prompt_preview:
-        isCleanPrompt(promptText) && !(await promptStaysOnComputer(db, ctx.taskId))
-          ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
-          : '',
-      created_at: Date.now()
-    })
-  } catch (err) {
-    console.error('[turn-tracker] insertTurn failed:', err)
-    await deleteTurnRef(ctx.worktreePath, id)
-    return
-  }
-
-  // Prune oldest beyond cap (per worktree).
-  const stale = await findTurnsToPrune(db, ctx.worktreePath)
-  for (const sid of stale) {
-    await deleteTurn(db, sid)
-    await deleteTurnRef(ctx.worktreePath, sid)
-  }
-
-  broadcastChange(ctx.worktreePath)
+  const outcome = await recordTurnOnComputer(ctx.computerId, {
+    taskId: ctx.taskId,
+    tabId,
+    projectId: ctx.projectId,
+    promptPreview: isCleanPrompt(promptText)
+      ? promptText.replace(/\s+/g, ' ').trim().slice(0, 200)
+      : ''
+  })
+  if (!outcome.recorded) return
+  await db
+    .prepare(
+      `UPDATE tasks SET last_interaction_at = ? WHERE id = ? AND (last_interaction_at IS NULL OR last_interaction_at < ?)`
+    )
+    .run(outcome.createdAt, ctx.taskId, outcome.createdAt)
+  broadcastChange(outcome.worktreePath, ctx.taskId)
 }
 
 /**

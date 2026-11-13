@@ -1,3 +1,7 @@
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   ChatAttachment,
@@ -23,6 +27,7 @@ export async function saveChatDraft(
   draft: ChatDraft,
   now: number = Date.now()
 ): Promise<{ rev: number } | null> {
+  if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError('chat draft')
   try {
     await db
       .prepare(
@@ -57,6 +62,7 @@ export async function saveChatScroll(
   anchor: ChatScrollAnchor,
   now: number = Date.now()
 ): Promise<void> {
+  if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError('chat scroll position')
   try {
     await db
       .prepare(
@@ -103,6 +109,7 @@ function parseAnchor(raw: string | null): ChatScrollAnchor | null {
 }
 
 export async function getChatTabState(db: SlayzoneDb, tabId: string): Promise<ChatTabState | null> {
+  if (!(await legacyChatTables(db))) return null
   const row = (await db
     .prepare(
       `SELECT draft_text, draft_attachments, scroll_anchor, rev FROM chat_tab_state WHERE tab_id = ?`

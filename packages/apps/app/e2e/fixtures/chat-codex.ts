@@ -20,7 +20,7 @@ import {
   type FakeCodexRun
 } from '@slayzone/test-utils/fake-codex'
 import { knownBug } from './chat'
-import { expect, newRuntimeDir, test as base } from './electron'
+import { expect, ledgerConversations, newRuntimeDir, test as base } from './electron'
 import { closeAllTaskTabs } from './terminal'
 import {
   chatDb,
@@ -42,9 +42,9 @@ export interface CodexChatTask extends ChatTaskCore<'codex-chat'> {
     pred?: (run: FakeCodexRun) => boolean,
     timeoutMs?: number
   ): Promise<FakeCodexRun>
-  /** The task's stored Codex thread id (`provider_config` mirror of the honored row), or null. */
+  /** The chat's stored Codex thread id, as its computer holds it, or null. */
   storedThread(): Promise<string | null>
-  /** The task's conversation ledger (`task_conversations`) for codex-chat, oldest first. */
+  /** The task's conversation ledger for codex-chat (on its computer), oldest first. */
   conversations(): Promise<Array<{ conversationId: string | null; origin: string }>>
 }
 
@@ -119,19 +119,22 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
           epoch,
           run: (index, pred, timeoutMs) => epoch.waitForRun(index, pred, timeoutMs),
           async storedThread() {
-            const rows = await db.all<{ id: string | null }>(
-              `SELECT json_extract(provider_config, '$."codex-chat".chatConversationId') AS id
-                 FROM tasks WHERE id = ?`,
-              [core.taskId]
+            // The chat's computer holds its session id, the only copy (decision 2).
+            const config = await page.evaluate(
+              (tabId) =>
+                window.getTrpcVanillaClient().chat.testProviderConfig.query({ tabId }) as Promise<{
+                  chatConversationId?: string | null
+                }>,
+              core.tabId
             )
-            return rows[0]?.id ?? null
+            return config.chatConversationId ?? null
           },
           async conversations() {
-            return db.all<{ conversationId: string | null; origin: string }>(
-              `SELECT conversation_id AS conversationId, origin FROM task_conversations
-                 WHERE task_id = ? AND mode = 'codex-chat' ORDER BY created_at, rowid`,
-              [core.taskId]
-            )
+            // The ledger lives on the task's computer (robustness plan §9).
+            return (await ledgerConversations(page, core.taskId, 'codex-chat')).map((r) => ({
+              conversationId: r.conversationId,
+              origin: r.origin
+            }))
           }
         }
       },

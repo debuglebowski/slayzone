@@ -5,7 +5,7 @@ import { useTrack, type Tracker } from '@slayzone/telemetry/client'
 import { Search, ALargeSmall, Regex, Loader2, ChevronRight, ChevronDown } from 'lucide-react'
 import type { FileSearchResult, OpenFileOptions } from '../shared'
 import { FileIcon } from './FileIcon'
-import { useWorkspaceTarget } from './workspace-target'
+import { requireScope, useWorkspaceScope } from './workspace-target'
 
 interface SearchPanelProps {
   projectPath: string
@@ -47,7 +47,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
   // Which machine these filesystem calls are for. Ambient for the whole
   // panel — see ./workspace-target. Spread into every input so it also
   // keys the query cache.
-  const target = useWorkspaceTarget()
+  const scope = useWorkspaceScope()
   const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -97,10 +97,10 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
     let cancelled = false
     debounceRef.current = setTimeout(() => {
       void runSearch(
-        () =>
+        async () =>
           queryClient.fetchQuery(
             trpc.fileEditor.searchFiles.queryOptions({
-              ...target,
+              ...requireScope(scope),
               rootPath: projectPath,
               query,
               options: { matchCase, regex: useRegex }
@@ -115,7 +115,7 @@ export function SearchPanel({ projectPath, onOpenFile }: SearchPanelProps) {
       cancelled = true
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, matchCase, useRegex, projectPath, target, queryClient, trpc, track])
+  }, [query, matchCase, useRegex, projectPath, scope, queryClient, trpc, track])
 
   const totalMatches = results.reduce((n, r) => n + r.matches.length, 0)
 

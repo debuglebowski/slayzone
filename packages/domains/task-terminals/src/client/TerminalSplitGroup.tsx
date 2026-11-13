@@ -17,8 +17,6 @@ interface PaneProps {
   cwd: string
   conversationId?: string | null
   existingConversationId?: string | null
-  /** True once the conversation id is hydrated; gates the main tab's auto-spawn. */
-  conversationHydrated?: boolean
   supportsSessionId?: boolean
   providerFlags?: string
   executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
@@ -44,6 +42,8 @@ interface PaneProps {
   onHandoff?: (() => void) | null
   /** Open the task's sessions sidebar (absent: nothing to pick from). */
   onShowSessions?: (() => void) | null
+  /** Bumped to remount the pane (a secondary tab's session reset / switch). */
+  remountKey?: number
 }
 
 export interface TerminalSplitGroupHandle {
@@ -185,7 +185,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
       const terminal = (
         <TerminalCmp
           ref={terminalRef}
-          key={pane.sessionId}
+          key={`${pane.sessionId}#${pane.remountKey ?? 0}`}
           sessionId={pane.sessionId}
           cwd={pane.cwd}
           mode={pane.tab.mode}
@@ -206,8 +206,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           {...(shouldGate
             ? {
                 agentState: pane.tab.agentState,
-                isTemporary: pane.isTemporary,
-                conversationHydrated: pane.conversationHydrated
+                isTemporary: pane.isTemporary
               }
             : {})}
         />

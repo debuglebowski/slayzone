@@ -4,7 +4,8 @@ import {
   seed,
   resetApp,
   createIsolatedGitRepo,
-  openTaskByTitle
+  openTaskByTitle,
+  taskWithPaths
 } from '../fixtures/electron'
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
@@ -288,10 +289,7 @@ test.describe('Git diff panel — auto-created worktree', () => {
     )
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-          created.id
-        )
+        const task = await taskWithPaths(mainWindow, created.id)
         return task?.worktree_path ?? null
       })
       .toBe(autoWorktreePath)
@@ -438,13 +436,19 @@ test.describe('Git diff panel — worktree attached after open', () => {
     // 2. Create worktree via IPC (mirrors what the Create Worktree dialog does)
     mkdirSync(manualWorktreeDir, { recursive: true })
     await mainWindow.evaluate(
-      ({ repoPath, targetPath, branch }) =>
+      ({ repoPath, targetPath, branch, taskId }) =>
         window.getTrpcVanillaClient().worktrees.createWorktree.mutate({
           repoPath,
           targetPath,
-          branch
+          branch,
+          target: { taskId }
         }),
-      { repoPath: manualGitDir, targetPath: manualWorktreePath, branch: 'manual-feature' }
+      {
+        repoPath: manualGitDir,
+        targetPath: manualWorktreePath,
+        branch: 'manual-feature',
+        taskId: manualTaskId
+      }
     )
 
     // 3. Attach worktree to the task (dialog's onCreated callback path)

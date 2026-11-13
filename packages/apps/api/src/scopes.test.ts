@@ -62,7 +62,6 @@ describe('SCOPE_POLICY — specific classifications', () => {
     ['pty.kill', 'ends the host process'],
     ['pty.killTask', 'ends every host process of a task'],
     ['pty.setShellOverride', 'changes which binary a terminal launches'],
-    ['chat.start', 'creates a session with an attacker-chosen mode + cwd'],
     ['chat.reset', 're-creates a session with an attacker-chosen mode + cwd'],
     ['task.startMainAgent', 'starts a process with flags/cwd a tasks-scoped session can write'],
     ['workspace.setAllowedRoots', 'mutates the filesystem sandbox itself'],
@@ -109,7 +108,7 @@ describe('SCOPE_POLICY — specific classifications', () => {
     for (const p of paths) expect(SCOPE_POLICY[p], p).toBe('never')
   })
 
-  const agent: string[] = ['pty.write', 'pty.submit', 'pty.interrupt']
+  const agent: string[] = ['pty.write', 'pty.submit', 'pty.interrupt', 'chat.start']
   for (const path of agent) {
     test(`${path} is agent`, () => {
       expect(SCOPE_POLICY[path]).toBe('agent')

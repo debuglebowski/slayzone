@@ -7,7 +7,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ChatStorage } from './storage'
 import { chatStorageMode } from './storage-mode'
-interface LocalPrompt {
+export interface LocalPrompt {
   id: string
   taskId: string
   agentId: string
@@ -27,6 +27,55 @@ export function trimLocalPromptHistory(store: ChatStorage, taskId: string, agent
       .run(taskId, agentId)
   )
 }
+/**
+ * Keep one prompt in the task's history: in the task's active conversation of the
+ * prompt's provider when there is one, else in the task's storage-only prompt inbox.
+ * With `once`, a prompt whose id the task already holds is kept as it is (a hand-off
+ * delivered twice, robustness plan §9).
+ */
+export function storePrompt(store: ChatStorage, prompt: LocalPrompt, once = false): void {
+  const { taskId } = prompt
+  if (once && store.findRecords('prompt', taskId, { id: prompt.id }).length) return
+  const mode = chatStorageMode(prompt.agentId)
+  const existing = store
+    .listForTask(taskId)
+    .find(
+      (r) =>
+        r.state === 'active' &&
+        r.identity.mode === mode &&
+        !store.getRecord(r.identity.id, 'settings', 'inbox')
+    )
+  const inbox = store.conversation(`hook-inbox:${taskId}`)
+  const identity = existing?.identity ??
+    inbox?.identity ?? {
+      id: `hook-inbox:${taskId}`,
+      taskId,
+      tabId: `hook-inbox:${taskId}`,
+      // One task inbox accepts hooks from several providers; provider identity
+      // belongs to each prompt, not this storage-only container.
+      mode: 'claude-chat',
+      epoch: 1
+    }
+  store.transaction(() => {
+    if (!existing) {
+      store.createConversation(identity)
+      store.putRecord(identity.id, identity.epoch, {
+        kind: 'settings',
+        id: 'inbox',
+        value: true,
+        at: 0
+      })
+    }
+    store.putRecord(identity.id, identity.epoch, {
+      kind: 'prompt',
+      id: prompt.id,
+      value: prompt,
+      at: prompt.createdAt
+    })
+    trimLocalPromptHistory(store, taskId, prompt.agentId)
+  })
+}
+
 export function createLocalPrompts(store: ChatStorage) {
   function list(
     taskId: string,
@@ -152,51 +201,13 @@ export function createLocalPrompts(store: ChatStorage) {
       if (!taskId || !text || !isPromptCaptureMode(hook.agentId)) return
       if (store.conversation(`task-tombstone:${taskId}`)?.state === 'deleted')
         throw new Error('Task chat history was deleted')
-      const mode = chatStorageMode(hook.mode)
-      const existing = store
-        .listForTask(taskId)
-        .find(
-          (r) =>
-            r.state === 'active' &&
-            r.identity.mode === mode &&
-            !store.getRecord(r.identity.id, 'settings', 'inbox')
-        )
-      const inbox = store.conversation(`hook-inbox:${taskId}`)
-      const identity = existing?.identity ??
-        inbox?.identity ?? {
-          id: `hook-inbox:${taskId}`,
-          taskId,
-          tabId: `hook-inbox:${taskId}`,
-          // One task inbox accepts hooks from several providers; provider identity
-          // belongs to each prompt, not this storage-only container.
-          mode: 'claude-chat',
-          epoch: 1
-        }
-      store.transaction(() => {
-        if (!existing) {
-          store.createConversation(identity)
-          store.putRecord(identity.id, identity.epoch, {
-            kind: 'settings',
-            id: 'inbox',
-            value: true,
-            at: 0
-          })
-        }
-        const prompt: LocalPrompt = {
-          id: randomUUID(),
-          taskId,
-          agentId: hook.mode,
-          cliSessionId: hook.sessionId ?? null,
-          text,
-          createdAt: Date.now()
-        }
-        store.putRecord(identity.id, identity.epoch, {
-          kind: 'prompt',
-          id: prompt.id,
-          value: prompt,
-          at: prompt.createdAt
-        })
-        trimLocalPromptHistory(store, taskId, hook.mode)
+      storePrompt(store, {
+        id: randomUUID(),
+        taskId,
+        agentId: hook.mode,
+        cliSessionId: hook.sessionId ?? null,
+        text,
+        createdAt: Date.now()
       })
     }
   }

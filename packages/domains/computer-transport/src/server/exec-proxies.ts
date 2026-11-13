@@ -16,9 +16,8 @@
  * survives a computer which never connected, a socket map wiped on restart, a cache
  * that can name a dead computer.
  *
- * Two categories are hub-local by DESIGN, not by fallback, and must never route:
- * worktree COLOR state (`getWorktreeColor` is sync UI state) and HUB-STORAGE fs
- * ops (`hubPathExists` / `removeArtifactDir` — artifacts live under the hub's own
+ * One category is hub-local by DESIGN, not by fallback, and must never route:
+ * HUB-STORAGE fs ops (`hubPathExists` / `removeArtifactDir` — artifacts live under the hub's own
  * `<ROOT>/storage`, a path that does not exist on a computer).
  *
  * These are drop-in replacements for the terminal/processes/task exec backends:
@@ -37,9 +36,7 @@
  *   1. The gateway emits `proc.data`/`proc.exit` (added to `ComputerGatewayEvents`).
  *   2. `WorktreeExecAdapters.pathExists`/`removeArtifactDir` were widened to
  *      `boolean | Promise<boolean>` / `void | Promise<void>` so a remote
- *      (async) impl is valid alongside the sync local default. `getWorktreeColor`
- *      stays SYNC and is always served locally — a documented cosmetic
- *      degradation for remote worktrees.
+ *      (async) impl is valid alongside the sync local default.
  *
  * @module computer/server/exec-proxies
  */
@@ -118,6 +115,7 @@ import {
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
+import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
 import { ComputerUpdatePendingError, type HubComputerGateway } from './hub-gateway'
 
 // ===========================================================================
@@ -769,11 +767,32 @@ function createDetachController<E extends DetachableEntry>(
     prune()
     const previousEpoch = epochByComputer.get(computerId)
     epochByComputer.set(computerId, epoch)
-    const detached = liveEntries(computerId).filter((o) => o.entry.detached)
+    let detached = liveEntries(computerId).filter((o) => o.entry.detached)
     // First contact with this computer: nothing was ever detached, and the sweep
     // below has no baseline to sweep against.
     if (previousEpoch === undefined && detached.length === 0) return
     clearGrace(computerId)
+
+    // First contact, yet spawns are waiting: they were sent while this hub had never
+    // reached the computer (a restarted app opening its task before the computer's
+    // first hello). No earlier process of it can hold them, so this is no
+    // "reconnected as a different process" — start them now, the same attempt.
+    if (previousEpoch === undefined) {
+      const waiting = detached.filter((o) => o.entry.pendingSpawn && !o.entry.disposed)
+      for (const o of waiting) {
+        o.entry.detached = false
+        o.entry.pendingSpawn?.resend()
+      }
+      if (waiting.length > 0) {
+        record('computer.sessions_resent', 'info', waiting, computerId, {
+          message:
+            `Computer connected for the first time — ${String(waiting.length)} ${kind} ` +
+            'session(s) waiting for it are starting now.'
+        })
+      }
+      detached = detached.filter((o) => !waiting.includes(o))
+      if (detached.length === 0) return
+    }
 
     // A missing epoch on EITHER side proves nothing — an old computer that cannot
     // report one, or a hub that never saw the pre-disconnect value. Absence is
@@ -1438,6 +1457,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       computerId: string,
       spec: {
         warmId: string
+        projectId: string
         command: string
         args: string[]
         cwd: string
@@ -2283,12 +2303,19 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
           // Same rule as pty.spawn: an absent cwd lets the computer resolve the
           // project's checkout, rather than an empty string travelling as a path.
           ...(spec.cwd ? { cwd: spec.cwd } : {}),
+          // The user's own folder for the process (B3): a root of this spawn.
+          ...(spec.cwd && spec.declaredCwd ? { declaredCwd: true } : {}),
           ...(spec.projectId ? { projectId: spec.projectId } : {}),
           env: spec.env,
           // A background process's computer sweeps its group when it exits on
           // its own (the hub used to, against its own pids).
-          reapGroupOnExit: true
+          reapGroupOnExit: true,
+          // No task, no project: a GLOBAL process, declared so — the computer
+          // starts it in the machine bound as before §9 Phase 7c, where it refuses
+          // any other spawn that names no scope.
+          ...(!spec.taskId && !spec.projectId ? { global: true } : {})
         }),
+      ...(spec.taskId ? { taskId: spec.taskId } : {}),
       // After the override: the idempotency key is the transport's, not the
       // caller's — see `spawnIdField` in frames.ts.
       spawnId
@@ -2303,8 +2330,18 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     }
     // No request timeout, and a lost reply is UNKNOWN rather than failed — the
     // same rules and reasons as the pty spawn above.
+    // The path scope the spawn was started in (the hub's authorized task/project,
+    // platform/path-scope) is the spawn's own: a re-send after a lost reply runs
+    // outside that request, yet must reach the computer with the same scope.
+    const spawnScope = currentPathScope()
+    const send = (): Promise<unknown> =>
+      spawnScope
+        ? runInPathScope(spawnScope, () =>
+            gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0)
+          )
+        : gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0)
     const attempt = (): void => {
-      void gateway.request(computerId, HubToComputerMethods.procSpawn, params, 0).then(
+      void send().then(
         (res) => {
           const parsed = procSpawnResultSchema.safeParse(res)
           if (parsed.success) setSpawnedPid(parsed.data.pid)
@@ -2459,10 +2496,22 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
     return spawnError('spawn-failed', detail)
   }
 
+  /** Where each session's agent is waiting to start: `prioritize` asks there. */
+  const queuedOn = new Map<string, string>()
+
   return {
+    prioritize(sessionId: string): void {
+      const computerId = queuedOn.get(sessionId)
+      if (computerId == null) return
+      // A computer that predates `proc.prioritize` answers `unimplemented`: FIFO.
+      void gateway
+        .request(computerId, HubToComputerMethods.procPrioritize, { sessionId })
+        .catch(() => undefined)
+    },
     async spawn(spec: ChatSpawnSpec): Promise<ChatProcHandle> {
       const computerId = resolveComputerId(spec)
       if (computerId == null) throw new NoComputerAvailableError(`chat agent ${spec.binaryName}`)
+      queuedOn.set(spec.sessionId, computerId)
       if (gate) await gate(computerId, { kind: 'task', id: spec.taskId })
 
       const procHandle = channel.spawnRouted(
@@ -2500,6 +2549,8 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
       let started = false
       procHandle.onSpawned(() => {
         started = true
+        // Started: nothing left to move up the queue.
+        if (queuedOn.get(spec.sessionId) === computerId) queuedOn.delete(spec.sessionId)
       })
       const failed = new Latch<Error>()
       procHandle.onExit(() => {
@@ -2537,15 +2588,10 @@ export function createRoutingChatBackend(options: RoutingChatBackendOptions): Ch
 
 export interface RemoteWorktreeAdaptersOptions {
   gateway: RoutingGateway
-  /** In-process adapters. Used ONLY for the two color ops, which are hub-local UI
-   *  state and never routed — every other method requires a computer. */
   /** In-process adapters. Used ONLY for the ops that are hub-owned by design —
-   *  worktree colors and the `<ROOT>/storage` artifact paths (see
-   *  docs/exec-boundary.md). Every workspace op requires a computer. */
-  local: Pick<
-    WorktreeExecAdapters,
-    'getWorktreeColor' | 'ensureProjectWorktreeColors' | 'hubPathExists' | 'removeArtifactDir'
-  >
+   *  the `<ROOT>/storage` artifact paths (see docs/exec-boundary.md). Every
+   *  workspace op requires a computer. */
+  local: Pick<WorktreeExecAdapters, 'hubPathExists' | 'removeArtifactDir'>
   /**
    * The computer a given TASK's worktree work belongs to, or null for hub-local.
    * Takes the taskId because that is the only thing a computer can be resolved
@@ -2554,16 +2600,19 @@ export interface RemoteWorktreeAdaptersOptions {
    * local — so a task whose agent ran on a computer got its worktree on the hub.
    */
   resolveComputerId: (taskId: string) => string | null | Promise<string | null>
+  /**
+   * The computer that HOLDS a task's worktree — where `removeWorktree` goes. It can
+   * differ from {@link resolveComputerId}: an unbound task's computer is whichever is
+   * the default NOW, the worktree stays on the one that made it. Omitted: the task's
+   * computer.
+   */
+  resolveWorktreeComputerId?: (taskId: string) => string | null | Promise<string | null>
   /** Asked before every routed op, for its task. */
   gate?: ComputerWorkGate
 }
 
 /**
  * A COMPLETE `WorktreeExecAdapters` that forwards git/fs work to a computer.
- * `getWorktreeColor` (SYNC) and `ensureProjectWorktreeColors` are always served
- * by `local` — worktree colors are hub-local UI state, and a sync getter cannot
- * be a network call (documented cosmetic degradation for remote worktrees).
- * When `resolveComputerId()` is null every method degrades to `local`.
  */
 /**
  * Request limits for a task's worktree steps — never the gateway's 30 s default, as
@@ -2580,11 +2629,17 @@ export function createRemoteWorktreeAdapters(
 ): WorktreeExecAdapters {
   const { gateway, local, gate } = options
   /** The task's computer, admitted by the gate before any op reaches it. */
-  const resolveComputerId = async (taskId: string): Promise<string | null> => {
-    const computerId = await options.resolveComputerId(taskId)
+  const admitted = async (
+    taskId: string,
+    resolve: (taskId: string) => string | null | Promise<string | null>
+  ): Promise<string | null> => {
+    const computerId = await resolve(taskId)
     if (computerId != null && gate) await gate(computerId, { kind: 'task', id: taskId })
     return computerId
   }
+  const resolveComputerId = (taskId: string) => admitted(taskId, options.resolveComputerId)
+  const resolveWorktreeComputerId = (taskId: string) =>
+    admitted(taskId, options.resolveWorktreeComputerId ?? options.resolveComputerId)
 
   return {
     async createWorktree(taskId, repoPath, worktreePath, branch, sourceBranch) {
@@ -2597,10 +2652,11 @@ export function createRemoteWorktreeAdapters(
         { repoPath, worktreePath, branch, sourceBranch },
         WORKTREE_LONG_STEP_TIMEOUT_MS
       )
+      return { computerId }
     },
 
     async removeWorktree(taskId, projectPath, worktreePath) {
-      const computerId = await resolveComputerId(taskId)
+      const computerId = await resolveWorktreeComputerId(taskId)
       if (computerId == null)
         throw new NoComputerAvailableError(`worktree remove for task ${taskId}`)
       const res = await gateway.request(
@@ -2665,15 +2721,6 @@ export function createRemoteWorktreeAdapters(
         WORKTREE_PROBE_TIMEOUT_MS
       )
       return gitIsGitRepoResultSchema.parse(res).isGitRepo
-    },
-
-    // SYNC + hub-local: worktree colors are UI state; cannot be a network call.
-    getWorktreeColor(projectPath, worktreePath) {
-      return local.getWorktreeColor(projectPath, worktreePath)
-    },
-
-    ensureProjectWorktreeColors(projectPath) {
-      return local.ensureProjectWorktreeColors(projectPath)
     },
 
     // WORKSPACE path probe → routed (the workspace lives on the computer).

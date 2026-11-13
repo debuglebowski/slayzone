@@ -601,6 +601,35 @@ test('remote backend: the spawn spec carries the startup deadline for the owner 
   setPtyBackend(null)
 })
 
+test('OpenCode cold initialization gets its longer deadline on the computer', async () => {
+  let capturedSpec: PtySpawnSpec | undefined
+  const handle = makeFakeHandle({
+    whenSpawned: Promise.resolve({ pid: 4242, ownsStartupDeadline: true })
+  })
+  setPtyBackend({
+    spawn(spec) {
+      capturedSpec = spec
+      return handle
+    }
+  })
+  const sid = 'opencodeDeadline:opencodeDeadline'
+  try {
+    await createPty({
+      win: fakeWin,
+      sessionId: sid,
+      cwd: '/tmp',
+      mode: 'opencode',
+      type: 'opencode',
+      computerId: 'computer-1'
+    })
+    expect(capturedSpec?.startupTimeoutMs).toBe(60_000)
+  } finally {
+    killPty(sid)
+    handle.emitExit(-2)
+    setPtyBackend(null)
+  }
+})
+
 test("a computer that OWNS the startup deadline is never second-guessed by the hub; one that does not still gets the hub's", async () => {
   // Both sessions stay silent past the deadline. Only the one whose owner did NOT
   // claim the deadline may be killed by the hub.

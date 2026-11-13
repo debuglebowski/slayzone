@@ -5,10 +5,14 @@
  * Import-free on purpose: this barrel reaches the renderer and mobile.
  */
 
-/** One session or one chat tab on the computer that holds it. */
+/**
+ * One session, one chat tab, or one task's computer-only data (robustness plan §9),
+ * on the computer that holds it.
+ */
 export type DirectLinkResource =
   | { kind: 'pty'; sessionId: string }
   | { kind: 'chat'; tabId: string }
+  | { kind: 'task'; taskId: string }
 
 /**
  * What a client wants to reach directly: a computer target like every other

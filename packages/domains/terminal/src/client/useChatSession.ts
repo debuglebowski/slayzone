@@ -33,6 +33,7 @@ import {
   decodeTimelineState
 } from '../shared/chat-timeline-checkpoint'
 import { summarizeRows, type TimelinePageSummary } from '../shared/timeline-summary'
+import { SessionReadyGate } from '../shared/chat-session-ready'
 import {
   initialState,
   reducer,
@@ -198,6 +199,8 @@ interface HydrateChatCtx {
   }
   gen: number
   genRef: RefObject<number>
+  /** Holds sends until this load's hydrate answered (either way). */
+  sessionReady: SessionReadyGate
   hydratedRef: RefObject<boolean>
   /** True once any load of this hook finished — the next one is a reload. */
   loadedOnceRef: RefObject<boolean>
@@ -240,6 +243,7 @@ async function hydrateAndReplay({
   target,
   gen,
   genRef,
+  sessionReady,
   hydratedRef,
   loadedOnceRef,
   liveQueueRef,
@@ -256,7 +260,7 @@ async function hydrateAndReplay({
   onHydrateError
 }: HydrateChatCtx): Promise<void> {
   try {
-    await trpcClient.chat.hydrate.mutate(target)
+    await sessionReady.track(trpcClient.chat.hydrate.mutate(target))
     if (gen === genRef.current) onHydrateError(null)
   } catch (e) {
     // Surface hydrate failure but still attempt replay (e.g. session may
@@ -413,6 +417,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // in-flight work from the previous session. `hydratedRef` gates the queue
   // (queue events until the buffer replay completes), `liveQueueRef` holds them.
   const genRef = useRef(0)
+  // The current load's hydrate: the computer holds the tab's session only once it
+  // ran there, and a command that overtakes it is refused ("No chat session for
+  // tab"). Commands that need the session wait on it.
+  const [sessionReady] = useState(() => new SessionReadyGate())
   const hydratedRef = useRef(false)
   const loadedOnceRef = useRef(false)
   const liveQueueRef = useRef<
@@ -450,11 +458,20 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // still the newest saved event here and it is newer than the last live one.
   // Otherwise it is stale (the saved event it led to is already applied). A
   // saved event's rows show `at`, when it was saved.
+  const applyCliMetadata = useStableCallback((event: AgentEvent) => {
+    if (event.kind !== 'cli-models') return
+    const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
+    // Initialize can beat both the subscription and an older empty metadata query.
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData(queryKey, event.models)
+    })
+  })
   const applyLive = useCallback(
     (event: AgentEvent, seq: number, live?: number, at?: number): void => {
       if (live !== undefined) {
         if (seq !== lastSeqRef.current || live <= lastLiveRef.current) return
         lastLiveRef.current = live
+        applyCliMetadata(event)
         pendingLiveRef.current.push(event)
         if (frameRef.current === null) {
           frameRef.current = requestFrame(() => {
@@ -469,7 +486,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       flushLive()
       dispatch({ type: 'event', event, at, seq })
     },
-    [flushLive]
+    [flushLive, applyCliMetadata]
   )
   // Stable: refs + dispatch only. Saved events in seq order as one batch — the
   // same as applying each through `applyLive` (fragments waiting for a frame
@@ -668,15 +685,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     }) => {
       if (tabId !== opts.tabId) return
       const agentEvent = event as AgentEvent
-      if (agentEvent.kind === 'cli-models') {
-        const queryKey = trpc.chat.getModels.queryKey({ taskId: opts.taskId, mode: opts.mode })
-        // The session can start before its model/list handshake finishes. Use
-        // the advertised list directly; an older empty DB query must not win.
-        void queryClient.cancelQueries({ queryKey }).then(() => {
-          queryClient.setQueryData(queryKey, agentEvent.models)
-        })
-      }
       if (!hydratedRef.current) {
+        applyCliMetadata(agentEvent)
         liveQueueRef.current.push({ event: event as AgentEvent, seq, live, at })
         return
       }
@@ -688,9 +698,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     (events: AgentEvent[], afterSeq: number, liveSeq: number): void => {
       if (afterSeq !== lastSeqRef.current) return
       lastLiveRef.current = Math.max(lastLiveRef.current, liveSeq)
+      for (const event of events) applyCliMetadata(event)
       if (events.length > 0) dispatch({ type: 'events', events })
     },
-    []
+    [applyCliMetadata]
   )
   // The lease whose computer stream has started (onStarted). Make-before-break: the
   // hub stream stays on until then, so an event saved while the direct subscription
@@ -840,6 +851,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       },
       gen,
       genRef,
+      sessionReady,
       hydratedRef,
       loadedOnceRef,
       liveQueueRef,
@@ -878,7 +890,8 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
     trpcClient,
     reopenToken,
     openTimelineRead,
-    getReplayRead
+    getReplayRead,
+    sessionReady
   ])
 
   const createOpts = (): {
@@ -911,6 +924,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       // `user-sent` is renderer-only; never persisted.
       dispatchLocal({ type: 'user-sent', id, text: userMessageText(content), content })
       try {
+        await sessionReady.ready()
         await trpcClient.chat.send.mutate({
           tabId: opts.tabId,
           message: { id, content },
@@ -925,7 +939,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
         throw err
       }
     },
-    [opts.tabId, trpcClient, dispatchLocal]
+    [opts.tabId, trpcClient, dispatchLocal, sessionReady]
   )
 
   // Read the failed message's text from the reducer; `state` is read via a
@@ -945,6 +959,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       ...(item.text ? [{ type: 'text' as const, text: item.text }] : [])
     ]
     try {
+      await sessionReady.ready()
       // Same id: the server retries it (or takes it, if it never got it).
       await trpcClient.chat.send.mutate({
         tabId: opts.tabId,

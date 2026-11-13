@@ -92,6 +92,7 @@ import { buildMcpEnv, resolveRemoteMcpEnv, type RemoteMcpEnvProvider } from '../
 import { localChatRuntime } from './local-chat-runtime'
 import {
   conversationInUseMessage,
+  conversationInOtherTabMessage,
   isConversationLive,
   registerConversationHolder
 } from './live-conversations'
@@ -103,13 +104,38 @@ export { filterBufferData }
 export interface PtyCreateResult {
   success: boolean
   error?: string
-  /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here"). */
-  code?: 'conversation-in-use'
+  /** `conversation-in-use`: a chat of the task runs this conversation (offer "Continue here").
+   *  `conversation-in-other-tab`: another terminal tab of the task runs it (named in
+   *  `error`); the user stops it there, or starts a new session in this tab. */
+  code?: 'conversation-in-use' | 'conversation-in-other-tab' | 'session-ledger-unreadable'
 }
 
-/** A start refused: another side runs this conversation. */
+/** A start refused: another side (or another terminal tab) runs this conversation. */
 class ConversationInUseError extends Error {
-  readonly code = 'conversation-in-use'
+  constructor(
+    message: string,
+    readonly code: 'conversation-in-use' | 'conversation-in-other-tab' = 'conversation-in-use'
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * The task's session ledger (on the agent's computer, robustness plan §9) could
+ * not be read. NOT "no session": a fresh start would silently shadow the real one,
+ * so a resolver throws this and `createPty` refuses the start, naming why — the
+ * user retries once the computer answers.
+ */
+export class SessionLedgerUnreadableError extends Error {
+  readonly code = 'session-ledger-unreadable' as const
+  constructor(cause: unknown) {
+    const why = cause instanceof Error ? cause.message : String(cause)
+    super(
+      `This task's session history could not be read from its computer (${why}). Not starting a new session over it — try again once the computer answers.`,
+      { cause }
+    )
+    this.name = 'SessionLedgerUnreadableError'
+  }
 }
 
 /**
@@ -337,6 +363,11 @@ interface PtySession {
   // ~100ms for trailing output; `state` cannot mark that window ('dead' goes
   // through the debounced state machine), so `hasLivePty` reads this.
   exited?: boolean
+  // Set when the hub asked the process to die (`killPty`), before its exit arrives
+  // (a computer's exit frame is a round trip away). Not live from then on: a mode
+  // switch's remount asked `pty.exists`, got "yes", and reattached to the dying
+  // session instead of starting the new mode.
+  killRequested?: boolean
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -733,6 +764,8 @@ let idleCheckerInterval: NodeJS.Timeout | null = null
 export interface ConversationHealRequest {
   taskId: string
   mode: AgentId
+  /** The spawning tab: a heal repoints only to THIS tab's sessions (v201). */
+  tabId: string
   cwd: string
   storedId: string
   /** Where the agent runs: transcripts are looked up on THAT computer's disk. */
@@ -758,8 +791,13 @@ export function setConversationHealer(handler: ConversationHealer | null): void 
  *  bug). Registered from the app (apps/app) for the same task → terminal
  *  dependency reason as the healer. No-op when unset. */
 export type ConversationResolver = (req: {
+  /** The computer the agent runs on: its session ledger answers (robustness plan §9). */
+  computerId: string | null
   taskId: string
   mode: AgentId
+  /** Sessions are scoped per tab (v201): the spawning tab's session, never the
+   *  main tab's for a secondary tab. Main tab id = task id. */
+  tabId: string
 }) => Promise<string | null>
 
 let conversationResolver: ConversationResolver | null = null
@@ -1406,12 +1444,25 @@ export function takePtyKillCalls(): string[] {
 
 export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult> {
   if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn) {
+    // What the spawn would resume: the caller's id, else the session ledger's on the
+    // agent's computer (robustness plan §9) — the same resolver a real spawn asks.
+    const taskId = opts.taskId !== undefined ? (opts.taskId ?? '') : splitTaskId(opts.sessionId)
+    const resolved =
+      !opts.existingConversationId && conversationResolver && taskId
+        ? await conversationResolver({
+            computerId: opts.computerId ?? null,
+            taskId,
+            mode: (opts.mode || 'claude-code') as AgentId,
+            tabId: opts.tabId ?? splitTabRowId(opts.sessionId)
+          }).catch(() => null)
+        : null
     ptyCreateCapturedOpts.push({
       sessionId: opts.sessionId,
       cwd: opts.cwd,
       mode: opts.mode,
       conversationId: opts.conversationId ?? null,
       existingConversationId: opts.existingConversationId ?? null,
+      resumeConversationId: opts.existingConversationId ?? resolved ?? null,
       providerArgs: opts.providerArgs ?? null
     })
     return { success: true }
@@ -1520,7 +1571,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       patterns: { working: patternWorking, error: patternError }
     })
     // MAIN is authoritative: when the renderer gave no hint (e.g. the boot board
-    // load hadn't hydrated `currentConversationByMode` yet), resolve the id from
+    // load hadn't hydrated a hint yet — today there never is one), resolve the id from
     // the ledger BEFORE deciding fresh-vs-resume. A null/stale hint must never
     // cause a destructive fresh-mint over a conversation main already knows.
     // Best-effort — on any failure keep null and fall through to a fresh spawn.
@@ -1538,18 +1589,26 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // active tab on restart. Minting a fresh session over a real conversation
       // is destructive, so a single null is not taken at face value here; a real
       // id (no rows) costs at most ~300ms of retry on the cold spawn path.
+      // A ledger that could not be READ (its computer restarting, a timeout) is
+      // retried the same way, then refuses the start: unknown is not "none".
+      let unreadable: SessionLedgerUnreadableError | null = null
       for (let attempt = 0; attempt < 3; attempt++) {
+        unreadable = null
         try {
           ledgerConversationId = await conversationResolver({
+            computerId,
             taskId,
-            mode: agentId
+            mode: agentId,
+            tabId: resolveTabRowId(sessionId)
           })
-        } catch {
+        } catch (err) {
           ledgerConversationId = null
+          if (err instanceof SessionLedgerUnreadableError) unreadable = err
         }
         if (ledgerConversationId) break
         if (attempt < 2) await new Promise((r) => setTimeout(r, 150))
       }
+      if (unreadable) throw unreadable
     }
     // Pure fresh-vs-resume decision — see resolveSpawnConversation. The invariant
     // (known id ⇒ resume, never mint over it) lives there + is unit-tested.
@@ -1569,6 +1628,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       sessionId,
       taskId,
       payload: {
+        tabId: resolveTabRowId(sessionId),
         hasExisting: Boolean(existingConversationId),
         hasConversationId: Boolean(conversationId),
         resolverReady: Boolean(conversationResolver),
@@ -1590,6 +1650,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
         const healed = await conversationHealer({
           taskId,
           mode: agentId,
+          tabId: resolveTabRowId(sessionId),
           cwd,
           storedId: resolvedExistingId,
           computerId,
@@ -1662,6 +1723,32 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // task runs it — the hand-off ("Continue in terminal") stops it first.
     if (resolvedExistingId && isConversationLive('chat', taskId, resolvedExistingId)) {
       throw new ConversationInUseError(conversationInUseMessage('chat'))
+    }
+    // …and never two terminal tabs on one conversation. A tab resolves only its own
+    // sessions, so this needs a race or a heal to happen — and then the spawn is
+    // REFUSED, naming the tab that runs it. Never a silent fresh start instead:
+    // a fresh mint over a session the tab owns is exactly how a tab's session got
+    // lost (robustness plan §2).
+    const knownConversationId = resolvedExistingId || neverWrittenId
+    const holderSessionId = knownConversationId
+      ? terminalSessionRunning(taskId, knownConversationId, sessionId)
+      : null
+    if (knownConversationId && holderSessionId) {
+      const holderTabId = resolveTabRowId(holderSessionId)
+      const label = ledger ? await ledger.tabLabel(taskId, holderTabId).catch(() => null) : null
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'conv_id.live_elsewhere',
+        sessionId,
+        taskId,
+        message: knownConversationId,
+        payload: { tabId: resolveTabRowId(sessionId), holderTabId, holderSessionId }
+      })
+      throw new ConversationInUseError(
+        conversationInOtherTabMessage(label ?? (holderTabId === taskId ? 'Main' : holderTabId)),
+        'conversation-in-other-tab'
+      )
     }
     // Fresh-spawn pre-mint (decision.shouldMintFresh): when the provider's
     // `initialCommand` has the literal `{id}` placeholder (today: claude-code,
@@ -1780,7 +1867,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
           spawnToken = randomUUID()
           mcpEnv.SLAYZONE_AGENT_HOOK_CONTEXT = JSON.stringify({
             ...hookContext,
-            spawnToken
+            spawnToken,
+            // Routes this agent's hooks to its own tab's PTY (two same-mode tabs).
+            // Provenance never trusts it: the token names the spawn, and the
+            // spawn row names its tab.
+            tabId: resolveTabRowId(sessionId)
           })
         }
       } catch {
@@ -1828,8 +1919,13 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // refuses with `project_not_placed`.
     const onComputer = computerId != null
     const spawnCwd = resumeCwd ?? cwd
+    // A docker / ssh transport works in its own workdir; on a computer its local
+    // process starts in the task's own folder there (§9 Phase 7c: the computer
+    // confines a spawn's cwd to them — this hub's home folder is not one).
     let effectiveCwd = transport
-      ? transport.cwd
+      ? onComputer
+        ? ''
+        : transport.cwd
       : onComputer
         ? spawnCwd || ''
         : spawnCwd || homedir()
@@ -1901,15 +1997,31 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     // so the row is durable before the child process can race ahead. Drops
     // on PTY exit via `prunePendingSpawns` below. Legacy rows without tokens
     // retain the time limit; token-bearing rows can wait for the first prompt.
+    // The row id is pruned on THIS process's exit — only its own row, never a
+    // sibling tab's in-flight one.
+    const pendingRowIds: string[] = []
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'conv_id.spawn_effective',
+      sessionId,
+      taskId,
+      message: effectiveConversationId ?? null,
+      payload: { tabId: resolveTabRowId(sessionId), mode: agentId, resuming }
+    })
     if (ledger && !opts.adoptPty?.preWarmedAgent) {
       try {
-        await ledger.recordPendingSpawn({
-          taskId,
-          mode: agentId,
-          expectedSessionId: effectiveConversationId || null,
-          usedResume: resuming,
-          spawnToken
-        })
+        pendingRowIds.push(
+          await ledger.recordPendingSpawn({
+            computerId,
+            taskId,
+            mode: agentId,
+            tabId: resolveTabRowId(sessionId),
+            expectedSessionId: effectiveConversationId || null,
+            usedResume: resuming,
+            spawnToken
+          })
+        )
       } catch {
         // Best-effort — a failed pending row falls back to "no pending" in the
         // hook handler, which records as foreign-observed for that one session.
@@ -2131,6 +2243,7 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
     if (opts.adoptPty?.preWarmedAgent && opts.adoptPty.sessionId && ledger) {
       try {
         await ledger.bindSessionToTask({
+          computerId: opts.adoptPty.computerId,
           sessionId: opts.adoptPty.sessionId,
           taskId,
           tabId: resolveTabRowId(sessionId)
@@ -2209,11 +2322,11 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       finalized = true
       const exiting = sessions.get(sessionId)
       if (exiting && exiting.pty === ptyProcess) exiting.exited = true
-      // Drop the pending-spawn provenance row for this (task, mode). A row that
-      // isn't pruned here cannot match a later launch's token, but explicit
-      // pruning keeps the ledger small and avoids stale lookup candidates.
-      if (ledger) {
-        void ledger.prunePendingSpawns({ taskId, mode: agentId }).catch(() => {
+      // Drop THIS launch's pending-spawn provenance row (by id: a sibling tab of
+      // the same mode keeps its own). A row that isn't pruned here cannot match
+      // a later launch's token, but pruning keeps the ledger small.
+      if (ledger && pendingRowIds.length) {
+        void ledger.prunePendingSpawns({ computerId, ids: pendingRowIds }).catch(() => {
           // Best-effort — a leaked token-bearing row cannot claim a later spawn.
         })
       }
@@ -2280,8 +2393,12 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       // Delay session cleanup so any trailing onData events (buffered in the PTY fd)
       // can still be processed and forwarded to the renderer before we drop the session.
       setTimeout(() => {
+        // Replaced meanwhile (agent switch, restart): the id and every map keyed by
+        // it belong to the NEW session now. Clearing them here dropped it — exists
+        // false, its process running attached to nothing.
+        exitSession?.replyMirror.dispose()
+        if (sessions.get(sessionId) !== exitSession) return
         dataListeners.delete(sessionId)
-        sessions.get(sessionId)?.replyMirror.dispose()
         sessions.delete(sessionId)
         sessionTaskMap.delete(sessionId)
         sessionTabMap.delete(sessionId)
@@ -3208,6 +3325,17 @@ export async function createPty(opts: CreatePtyOptions): Promise<PtyCreateResult
       })
       return { success: false, error: err.message, code: err.code }
     }
+    if (err instanceof SessionLedgerUnreadableError) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.session_ledger_unreadable',
+        sessionId,
+        taskId: taskIdFromSessionId(sessionId),
+        message: err.message
+      })
+      return { success: false, error: err.message, code: err.code }
+    }
     recordDiagnosticEvent({
       level: 'error',
       source: 'pty',
@@ -3442,6 +3570,7 @@ export function killPty(sessionId: string): boolean {
     sessionId,
     taskId: session.taskId
   })
+  session.killRequested = true
   // Clear any pending timeouts to prevent orphaned callbacks
   stopSessionTimers(session)
   // Note: we intentionally do NOT eagerly delete from sessions/dataListeners
@@ -3511,6 +3640,13 @@ registerConversationHolder('terminal', {
       .filter(([, s]) => s.taskId === taskId && s.conversationId === conversationId && !s.exited)
       .map(([id]) => id)
     await Promise.all(ids.map((id) => killPtyAndWait(id)))
+  },
+  liveSessionId: (taskId, conversationId) => terminalSessionRunning(taskId, conversationId, ''),
+  liveConversations: (taskId) => {
+    const ids = new Set<string>()
+    for (const s of sessions.values())
+      if (s.taskId === taskId && s.conversationId && !s.exited) ids.add(s.conversationId)
+    return [...ids]
   }
 })
 
@@ -3531,26 +3667,51 @@ export function hasPty(sessionId: string): boolean {
   return sessions.has(sessionId)
 }
 
-/** Registered AND its process has not exited. During the post-exit drain window
- *  a session is still in the map but dead: a write there is lost, and treating
- *  it as alive skips the respawn that should replace it. */
+/** Registered, its process not exited and not asked to die. During the post-exit
+ *  drain window a session is still in the map but dead, and a killed one is dying:
+ *  a write there is lost, and treating it as alive skips the respawn that should
+ *  replace it. */
 export function hasLivePty(sessionId: string): boolean {
   const session = sessions.get(sessionId)
-  return !!session && !session.exited
+  return !!session && !session.exited && !session.killRequested
 }
 
-/** Find a live session by taskId + mode. Used by the agent-hook REST handler to
- *  resolve `{ taskId, agentId }` → sessionId so hook events can drive state
- *  transitions. Prefers the main session (`sessionId === taskId`) when multiple
- *  panes share a mode. Returns null if no session matches. */
-export function findSessionByTaskIdAndMode(taskId: string, mode: AgentId): string | null {
+/** Find the live session a hook event is about. Used by the agent-hook REST
+ *  handler to drive state transitions. `tabId` (the hook context names the
+ *  agent's own tab) picks exactly that tab's session — two tabs of one mode
+ *  each get their own events. Without it: the task's MAIN tab session of that
+ *  mode, else any session of it. Returns null if no session matches. */
+export function findSessionByTaskIdAndMode(
+  taskId: string,
+  mode: AgentId,
+  tabId?: string
+): string | null {
+  let main: string | null = null
   let fallback: string | null = null
   for (const [sessionId, session] of sessions) {
     if (session.taskId !== taskId || session.mode !== mode) continue
-    if (sessionId === taskId) return sessionId
+    const tab = resolveTabRowId(sessionId)
+    if (tabId) {
+      if (tab === tabId) return sessionId
+      continue
+    }
+    if (tab === taskId) main ??= sessionId
     fallback ??= sessionId
   }
-  return fallback
+  return main ?? fallback
+}
+
+/** The OTHER live terminal session of `taskId` running `conversationId`, if any. */
+function terminalSessionRunning(
+  taskId: string,
+  conversationId: string,
+  exceptSessionId: string
+): string | null {
+  for (const [id, s] of sessions) {
+    if (id === exceptSessionId || s.taskId !== taskId) continue
+    if (s.conversationId === conversationId && !s.exited && !s.killRequested) return id
+  }
+  return null
 }
 
 /** External entry point for hook-driven state transitions. Tags the

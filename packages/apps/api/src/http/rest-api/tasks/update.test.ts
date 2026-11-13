@@ -12,7 +12,15 @@ import {
   __ipcEmitCalls,
   __resetIpcEmitCalls
 } from '../../../../../../shared/test-utils/mock-electron.js'
-import { taskEvents, configureTaskRuntimeAdapters } from '@slayzone/task/server'
+import {
+  taskEvents,
+  configureTaskRuntimeAdapters,
+  getTaskPathsDelegate,
+  setTaskPathsDelegate,
+  setTaskSessionLedger
+} from '@slayzone/task/server'
+import { COMPUTER_REFUSED_RPC_CODE } from '@slayzone/platform/path-scope'
+import { createSessionLedgerHarness } from '@slayzone/chat-runtime/server'
 import { tmpdir } from 'node:os'
 import { TypedEmitter } from '@slayzone/platform/events'
 import { setChatDeps, setPtyDeps, type ChatDeps, type PtyDeps } from '@slayzone/terminal/server'
@@ -21,12 +29,17 @@ import { registerUpdateTaskRoute } from './update.js'
 const h = await createTestHarness()
 // archive/cleanup ops resolve the data root via the task runtime adapter.
 configureTaskRuntimeAdapters({ getDataRoot: () => tmpdir() })
+// The session ledger lives on the task's computer (robustness plan §9).
+const computer = createSessionLedgerHarness({ db: h.slayDb })
+setTaskSessionLedger(computer.ledger)
 const projectId = crypto.randomUUID()
 h.db
   .prepare('INSERT INTO projects (id, name, color, path) VALUES (?, ?, ?, ?)')
   .run(projectId, 'P', '#000', '/tmp/p')
 
 let notifyCount = 0
+/** Session ids the stub reports mid-reply, per task. */
+const midReply = new Map<string, string[]>()
 const app = express()
 app.use(express.json())
 registerUpdateTaskRoute(app, {
@@ -34,7 +47,8 @@ registerUpdateTaskRoute(app, {
   taskBus: ipcMain,
   notifyRenderer: () => {
     notifyCount++
-  }
+  },
+  taskAgents: { midReplySessionIds: async (taskId) => midReply.get(taskId) ?? [] }
 })
 const rest = await mountRestApp(app)
 
@@ -176,6 +190,79 @@ describe('PATCH /api/tasks/:id', () => {
     expect(row.status).toBe('todo')
   })
 
+  test('projectId + status: the status resolves against the TARGET project', async () => {
+    const targetId = crypto.randomUUID()
+    h.db
+      .prepare(
+        'INSERT INTO projects (id, name, color, path, columns_config) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        targetId,
+        'RestMoveTarget',
+        '#111',
+        '/tmp/rest-move-target',
+        JSON.stringify([
+          { id: 'backlog', label: 'Backlog', color: 'gray', position: 0, category: 'unstarted' },
+          { id: 'shipping', label: 'Shipping', color: 'blue', position: 1, category: 'started' },
+          { id: 'shipped', label: 'Shipped', color: 'green', position: 2, category: 'completed' }
+        ])
+      )
+    const id = seedTask({ status: 'todo' })
+    const res = await rest.request<{ ok: boolean; data: { project_id: string; status: string } }>(
+      'PATCH',
+      `/api/tasks/${id}`,
+      { projectId: targetId, status: 'Shipping' }
+    )
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ project_id: targetId, status: 'shipping' })
+  })
+
+  test('409: a terminal status while an agent is mid-reply is refused, nothing written; force completes', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      for (const status of ['done', 'canceled']) {
+        const res = await rest.request<{ ok: boolean; code: string; error: string }>(
+          'PATCH',
+          `/api/tasks/${id}`,
+          { status, title: 'renamed' }
+        )
+        expect(res.status).toBe(409)
+        expect(res.body.code).toBe('agent_mid_reply')
+        expect(res.body.error).toContain('--force')
+      }
+      expect(h.db.prepare('SELECT status, title FROM tasks WHERE id = ?').get(id)).toEqual({
+        status: 'todo',
+        title: 'T'
+      })
+      const forced = await rest.request<{ ok: boolean; data: { status: string } }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { status: 'done', force: true }
+      )
+      expect(forced.status).toBe(200)
+      expect(forced.body.data.status).toBe('done')
+    } finally {
+      midReply.delete(id)
+    }
+  })
+
+  test('a non-terminal status (or no status) is never blocked by a mid-reply agent', async () => {
+    const id = seedTask()
+    midReply.set(id, [`${id}:${id}`])
+    try {
+      const res = await rest.request<{ ok: boolean; data: { status: string } }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { status: 'in_progress', title: 'still working' }
+      )
+      expect(res.status).toBe(200)
+      expect(res.body.data.status).toBe('in_progress')
+    } finally {
+      midReply.delete(id)
+    }
+  })
+
   test('parentId: a unique prefix resolves to the full parent id', async () => {
     const parent = seedTask({ id: `33333333-${crypto.randomUUID().slice(9)}` })
     const child = seedTask()
@@ -279,9 +366,11 @@ describe('PATCH /api/tasks/:id', () => {
 
   test('agentId: a mode switch — stops the main agent, clears conversations', async () => {
     const id = seedTask()
-    h.db
-      .prepare('UPDATE tasks SET agent_id = ?, provider_config = ? WHERE id = ?')
-      .run('claude-code', JSON.stringify({ 'claude-code': { conversationId: 'c1' } }), id)
+    h.db.prepare('UPDATE tasks SET agent_id = ? WHERE id = ?').run('claude-code', id)
+    await computer.service.handle({
+      op: 'recordConversation',
+      args: { taskId: id, mode: 'claude-code', conversationId: 'c1', origin: 'slay-spawned-resume' }
+    })
     killed = []
     const res = await rest.request<{ ok: boolean; data: { agent_id: string; title: string } }>(
       'PATCH',
@@ -291,10 +380,9 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ agent_id: 'codex', title: 'Both' })
     expect(killed).toEqual([`pty:${id}:${id}`])
-    const row = h.db.prepare('SELECT provider_config FROM tasks WHERE id = ?').get(id) as {
-      provider_config: string
-    }
-    expect(JSON.parse(row.provider_config)['claude-code'].conversationId).toBeNull()
+    expect(
+      await computer.ledger.store.getCurrentConversationId(computer.computerId, id, 'claude-code')
+    ).toBeNull()
   })
 
   test('terminalMode: deprecated alias of agentId still switches the agent', async () => {
@@ -359,6 +447,58 @@ describe('PATCH /api/tasks/:id', () => {
     expect(killed).toEqual([])
   })
 
+  test('409: a path set while no computer holds the task folders is refused, nothing written', async () => {
+    // The hub keeps no path (§9 7e): with no computer to hold it, setting one is a
+    // precondition the caller can fix (connect a computer), never a server error.
+    const id = seedTask()
+    const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
+      worktreePath: '/tmp/p-wt'
+    })
+    expect(res.status).toBe(409)
+    expect(res.body.ok).toBe(false)
+    expect(res.body.error).toMatch(/computer/i)
+    const row = h.db.prepare('SELECT has_worktree FROM tasks WHERE id = ?').get(id) as {
+      has_worktree: number
+    }
+    expect(row.has_worktree).toBe(0)
+  })
+
+  test('409 COMPUTER_REFUSED: the task computer refuses the folder, nothing written (B3)', async () => {
+    // The computer's path jail refused it (an RpcError with refusedByComputer, as the
+    // hub gateway rejects): a conflict the caller can resolve, never a 500.
+    const id = seedTask()
+    const refused = Object.assign(
+      new Error("path '/etc' is outside this computer's allowed folders; refused"),
+      { name: 'RpcError', code: COMPUTER_REFUSED_RPC_CODE }
+    )
+    const prior = getTaskPathsDelegate()
+    setTaskPathsDelegate({
+      changed: async () => {},
+      release: async () => ({ worktreePath: null, shared: false, computerId: 'c' }),
+      apply: async () => {
+        throw refused
+      },
+      forget: async () => {},
+      read: async () => ({})
+    } as never)
+    try {
+      const res = await rest.request<{ ok: boolean; error: string; code: string }>(
+        'PATCH',
+        `/api/tasks/${id}`,
+        { baseDir: '/etc' }
+      )
+      expect(res.status).toBe(409)
+      expect(res.body).toMatchObject({ ok: false, code: 'COMPUTER_REFUSED' })
+      expect(res.body.error).toMatch(/outside this computer's allowed folders/)
+      const row = h.db.prepare('SELECT has_base_dir FROM tasks WHERE id = ?').get(id) as {
+        has_base_dir: number
+      }
+      expect(row.has_base_dir).toBe(0)
+    } finally {
+      setTaskPathsDelegate(prior)
+    }
+  })
+
   test('500: invalid reparent throws (cyclic)', async () => {
     const id = seedTask()
     const res = await rest.request<{ ok: boolean; error: string }>('PATCH', `/api/tasks/${id}`, {
@@ -372,4 +512,5 @@ describe('PATCH /api/tasks/:id', () => {
 afterAll(async () => {
   await rest.close()
   h.cleanup()
+  computer.close()
 })

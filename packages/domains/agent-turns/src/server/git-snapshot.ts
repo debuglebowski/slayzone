@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { writeWorkspaceTree } from './workspace-tree'
 import { childProcessEnv, type EnvOverlay } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
@@ -21,14 +22,15 @@ interface ExecResult {
 
 function exec(args: string[], cwd: string, env?: EnvOverlay): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = gitSpawn('git', args, {
+    const childEnv = childProcessEnv(env)
+    const child = gitSpawn(gitCommand(childEnv), args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       // Sanitized base (user env survives; SlayZone infra/secret/identity
       // stripped, fail closed) + the caller's overlay (e.g. GIT_INDEX_FILE for
       // the isolated-index snapshot). Keeps the host's hub creds out of any git
       // subprocess env.
-      env: childProcessEnv(env)
+      env: childEnv
     })
     const out: string[] = []
     const err: string[] = []

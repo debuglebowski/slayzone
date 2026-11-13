@@ -4,6 +4,7 @@ import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import type { Task, PanelVisibility } from '@slayzone/task-contracts'
 import { TaskShell } from '@slayzone/task/client/TaskShell'
+import { settleDeleteTaskResult } from '@slayzone/task/client/deleteTaskResult'
 
 const TaskDetailPage = lazy(() =>
   import('@slayzone/task/client/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage }))
@@ -197,7 +198,8 @@ export function SecondaryTaskWindow({ taskId: initialTaskId }: Props) {
                     handleClose()
                   }}
                   onDeleteTask={async (id) => {
-                    await trpcClient.task.delete.mutate({ id })
+                    // Throws (already reported) when the task still exists: keep the window.
+                    settleDeleteTaskResult(await trpcClient.task.delete.mutate({ id }))
                     handleClose()
                   }}
                   onNavigateToTask={(id) => {

@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest'
 import { webFetchView, webSearchView } from './web-results'
 import { mcpResultBlocks, parseMcpToolName } from './mcp'
 import { codeViewDiff, notebookEditDiff, textChangeDiff } from './file-diffs'
+import { readImageSrc } from './read-image'
 
 describe('webSearchView', () => {
   const structured = {
@@ -224,5 +225,23 @@ describe('file diffs', () => {
     expect(
       notebookEditDiff({ notebook_path: '/r/nb.ipynb', cell_id: 'c9', new_source: 'x' }, null)
     ).toBe(null)
+  })
+})
+
+describe('readImageSrc', () => {
+  const block = { type: 'image', source: { type: 'base64', data: 'AAA', media_type: 'image/png' } }
+
+  test('image block in the tool result → data URL', () => {
+    expect(readImageSrc([block], null)).toBe('data:image/png;base64,AAA')
+  })
+
+  test('no image block → the structured file (Claude Code `toolUseResult`)', () => {
+    expect(readImageSrc(null, { type: 'image', file: { base64: 'BBB', type: 'image/jpeg' } })).toBe(
+      'data:image/jpeg;base64,BBB'
+    )
+  })
+
+  test('a text read has no image', () => {
+    expect(readImageSrc('1\thello', { type: 'text', file: { content: 'hello' } })).toBe(null)
   })
 })

@@ -306,8 +306,8 @@ export type TimelineItem =
       kind: 'interrupted'
       timestamp: number
       parentToolUseId?: string
-      /** Why the turn ended without a reply; absent = the user stopped it. */
-      reason?: 'already-in-conversation'
+      /** Why the turn ended without a reply; absent = unspecified interruption. */
+      reason?: 'already-in-conversation' | 'watchdog' | 'stop-request'
       /**
        * A later marker closes the same user turn (a Stop the CLI never saw, then
        * the message ran and was stopped again): this one is not shown.
@@ -1379,7 +1379,9 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
       // A stopped turn stopped again (it ran on before the CLI read the first
       // Stop) moves its one marker after the work it did meanwhile.
       const stoppedAgain =
-        !isTurnOpen(state) && event.reason === undefined && workedSinceStop(state)
+        !isTurnOpen(state) &&
+        (event.reason === undefined || event.reason === 'stop-request') &&
+        workedSinceStop(state)
       if (!isTurnOpen(state) && !stoppedAgain) return state
       const item: TimelineItem = {
         kind: 'interrupted',
@@ -2321,11 +2323,17 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
         timeline: appended(state.timeline, { kind: 'stderr', text: event.text, timestamp: ts })
       }
     case 'process-exit': {
+      // Older buffers recorded the watchdog notice, but no exit provenance.
+      const tail =
+        state.timeline.length > 0 ? rowAt(state.timeline, state.timeline.length - 1) : undefined
+      const reason =
+        event.reason ??
+        (tail?.kind === 'notice' && tail.code === 'watchdog-killed' ? 'watchdog' : undefined)
       // Process exited. If we were mid-turn, heal counters + clear stream state
       // so inFlight drops and the typing indicator clears. Without this, a crash
       // mid-stream leaves "Writing…" stuck forever even after the buffer replay.
       const healed = failInFlightSubAgents(
-        endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts)),
+        endRunningCommandTasks(healOrphanedTurn(endAgentTurn(state, ts), ts, reason)),
         'stopped',
         'process'
       )
@@ -3105,9 +3113,17 @@ function blockingHookIndex(timeline: TimelineRows, toolAt: number, raw: unknown)
   return -1
 }
 
-function healOrphanedTurn(state: ChatTimelineState, ts: number): ChatTimelineState {
+function healOrphanedTurn(
+  state: ChatTimelineState,
+  ts: number,
+  reason?: 'watchdog'
+): ChatTimelineState {
   if (!isInFlight(state)) return state
-  const item: TimelineItem = { kind: 'interrupted', timestamp: ts }
+  const item: TimelineItem = {
+    kind: 'interrupted',
+    timestamp: ts,
+    ...(reason ? { reason } : {})
+  }
   const failed = failInFlightSubAgents(settleStreams(state), 'interrupted')
   return {
     ...failed,

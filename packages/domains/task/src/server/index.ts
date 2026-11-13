@@ -14,11 +14,20 @@ export {
 // `task.*` tRPC router + the host-injected deps it calls. Composed by `@slayzone/api`;
 // the deps are injected by the composition roots (hub, Electron main).
 export { taskRouter } from './task-router'
+export { taskMovesRouter } from './task-moves-router'
+export { anyTaskMoveLocking, lockedProjectIds, lockedTaskIds } from './ops/task-moves'
+// For project-scoped jobs (the automation engine) that do not depend on @slayzone/projects.
+export { projectMovingSql } from '@slayzone/projects/server'
+export {
+  setTaskMoveSessionsDelegate,
+  type TaskMoveSessionsDelegate
+} from './ops/task-move-sessions'
 export { setTaskDeps, getTaskOps } from './task-router-deps'
 // `task.startMainAgent`'s repo-discovery seam (api wires worktrees' `detectChildRepos`).
 export {
   setMainAgentDeps,
   resolveMainAgentLaunch,
+  resolveChatAgentLaunch,
   startMainAgent,
   switchMainAgentMode,
   type SwitchMainAgentModeInput,
@@ -27,6 +36,12 @@ export {
   type StartMainAgentInput,
   type StartMainAgentResult
 } from './main-agent'
+// The hub's boot restore of the chat agents that ran at shutdown.
+export {
+  restoreRunningChatAgents,
+  type AgentRestorePassOptions,
+  type AgentRestorePassResult
+} from './agent-restore'
 export type { TaskRouter, TaskMounts } from './router-mounts'
 
 export {
@@ -66,38 +81,42 @@ export {
   restoreTaskOp,
   unarchiveTaskOp,
   updateTaskOp,
-  collectReferencedConversationIds,
-  casRepointConversationId,
-  recordConversation,
-  getCurrentConversationId,
-  listConversationHistory,
+  moveTasksToProjectOp,
+  setTaskSessionLedger,
+  taskSessionLedger,
+  SessionsOfflineError,
   listTaskSessions,
   setTaskSessionPromptReader,
-  legacySessionPromptSummaries,
+  legacyCodexChatPromptSummaries,
   isHonoredConversation,
   deleteSession,
-  recordPendingSpawn,
-  findPendingSpawn,
-  findOwnedSpawnForConversation,
-  prunePendingSpawns,
-  recordSessionSpawn,
-  confirmSessionConversation,
-  confirmSessionConversationByTaskMode,
-  markSessionDead,
-  markSessionFirstTurn,
-  listResumeCandidates,
-  bindSessionToTask,
   relinquishSession,
-  claimedByOtherTasks,
-  listSharedSessionClaims
+  resetConversation,
+  switchConversation
 } from './ops'
-export type { CreateImportedTaskInput, SharedSessionClaim, TaskSessionSummary } from './ops'
-export { taskSessionStore } from './task-session-store'
+export type {
+  CreateImportedTaskInput,
+  LedgerSessionRow,
+  SessionLedgerClient,
+  TaskSessionSummary
+} from './ops'
 export {
   configureTaskRuntimeAdapters,
   getRuntimeAdapters,
   updateTask,
-  InvalidTaskUpdateError
+  setChatSettingsDelegate,
+  type ChatSettingsDelegate,
+  setTaskPathsDelegate,
+  getTaskPathsDelegate,
+  notifyTaskPaths,
+  readTaskPaths,
+  type TaskPathsDelegate,
+  type TaskPathChange,
+  type TaskPathPatch,
+  type TaskPathRelease,
+  InvalidTaskUpdateError,
+  TaskFoldersUnavailableError,
+  ProjectNotFoundError
 } from './ops/shared'
 // The in-process implementations (`defaultWorktreeExecAdapters`,
 // `defaultWorktreePolicyAdapters`) live in `worktrees/server`.
@@ -106,7 +125,6 @@ export type {
   WorktreeExecAdapters,
   WorktreePolicyAdapters
 } from './ops/shared'
-export { purgeExpiredTrash, purgeStaleAndOrphanedTasks } from './ops/startup-purge'
 export type {
   OpDeps,
   TaskRuntimeAdapters,
@@ -118,9 +136,6 @@ export type { TaskOps } from './task-ops-bundle'
 export { handleAttentionTransition } from './attention'
 // Conversation self-heal + resolver. Registered by BOTH composition roots (the
 // Electron main process and the slice-9 sidecar that owns the pty runtime) so
-// the healer/resolver seams `createPty` calls are never left null. Lives here
-// because it needs task DB ops + terminal transcript helpers, and the package graph
-// runs task → terminal (a cycle from terminal/server). The git branch lookup is
-// injected (`ConversationHealerDeps`) since worktrees builds on task.
+// the healer/resolver seams `createPty` calls are never left null. Both only
+// forward to the agent's computer (its session ledger decides, robustness plan §9).
 export { registerConversationHealer, registerConversationResolver } from './conversation-healer'
-export type { ConversationHealerDeps } from './conversation-healer'

@@ -197,3 +197,26 @@ test('task state version moves on every hub-facing write, never on local content
   expect(version()).toBe(previous)
   expect(store.stateVersion('task-b')).toBeGreaterThan(0)
 })
+
+test('v9 (hub v208): pending settings, session and queue updates for the hub are dropped; others stay', () => {
+  const { store, root } = open()
+  store.createConversation(identity)
+  const pending = (kind: string) => ({
+    kind: 'settings' as const,
+    id: `metadata:${kind}`,
+    value: { operationId: kind, kind, sequence: 1, value: {} },
+    at: 1
+  })
+  for (const kind of ['provider-config', 'conversation', 'queue-item', 'agent-state'])
+    store.putRecord(identity.id, 1, pending(kind))
+  // As a v8 store left it.
+  store.compose((db) => db.pragma('user_version = 8'))
+  store.close()
+  const next = open(root).store
+  expect(
+    next
+      .findRecords('settings', undefined, { idPrefix: 'metadata:' })
+      .map((r) => r.id)
+      .sort()
+  ).toEqual(['metadata:agent-state'])
+})

@@ -13,14 +13,24 @@ import type { TaskArtifact } from '@slayzone/task-contracts'
 
 // Stable clients, like the real providers' (the editor's callbacks depend on them).
 vi.mock('./trpc', () => {
-  const trpc = { artifacts: { onContentChanged: { subscriptionOptions: () => ({}) } } }
+  const trpc = {
+    artifacts: {
+      onContentChanged: { subscriptionOptions: (_input: unknown, opts: unknown) => opts }
+    }
+  }
   const trpcClient = {
     artifacts: { getMtime: { query: async ({ id }: { id: string }) => disk.mtime[id] ?? null } },
     app: { shell: { openExternal: { mutate: vi.fn() } } }
   }
   return { useTRPC: () => trpc, useTRPCClient: () => trpcClient }
 })
-vi.mock('@slayzone/transport/client', () => ({ useSubscription: () => undefined }))
+/** The file watcher's `content-changed` handler the mounted editor subscribed. */
+let contentChanged: ((id: string) => void) | undefined
+vi.mock('@slayzone/transport/client', () => ({
+  useSubscription: (opts: { onData?: (id: string) => void }) => {
+    contentChanged = opts?.onData
+  }
+}))
 const appearance = {
   notesFontFamily: 'sans',
   notesCheckedHighlight: false,
@@ -225,5 +235,88 @@ describe('ArtifactContentEditor switching artifacts', () => {
     expect(code()?.value).toBe('second')
     await act(async () => pending.a1())
     expect(code()?.value).toBe('second')
+  })
+})
+
+describe('ArtifactContentEditor and its own autosave', () => {
+  // The file watcher reports EVERY write, the editor's own autosave included (100 ms
+  // debounce). The editor treated that echo as an outside change: arriving while the
+  // save was still reading back its mtime it raised a false conflict banner, and the
+  // save marked the draft clean even when keys were typed during it — so the echo
+  // then reloaded the file over them (lost text, caret reset; e2e 93 under load).
+  /** saveContent that writes only when released. */
+  function heldSave(): { release: () => Promise<void> } {
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    saveContent.mockImplementationOnce(async (id: string, content: string) => {
+      await gate
+      disk.content[id] = content
+      disk.mtime[id] = (disk.mtime[id] ?? 0) + 1
+    })
+    return {
+      release: async () => {
+        release()
+        await flush()
+      }
+    }
+  }
+  const banner = () => screen.queryByTestId('artifact-conflict-banner')
+
+  it("its own save's change event is no change: no conflict, no reload", async () => {
+    render(<Tab mode="visible" />)
+    await flush()
+    const save = heldSave()
+    fireEvent.change(code()!, { target: { value: 'abc' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    const reads = readContent.mock.calls.length
+    act(() => contentChanged?.('a1'))
+    await save.release()
+    act(() => contentChanged?.('a1'))
+    await flush()
+    expect(banner()).toBeNull()
+    expect(readContent.mock.calls.length).toBe(reads)
+    expect(code()?.value).toBe('abc')
+  })
+
+  it('keys typed during a save stay, and are saved next', async () => {
+    render(<Tab mode="visible" />)
+    await flush()
+    const save = heldSave()
+    fireEvent.change(code()!, { target: { value: 'abc' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    fireEvent.change(code()!, { target: { value: 'abcdef' } })
+    await save.release()
+    act(() => contentChanged?.('a1'))
+    await flush()
+    expect(code()?.value).toBe('abcdef')
+    expect(banner()).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(saveContent.mock.calls.at(-1)).toEqual(['a1', 'abcdef'])
+    expect(disk.content.a1).toBe('abcdef')
+  })
+
+  it('a write from outside during the save still shows', async () => {
+    render(<Tab mode="visible" />)
+    await flush()
+    const save = heldSave()
+    fireEvent.change(code()!, { target: { value: 'abc' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    await save.release()
+    // Someone else writes right after the save.
+    disk.content.a1 = 'from outside'
+    disk.mtime.a1 = (disk.mtime.a1 ?? 0) + 1
+    act(() => contentChanged?.('a1'))
+    await flush()
+    expect(code()?.value).toBe('from outside')
   })
 })

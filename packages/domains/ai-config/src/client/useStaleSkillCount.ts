@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useTRPCClient } from './trpc'
+import { getHubIdForProject } from '@slayzone/transport/client'
+import { getClientForHub, useTRPCClient } from './trpc'
 
 /**
  * Polls the stale-skill count for the active project.
  * Event-driven: mount, project change, window focus, manual refresh.
+ * Asked of the hub that OWNS the project (multi-hub federation): the shell runs this
+ * under the default hub's client, which does not know another hub's project.
  */
 export function useStaleSkillCount(
   projectId: string | null | undefined,
@@ -19,8 +22,8 @@ export function useStaleSkillCount(
   const fetchCount = useCallback(() => {
     const reqId = ++reqIdRef.current
     if (!projectId || !projectPath) return
-    trpcClient.aiConfig.getProjectStaleSkillCount
-      .query({ projectId, projectPath })
+    getClientForHub(getHubIdForProject(projectId), trpcClient)
+      .aiConfig.getProjectStaleSkillCount.query({ projectId, projectPath })
       .then((n) => {
         if (reqId === reqIdRef.current) setCount(n)
       })

@@ -25,7 +25,7 @@ if (argv.includes('--version') || argv.includes('-V')) {
   process.exit(0)
 }
 
-const { stateDir, epoch, index, script, log, peersAlive } = claimSpawn({
+const { stateDir, epoch, epochDir, index, script, log, peersAlive } = claimSpawn({
   stateEnvVar: 'FAKE_CODEX_STATE_DIR',
   label: 'fake-codex'
 })
@@ -442,11 +442,15 @@ async function startSideTurn(id, params) {
     approvalPolicy: params.approvalPolicy ?? null,
     sandboxPolicy: params.sandboxPolicy ?? null
   })
-  await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
   const spec = script.sideTurn ?? {}
+  // Interruptible from the moment its id is out (an interrupt may answer the reply at once).
   const abort = new AbortController()
   side.abort = abort
   side.turnId = turnId
+  // The reply AND turn/started carry the turn id; holding both back opens the
+  // window where the app has a side turn it cannot name yet.
+  if (spec.gate) await waitGate(spec.gate, null)
+  await writeMessage({ id, result: { turn: turnObject(turnId, 'inProgress') } })
   const started = Date.now()
   const completed = (status) => ({
     method: 'turn/completed',
@@ -465,6 +469,7 @@ async function startSideTurn(id, params) {
     params: { threadId, turn: turnObject(turnId, 'inProgress') }
   })
   try {
+    if (abort.signal.aborted) throw new Aborted()
     if (spec.hang) await sleep(2 ** 31 - 1, abort.signal)
     if (spec.delayMs) await sleep(spec.delayMs, abort.signal)
     const reply = spec.reply ?? `side answer: ${text}`
@@ -548,6 +553,7 @@ async function startTurn(id, params) {
   // window where the app has a running turn it cannot name (Stop before an id).
   const reply = async () => {
     if (spec.replyDelayMs) await sleep(spec.replyDelayMs, null)
+    if (spec.gate) await waitGate(spec.gate, null)
     if (spec.error) {
       await writeMessage({ id, error: substitute(spec.error) })
       return false
@@ -715,6 +721,8 @@ async function runSteps(steps, signal, state = { ended: false }) {
       log('stderr', { text: s.stderr })
     } else if (s.sleep !== undefined) {
       await sleep(s.sleep, signal)
+    } else if (s.gate !== undefined) {
+      await waitGate(s.gate, signal)
     } else if (s.hang) {
       await new Promise((_, reject) => {
         if (!signal) return
@@ -744,6 +752,18 @@ async function runSteps(steps, signal, state = { ended: false }) {
       throw new Error(`fake-codex: unknown step ${JSON.stringify(s)}`)
     }
   }
+}
+
+/**
+ * Block until the test opens gate `name` (`epoch.openGate(name)` writes
+ * `<epoch>/gates/<name>`): a step the test releases when it has seen what it
+ * wanted, instead of a sleep it hopes is long enough. An interrupt aborts it.
+ */
+async function waitGate(name, signal) {
+  const file = path.join(epochDir, 'gates', name)
+  log('gate-wait', { name })
+  while (!fs.existsSync(file)) await sleep(5, signal)
+  log('gate-open', { name })
 }
 
 /** Send a server→client request (an approval) and wait for the app's reply. */

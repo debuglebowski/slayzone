@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createChatRuntimeHandlers } from './chat-runtime'
+import { createFixtureChatRuntime, projectScopedDeps } from '../project-scope.fixture'
 const dirs: string[] = [],
   handles: Array<ReturnType<typeof createChatRuntimeHandlers>> = []
 afterEach(async () => {
@@ -22,7 +23,7 @@ function setup(extra: Partial<Parameters<typeof createChatRuntimeHandlers>[0]> =
   const stateDir = mkdtempSync(join(tmpdir(), 'slz-chat-rpc-'))
   dirs.push(stateDir)
   const notifications: unknown[] = []
-  const h = createChatRuntimeHandlers({
+  const h = createFixtureChatRuntime({
     ...extra,
     ctx: {
       config: {
@@ -167,6 +168,8 @@ test('authenticated dispatch exposes chat requests and rejects a missing actor',
     stateDir,
     hubScope: 'hub-dispatch',
     getComputerId: () => 'computer',
+    // The task's project is placed here: its agent starts inside it (§9 Phase 7c).
+    getProjectPaths: projectScopedDeps({ p1: realpathSync(tmpdir()) }).getProjectPaths,
     shutdown: () => {},
     dialer: { notify: () => true },
     config: {
@@ -176,14 +179,15 @@ test('authenticated dispatch exposes chat requests and rejects a missing actor',
       capabilities: ['proc']
     }
   })
+  const placed = { ...bootstrap, projectId: 'p1' }
   try {
     await expect(
-      dispatch.handle('chat.request', { kind: 'bootstrap', value: bootstrap }, undefined)
+      dispatch.handle('chat.request', { kind: 'bootstrap', value: placed }, undefined)
     ).rejects.toThrow(/actor|older|protocol/i)
     expect(
       await dispatch.handle(
         'chat.request',
-        { kind: 'bootstrap', value: bootstrap },
+        { kind: 'bootstrap', value: placed },
         { userId: null, route: 'test chat' }
       )
     ).toMatchObject({ ok: true })
@@ -350,4 +354,60 @@ test('direct link: simple commands run under the granted epoch and tell the hub 
   await expect(h.direct.command('tab', 1, 'send' as never, ['tab', {}], 'op-3')).rejects.toThrow(
     /not a direct chat command/
   )
+})
+
+test('inventory: one conversation whose state cannot be read is flagged, the others are reported', async () => {
+  const { h, stateDir } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  await h.request({
+    kind: 'bootstrap',
+    value: { ...bootstrap, identity: { ...bootstrap.identity, id: 'other', tabId: 'tab2' } }
+  })
+  const { default: Database } = await import('better-sqlite3')
+  const { readdirSync } = await import('node:fs')
+  const runtime = join(stateDir, 'computer-runtime')
+  const ns = readdirSync(runtime).find((d) => /^[a-f0-9]{64}$/.test(d))!
+  const raw = new Database(join(runtime, ns, 'chat.sqlite'))
+  raw
+    .prepare(
+      "UPDATE records SET value='{broken' WHERE conversation_id='store' AND kind='settings' AND id='bootstrap'"
+    )
+    .run()
+  raw.close()
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const inventory = (await h.request({ kind: 'inventory' })) as Array<{
+    identity: { id: string }
+    unreadable?: boolean
+    bootstrapRevision?: number
+  }>
+  expect(inventory.find((e) => e.identity.id === 'store')).toMatchObject({ unreadable: true })
+  expect(inventory.find((e) => e.identity.id === 'other')).toMatchObject({ bootstrapRevision: 1 })
+})
+
+test('a storage-only owner (task content / artifact store) opens without any folder; no agent starts there', async () => {
+  const { h } = setup()
+  const identity = {
+    id: 'content',
+    taskId: 'task',
+    tabId: 'task-content:task',
+    mode: 'claude-chat',
+    epoch: 1
+  }
+  // The hub sends a storage-only owner no folder (it never runs an agent): the
+  // task may have no worktree, base dir or placed project on this computer.
+  await expect(
+    h.request({ kind: 'bootstrap', value: { ...bootstrap, identity, cwd: '' } })
+  ).resolves.toMatchObject({ ok: true })
+  await expect(
+    h.request({
+      kind: 'invoke',
+      value: {
+        route: { id: 'content', epoch: 1 },
+        target: 'ops',
+        method: 'takeOver',
+        operationId: 'take-1',
+        args: [{ tabId: 'task-content:task', taskId: 'task', mode: 'claude-chat', cwd: '' }]
+      }
+    })
+  ).rejects.toThrow(/no folder on this computer/)
 })

@@ -50,6 +50,14 @@ export type TrpcContext = TrpcServerDeps & {
     orgId?: string | null
     scopes: readonly Scope[]
   } | null
+  /**
+   * Whether {@link principal} still stands, checked SYNCHRONOUSLY from persisted state
+   * (never a network call) before every operation and every subscription output of the
+   * connection (`livenessGate`, trpc.ts). Set by the hub on an authenticated socket: the
+   * persisted IdP-role mode/epoch/config, revocation and evidence age (hub-auth
+   * `idpSessionLiveNow`). Absent: always live (unchanged behaviour).
+   */
+  principalLive?: () => boolean
 }
 
 export type TrpcContextFactory = (req?: IncomingMessage) => TrpcContext

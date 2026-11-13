@@ -1,0 +1,12 @@
+{
+  "expect": {
+    "503af8a7-29a2-4035-b371-1c54613a7d89": {
+      "fresh": true,
+      "why": "baseline: v0.36.2 itself starts a fresh Codex thread when a Codex chat is continued (it recorded Codex threads as 'foreign-observed' and never resumed them; checked by killing + restarting the chat on v0.36.2, 2026-11-10). The upgrade must not do worse."
+    },
+    "2d943df3-3822-4e15-ac13-47bbdbaadf19": {
+      "fresh": true,
+      "why": "baseline: v0.36.2 itself starts a fresh Codex thread when a Codex chat is continued (it recorded Codex threads as 'foreign-observed' and never resumed them; checked by killing + restarting the chat on v0.36.2, 2026-11-10). The upgrade must not do worse."
+    }
+  }
+}

@@ -257,7 +257,7 @@ describe('tRPC, on a hub that requires login', () => {
 
   const ADMIN_PATHS = ofClass(TRPC_ADMIN_POLICY, 'admin')
 
-  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(36))
+  test('there are admin procedures to check', () => expect(ADMIN_PATHS.length).toBe(45))
 
   for (const path of ADMIN_PATHS) {
     test(`${path}: a user account is FORBIDDEN (ADMIN_ONLY, one audit line); an admin passes`, async () => {
@@ -514,7 +514,9 @@ describe('REST, over HTTP through registerRestApi', () => {
 
   const ADMIN_ROUTES = ofClass(REST_ADMIN_POLICY, 'admin')
 
-  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(12))
+  // 12, plus content erasure's GET/POST `/api/hub/content-erasure`, plus replacing a
+  // re-enrolled computer's `GET /api/hub/computers/takeovers` + `POST …/replace`.
+  test('there are admin routes to check', () => expect(ADMIN_ROUTES.length).toBe(16))
 
   for (const key of ADMIN_ROUTES) {
     test(`${key}: a user account gets 403 ADMIN_ONLY and one audit line; an admin does not`, async () => {

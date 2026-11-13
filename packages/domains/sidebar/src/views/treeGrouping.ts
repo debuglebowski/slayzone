@@ -49,7 +49,7 @@ export function orderTreeRows(
         break
       case 'last_interaction': {
         // Newest interaction first. Null → bottom. Bumped by chat user-messages
-        // and agent_turns inserts; see migrations v139.
+        // and recorded agent turns; see migrations v139.
         const av = a.last_interaction_at
         const bv = b.last_interaction_at
         if (av == null && bv == null) cmp = 0

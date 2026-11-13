@@ -251,6 +251,25 @@ describe('TaskPage ⋯: archive and delete', () => {
     )
   })
 
+  it('a temporary task: Keep as task makes it a regular, started task', async () => {
+    const { work } = await show({}, boardWith({ is_temporary: true }))
+    await menu('Keep as task')
+    await waitFor(() =>
+      expect(writes(work)).toEqual([
+        {
+          path: 'task.update',
+          input: { id: 't1', title: 'Untitled task', status: 'doing', isTemporary: false }
+        }
+      ])
+    )
+  })
+
+  it('a regular task has no Keep as task', async () => {
+    await show()
+    await user().press(screen.getByTestId('task-menu'))
+    expect(within(screen.getByTestId('task-menu-sheet')).queryByText('Keep as task')).toBeNull()
+  })
+
   it('deletes after asking, then leaves', async () => {
     const { work, onDeleted } = await show()
     answerAlert('Delete')

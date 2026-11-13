@@ -28,7 +28,18 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
       id TEXT PRIMARY KEY,
       project_id TEXT,
       provider_config TEXT,
-      last_interaction_at INTEGER
+      last_interaction_at INTEGER,
+      computer_id TEXT,
+      has_worktree INTEGER NOT NULL DEFAULT 0,
+      has_base_dir INTEGER NOT NULL DEFAULT 0,
+      worktree_computer_id TEXT
+    );
+    CREATE TABLE projects (id TEXT PRIMARY KEY, default_computer_id TEXT);
+    CREATE TABLE computer_retirements (
+      computer_id TEXT PRIMARY KEY,
+      successor_id TEXT,
+      reason TEXT,
+      retired_at INTEGER
     );
     CREATE TABLE terminal_tabs (id TEXT PRIMARY KEY, task_id TEXT);
     CREATE TABLE chat_attachment_messages (task_id TEXT, message_id TEXT, attachments TEXT, PRIMARY KEY(task_id, message_id));
@@ -99,6 +110,7 @@ function makeDb(): { raw: Database.Database; db: SlayzoneDb; runLog: string[] } 
   `)
   const runLog: string[] = []
   const db = {
+    get: async (sql: string, params: unknown[] = []) => raw.prepare(sql).get(...(params as [])),
     prepare(sql: string) {
       const stmt = raw.prepare(sql)
       return {
@@ -586,4 +598,40 @@ test('attachment refs survive reset and closing their original tab without retai
   }
   expect(stored.attachments).not.toContain('private prompt')
   raw.close()
+})
+
+// S5: one answer to "which computer is this task's". While the task has a folder,
+// the computer holding it wins over the task's pin and its project's default — the
+// session ledger (start gate's current-conversation check, recordConversation) lives
+// there. A holder removed for good took the folder with it: the pin answers then.
+test('session-ledger calls ask the computer holding the task folder, not the pin or project default', async () => {
+  const { raw, db } = makeDb()
+  raw.exec(`INSERT INTO projects (id, default_computer_id) VALUES ('p', 'project-default');
+    INSERT INTO tasks (id, project_id, computer_id, has_worktree, worktree_computer_id)
+      VALUES ('t', 'p', 'pinned', 1, 'holder');
+    INSERT INTO tasks (id, project_id) VALUES ('unbound', 'p');`)
+  const store = createFakeTaskSessionStore()
+  const ops = createDbChatDataOps(db, store)
+
+  await ops.getCurrentConversationId('t', 'claude-code')
+  await ops.recordConversation({
+    taskId: 't',
+    mode: 'claude-code',
+    conversationId: 'c1',
+    origin: 'user-selected'
+  })
+  await ops.isHonoredConversation('t', 'claude-code', 'c1')
+  await ops.getCurrentConversationId('unbound', 'claude-code')
+  expect(store.calls.map((c) => [c.method, c.computerId])).toEqual([
+    ['getCurrentConversationId', 'holder'],
+    ['recordConversation', 'holder'],
+    ['isHonoredConversation', 'holder'],
+    ['getCurrentConversationId', 'project-default']
+  ])
+
+  // The holder was removed for good: its folder went with it, the pin answers.
+  raw.exec(`INSERT INTO computer_retirements (computer_id, successor_id) VALUES ('holder', NULL)`)
+  store.calls.length = 0
+  await ops.getCurrentConversationId('t', 'claude-code')
+  expect(store.calls.map((c) => c.computerId)).toEqual(['pinned'])
 })

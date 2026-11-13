@@ -59,6 +59,11 @@ export { agentStarts, type AgentStartEntry } from './runtime/agent-starts'
 // Cross-domain seam: server-side callers (integrations sync, pty.killTask) invoke
 // the no-op default; the host injects the real agent teardown at boot.
 export { onTaskReachedTerminal, setTaskAgentsStopper, stopTaskAgents } from './task-events'
+export {
+  isMidReplyState,
+  midReplySessionIds,
+  type TaskAgentSessionEntry
+} from './task-agent-activity'
 
 // PTY/chat runtime (slice 6c inversion: electron-free, host-bridged). The
 // Electron entry configures the real window/theme/bus bridge at import time;
@@ -135,6 +140,7 @@ export {
   clearWindowTabCounts,
   createDbWarmPoolDataOps,
   initWarmProcessManager,
+  reconcileWarmPool,
   reapOrphanWarms,
   reserveWarmTaskId,
   teardownAllWarm,
@@ -194,6 +200,7 @@ export {
   type ConversationHealer,
   type ConversationHealRequest,
   setConversationResolver,
+  SessionLedgerUnreadableError,
   type ConversationResolver,
   // Wave-1 session-ledger seam (was landed but left unexported): lets a later
   // hub/computer wave inject a non-DB-backed ledger from the composition root.

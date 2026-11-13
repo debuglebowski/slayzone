@@ -905,3 +905,107 @@ test('B19: unset, empty and host:port lists boot; anything else refuses, naming 
     expect(refusedRule({ env: { SLAYZONE_HUB_STUN_ADDRESSES: v } }), `'${v}' is B19`).toBe('B19')
   }
 })
+
+console.log('\nhub boot rules: B7 — a generic OpenID issuer')
+console.log('─'.repeat(40))
+
+const GENERIC = {
+  ...SSO_ON,
+  SLAYZONE_HUB_PUBLIC_ADDRESS: 'hub.example.com',
+  SLAYZONE_HUB_OIDC_ISSUER: 'https://idp.example.com/realms/acme',
+  SLAYZONE_HUB_OIDC_CLIENT_ID: 'slayzone-hub',
+  SLAYZONE_HUB_OIDC_CLIENT_SECRET: 'not-a-real-secret'
+}
+const genericBoot = (env: NodeJS.ProcessEnv) =>
+  assertHubBootRules({ env, host: '127.0.0.1', supervised: false, devSqlEnabled: false })
+
+test('B7 generic: issuer + client id + secret boots; the secret reaches the SSO config', () => {
+  const out = assertSsoCredential(genericBoot(GENERIC), () => {
+    throw new Error('no certificate is loaded with a secret')
+  })
+  expect(out).toEqual({
+    issuer: 'https://idp.example.com/realms/acme',
+    clientId: 'slayzone-hub',
+    requireMfa: true,
+    idpRoles: null,
+    clientSecret: 'not-a-real-secret'
+  })
+})
+
+test('B7 generic: a certificate instead of the secret is loaded', () => {
+  const { SLAYZONE_HUB_OIDC_CLIENT_SECRET: _, ...noSecret } = GENERIC
+  const out = assertSsoCredential(
+    genericBoot({
+      ...noSecret,
+      SLAYZONE_HUB_SSO_CERT_PATH: '/c.pem',
+      SLAYZONE_HUB_SSO_KEY_PATH: '/k.pem'
+    }),
+    () => 'cred'
+  )
+  expect(out?.credential).toBe('cred')
+  expect(out?.clientSecret).toBeUndefined()
+})
+
+test('B7 generic: refusals — tenant settings too, no client id, no credential, both credentials, http issuer, Entra issuer with a secret, scopes without openid', () => {
+  const { SLAYZONE_HUB_OIDC_CLIENT_SECRET: _s, ...noSecret } = GENERIC
+  const { SLAYZONE_HUB_OIDC_CLIENT_ID: _c, ...noClient } = GENERIC
+  const cases: Array<[NodeJS.ProcessEnv, RegExp]> = [
+    [{ ...GENERIC, SLAYZONE_HUB_SSO_TENANT_ID: TENANT }, /not both/],
+    [noClient, /SLAYZONE_HUB_OIDC_CLIENT_ID/],
+    [noSecret, /CLIENT_SECRET/],
+    [
+      { ...GENERIC, SLAYZONE_HUB_SSO_CERT_PATH: '/c', SLAYZONE_HUB_SSO_KEY_PATH: '/k' },
+      /ONE client credential/
+    ],
+    [{ ...GENERIC, SLAYZONE_HUB_OIDC_ISSUER: 'http://idp.example.com' }, /https URL/],
+    [
+      { ...GENERIC, SLAYZONE_HUB_OIDC_ISSUER: `https://login.microsoftonline.com/${TENANT}/v2.0` },
+      /certificate/
+    ],
+    [{ ...GENERIC, SLAYZONE_HUB_OIDC_SCOPES: 'email profile' }, /openid/]
+  ]
+  for (const [env, why] of cases) {
+    const msg = refusal({ env })
+    expect(msg, JSON.stringify(env)).toMatch(why)
+    expect(refusedRule({ env })).toBe('B7')
+  }
+})
+
+console.log('\nhub boot rules: B20 — the IdP-role mode (shared contract names)')
+console.log('─'.repeat(40))
+
+const IDP_ON = {
+  IDP_ROLES_ENABLED: 'true',
+  IDP_ROLE_CLAIM: 'roles',
+  IDP_ROLE_MAPPING: '{"SlayZone.Admin":["admin"],"SlayZone.User":["user"]}'
+}
+
+test('B20: off by default; nothing set boots with the mode off', () => {
+  const s = ssoBoot({ ...SSO_ON, ...SSO_FULL })
+  expect(s.idpRoles.enabled).toBe(false)
+  expect(assertSsoCredential(s, () => 'cred')?.idpRoles).toBeNull()
+})
+
+test('B20: on with SSO and password off boots; the parsed config reaches SSO', () => {
+  const s = ssoBoot({ ...SSO_ON, ...SSO_FULL, ...IDP_ON, SLAYZONE_HUB_ENABLE_PASSWORD: '0' })
+  expect(s.idpRoles).toMatchObject({ enabled: true, claim: 'roles', intervalSec: 3600 })
+  expect(assertSsoCredential(s, () => 'cred')?.idpRoles?.mapping).toEqual({
+    'SlayZone.Admin': ['admin'],
+    'SlayZone.User': ['user']
+  })
+})
+
+test('B20: refusals — password on, SSO off, malformed values even with the mode off, unknown target, legacy names', () => {
+  const base = { ...SSO_ON, ...SSO_FULL, SLAYZONE_HUB_ENABLE_PASSWORD: '0' }
+  const cases: NodeJS.ProcessEnv[] = [
+    { ...SSO_ON, ...SSO_FULL, ...IDP_ON }, // password still on
+    { ...IDP_ON }, // no SSO
+    { ...base, IDP_ROLES_ENABLED: 'TRUE' },
+    { ...base, IDP_ROLES_ENABLED: 'false', IDP_ROLE_MAPPING: 'not json' }, // off, still parsed
+    { ...base, ...IDP_ON, IDP_ROLE_MAPPING: '{"X":["owner"]}' },
+    { ...base, ...IDP_ON, IDP_ROLE_MAPPING: '{}' },
+    { ...base, ...IDP_ON, IDP_RECHECK_INTERVAL_SECONDS: '3601' },
+    { ...base, ...IDP_ON, SLAYZONE_HUB_SSO_ROLE_MAP: 'SlayZone.Admin=admin' }
+  ]
+  for (const env of cases) expect(refusedRule({ env }), JSON.stringify(env)).toBe('B20')
+})

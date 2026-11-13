@@ -13,6 +13,9 @@ import {
  */
 export class OpencodeAdapter implements TerminalAdapter {
   readonly mode = 'opencode' as const
+  // A fresh OpenCode config can take 11–50s to initialize before its first
+  // terminal output. The generic 10s deadline killed healthy cold starts.
+  readonly startupTimeoutMs = 60_000
   // Bubble Tea TUI updates in many small chunks; short idle timeout for completion
   readonly idleTimeoutMs = 2500
 

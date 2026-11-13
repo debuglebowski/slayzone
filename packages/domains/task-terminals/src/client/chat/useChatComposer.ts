@@ -459,23 +459,40 @@ export function useChatComposer({
         cliList?.details?.[parked[1]]?.argumentHint ||
         null
       : null
-  const sources = useMemo(
-    () => [
-      createFilesSource(listApi),
+  // One memo per source: a source keeps its identity — and so its fetched items
+  // (useAutocomplete fetches per source) — while only another source's inputs
+  // change, e.g. when the models or the CLI snapshot land.
+  const filesSource = useMemo(() => createFilesSource(listApi), [listApi])
+  const nativeSlashCommands = capabilities.nativeSlashCommands
+  const commandsSource = useMemo(
+    () =>
       // A CLI that runs slash commands expands custom-command templates itself:
       // send the typed `/name args`. Otherwise expand them here.
-      capabilities.nativeSlashCommands
+      nativeSlashCommands
         ? createCliCustomCommandsSource(listApi, cliList)
         : createCommandsSource((text) => submitPrompt(text, text).then(() => true), listApi),
-      createAgentsSource(listApi),
-      createBuiltinsSource(builtinsOpts),
-      createSkillsSource(listApi),
-      createCliCommandsSource(cliList)
-    ],
-    [submitPrompt, listApi, cliList, capabilities, builtinsOpts]
-  ) as AutocompleteSource[]
+    [nativeSlashCommands, listApi, cliList, submitPrompt]
+  )
+  const agentsSource = useMemo(() => createAgentsSource(listApi), [listApi])
+  const builtinsSource = useMemo(() => createBuiltinsSource(builtinsOpts), [builtinsOpts])
+  const skillsSource = useMemo(() => createSkillsSource(listApi), [listApi])
+  const cliCommandsSource = useMemo(() => createCliCommandsSource(cliList), [cliList])
+  const sources = useMemo(
+    () =>
+      [
+        filesSource,
+        commandsSource,
+        agentsSource,
+        builtinsSource,
+        skillsSource,
+        cliCommandsSource
+      ] as AutocompleteSource[],
+    [filesSource, commandsSource, agentsSource, builtinsSource, skillsSource, cliCommandsSource]
+  )
 
   const autocomplete = useAutocomplete({
+    // A hidden tab's composer loads its menus when the tab is first shown.
+    enabled: isActive,
     sources,
     draft,
     setDraft,

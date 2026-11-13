@@ -16,8 +16,8 @@ import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import { createSlayzoneDbAdapter, createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { createComputerChatCommandBarrier } from './computer-chat-maintenance'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
@@ -40,10 +40,11 @@ async function fixture() {
   process.env.USERPROFILE = root
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', root)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
   const openComputer = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => root,
       stateDir: root,
       hubScope: 'second-pass',
       computerId: () => 'pc',
@@ -553,9 +554,9 @@ test('legacy active locator with missing computer store is quarantined without w
   try {
     f.h.db
       .prepare(
-        "INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('healthy','p','Healthy',?)"
+        "INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('healthy','p','Healthy',1)"
       )
-      .run(f.root)
+      .run()
     f.h.db
       .prepare(
         "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('healthy-tab','healthy','claude-chat',0)"

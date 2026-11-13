@@ -166,6 +166,7 @@ describe('AddComputerMcpDialog / AddProjectMcpDialog', () => {
 
   it('project dialog seeds provider checkboxes from availableProviders / editProviders', () => {
     const base = {
+      projectId: 'p1',
       onOpenChange: vi.fn(),
       onAdded: vi.fn(),
       projectPath: '/a',

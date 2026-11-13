@@ -161,16 +161,26 @@ interface SocketState {
 }
 
 function covers(resource: GrantRecord['resource'], target: DirectTarget): boolean {
-  return resource.kind === 'pty'
-    ? target.kind === 'pty' && resource.sessionId === target.sessionId
-    : target.kind === 'chat' && resource.tabId === target.tabId
+  switch (resource.kind) {
+    case 'pty':
+      return target.kind === 'pty' && resource.sessionId === target.sessionId
+    case 'chat':
+      return target.kind === 'chat' && resource.tabId === target.tabId
+    case 'task':
+      return target.kind === 'task' && resource.taskId === target.taskId
+  }
 }
 
-/** Same session, or same tab (any epoch). */
+/** Same session, same tab (any epoch), or same task. */
 function sameResource(a: GrantRecord['resource'], b: GrantRecord['resource']): boolean {
-  return a.kind === 'pty'
-    ? b.kind === 'pty' && a.sessionId === b.sessionId
-    : b.kind === 'chat' && a.tabId === b.tabId
+  switch (a.kind) {
+    case 'pty':
+      return b.kind === 'pty' && a.sessionId === b.sessionId
+    case 'chat':
+      return b.kind === 'chat' && a.tabId === b.tabId
+    case 'task':
+      return b.kind === 'task' && a.taskId === b.taskId
+  }
 }
 
 /** End the streams whose target this socket no longer holds any grant on. */

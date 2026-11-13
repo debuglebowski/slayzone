@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/terminal",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "//xterm": "@xterm/* + @xterm/headless are pinned (exact, no ^) to the xterm 6.1 beta channel for ScreenDprMonitor + texture-atlas race fixes and the ESC[3J scroll fix. Move all 7 in lockstep: one xterm.js commit per set (npm `gitHead`). Re-bump when xterm 6.1 ships stable, or to a newer beta if a relevant fix lands.",
@@ -34,7 +34,8 @@
     "./pty-detection": "./src/server/pty-detection.ts",
     "./reply-mirror": "./src/server/terminal-reply-mirror.ts",
     "./claude-transcripts": "./src/server/claude-transcripts.ts",
-    "./chat-direct": "./src/client/chat-direct.ts"
+    "./chat-direct": "./src/client/chat-direct.ts",
+    "./chat-session-ready": "./src/shared/chat-session-ready.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit"
@@ -63,7 +64,7 @@
     "@xterm/xterm": "6.1.0-beta.315",
     "lucide-react": "^1.61.0",
     "node-pty": "^1.1.0",
-    "zod": "^4.3.5",
+    "zod": "^4.6.6",
     "zustand": "^5.0.16"
   },
   "peerDependencies": {

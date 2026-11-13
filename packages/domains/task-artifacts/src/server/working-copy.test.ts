@@ -259,3 +259,38 @@ test('Windows flush semantics: create, import from a read-only source, write and
     raw.close()
   }
 })
+
+test('one corrupt working-copy journal is quarantined; recovery, writes and task cleanup go on', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'artifact-corrupt-journal-'))
+  roots.push(dir)
+  const raw = new Database(join(dir, 'data.sqlite'))
+  const local = createStandaloneArtifacts(raw, dir)
+  try {
+    const keep = (await local.store.createArtifact(local.db, {
+      taskId: 'task',
+      title: 'keep.txt',
+      content: 'v1'
+    }))!
+    const journals = join(dir, 'artifacts', '.transactions')
+    const torn = join(journals, '00000000-0000-4000-8000-000000000001')
+    mkdirSync(torn, { recursive: true })
+    writeFileSync(join(torn, 'manifest.json'), '{"taskId":"other-task","artifa')
+    writeFileSync(join(torn, 'before'), 'other task bytes')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Every artifact mutation recovers journals first: it must not be blocked.
+    await local.store.updateArtifact(local.db, { id: keep.id, content: 'v2' })
+    expect(await local.store.readArtifactContent(local.db, keep.id)).toBe('v2')
+    expect(existsSync(torn)).toBe(false)
+    const { listQuarantine, eraseQuarantinedForTask } = await import(
+      '@slayzone/platform/quarantine'
+    )
+    expect(listQuarantine(dir)).toMatchObject([{ pass: 'artifact-file-journal' }])
+    // Deleting an unrelated task works; erasing the task the bytes name deletes them.
+    local.store.cleanupTaskArtifacts('task')
+    expect(eraseQuarantinedForTask(dir, 'other-task')).toBe(1)
+    expect(listQuarantine(dir)).toEqual([])
+  } finally {
+    vi.restoreAllMocks()
+    raw.close()
+  }
+})

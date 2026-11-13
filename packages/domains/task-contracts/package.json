@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task-contracts",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -14,6 +14,6 @@
   },
   "dependencies": {
     "@slayzone/terminal-contracts": "workspace:*",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   }
 }

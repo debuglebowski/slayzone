@@ -11,7 +11,7 @@ import type { TasksChange } from '@slayzone/task-contracts'
 import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '@slayzone/trpc-server'
-import type { FindJoinTokenAccount } from '@slayzone/computers/server'
+import type { FindJoinTokenAccount, TakeoverCandidate } from '@slayzone/computers/server'
 import type { Scope } from '@slayzone/transport/scopes'
 
 /**
@@ -49,7 +49,9 @@ export interface HubUserListRow {
  * diagnostics but skips state transitions.
  */
 export interface TerminalStateBridge {
-  findSession: (taskId: string, mode: AgentId) => string | null
+  /** The live PTY a hook is about: `tabId` (from the hook context) picks that
+   *  tab's session; without it, the task's main tab session of `mode`. */
+  findSession: (taskId: string, mode: AgentId, tabId?: string) => string | null
   transition: (sessionId: string, state: TerminalState, hookEvent: string) => boolean
   /** Refresh the silence-timer clock without changing state. Called for hook
    *  events that prove activity but don't transition (PostToolUse, etc.). */
@@ -107,6 +109,13 @@ export interface PtyAccess {
   subscribeToStateChange: (sessionId: string, cb: (state: TerminalState) => void) => () => void
   onSessionChange: (cb: () => void) => () => void
   getState: (sessionId: string) => TerminalState | null
+}
+
+/** A task's agents as the CLI completion guard sees them (PTYs + chats, every
+ *  computer). */
+export interface TaskAgentsAccess {
+  /** Session ids of the task's agents that are mid-reply (`isMidReplyState`). */
+  midReplySessionIds: (taskId: string) => Promise<string[]>
 }
 
 /**
@@ -198,7 +207,48 @@ export interface BrowserAccess {
   capturePageToFile: (taskId: string, tabId: string | null, destPath: string) => Promise<boolean>
 }
 
+/**
+ * The agent-session ledger as the hook route reaches it (robustness plan §9, P0):
+ * on the computer that runs the reporting agent. Absent = no ledger (a host without
+ * computers): hooks still drive state, nothing is recorded.
+ */
+export interface AgentHookSessionLedger {
+  /**
+   * The computer running the agent that reported: the relaying computer, else the
+   * computer of the task's live terminal of that mode/tab, else the task's; null =
+   * none known (nothing is recorded).
+   */
+  computerFor(
+    hook: { taskId: string; mode: string; tabId?: string },
+    reporterComputerId?: string | null
+  ): Promise<string | null>
+  /** A SessionStart's session id, with its provenance (see the ledger's `recordHookConversation`). */
+  recordHookConversation(
+    computerId: string,
+    args: {
+      taskId: string
+      mode: string
+      sessionId: string
+      source?: string
+      spawnToken?: string
+      ctxTabId?: string
+    }
+  ): Promise<{
+    origin: import('@slayzone/task-contracts').ConversationOrigin
+    tabId: string
+  } | null>
+  /** A warm (pooled) agent's conversation, on its pooled session row (write-once). */
+  confirmSessionConversation(
+    computerId: string,
+    args: { sessionId: string; observedConversationId: string }
+  ): Promise<unknown>
+  /** The conversation took its first turn: it can be resumed. */
+  markSessionFirstTurn(computerId: string, conversationId: string): Promise<boolean>
+}
+
 export interface RestApiDeps {
+  /** The agent-session ledger on the reporting agent's computer (hook route). */
+  agentSessionLedger?: AgentHookSessionLedger
   captureAgentPrompt?: (
     hook: import('@slayzone/terminal-contracts').ResolvedAgentHook,
     computerId?: string | null
@@ -221,6 +271,9 @@ export interface RestApiDeps {
   taskBus?: TaskOpsBus
   pty?: PtyAccess
   chat?: ChatAccess
+  /** Completion guard for the CLI's done/update routes. Absent → this host runs
+   *  no agents, so none can be mid-reply. */
+  taskAgents?: TaskAgentsAccess
   terminalStateBridge?: TerminalStateBridge
   processes?: ProcessesAccess
   browser?: BrowserAccess
@@ -256,6 +309,11 @@ export interface RestApiDeps {
     /** Listener addresses of the caller's live direct-link grants
      *  (`GET /api/computers/direct-addresses`). Absent: this hub issues none. */
     directAddresses?: (userId: string | null) => string[]
+    /** Chats a computer holds that the hub assigns to another (`ComputersDeps.takeoverCandidates`),
+     *  for `GET /api/hub/computers/takeovers`. Absent: none. */
+    takeoverCandidates?: () => readonly TakeoverCandidate[]
+    /** The desktop app's own computer on its own hub, never replaced (`ComputersDeps.localComputerId`). */
+    localComputerId?: string | null
   }
   /**
    * Operator account management, powering the `/api/hub/users` routes behind
@@ -281,20 +339,22 @@ export interface RestApiDeps {
           ok: true
           user: { id: string; email: string; name: string; role: PrincipalRole; password: string }
         }
-      /** `sso-managed`: an admin account asked for on a hub with Entra sign-in. */
-      | { ok: false; reason: 'exists' | 'sso-managed' }
+      /** `sso-managed`: an admin account asked for on the Entra setup (IdP-role mode
+       *  off). `idp-managed`: any role asked for with the IdP-role mode on. */
+      | { ok: false; reason: 'exists' | 'sso-managed' | 'idp-managed' }
     >
     list: () => Promise<HubUserListRow[]>
     /** Keeps every row; revokes the account's better-auth AND web sessions. */
     disable: (
       email: string
     ) => Promise<'ok' | 'not-found' | 'protected' | 'last-user' | 'last-admin'>
-    enable: (email: string) => Promise<'ok' | 'not-found' | 'protected'>
-    /** `sso-managed`: on a hub with Entra sign-in the role is the Entra app role. */
+    enable: (email: string) => Promise<'ok' | 'not-found' | 'protected' | 'erasure-in-progress'>
+    /** `sso-managed`: the Entra setup's app role (IdP-role mode off). `idp-managed`:
+     *  the IdP-role mode — 409 ROLES_MANAGED_BY_IDP. */
     setRole: (
       email: string,
       role: PrincipalRole
-    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed'>
+    ) => Promise<'ok' | 'not-found' | 'protected' | 'last-admin' | 'sso-managed' | 'idp-managed'>
   }
   /**
    * The hub's bearer-auth authority, for routes that accept an OFF-BOX caller who

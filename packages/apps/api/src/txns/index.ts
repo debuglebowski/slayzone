@@ -1,7 +1,7 @@
 import { exportImportTxns } from './export-import-txns'
 import { resetForTestTxns } from './reset-for-test-txn'
 import { chatQueueTxns } from '@slayzone/terminal/db'
-import { chatMigrationAttachmentTxns } from '@slayzone/chat-runtime/db'
+import { chatLegacyTablesTxns, chatMigrationAttachmentTxns } from '@slayzone/chat-runtime/db'
 import { taskTxns, templatesTxns } from '@slayzone/task/db'
 import { artifactTxns, artifactsTxns } from '@slayzone/task-artifacts/db'
 import { integrationTxns } from '@slayzone/integrations/db'
@@ -9,6 +9,7 @@ import { tagsTxns } from '@slayzone/tags/db'
 import { projectsTxns } from '@slayzone/projects/db'
 import { automationsTxns } from '@slayzone/automations/db'
 import { marketplaceTxns } from '@slayzone/ai-config/db'
+import { contentErasureTxns } from '@slayzone/content-erasure/db'
 
 /**
  * Domain half of the named-transaction registry — every txn whose impl lives
@@ -47,7 +48,9 @@ export function assertNoDuplicateTxnKeys(sources: readonly Record<string, unknow
 }
 
 const sources = [
+  contentErasureTxns,
   chatMigrationAttachmentTxns,
+  chatLegacyTablesTxns,
   chatQueueTxns,
   taskTxns,
   artifactsTxns,
@@ -69,8 +72,10 @@ assertNoDuplicateTxnKeys(sources)
  * types this file never imports — TS2883) while preserving exact keys for the
  * app registry's completeness check.
  */
-export type DomainTxnRegistry = typeof chatQueueTxns &
+export type DomainTxnRegistry = typeof contentErasureTxns &
+  typeof chatQueueTxns &
   typeof chatMigrationAttachmentTxns &
+  typeof chatLegacyTablesTxns &
   typeof taskTxns &
   typeof artifactsTxns &
   typeof templatesTxns &
@@ -84,7 +89,9 @@ export type DomainTxnRegistry = typeof chatQueueTxns &
   typeof resetForTestTxns
 
 export const domainTxnRegistry: DomainTxnRegistry = {
+  ...contentErasureTxns,
   ...chatMigrationAttachmentTxns,
+  ...chatLegacyTablesTxns,
   // Export/import moved here from `apps/app/src/main` so the HUB can dispatch it.
   // The hub's `namedTxn` only knows this registry — app-only txns throw — which is
   // precisely why export/import could not run anywhere but the Electron host, even

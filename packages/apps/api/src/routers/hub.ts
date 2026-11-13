@@ -3,6 +3,8 @@ import { HUB_SWITCH_DEFAULTS } from '@slayzone/platform'
 import { SettingsService } from '@slayzone/settings-core/server'
 import { router, publicProcedure, openProcedure, getAuthGate } from '@slayzone/trpc-server'
 import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
+import { hubUsersRouter } from './hub-users'
+import { hubErasureRouter } from '@slayzone/content-erasure/router'
 
 /**
  * Hub router — the client-facing identity surface of a hub (multi-hub
@@ -27,6 +29,8 @@ import { getAppDeps, getHubDescribeDepsOrNull } from '../app-deps'
 const HUB_LABEL_KEY = 'hub_label'
 
 export const hubRouter = router({
+  users: hubUsersRouter,
+  erasure: hubErasureRouter,
   /**
    * Intrinsic identity of THIS hub, for a connecting client. `authRequired`
    * reports whether `/trpc` enforces bearer auth (the `REQUIRE_LOGIN` switch);

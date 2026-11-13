@@ -38,7 +38,8 @@ export function mergeFamilySessions(args: {
         ...latest,
         startedAt: Math.min(prev.startedAt, row.startedAt),
         lastActiveAt: Math.max(prev.lastActiveAt, row.lastActiveAt),
-        isCurrent: prev.isCurrent || next.isCurrent
+        isCurrent: prev.isCurrent || next.isCurrent,
+        currentInOtherTab: prev.currentInOtherTab || next.currentInOtherTab
       })
     }
   }

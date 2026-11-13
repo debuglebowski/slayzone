@@ -31,6 +31,7 @@ import {
   createFixedWindowLimiter,
   createRateLimitAudit
 } from '@slayzone/platform/rate-limit'
+import { currentPathScope } from '@slayzone/platform/path-scope'
 import {
   currentSecurityContext,
   runWithSecurityContext,
@@ -94,6 +95,9 @@ export interface ComputerDescriptor {
   peerLoopback: boolean
   /** v8: whether it answers WebRTC offers (`direct.rtcOffer`), from this connection's frame. */
   directRtc: boolean
+  /** Whether it enforces a direct grant's absolute `notAfter`, from this connection's
+   *  frame. Absent = no. */
+  directNotAfter?: boolean
   connectedAt: number
   lastSeenAt: number
 }
@@ -716,6 +720,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -879,6 +884,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directAddress: advertisedDirectAddress(conn, parsed.data.directAddress),
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
+      directNotAfter: parsed.data.directNotAfter === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -1156,9 +1162,13 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       // Who asked, for the computer's local request log (T-27). Same context the
       // audit line above reads; none = the hub acting on its own behalf.
       const ctx = currentSecurityContext()
+      // The path scope the router authorized rides beside the actor: the computer
+      // confines every path of this request to it (platform/path-scope).
+      const pathScope = currentPathScope()
       const actor: RequestActor = {
         userId: ctx?.actor ? ctx.actor.slice(0, 200) : null,
-        route: ctx?.route ? ctx.route.slice(0, 200) : null
+        route: ctx?.route ? ctx.route.slice(0, 200) : null,
+        ...(pathScope ? { pathScope } : {})
       }
       const send = () => {
         if (getConnection(computerId) !== conn || conn.closed)

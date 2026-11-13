@@ -37,7 +37,8 @@ describe('fetchHubSignIn', () => {
     })
     expect(await fetchHubSignIn()).toEqual({
       authRequired: true,
-      methods: { password: false, sso: true }
+      methods: { password: false, sso: true },
+      ssoLabel: 'Microsoft'
     })
   })
 

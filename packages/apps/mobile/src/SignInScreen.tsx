@@ -147,7 +147,7 @@ export function SignInScreen({
             disabled={busy}
             accessibilityRole="button"
           >
-            <Text style={styles.buttonText}>Sign in with Microsoft</Text>
+            <Text style={styles.buttonText}>Sign in with {offer?.ssoLabel ?? 'Microsoft'}</Text>
           </Pressable>
         ) : null}
         {showMicrosoft && showPassword ? <Text style={styles.or}>or</Text> : null}

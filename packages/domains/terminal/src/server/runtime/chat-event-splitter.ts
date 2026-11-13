@@ -66,6 +66,7 @@ export function isStreamFragment(kind: AgentEvent['kind']): boolean {
 
 export class ChatEventSplitter {
   private open: OpenMessage | null = null
+  private readonly cliMetadata = new Map<'cli-command-details' | 'cli-models', AgentEvent>()
 
   route(event: AgentEvent): SplitResult {
     switch (event.kind) {
@@ -132,6 +133,8 @@ export class ChatEventSplitter {
       case 'cli-command-details':
       case 'cli-models':
         // Describes the CLI, not the conversation (stored per project instead).
+        // Keep its latest value for viewers attaching after initialize completed.
+        this.cliMetadata.set(event.kind, event)
         return { live: [event], saved: [] }
       case 'codex-plan':
         // Stream fragments are preview-only. Completed item text is authoritative.
@@ -158,14 +161,13 @@ export class ChatEventSplitter {
     return saved
   }
 
-  /** Live events that redraw the blocks still streaming (reload mid-stream). */
+  /** Current CLI metadata and blocks still streaming (late attach / reload). */
   snapshot(): AgentEvent[] {
+    const out = [...this.cliMetadata.values()]
     const open = this.open
-    if (!open) return []
+    if (!open) return out
     const parent = open.parentToolUseId ? { parentToolUseId: open.parentToolUseId } : {}
-    const out: AgentEvent[] = [
-      { kind: 'stream-message-start', messageId: open.messageId, ...parent }
-    ]
+    out.push({ kind: 'stream-message-start', messageId: open.messageId, ...parent })
     for (const block of [...open.blocks.values()].sort((a, b) => a.index - b.index)) {
       if (block.consolidated) continue
       out.push({

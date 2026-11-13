@@ -6,14 +6,14 @@ import { expect, test } from 'vitest'
 import { migrations } from '@slayzone/db-migrations'
 import { openChatStorage } from '@slayzone/chat-runtime/server'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
 import { bootstrapSchema } from './bootstrap-schema'
 import { createComputerChatServices } from './computer-chat'
 
 test.each([171, 177, 182, 186])(
-  'review: upgrade schema %i retains mixed-mode history, drafts and prompts across reconnect',
+  'review: upgrade schema %i retains mixed-mode history, drafts and prompts (staged) across reconnect',
   async (version) => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'chat-released-upgrade-review-'))
     const db = new Database(join(root, 'hub.sqlite'))
@@ -108,19 +108,21 @@ test.each([171, 177, 182, 186])(
       expect(owners.filter((owner) => !owner.tabId.startsWith('task-content:'))).toHaveLength(
         expected.length
       )
-      expect(owners.find((owner) => owner.tabId === 'task-content:task')).toMatchObject({
-        state: 'active',
-        cleanupPending: false
-      })
       expect(owners.every((owner) => owner.state === 'active' && !owner.cleanupPending)).toBe(true)
       expect(db.prepare('SELECT count(*) AS n FROM chat_events').get()).toEqual({ n: 0 })
-      expect(db.prepare('SELECT count(*) AS n FROM agent_prompts').get()).toEqual({ n: 0 })
       expect(db.prepare('SELECT count(*) AS n FROM chat_tab_state').get()).toEqual({ n: 0 })
-      expect(await pc.request({ kind: 'prompts', taskId: 'task' })).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: 'prompt', text: 'retained task prompt' })
-        ])
-      )
+      // The prompt history is handed to the computer directly (v207, robustness plan
+      // §9): staged once for the task's computer, the hub table gone.
+      expect(
+        db
+          .prepare(
+            "SELECT json_extract(payload,'$.text') AS text FROM computer_data_handoff WHERE kind='agent-prompt' AND item_key='prompt'"
+          )
+          .get()
+      ).toEqual({ text: 'retained task prompt' })
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_prompts'").get()
+      ).toBeUndefined()
       await pc.close()
       inspected = openChatStorage({ stateDir: root, hubScope: 'released-review' })
       for (const item of expected) {

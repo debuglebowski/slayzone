@@ -141,10 +141,34 @@ export function isProjectNotPlacedError(err: unknown): boolean {
  * REQUIRED from a v3 hub: a request without it comes from an older hub and is
  * refused with `protocolMismatch` (see {@link COMPUTER_PROTOCOL_VERSION}).
  */
+/**
+ * The path scope a request runs under (`@slayzone/platform/path-scope`, §9 Phase
+ * 7b): the task or project the hub authorized. The computer confines every path it
+ * judges while serving the request to that scope's roots in its own store.
+ */
+const scopeId = z.string().min(1).max(500)
+export const wirePathScopeSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('task'),
+    taskId: scopeId,
+    projectId: scopeId.nullable(),
+    hostReads: z.boolean().optional()
+  }),
+  z.object({
+    kind: z.literal('project'),
+    projectId: scopeId,
+    hostReads: z.boolean().optional(),
+    /** The hub's `worktree_base_path` template (platform/path-scope `WirePathScope`). */
+    worktreeBase: z.string().min(1).max(4096).optional()
+  })
+])
+
 export const requestActorSchema = z.object({
   userId: z.string().min(1).max(200).nullable(),
   /** `trpc <path>` / `METHOD /path` the request entered the hub through. */
-  route: z.string().max(200).nullable()
+  route: z.string().max(200).nullable(),
+  /** The path scope the hub authorized (absent: none — judged by `allowedRoots`). */
+  pathScope: wirePathScopeSchema.nullable().optional()
 })
 export type RequestActor = z.infer<typeof requestActorSchema>
 
@@ -204,7 +228,14 @@ export const enrollParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type EnrollParams = z.infer<typeof enrollParamsSchema>
 
@@ -234,7 +265,14 @@ export const helloParamsSchema = z.object({
   /** v8: the direct listener's advertised authority; absent/null = none. */
   directAddress: directAddressSchema.optional(),
   /** v8: whether this computer answers WebRTC offers (`direct.rtcOffer`); absent = no. */
-  directRtc: z.boolean().optional()
+  directRtc: z.boolean().optional(),
+  /**
+   * Whether this computer enforces a direct grant's absolute `notAfter` (shared/direct.ts)
+   * — ending the grant and its connections at that wall-clock time however late the grant
+   * arrived. Absent = no: a hub that must bound a grant absolutely (IdP-role deadlines)
+   * offers such a computer no direct link (the relay is always correct).
+   */
+  directNotAfter: z.boolean().optional()
 })
 export type HelloParams = z.infer<typeof helloParamsSchema>
 
@@ -628,6 +666,8 @@ export const HubToComputerMethods = {
   fsWatchStop: 'fs.watchStop',
   // child-process ops (routed ProcessBackend + routed chat agents)
   procSpawn: 'proc.spawn',
+  /** Move a chat agent's spawn still waiting for an agent-start slot to the front. */
+  procPrioritize: 'proc.prioritize',
   procKill: 'proc.kill',
   procWrite: 'proc.write',
   procGetBufferSince: 'proc.getBufferSince',
@@ -861,6 +901,19 @@ export const ptyPrioritizeResultSchema = z.object({
   queued: z.boolean()
 })
 export type PtyPrioritizeResult = z.infer<typeof ptyPrioritizeResultSchema>
+
+/**
+ * Someone is waiting on this chat agent now (its tab was revealed, or a message was
+ * sent): if its `proc.spawn` is still waiting for an agent-start slot, start it next.
+ * A no-op (`queued: false`) for a process that already started or never queued.
+ */
+export const procPrioritizeParamsSchema = z.object({
+  sessionId: z.string().min(1)
+})
+export type ProcPrioritizeParams = z.infer<typeof procPrioritizeParamsSchema>
+
+export const procPrioritizeResultSchema = ptyPrioritizeResultSchema
+export type ProcPrioritizeResult = z.infer<typeof procPrioritizeResultSchema>
 
 /**
  * Which of a claude session's background jobs (`Bash` run_in_background /
@@ -1111,6 +1164,11 @@ export type PtyListResult = z.infer<typeof ptyListResultSchema>
 export const ptyWarmSpawnParamsSchema = z.object({
   /** Placeholder session key; becomes a real `sessionId` at adopt. */
   warmId: z.string().min(1),
+  /**
+   * The project the warm agent is pre-started for: its cwd must lie inside that
+   * project's own folder on the computer (§9 Phase 7c).
+   */
+  projectId: z.string().min(1),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   computerShell: z.boolean().optional(),
@@ -1510,27 +1568,35 @@ export type AgentConfigFsParams = z.infer<typeof agentConfigFsParamsSchema>
 export const agentConfigFsResultSchema = z.object({ result: z.unknown() })
 
 /**
- * `usage.collect`: parse this computer's agent usage logs from `cursors` (per log
- * file: the offset and mtime the last parse ended at — the hub keeps them per
- * computer). Answers each changed file's new records and its new cursor.
- */
-/**
- * A collect is paged: the first reply carries `next` when more follows, and the hub
- * asks for it (`page`) — no single message nears the WebSocket's 100 MiB limit, which
- * a whole backlog (81 MiB measured) can pass. A file split across pages is
- * `complete: false` on all but its last chunk, with its OLD cursor as `endOffset`
- * (an older hub that ignores paging saves that, and re-parses the rest next time).
+ * `usage.collect`: this computer's agent usage logs, parsed from the read offsets it
+ * keeps itself (robustness plan §9, P0; hub v209 — the hub keeps none). Answers each
+ * changed file's new records (`@slayzone/usage-analytics/collect` collector.ts).
+ *
+ * Paged: the first reply carries `next` when more follows, and the hub asks for it
+ * (`page`) — no single message nears the WebSocket's 100 MiB limit, which a whole
+ * backlog (81 MiB measured) can pass. A file split across pages is
+ * `complete: false` on all but its last chunk.
+ *
+ * Every reply with records carries a `receipt`; the hub sends it back as `ack` once
+ * it stored that page (with the next `page` request, or alone after the last). Only
+ * then do that page's files' cursors move here: a lost reply is parsed again, and
+ * deterministic record ids keep the hub from counting it twice.
+ *
+ * `seed` (first request only): the hub's former cursors for this computer, handed
+ * over once (v209). A cursor this computer keeps wins.
  */
 const usageCollectPageSchema = z.object({
   token: z.string().min(1).max(64),
   index: z.number().int().nonnegative()
 })
+const usageCursorsSchema = z.record(
+  z.string(),
+  z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
+)
 export const usageCollectParamsSchema = z.object({
-  cursors: z.record(
-    z.string(),
-    z.object({ offset: z.number().int().nonnegative(), modifiedMs: z.number() })
-  ),
-  page: usageCollectPageSchema.optional()
+  page: usageCollectPageSchema.optional(),
+  ack: usageCollectPageSchema.optional(),
+  seed: usageCursorsSchema.optional()
 })
 export type UsageCollectParams = z.infer<typeof usageCollectParamsSchema>
 export const usageCollectResultSchema = z.object({
@@ -1539,13 +1605,14 @@ export const usageCollectResultSchema = z.object({
       sourceFile: z.string(),
       fileMtimeMs: z.number(),
       endOffset: z.number().int().nonnegative(),
-      /** false: more of this file's records follow on a later page; keep its cursor. */
+      /** false: more of this file's records follow on a later page. */
       complete: z.boolean().optional(),
       // UsageRecord rows (`@slayzone/usage-analytics/shared`): opaque here.
       records: z.array(z.record(z.string(), z.unknown()))
     })
   ),
-  next: usageCollectPageSchema.optional()
+  next: usageCollectPageSchema.optional(),
+  receipt: usageCollectPageSchema.optional()
 })
 export type UsageCollectResult = z.infer<typeof usageCollectResultSchema>
 
@@ -1924,6 +1991,7 @@ export type FsOkResult = z.infer<typeof fsOkResultSchema>
 
 export const procSpawnParamsSchema = z.object({
   sessionId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
   /** Idempotency key — see `pty.spawn`. */
   spawnId: spawnIdField,
   /** Resolve cwd from this project when `cwd` is absent. See `pty.spawn`. */
@@ -1942,6 +2010,15 @@ export const procSpawnParamsSchema = z.object({
    */
   shell: z.boolean().optional(),
   cwd: z.string().min(1).optional(),
+  /**
+   * `cwd` is a folder the USER chose for this background process (the process
+   * domain's stored working folder — a sibling repo such as `~/backend`, a legacy
+   * row's folder): a declared root of this spawn (B3), judged by the computer's
+   * machine bound only (allowed roots, no link out of them, never its own state),
+   * not confined to its task's / project's folders. Absent: the cwd is judged
+   * against those folders, as for every other spawn.
+   */
+  declaredCwd: z.boolean().optional(),
   env: z.record(z.string(), z.string()).optional(),
   /** Agent-start admission lane (chat agents), as for `pty.spawn`. Absent: start at once. */
   admission: ptySpawnAdmissionSchema.optional(),
@@ -1950,7 +2027,16 @@ export const procSpawnParamsSchema = z.object({
    * SIGKILL): a `pnpm dev` shell can exit leaving its real server running, holding
    * the port. Set by the process domain; never for an agent. Absent: left alone.
    */
-  reapGroupOnExit: z.boolean().optional()
+  reapGroupOnExit: z.boolean().optional(),
+  /**
+   * A GLOBAL background process (the process domain's row with no task and no
+   * project): the hub declares it, and the computer starts it as before §9 Phase 7c —
+   * its `cwd` judged by the machine bound, none = the first allowed root. Ignored
+   * when the spawn names a task or a project (those start inside that scope's own
+   * folders). Absent on a spawn naming neither: refused (an unscoped spawn is a bug,
+   * not a global process).
+   */
+  global: z.boolean().optional()
 })
 export type ProcSpawnParams = z.infer<typeof procSpawnParamsSchema>
 

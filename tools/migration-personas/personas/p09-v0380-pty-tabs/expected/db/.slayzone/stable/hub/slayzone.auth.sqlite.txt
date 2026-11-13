@@ -1,0 +1,45 @@
+user_version 0
+
+## schema
+index account_userId_idx: CREATE INDEX "account_userId_idx" on "account" ("userId")
+index apikey_configId_idx: CREATE INDEX "apikey_configId_idx" on "apikey" ("configId")
+index apikey_key_idx: CREATE INDEX "apikey_key_idx" on "apikey" ("key")
+index apikey_referenceId_idx: CREATE INDEX "apikey_referenceId_idx" on "apikey" ("referenceId")
+index invitation_email_idx: CREATE INDEX "invitation_email_idx" on "invitation" ("email")
+index invitation_organizationId_idx: CREATE INDEX "invitation_organizationId_idx" on "invitation" ("organizationId")
+index member_organizationId_idx: CREATE INDEX "member_organizationId_idx" on "member" ("organizationId")
+index member_userId_idx: CREATE INDEX "member_userId_idx" on "member" ("userId")
+index session_userId_idx: CREATE INDEX "session_userId_idx" on "session" ("userId")
+index verification_identifier_idx: CREATE INDEX "verification_identifier_idx" on "verification" ("identifier")
+table account: CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null)
+table apikey: CREATE TABLE "apikey" ("id" text not null primary key, "configId" text not null, "name" text, "start" text, "referenceId" text not null, "prefix" text, "key" text not null, "refillInterval" integer, "refillAmount" integer, "lastRefillAt" date, "enabled" integer, "rateLimitEnabled" integer, "rateLimitTimeWindow" integer, "rateLimitMax" integer, "requestCount" integer, "remaining" integer, "lastRequest" date, "expiresAt" date, "createdAt" date not null, "updatedAt" date not null, "permissions" text, "metadata" text)
+table invitation: CREATE TABLE "invitation" ("id" text not null primary key, "organizationId" text not null references "organization" ("id") on delete cascade, "email" text not null, "role" text, "status" text not null, "expiresAt" date not null, "createdAt" date not null, "inviterId" text not null references "user" ("id") on delete cascade)
+table jwks: CREATE TABLE "jwks" ("id" text not null primary key, "publicKey" text not null, "privateKey" text not null, "createdAt" date not null, "expiresAt" date, "alg" text, "crv" text)
+table member: CREATE TABLE "member" ("id" text not null primary key, "organizationId" text not null references "organization" ("id") on delete cascade, "userId" text not null references "user" ("id") on delete cascade, "role" text not null, "createdAt" date not null)
+table organization: CREATE TABLE "organization" ("id" text not null primary key, "name" text not null, "slug" text not null unique, "logo" text, "createdAt" date not null, "metadata" text)
+table session: CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade, "activeOrganizationId" text, "signInMethod" text, "idpEpoch" integer)
+table slayzone_idp_activation: CREATE TABLE slayzone_idp_activation ( id INTEGER PRIMARY KEY CHECK (id = 1), config_identity TEXT NOT NULL, epoch INTEGER NOT NULL, activated_at INTEGER NOT NULL )
+table user: CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "role" text, "disabledAt" date, "idpSubject" text, "idpVerifiedAt" integer, "idpRevision" integer, "idpGrantedAt" integer, "idpDeniedAt" integer)
+table verification: CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null)
+
+## account (0)
+
+## apikey (1)
+{"id":"kJkFGOJMgSjxjCDK0s3weB1MD4ytV0GN","configId":"default","name":"local-computer","start":"szr_<new-key>","referenceId":"k8TGu8RS2LoywTSUWRHYqPnxLuyoSU4y","prefix":"szr_","key":"-TafCTtqu4gbtUsnK5-V2lPt2zLRSWAMBI-RJK16gtA","refillInterval":null,"refillAmount":null,"lastRefillAt":null,"enabled":1,"rateLimitEnabled":0,"rateLimitTimeWindow":86400000,"rateLimitMax":10,"requestCount":0,"remaining":null,"lastRequest":"<run-time>","expiresAt":null,"createdAt":"2026-11-10T20:55:07.807Z","updatedAt":"<run-time>","permissions":null,"metadata":"{\"computerId\":\"f01a216a-4803-4214-98eb-f9e28951e1bb\"}"}
+
+## invitation (0)
+
+## jwks (0)
+
+## member (0)
+
+## organization (0)
+
+## session (0)
+
+## slayzone_idp_activation (0)
+
+## user (1)
+{"id":"k8TGu8RS2LoywTSUWRHYqPnxLuyoSU4y","name":"SlayZone Computer Service","email":"computers@slayzone.internal","emailVerified":1,"image":null,"createdAt":"2026-11-10T20:55:07.756Z","updatedAt":"2026-11-10T20:55:07.756Z","role":"user","disabledAt":null,"idpSubject":null,"idpVerifiedAt":null,"idpRevision":null,"idpGrantedAt":null,"idpDeniedAt":null}
+
+## verification (0)

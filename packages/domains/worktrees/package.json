@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/worktrees",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -13,6 +13,7 @@
     "./hub": "./src/server/hub.ts",
     "./electron": "./src/electron/index.ts",
     "./client": "./src/client/index.ts",
+    "./client/useWorktreeColors": "./src/client/useWorktreeColors.ts",
     "./hooks": "./src/client/hooks.ts",
     "./task-panels": "./src/client/task-panels.ts"
   },
@@ -48,7 +49,7 @@
     "@trpc/server": "^11.19.0",
     "codemirror": "^6.0.2",
     "lucide-react": "^1.61.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "react": "^19.3.1"

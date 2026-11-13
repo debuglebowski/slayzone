@@ -63,6 +63,7 @@ export interface ChatOwnership {
   migrationHash: string | null
 }
 export * from './protocol'
+export * from './task-data'
 export interface ChatTransferHeader {
   format: 'slayzone-chat'
   version: 1
@@ -71,9 +72,18 @@ export interface ChatTransferHeader {
   events: number
   records: number
   receipts: number
+  /**
+   * Set by a cross-hub move's export: this copy may replace an OLDER copy of the same
+   * conversation the target store still holds from an earlier stay of the task (a
+   * plain migration refuses to overwrite any). Part of the first line, so of the hash.
+   */
+  move?: true
 }
 export interface ChatTransferManifest {
   header: ChatTransferHeader
   hash: string
   bytes: number
 }
+export * from './session-ledger'
+export * from './agent-turns'
+export * from './task-paths'

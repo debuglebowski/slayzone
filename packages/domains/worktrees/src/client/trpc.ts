@@ -1,15 +1,164 @@
+import { createContext, createElement, type ReactNode, useContext, useMemo } from 'react'
 import { typedTrpc } from '@slayzone/transport/client'
+import {
+  useWorkspaceTarget,
+  type WorkspaceTarget
+} from '@slayzone/file-editor/client/workspace-target'
 // Type-only: erased from the client bundle. The routers' runtime stays server-side.
 import type { AppShellMounts } from '@slayzone/host-capabilities/server'
 import type { SettingsMounts } from '@slayzone/settings-core/server'
 import type { TaskMounts } from '@slayzone/task/server'
-import type { WorktreesMounts } from '../server/worktrees-router'
+import type { GitScope, WorktreesAmbientMounts } from '../server/worktrees-router'
 
 /**
  * This domain's typed view of the shared tRPC client (one runtime, one socket per hub),
  * typed against only the routers worktrees calls: its own `worktrees`, `task`,
  * `settings` and `app.shell`.
  */
-export const { useTRPC, useTRPCClient } = typedTrpc<
-  WorktreesMounts & TaskMounts & SettingsMounts & AppShellMounts
->()
+const base = typedTrpc<WorktreesAmbientMounts & TaskMounts & SettingsMounts & AppShellMounts>()
+
+/**
+ * The git panel's PATH SCOPE (§9 Phase 7b): every `worktrees.*` call names the task
+ * or project whose checkout it touches — the hub authorizes that, the computer
+ * confines the call's paths to its folders. Ambient, like the file editor's target
+ * ({@link WorkspaceTargetProvider}): the scope is a property of the whole panel, so
+ * it is added to every `worktrees.*` input made through these hooks rather than
+ * threaded through some sixty call sites, any one of which could forget it. A call
+ * that names its own `target` keeps it. Only these hooks see `target` as optional
+ * (`WorktreesAmbientMounts`); every other client sees it required. Outside any
+ * provider nothing is added and the hub refuses the call (a query/mutation error).
+ */
+export function gitScopeOf(target: WorkspaceTarget, projectWide = false): GitScopeTarget | null {
+  if (target.taskId)
+    return {
+      taskId: target.taskId,
+      computerId: target.computerId,
+      ...(projectWide ? { projectWide: true } : {})
+    }
+  if (target.projectId) return { projectId: target.projectId, computerId: target.computerId }
+  return null
+}
+/** Exactly what the router validates as `target`. */
+export type GitScopeTarget = GitScope
+
+const ProjectWideContext = createContext(false)
+
+/**
+ * Its subtree works on the panel's whole PROJECT, not only the panel's task (B1): the
+ * Worktrees tab lists, polls and removes every worktree of the project — another
+ * task's, or none's. In a task's panel its `worktrees.*` calls name the task with
+ * `projectWide`, so the hub runs them in the task's project's path scope, on the
+ * task's computer; a project's panel is that scope already.
+ */
+export function ProjectWideGitScope({ children }: { children: ReactNode }) {
+  return createElement(ProjectWideContext.Provider, { value: true }, children)
+}
+
+/**
+ * `input` with the panel's scope, unless it names one (or is not an object input).
+ * Never throws: this runs while rendering (`queryOptions`), so a call outside any
+ * scope provider goes out as it is and the hub refuses it — a query/mutation
+ * error, never an uncaught render exception.
+ */
+function withScope(input: unknown, scope: GitScopeTarget | null): unknown {
+  if (!scope || input === null || typeof input !== 'object' || Array.isArray(input)) return input
+  if ('target' in (input as Record<string, unknown>)) return input
+  return { ...(input as Record<string, unknown>), target: scope }
+}
+
+type Fn = (...args: unknown[]) => unknown
+
+/** One `worktrees.<proc>` of the options proxy, its inputs scoped. */
+function scopeOptionsProcedure(proc: Record<string, Fn>, scope: GitScopeTarget | null) {
+  return new Proxy(proc, {
+    get(target, key: string) {
+      const fn = target[key]
+      if (typeof fn !== 'function') return fn
+      if (key === 'mutationOptions') {
+        return (...args: unknown[]) => {
+          const opts = fn(...args) as { mutationFn?: Fn }
+          const run = opts.mutationFn
+          if (!run) return opts
+          return {
+            ...opts,
+            mutationFn: (v: unknown, ...rest: unknown[]) => run(withScope(v, scope), ...rest)
+          }
+        }
+      }
+      if (
+        key === 'queryOptions' ||
+        key === 'queryKey' ||
+        key === 'queryFilter' ||
+        key === 'infiniteQueryOptions' ||
+        key === 'subscriptionOptions'
+      ) {
+        return (input: unknown, ...rest: unknown[]) => fn(withScope(input, scope), ...rest)
+      }
+      return fn
+    }
+  })
+}
+
+/** One `worktrees.<proc>` of the vanilla client, its inputs scoped. */
+function scopeClientProcedure(proc: Record<string, Fn>, scope: GitScopeTarget | null) {
+  return new Proxy(proc, {
+    get(target, key: string) {
+      const fn = target[key]
+      if (typeof fn !== 'function') return fn
+      if (key === 'query' || key === 'mutate' || key === 'subscribe') {
+        return (input: unknown, ...rest: unknown[]) => fn(withScope(input, scope), ...rest)
+      }
+      return fn
+    }
+  })
+}
+
+/** The root proxy with its `worktrees` namespace scoped per procedure. */
+function scopeRoot<T extends object>(
+  root: T,
+  scope: GitScopeTarget | null,
+  wrap: (proc: Record<string, Fn>, scope: GitScopeTarget | null) => unknown
+): T {
+  return new Proxy(root, {
+    get(target, key, receiver) {
+      const ns = Reflect.get(target, key, receiver)
+      if (key !== 'worktrees' || !ns) return ns
+      return new Proxy(ns as object, {
+        get(nsTarget, proc, nsReceiver) {
+          const p = Reflect.get(nsTarget, proc, nsReceiver)
+          return p && typeof proc === 'string' ? wrap(p as Record<string, Fn>, scope) : p
+        }
+      })
+    }
+  })
+}
+
+/** The calling panel's git scope (null outside any task / project panel). */
+export function useGitScope(): GitScopeTarget | null {
+  const target = useWorkspaceTarget()
+  const projectWide = useContext(ProjectWideContext)
+  return useMemo(() => gitScopeOf(target, projectWide), [target, projectWide])
+}
+
+/** The options proxy, `worktrees.*` inputs scoped to the panel's task / project. */
+export function useTRPC(): ReturnType<typeof base.useTRPC> {
+  const trpc = base.useTRPC()
+  const scope = useGitScope()
+  return useMemo(() => scopeRoot(trpc, scope, scopeOptionsProcedure), [trpc, scope])
+}
+
+/** The vanilla client, `worktrees.*` inputs scoped to the panel's task / project. */
+export function useTRPCClient(): ReturnType<typeof base.useTRPCClient> {
+  const client = base.useTRPCClient()
+  const scope = useGitScope()
+  return useMemo(() => scopeRoot(client, scope, scopeClientProcedure), [client, scope])
+}
+
+/**
+ * The UNSCOPED options proxy and vanilla client — ONLY for state that outlives one
+ * panel and is shared across panels (the module-level git-diff store). Such state must
+ * never capture a panel's scoped proxy: every panel after the one that wired it would
+ * then call in THAT panel's scope. It names each call's `target` itself instead.
+ */
+export const useUnscopedTRPC = base.useTRPC
+export const useUnscopedTRPCClient = base.useTRPCClient

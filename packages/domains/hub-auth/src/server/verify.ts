@@ -5,6 +5,13 @@ import type { HubAuthContext, ComputerPrincipal } from '../shared/types'
 import { isDisabled, readRole } from './account'
 import type { HubAuth } from './auth'
 import { findComputerServiceUserId } from './computer-keys'
+import {
+  bindingHoldsFor,
+  type IdpAuthorization,
+  idpModeFenceOk,
+  idpRolesOf,
+  type SessionBinding
+} from './idp-roles'
 
 /** Header computers present their API key in (mirrors the apiKey plugin default). */
 export const API_KEY_HEADER = 'x-api-key'
@@ -19,6 +26,11 @@ function toWebHeaders(headers: Headers | IncomingHttpHeaders): Headers {
  * plugin). Returns null when there is no valid session, or when its account is
  * disabled: disabling revokes the account's sessions, and this refuses one that
  * exists anyway (see account.ts).
+ *
+ * IdP-role mode (./idp-roles.ts): also null unless the session belongs to the current
+ * activation epoch and the account's role evidence is fresh — revalidated at the issuer
+ * inline when due. The role returned is the freshly proven one. Every human bearer
+ * (REST, `/trpc`, CLI, desktop, iOS app) and cookie passes here.
  */
 export async function verifySession(
   auth: HubAuth,
@@ -28,8 +40,67 @@ export async function verifySession(
   if (!result) return null
   const user = result.user as typeof result.user & Record<string, unknown>
   if (isDisabled(user)) return null
+  let role = readRole(user.role)
+  const idp = idpRolesOf(auth)
+  // A process whose view of the mode is not the persisted one (still running with it
+  // off after another boot turned it on, or an older config) authorizes nobody.
+  if (!idp && !idpModeFenceOk(auth)) return null
+  if (idp) {
+    const epoch = (result.session as Record<string, unknown>).idpEpoch
+    const verdict = await idp.authorize(user.id, {
+      createdAtMs: new Date(result.session.createdAt).getTime(),
+      epoch: typeof epoch === 'number' ? epoch : null
+    })
+    if (!verdict.ok) return null
+    role = verdict.role
+  }
   const orgId = (result.session.activeOrganizationId as string | null | undefined) ?? null
-  return { userId: user.id, role: readRole(user.role), orgId, session: result.session }
+  return { userId: user.id, role, orgId, session: result.session }
+}
+
+/**
+ * The synchronous per-operation check of an already-verified session (open `/trpc`
+ * sockets: every operation, every subscription output). Storage only, never a network
+ * call. Mode off: this process's view of the mode must still be the persisted one, and
+ * the account must exist and not be disabled. Mode on: the runtime's `liveNow`.
+ */
+export function idpSessionLiveNow(auth: HubAuth, userId: string, session: SessionBinding): boolean {
+  try {
+    const idp = idpRolesOf(auth)
+    if (idp) return idp.liveNow(userId, session)
+    return idpModeFenceOk(auth) && bindingHoldsFor(auth, userId, session)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The IdP-role gate for a human acted for WITHOUT a session of theirs (the hub's task
+ * CLI relay: a computer's credential acting as its owner). Mode off: `{ ok: true }` with
+ * no role, unless this process's view of the mode is not the persisted one.
+ */
+export async function authorizeDelegatedHuman(
+  auth: HubAuth,
+  userId: string
+): Promise<IdpAuthorization | { ok: true; role: null }> {
+  const idp = idpRolesOf(auth)
+  if (!idp) return idpModeFenceOk(auth) ? { ok: true, role: null } : { ok: false, reason: 'epoch' }
+  return idp.authorizeAccount(userId)
+}
+
+/**
+ * The IdP-role gate for a session that lives OUTSIDE hub-auth (the hub's web sessions):
+ * created at `createdAtMs` (Unix ms). Mode off: `{ ok: true }` with no role (the caller
+ * keeps the stored one).
+ */
+export async function authorizeExternalSession(
+  auth: HubAuth,
+  userId: string,
+  createdAtMs: number
+): Promise<IdpAuthorization | { ok: true; role: null }> {
+  const idp = idpRolesOf(auth)
+  if (!idp) return idpModeFenceOk(auth) ? { ok: true, role: null } : { ok: false, reason: 'epoch' }
+  return idp.authorize(userId, { createdAtMs })
 }
 
 function readComputerId(metadata: unknown): string | null {

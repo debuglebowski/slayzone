@@ -31,13 +31,20 @@ import {
 import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
 import { SUPERVISED_STOP_DEADLINE_MS, watchParent } from '@slayzone/platform/parent-watch'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
-import { ENV_VARS, effectiveHubUrls, ignoredCertPinNotices, loadBootComputerConfig } from './config'
+import {
+  ENV_VARS,
+  effectiveHubUrls,
+  ignoredCertPinNotices,
+  loadBootComputerConfig,
+  supervisedComputerConfigFile
+} from './config'
 import { adoptLoginShellPath } from './login-shell-path'
 import { COMPUTER_VERSION, startComputer, watchPrimaryHubExitCode } from './main'
 import { createSupervisorIpc } from './supervisor-ipc'
 import { isUpgradeWorker, receiveUpgradeBoot, superviseUpgrades } from './upgrade-runtime'
 import { dirname, join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { eraseComputerOffline } from './offline-erasure'
 import { fork } from 'node:child_process'
 import { ensureComputerLauncher } from '@slayzone/platform/computer-launcher'
 import { atomicRuntimeJson, startSessionHost } from './session-host'
@@ -47,6 +54,9 @@ import {
   HOST_MAINTENANCE_MIN_CONTRACT_VERSION
 } from '@slayzone/computer-runtime'
 import { COMPUTER_BUILD_ID } from './build-identity'
+import { StructuralFaultError } from '@slayzone/platform/isolation'
+import { readJsonTolerant } from '@slayzone/platform/quarantine'
+import { createComputerFileLog } from './file-log'
 
 /**
  * First-run interactive setup for a STANDALONE computer. Runs ONLY when
@@ -146,6 +156,24 @@ async function maybeInteractiveSetup(): Promise<{
 }
 
 async function main(): Promise<void> {
+  if (process.argv.includes('--erase-data')) {
+    const requestFile = process.argv[process.argv.indexOf('--erase-data') + 1]
+    const receiptIndex = process.argv.indexOf('--receipt'),
+      receiptFile = receiptIndex >= 0 ? process.argv[receiptIndex + 1] : undefined
+    if (!requestFile || !receiptFile)
+      throw new Error(
+        'Usage: slayzone-computer --erase-data <request.json> --receipt <new-receipt.json> [--worktrees-verified]'
+      )
+    const receipt = await eraseComputerOffline(
+      process.env.SLAYZONE_ROOT ?? process.cwd(),
+      // startup-json: strict — the admin's cleanup request file: a bad one must refuse, not default
+      JSON.parse(readFileSync(requestFile, 'utf8')),
+      { worktreesVerified: process.argv.includes('--worktrees-verified') }
+    )
+    writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+    process.stdout.write('SlayZone-managed computer data erased. Cleanup receipt saved.\n')
+    return
+  }
   if (process.argv.includes('--runtime-contract')) {
     process.stdout.write(
       JSON.stringify({
@@ -172,12 +200,22 @@ async function main(): Promise<void> {
   }
   if (process.argv.includes('--session-host')) {
     const root = process.env.SLAYZONE_ROOT ?? process.cwd()
-    let seed: Record<string, unknown> = {}
-    try {
-      seed = JSON.parse(readFileSync(join(root, 'computer-runtime', 'host-config.json'), 'utf8'))
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
+    // The seed only carries launch overrides on top of the computer's config file;
+    // an unreadable seed is quarantined and the host starts from the file alone.
+    const read = readJsonTolerant(
+      join(root, 'computer-runtime', 'host-config.json'),
+      (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+          throw new StructuralFaultError('Host config seed is not an object')
+        return value as Record<string, unknown>
+      },
+      { root: join(root, 'computer-runtime'), pass: 'computer-host-config' }
+    )
+    if (read.status === 'corrupt')
+      process.stdout.write(
+        `[host] host-config.json unreadable; quarantined, starting from the config file ${JSON.stringify({ error: read.error.message })}\n`
+      )
+    const seed: Record<string, unknown> = read.status === 'ok' ? read.value : {}
     const config = loadBootComputerConfig(seed)
     if (!config.allowedRoots.length) config.allowedRoots = [root]
     const host = await startSessionHost(root, config, (message, meta) =>
@@ -234,10 +272,16 @@ async function main(): Promise<void> {
             }
           })()
         : undefined
+    // Supervised: of its own config file only the roots its loopback hub set — see
+    // supervisedComputerConfigFile (they used to be lost on every restart).
     const snapshot =
       !workerBoot && !supervised
         ? readComputerConfigSnapshot(undefined, { allowLegacy: !savedSeed?.currentFileSeen })
-        : { config: {}, fingerprint: 'absent', currentFileSeen: false }
+        : {
+            config: supervised && !workerBoot ? supervisedComputerConfigFile() : {},
+            fingerprint: 'absent',
+            currentFileSeen: false
+          }
     const candidateSeed: ComputerBootSeed = (process.argv.includes('--supervisor')
       ? savedSeed
       : undefined) ?? {
@@ -310,9 +354,12 @@ async function main(): Promise<void> {
     return
   }
 
+  // Also kept on disk (file-log.ts): a supervising app drops this process's stdout.
+  const fileLog = createComputerFileLog(dirname(getComputerConfigFilePath()))
   const log = (message: string, meta?: Record<string, unknown>): void => {
     const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
     process.stdout.write(`[computer] ${message}${suffix}\n`)
+    fileLog(`${message}${suffix}`)
   }
 
   // A certificate pin from an older release is ignored, never enforced (see

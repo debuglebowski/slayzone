@@ -75,6 +75,16 @@ async function hoverSubmenu(page: Page, label: string) {
   await page.waitForTimeout(150)
 }
 
+/** The move dialog the "Move to" pick opens: confirm it (a move can't be undone). */
+async function confirmMove(page: Page) {
+  const dialog = page.getByTestId('move-task-dialog')
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const confirm = dialog.getByTestId('move-task-confirm')
+  await expect(confirm).toBeEnabled({ timeout: 5_000 })
+  await confirm.click()
+  await expect(dialog).toBeHidden({ timeout: 5_000 })
+}
+
 async function getTaskById(page: Page, id: string) {
   const tasks = await seed(page).getTasks()
   return tasks.find((t: { id: string }) => t.id === id)
@@ -292,6 +302,7 @@ test.describe('TreeView actions', () => {
     await rightClickRow(mainWindow, rootA)
     await hoverSubmenu(mainWindow, 'Move to')
     await radioItem(mainWindow, new RegExp(otherName)).click()
+    await confirmMove(mainWindow)
 
     await expect
       .poll(
@@ -304,6 +315,75 @@ test.describe('TreeView actions', () => {
         { timeout: 5_000 }
       )
       .toEqual([otherProjectId, otherProjectId, projectId])
+  })
+
+  test('move-to-project brings the subtasks along after the dialog confirms', async ({
+    mainWindow
+  }) => {
+    const child = (
+      await seed(mainWindow).createTask({
+        projectId,
+        title: 'TA A child',
+        status: 'in_progress',
+        parentId: rootA
+      })
+    ).id
+    await rightClickRow(mainWindow, rootA)
+    await hoverSubmenu(mainWindow, 'Move to')
+    await radioItem(mainWindow, new RegExp(otherName)).click()
+
+    const dialog = mainWindow.getByTestId('move-task-dialog')
+    await expect(dialog.getByText('Bring subtasks (1)')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByTestId('move-task-include-subtasks')).toBeChecked()
+    // Nothing moves before the confirm.
+    expect((await getTaskById(mainWindow, rootA))?.project_id).toBe(projectId)
+    await confirmMove(mainWindow)
+
+    await expect
+      .poll(
+        async () => {
+          const a = await getTaskById(mainWindow, rootA)
+          const c = await getTaskById(mainWindow, child)
+          return [a?.project_id, c?.project_id, c?.parent_id]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, otherProjectId, rootA])
+  })
+
+  test('moving a subtask alone explains the detach, then detaches it', async ({ mainWindow }) => {
+    const child = (
+      await seed(mainWindow).createTask({
+        projectId,
+        title: 'TA lone child',
+        status: 'in_progress',
+        parentId: rootB
+      })
+    ).id
+    await seed(mainWindow).refreshData()
+    await expect(taskRow(mainWindow, child)).toBeVisible({ timeout: 5_000 })
+    await rightClickRow(mainWindow, child)
+    await hoverSubmenu(mainWindow, 'Move to')
+    await radioItem(mainWindow, new RegExp(otherName)).click()
+
+    const notice = mainWindow.getByTestId('move-task-detach-notice')
+    await expect(notice).toBeVisible({ timeout: 5_000 })
+    await expect(notice).toContainText('TA B')
+    // Enter confirms (focus starts on the dialog's form, not the project picker).
+    const dialog = mainWindow.getByTestId('move-task-dialog')
+    await expect(dialog.getByTestId('move-task-confirm')).toBeEnabled({ timeout: 5_000 })
+    await mainWindow.keyboard.press('Enter')
+    await expect(dialog).toBeHidden({ timeout: 5_000 })
+
+    await expect
+      .poll(
+        async () => {
+          const c = await getTaskById(mainWindow, child)
+          return [c?.project_id, c?.parent_id]
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, null])
   })
 
   test('single delete via context menu removes only that row', async ({ mainWindow }) => {
@@ -340,6 +420,54 @@ test.describe('TreeView actions', () => {
         { timeout: 5_000 }
       )
       .toEqual({ aArchived: false, cArchived: true })
+  })
+
+  test('duplicate via context menu creates a fresh follow-up in the picked project and opens it', async ({
+    mainWindow
+  }) => {
+    await rightClickRow(mainWindow, rootA)
+    await menuItem(mainWindow, /^Duplicate…$/).click()
+
+    const dialog = mainWindow.getByTestId('duplicate-task-dialog')
+    await expect(dialog).toBeVisible({ timeout: 3_000 })
+    await dialog.getByTestId('duplicate-task-title').fill('TA A follow-up')
+    await dialog.getByTestId('duplicate-task-project-select').click()
+    await mainWindow.getByRole('option', { name: otherName }).click()
+    await dialog.getByTestId('duplicate-task-confirm').click()
+    await expect(dialog).toBeHidden({ timeout: 5_000 })
+
+    await expect
+      .poll(
+        async () => {
+          const all = await seed(mainWindow).getTasks()
+          const copy = all.find((t: { title: string }) => t.title === 'TA A follow-up')
+          return copy ? [copy.project_id, copy.parent_id] : null
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, null])
+    // The source is untouched.
+    expect((await getTaskById(mainWindow, rootA))?.project_id).toBe(projectId)
+    // The copy opens in a tab.
+    const copyId = (await seed(mainWindow).getTasks()).find(
+      (t: { title: string }) => t.title === 'TA A follow-up'
+    )!.id
+    await expect
+      .poll(
+        () =>
+          mainWindow.evaluate((id) => {
+            const store = (
+              window as unknown as {
+                __slayzone_tabStore: {
+                  getState: () => { tabs: Array<{ type: string; taskId?: string }> }
+                }
+              }
+            ).__slayzone_tabStore
+            return store.getState().tabs.some((t) => t.type === 'task' && t.taskId === id)
+          }, copyId),
+        { timeout: 5_000 }
+      )
+      .toBe(true)
   })
 
   test('inline rename persists to DB and survives a data refresh', async ({ mainWindow }) => {

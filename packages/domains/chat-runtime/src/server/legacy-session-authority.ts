@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { createChatOwnershipStore, type HubChatOwnership } from './hub-ownership'
 import { terminalStorageAgentId } from './storage-mode'
 
@@ -18,7 +19,11 @@ type ResolveComputer = (owner: HubChatOwnership) => Promise<string | null>
  *   ambiguous, so nothing is fenced.
  *
  * v0.37.0 wrote NULL for the unclaimed case too, fencing every terminal-agent
- * resume in such tasks (#172). Re-electing NULL rows deletes those. */
+ * resume in such tasks (#172). Re-electing NULL rows deletes those.
+ *
+ * Once the legacy chat tables are dropped (every chat migrated, §9 Phase 8) no
+ * hub-era session is left to elect: every session is unclaimed here (the computers
+ * holding chats answer for theirs, `chatSessionOwner`). */
 export async function legacySessionAuthority(
   db: SlayzoneDb,
   taskId: string,
@@ -26,6 +31,7 @@ export async function legacySessionAuthority(
   sessionId: string,
   resolveComputer?: ResolveComputer
 ): Promise<string | null> {
+  if (!(await legacyChatTables(db))) return null
   const canonical = terminalStorageAgentId(mode)
   const existing = await db.get<{ conversation_id: string | null }>(
     'SELECT conversation_id FROM chat_legacy_session_authority WHERE task_id=? AND mode=? AND provider_session_id=?',
@@ -67,6 +73,7 @@ export async function legacySessionAmbiguous(
   sessionId: string,
   resolveComputer?: ResolveComputer
 ): Promise<boolean> {
+  if (!(await legacyChatTables(db))) return false
   const canonical = terminalStorageAgentId(mode)
   const ambiguous = () =>
     db.get(
@@ -86,14 +93,10 @@ async function elect(
   sessionId: string,
   resolveComputer?: ResolveComputer
 ): Promise<{ contested: boolean; selected: string | null }> {
+  // A chat that already holds the session on its computer is found before this
+  // runs (the hub asks the computers: `chatSessionOwner`, v208). What is elected
+  // here is a session no reachable computer claims.
   const store = createChatOwnershipStore(db)
-  const bound = await store.forProviderSession(sessionId, mode)
-  if (
-    bound?.taskId === taskId &&
-    bound.state === 'active' &&
-    terminalStorageAgentId(bound.mode) === canonical
-  )
-    return { contested: true, selected: bound.id }
   const candidates: Array<{
     owner: HubChatOwnership
     computer: string | null

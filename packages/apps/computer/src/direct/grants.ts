@@ -53,6 +53,8 @@ export interface DirectGrantStore {
 export interface DirectGrantStoreOptions {
   /** Monotonic ms. Default `performance.now()`. */
   now?: () => number
+  /** Wall-clock Unix ms, for a grant's absolute `notAfter`. Default `Date.now()`. */
+  wallNow?: () => number
   onDropped?: (grants: GrantRecord[], reason: GrantDropReason) => void
   /** Bound per hub, so a misbehaving hub cannot grow this without limit. */
   maxGrantsPerHub?: number
@@ -84,11 +86,13 @@ function sameResource(
 ): boolean {
   if (r.kind === 'pty' && target.kind === 'pty') return r.sessionId === target.sessionId
   if (r.kind === 'chat' && target.kind === 'chat') return r.tabId === target.tabId
+  if (r.kind === 'task' && target.kind === 'task') return r.taskId === target.taskId
   return false
 }
 
 export function createDirectGrantStore(options: DirectGrantStoreOptions = {}): DirectGrantStore {
   const now = options.now ?? (() => performance.now())
+  const wallNow = options.wallNow ?? (() => Date.now())
   const maxPerHub = options.maxGrantsPerHub ?? DEFAULT_MAX_GRANTS_PER_HUB
   const byId = new Map<string, Entry>()
   const byHash = new Map<string, Entry>()
@@ -140,6 +144,12 @@ export function createDirectGrantStore(options: DirectGrantStoreOptions = {}): D
 
   return {
     grant(hubKey, params) {
+      // An absolute end (`notAfter`, wall clock) bounds the grant however late it
+      // arrived: what is left of it at receipt, on this store's monotonic clock. One that
+      // is already past is refused, never registered.
+      const left =
+        params.notAfter === undefined ? Number.POSITIVE_INFINITY : params.notAfter - wallNow()
+      if (left <= 0) throw new Error('direct-link grant arrived after its absolute end')
       const existing = byId.get(params.grantId)
       if (existing && existing.hubKey !== hubKey) {
         throw new Error('grant id already registered by another hub')
@@ -157,7 +167,7 @@ export function createDirectGrantStore(options: DirectGrantStoreOptions = {}): D
         hubKey,
         userId: params.userId,
         resource: params.resource,
-        expiresAt: now() + params.ttlMs,
+        expiresAt: now() + Math.min(params.ttlMs, left),
         tokenHash: params.tokenHash
       }
       byId.set(entry.grantId, entry)

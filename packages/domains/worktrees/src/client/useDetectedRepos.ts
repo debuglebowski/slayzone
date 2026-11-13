@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { skipToken, useQuery } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { DetectedRepo } from '@slayzone/projects-contracts'
 
@@ -12,10 +12,10 @@ import type { DetectedRepo } from '@slayzone/projects-contracts'
 export function useDetectedRepos(projectPath: string | null, projectId?: string): DetectedRepo[] {
   const trpc = useTRPC()
   const query = useQuery(
+    // No project → no scope to name: nothing to scan (the hub would refuse it).
     trpc.worktrees.detectChildRepos.queryOptions(
-      { projectPath: projectPath ?? '', projectId },
-      { enabled: !!projectPath }
+      projectPath && projectId ? { projectPath, projectId } : skipToken
     )
   )
-  return projectPath ? (query.data ?? []) : []
+  return projectPath && projectId ? (query.data ?? []) : []
 }

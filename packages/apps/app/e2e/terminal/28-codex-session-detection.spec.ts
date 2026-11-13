@@ -1,3 +1,4 @@
+import { currentSession } from '../fixtures/terminal'
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
 
@@ -203,11 +204,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-          codexTaskId
-        )
-        return task?.codex_conversation_id ?? null
+        return currentSession(mainWindow, codexTaskId, 'codex')
       })
       .toBe(detectedId)
 
@@ -242,11 +239,7 @@ test.describe('Session ID banners', () => {
 
     await expect
       .poll(async () => {
-        const task = await mainWindow.evaluate(
-          (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-          geminiTaskId
-        )
-        return task?.gemini_conversation_id ?? null
+        return currentSession(mainWindow, geminiTaskId, 'gemini')
       })
       .toBe(geminiDetectedId)
 

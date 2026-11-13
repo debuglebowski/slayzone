@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/host-capabilities",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/server/index.ts",
@@ -15,6 +15,6 @@
     "@slayzone/platform": "workspace:*",
     "@slayzone/trpc-server": "workspace:*",
     "@trpc/server": "^11.19.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   }
 }

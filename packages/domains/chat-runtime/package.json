@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/chat-runtime",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -13,12 +13,15 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/platform": "workspace:*",
     "@slayzone/task-artifacts": "workspace:*",
+    "@slayzone/task-contracts": "workspace:*",
     "@slayzone/terminal": "workspace:*",
     "@slayzone/terminal-contracts": "workspace:*",
     "better-sqlite3": "^13.0.3",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

@@ -1,3 +1,7 @@
+import {
+  LegacyChatStorageRetiredError,
+  legacyChatTables
+} from '@slayzone/platform/legacy-chat-tables'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
 
@@ -32,6 +36,7 @@ export async function persistChatEvent(
   event: AgentEvent,
   at?: number
 ): Promise<'inserted' | 'clash'> {
+  if (!(await legacyChatTables(db))) throw new LegacyChatStorageRetiredError('chat event')
   const res = await db
     .prepare(
       'INSERT INTO chat_events (tab_id, seq, event, saved_at) VALUES (?, ?, ?, ?) ON CONFLICT(tab_id, seq) DO NOTHING'
@@ -201,6 +206,7 @@ function toBuffered(rows: EventRow[]): BufferedEvent[] {
 }
 
 export async function loadChatEvents(db: SlayzoneDb, tabId: string): Promise<BufferedEvent[]> {
+  if (!(await legacyChatTables(db))) return []
   const rows = (await db
     .prepare(`SELECT ${EVENT_COLUMNS} FROM chat_events WHERE tab_id = ? ORDER BY seq ASC`)
     .all(tabId)) as EventRow[]
@@ -213,6 +219,7 @@ export async function loadChatEventsRange(
   afterSeq: number,
   beforeSeq: number
 ): Promise<BufferedEvent[]> {
+  if (!(await legacyChatTables(db))) return []
   const rows = (await db
     .prepare(
       `SELECT ${EVENT_COLUMNS} FROM chat_events WHERE tab_id = ? AND seq > ? AND seq < ? ORDER BY seq ASC`
@@ -222,6 +229,7 @@ export async function loadChatEventsRange(
 }
 
 export async function getNextSeqForTab(db: SlayzoneDb, tabId: string): Promise<number> {
+  if (!(await legacyChatTables(db))) return 0
   const row = (await db
     .prepare('SELECT MAX(seq) AS max_seq FROM chat_events WHERE tab_id = ?')
     .get(tabId)) as { max_seq: number | null } | undefined
@@ -230,5 +238,6 @@ export async function getNextSeqForTab(db: SlayzoneDb, tabId: string): Promise<n
 }
 
 export async function clearChatEventsForTab(db: SlayzoneDb, tabId: string): Promise<void> {
+  if (!(await legacyChatTables(db))) return
   await db.prepare('DELETE FROM chat_events WHERE tab_id = ?').run(tabId)
 }

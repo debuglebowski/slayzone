@@ -94,7 +94,6 @@ export {
 } from './gh-cli'
 export { runGhLocally } from './gh-local'
 export { hubWorktreeExecAdapters } from './hub-task-adapters'
-export { setWorktreeColorDetector, type WorktreeDetector } from './color-registry'
 export { runAiCommand, setAiCommandRunner, type AiCommandRunner } from './merge-ai'
 export {
   listProjectRepos,
@@ -106,7 +105,6 @@ export {
   ensureColors as ensureWorktreeColors,
   getColor as getWorktreeColor,
   getProjectColors as getProjectWorktreeColors,
-  ensureProjectColors as ensureProjectWorktreeColors,
   __resetForTests as resetWorktreeColorsForTest
 } from './color-registry'
 export { getGitWatcher, closeGitWatcher } from './git-watcher'
@@ -133,11 +131,12 @@ export { worktreesRouter, type WorktreesRouter, type WorktreesMounts } from './w
 export {
   setGitOpTransport,
   executeGitOp,
-  gitTargetForPath,
   deliverGitWatchEvent,
   gitWatchComputerGone,
-  type GitOpTransport
+  type GitOpTransport,
+  type GitScope
 } from './git-op-routing'
+// aiConfig's path routing only, until §9 Phase 7c gives it a scope.
 export {
   setWorktreesRouterDeps,
   getWorktreesRouterDeps,

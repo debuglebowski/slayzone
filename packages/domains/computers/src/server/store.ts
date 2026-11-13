@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { SlayzoneDb } from '@slayzone/platform'
+import type { BatchOp, SlayzoneDb } from '@slayzone/platform'
 import type { ComputerRecord } from '../shared/types'
 import { listVisibleComputerIds, type ComputerViewer } from './visibility'
 import { DEFAULT_LOCAL_COMPUTER_NAME } from '../shared'
+import {
+  COMPUTER_REPLACE_REFUSED,
+  ComputerStateError,
+  computerReplacesItselfError
+} from './computer-state-errors'
 
 /**
  * Computer store: CRUD over the v149 computer tables (`computers`,
@@ -102,8 +107,10 @@ export async function registerOrReplaceComputer(
   const now = input.now ?? Date.now()
   const capabilities_json = JSON.stringify(input.capabilities ?? {})
   const auth_key_id = input.authKeyId ?? null
-  await db.run(
-    `INSERT INTO computers
+  await db.batchTxn([
+    {
+      type: 'run',
+      sql: `INSERT INTO computers
        (id, name, platform, version, capabilities_json, auth_key_id, last_seen_at, created_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
      ON CONFLICT(id) DO UPDATE SET
@@ -114,8 +121,26 @@ export async function registerOrReplaceComputer(
        auth_key_id = excluded.auth_key_id,
        last_seen_at = excluded.last_seen_at,
        revoked_at = NULL`,
-    [input.id, input.name, input.platform, input.version, capabilities_json, auth_key_id, now, now]
-  )
+      params: [
+        input.id,
+        input.name,
+        input.platform,
+        input.version,
+        capabilities_json,
+        auth_key_id,
+        now,
+        now
+      ]
+    },
+    // Deleted, then enrolled again under its own id (it is derived from the machine):
+    // the same machine, live again ({@link computerStanding}). Its chats were retired
+    // as unavailable; its next recovery takes back the ones it still holds.
+    {
+      type: 'run',
+      sql: 'DELETE FROM computer_retirements WHERE computer_id = ?',
+      params: [input.id]
+    }
+  ])
   // Re-read so the returned record reflects the persisted row (created_at may be
   // the original birth time, not `now`, on an UPSERT that hit an existing row).
   const row = await getComputer(db, input.id)
@@ -171,41 +196,96 @@ export async function retireStaleLocalComputers(
   if (stale.length === 0) return 0
 
   const staleIds = stale.map((r) => r.id)
-  const placeholders = staleIds.map(() => '?').join(', ')
-  // Atomic collapse: repoint task + project bindings off the orphan ids onto the
-  // survivor, THEN delete the orphan computer rows — one transaction so a task can
-  // never observe a dangling computer_id mid-collapse.
-  const results = (await db.batchTxn([
-    {
-      type: 'run',
-      sql: `UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    {
-      type: 'run',
-      sql: `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    // Folders follow too. `OR IGNORE` keeps the survivor's own row where both hold
-    // the project (it is the current one); the orphan's leftovers then go.
-    {
-      type: 'run',
-      sql: `UPDATE OR IGNORE project_placements SET computer_id = ? WHERE computer_id IN (${placeholders})`,
-      params: [opts.keepComputerId, ...staleIds]
-    },
-    {
-      type: 'run',
-      sql: `DELETE FROM project_placements WHERE computer_id IN (${placeholders})`,
-      params: staleIds
-    },
-    {
-      type: 'run',
-      sql: `DELETE FROM computers WHERE id IN (${placeholders})`,
-      params: staleIds
-    }
-  ])) as Array<{ changes: number }>
+  const results = (await db.batchTxn(successionOps(staleIds, opts.keepComputerId))) as Array<{
+    changes: number
+  }>
   // The DELETE is the last op; its `changes` is the number of computer rows removed.
   return results[results.length - 1]?.changes ?? staleIds.length
+}
+
+/**
+ * The same machine, enrolled again under `successorId`: everything that named the
+ * `formerIds` rows moves to it, and the rows go. One transaction (`batchTxn`), the
+ * DELETE of the computer rows last. Shared by the local-computer collapse
+ * ({@link retireStaleLocalComputers}) and a user's {@link replaceComputer}.
+ *
+ * Bindings, worktrees and placements are repointed rather than nulled (there is a
+ * survivor); grants go — they said who could use the former row, the successor keeps
+ * its own. `tasks.computer_id` / `projects.default_computer_id` are plain TEXT with no
+ * FK, so a bare DELETE would leave them dangling.
+ */
+function successionOps(formerIds: readonly string[], successorId: string): BatchOp[] {
+  const placeholders = formerIds.map(() => '?').join(', ')
+  const run = (sql: string, params: unknown[]): BatchOp => ({ type: 'run', sql, params })
+  return [
+    run(`UPDATE tasks SET computer_id = ? WHERE computer_id IN (${placeholders})`, [
+      successorId,
+      ...formerIds
+    ]),
+    // The same machine: the worktrees it made are the successor's.
+    run(
+      `UPDATE tasks SET worktree_computer_id = ? WHERE worktree_computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    run(
+      `UPDATE projects SET default_computer_id = ? WHERE default_computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    // Folders follow too. `OR IGNORE` keeps the successor's own row where both hold
+    // the project (it is the current one); the former's leftovers then go.
+    run(
+      `UPDATE OR IGNORE project_placements SET computer_id = ? WHERE computer_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    run(`DELETE FROM project_placements WHERE computer_id IN (${placeholders})`, [...formerIds]),
+    run(`DELETE FROM computer_grants WHERE computer_id IN (${placeholders})`, [...formerIds]),
+    // A retirement names its final successor ({@link computerStanding}): one that
+    // named a former id names the successor now.
+    run(
+      `UPDATE computer_retirements SET successor_id = ? WHERE successor_id IN (${placeholders})`,
+      [successorId, ...formerIds]
+    ),
+    // Chat bookkeeping names computers too; the chat domain repoints it onto the
+    // successor from this record (applyComputerRetirements), whenever it next runs.
+    // 're-enrolled' is what both callers mean: the same machine under a new id.
+    run(
+      `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT id,?,'re-enrolled',? FROM computers WHERE id IN (${placeholders})
+        ON CONFLICT(computer_id) DO UPDATE SET successor_id=excluded.successor_id,reason=excluded.reason`,
+      [successorId, Date.now(), ...formerIds]
+    ),
+    run(`DELETE FROM computers WHERE id IN (${placeholders})`, [...formerIds])
+  ]
+}
+
+/**
+ * Replace a computer with its successor: the user confirmed `successorId` is the same
+ * machine as `computerId`, enrolled again under a new id (its credential was lost, so
+ * the hub could not tell). Its work moves there ({@link successionOps}) and the former
+ * row is deleted; the chat domain then repoints its chats (applyComputerRetirements),
+ * and the successor's next recovery adopts the ones it holds.
+ *
+ * Refuses a replacement by itself, a missing computer and a revoked successor. Whether
+ * the former may go now (it must not be connected; the desktop's own computer never
+ * goes) is the caller's: only it knows the live connections.
+ */
+export async function replaceComputer(
+  db: SlayzoneDb,
+  opts: { computerId: string; successorId: string }
+): Promise<void> {
+  if (opts.computerId === opts.successorId) throw computerReplacesItselfError()
+  const [former, successor] = await Promise.all([
+    getComputer(db, opts.computerId),
+    getComputer(db, opts.successorId)
+  ])
+  if (!former || !successor) throw new Error('no such computer, or you do not have access to it')
+  if (successor.revoked_at !== null)
+    throw new ComputerStateError(
+      COMPUTER_REPLACE_REFUSED,
+      `"${successor.name}" is revoked, so it cannot take over another computer's work.`
+    )
+  await db.batchTxn(successionOps([opts.computerId], opts.successorId))
+  computerRemoved(opts.computerId)
 }
 
 /**
@@ -253,6 +333,9 @@ function computerRemoved(id: string): void {
 }
 
 export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> {
+  // `tasks.worktree_computer_id` is deliberately KEPT: it records where a worktree
+  // is, and a computer with no row tells the Trash purge it is gone for good — NULL
+  // would send the removal to whichever computer is the default instead.
   await db.batchTxn([
     { type: 'run', sql: `UPDATE tasks SET computer_id = NULL WHERE computer_id = ?`, params: [id] },
     {
@@ -262,9 +345,67 @@ export async function deleteComputer(db: SlayzoneDb, id: string): Promise<void> 
     },
     { type: 'run', sql: `DELETE FROM project_placements WHERE computer_id = ?`, params: [id] },
     { type: 'run', sql: `DELETE FROM computer_grants WHERE computer_id = ?`, params: [id] },
+    // No survivor: the chat domain retires the work still addressed to it, with
+    // this reason (applyComputerRetirements). Revoke records nothing: that work waits.
+    {
+      type: 'run',
+      sql: `INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT id,NULL,'deleted',? FROM computers WHERE id = ?
+        ON CONFLICT(computer_id) DO UPDATE SET successor_id=NULL,reason='deleted'`,
+      params: [Date.now(), id]
+    },
+    // Ids re-enrolled as this one are removed for good with it ({@link computerStanding}).
+    {
+      type: 'run',
+      sql: `UPDATE computer_retirements SET successor_id = NULL, reason = 'deleted' WHERE successor_id = ?`,
+      params: [id]
+    },
     { type: 'run', sql: `DELETE FROM computers WHERE id = ?`, params: [id] }
   ])
   computerRemoved(id)
+}
+
+/**
+ * Where a computer id stands, as `computer_retirements` records it — THE answer for
+ * every reader that holds an id (a chat's owner or destination, a task's holder):
+ *
+ * - `live`: not retired. Connected or not, revoked or not: its work waits for it.
+ * - `successor`: re-enrolled under a new id (`id`, the last of any chain): the same
+ *   machine, its work moves there.
+ * - `removed`: deleted or gone missing (`reason`), directly or as the end of a chain:
+ *   it never connects again; work addressed to it can never be delivered.
+ *
+ * Retirements are written collapsed (each names its final successor, or none:
+ * {@link deleteComputer}, {@link replaceComputer}; v215 collapsed stored ones), so this
+ * is one row; a chain is still followed to its end, and a cycle names no live computer.
+ */
+export type ComputerStanding =
+  | { kind: 'live'; id: string }
+  | { kind: 'successor'; id: string; formerId: string }
+  | { kind: 'removed'; id: string; reason: 'deleted' | 'missing' }
+
+/** Longest chain of re-enrollments followed (they are written collapsed: one hop). */
+const MAX_RETIREMENT_HOPS = 64
+
+export async function computerStanding(db: SlayzoneDb, id: string): Promise<ComputerStanding> {
+  let current = id
+  const seen = new Set<string>()
+  for (let hop = 0; hop <= MAX_RETIREMENT_HOPS; hop++) {
+    const row = await db.get<{ successor_id: string | null; reason: string }>(
+      'SELECT successor_id, reason FROM computer_retirements WHERE computer_id = ?',
+      [current]
+    )
+    if (!row)
+      return current === id
+        ? { kind: 'live', id }
+        : { kind: 'successor', id: current, formerId: id }
+    if (row.successor_id === null)
+      return { kind: 'removed', id, reason: row.reason === 'deleted' ? 'deleted' : 'missing' }
+    seen.add(current)
+    if (seen.has(row.successor_id)) break // A cycle names no live computer.
+    current = row.successor_id
+  }
+  return { kind: 'removed', id, reason: 'missing' }
 }
 
 export async function getComputer(db: SlayzoneDb, id: string): Promise<ComputerRecord | null> {
@@ -381,30 +522,84 @@ export async function setProjectDefaultComputer(
 }
 
 /**
- * The task's EXPLICIT computer binding: its own `computer_id`, else its project's
- * `default_computer_id`. `null` = nothing bound, which does NOT mean "run locally"
- * — see {@link resolveTaskComputerIdOrDefault}, which falls back to the connected
- * default computer. (Computers run the agents; there is no in-process spawn path.)
+ * THE answer to "which computer is this task's" (S5): the one resolver. The computers
+ * store, chat-data-ops (session ledger, terminal start gate), the hub's data handoff,
+ * the local-roots sync and the hub consistency checks all use it — divergence would
+ * route a chat agent and a terminal agent of the SAME task to different computers,
+ * or make the start gate ask a computer that does not hold the task's sessions.
+ * `pnpm lint:task-computer` refuses a second copy.
  *
- * Both columns are plain nullable TEXT with no default, so `null` is the state of
- * every install that has never opened project settings — which is why an
- * unbound task must resolve to a real computer rather than to "the hub".
+ *  1. while the task has a folder (worktree or base dir), the computer holding it
+ *     (`worktree_computer_id`): the folder exists only there (robustness plan §9,
+ *     Phase 7e). Not one removed for good (retired with no successor): its folders
+ *     went with it;
+ *  2. the task's own pin;
+ *  3. its project's default.
+ *
+ * `null` = nothing bound, which does NOT mean "run locally" — see
+ * {@link resolveTaskComputerIdOrDefault}, which falls back to the connected default
+ * computer. Both binding columns are plain nullable TEXT with no default.
+ *
+ * An SQL EXPRESSION over the aliases `t` (tasks) and `p` (the task's project, joined
+ * on `t.project_id`), for queries that resolve many tasks at once. NULL when `t` is
+ * NULL (e.g. a LEFT JOIN that matched no task).
  */
+export const TASK_COMPUTER_EXPR = `COALESCE(
+    CASE WHEN (t.has_worktree = 1 OR t.has_base_dir = 1)
+      AND NOT EXISTS (SELECT 1 FROM computer_retirements task_computer_r
+                       WHERE task_computer_r.computer_id = t.worktree_computer_id
+                         AND task_computer_r.successor_id IS NULL)
+    THEN t.worktree_computer_id END,
+    t.computer_id, p.default_computer_id)`
+
+/** {@link TASK_COMPUTER_EXPR} for one task. One positional parameter: the task id. */
+export const TASK_COMPUTER_SQL = `SELECT ${TASK_COMPUTER_EXPR} AS computer_id
+  FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+  WHERE t.id = ?`
+
 export async function resolveTaskComputerId(
   db: SlayzoneDb,
   taskId: string
 ): Promise<string | null> {
-  // The task's own pin wins over the project default. `chat-data-ops.ts`
-  // `resolveComputerId` MUST stay identical — divergence would route a chat agent
-  // and a terminal agent for the SAME task to different computers.
-  const row = await db.get<{ computer_id: string | null }>(
-    `SELECT COALESCE(t.computer_id, p.default_computer_id) AS computer_id
-     FROM tasks t
-     LEFT JOIN projects p ON p.id = t.project_id
-     WHERE t.id = ?`,
+  const row = await db.get<{ computer_id: string | null }>(TASK_COMPUTER_SQL, [taskId])
+  return row?.computer_id ?? null
+}
+
+/** A task's folder is on another computer than the one it would be pinned to. */
+export class TaskFoldersElsewhereError extends Error {
+  constructor(
+    readonly taskId: string,
+    readonly holderId: string,
+    readonly holderName: string
+  ) {
+    super(
+      `This task's folder is on ${holderName}, and its work runs there. Remove its worktree or base folder to move it to another computer.`
+    )
+    this.name = 'TaskFoldersElsewhereError'
+  }
+}
+
+/**
+ * Refuse pinning a task to `computerId` while its folder (worktree or base dir) is on
+ * another computer that still exists: the folder exists only there, and its work runs
+ * there whatever the pin says ({@link TASK_COMPUTER_SQL}). Unpinning (`null`) is fine.
+ */
+export async function assertTaskMovable(
+  db: SlayzoneDb,
+  taskId: string,
+  computerId: string | null
+): Promise<void> {
+  if (computerId === null) return
+  const row = await db.get<{ holder: string | null; name: string | null }>(
+    `SELECT t.worktree_computer_id AS holder, c.name AS name FROM tasks t
+       LEFT JOIN computers c ON c.id = t.worktree_computer_id
+      WHERE t.id = ? AND (t.has_worktree = 1 OR t.has_base_dir = 1)
+        AND NOT EXISTS (SELECT 1 FROM computer_retirements r
+                         WHERE r.computer_id = t.worktree_computer_id AND r.successor_id IS NULL)`,
     [taskId]
   )
-  return row?.computer_id ?? null
+  if (!row?.holder || row.holder === computerId) return
+  throw new TaskFoldersElsewhereError(taskId, row.holder, row.name ?? `computer ${row.holder}`)
 }
 
 /** Record which SlayZone user a computer belongs to (set at enroll). */
@@ -420,8 +615,7 @@ export async function setComputerOwner(
  * Effective computer for a task, including the implicit default.
  *
  * Resolution order:
- *   1. the task's explicit `computer_id`
- *   2. its project's `default_computer_id`
+ *   1-2. {@link resolveTaskComputerId} (its folder's holder, its pin, its project's default)
  *   3. the sole connected computer, if exactly one is connected
  *   4. the connected computer named {@link DEFAULT_LOCAL_COMPUTER_NAME} (the
  *      co-located one the app auto-enrolls)

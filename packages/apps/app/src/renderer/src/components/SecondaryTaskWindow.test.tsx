@@ -12,12 +12,27 @@ vi.mock('@slayzone/task/client/taskDetailCache', () => ({
 vi.mock('@slayzone/task/client/TaskShell', () => ({
   TaskShell: () => <div data-testid="shell" />
 }))
+const pageProps = vi.hoisted(() => ({
+  current: null as null | { onDeleteTask?: (id: string) => Promise<void> }
+}))
 vi.mock('@slayzone/task/client/TaskDetailPage', () => ({
-  TaskDetailPage: (props: { taskId: string; task: { title: string } }) => (
-    <div data-testid="page">
-      {props.taskId}:{props.task.title}
-    </div>
-  )
+  TaskDetailPage: (props: {
+    taskId: string
+    task: { title: string }
+    onDeleteTask?: (id: string) => Promise<void>
+  }) => {
+    pageProps.current = props
+    return (
+      <div data-testid="page">
+        {props.taskId}:{props.task.title}
+      </div>
+    )
+  }
+}))
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }))
+vi.mock('@slayzone/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@slayzone/ui')>()),
+  toast
 }))
 vi.mock('@/components/usage/BoostPill', () => ({ BoostPill: () => null }))
 vi.mock('@/components/usage/UsagePopover', () => ({ UsagePopover: () => null }))
@@ -35,9 +50,9 @@ async function flush(): Promise<void> {
   })
 }
 
-function renderWindow() {
+function renderWindow(procedures: Record<string, (input: unknown) => unknown> = {}) {
   const { wrapper: Wrapper } = createTrpcTest({
-    procedures: { 'app.taskWindows.getPrimaryActive': () => null },
+    procedures: { 'app.taskWindows.getPrimaryActive': () => null, ...procedures },
     subscriptions: { 'app.taskWindows.onPrimaryActiveChanged': () => () => undefined }
   })
   return render(
@@ -51,6 +66,7 @@ function renderWindow() {
 
 beforeEach(() => {
   fetchTaskDetail.mockReset()
+  vi.clearAllMocks()
   document.title = 'start'
 })
 
@@ -106,5 +122,38 @@ describe('SecondaryTaskWindow load', () => {
     await advance(AUTO_RETRY_DELAYS_MS[0])
     expect(fetchTaskDetail).toHaveBeenCalledTimes(2)
     expect(screen.getByTestId('page').textContent).toBe('t1:Fix bug')
+  })
+})
+
+describe('SecondaryTaskWindow delete', () => {
+  async function renderLoaded(deleteResult: unknown) {
+    fetchTaskDetail.mockResolvedValue({ task: { title: 'Fix bug' }, project: null })
+    const close = vi.fn(() => undefined)
+    renderWindow({ 'task.delete': () => deleteResult, 'app.window.close': close })
+    await flush()
+    return close
+  }
+
+  it('a delete the hub refused keeps the window open and says why', async () => {
+    const close = await renderLoaded({ blocked: true, reason: 'linked_to_provider' })
+    await act(async () => {
+      await expect(pageProps.current?.onDeleteTask?.('t1')).rejects.toThrow()
+    })
+    expect(toast.error).toHaveBeenCalledWith(
+      'Unlink this task from its external provider before deleting it.'
+    )
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it('an incomplete erasure warns, then closes the window', async () => {
+    const close = await renderLoaded({ incomplete: true, erasure: { computers: [] } })
+    await act(async () => {
+      await pageProps.current?.onDeleteTask?.('t1')
+    })
+    await flush()
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Some data has not been deleted. Cleanup will retry.'
+    )
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })

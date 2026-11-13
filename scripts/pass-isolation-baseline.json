@@ -1,0 +1,73 @@
+{
+  "packages/apps/app/src/main/channel-storage-migration.ts": ["migrateComputerSlice#1"],
+  "packages/apps/app/src/main/db/legacy-migration.ts": [
+    "migrateLegacyDatabaseIfNeeded#1",
+    "migrateLegacyDatabaseIfNeeded#2"
+  ],
+  "packages/apps/app/src/main/db/v127-disk-migration.ts": [
+    "migrateV127DiskDir#1",
+    "migrateV127DiskDir#2"
+  ],
+  "packages/apps/app/src/main/local-computer-hubs.ts": ["sync#1"],
+  "packages/apps/computer/src/pty-history.ts": ["sweep#1", "sweep#2"],
+  "packages/apps/hub/src/backup.ts": [
+    "collectAbandonedHubSnapshots#1",
+    "collectAbandonedHubSnapshots#2"
+  ],
+  "packages/apps/hub/src/computer-chat.ts": ["recoverComputer#1"],
+  "packages/apps/hub/src/session-retention.ts": ["sweepTable#1", "sweepSessionContent#1"],
+  "packages/apps/hub/src/session-tab-recovery.ts": ["recoverTask#1", "recoverTask#2"],
+  "packages/apps/hub/src/sidecar-socket.ts": ["drain#1"],
+  "packages/domains/agent-turns/src/server/workspace-capture.ts": ["prune#1"],
+  "packages/domains/ai-config/src/server/handlers-store.ts": [
+    "collectMarkdownFilesRecursive#1",
+    "syncLinkedFile#1",
+    "syncLinkedFile#2",
+    "reconcileProjectSkills#1",
+    "reconcileProjectSkills#2",
+    "syncAll#1",
+    "syncAll#2",
+    "syncAll#3",
+    "syncAll#4",
+    "syncAll#5",
+    "syncAll#6",
+    "syncAll#7"
+  ],
+  "packages/domains/chat-runtime/src/server/attachments.ts": [
+    "collectStaging#1",
+    "collectGarbage#1"
+  ],
+  "packages/domains/chat-runtime/src/server/backups.ts": ["collectAbandonedStaging#1"],
+  "packages/domains/chat-runtime/src/server/hub-folders.ts": [
+    "sync#1",
+    "sync#2",
+    "recover#1",
+    "recover#2"
+  ],
+  "packages/domains/chat-runtime/src/server/hub-provider-transition.ts": ["recover#1"],
+  "packages/domains/chat-runtime/src/server/hub-relay.ts": [
+    "migrateTask#1",
+    "migrateTask#2",
+    "recoverMetadataNow#1",
+    "recoverMetadataNow#2",
+    "recoverMetadataNow#3",
+    "recoverMetadataNow#4",
+    "drainMetadata#1",
+    "drainMetadata#2",
+    "drainMetadata#3"
+  ],
+  "packages/domains/chat-runtime/src/server/transfers.ts": ["erase#1"],
+  "packages/domains/diagnostics/src/server/content-erasure.ts": [
+    "eraseDiagnosticContent#1",
+    "eraseDiagnosticContent#2",
+    "eraseDiagnosticContent#3",
+    "eraseDiagnosticContent#4"
+  ],
+  "packages/domains/hub-auth/src/server/idp-roles.ts": ["sweep#1"],
+  "packages/domains/tabs-state/src/useTabStore.ts": ["retrySavedViewState#1"],
+  "packages/domains/task-artifacts/src/server/blob-store.ts": [
+    "collectStaging#1",
+    "collectDeleted#1"
+  ],
+  "packages/domains/usage-analytics/src/server/cache.ts": ["refresh#1", "refresh#2", "refresh#3"]
+}

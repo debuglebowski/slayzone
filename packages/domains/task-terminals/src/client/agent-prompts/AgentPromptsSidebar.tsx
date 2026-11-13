@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { MessageSquareText, X } from 'lucide-react'
 import { IconButton } from '@slayzone/ui'
-import { useAgentPrompts } from './useAgentPrompts'
+import { useAgentPromptsState } from './useAgentPrompts'
 
 const storageKey = (taskId: string): string => `slayzone:prompts-sidebar:${taskId}`
 
@@ -80,7 +80,7 @@ export function AgentPromptsSidebar({
   /** Closes the sidebar — the toggle lives in this header while open. */
   onToggle: () => void
 }): React.ReactElement {
-  const prompts = useAgentPrompts(taskId, agentId, true)
+  const { prompts, offline } = useAgentPromptsState(taskId, agentId, true)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Keep the newest message in view as the list grows (transcript behaviour).
@@ -110,7 +110,14 @@ export function AgentPromptsSidebar({
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {prompts.length === 0 ? (
-          <div className="px-2 py-6 text-center text-xs text-muted-foreground">No messages yet</div>
+          <div
+            data-testid={offline ? 'agent-prompts-offline' : undefined}
+            className="px-2 py-6 text-center text-xs text-muted-foreground"
+          >
+            {offline
+              ? 'Computer offline — its messages show when it reconnects'
+              : 'No messages yet'}
+          </div>
         ) : (
           prompts.map((p) => (
             <div

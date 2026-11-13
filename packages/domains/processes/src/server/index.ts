@@ -18,6 +18,9 @@ export {
   killAllProcesses,
   shutdownAllProcesses,
   setProcessComputerResolver,
+  setProcessSpawnPreparer,
+  setProcessPathScopeResolver,
+  setProcessWrittenListener,
   processesComputerConnected,
   isAdoptedOnComputer,
   restartProcessForUi,
@@ -28,9 +31,11 @@ export {
 } from './process-manager'
 export type { ProcessStatus, ProcessInfo } from '../shared'
 export type {
+  ProcessPathScopeResolver,
   ProcessShutdownOptions,
   ProcessShutdownResult,
   ProcessComputerResolver,
+  ProcessSpawnPreparer,
   PidStats,
   StartProcessRefusal,
   StartProcessResult

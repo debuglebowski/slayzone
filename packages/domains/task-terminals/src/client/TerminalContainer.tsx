@@ -8,7 +8,7 @@ import {
   useImperativeHandle
 } from 'react'
 import { useTRPCClient } from './trpc'
-import { usePty } from '@slayzone/terminal'
+import { markSkipCache, usePty } from '@slayzone/terminal'
 import {
   chatCapabilitiesForMode,
   isPromptCaptureMode,
@@ -19,9 +19,13 @@ import {
   useShortcutStore,
   withModalGuard,
   getThemeChrome,
-  getChromeStyleOverrides
+  getChromeStyleOverrides,
+  useStableCallback
 } from '@slayzone/ui'
 import { useTheme } from '@slayzone/ui'
+import type { TerminalTab } from '../shared/types'
+import { isChatSupported } from '../shared/chat-modes'
+import { getTabLabel } from './get-tab-label'
 import { useTaskTerminals } from './useTaskTerminals'
 import { TerminalTabBar, type TerminalTabBarHandle } from './TerminalTabBar'
 import { TerminalSplitGroup, type TerminalSplitGroupHandle } from './TerminalSplitGroup'
@@ -48,11 +52,6 @@ interface TerminalContainerProps {
   defaultMode: AgentId
   conversationId?: string | null
   existingConversationId?: string | null
-  /** True once the task's conversation id is hydrated (currentConversationByMode
-   *  set by parseAndColorTasks). When explicitly false, the main tab holds
-   *  auto-spawn until hydration so it never spawns with a null hint. Undefined =
-   *  no gate (preserves behavior for non-gated callers). */
-  conversationHydrated?: boolean
   supportsSessionId?: boolean
   providerFlags?: string
   executionContext?: import('@slayzone/terminal-contracts').ExecutionContext | null
@@ -89,10 +88,32 @@ interface TerminalContainerProps {
   onSwitchSession?: (conversationId: string, mode: string) => Promise<void>
   /** Sessions sidebar: remove a session from the task. */
   onDeleteSession?: (conversationId: string, mode: string) => Promise<void>
+  /**
+   * A SECONDARY agent tab's session reset (sessions are per terminal tab). The
+   * container stops that tab's agent first and remounts its pane after.
+   */
+  onTabSessionReset?: (tabId: string, mode: string) => Promise<void>
+  /**
+   * A secondary agent tab picks a session from the sidebar (`fromMode` ran it;
+   * another tab's session moves here). Throws when another tab's live agent runs
+   * it. The container then stops and remounts the pane on it.
+   */
+  onTabSessionSwitch?: (
+    tabId: string,
+    mode: string,
+    conversationId: string,
+    fromMode: string
+  ) => Promise<void>
   rightContent?: React.ReactNode
   mainTabAccessories?: React.ReactNode
   mainTabContextMenu?: React.ReactNode
   overlay?: React.ReactNode
+}
+
+/** A non-main tab running a terminal agent (not a plain shell, not a chat). Its
+ *  session is its own (sessions are per tab). */
+function isSecondaryAgentTab(tab: TerminalTab): boolean {
+  return !tab.isMain && tab.mode !== 'terminal' && !isChatSupported(tab.mode)
 }
 
 export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalContainerProps>(
@@ -103,7 +124,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       defaultMode,
       conversationId,
       existingConversationId,
-      conversationHydrated,
       supportsSessionId,
       providerFlags,
       executionContext,
@@ -125,6 +145,8 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       onMainHandoff,
       onSwitchSession,
       onDeleteSession,
+      onTabSessionReset,
+      onTabSessionSwitch,
       rightContent,
       mainTabAccessories,
       mainTabContextMenu,
@@ -199,11 +221,21 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // while that gate holds, so idle tasks pay nothing.
     // The Sessions list also serves Claude chat (its resume picker), listing the
     // chat's and the terminal's conversations together (one CLI session store).
+    //
+    // Sessions are per terminal tab (v201): a secondary agent tab gets its own list
+    // (every tab's sessions, labelled; a pick moves one here) and its own Reset.
+    const sessionsTab: TerminalTab | null =
+      (activeGroup?.isMain
+        ? activeGroup.tabs.find((t) => t.isMain)
+        : activeGroup?.tabs.find(isSecondaryAgentTab)) ?? null
+    const sessionsMode = sessionsTab?.mode
     const sessionsEnabled =
-      (activeGroup?.isMain ?? false) &&
-      !!mainMode &&
-      (isPromptCaptureMode(mainMode) || chatCapabilitiesForMode(mainMode).sessions)
-    const sessions = useFamilySessions(taskId, mainMode ?? '', sessionsEnabled)
+      !!sessionsTab &&
+      !!sessionsMode &&
+      (sessionsTab.isMain
+        ? isPromptCaptureMode(sessionsMode) || chatCapabilitiesForMode(sessionsMode).sessions
+        : isPromptCaptureMode(sessionsMode) && !!onTabSessionSwitch)
+    const sessions = useFamilySessions(taskId, sessionsMode ?? '', sessionsEnabled, sessionsTab?.id)
     const canShowSessions =
       sessionsEnabled && (sessions.length > 1 || (sessions.length === 1 && !sessions[0].isCurrent))
     const [sessionsOpen, toggleSessions] = useSessionsSidebarOpen(taskId)
@@ -437,6 +469,45 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       tabBarRef.current?.startRename(tabId)
     }, [])
 
+    // A secondary pane remounts (re-resolving ITS session) after a reset/switch.
+    const [paneEpochs, setPaneEpochs] = useState<Readonly<Record<string, number>>>({})
+    const remountPane = useCallback((tabId: string) => {
+      setPaneEpochs((prev) => ({ ...prev, [tabId]: (prev[tabId] ?? 0) + 1 }))
+    }, [])
+    // Reset a secondary agent tab: stop its agent, reset ITS session (no other
+    // tab's), remount — the respawn starts fresh.
+    const resetTabSession = useStableCallback(async (tab: TerminalTab) => {
+      if (!onTabSessionReset) return
+      const sid = getSessionId(tab.id)
+      await trpcClient.pty.kill.mutate({ sessionId: sid })
+      await onTabSessionReset(tab.id, tab.mode)
+      await new Promise((r) => setTimeout(r, 100))
+      markSkipCache(sid)
+      remountPane(tab.id)
+    })
+    // Pick a session in a secondary tab: the server moves it here first (and
+    // refuses, naming the tab, if another tab's agent runs it — nothing stopped
+    // then), then this tab's agent restarts on it.
+    const switchTabSession = useStableCallback(
+      async (tab: TerminalTab, conversationId: string, fromMode: string) => {
+        if (!onTabSessionSwitch) return
+        await onTabSessionSwitch(tab.id, tab.mode, conversationId, fromMode)
+        const sid = getSessionId(tab.id)
+        await trpcClient.pty.kill.mutate({ sessionId: sid })
+        await new Promise((r) => setTimeout(r, 100))
+        markSkipCache(sid)
+        remountPane(tab.id)
+      }
+    )
+    const tabName = useCallback(
+      (tabId: string): string => {
+        const tab = tabs.find((t) => t.id === tabId)
+        if (!tab) return tabId === taskId ? 'Main' : 'A closed'
+        return tab.isMain ? 'Main' : getTabLabel(tab, terminalTitles.get(tab.id))
+      },
+      [tabs, taskId, terminalTitles]
+    )
+
     // Build pane props for the active group
     const paneProps = useMemo(() => {
       if (!activeGroup) return []
@@ -449,13 +520,16 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
           cwd,
           conversationId: tab.isMain ? conversationId : undefined,
           existingConversationId: tab.isMain ? existingConversationId : undefined,
-          // Gate only the main tab; splits/extra panes spawn fresh by design.
-          conversationHydrated: tab.isMain ? conversationHydrated : true,
           supportsSessionId: tab.isMain ? supportsSessionId : undefined,
           providerFlags: tab.isMain ? providerFlags : undefined,
           executionContext,
           isTemporary,
-          onStartFresh: tab.isMain ? onStartFresh : undefined,
+          onStartFresh: tab.isMain
+            ? onStartFresh
+            : isSecondaryAgentTab(tab) && onTabSessionReset
+              ? () => void resetTabSession(tab)
+              : undefined,
+          remountKey: paneEpochs[tab.id] ?? 0,
           onReady: tab.isMain ? handleTerminalReady : undefined,
           onFirstInput: tab.isMain ? onFirstInput : undefined,
           onRetry: tab.isMain ? onRetry : undefined,
@@ -475,7 +549,11 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
               }
             : null,
           onRename: tab.isMain ? null : () => startTabRename(tab.id),
-          onResetSession: tab.isMain && onMainReset ? onMainReset : null,
+          onResetSession: tab.isMain
+            ? (onMainReset ?? null)
+            : isSecondaryAgentTab(tab) && onTabSessionReset
+              ? () => void resetTabSession(tab)
+              : null,
           onHandoff: tab.isMain && onMainHandoff ? onMainHandoff : null,
           onShowSessions: showSessions
         }
@@ -487,7 +565,6 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       taskId,
       conversationId,
       existingConversationId,
-      conversationHydrated,
       supportsSessionId,
       providerFlags,
       executionContext,
@@ -496,6 +573,9 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       handleTerminalReady,
       onFirstInput,
       onRetry,
+      onTabSessionReset,
+      resetTabSession,
+      paneEpochs,
       handleSplitGroup,
       createTab,
       closeGroup,
@@ -565,12 +645,20 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             {overlay}
           </div>
         </div>
-        {canShowSessions && sessionsOpen && mainMode && (
+        {canShowSessions && sessionsOpen && sessionsTab && sessionsMode && (
           <SessionsSidebar
+            key={sessionsTab.id}
             taskId={taskId}
-            agentId={mainMode}
+            agentId={sessionsMode}
+            tabId={sessionsTab.id}
+            tabName={tabName}
             onToggle={toggleSessions}
-            onSwitch={onSwitchSession}
+            onSwitch={
+              sessionsTab.isMain
+                ? onSwitchSession
+                : (conversationId, fromMode) =>
+                    switchTabSession(sessionsTab, conversationId, fromMode)
+            }
             onDelete={onDeleteSession}
           />
         )}

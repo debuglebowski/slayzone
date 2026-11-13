@@ -57,6 +57,13 @@ package. `bearer`, `jwt`, and `organization` still come from
   `mfa`), identity keyed `<oid>.<tid>` on the `account` row, role written from
   the app role at every sign-in. `loadEntraClientCredential({ certPath,
   keyPath })` reads the PEM pair.
+- `sso` may also be a generic OpenID issuer (`{ issuer, clientId, clientAuth }`,
+  discovery, `private_key_jwt` or `client_secret_basic`; provider id `oidc`); an Entra
+  issuer is read as the Entra setup. `sso.idpRoles` turns on the IdP-role mode
+  (`src/server/idp-roles.ts`, the shared `@normain/idp-role-contract`): roles from the
+  provider, freshness gate in `verifySession` / `authorizeExternalSession` /
+  `authorizeDelegatedHuman`, activation epochs, issuance binding, revocation. Operator
+  guide: `docs/hub-sso-roles.md`. Test support for other packages: `./testing`.
 - `createHubAuth({ ..., enablePassword: false })` → no password sign-in, sign-up,
   change or reset (`src/server/password.ts`: better-auth's email + password off,
   its password endpoints 404), and `createHubUser` refuses

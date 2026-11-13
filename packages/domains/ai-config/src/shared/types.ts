@@ -225,6 +225,8 @@ export interface ProjectMcpServer {
 }
 
 export interface WriteMcpServerInput {
+  /** The path scope (§9 Phase 7c): whose MCP config this is. */
+  projectId: string
   projectPath: string
   provider: McpTarget
   serverKey: string
@@ -232,6 +234,8 @@ export interface WriteMcpServerInput {
 }
 
 export interface RemoveMcpServerInput {
+  /** The path scope (§9 Phase 7c): whose MCP config this is. */
+  projectId: string
   projectPath: string
   provider: McpTarget
   serverKey: string

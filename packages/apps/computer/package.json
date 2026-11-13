@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/computer",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/main.ts",
@@ -38,7 +38,7 @@
     "node-datachannel": "^0.33.4",
     "node-pty": "^1.1.0",
     "ws": "^8.22.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@slayzone/build-guards": "workspace:*",
@@ -47,7 +47,7 @@
     "@slayzone/trpc-server": "workspace:*",
     "@trpc/client": "^11.19.0",
     "@types/node": "^24.19.2",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
     "vitest": "^5.0.5"
   }

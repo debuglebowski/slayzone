@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/task",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -18,7 +18,9 @@
     "./client/TaskPanels": "./src/client/task-detail/TaskPanels.ts",
     "./client/taskSessionsSource": "./src/client/agent-sessions-source.ts",
     "./client/taskDetailCache": "./src/client/taskDetailCache.ts",
+    "./client/deleteTaskResult": "./src/client/deleteTaskResult.ts",
     "./client/taskScopedQueries": "./src/client/taskScopedQueries.ts",
+    "./client/useTaskPath": "./src/client/useTaskPath.ts",
     "./client/TaskShell": "./src/client/TaskShell.tsx",
     "./client/TerminalFirstShell": "./src/client/TerminalFirstShell.tsx",
     "./client/TaskPaneEventCatcher": "./src/client/TaskPaneEventCatcher.tsx",
@@ -38,6 +40,7 @@
     "@milkdown/core": "^7.22.3",
     "@slayzone/agent-turns": "workspace:*",
     "@slayzone/computers": "workspace:*",
+    "@slayzone/content-erasure": "workspace:*",
     "@slayzone/diagnostics": "workspace:*",
     "@slayzone/dialogs": "workspace:*",
     "@slayzone/editor": "workspace:*",
@@ -67,7 +70,7 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.61.0",
     "react-hook-form": "^7.90.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "electron": "^45.0.0",

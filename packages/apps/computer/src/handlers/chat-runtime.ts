@@ -1,3 +1,10 @@
+import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import { isAbsolute, join, resolve } from 'node:path'
+import {
+  DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
+  resolveWorktreeBasePathTemplate
+} from '@slayzone/worktrees/shared'
+import { createComputerFaults } from '../item-faults'
 import {
   chatSavedSummary,
   type AgentEvent,
@@ -11,8 +18,13 @@ import { chatTestRequestSchema, handleChatTesting } from './chat-testing'
 import {
   createComputerChatRuntime,
   computerArtifactRequestSchema,
-  type ChatBootstrap
+  type ChatBootstrap,
+  type DataImportKinds,
+  isStorageOnlyChatOwner,
+  scopeBounds,
+  usageCursorStore
 } from '@slayzone/chat-runtime/server'
+import type { WirePathScope } from '@slayzone/platform/path-scope'
 import {
   chatIdentitySchema,
   chatBootstrapSchema,
@@ -20,7 +32,11 @@ import {
   chatRouteSchema,
   chatAttachmentSchema,
   chatTransferManifestSchema,
-  chatTabTransitionSchema
+  chatTabTransitionSchema,
+  dataImportRequestSchema,
+  ledgerRequestSchema,
+  turnsRequestSchema,
+  taskPathsRequestSchema
 } from '@slayzone/chat-runtime/shared'
 import {
   createRoutingChatBackend,
@@ -39,9 +55,21 @@ import {
   workspaceCaptureResultSchema,
   projectNotPlacedError
 } from '@slayzone/computer-transport/shared'
-import { judgePath, spawnCwd } from '../path-jail'
-import { createProcHandlers } from './proc'
+import {
+  judgePath,
+  outsideScopeJail,
+  runInScopeJail,
+  type ScopeJail,
+  scopedSpawnCwd,
+  spawnCwd
+} from '../path-jail'
+import { createProcHandlers, type ProcHandlerOptions } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
+import {
+  createSessionMoveFiles,
+  sessionMoveFileRefSchema,
+  type SessionMoveFiles
+} from './session-move-files'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
 import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
@@ -91,7 +119,16 @@ export interface DirectChatService {
     onEnd: (reason: 'epoch' | 'deleted' | 'disposed') => void
   ): (() => void) | null
 }
+/**
+ * One hub's computer-only task data, as direct-link clients read it (a `task` grant).
+ * The same reads the hub relays (`taskData`), answered from this computer's store.
+ */
+export interface DirectTaskDataService {
+  read(taskId: string, request: unknown): Promise<unknown>
+}
 import type { ProjectPathStore } from '../project-paths'
+import { createTurnGitIo } from './turn-git-io'
+import { createConversationHealIo } from './conversation-heal-io'
 import type { SpawnAdmission } from '../spawn-admission'
 
 const requestSchema = z.discriminatedUnion('kind', [
@@ -132,6 +169,20 @@ const requestSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('artifact.invoke'), value: computerArtifactRequestSchema }),
   z.object({ kind: z.literal('inventory') }),
+  /** Hub-held computer-only data handed to this computer once (robustness plan §9). */
+  z.object({ kind: z.literal('data.import'), value: dataImportRequestSchema }),
+  /** One operation on this computer's agent-session ledger (robustness plan §9, P0). */
+  z.object({ kind: z.literal('ledger'), value: ledgerRequestSchema }),
+  /** One agent-turn operation (record a boundary, list a checkout's turns; §9, P0). */
+  z.object({ kind: z.literal('turns'), value: turnsRequestSchema }),
+  /** One task-path operation (set / inherit / clear / get; §9, P0, Phase 7a). */
+  z.object({ kind: z.literal('taskPaths'), value: taskPathsRequestSchema }),
+  /** A read of one task's computer-only data, relayed for a client (`DirectTaskDataService`). */
+  z.object({
+    kind: z.literal('taskData'),
+    taskId: z.string().min(1).max(200),
+    request: z.unknown()
+  }),
   z.object({ kind: z.literal('metadata.snapshot'), id: z.string() }),
   z.object({ kind: z.literal('backup.list') }),
   z.object({ kind: z.literal('backup.create'), id: z.string().uuid() }),
@@ -151,6 +202,15 @@ const requestSchema = z.discriminatedUnion('kind', [
     })
   }),
   z.object({ kind: z.literal('archive.list') }),
+  z.object({ kind: z.literal('faults.list') }),
+  z.object({
+    kind: z.enum(['faults.retry', 'faults.discard']),
+    ref: z.object({
+      source: z.enum(['ledger', 'quarantine']),
+      pass: z.string().min(1).max(128),
+      key: z.string().min(1).max(512)
+    })
+  }),
   z.object({ kind: z.literal('folders.inventory'), after: z.number().int().nonnegative() }),
   z.object({
     kind: z.literal('folders.delete'),
@@ -191,6 +251,12 @@ const requestSchema = z.discriminatedUnion('kind', [
     revision: z.number().int().positive()
   }),
   z.object({
+    kind: z.literal('task.erase'),
+    jobId: z.string().uuid(),
+    taskId: z.string().min(1).max(200),
+    revision: z.number().int().positive()
+  }),
+  z.object({
     kind: z.literal('migration.checkpoint'),
     identity: chatIdentitySchema,
     migrationId: z.string(),
@@ -223,6 +289,13 @@ const requestSchema = z.discriminatedUnion('kind', [
     ]),
     args: z.array(z.unknown()),
     route: chatRouteSchema.optional(),
+    /** The task a folder list is for when its chat is not open yet (§9 Phase 7c). */
+    scope: z
+      .object({
+        taskId: z.string().min(1).max(200),
+        projectId: z.string().min(1).max(200).nullable()
+      })
+      .optional(),
     operationId: z.string().optional()
   }),
   z.object({ kind: z.literal('sessions') }),
@@ -245,6 +318,63 @@ const requestSchema = z.discriminatedUnion('kind', [
     data: z.string().max(350000)
   }),
   z.object({ kind: z.literal('transfer.finish'), id: z.string() }),
+  // A task's sessions leaving for another hub (slice 4a): this computer hands out its
+  // chats as transfers + its ledger; the target takes them with transfer.* above.
+  z.object({
+    kind: z.literal('sessionMove.export'),
+    moveId: z.string().min(1).max(80),
+    taskId: z.string().min(1).max(200)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.read'),
+    moveId: z.string().min(1).max(80),
+    conversationId: z.string().min(1).max(500),
+    offset: z.number().int().nonnegative(),
+    length: z.number().int().min(1).max(262144)
+  }),
+  z.object({ kind: z.literal('sessionMove.discard'), moveId: z.string().min(1).max(80) }),
+  // The task's sessions are kept elsewhere now: this computer lets go of them (no tombstone).
+  z.object({ kind: z.literal('sessionMove.forget'), taskId: z.string().min(1).max(200) }),
+  // The files beside the chat (Claude transcripts, terminal scrollback), copied like a
+  // move's artifact files.
+  z.object({
+    kind: z.literal('sessionMove.files'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileRead'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    ref: sessionMoveFileRefSchema,
+    offset: z.number().int().nonnegative(),
+    length: z.number().int().min(1).max(262144)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileMissing'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    entries: z
+      .array(
+        z.object({
+          ref: sessionMoveFileRefSchema,
+          size: z.number().int().nonnegative(),
+          hash: z.string().regex(/^[a-f0-9]{64}$/)
+        })
+      )
+      .max(10_000)
+  }),
+  z.object({
+    kind: z.literal('sessionMove.fileWrite'),
+    taskId: z.string().min(1).max(200),
+    projectId: z.string().min(1).max(200),
+    ref: sessionMoveFileRefSchema,
+    offset: z.number().int().nonnegative(),
+    data: z.string().max(350000),
+    complete: z
+      .object({ size: z.number().int().nonnegative(), hash: z.string().regex(/^[a-f0-9]{64}$/) })
+      .optional()
+  }),
   z.object({
     kind: z.literal('migration.activate'),
     id: z.string(),
@@ -271,12 +401,29 @@ const requestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('invoke'), value: z.unknown() }),
   z.object({ kind: z.literal('inspect'), id: z.string().min(1) }),
   z.object({ kind: z.literal('pendingMetadata') }),
+  z.object({ kind: z.literal('task.lifecycles') }),
   z.object({
     kind: z.literal('ackMetadata'),
     id: z.string().min(1),
     operationId: z.string().min(1)
   })
 ])
+/**
+ * Where a project's worktrees are made, from its folder HERE (B1): the default
+ * `../<folder name>-workspaces` always, and the hub's configured `worktree_base_path`
+ * template when the scope carries one (resolved against this folder; a relative one
+ * is project-relative). Absolute folders only.
+ */
+export function projectWorktreeBases(folder: string, scope: WirePathScope): string[] {
+  const templates = [DEFAULT_WORKTREE_BASE_PATH_TEMPLATE]
+  if (scope.kind === 'project' && scope.worktreeBase) templates.push(scope.worktreeBase)
+  const bases = templates
+    .map((t) => resolveWorktreeBasePathTemplate(t, folder))
+    .filter((b) => b && isAbsolute(b))
+    .map((b) => resolve(b))
+  return [...new Set(bases)]
+}
+
 /** A per-hub runtime. Raw subprocess output never leaves this process. */
 export function createChatRuntimeHandlers(opts: {
   ctx: HandlerContext
@@ -285,12 +432,25 @@ export function createChatRuntimeHandlers(opts: {
   computerId: () => string | null
   getProjectPaths: () => ProjectPathStore | null
   admission?: SpawnAdmission
+  /** Tests only: starts provider processes (default: `child_process.spawn`). */
+  spawnProcess?: ProcHandlerOptions['spawnProcess']
   hasTaskWork?(taskId: string): boolean
   stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
+  /** Tests only: the kinds of hub data `data.import` accepts (default: the built-in ones). */
+  dataImports?: DataImportKinds
 }) {
   let closed = false,
     resetting = false
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
+  let moveFilesInstance: SessionMoveFiles | null = null
+  /** A moved task's session files here (Claude transcripts, scrollback): see session-move-files.ts. */
+  const moveFiles = (_r: ReturnType<typeof createComputerChatRuntime>): SessionMoveFiles =>
+    (moveFilesInstance ??= createSessionMoveFiles({
+      stateDir: opts.stateDir,
+      hubScope: opts.hubScope,
+      projectFolder: (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
+      sessionIds: (taskId) => runtime().sessionMoves.cliSessionIds(taskId)
+    }))
   let localProcs: ReturnType<typeof createProcHandlers> | null = null
   const directFanout = createDirectChatFanout()
   /** Which tabs' full events this hub wants (`relay.watch`); all until it says. */
@@ -327,7 +487,14 @@ export function createChatRuntimeHandlers(opts: {
         }
       },
       opts.getProjectPaths,
-      { admission: opts.admission }
+      {
+        admission: opts.admission,
+        spawnProcess: opts.spawnProcess,
+        assertTaskActive: (taskId) => {
+          if (instance && instance.storage.taskLifecycle(taskId).state !== 'active')
+            throw new Error('Task is paused or deleted')
+        }
+      }
     )
     localProcs = procs
     const gateway: RoutingGateway = {
@@ -394,6 +561,9 @@ export function createChatRuntimeHandlers(opts: {
       hubScope: opts.hubScope,
       computerId,
       hasExternalTaskWork: opts.hasTaskWork,
+      ...(opts.dataImports ? { dataImports: opts.dataImports } : {}),
+      healIo: createConversationHealIo(opts.ctx, opts.getProjectPaths),
+      turnGit: createTurnGitIo(opts.ctx),
       sessionReader: async (input) =>
         session[HubToComputerMethods.claudeSessionRead](input) as Promise<{
           found: boolean
@@ -439,6 +609,7 @@ export function createChatRuntimeHandlers(opts: {
       publish('exit', { tabId, sessionId, code, signal })
     )
     instance.events.on('threads-changed', (tabId) => publish('threads-changed', { tabId }))
+    instance.events.on('sessions-changed', (tabId) => publish('sessions-changed', { tabId }))
     instance.events.on('pinned-messages-changed', (tabId) =>
       publish('pinned-messages-changed', { tabId })
     )
@@ -448,6 +619,82 @@ export function createChatRuntimeHandlers(opts: {
     )
     return instance
   }
+  const faults = createComputerFaults({
+    runtime,
+    runtimeDir: join(opts.stateDir, 'computer-runtime'),
+    hubUrl: opts.ctx.config.hubUrl
+  })
+  /**
+   * The folders of a project's tasks held here, for its scope (B1). A project scope
+   * needs no chat store: with none (no computer identity yet, shutting down) no
+   * task's folder is held here, and one that cannot be read narrows the scope to the
+   * project's own folders — it never fails a project's request.
+   */
+  function projectTaskRoots(projectId: string): { own: string[]; others: string[] } {
+    const none = { own: [], others: [] }
+    if (closed || resetting || (!instance && !opts.computerId())) return none
+    try {
+      return runtime().taskPaths.ofProject(projectId)
+    } catch (err) {
+      opts.ctx.log('project scope: task folders unreadable', {
+        projectId,
+        error: err instanceof Error ? err.message : String(err)
+      })
+      return none
+    }
+  }
+  /** What a request's path scope may touch here (§9 Phase 7b): see `scopeBounds`. */
+  function boundsOf(scope: WirePathScope) {
+    return scopeBounds(
+      // Lazy: each part reads this hub's chat store only when the scope needs it.
+      {
+        get: (taskId) => runtime().taskPaths.get(taskId),
+        others: (taskId) => runtime().taskPaths.others(taskId),
+        ofProject: (projectId) => projectTaskRoots(projectId)
+      },
+      scope,
+      (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
+      () => opts.getProjectPaths()?.list() ?? [],
+      (_projectId, folder) => projectWorktreeBases(folder, scope)
+    )
+  }
+  /** The jail of a task's / project's own folders here. */
+  function scopeJail(scope: WirePathScope): ScopeJail {
+    const bounds = boundsOf(scope)
+    return {
+      label: scope.kind === 'task' ? `task ${scope.taskId}` : `project ${scope.projectId}`,
+      roots: bounds.roots,
+      excluded: bounds.excluded,
+      foreign: bounds.foreign,
+      hostReads: scope.hostReads === true
+    }
+  }
+  /**
+   * The task a chat conversation belongs to, as a path scope (§9 Phase 7c): its
+   * agent starts, and its folder lists run, inside that task's own folders here.
+   */
+  function conversationScope(
+    r: ReturnType<typeof runtime>,
+    conversationId: string
+  ): WirePathScope | null {
+    const owner = r.storage.conversation(conversationId)
+    if (!owner) return null
+    const bootstrap = r.local.get<ChatBootstrap>(owner.identity.tabId, 'settings', 'bootstrap')
+    return { kind: 'task', taskId: owner.identity.taskId, projectId: bootstrap?.projectId ?? null }
+  }
+  /** `cwd` judged inside the conversation's task folders; refused without one. */
+  function judgeChatPath(
+    r: ReturnType<typeof runtime>,
+    conversationId: string,
+    candidate: string
+  ): string {
+    const scope = conversationScope(r, conversationId)
+    if (!scope) throw new Error('Chat conversation is not on this computer')
+    return runInScopeJail(scopeJail(scope), () =>
+      judgePath(candidate, opts.ctx.config.allowedRoots)
+    )
+  }
+
   async function request(raw: unknown): Promise<unknown> {
     const req = requestSchema.parse(raw)
     if (req.kind.startsWith('test.') && process.env.PLAYWRIGHT !== '1')
@@ -485,27 +732,93 @@ export function createChatRuntimeHandlers(opts: {
       case 'hook.capture':
         r.captureHook(req.hook)
         return { ok: true }
-      case 'inventory':
-        return r.storage
-          .inventory()
-          .filter((o) => !o.identity.id.startsWith('__'))
-          .map((o) => ({
-            ...o,
-            hasConversationContent: r.storage.hasConversationContent(o.identity.id),
-            bootstrapRevision:
-              r.storage.getRecord<ChatBootstrap>(o.identity.id, 'settings', 'bootstrap')
-                ?.revision ?? 0,
-            inbox: !!r.storage.getRecord(o.identity.id, 'settings', 'inbox'),
-            tabTransitions: r.storage
-              .records(o.identity.id, 'settings')
-              .filter((record) => record.id.startsWith('tab-transition:'))
-              .map((record) => record.value),
-            lifecycle: r.storage.taskLifecycle(o.identity.taskId),
-            metadataCounter:
-              r.storage.getRecord<number>(o.identity.id, 'settings', 'metadata-counter') ?? 0,
-            historySeq: r.storage.nextSeq(o.identity.id) - 1,
-            stateVersion: r.storage.stateVersion(o.identity.taskId)
-          }))
+      case 'inventory': {
+        // One conversation whose stored state cannot be read is reported as
+        // `unreadable` (and recorded in item_faults): the hub leaves it as is and
+        // still recovers every other conversation on this computer.
+        const entries: Array<Record<string, unknown>> = []
+        forEachIsolatedSync(
+          r.storage.inventory().filter((o) => !o.identity.id.startsWith('__')),
+          {
+            pass: 'computer.chat-inventory',
+            key: (o) => o.identity.id,
+            taskId: (o) => o.identity.taskId,
+            ledger: r.storage.faults,
+            ignoreGate: true,
+            isFatal: isStorageFatal
+          },
+          (o) => {
+            try {
+              entries.push({
+                ...o,
+                hasConversationContent: r.storage.hasConversationContent(o.identity.id),
+                bootstrapRevision:
+                  r.storage.getRecord<ChatBootstrap>(o.identity.id, 'settings', 'bootstrap')
+                    ?.revision ?? 0,
+                inbox: !!r.storage.getRecord(o.identity.id, 'settings', 'inbox'),
+                tabTransitions: r.storage
+                  .records(o.identity.id, 'settings')
+                  .filter((record) => record.id.startsWith('tab-transition:'))
+                  .map((record) => record.value),
+                lifecycle: r.storage.taskLifecycle(o.identity.taskId),
+                metadataCounter:
+                  r.storage.getRecord<number>(o.identity.id, 'settings', 'metadata-counter') ?? 0,
+                historySeq: r.storage.nextSeq(o.identity.id) - 1,
+                stateVersion: r.storage.stateVersion(o.identity.taskId),
+                storeId: r.storage.storeId()
+              })
+            } catch (error) {
+              entries.push({ ...o, unreadable: true })
+              throw error
+            }
+          }
+        )
+        return entries
+      }
+      case 'data.import':
+        return r.taskData.importBatch(req.value)
+      case 'ledger':
+        return r.ledger.handle(req.value)
+      case 'turns': {
+        const value = req.value
+        if (value.op !== 'record' && value.op !== 'list') return r.turns.handle(value)
+        // The task's checkout is this computer's to know (§9 Phase 7c/7d): its worktree,
+        // else its project's folder here; a given path is judged against its folders.
+        const { taskId, projectId } = value
+        const jail = scopeJail({ kind: 'task', taskId, projectId })
+        const repoPath = runInScopeJail(jail, () => {
+          const own =
+            value.repoPath ??
+            r.taskPaths.get(taskId)?.worktreePath ??
+            (projectId ? opts.getProjectPaths()?.get(projectId)?.path : undefined)
+          return own ? judgePath(own, opts.ctx.config.allowedRoots) : null
+        })
+        // No checkout here: nothing to snapshot / list (skipped quietly, as on the hub).
+        if (!repoPath)
+          return value.op === 'record' ? { recorded: false } : { worktreePath: '', rows: [] }
+        return r.turns.handle({ ...value, repoPath })
+      }
+      case 'taskPaths': {
+        const value = req.value
+        if (value.op === 'set') {
+          // The hub keeps no path (§9 Phase 7e): a path set for a task is judged HERE.
+          // It is the task's DECLARED root (B3) — a folder the user chose (a custom
+          // folder outside the project, one another task already uses, one inside
+          // another project's folder; a worktree assigned from the Worktrees tab, as a
+          // subtask shares its parent's) or the worktree just made for it — so it is
+          // judged by this computer's machine bound only: inside its allowed roots, no
+          // link out of them, never its own state. Reaching another task's worktree
+          // through the task's scope stays refused (`scopeBounds`); declaring one is
+          // the user's choice. Outside any request scope, whatever the hub sent.
+          outsideScopeJail(() => {
+            for (const path of [value.worktreePath, value.baseDir])
+              if (path) judgePath(path, opts.ctx.config.allowedRoots)
+          })
+        }
+        return r.taskPaths.handle(value)
+      }
+      case 'taskData':
+        return r.taskData.read(req.taskId, req.request)
       case 'metadata.snapshot':
         return r.artifacts.metadata(req.id)
       case 'artifact.invoke':
@@ -530,6 +843,14 @@ export function createChatRuntimeHandlers(opts: {
       case 'backup.configure':
         r.backups.configure(req.settings)
         return null
+      case 'faults.list':
+        return faults.list()
+      case 'faults.retry':
+        faults.retry(req.ref)
+        return { ok: true }
+      case 'faults.discard':
+        faults.discard(req.ref)
+        return { ok: true }
       case 'archive.list':
         return r.backups.listArchives()
       case 'folders.inventory':
@@ -557,11 +878,18 @@ export function createChatRuntimeHandlers(opts: {
           data: r.backups.attachment(req.archiveId, req.conversationId, req.ref).toString('base64')
         }
 
+      case 'task.lifecycles':
+        return r.storage.taskLifecycles()
       case 'task.lifecycle': {
         const applied = await r.applyTaskLifecycle(req.taskId, req.state, req.revision)
         if (applied.state !== 'active') await opts.stopTask?.(req.taskId, applied.state)
         return applied
       }
+      case 'task.erase':
+        return r.eraseTask(req.taskId, req.revision, async () => {
+          await opts.stopTask?.(req.taskId, 'deleted')
+          await localProcs?.stopTask(req.taskId)
+        })
       case 'migration.checkpoint':
         return r.storage.migrationCheckpoint(req.identity, req.migrationId, req.candidate)
       case 'prompts':
@@ -604,14 +932,20 @@ export function createChatRuntimeHandlers(opts: {
           operationId: req.operationId ?? randomUUID()
         })
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(req.method)) {
-          const owner = r.storage.conversation(route.id),
+          // A folder list runs inside one task's own folders (§9 Phase 7c): the
+          // conversation's, else the task the hub named for a chat not opened yet.
+          const owner = req.route ? r.storage.conversation(route.id) : null,
             bootstrap = owner
               ? r.local.get<ChatBootstrap>(owner.identity.tabId, 'settings', 'bootstrap')
               : null
-          call.args[0] = judgePath(
-            String(call.args[0] || bootstrap?.cwd || ''),
-            opts.ctx.config.allowedRoots
-          )
+          const candidate = String(call.args[0] || bootstrap?.cwd || '')
+          if (owner) call.args[0] = judgeChatPath(r, route.id, candidate)
+          else if (req.scope)
+            call.args[0] = runInScopeJail(
+              scopeJail({ kind: 'task', taskId: req.scope.taskId, projectId: req.scope.projectId }),
+              () => judgePath(candidate, opts.ctx.config.allowedRoots)
+            )
+          else throw new Error(`${req.method} names no task; refusing to list a folder`)
         }
         return r.invoke(call)
       }
@@ -620,8 +954,41 @@ export function createChatRuntimeHandlers(opts: {
         return r.transfers.begin(req.manifest)
       case 'transfer.chunk':
         return r.transfers.chunk(req.id, req.offset, Buffer.from(req.data, 'base64'))
-      case 'transfer.finish':
+      case 'transfer.finish': {
+        // A move's copy replaces this store's older one of the same chat: the tab must
+        // not hold the old conversation in a live session.
+        const moving = r.transfers.manifestOf(req.id)
+        if (moving?.header.move) await r.transport.removeSession(moving.header.identity.tabId)
         return r.transfers.finish(req.id)
+      }
+      case 'sessionMove.export':
+        return r.sessionMoves.exportTask(req.moveId, req.taskId)
+      case 'sessionMove.read':
+        return { data: r.sessionMoves.read(req.moveId, req.conversationId, req.offset, req.length) }
+      case 'sessionMove.discard':
+        r.sessionMoves.discard(req.moveId)
+        return { ok: true }
+      case 'sessionMove.forget': {
+        // Live sessions first, so nothing writes into what is being removed.
+        for (const owner of r.storage.listForTask(req.taskId)) {
+          await r.transport.removeSession(owner.identity.tabId).catch(() => undefined)
+          directFanout.end(owner.identity.tabId, 'deleted')
+        }
+        const tabs = r.sessionMoves.forgetTask(req.taskId)
+        r.transfers.removeTask(req.taskId)
+        r.attachments.collectGarbage()
+        moveFiles(r).forgetScrollback(req.taskId)
+        r.storage.checkpoint()
+        return { forgotten: tabs.length }
+      }
+      case 'sessionMove.files':
+        return { files: await moveFiles(r).list(req.taskId, req.projectId) }
+      case 'sessionMove.fileRead':
+        return moveFiles(r).read(req.taskId, req.projectId, req.ref, req.offset, req.length)
+      case 'sessionMove.fileMissing':
+        return { missing: moveFiles(r).missing(req.taskId, req.projectId, req.entries) }
+      case 'sessionMove.fileWrite':
+        return moveFiles(r).write(req)
       case 'migration.verify':
         return { missing: r.attachments.missing(req.id) }
       case 'migration.prepared': {
@@ -706,11 +1073,20 @@ export function createChatRuntimeHandlers(opts: {
 
       case 'bootstrap': {
         const value = req.value as ChatBootstrap
-        const candidate =
-          value.cwd ||
-          (value.projectId ? opts.getProjectPaths()?.get(value.projectId)?.path : undefined)
-        if (!candidate && value.projectId) throw projectNotPlacedError(value.projectId)
-        const cwd = spawnCwd(candidate, opts.ctx.config.allowedRoots)
+        // The agent starts inside its task's own folders here (§9 Phase 7c): the
+        // hub's cwd is judged against them, none means the task's own folder.
+        // A storage-only owner (task content, artifact store) never runs an agent:
+        // it opens with no folder, and any agent start there is refused below.
+        const projectId = value.projectId
+        const cwd =
+          !value.cwd && isStorageOnlyChatOwner(value.identity)
+            ? ''
+            : scopedSpawnCwd(
+                scopeJail({ kind: 'task', taskId: value.identity.taskId, projectId }),
+                value.cwd || undefined,
+                opts.ctx.config.allowedRoots,
+                projectId ? () => projectNotPlacedError(projectId) : undefined
+              )
         r.bootstrap({ ...value, cwd })
         return { ok: true, identity: r.storage.conversation(value.identity.id)?.identity }
       }
@@ -719,23 +1095,28 @@ export function createChatRuntimeHandlers(opts: {
         const first = call.args[0]
         if (first && typeof first === 'object' && 'cwd' in first) {
           const o = first as { cwd: string }
-          if (o.cwd) o.cwd = judgePath(o.cwd, opts.ctx.config.allowedRoots)
+          if (o.cwd) o.cwd = judgeChatPath(r, call.route.id, o.cwd)
           else {
             const i = r.storage.conversation(call.route.id)?.identity
             const b = i ? r.local.get<ChatBootstrap>(i.tabId, 'settings', 'bootstrap') : null
-            if (b) o.cwd = b.cwd
+            if (b?.cwd) o.cwd = b.cwd
+            else {
+              // No folder recorded (a storage-only owner): the task's own folder
+              // here, else refused — an agent never starts unconfined.
+              const scope = conversationScope(r, call.route.id)
+              if (!scope) throw new Error('Chat conversation is not on this computer')
+              o.cwd = scopedSpawnCwd(scopeJail(scope), undefined, opts.ctx.config.allowedRoots)
+            }
           }
         }
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(call.method))
-          call.args[0] = judgePath(String(first), opts.ctx.config.allowedRoots)
+          call.args[0] = judgeChatPath(r, call.route.id, String(first))
         return r.invoke(call)
       }
       case 'inspect':
         return r.storage.conversation(req.id)
       case 'pendingMetadata':
-        return r.storage
-          .findRecords('settings', undefined, { idPrefix: 'metadata:', limit: 500 })
-          .map((r) => r.value)
+        return r.local.pendingMetadata(500)
       case 'ackMetadata': {
         const owner = r.storage.conversation(req.id)
         if (!owner) throw new Error('Unknown conversation')
@@ -797,9 +1178,16 @@ export function createChatRuntimeHandlers(opts: {
     }
   }
 
+  const directTaskData: DirectTaskDataService = {
+    async read(taskId, request) {
+      return runtime().taskData.read(taskId, request)
+    }
+  }
+
   return {
     request,
     direct,
+    directTaskData,
     assertTaskActive(taskId: string) {
       const r = runtime()
       if (r.storage.taskLifecycle(taskId).state !== 'active')
@@ -808,6 +1196,19 @@ export function createChatRuntimeHandlers(opts: {
         throw new Error('Task chat migration is pending')
     },
     captureHook: (hook: ResolvedAgentHook) => runtime().captureHook(hook),
+    /** Which task ran each provider session here (this hub's session ledger). */
+    sessionTasks: (conversationIds: string[]) => runtime().ledger.sessionTasks(conversationIds),
+    /** The task whose worktree each folder is, from this hub's task paths (§9 7c). */
+    worktreeTasks: (paths: string[]) => runtime().taskPaths.byWorktree(paths),
+    /**
+     * What a request's path scope may touch here (§9 Phase 7b): the task's or
+     * project's own folders from this hub's store, other tasks' carved out.
+     */
+    scopeBounds: boundsOf,
+    /** The jail of a request's path scope: the task's / project's own folders here. */
+    scopeJail,
+    /** This hub's usage-log read offsets, kept here only (robustness plan §9, hub v209). */
+    usageCursors: () => usageCursorStore(runtime().storage),
     async close() {
       if (closed) return
       closed = true

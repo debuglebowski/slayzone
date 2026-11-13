@@ -37,6 +37,8 @@ export type Step =
   | { emitRaw: string }
   | { stderr: string }
   | { sleep: number }
+  /** Block until the test creates this file. An interrupt aborts the wait. */
+  | { waitForFile: string }
   /** Block until the turn is interrupted or the process is killed. */
   | { hang: true }
   /**
@@ -328,6 +330,7 @@ export const step = {
     gapMs === undefined ? { emitSplit: event } : { emitSplit: event, gapMs },
   stderr: (text: string): Step => ({ stderr: text }),
   sleep: (ms: number): Step => ({ sleep: ms }),
+  waitForFile: (file: string): Step => ({ waitForFile: file }),
   hang: (): Step => ({ hang: true }),
   exit: (code: number | null, signal?: NodeJS.Signals): Step =>
     signal ? { exit: code, signal } : { exit: code },

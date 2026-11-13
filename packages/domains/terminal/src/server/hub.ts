@@ -48,7 +48,12 @@ export {
   setPtyDeps
 } from './pty-router-deps'
 export { createDbChatDataOps } from './runtime/chat-data-ops'
-export { defaultConversationRegistry, releaseConversation } from './runtime/live-conversations'
+export {
+  defaultConversationRegistry,
+  releaseConversation,
+  liveConversationSession,
+  conversationInOtherTabMessage
+} from './runtime/live-conversations'
 export {
   locateClaudeTranscripts,
   setClaudeTranscriptLocator
@@ -83,6 +88,7 @@ export {
   onTaskReachedTerminal as runtimeOnTaskReachedTerminal,
   setConversationHealer,
   setConversationResolver,
+  SessionLedgerUnreadableError,
   setIdleCloseConfigGetter,
   setAgentStateTabRecorder as setPtyAgentStateTabRecorder,
   setPtyEnricher,
@@ -110,6 +116,7 @@ export {
   clearWindowTabCounts,
   createDbWarmPoolDataOps,
   initWarmProcessManager,
+  reconcileWarmPool,
   reapOrphanWarms,
   reserveWarmTaskId,
   teardownAllWarm,
@@ -117,8 +124,14 @@ export {
 } from './runtime/warm-process-manager'
 export {
   onTaskReachedTerminal,
-  setTaskAgentsStopper
+  setTaskAgentsStopper,
+  stopTaskAgents
 } from './task-events'
+export {
+  isMidReplyState,
+  midReplySessionIds,
+  type TaskAgentSessionEntry
+} from './task-agent-activity'
 export {
   type AppUsageMounts,
   appUsageRouter

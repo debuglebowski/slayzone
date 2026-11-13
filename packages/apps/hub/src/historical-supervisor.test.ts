@@ -86,6 +86,8 @@ async function historicalBin(ref: string): Promise<string> {
   return result.outputFiles[0].text
 }
 
+// Run the actual historical supervisor: current-code mocks cannot protect users upgrading from this release. Real build/process/socket timing is intentional. A rare watchdog timeout during deliberate machine oversubscription is acceptable only as a capacity signal; rerun isolated and inspect captured stage output. Busy-job preservation, host epoch/PID change and one enrollment remain mandatory.
+// (Applies to both cases: 6bd86bfd0^ and ed9673300.)
 test.each([
   ['6bd86bfd0^', 4],
   ['ed9673300', 5]

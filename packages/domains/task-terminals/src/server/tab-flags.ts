@@ -1,6 +1,7 @@
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   AGENT_STARTUP_SETTING,
+  isChatSupported,
   parseAgentStartupMode,
   restoresRunningAgentsOnBoot,
   type AgentState
@@ -75,4 +76,63 @@ export async function listAutoRestoreTaskIds(db: SlayzoneDb): Promise<string[]> 
   return rows
     .filter((r) => !isTerminalStatus(r.status, parseColumnsConfig(r.columns_config)))
     .map((r) => r.task_id)
+}
+
+/** A chat tab the hub restarts at boot (see {@link listAutoRestoreChatTabs}). */
+export interface AutoRestoreChatTab {
+  tabId: string
+  taskId: string
+  isMain: boolean
+}
+
+/**
+ * Chat tabs whose agent was alive at last shutdown (`agent_state = 'running'`):
+ * the agents the hub restarts itself at boot, without waiting for a client to
+ * mount their tabs.
+ *
+ * - A MAIN tab follows {@link listAutoRestoreTaskIds} exactly (the same tasks a
+ *   client reopens as background tabs).
+ * - Another chat tab of a task restores when that task's main one does, or when
+ *   the task is open in a client (`openTaskIds`) — what a client mounting it does
+ *   today. Never for a task nobody will see: that would boot an agent no tab shows.
+ *
+ * Empty in the `manual` startup mode, where every agent waits for its Start button.
+ */
+export async function listAutoRestoreChatTabs(
+  db: SlayzoneDb,
+  openTaskIds: ReadonlySet<string>
+): Promise<AutoRestoreChatTab[]> {
+  const mainTaskIds = new Set(await listAutoRestoreTaskIds(db))
+  if (mainTaskIds.size === 0 && openTaskIds.size === 0) return []
+  const setting = (await db
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get(AGENT_STARTUP_SETTING)) as { value: string } | undefined
+  if (!restoresRunningAgentsOnBoot(parseAgentStartupMode(setting?.value))) return []
+  const rows = (await db
+    .prepare(
+      `SELECT tt.id, tt.task_id, tt.is_main, tt.mode, t.status, p.columns_config FROM terminal_tabs tt
+       JOIN tasks t ON t.id = tt.task_id
+       LEFT JOIN projects p ON p.id = t.project_id
+       WHERE tt.agent_state = 'running'
+         AND t.deleted_at IS NULL
+         AND t.archived_at IS NULL
+       ORDER BY tt.task_id, tt.is_main DESC, tt.position`
+    )
+    .all()) as Array<{
+    id: string
+    task_id: string
+    is_main: number
+    mode: string
+    status: string
+    columns_config: string | null
+  }>
+  return rows
+    .filter((r) => isChatSupported(r.mode))
+    .filter((r) =>
+      r.is_main
+        ? mainTaskIds.has(r.task_id)
+        : mainTaskIds.has(r.task_id) || openTaskIds.has(r.task_id)
+    )
+    .filter((r) => !isTerminalStatus(r.status, parseColumnsConfig(r.columns_config)))
+    .map((r) => ({ tabId: r.id, taskId: r.task_id, isMain: r.is_main === 1 }))
 }

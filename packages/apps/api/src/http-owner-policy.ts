@@ -201,6 +201,8 @@ const DIRECT_ADDRESSES =
   "the listener addresses of the caller's own live direct-link grants (direct-link.ts issuedAddresses): cut in the handler to the caller"
 const ACCOUNTS =
   'hub accounts (email, name, role, disabled): what the admin manages; no project content'
+const ERASURE =
+  "erasing a disabled account's content: decided by content-erasure admin.ts (admin + full session, disabled target, typed email); answers counts, ids and receipts, never content"
 
 // ── REST ──────────────────────────────────────────────────────────────────────
 
@@ -227,6 +229,15 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
     folderPrefix('body.folderId'),
     taskPrefix('query.taskId'),
     folderPrefix('query.folderId', ['root'])
+  ),
+  'POST /api/artifacts/move': checked(
+    taskPrefix('body.destTaskId'),
+    taskPrefix('body.sourceTaskId'),
+    artifactPrefix('body.artifactIds[]'),
+    folderPrefix('body.folderIds[]'),
+    folderPrefix('body.destFolderId', ['root'])
+    // body.entryIds[] (artifact OR folder prefixes) are checked in the handler:
+    // each resolves through resolveByIdPrefix, which sees only the caller's rows.
   ),
   'DELETE /api/artifacts/:id': checked(artifactPrefix('params.id')),
   'GET /api/artifacts/:id': checked(artifactPrefix('params.id')),
@@ -438,7 +449,20 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   // `mayManageComputer` (an admin: any existing computer), else 404.
   'PATCH /api/hub/computers': none(
     'computer lifecycle (revoked or not): management metadata, decided in the handler by computer-access.ts mayManageComputer (T-19); no content'
-  )
+  ),
+  // Replacing a re-enrolled computer: both computers' lifecycle, decided in the handler
+  // by mayManageComputer (T-19), else 404. Offers name computers and counts; no content.
+  'GET /api/hub/computers/takeovers': none(
+    'computer lifecycle offers: management metadata (names, counts), filtered in the handler by computer-access.ts mayManageComputer (T-19); no content'
+  ),
+  'POST /api/hub/computers/replace': none(
+    'computer lifecycle (one computer replaced by another): decided in the handler by computer-access.ts mayManageComputer for both (T-19); no content'
+  ),
+  // Content erasure (added): another account's content is ERASED, never read. The
+  // service decides (content-erasure admin.ts: admin + full session, a disabled target,
+  // the typed email); it answers counts, ids and receipts only.
+  'GET /api/hub/content-erasure': none(ERASURE),
+  'POST /api/hub/content-erasure': none(ERASURE)
 }
 
 // ── MCP ───────────────────────────────────────────────────────────────────────

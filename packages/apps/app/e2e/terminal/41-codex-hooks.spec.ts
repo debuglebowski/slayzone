@@ -7,7 +7,7 @@ import {
   notifyScriptEnv,
   notifyScriptPath
 } from '../fixtures/electron'
-import { subscribeAgentLifecycle } from '../fixtures/terminal'
+import { currentSession, subscribeAgentLifecycle } from '../fixtures/terminal'
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 
@@ -154,7 +154,7 @@ test.describe('Codex agent hooks', () => {
     })
   })
 
-  test('SessionStart stdin payload persists session_id to provider_config.codex.conversationId', async ({
+  test('SessionStart stdin payload records session_id as the codex session on the task computer', async ({
     mainWindow
   }) => {
     const port = (await mainWindow.evaluate(() => {
@@ -169,7 +169,7 @@ test.describe('Codex agent hooks', () => {
     const scriptPath = notifyScriptPath(env.SLAYZONE_USER_DATA_DIR)
     await waitForFile(scriptPath, 5000)
 
-    // A real task row must exist — the server reads provider_config by task id.
+    // A real task row must exist — the hook names the task its session belongs to.
     const s = seed(mainWindow)
     const project = await s.createProject({
       name: 'Codex Hook Capture',
@@ -191,8 +191,8 @@ test.describe('Codex agent hooks', () => {
     const codexSessionId = '88888888-8888-4888-8888-888888888888'
 
     // Seed the spawn-intent row slay writes when it launches the agent. Without
-    // it the hook is treated as foreign-observed and the legacy provider_config
-    // dual-write is skipped (RC1 clobber guard) — here we simulate the real
+    // it the hook is treated as foreign-observed and never becomes the task's
+    // session (RC1 clobber guard) — here we simulate the real
     // slay-spawned path so the SessionStart id is honored + persisted.
     await mainWindow.evaluate(
       ({ id, sid }) =>
@@ -218,16 +218,7 @@ test.describe('Codex agent hooks', () => {
     await expect
       .poll(
         async () => {
-          const t = await mainWindow.evaluate(
-            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-            task.id
-          )
-          const pc = (t as { provider_config?: unknown } | null)?.provider_config
-          const parsed = typeof pc === 'string' ? JSON.parse(pc) : pc
-          return (
-            (parsed as { codex?: { conversationId?: string } } | null)?.codex?.conversationId ??
-            null
-          )
+          return currentSession(mainWindow, task.id, 'codex')
         },
         { timeout: 5000 }
       )

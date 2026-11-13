@@ -718,8 +718,11 @@ export const REGRESSIONS = [
   {
     round: 17,
     id: 'DL-L5h',
-    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC from a resolve) and loads the addon on the first offer; a failed load refuses that offer',
-    files: [`${P}apps/computer/src/main.test.ts`]
+    what: 'the computer dials its hubs without loading node-datachannel (it advertises WebRTC when its binary for this platform is on disk) and loads the addon on the first offer; a failed load refuses that offer and stops advertising WebRTC',
+    files: [
+      `${P}apps/computer/src/main.test.ts`,
+      `${P}apps/computer/src/direct/rtc-runtime.test.ts`
+    ]
   },
   {
     round: 18,
@@ -795,6 +798,17 @@ export const REGRESSIONS = [
     id: 'DL-turns',
     what: "a chat turn on the direct link records its snapshot: the turn's end is read from the saved-event signal the hub always gets, once per result whether or not the full event is relayed",
     files: [`${P}domains/agent-turns/src/server/turn-recording.test.ts`]
+  },
+  // ── move-to-computer final review round 6 follow-up (task f4911699) ──
+  {
+    round: 19,
+    id: 'R6-purge-owner',
+    what: 'the Trash purge removes a worktree on the computer it was made on, not the current default (no-login hub, several computers); that computer away = wait, gone for good = never blocks',
+    files: [
+      `${P}apps/hub/src/trash-purge-worktree-owner.test.ts`,
+      `${P}apps/hub/src/worktree-computer-state.test.ts`,
+      `${P}domains/computer-transport/src/server/exec-proxies.test.ts`
+    ]
   }
 ]
 

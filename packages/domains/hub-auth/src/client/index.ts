@@ -25,7 +25,9 @@ export {
 } from './protocol'
 export {
   fetchHubHealth,
+  DEFAULT_SSO_LABEL,
   healthProbeOf,
+  ssoLabelOf,
   HUB_BROWSER_SIGN_IN_UNKNOWN,
   hubBrowserSignInOf,
   probeHubHealth,

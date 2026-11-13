@@ -22,8 +22,8 @@ export type AiConfigFsCall =
   | { op: 'rename'; path: string; to: string }
 
 export interface AiConfigFsRouting {
-  /** The computer holding a project's files (by its checkout path, else its id). */
-  computerForProject(target: { projectPath?: string; projectId?: string }): Promise<string | null>
+  /** The computer holding a project's (or task's) files, by the scope the call names. */
+  computerForProject(target: { taskId?: string; projectId?: string }): Promise<string | null>
   /** An explicit computer (admitted), else the caller's own. */
   computerForCaller(computerId?: string | null): Promise<string | null>
   request(computerId: string, call: AiConfigFsCall): Promise<unknown>
@@ -93,7 +93,7 @@ async function opsOn(db: SlayzoneDb, computerId: string | null, op: string): Pro
 /** The ops for a project's files: on the project's computer. */
 export async function aiConfigOpsForProject(
   db: SlayzoneDb,
-  target: { projectPath?: string; projectId?: string },
+  target: { taskId?: string; projectId?: string },
   op: string
 ): Promise<AiConfigOps> {
   const computerId = routing ? await routing.computerForProject(target) : null

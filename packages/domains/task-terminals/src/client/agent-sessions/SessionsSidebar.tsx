@@ -13,6 +13,7 @@ import {
   cn
 } from '@slayzone/ui'
 import { useFamilySessions } from './useFamilySessions'
+import { useTaskSessionsOffline } from './TaskSessionsSource'
 
 const storageKey = (taskId: string): string => `slayzone:sessions-sidebar:${taskId}`
 
@@ -130,12 +131,20 @@ interface PendingAction {
 export function SessionsSidebar({
   taskId,
   agentId,
+  tabId,
+  tabName,
   onToggle,
   onSwitch,
   onDelete
 }: {
   taskId: string
   agentId: string
+  /** The terminal tab whose sessions these are (default: the main tab). Sessions
+   *  are per tab; another tab's are listed too, labelled, and a pick MOVES one
+   *  here. */
+  tabId?: string
+  /** A tab's display name, for labelling sessions owned by another tab. */
+  tabName?: (tabId: string) => string
   /** Closes the sidebar — the toggle lives in this header while open. */
   onToggle: () => void
   /**
@@ -147,7 +156,10 @@ export function SessionsSidebar({
   /** Removes this session from the task. Omitted → no delete affordance. */
   onDelete?: (conversationId: string, mode: string) => Promise<void>
 }): React.ReactElement {
-  const sessions = useFamilySessions(taskId, agentId, true)
+  const sessions = useFamilySessions(taskId, agentId, true, tabId)
+  // The sessions live on the task's computer: offline, there is nothing to list.
+  const offline = useTaskSessionsOffline(taskId, agentId, true, tabId)
+  const hereTab = tabId ?? taskId
   const mixed = new Set(sessions.map((s) => s.mode)).size > 1
   // Stable "now" anchored at mount — relative labels don't need per-ms churn, and
   // reading the clock in render is an impure call the React Compiler rejects.
@@ -156,18 +168,22 @@ export function SessionsSidebar({
   // Latched across the confirm handler so a slow switch (kill → mutate → remount)
   // can't be fired twice, and so every card reads as unavailable meanwhile.
   const [busy, setBusy] = useState(false)
+  // A refused switch/delete (e.g. the session runs in another tab) stays open
+  // with the server's reason, naming that tab.
+  const [error, setError] = useState<string | null>(null)
 
-  const confirm = useCallback(async () => {
+  const confirm = useCallback(() => {
     if (!pending || busy) return
     const run = pending.kind === 'switch' ? onSwitch : onDelete
     if (!run) return
     setBusy(true)
-    try {
-      await run(pending.conversationId, pending.mode)
-      setPending(null)
-    } finally {
-      setBusy(false)
-    }
+    setError(null)
+    void run(pending.conversationId, pending.mode)
+      .then(
+        () => setPending(null),
+        (err: unknown) => setError(err instanceof Error ? err.message : String(err))
+      )
+      .then(() => setBusy(false))
   }, [pending, busy, onSwitch, onDelete])
 
   return (
@@ -191,12 +207,20 @@ export function SessionsSidebar({
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {sessions.length === 0 ? (
-          <div className="px-2 py-6 text-center text-xs text-muted-foreground">No sessions yet</div>
+          <div
+            data-testid={offline ? 'agent-sessions-offline' : undefined}
+            className="px-2 py-6 text-center text-xs text-muted-foreground"
+          >
+            {offline
+              ? 'Computer offline — its sessions show when it reconnects'
+              : 'No sessions yet'}
+          </div>
         ) : (
           sessions.map((s) => {
             const title = sessionTitle(s.firstPrompt, s.origin)
             const switchable = !s.isCurrent && !!onSwitch && !busy
-            const deletable = !s.isCurrent && !!onDelete && !busy
+            const deletable = !s.isCurrent && !s.currentInOtherTab && !!onDelete && !busy
+            const otherTab = s.ownerTabId !== hereTab ? (tabName?.(s.ownerTabId) ?? null) : null
             return (
               // The delete control is a SIBLING of the card button, not a child:
               // a button inside a button is invalid HTML and browsers reparent it.
@@ -243,6 +267,12 @@ export function SessionsSidebar({
                         <span>·</span>
                       </>
                     )}
+                    {otherTab && (
+                      <>
+                        <span data-testid="agent-session-owner-tab">{otherTab} tab</span>
+                        <span>·</span>
+                      </>
+                    )}
                     <span
                       className="flex items-center gap-0.5"
                       title={s.messageCount === null ? 'Message count unavailable' : undefined}
@@ -281,7 +311,10 @@ export function SessionsSidebar({
       <AlertDialog
         open={!!pending}
         onOpenChange={(open) => {
-          if (!open && !busy) setPending(null)
+          if (!open && !busy) {
+            setPending(null)
+            setError(null)
+          }
         }}
       >
         <AlertDialogContent>
@@ -296,6 +329,11 @@ export function SessionsSidebar({
                   ? `Stop the running agent and continue "${pending.title}" here? It was last used in the ${modeLabel(pending.mode).toLowerCase()}, which must not run it at the same time.`
                   : `Stop the running agent and restart it on "${pending?.title}"? Any work in progress in the current session is interrupted.`}
             </AlertDialogDescription>
+            {error && (
+              <p data-testid="agent-session-error" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
@@ -307,7 +345,7 @@ export function SessionsSidebar({
                 // closes it immediately, which would unmount the busy state and
                 // let a second click through mid-switch.
                 e.preventDefault()
-                void confirm()
+                confirm()
               }}
             >
               {busy

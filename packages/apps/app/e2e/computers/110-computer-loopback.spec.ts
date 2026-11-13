@@ -250,20 +250,24 @@ base.describe('Computer loopback (computer ON)', () => {
       // computerId and forwards the spawn to the computer; its node-pty output
       // streams back through the gateway into the session buffer.
       const projectPath = launched.userDataDir // an existing, readable dir
-      const taskId = await page.evaluate(async (dir) => {
-        const c = window.getTrpcVanillaClient()
-        const project = await c.projects.create.mutate({
-          name: 'Computer Loopback',
-          color: '#22c55e',
-          path: dir
-        })
-        const task = await c.task.create.mutate({
-          projectId: project.id,
-          title: 'Computer loopback task',
-          status: 'in_progress'
-        })
-        return task.id as string
-      }, projectPath)
+      const taskId = await page.evaluate(
+        async ({ dir, computerId }) => {
+          const c = window.getTrpcVanillaClient()
+          const project = await c.projects.create.mutate({
+            name: 'Computer Loopback',
+            color: '#22c55e',
+            path: dir,
+            computerId
+          })
+          const task = await c.task.create.mutate({
+            projectId: project.id,
+            title: 'Computer loopback task',
+            status: 'in_progress'
+          })
+          return task.id as string
+        },
+        { dir: projectPath, computerId: computerId! }
+      )
 
       await page.evaluate(
         ({ tId, rId }) =>

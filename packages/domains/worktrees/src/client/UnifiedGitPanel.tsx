@@ -1,5 +1,7 @@
-import { forwardRef, useRef, useState } from 'react'
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react'
+import { useTaskWorktreePaths } from '@slayzone/task/client/useTaskPath'
 import { cn } from '@slayzone/ui'
+import { WorkspaceTargetProvider } from '@slayzone/file-editor/client/workspace-target'
 import type { Task, UpdateTaskInput, GitTabId } from '@slayzone/task-contracts'
 import type { FilterState } from '@slayzone/tasks'
 import type { Project, DetectedRepo } from '@slayzone/projects-contracts'
@@ -7,6 +9,7 @@ import { GitDiffPanel, type GitDiffPanelHandle } from './GitDiffPanel'
 import { GeneralTabContent } from './GeneralTabContent'
 import { ProjectGeneralTab } from './ProjectGeneralTab'
 import { WorktreesTab, type WorktreesTabHandle } from './WorktreesTab'
+import { ProjectWideGitScope } from './trpc'
 import { PullRequestTab } from './PullRequestTab'
 import { ProjectPrTab } from './ProjectPrTab'
 import { StashTab, type StashTabHandle } from './StashTab'
@@ -42,8 +45,26 @@ type UnifiedGitPanelProps = {
   onRepoChange?: (repoName: string) => void
 }
 
+/**
+ * The git panel, scoped (§9 Phase 7b): every `worktrees.*` call inside it names the
+ * panel's task — or, with none, its project — as the PATH SCOPE the hub authorizes
+ * and the computer confines its paths to.
+ */
 export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanelProps>(
-  function UnifiedGitPanel(
+  function UnifiedGitPanel(props, ref) {
+    const taskId = props.task?.id
+    return (
+      <WorkspaceTargetProvider
+        target={taskId ? { taskId } : { projectId: props.projectId || undefined }}
+      >
+        <UnifiedGitPanelInner {...props} ref={ref} />
+      </WorkspaceTargetProvider>
+    )
+  }
+)
+
+const UnifiedGitPanelInner = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanelProps>(
+  function UnifiedGitPanelInner(
     {
       task,
       projectId,
@@ -85,6 +106,17 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
       onTaskUpdated
     })
 
+    // Worktree paths live on the tasks' computers (§9 Phase 7d): one batched read.
+    const pathTasks = useMemo(
+      () => (task && !tasks.some((t) => t.id === task.id) ? [task, ...tasks] : tasks),
+      [task, tasks]
+    )
+    const worktreePaths = useTaskWorktreePaths(pathTasks)
+    const worktreeOf = useCallback(
+      (t: Task) => (t.has_worktree ? worktreePaths.get(t.id) : undefined),
+      [worktreePaths]
+    )
+
     const diffRef = useRef<GitDiffPanelHandle>(null)
     const worktreesRef = useRef<WorktreesTabHandle>(null)
     const stashRef = useRef<StashTabHandle>(null)
@@ -101,7 +133,8 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
           projectPath,
           onTaskClick,
           onUpdateTask,
-          onTaskUpdated
+          onTaskUpdated,
+          worktreeOf
         }}
       >
         <div className="h-full flex flex-col">
@@ -169,7 +202,9 @@ export const UnifiedGitPanel = forwardRef<UnifiedGitPanelHandle, UnifiedGitPanel
               />
             </div>
             <div className={cn('absolute inset-0', activeTab !== 'worktrees' && 'hidden')}>
-              <WorktreesTab ref={worktreesRef} visible={visible && activeTab === 'worktrees'} />
+              <ProjectWideGitScope>
+                <WorktreesTab ref={worktreesRef} visible={visible && activeTab === 'worktrees'} />
+              </ProjectWideGitScope>
             </div>
             <div className={cn('absolute inset-0', activeTab !== 'stash' && 'hidden')}>
               <StashTab

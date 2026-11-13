@@ -15,6 +15,8 @@ import type { ComputerCliRelay } from '../cli-relay'
 export interface ComputerDialer {
   /** Fire-and-forget notification to the hub; returns false when offline. */
   notify(method: string, params?: unknown): boolean
+  /** Persistent hosts clear buffered hooks before acknowledging permanent erasure. */
+  forgetTaskEvents?(taskId: string): Promise<void>
 }
 
 export type ComputerLog = (message: string, meta?: Record<string, unknown>) => void

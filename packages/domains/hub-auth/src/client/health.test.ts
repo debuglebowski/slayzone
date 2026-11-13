@@ -75,7 +75,11 @@ describe('healthProbeOf / probeHubHealth (desktop add-hub probe)', () => {
         authRequired: true,
         switches: { enableSso: true, enablePassword: false }
       })
-    ).toEqual({ ok: true, authRequired: true, signIn: { sso: true, password: false } })
+    ).toEqual({
+      ok: true,
+      authRequired: true,
+      signIn: { sso: true, password: false, ssoLabel: 'Microsoft' }
+    })
   })
 
   it('authRequired that is not a boolean stays unknown (undefined)', () => {
@@ -123,12 +127,19 @@ describe('signInMethodsOf (native clients)', () => {
   it('reads the switches: SSO only when explicitly on, password unless explicitly off', () => {
     expect(signInMethodsOf({ switches: { enableSso: true, enablePassword: false } })).toEqual({
       sso: true,
-      password: false
+      password: false,
+      ssoLabel: 'Microsoft'
     })
     expect(signInMethodsOf({ switches: { enableSso: 'true' } })).toEqual({
       sso: false,
-      password: true
+      password: true,
+      ssoLabel: 'Microsoft'
     })
+    // A generic OpenID provider's hub names its sign-in; junk falls back.
+    expect(signInMethodsOf({ switches: { enableSso: true }, ssoLabel: 'SSO' })?.ssoLabel).toBe(
+      'SSO'
+    )
+    expect(signInMethodsOf({ switches: {}, ssoLabel: '<b>x</b>' })?.ssoLabel).toBe('Microsoft')
   })
 
   it('no switches (a hub too old to say, a 503 body, not JSON, null): undefined', () => {
@@ -152,7 +163,11 @@ describe('hubBrowserSignInOf (web shell, FAILS CLOSED)', () => {
         authRequired: true,
         switches: { requireLogin: true, enablePassword: false, enableSso: true }
       })
-    ).toEqual({ authRequired: true, methods: { password: false, sso: true } })
+    ).toEqual({
+      authRequired: true,
+      methods: { password: false, sso: true },
+      ssoLabel: 'Microsoft'
+    })
   })
 
   it('SSO counts only where login is required (the hub only serves it there)', () => {

@@ -15,6 +15,8 @@ export interface UpdateOpts {
   permanent?: boolean
   agent?: string
   worktreePath?: string
+  /** With a terminal --status: complete even while an agent is mid-reply. */
+  force?: boolean
 }
 
 export async function updateAction(idPrefix: string | undefined, opts: UpdateOpts): Promise<void> {
@@ -60,6 +62,7 @@ export async function updateAction(idPrefix: string | undefined, opts: UpdateOpt
   if (opts.description !== undefined) body.description = opts.description || null
   if (opts.appendDescription !== undefined) body.appendDescription = opts.appendDescription
   if (opts.status !== undefined) body.status = opts.status
+  if (opts.force) body.force = true
   if (opts.priority) body.priority = parseInt(opts.priority, 10)
   if (typeof opts.due === 'string') body.dueDate = opts.due
   else if (opts.due === false) body.dueDate = null

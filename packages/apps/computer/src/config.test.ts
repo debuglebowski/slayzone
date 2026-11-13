@@ -19,7 +19,8 @@ import {
   effectiveHubUrls,
   ENV_VARS,
   ignoredCertPinNotices,
-  loadComputerConfig
+  loadComputerConfig,
+  supervisedComputerConfigFile
 } from './config'
 import { JOIN_TOKEN_PREFIX, type JoinTokenPayload } from '@slayzone/platform/join-token'
 
@@ -419,6 +420,79 @@ describe('loadComputerConfig', () => {
       )
       expect(fromEnv.joinToken).toBe('jt-env')
     })
+  })
+})
+
+// Settings → Computers → Folders on the desktop's own computer saved its roots to
+// computer.config.json, which a supervised computer never read: every folder the user
+// added was gone after a restart while the UI had said saved. It reads that ONE key
+// of its OWN file now — nothing else in it, and never the legacy shared config.json.
+describe('supervised computer: the folders it was given survive a restart', () => {
+  const withEnv = (vars: Record<string, string | undefined>, fn: () => void): void => {
+    const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
+    try {
+      for (const [k, v] of Object.entries(vars)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+      fn()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+  const supervised = (): Record<string, string | undefined> => ({
+    SLAYZONE_ROOT: dir,
+    SLAYZONE_SUPERVISED: '1',
+    SLAYZONE_HUB_ADDRESS: '127.0.0.1:4321',
+    SLAYZONE_HUB_JOIN_TOKEN: undefined
+  })
+
+  it('applies allowedRoots from its own computer.config.json, and no other key', () => {
+    writeFileSync(
+      join(dir, 'computer.config.json'),
+      JSON.stringify({
+        allowedRoots: ['/Users/k', '/Volumes/X/work'],
+        hubUrl: 'ws://127.0.0.1:9/computers',
+        hubUrls: ['wss://elsewhere.example/computers'],
+        joinToken: 'jt-planted',
+        computerName: 'planted'
+      })
+    )
+    expect(supervisedComputerConfigFile(join(dir, 'computer.config.json'))).toEqual({
+      allowedRoots: ['/Users/k', '/Volumes/X/work']
+    })
+    withEnv(supervised(), () => {
+      const config = loadComputerConfig()
+      expect(config.allowedRoots).toEqual(['/Users/k', '/Volumes/X/work'])
+      expect(config.hubUrl).toBe('ws://127.0.0.1:4321/computers')
+      expect(config.hubUrls).toBeUndefined()
+      expect(config.joinToken).toBeUndefined()
+      expect(config.name).toBe(DEFAULT_LOCAL_COMPUTER_NAME)
+      // Still the desktop's own computer talking to its own loopback hub.
+      expect(config.hubMayEditRoots).toBe(true)
+    })
+  })
+
+  it('keeps [homedir()] with no usable list, and never reads the legacy shared config.json', () => {
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ allowedRoots: ['/legacy'] }))
+    withEnv(supervised(), () => {
+      expect(loadComputerConfig().allowedRoots).toEqual([homedir()])
+    })
+    for (const body of [
+      'not json',
+      JSON.stringify({ allowedRoots: [] }),
+      JSON.stringify({ allowedRoots: 'not-a-list' }),
+      JSON.stringify({ allowedRoots: ['relative/dir', 7, ''] })
+    ]) {
+      writeFileSync(join(dir, 'computer.config.json'), body)
+      expect(supervisedComputerConfigFile(join(dir, 'computer.config.json'))).toEqual({})
+      withEnv(supervised(), () => {
+        expect(loadComputerConfig().allowedRoots).toEqual([homedir()])
+      })
+    }
   })
 })
 

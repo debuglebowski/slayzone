@@ -413,6 +413,25 @@ describe('usePanelSettings', () => {
       webPanels: [{ id: 'web:x', name, baseUrl: 'https://x.dev', shortcut: 'y' }]
     })
 
+  it('keeps unsaved web-panel edits when unrelated panel config refreshes', async () => {
+    let all: Record<string, string> = { panel_config: panelConfig('First') }
+    results['settings.getAll'] = () => all
+    const { result } = renderHook(() => usePanelSettings('panels/web:x', vi.fn()), { wrapper })
+    await flush()
+    act(() => {
+      result.current.setEditPanelName('Draft name')
+      result.current.setEditPanelUrl('https://draft.dev')
+    })
+
+    const next = JSON.parse(all.panel_config)
+    next.viewEnabled = { task: { 'web:x': true } }
+    all = { ...all, panel_config: JSON.stringify(next) }
+    await refetchAll()
+
+    expect(result.current.editPanelName).toBe('Draft name')
+    expect(result.current.editPanelUrl).toBe('https://draft.dev')
+  })
+
   it('seeds from getAll and seeds the web-panel edit form for the active tab', async () => {
     let all: Record<string, string> = {
       panel_config: panelConfig('First'),

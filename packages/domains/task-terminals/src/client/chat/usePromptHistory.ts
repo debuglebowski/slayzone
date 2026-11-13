@@ -6,7 +6,7 @@ import { buildPromptHistory, recordedAttachments, type HistoryRecord } from './p
 
 /**
  * The task's prompt history for the composer, newest first: every prompt stored
- * for the task (`agent_prompts` — chat sends and terminal-agent prompts, so it
+ * for the task (on its computer — chat sends and terminal-agent prompts, so it
  * survives a chat reset) plus what this composer recorded since mount: its sends
  * (exactly as typed, and visible before the stored copy arrives) and the drafts
  * Esc Esc cleared, with their files (`attachmentsOf`) — kept in memory only.

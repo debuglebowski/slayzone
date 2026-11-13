@@ -122,6 +122,12 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
   SLAYZONE_HUB_SSO_CERT_PATH: 'infra',
   SLAYZONE_HUB_SSO_KEY_PATH: 'infra',
   SLAYZONE_HUB_SSO_REQUIRE_MFA: 'infra',
+  // Generic OIDC sign-in (any OpenID provider; hub-auth oidc.ts). The issuer, client id
+  // and scopes are wiring; the client secret is a credential.
+  SLAYZONE_HUB_OIDC_ISSUER: 'infra',
+  SLAYZONE_HUB_OIDC_CLIENT_ID: 'infra',
+  SLAYZONE_HUB_OIDC_SCOPES: 'infra',
+  SLAYZONE_HUB_OIDC_CLIENT_SECRET: 'secret',
   // Operator-facing hub name (`slay hub ls`/`stop` address a hub by it). Infra,
   // not global: it identifies THIS hub process, so inheriting it into a task
   // terminal — which may target a different hub entirely — would mislabel.
@@ -236,7 +242,15 @@ export const ENV_MANIFEST: Record<string, EnvScope> = {
 export const NON_PREFIXED_INFRA = new Set<string>([
   'ELECTRON_RUN_AS_NODE',
   'NODE_PATH',
-  'PLAYWRIGHT'
+  'PLAYWRIGHT',
+  // The IdP-role mode's settings (hub-switches.ts IDP_ROLE_ENV). UNPREFIXED BY DESIGN:
+  // the shared contract (@normain/idp-role-contract) fixes these names across services,
+  // a narrow exception to the SLAYZONE_ prefix rule. Hub-only process config: a task
+  // agent must never inherit them (it would read a hub's role policy as its own).
+  'IDP_ROLES_ENABLED',
+  'IDP_ROLE_CLAIM',
+  'IDP_ROLE_MAPPING',
+  'IDP_RECHECK_INTERVAL_SECONDS'
 ])
 
 /**

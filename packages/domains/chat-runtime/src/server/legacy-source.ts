@@ -14,12 +14,12 @@ import type {
   ChatTransferManifest,
   StoredChatEvent
 } from '../shared'
-import { sessionRecordKey, type ChatBootstrap } from './local-data'
+import type { ChatBootstrap } from './local-data'
 import type { HubChatOwnership } from './hub-ownership'
 import type { ChatMigrationSource } from './migration'
 import { TRANSFER_CHUNK_BYTES } from './transfers'
 import { legacyChatTabContentSql } from './legacy-census'
-import { legacySessionAuthority } from './legacy-session-authority'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { migrationAttachmentScope } from './migration-attachments'
 import {
   LEGACY_CHAT_BLOB_PIN_SCOPE,
@@ -73,7 +73,7 @@ export function createLegacyChatSource(opts: {
   async function leader(taskId: string) {
     return (
       await db.get<{ id: string }>(
-        `SELECT id FROM terminal_tabs WHERE task_id=? AND (mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql('terminal_tabs')}
+        `SELECT id FROM terminal_tabs WHERE task_id=? AND (mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql(await legacyChatTables(db), 'terminal_tabs')}
           OR EXISTS(SELECT 1 FROM chat_tab_bindings b JOIN chat_ownership o ON o.id=b.conversation_id
             WHERE b.tab_id=terminal_tabs.id AND o.state<>'deleted'))
           AND NOT EXISTS(SELECT 1 FROM chat_threads WHERE id=terminal_tabs.id) ORDER BY created_at,id LIMIT 1`,
@@ -129,51 +129,9 @@ export function createLegacyChatSource(opts: {
     const config = JSON.parse(task?.provider_config ?? '{}')
     if (!storageOnly)
       yield record('settings', `provider:${canonicalMode}`, config[canonicalMode] ?? {})
-    for await (const r of rows<{
-      conversation_id: string
-      mode: string
-      origin: string
-      created_at: number
-    }>(
-      `SELECT rowid AS _rowid,* FROM task_conversations c WHERE task_id=? AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn') AND rowid=(SELECT max(d.rowid) FROM task_conversations d WHERE d.task_id=c.task_id AND d.mode=c.mode AND d.conversation_id=c.conversation_id AND d.origin NOT IN ('foreign-observed','pending-spawn'))`,
-      [owner.taskId]
-    ))
-      yield record(
-        'settings',
-        sessionRecordKey(r.mode, r.conversation_id),
-        {
-          taskId: owner.taskId,
-          mode: r.mode,
-          conversationId: r.conversation_id,
-          origin: r.origin,
-          createdAt: r.created_at,
-          ownershipClaim:
-            (await legacySessionAuthority(
-              db,
-              owner.taskId,
-              r.mode,
-              r.conversation_id,
-              opts.resolveSessionComputer
-            )) === owner.id
-        },
-        r.created_at
-      )
-    for (const r of await db.all<{ mode: string; created_at: number }>(
-      'SELECT mode,max(created_at) AS created_at FROM session_resets WHERE task_id=? GROUP BY mode',
-      [owner.taskId]
-    ))
-      yield record(
-        'settings',
-        `session:reset:${r.mode}`,
-        {
-          taskId: owner.taskId,
-          mode: r.mode,
-          conversationId: null,
-          origin: 'manual-reset',
-          createdAt: r.created_at
-        },
-        r.created_at
-      )
+    // Session history is not copied from here: the task's session ledger (and the
+    // hub's resets of it) reach the computer through the handoff and the session
+    // intents before the chat bootstraps there (robustness plan §9, P0).
     if (task?.project_id && !storageOnly) {
       const snapshot = await db.get<{
         slash_commands: string
@@ -205,79 +163,85 @@ export function createLegacyChatSource(opts: {
   }
   async function* rawItems(owner: HubChatOwnership, metadata: ChatRecord[]): AsyncGenerator<Item> {
     for (const value of metadata) yield { kind: 'record', value }
-    for await (const r of eventRows(owner.tabId)) {
-      const event = JSON.parse(r.event) as AgentEvent
-      yield {
-        kind: 'event',
-        value: { seq: r.seq, at: r.saved_at ?? timestamp(r.created_at), event }
+    // Without the legacy tables (dropped once every chat migrated, §9 Phase 8) a
+    // legacy owner can still exist for content the hub holds elsewhere (diagnostics,
+    // thread records): those are read, the dropped tables are not.
+    const tables = await legacyChatTables(db)
+    if (tables) {
+      for await (const r of eventRows(owner.tabId)) {
+        const event = JSON.parse(r.event) as AgentEvent
+        yield {
+          kind: 'event',
+          value: { seq: r.seq, at: r.saved_at ?? timestamp(r.created_at), event }
+        }
       }
-    }
-    const draft = await db.get<{
-      draft_text: string
-      draft_attachments: string | null
-      scroll_anchor: string | null
-      rev: number
-      updated_at: number
-    }>('SELECT * FROM chat_tab_state WHERE tab_id=?', [owner.tabId])
-    if (draft) {
-      const attachments = JSON.parse(draft.draft_attachments ?? '[]') as ChatAttachment[]
-      yield record(
-        'draft',
-        'state',
-        {
-          draft: { text: draft.draft_text, attachments, rev: draft.rev },
-          scroll: JSON.parse(draft.scroll_anchor ?? 'null')
-        },
-        draft.updated_at
+      const draft = await db.get<{
+        draft_text: string
+        draft_attachments: string | null
+        scroll_anchor: string | null
+        rev: number
+        updated_at: number
+      }>('SELECT * FROM chat_tab_state WHERE tab_id=?', [owner.tabId])
+      if (draft) {
+        const attachments = JSON.parse(draft.draft_attachments ?? '[]') as ChatAttachment[]
+        yield record(
+          'draft',
+          'state',
+          {
+            draft: { text: draft.draft_text, attachments, rev: draft.rev },
+            scroll: JSON.parse(draft.scroll_anchor ?? 'null')
+          },
+          draft.updated_at
+        )
+      }
+      for await (const r of rows<{
+        id: string
+        send: string
+        original: string
+        position: number
+        created_at: string
+        content: string | null
+        conversation_id: string | null
+      }>('SELECT rowid AS _rowid,* FROM chat_queue WHERE tab_id=?', [owner.tabId])) {
+        const content = JSON.parse(r.content ?? '[]')
+        yield record(
+          'queue',
+          r.id,
+          {
+            id: r.id,
+            tabId: owner.tabId,
+            send: r.send,
+            original: r.original,
+            position: r.position,
+            createdAt: r.created_at,
+            ...(r.content ? { content } : {}),
+            ...(r.conversation_id ? { expectedConversationId: r.conversation_id } : {})
+          },
+          timestamp(r.created_at)
+        )
+      }
+      const checkpoint = await db.get<{ version: string; seq: number; data: string }>(
+        'SELECT version,seq,data FROM chat_timeline_checkpoints WHERE tab_id=?',
+        [owner.tabId]
       )
+      if (checkpoint) yield record('timeline', 'checkpoint', checkpoint)
+      for await (const r of rows<{
+        page: number
+        start_row: number
+        end_row: number
+        rows: string
+        summary: string
+        search_text: string
+      }>('SELECT rowid AS _rowid,* FROM chat_timeline_pages WHERE tab_id=?', [owner.tabId]))
+        yield record('timeline', `page:${r.page}`, {
+          page: r.page,
+          startRow: r.start_row,
+          endRow: r.end_row,
+          rows: r.rows,
+          summary: r.summary,
+          searchText: r.search_text
+        })
     }
-    for await (const r of rows<{
-      id: string
-      send: string
-      original: string
-      position: number
-      created_at: string
-      content: string | null
-      conversation_id: string | null
-    }>('SELECT rowid AS _rowid,* FROM chat_queue WHERE tab_id=?', [owner.tabId])) {
-      const content = JSON.parse(r.content ?? '[]')
-      yield record(
-        'queue',
-        r.id,
-        {
-          id: r.id,
-          tabId: owner.tabId,
-          send: r.send,
-          original: r.original,
-          position: r.position,
-          createdAt: r.created_at,
-          ...(r.content ? { content } : {}),
-          ...(r.conversation_id ? { expectedConversationId: r.conversation_id } : {})
-        },
-        timestamp(r.created_at)
-      )
-    }
-    const checkpoint = await db.get<{ version: string; seq: number; data: string }>(
-      'SELECT version,seq,data FROM chat_timeline_checkpoints WHERE tab_id=?',
-      [owner.tabId]
-    )
-    if (checkpoint) yield record('timeline', 'checkpoint', checkpoint)
-    for await (const r of rows<{
-      page: number
-      start_row: number
-      end_row: number
-      rows: string
-      summary: string
-      search_text: string
-    }>('SELECT rowid AS _rowid,* FROM chat_timeline_pages WHERE tab_id=?', [owner.tabId]))
-      yield record('timeline', `page:${r.page}`, {
-        page: r.page,
-        startRow: r.start_row,
-        endRow: r.end_row,
-        rows: r.rows,
-        summary: r.summary,
-        searchText: r.search_text
-      })
     for await (const r of rows<ChatThread>(
       `SELECT rowid AS _rowid,id,parent_tab_id AS parentTabId,task_id AS taskId,mode,parent_conversation_id AS parentConversationId,answer_id AS answerId,source_message_id AS sourceMessageId,source_uuid AS sourceUuid,title,conversation_id AS conversationId,created_at AS createdAt FROM chat_threads WHERE parent_tab_id=?`,
       [owner.tabId]
@@ -290,42 +254,43 @@ export function createLegacyChatSource(opts: {
       [owner.tabId]
     )
     if (parent) yield record('settings', 'thread-parent', parent.parent_tab_id)
-    for await (const r of rows<{
-      id: string
-      message_id: string
-      computer_id: string | null
-      root_path: string
-      status: WorkspaceChangesRecord['status']
-      reason: string | null
-      files: string
-      created_at: number
-    }>('SELECT rowid AS _rowid,* FROM chat_workspace_changes WHERE tab_id=?', [owner.tabId])) {
-      const files = JSON.parse(r.files) as WorkspaceChangesRecord['files']
-      for (const file of files) {
-        file.diff =
-          (
-            await db.get<{ diff: string }>(
-              'SELECT diff FROM chat_workspace_diffs WHERE capture_id=? AND path=?',
-              [r.id, file.path]
-            )
-          )?.diff ?? null
+    if (tables)
+      for await (const r of rows<{
+        id: string
+        message_id: string
+        computer_id: string | null
+        root_path: string
+        status: WorkspaceChangesRecord['status']
+        reason: string | null
+        files: string
+        created_at: number
+      }>('SELECT rowid AS _rowid,* FROM chat_workspace_changes WHERE tab_id=?', [owner.tabId])) {
+        const files = JSON.parse(r.files) as WorkspaceChangesRecord['files']
+        for (const file of files) {
+          file.diff =
+            (
+              await db.get<{ diff: string }>(
+                'SELECT diff FROM chat_workspace_diffs WHERE capture_id=? AND path=?',
+                [r.id, file.path]
+              )
+            )?.diff ?? null
+        }
+        yield record(
+          'workspace',
+          r.id,
+          {
+            id: r.id,
+            tabId: owner.tabId,
+            messageId: r.message_id,
+            computerId: r.computer_id,
+            rootPath: r.root_path,
+            status: r.status,
+            ...(r.reason ? { reason: r.reason } : {}),
+            files
+          },
+          r.created_at
+        )
       }
-      yield record(
-        'workspace',
-        r.id,
-        {
-          id: r.id,
-          tabId: owner.tabId,
-          messageId: r.message_id,
-          computerId: r.computer_id,
-          rootPath: r.root_path,
-          status: r.status,
-          ...(r.reason ? { reason: r.reason } : {}),
-          files
-        },
-        r.created_at
-      )
-    }
     if (frozenTaskContent(metadata) ?? (await includesTaskContent(owner))) {
       const cutoff = metadata.find(
         (r) => r.kind === 'settings' && r.id === 'legacy-diagnostics-cutoff'
@@ -333,58 +298,17 @@ export function createLegacyChatSource(opts: {
       if (opts.diagnostics && typeof cutoff === 'number')
         for await (const value of opts.diagnostics.records(owner.taskId, cutoff))
           yield { kind: 'record', value }
-      for await (const r of rows<{
-        id: string
-        terminal_tab_id: string
-        worktree_path: string
-        snapshot_sha: string
-        head_sha_at_snap: string | null
-        prompt_preview: string
-        created_at: number
-      }>("SELECT rowid AS _rowid,* FROM agent_turns WHERE task_id=? AND prompt_preview<>''", [
-        owner.taskId
-      ]))
-        yield record(
-          'settings',
-          `legacy-turn-preview:${r.id}`,
-          {
-            id: r.id,
-            tabId: r.terminal_tab_id,
-            worktreePath: r.worktree_path,
-            snapshotSha: r.snapshot_sha,
-            headShaAtSnap: r.head_sha_at_snap,
-            promptPreview: r.prompt_preview,
-            createdAt: r.created_at
-          },
-          r.created_at
-        )
-      for await (const r of rows<{
-        id: string
-        agent_id: string
-        cli_session_id: string | null
-        text: string
-        created_at: number
-      }>('SELECT rowid AS _rowid,* FROM agent_prompts WHERE task_id=?', [owner.taskId]))
-        yield record(
-          'prompt',
-          r.id,
-          {
-            id: r.id,
-            taskId: owner.taskId,
-            agentId: r.agent_id,
-            cliSessionId: r.cli_session_id,
-            text: r.text,
-            createdAt: r.created_at
-          },
-          r.created_at
-        )
-      for await (const r of rows<{ message_id: string; attachments: string }>(
-        'SELECT rowid AS _rowid,* FROM chat_attachment_messages WHERE task_id=?',
-        [owner.taskId]
-      )) {
-        const attachments = JSON.parse(r.attachments) as ChatAttachment[]
-        yield record('settings', `attachment-message:${r.message_id}`, attachments)
-      }
+      // Prompts and turn previews are no longer part of a task's legacy content:
+      // migration v207 handed the hub's rows to the task's computer directly
+      // (robustness plan §9).
+      if (tables)
+        for await (const r of rows<{ message_id: string; attachments: string }>(
+          'SELECT rowid AS _rowid,* FROM chat_attachment_messages WHERE task_id=?',
+          [owner.taskId]
+        )) {
+          const attachments = JSON.parse(r.attachments) as ChatAttachment[]
+          yield record('settings', `attachment-message:${r.message_id}`, attachments)
+        }
     }
   }
   async function* eventRows(tabId: string) {
@@ -809,35 +733,30 @@ export function createLegacyChatSource(opts: {
       )
       const diagnosticsCutoff = diagnostics ? Number(diagnostics.source_id) : null
       await db.get('PRAGMA secure_delete=ON')
-      const ops: BatchOp[] = [
-        'chat_events',
-        'chat_queue',
-        'chat_tab_state',
-        'chat_timeline_pages',
-        'chat_timeline_checkpoints',
-        'chat_workspace_changes'
-      ].map((table) => ({
+      // Dropped legacy tables (§9 Phase 8) hold nothing to remove.
+      const tables = await legacyChatTables(db)
+      const ops: BatchOp[] = (
+        tables
+          ? [
+              'chat_events',
+              'chat_queue',
+              'chat_tab_state',
+              'chat_timeline_pages',
+              'chat_timeline_checkpoints',
+              'chat_workspace_changes'
+            ]
+          : []
+      ).map((table) => ({
         type: 'run',
         sql: `DELETE FROM ${table} WHERE tab_id=?`,
         params: [owner.tabId]
       }))
-      ops.push(
-        {
-          type: 'run',
-          sql: "DELETE FROM agent_prompts WHERE task_id=? AND id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='prompt')",
-          params: [owner.taskId, ...proofParams]
-        },
-        {
+      if (tables)
+        ops.push({
           type: 'run',
           sql: "DELETE FROM chat_attachment_messages WHERE task_id=? AND message_id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='attachment-message')",
           params: [owner.taskId, ...proofParams]
-        },
-        {
-          type: 'run',
-          sql: "UPDATE agent_turns SET prompt_preview='' WHERE task_id=? AND id IN(SELECT source_id FROM chat_legacy_task_copies WHERE conversation_id=? AND migration_id=? AND manifest_hash=? AND kind='turn-preview')",
-          params: [owner.taskId, ...proofParams]
-        }
-      )
+        })
       // Keep thread ids for authorization and hidden-tab lifetime; content stays local.
       ops.push(
         {

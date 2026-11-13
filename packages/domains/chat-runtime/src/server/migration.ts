@@ -40,6 +40,10 @@ export function createChatMigration(opts: {
   async function run(id: string, computerId: string) {
     let owner = await current(id)
     if (owner.state === 'active' && !owner.cleanupPending) return owner
+    // Committed, but the destination lost its copy before activation: the hub
+    // source was never cleaned up, so copy again from it.
+    if (owner.state === 'active' && (await opts.ownership.unavailable(id)))
+      owner = await opts.ownership.reseedFromSource(id, owner.epoch)
     if (owner.state === 'legacy') {
       // Deferral must not freeze a task whose existing agents are still running.
       await opts.source.quiesce(owner)

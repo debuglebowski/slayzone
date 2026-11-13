@@ -3,7 +3,7 @@
  * session-provenance DB touchpoints go through the injected ledger, not a raw
  * db handle. Asserts the ordering contract with a fake ledger:
  *   - pending-spawn is recorded (and AWAITED durable) before the agent starts
- *   - pending rows are pruned on exit (fire-and-forget)
+ *   - its OWN pending row is pruned on exit, by id (fire-and-forget)
  *   - bindSessionToTask fires only on pre-warmed (pooled) adoption
  *   - a null ledger (pre-init) spawns fine and records nothing
  * Uses a fake pty + fake window + fake ledger — no real shell spawns, no db.
@@ -77,11 +77,12 @@ type LedgerCalls = {
   record: Array<{
     taskId: string
     mode: string
+    tabId: string
     expectedSessionId: string | null
     usedResume: boolean
     spawnToken?: string
   }>
-  prune: Array<{ taskId: string; mode: string }>
+  prune: Array<{ ids: string[] }>
   bind: Array<{ sessionId: string; taskId: string; tabId: string }>
 }
 function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: LedgerCalls } {
@@ -95,6 +96,7 @@ function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: Le
       await new Promise((r) => setTimeout(r, 20))
       calls.record.push(args)
       events.push('record:done')
+      return `pending-${calls.record.length}`
     },
     async prunePendingSpawns(scope) {
       calls.prune.push(scope)
@@ -105,6 +107,9 @@ function makeFakeLedger(events: string[]): { ledger: PtySessionLedger; calls: Le
       calls.bind.push(args)
       events.push('bind')
       return true
+    },
+    async tabLabel() {
+      return null
     },
     async buildMcpEnv(taskId): Promise<Record<string, string>> {
       return taskId ? { SLAYZONE_TASK_ID: taskId } : {}
@@ -206,7 +211,7 @@ test('Codex launch token is recorded and exported to its hook context', async ()
   }
 })
 
-test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mode)', async () => {
+test('pending-spawn is pruned on exit (fire-and-forget, only its own row by id)', async () => {
   const events: string[] = []
   const { ledger, calls } = makeFakeLedger(events)
   setPtySessionLedger(ledger)
@@ -235,12 +240,9 @@ test('pending-spawn is pruned on exit (fire-and-forget, scoped to task+mode)', a
     // Prune is deliberately fire-and-forget (void'd promise) — flush microtasks.
     await new Promise((r) => setTimeout(r, 10))
     expect(calls.prune.length, `expected 1 prune on exit, got ${calls.prune.length}`).toBe(1)
-    expect(calls.prune[0].taskId, `prune scope wrong: ${JSON.stringify(calls.prune[0])}`).toBe(
-      'ledgerB'
-    )
-    expect(calls.prune[0].mode, `prune scope wrong: ${JSON.stringify(calls.prune[0])}`).toBe(
-      'claude-code'
-    )
+    // Its own row only — a sibling tab of the same mode keeps its in-flight row.
+    expect(calls.record[0].tabId).toBe('ledgerB')
+    expect(calls.prune[0]).toEqual({ computerId: null, ids: ['pending-1'] })
   } finally {
     setPtySessionLedger(null)
   }

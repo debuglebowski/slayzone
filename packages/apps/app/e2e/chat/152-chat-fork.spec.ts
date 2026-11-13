@@ -6,7 +6,7 @@
  * Sessions, one click away (its history comes back from its session file).
  * Against the scripted fake CLI (2.1.312 shapes; chat-a checks R3, R3b).
  */
-import { resetApp } from '../fixtures/electron'
+import { lastLedgerConversation, resetApp } from '../fixtures/electron'
 import { echoTurn, expect, fileSha256, readSessionFile, test } from '../fixtures/chat'
 
 const userTexts = (records: Array<Record<string, unknown>>): string[] =>
@@ -21,8 +21,7 @@ test.describe('Chat fork', () => {
   })
 
   test('fork from here: a new conversation in the same tab; the original untouched and one click away', async ({
-    chat,
-    electronApp
+    chat
   }) => {
     const t = await chat.openTask({
       title: 'Fork from here',
@@ -80,21 +79,7 @@ test.describe('Chat fork', () => {
     expect(fileSha256(originalFile)).toBe(before)
     // The task's chat runs the fork now, recorded as one.
     await expect
-      .poll(async () =>
-        electronApp.evaluate(async ({}, taskId) => {
-          const db = (globalThis as Record<string, unknown>).__db as {
-            get: (
-              sql: string,
-              params?: unknown[]
-            ) => Promise<{ origin: string; conv: string } | undefined>
-          }
-          return db.get(
-            `SELECT origin, conversation_id AS conv FROM task_conversations
-              WHERE task_id = ? AND mode = 'claude-chat' ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-            [taskId]
-          )
-        }, t.taskId)
-      )
+      .poll(() => lastLedgerConversation(t.page, t.taskId, 'claude-chat'))
       .toEqual({ origin: 'slay-spawned-fork', conv: forkId })
 
     // Saved: a reload keeps the fold, and the next spawn resumes the fork.

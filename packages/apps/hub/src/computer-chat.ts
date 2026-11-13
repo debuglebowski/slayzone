@@ -2,8 +2,18 @@ import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { listPromptsForTask } from '@slayzone/agent-turns/server'
-import { legacySessionPromptSummaries } from '@slayzone/task/server'
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
+import {
+  classifyFault,
+  createAsyncFaultLedger,
+  forEachIsolated,
+  toError
+} from '@slayzone/platform/isolation'
+import { AgentHistoryOfflineError } from '@slayzone/agent-turns/server'
+import {
+  legacyCodexChatPromptSummaries,
+  type TaskMoveSessionsDelegate
+} from '@slayzone/task/server'
 import {
   defaultChatModeSettingKey,
   defaultChatModelSettingKey,
@@ -17,6 +27,11 @@ import {
   type UserContentBlock
 } from '@slayzone/terminal-contracts'
 import {
+  applyComputerRetirements,
+  type RetirementReport,
+  chatComputer,
+  ChatUnavailableError,
+  ChatHeldByAnotherComputerError,
   createChatRecovery,
   createChatAvailability,
   chatHistoryGeneration,
@@ -30,14 +45,18 @@ import {
   legacyChatTaskContentSql,
   legacySessionAmbiguous,
   createHubChatRelay,
-  createHubProviderConfigStore,
   isStorageOnlyChatOwner,
   terminalStorageAgentId,
   type ChatComputerRequest,
   type HubChatOwnership,
   type ChatBootstrap,
   type LegacyChatDiagnostics,
-  createChatMigrationAttachmentReader
+  createChatMigrationAttachmentReader,
+  mergeSessionLedgers,
+  type SessionLedgerBundle,
+  isolateItem,
+  isComputerUnreachable,
+  checkHubChatConsistency
 } from '@slayzone/chat-runtime/hub'
 import type {
   ChatDataOps,
@@ -45,6 +64,8 @@ import type {
   ChatTerminalState
 } from '@slayzone/terminal/runtime'
 import { defaultConversationRegistry } from '@slayzone/terminal/hub'
+import { computerStanding, type TakeoverCandidate } from '@slayzone/computers/server'
+import { DECISIVE_HANDOFF_KINDS } from './computer-data-handoff'
 
 /** `quiesce` refused: the task's agents run, so its history migration waits. */
 class ChatMigrationDeferredError extends Error {}
@@ -67,6 +88,24 @@ export class ProviderSessionOwnedElsewhereError extends Error {
       `This session belongs to task "${ownerTitle?.trim() || ownerTaskId}". Continue it there, or start a fresh session here.`
     )
     this.name = 'ProviderSessionOwnedElsewhereError'
+  }
+}
+
+/**
+ * An agent start named a provider session, and a computer that may hold it (the
+ * computer of one of the task's chats, or the one the task resolves to) cannot be
+ * reached while no reachable computer holds it. Work waits for its computer
+ * (robustness plan decisions): starting it elsewhere would silently fork the
+ * session or start fresh. Refused, naming the offline computer(s).
+ */
+export class ProviderSessionHolderOfflineError extends Error {
+  readonly code = 'provider-session-holder-offline'
+  constructor(readonly computerNames: string[]) {
+    const names = computerNames.map((n) => `"${n}"`).join(', ')
+    super(
+      `The computer holding this session (${names}) is offline. Reconnect it to continue the session, or start a fresh session.`
+    )
+    this.name = 'ProviderSessionHolderOfflineError'
   }
 }
 
@@ -96,12 +135,28 @@ export function createComputerChatServices(opts: {
   chatRuntimeReady?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
+  /**
+   * Deliver to `computerId` whatever the hub still holds of the task (the computer
+   * data handoff) before a relayed history read there — as the direct link's task
+   * grant does — so a read right after boot never misses rows still staged here.
+   * With `kinds`, only those (a chat invoke waits for its settings, not history).
+   */
+  flushTask?(taskId: string, computerId: string, kinds?: readonly string[]): Promise<void>
   admitComputer?(computerId: string): Promise<void>
   retentionDays?: number
+  /** A reserved provider switch was superseded: record a diagnostics event. */
+  onProviderTransitionSuperseded?(info: {
+    id: string
+    conversationId: string
+    taskId: string
+    reason: string
+  }): void
   diagnosticsConfig?(): { enabled: boolean; verbose: boolean }
   hasLiveTask(taskId: string): Promise<boolean>
   beforeInvoke?(owner: HubChatOwnership, method: string, args: unknown[]): Promise<void>
   onTasksChanged?(taskId: string): void
+  /** A task's sessions changed on its computer (its session ledger, §9). */
+  onSessionsChanged?(taskId: string): void
   onState?(
     sessionId: string,
     state: ChatTerminalState,
@@ -111,17 +166,108 @@ export function createComputerChatServices(opts: {
   onBackgroundJobs?(sessionId: string, count: number): void | Promise<void>
 }) {
   const ownership = createChatOwnershipStore(opts.db)
-  const providerConfigs = createHubProviderConfigStore(opts.db)
   const folderDeletions = createChatFolderDeletions(opts.db)
   const lifecycle = createChatLifecycle({ db: opts.db, request: opts.request })
   const request = lifecycle.request
+  /**
+   * Conversations the last pass on their computer could not reconcile, and why.
+   * Each is fenced on its own: its chat refuses with the error (opening it again
+   * re-runs recovery), its task refuses agents, and its metadata is not re-read.
+   * Every other conversation on the computer keeps working. A new recovery pass
+   * of the computer starts with none.
+   */
+  const fences = new Map<string, { computerId: string; error: Error }>()
+  /**
+   * Takeover candidates: conversations a computer (the holder) reported that the hub
+   * assigns to another, unretired computer (the owner) — possibly that computer
+   * enrolled again under a new id. The user decides (`computers.replace`); recovery
+   * never adopts them. Re-decided by every recovery pass of the holder, like fences.
+   */
+  const takeovers = new Map<string, TakeoverCandidate>()
+  const fence = (computerId: string, conversationId: string | null, error: Error) => {
+    if (!conversationId) return
+    fences.set(conversationId, {
+      computerId,
+      error: new Error(`This chat could not be recovered: ${error.message}`, { cause: error })
+    })
+    if (error instanceof ChatHeldByAnotherComputerError)
+      takeovers.set(conversationId, {
+        conversationId,
+        taskId: error.taskId,
+        ownerComputerId: error.ownerComputerId,
+        holderComputerId: error.holderComputerId
+      })
+  }
+  const conversationFence = (id: string) => fences.get(id)?.error
+  /**
+   * The owner check, plus the one task-level fence: a task whose paused/deleted
+   * state the last lifecycle pass could not deliver to this computer.
+   */
+  const assertTaskDelivered = (computerId: string, taskId: string, stopsOnly = false) => {
+    const failure = lifecycle.taskFailure(computerId, taskId, stopsOnly)
+    if (failure)
+      throw new Error(
+        `This task's state could not be delivered to its computer: ${failure.message}`,
+        {
+          cause: failure
+        }
+      )
+  }
+  const gate = async (computerId: string, taskId: string) => {
+    assertTaskDelivered(computerId, taskId)
+    await opts.gate?.(computerId, taskId)
+  }
   const recovery = createChatRecovery({
     db: opts.db,
     request: opts.request,
+    onConversationFailure: fence,
     gate: opts.gate,
     recoverTabTransitions: (computerId, identity, transitions) =>
       relay.recoverProviderTransitions(computerId, identity, transitions)
   })
+  /**
+   * Idempotent; one pass at a time, shared by concurrent callers. `fresh`: the caller
+   * just changed the retirements (a computer was removed), so a pass already running
+   * may have read them before the change: another pass follows it. Recovery callers
+   * change nothing and share the running pass.
+   */
+  let retiring: Promise<RetirementReport> | null = null
+  let retireAgain = false
+  /** Resolves with the last pass's report: what it could not apply is still owed. */
+  function retireComputers(retire: { fresh?: boolean } = {}): Promise<RetirementReport> {
+    if (retiring) {
+      if (retire.fresh) retireAgain = true
+      return retiring
+    }
+    retiring = (async () => {
+      try {
+        let report: RetirementReport = { failed: new Map() }
+        do {
+          retireAgain = false
+          try {
+            report = await applyComputerRetirements(opts.db)
+          } catch (error) {
+            // A fresh pass asked meanwhile still runs; otherwise the callers see it.
+            if (!retireAgain) throw error
+            console.error(
+              '[chat] applying computer retirements failed; a fresh pass follows:',
+              error
+            )
+          }
+        } while (retireAgain)
+        return report
+      } finally {
+        // In the body, not a later `.finally`: a caller arriving after the last check
+        // starts a new pass instead of joining one that already ended.
+        retiring = null
+      }
+    })()
+    return retiring
+  }
+  // Hub start: a computer removed while the hub was down stops blocking now.
+  void retireComputers().catch((error: unknown) =>
+    console.error('[chat] applying computer retirements failed:', error)
+  )
   const recovered = new Map<string, Promise<void>>()
   const recoveryFinished = new Set<string>()
   const recoveryNonce = randomUUID()
@@ -176,62 +322,111 @@ export function createComputerChatServices(opts: {
     // reports the error, retried on the next pass) instead of failing recovery
     // for every task on the computer.
     const unfinished = new Set<string>()
+    // This pass re-decides every fence of this computer, and what it holds of others.
+    for (const [id, f] of fences) if (f.computerId === computerId) fences.delete(id)
+    for (const [id, t] of takeovers) if (t.holderComputerId === computerId) takeovers.delete(id)
     let inventory: ComputerChatInventory[] = []
     let restoredMetadata: ReadonlySet<string> = new Set()
-    const work = relay
-      .resumeProviderTransitions(computerId)
-      .then(() => recovery.reconcile(computerId))
-      .then((items) => {
-        inventory = items
-      })
-      .then(() => lifecycle.sync(computerId))
-      .then(() => relay.resumeInitializations(computerId))
-      .then(async () => {
-        // A hub CAS can commit before the destination receives activation. Do
-        // not request active metadata from that still-prepared destination.
-        const owners = await opts.db.all<{ id: string }>(
-          `SELECT id FROM chat_ownership o WHERE (
-            (destination_computer_id=? AND state IN ('copying','verified')) OR
-            (computer_id=? AND state='active' AND cleanup_pending=1)) AND NOT EXISTS(
-              SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
-          [computerId, computerId]
-        )
-        for (const owner of owners)
-          await migration.ensure(owner.id, computerId).catch((error: unknown) => {
-            unfinished.add(owner.id)
-            console.error(
-              `[chat] migration of conversation ${owner.id} to computer ${computerId} pending:`,
-              error
+    // Work still addressed to a re-enrolled or removed computer moves or is
+    // retired first: this pass must never wait on a computer that is gone.
+    // The pass on a computer that can answer: reconcile, deliver, configure.
+    const connectedPass = (): Promise<void> =>
+      Promise.resolve()
+        .then(() => relay.resumeProviderTransitions(computerId))
+        .then(() => recovery.reconcile(computerId))
+        .then((items) => {
+          // An entry without a valid identity was already skipped (and logged).
+          inventory = items.filter((entry) => typeof entry?.identity?.id === 'string')
+        })
+        // Every task's lifecycle the computer holds, against the hub's (tasks
+        // without chats too): rebases either side's restore before delivery.
+        .then(() => lifecycle.reconcile(computerId))
+        .then(() => lifecycle.sync(computerId))
+        .then(() => relay.resumeInitializations(computerId))
+        .then(async () => {
+          // A hub CAS can commit before the destination receives activation. Do
+          // not request active metadata from that still-prepared destination.
+          const owners = await opts.db.all<{ id: string }>(
+            `SELECT id FROM chat_ownership o WHERE (
+              (destination_computer_id=? AND state IN ('copying','verified')) OR
+              (computer_id=? AND state='active' AND cleanup_pending=1)) AND NOT EXISTS(
+                SELECT 1 FROM chat_unavailable_owners u WHERE u.conversation_id=o.id AND u.computer_id=o.computer_id AND u.epoch=o.epoch) ORDER BY id`,
+            [computerId, computerId]
+          )
+          for (const owner of owners)
+            await isolateItem(
+              `migration of conversation ${owner.id} to computer ${computerId}`,
+              () => migration.ensure(owner.id, computerId),
+              () => unfinished.add(owner.id)
             )
+        })
+        // Migrated chats hold their settings now: the hub's starting values go.
+        .then(() => relay.settleStartingValues(computerId))
+        .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
+        .then(async () => {
+          const reported = new Map(inventory.map((entry) => [entry.identity.id, entry]))
+          restoredMetadata = await relay.drainMetadata(
+            computerId,
+            true,
+            new Set([
+              ...unfinished,
+              ...[...fences].filter(([, f]) => f.computerId === computerId).map(([id]) => id)
+            ]),
+            reported
+          )
+        })
+        .then(() => lifecycle.sync(computerId))
+        .then(async () => {
+          await opts.request(computerId, {
+            kind: 'diagnostics.configure',
+            ...(opts.diagnosticsConfig?.() ?? { enabled: true, verbose: false })
           })
-      })
-      .then(() => folderDeletions.recover(computerId, opts.request, opts.gate))
-      .then(async () => {
-        const reported = new Map(inventory.map((entry) => [entry.identity.id, entry]))
-        restoredMetadata = await relay.drainMetadata(computerId, true, unfinished, reported)
-      })
-      .then(() => lifecycle.sync(computerId))
-      .then(async () => {
-        await opts.request(computerId, {
-          kind: 'diagnostics.configure',
-          ...(opts.diagnosticsConfig?.() ?? { enabled: true, verbose: false })
-        })
-        await opts.request(computerId, {
-          kind: 'retention.configure',
-          days: opts.retentionDays ?? 0
-        })
-        if (recovered.get(computerId) === work) {
-          const first = !recoveredOnce.has(computerId)
-          const changed = changedConversations(inventory, restoredMetadata)
-          recoveredOnce.add(computerId)
-          recoveryFinished.add(computerId)
-          if (!first) {
-            for (const id of changed) historyMarks.set(id, (historyMarks.get(id) ?? 0) + 1)
-            await relay.notifyReplayRequired(computerId, changed, (id, epoch) =>
-              historyGeneration(computerId, id, epoch)
-            )
+          await opts.request(computerId, {
+            kind: 'retention.configure',
+            days: opts.retentionDays ?? 0
+          })
+          // Drift the passes failed to prevent or repair shows in the logs, not
+          // only later as a tab that will not open. Never blocks recovery.
+          await checkHubChatConsistency(opts.db)
+            .then((violations) => {
+              for (const v of violations)
+                console.warn(`[chat] consistency: ${v.rule} (${v.ids.join(', ')}): ${v.detail}`)
+            })
+            .catch((error: unknown) => console.warn('[chat] consistency check failed:', error))
+          if (recovered.get(computerId) === work) {
+            const first = !recoveredOnce.has(computerId)
+            const changed = changedConversations(inventory, restoredMetadata)
+            recoveredOnce.add(computerId)
+            recoveryFinished.add(computerId)
+            if (!first) {
+              for (const id of changed) historyMarks.set(id, (historyMarks.get(id) ?? 0) + 1)
+              await relay.notifyReplayRequired(computerId, changed, (id, epoch) =>
+                historyGeneration(computerId, id, epoch)
+              )
+            }
           }
+        })
+    const work: Promise<void> = retireComputers()
+      .then(async (report) => {
+        const standing = await computerStanding(opts.db, computerId)
+        // Removed for good (deleted, or gone missing): there is nothing to reconcile
+        // and nothing can be delivered. Its chats wait visibly (applyComputerRetirements).
+        if (standing.kind === 'removed') {
+          // Its retirement is still owed: this pass is not kept, the next one retries it.
+          const failure = report.failed.get(computerId)
+          if (failure) throw failure
+          // Finished like a connected pass: a forced recovery runs it again.
+          if (recovered.get(computerId) === work) recoveryFinished.add(computerId)
+          return
         }
+        // Re-enrolled: the same machine under its successor's id, whose own pass this
+        // is (never kept under the gone id: nothing can connect as it).
+        if (standing.kind === 'successor') {
+          if (recovered.get(computerId) === work) invalidateRecovery(computerId)
+          await recoverComputer(standing.id, force)
+          return
+        }
+        await connectedPass()
       })
       .catch((error) => {
         if (recovered.get(computerId) === work) invalidateRecovery(computerId)
@@ -240,9 +435,44 @@ export function createComputerChatServices(opts: {
     recovered.set(computerId, work)
     return work
   }
+  /**
+   * A computer was removed (deleted, replaced by its successor, or revoked): its cached
+   * recovery pass is stale (a later recovery must apply its retirement, not return the
+   * old result), and the chat work naming it is moved or retired now — by a pass that
+   * reads the change (`fresh`), never one already running.
+   *
+   * Deleted or replaced (a retirement is recorded): every connected computer holding
+   * chats it owned recovers again at once, so it adopts them (a successor's own, a
+   * deleted owner's) without waiting for a reconnect; one not connected adopts on its
+   * next connect. Revoked records none: its work waits for it, nothing is adopted.
+   */
+  async function computerRemoved(computerId: string): Promise<void> {
+    invalidateRecovery(computerId)
+    await retireComputers({ fresh: true })
+    if (
+      !(await opts.db.get('SELECT 1 FROM computer_retirements WHERE computer_id=?', [computerId]))
+    )
+      return
+    const holders = new Set(
+      [...takeovers.values()]
+        .filter((t) => t.ownerComputerId === computerId)
+        .map((t) => t.holderComputerId)
+    )
+    for (const holder of holders) {
+      if (opts.connected && !opts.connected(holder)) continue
+      await isolateItem(`recovery of computer ${holder} after ${computerId} was removed`, () =>
+        // A pass already running may have applied the retirements before this one.
+        (recovered.get(holder) ?? Promise.resolve())
+          .catch(() => {
+            // That pass's failure is its own (logged by it); this one runs regardless.
+          })
+          .then(() => recoverComputer(holder, true))
+      )
+    }
+  }
   async function bootstrap(owner: HubChatOwnership): Promise<ChatBootstrap> {
-    const task = await opts.db.get<{ project_id: string | null; worktree_path: string | null }>(
-      'SELECT project_id,worktree_path FROM tasks WHERE id=?',
+    const task = await opts.db.get<{ project_id: string | null }>(
+      'SELECT project_id FROM tasks WHERE id=?',
       [owner.taskId]
     )
     if (!task) throw new Error('Chat task no longer exists')
@@ -272,9 +502,6 @@ export function createComputerChatServices(opts: {
     const computerId = owner.destinationComputerId ?? owner.computerId
     if (!computerId) throw new Error('Chat computer is unassigned')
     const terminalAgentId = terminalStorageAgentId(owner.mode)
-    const projectRoot = task.project_id
-      ? await opts.legacyData.getProjectRoot(task.project_id, computerId)
-      : null
     const values = {
       identity: {
         id: owner.id,
@@ -284,7 +511,9 @@ export function createComputerChatServices(opts: {
         epoch: owner.epoch + (owner.state === 'active' ? 0 : 1)
       },
       projectId: task.project_id,
-      cwd: task.worktree_path ?? projectRoot ?? '',
+      // The hub keeps no task path (§9 7e): the computer starts the chat in the task's
+      // own folder there (worktree, else base dir, else its project's folder).
+      cwd: '',
       providerConfig: await opts.legacyData.readProviderConfig(owner.taskId, owner.mode),
       settings: Object.fromEntries(
         await Promise.all(
@@ -302,28 +531,14 @@ export function createComputerChatServices(opts: {
         terminalAgentId
       ),
       defaultFlags: await opts.legacyData.getModeDefaultFlags(owner.mode),
-      env: await opts.legacyData.buildMcpEnv(owner.taskId, owner.mode, computerId),
-      deletedConversations: await opts.db.all<{ mode: string; conversationId: string }>(
-        'SELECT mode,conversation_id AS conversationId FROM session_deletions WHERE task_id=?',
-        [owner.taskId]
-      ),
-      honoredSessions: await opts.db.all<{ mode: string; conversationId: string }>(
-        "SELECT DISTINCT mode,conversation_id AS conversationId FROM agent_sessions WHERE task_id=? AND mode IN (?,?) AND conversation_id IS NOT NULL AND origin NOT IN ('foreign-observed','pending-spawn')",
-        [owner.taskId, owner.mode, terminalAgentId]
-      )
+      env: await opts.legacyData.buildMcpEnv(owner.taskId, owner.mode, computerId)
     }
-    // Capture values and their authority revision together after asynchronous
-    // environment/settings work. An old captured value cannot acquire a newer
-    // revision after a concurrent edit has already reached the computer.
-    const provider = await providerConfigs.snapshot(owner.taskId, owner.mode)
-    const terminal = await providerConfigs.snapshot(owner.taskId, terminalAgentId)
-    values.providerConfig = provider.value
-    values.terminalProviderConfig = terminal.value
+    // `providerConfig` carries hub-owned spawn flags plus a new chat's starting
+    // values; chat settings and the chat session id are the computer's alone
+    // (robustness plan §9, decision 2): it never takes them from here again.
     const hash = createHash('sha256').update(JSON.stringify(values)).digest('hex')
     return {
       ...values,
-      providerConfigRevision: provider.revision,
-      terminalProviderConfigRevision: terminal.revision,
       revision: (await ownership.get(owner.id))
         ? await ownership.settingsRevision(owner.id, hash)
         : 0
@@ -334,10 +549,12 @@ export function createComputerChatServices(opts: {
    * if they disagreed, a session could be elected in one and fenced in another. */
   // Where a legacy (hub-era) tab's agent ran: v196's record, not the legacy table.
   const sessionComputer = async (owner: HubChatOwnership) => {
-    const recorded = await opts.db.get<{ computer_id: string }>(
-      'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
-      [owner.tabId]
-    )
+    const recorded = (await legacyChatTables(opts.db))
+      ? await opts.db.get<{ computer_id: string }>(
+          'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
+          [owner.tabId]
+        )
+      : undefined
     return recorded?.computer_id ?? opts.resolveComputer(owner.taskId)
   }
   const source = createLegacyChatSource({
@@ -424,10 +641,10 @@ export function createComputerChatServices(opts: {
   }
   const migration = createChatMigration({ ownership, source, request })
   /**
-   * Is the hub still the source of this task's prompt history? Prompts and
-   * task-wide content migrate with the task's `chat_legacy_task_authority`
-   * owner; until that owner activates, its `agent_prompts` rows are the only
-   * copy. Without an authority owner the task has no legacy prompt content.
+   * Is the hub still the source of this task's legacy chat history (its unmigrated
+   * chat events)? Task-wide content migrates with the task's
+   * `chat_legacy_task_authority` owner; until that owner activates, the hub's legacy
+   * rows are the only copy. Without an authority owner the task has none.
    */
   async function hubHoldsTaskHistory(taskId: string) {
     const authority = await opts.db.get<{ conversation_id: string }>(
@@ -439,35 +656,51 @@ export function createComputerChatServices(opts: {
     return !!owner && HUB_HISTORY_STATES.has(owner.state)
   }
   /**
-   * History reads of a task whose migration is deferred (its agents run, often
-   * for days after an upgrade restarts them) serve the hub's legacy rows
-   * read-only instead of failing. Migration itself is unchanged: every read
-   * still tries it first, and once the task's history is activated on its
-   * computer, reads go there. Never both sources at once: when the task's
-   * prompts already moved but another conversation still waits, the deferral
-   * error stands.
+   * The computers holding a task's prompt history (robustness plan §9: only there,
+   * since v207 even the prompts the hub once held). Reading first runs the task's
+   * legacy migration, as every history read does. While that migration is deferred
+   * (its agents run, often for days after an upgrade restarts them) the prompts are
+   * read anyway, from the computers already holding them: they never wait on it.
+   * `deferred`: the task's legacy chat events are still the hub's (its legacy Codex
+   * chat prompts count in the session summaries).
    */
-  async function readHistory<T>(
-    taskId: string,
-    computer: () => Promise<T>,
-    hub: () => Promise<T>
-  ): Promise<T> {
+  async function promptComputers(
+    taskId: string
+  ): Promise<{ computers: Set<string>; deferred: boolean }> {
     try {
-      return await computer()
+      const owners = await relay.ensurePromptTask(taskId)
+      return { computers: new Set(owners.map((o) => o.computerId!)), deferred: false }
     } catch (error) {
-      if (!(error instanceof ChatMigrationDeferredError) || !(await hubHoldsTaskHistory(taskId)))
-        throw error
-      return hub()
+      if (isComputerUnreachable(error)) throw new AgentHistoryOfflineError()
+      if (!(error instanceof ChatMigrationDeferredError)) throw error
+      const pc = await opts.resolveComputer(taskId)
+      const known = (await ownership.forTask(taskId)).flatMap((o) =>
+        o.state === 'active' && o.computerId ? [o.computerId] : []
+      )
+      return {
+        computers: new Set([...known, ...(pc ? [pc] : [])]),
+        deferred: await hubHoldsTaskHistory(taskId)
+      }
+    }
+  }
+  /** One request to a computer holding history; one not connected = offline (no hub copy). */
+  async function historyRequest(computerId: string, taskId: string, value: unknown) {
+    try {
+      await opts.gate?.(computerId, taskId)
+      await opts.flushTask?.(taskId, computerId)
+      return await request(computerId, value)
+    } catch (error) {
+      if (isComputerUnreachable(error)) throw new AgentHistoryOfflineError()
+      throw error
     }
   }
   async function computerPromptSummaries(taskId: string, conversationIds: string[]) {
-    const owners = await relay.ensurePromptTask(taskId)
+    const { computers, deferred } = await promptComputers(taskId)
     type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
     const result = new Map<string, Summary>()
-    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-      await opts.gate?.(computerId, taskId)
+    for (const computerId of computers) {
       for (let offset = 0; offset < conversationIds.length; offset += 500) {
-        const summaries = (await request(computerId, {
+        const summaries = (await historyRequest(computerId, taskId, {
           kind: 'prompt.summaries',
           taskId,
           conversationIds: conversationIds.slice(offset, offset + 500)
@@ -483,10 +716,27 @@ export function createComputerChatServices(opts: {
         }
       }
     }
-    return [...result.values()]
+    const merged: Array<{ conversationId: string; count: number; firstPrompt: string }> = [
+      ...result.values()
+    ]
+    if (!deferred) return merged
+    // Codex chat prompts of conversations still waiting in the hub's legacy chat
+    // events: the larger count of the two sources stands (they overlap once moved).
+    const legacy = new Map(
+      (await legacyCodexChatPromptSummaries(opts.db, taskId, conversationIds)).map((s) => [
+        s.conversationId,
+        s
+      ])
+    )
+    const out = merged.map((s) => {
+      const l = legacy.get(s.conversationId)
+      legacy.delete(s.conversationId)
+      return l && l.count > s.count ? l : s
+    })
+    return [...out, ...legacy.values()]
   }
   async function computerPrompts(taskId: string, agentId?: string) {
-    const owners = await relay.ensurePromptTask(taskId)
+    const { computers } = await promptComputers(taskId)
     const excluded = (
       await opts.db.all<{ mode: string; conversation_id: string }>(
         'SELECT mode,conversation_id FROM session_deletions WHERE task_id=?',
@@ -504,9 +754,8 @@ export function createComputerChatServices(opts: {
         created_at: number
       }
     >()
-    for (const computerId of new Set(owners.map((o) => o.computerId!))) {
-      await opts.gate?.(computerId, taskId)
-      const prompts = (await request(computerId, {
+    for (const computerId of computers) {
+      const prompts = (await historyRequest(computerId, taskId, {
         kind: 'prompts',
         taskId,
         agentId,
@@ -525,9 +774,105 @@ export function createComputerChatServices(opts: {
       (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)
     )
   }
+  /** One (task, mode) configuration as the chat's computer holds it (the only copy). */
+  const computerProviderConfig = async (
+    owner: HubChatOwnership,
+    mode: string
+  ): Promise<{ conversationId?: string | null; chatConversationId?: string | null }> => {
+    if (!owner.computerId) return {}
+    return ((await request(owner.computerId, {
+      kind: 'taskData',
+      taskId: owner.taskId,
+      request: { kind: 'providerConfig', mode }
+    })) ?? {}) as { conversationId?: string | null; chatConversationId?: string | null }
+  }
+  /**
+   * The chat holding a provider session, as the computers answer (robustness plan
+   * §9, v208: the hub keeps no provider bindings). Asked: every computer holding an
+   * active chat of the task for that provider, and the computer the task resolves
+   * to. A computer that cannot be reached cannot answer: when no reachable one holds
+   * the session, the start is refused naming it (ProviderSessionHolderOfflineError)
+   * — never started where the task resolves, which would fork the session.
+   */
+  const sessionChatOwner = async (
+    taskId: string,
+    mode: string,
+    sessionId: string
+  ): Promise<HubChatOwnership | null> => {
+    const provider = terminalStorageAgentId(mode)
+    // The computers that may hold it, as the hub answers each (`computerStanding`): a
+    // re-enrolled one is asked under its successor's id; a removed one is never asked
+    // (it never answers) — if it was the only one, the session is gone with it.
+    const computers = new Set<string>()
+    let removed = false
+    const candidate = async (id: string) => {
+      const standing = await computerStanding(opts.db, id)
+      if (standing.kind === 'removed') removed = true
+      else computers.add(standing.id)
+    }
+    for (const o of await ownership.forTask(taskId))
+      if (
+        o.state === 'active' &&
+        o.computerId &&
+        !isStorageOnlyChatOwner(o) &&
+        terminalStorageAgentId(o.mode) === provider
+      )
+        await candidate(o.computerId)
+    const resolved = await opts.resolveComputer(taskId)
+    if (resolved) await candidate(resolved)
+    const offline: string[] = []
+    for (const pc of computers) {
+      let found: { conversationId: string } | null
+      try {
+        found = (await request(pc, {
+          kind: 'ledger',
+          value: { op: 'chatSessionOwner', args: { sessionId, mode } }
+        })) as { conversationId: string } | null
+      } catch (error) {
+        if (isComputerUnreachable(error)) {
+          offline.push(pc)
+          continue
+        }
+        throw error
+      }
+      if (!found) continue
+      const owner = await ownership.get(found.conversationId)
+      if (owner && (await chatComputer(opts.db, owner))?.id === pc) return owner
+    }
+    if (offline.length) {
+      const names: string[] = []
+      for (const id of offline)
+        names.push(
+          (
+            await opts.db.get<{ name: string | null }>('SELECT name FROM computers WHERE id=?', [
+              id
+            ])
+          )?.name?.trim() || id
+        )
+      throw new ProviderSessionHolderOfflineError(names)
+    }
+    // No computer that can answer holds it, and one that may have was removed: it is
+    // gone with that computer (as before, never started elsewhere as if it were new).
+    if (removed) throw new ChatUnavailableError('computer-removed')
+    return null
+  }
+  /** The terminal session of (task, mode) — its main tab's — on the chat's computer's ledger. */
+  const computerTerminalSession = async (
+    owner: HubChatOwnership,
+    mode: string
+  ): Promise<string | null> => {
+    if (!owner.computerId) return null
+    return ((await request(owner.computerId, {
+      kind: 'ledger',
+      value: { op: 'getCurrentConversationId', args: { taskId: owner.taskId, mode } }
+    })) ?? null) as string | null
+  }
   const relay = createHubChatRelay({
     ...opts,
-    recordConversation: (input) => opts.legacyData.recordConversation(input),
+    gate,
+    onConversationFailure: fence,
+    conversationFence,
+    onSessionsChanged: (taskId) => opts.onSessionsChanged?.(taskId),
     request,
     stopRequest: opts.request,
     ownership,
@@ -540,17 +885,22 @@ export function createComputerChatServices(opts: {
     bootstrap,
     migrate: migration.ensure,
     quiesceProvider: async (owner) => {
-      for (const mode of [owner.mode, terminalStorageAgentId(owner.mode)]) {
-        const config = await opts.legacyData.readProviderConfig(owner.taskId, mode)
-        for (const session of [config.conversationId, config.chatConversationId])
-          if (
-            session &&
-            defaultConversationRegistry.isConversationLive('terminal', owner.taskId, session)
-          )
-            await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
-      }
+      // Every session id lives only on the chat's computer (robustness plan §9):
+      // the chat's in its configuration, the terminal's in its session ledger.
+      const chat = await computerProviderConfig(owner, owner.mode)
+      const terminal = await computerTerminalSession(owner, terminalStorageAgentId(owner.mode))
+      for (const session of [chat.conversationId, chat.chatConversationId, terminal])
+        if (
+          session &&
+          defaultConversationRegistry.isConversationLive('terminal', owner.taskId, session)
+        )
+          await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
     },
     beforeInvoke: async (owner, method, args) => {
+      // An existing chat (restored after an upgrade, reopened) reads and starts with
+      // its saved settings and the task's paths and session ledger: what the hub
+      // still stages of them reaches its computer first (S4). Never its history.
+      await opts.flushTask?.(owner.taskId, owner.computerId!, DECISIVE_HANDOFF_KINDS)
       await sealAttachments(owner, method, args)
       if (
         CHAT_READ_OPERATIONS.has(method as ChatOperation) ||
@@ -559,24 +909,25 @@ export function createComputerChatServices(opts: {
         await opts.beforeInvoke?.(owner, method, args)
         return
       }
+      // Which provider session a command acts on matters only while a terminal of
+      // the task runs one: the two sides must never drive one transcript. Whether
+      // the session is this computer's is the computer's own check (it refuses a
+      // session its ledger does not hold — robustness plan §9, v208), so the hub
+      // reads the chat's session id there only when a terminal could collide.
       const first = args[0] as { conversationId?: string } | undefined
       const native = method === 'switchConversation' ? first?.conversationId : undefined
-      const config = await opts.legacyData.readProviderConfig(owner.taskId, owner.mode)
+      const terminalLive = defaultConversationRegistry.liveConversations('terminal', owner.taskId)
       const terminalAgentId = terminalAgentIdForChat(owner.mode)
-      const terminal = terminalAgentId
-        ? await opts.legacyData.readProviderConfig(owner.taskId, terminalAgentId)
-        : null
       const session =
-        native ??
-        (['continueInChat', 'takeOver'].includes(method)
-          ? terminal?.conversationId
-          : config.chatConversationId)
+        terminalLive?.length === 0
+          ? null
+          : (native ??
+            (['continueInChat', 'takeOver'].includes(method)
+              ? terminalAgentId
+                ? await computerTerminalSession(owner, terminalAgentId)
+                : null
+              : (await computerProviderConfig(owner, owner.mode)).chatConversationId))
       if (session) {
-        const original = await ownership.forProviderSession(session, owner.mode)
-        if (original && original.computerId !== owner.computerId)
-          throw new Error(
-            'This provider session belongs to another computer. Open its original chat to continue.'
-          )
         if (defaultConversationRegistry.isConversationLive('terminal', owner.taskId, session)) {
           if (['continueInChat', 'takeOver', 'switchConversation'].includes(method))
             await defaultConversationRegistry.releaseConversation('terminal', owner.taskId, session)
@@ -623,6 +974,22 @@ export function createComputerChatServices(opts: {
     await opts.admitComputer(computerId)
     await recoverComputer(computerId)
     return request(computerId, body)
+  }
+  /** The project a task is in on this hub (the computer finds its folder for it). */
+  async function moveProjectOf(taskId: string): Promise<string> {
+    const row = await opts.db.get<{ project_id: string }>(
+      'SELECT project_id FROM tasks WHERE id = ?',
+      [taskId]
+    )
+    if (!row) throw new Error(`Task ${taskId} is not on this hub`)
+    return row.project_id
+  }
+  /** The computer this hub keeps a moved-in task's sessions on. */
+  async function moveComputerOf(taskId: string): Promise<string> {
+    const computerId = await opts.resolveComputer(taskId)
+    if (!computerId) throw new Error('This task has no computer to keep its sessions on.')
+    await opts.gate?.(computerId, taskId)
+    return computerId
   }
   const computers: ChatComputerOps = {
     listBackups: (pc) =>
@@ -727,9 +1094,287 @@ export function createComputerChatServices(opts: {
           route: { id: owner.id, epoch: owner.epoch },
           prompts
         })
+      },
+      async providerConfig(tabId) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const owner = await relay.ensureTab(tabId)
+        return (await computerProviderConfig(owner, owner.mode)) as Record<string, unknown>
       }
     } satisfies NonNullable<ChatDeps['testing']>,
+    /**
+     * Chat settings of chats a computer owns (robustness plan §9, decision 2): a task
+     * update carrying them (a template applied) changes them there; the hub keeps
+     * no copy. Installed as the task domain's `ChatSettingsDelegate`.
+     */
+    /**
+     * A moved task's agent sessions, between this hub's computers and another hub's
+     * (cross-hub move, `copy-sessions`): the app relays; each call asks one computer,
+     * through the same admission and recovery every computer request here passes.
+     */
+    taskMoveSessions: {
+      async exportTask(moveId, taskId, only) {
+        // Chats whose history still sits in this hub's own tables (older versions), or whose
+        // migration to a computer is not finished, go to their computer first: only what a
+        // computer holds can be exported.
+        const owners = await ownership.forTask(taskId)
+        const tables = await legacyChatTables(opts.db)
+        if (
+          owners.some((o) => !['active', 'deleted'].includes(o.state) || o.cleanupPending) ||
+          (await opts.db.get(
+            `SELECT 1 FROM terminal_tabs t WHERE t.task_id = ? AND ${legacyChatTabContentSql(tables)}`,
+            [taskId]
+          ))
+        )
+          await relay.migrateWholeTask(taskId)
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
+        const transfers: Array<{
+          computerId: string
+          manifest: Parameters<TaskMoveSessionsDelegate['begin']>[1]
+        }> = []
+        const ledgers: SessionLedgerBundle[] = []
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const exported = (await computerRequest(computerId, {
+            kind: 'sessionMove.export',
+            moveId,
+            taskId
+          })) as {
+            transfers: (typeof transfers)[number]['manifest'][]
+            ledger: SessionLedgerBundle
+          }
+          for (const manifest of exported.transfers) transfers.push({ computerId, manifest })
+          ledgers.push(exported.ledger)
+        }
+        return { transfers, ledger: mergeSessionLedgers(ledgers) }
+      },
+      async read(input) {
+        const r = (await computerRequest(input.computerId, {
+          kind: 'sessionMove.read',
+          moveId: input.moveId,
+          conversationId: input.conversationId,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string }
+        return r.data
+      },
+      async readAttachment(input) {
+        const r = (await computerRequest(input.computerId, {
+          kind: 'attachment.read',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref
+        })) as { data: string }
+        return r.data
+      },
+      async discard(moveId, taskIds) {
+        const computers = new Set<string>()
+        for (const taskId of taskIds) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+        }
+        for (const computerId of computers)
+          await computerRequest(computerId, { kind: 'sessionMove.discard', moveId }).catch(
+            () => undefined
+          )
+      },
+      async holders(taskId) {
+        const computers = new Set<string>()
+        for (const o of await ownership.forTask(taskId))
+          if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+        const tracked = await opts.db.all<{ computer_id: string }>(
+          'SELECT computer_id FROM chat_task_computers WHERE task_id = ?',
+          [taskId]
+        )
+        for (const r of tracked) computers.add(r.computer_id)
+        return [...computers].sort()
+      },
+      async forgetOn(taskId, computerId) {
+        await opts.gate?.(computerId, taskId)
+        await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+      },
+      async forget(taskIds) {
+        for (const taskId of taskIds) {
+          const computers = new Set<string>()
+          for (const o of await ownership.forTask(taskId))
+            if (o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId).catch(() => null)
+          if (home) computers.add(home)
+          for (const computerId of [...computers].sort())
+            await computerRequest(computerId, { kind: 'sessionMove.forget', taskId })
+        }
+      },
+      async files(moveId, taskId, only) {
+        void moveId
+        const projectId = await moveProjectOf(taskId)
+        const computers = new Set<string>(only ?? [])
+        if (!only) {
+          for (const o of await ownership.forTask(taskId))
+            if (o.state === 'active' && o.computerId) computers.add(o.computerId)
+          const home = await opts.resolveComputer(taskId)
+          if (home) computers.add(home)
+        }
+        const files: Awaited<ReturnType<TaskMoveSessionsDelegate['files']>> = []
+        const seen = new Set<string>()
+        for (const computerId of [...computers].sort()) {
+          await opts.gate?.(computerId, taskId)
+          const listed = (await computerRequest(computerId, {
+            kind: 'sessionMove.files',
+            taskId,
+            projectId
+          })) as { files: Array<Omit<(typeof files)[number], 'computerId'>> }
+          for (const file of listed.files) {
+            const key = JSON.stringify(file.ref)
+            if (seen.has(key)) continue
+            seen.add(key)
+            files.push({ ...file, computerId })
+          }
+        }
+        return files
+      },
+      async readFile(input) {
+        return (await computerRequest(input.computerId, {
+          kind: 'sessionMove.fileRead',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          length: input.length
+        })) as { data: string; eof: boolean }
+      },
+      async missingFiles(taskId, entries) {
+        const pc = await moveComputerOf(taskId)
+        const answer = (await computerRequest(pc, {
+          kind: 'sessionMove.fileMissing',
+          taskId,
+          projectId: await moveProjectOf(taskId),
+          entries
+        })) as { missing: Awaited<ReturnType<TaskMoveSessionsDelegate['missingFiles']>> }
+        return answer.missing
+      },
+      async writeFile(input) {
+        const pc = await moveComputerOf(input.taskId)
+        await computerRequest(pc, {
+          kind: 'sessionMove.fileWrite',
+          taskId: input.taskId,
+          projectId: await moveProjectOf(input.taskId),
+          ref: input.ref,
+          offset: input.offset,
+          data: input.data,
+          ...(input.complete ? { complete: input.complete } : {})
+        })
+      },
+      computerOf: moveComputerOf,
+      async begin(taskId, manifest) {
+        const pc = await moveComputerOf(taskId)
+        const begun = (await computerRequest(pc, { kind: 'transfer.begin', manifest })) as {
+          id: string
+          offset: number
+        }
+        return { transferId: begun.id, offset: begun.offset }
+      },
+      async chunk(taskId, transferId, offset, data) {
+        const pc = await moveComputerOf(taskId)
+        await computerRequest(pc, { kind: 'transfer.chunk', id: transferId, offset, data })
+      },
+      async finish(taskId, transferId) {
+        const pc = await moveComputerOf(taskId)
+        const staged = (await computerRequest(pc, { kind: 'transfer.finish', id: transferId })) as {
+          id: string
+          epoch: number
+        }
+        const verified = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: staged.id
+        })) as { missing: Array<Parameters<TaskMoveSessionsDelegate['putAttachment']>[0]['ref']> }
+        return { conversationId: staged.id, epoch: staged.epoch, missing: verified.missing }
+      },
+      async putAttachment(input) {
+        const pc = await moveComputerOf(input.taskId)
+        await computerRequest(pc, {
+          kind: 'attachment.put',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref,
+          data: input.data
+        })
+      },
+      async activate(input) {
+        const pc = await moveComputerOf(input.taskId)
+        const left = (await computerRequest(pc, {
+          kind: 'migration.verify',
+          id: input.conversationId
+        })) as { missing: unknown[] }
+        if (left.missing.length) throw new Error('The chat is still missing attachments.')
+        await computerRequest(pc, {
+          kind: 'migration.activate',
+          id: input.conversationId,
+          epoch: input.epoch,
+          migrationId: input.migrationId,
+          hash: input.hash
+        })
+      },
+      async importLedger(taskId, ledger) {
+        const pc = await moveComputerOf(taskId)
+        const result = (await computerRequest(pc, {
+          kind: 'data.import',
+          value: {
+            kind: 'session-ledger-move',
+            items: [{ key: `session-ledger-move:${taskId}`, taskId, value: ledger }]
+          }
+        })) as { rejected: Array<{ message: string }> }
+        if (result.rejected.length) throw new Error(result.rejected[0].message)
+      },
+      async settle(computerId) {
+        invalidateRecovery(computerId)
+        await recoverComputer(computerId, true)
+      }
+    } satisfies TaskMoveSessionsDelegate,
+    chatSettings: {
+      async ownedModes(taskId: string): Promise<ReadonlySet<string>> {
+        const rows = await opts.db.all<{ mode: string }>(
+          `SELECT DISTINCT mode FROM chat_ownership WHERE task_id=? AND state IN ('active','copying','verified')
+            AND tab_id NOT LIKE 'artifact-store:%' AND tab_id<>'task-content:'||task_id`,
+          [taskId]
+        )
+        return new Set(rows.map((r) => r.mode))
+      },
+      async apply(taskId: string, mode: string, settings: Record<string, unknown>) {
+        const owner = await opts.db.get<{ tab_id: string; computer_id: string | null }>(
+          `SELECT tab_id,computer_id FROM chat_ownership WHERE task_id=? AND mode=? AND state IN ('active','copying','verified')
+            AND tab_id NOT LIKE 'artifact-store:%' AND tab_id<>'task-content:'||task_id
+            ORDER BY epoch DESC,id LIMIT 1`,
+          [taskId, mode]
+        )
+        if (!owner) throw new Error('The chat is no longer on a computer')
+        // The computer resolves the chat's folder itself (the hub keeps no task path).
+        const target = { tabId: owner.tab_id, taskId, mode, cwd: '' }
+        if (typeof settings.chatMode === 'string')
+          await relay.ops.setMode({ ...target, chatMode: settings.chatMode })
+        if (typeof settings.chatModel === 'string')
+          await relay.ops.setModel({ ...target, chatModel: settings.chatModel })
+        if (typeof settings.chatEffort === 'string')
+          await relay.ops.setEffort({ ...target, chatEffort: settings.chatEffort })
+        if (typeof settings.chatCollaboration === 'string')
+          await relay.ops.setCollaboration({
+            ...target,
+            chatCollaboration: settings.chatCollaboration
+          })
+        if (typeof settings.chatFastMode === 'boolean')
+          await relay.ops.setFastMode({ ...target, chatFastMode: settings.chatFastMode })
+      }
+    },
     computers,
+    /** A computer was deleted or re-enrolled: move or retire the chat work naming it. */
+    retireComputers,
+    computerRemoved,
+    /** Conversations a computer holds that the hub assigns to another (see `takeovers`). */
+    takeoverCandidates: (): TakeoverCandidate[] => [...takeovers.values()],
     availability: createChatAvailability({
       historyGeneration,
       db: opts.db,
@@ -738,45 +1383,66 @@ export function createComputerChatServices(opts: {
       connected: opts.connected ?? (() => false),
       chatRuntimeReady: opts.chatRuntimeReady,
       hasLiveTask: opts.hasLiveTask,
-      gate: opts.gate
+      gate: opts.gate,
+      heldBy: (conversationId, ownerId) => {
+        const t = takeovers.get(conversationId)
+        return t?.ownerComputerId === ownerId ? t.holderComputerId : null
+      }
     }),
     async migrateIdleComputer(computerId: string) {
       await recoverComputer(computerId)
+      // Dropped once every chat migrated (§9 Phase 8): unowned chat tabs still register.
+      const tables = await legacyChatTables(opts.db)
       const tasks = new Set(
         (
           await opts.db.all<{ task_id: string }>(
             `SELECT DISTINCT t.task_id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id
-              WHERE (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+              WHERE (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql(tables)})
               AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1)
-              UNION SELECT task.id AS task_id FROM tasks task WHERE ${legacyChatTaskContentSql()}`
+              UNION SELECT task.id AS task_id FROM tasks task WHERE ${legacyChatTaskContentSql(tables)}`
           )
         ).map((t) => t.task_id)
       )
-      for (const task of (await opts.diagnostics?.tasks()) ?? []) {
-        const deleted = await opts.db.get(
-          "SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'",
-          [task]
-        )
-        if (deleted && opts.diagnostics) {
-          await opts.diagnostics.cleanup(task, await opts.diagnostics.freeze(task))
-        } else tasks.add(task)
-      }
+      const ledger = createAsyncFaultLedger(opts.db, { origin: 'hub', computerId })
+      // One task's diagnostics that cannot be cleaned (a damaged row, a busy
+      // checkpoint) is recorded and retried on its backoff; the migration and the
+      // later maintenance stages still run for every other task.
+      await forEachIsolated(
+        (await opts.diagnostics?.tasks()) ?? [],
+        {
+          pass: 'hub-legacy-diagnostics-cleanup',
+          key: (task) => task,
+          taskId: (task) => task,
+          ledger,
+          isFatal: isComputerUnreachable
+        },
+        async (task) => {
+          const deleted = await opts.db.get(
+            "SELECT 1 FROM chat_task_lifecycle WHERE task_id=? AND state='deleted'",
+            [task]
+          )
+          if (deleted && opts.diagnostics) {
+            await opts.diagnostics.cleanup(task, await opts.diagnostics.freeze(task))
+          } else tasks.add(task)
+        }
+      )
       for (const taskId of tasks) {
-        if (await opts.hasLiveTask(taskId)) continue
         try {
+          if (await opts.hasLiveTask(taskId)) continue
           const owners = await ownership.forTask(taskId)
           const tab = await opts.db.get<{ id: string }>(
             `SELECT t.id FROM terminal_tabs t LEFT JOIN chat_tab_bindings b ON b.tab_id=t.id LEFT JOIN chat_ownership o ON o.id=b.conversation_id WHERE t.task_id=?
-              AND (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql()})
+              AND (t.mode IN ('claude-chat','codex-chat') OR ${legacyChatTabContentSql(tables)})
               AND (o.id IS NULL OR o.state IN ('legacy','copying','verified') OR o.cleanup_pending=1) ORDER BY t.created_at,t.id LIMIT 1`,
             [taskId]
           )
-          const recorded = tab
-            ? await opts.db.get<{ computer_id: string }>(
-                'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
-                [tab.id]
-              )
-            : null
+          const recorded =
+            tab && tables
+              ? await opts.db.get<{ computer_id: string }>(
+                  'SELECT computer_id FROM chat_legacy_tab_computers WHERE tab_id=?',
+                  [tab.id]
+                )
+              : null
           const pc =
             owners.find((o) => o.state !== 'deleted' && o.destinationComputerId)
               ?.destinationComputerId ??
@@ -786,17 +1452,32 @@ export function createComputerChatServices(opts: {
           if (tab) await relay.ensureTab(tab.id)
           else if (await opts.db.get('SELECT 1 FROM tasks WHERE id=?', [taskId]))
             await relay.ensurePromptTask(taskId)
-        } catch {
-          /* A disconnected, active or unplaced task remains fenced and retries later. */
+          await ledger.clear('hub-legacy-chat-migration', taskId)
+        } catch (error) {
+          // A disconnected computer: every later task would fail the same way. Stop
+          // here (not a fault); the next pass after reconnect retries them all.
+          if (isComputerUnreachable(error)) break
+          // An active or unplaced task remains fenced and retries next pass; recorded
+          // (never silent) so a task that can never migrate shows under Needs attention.
+          const failure = toError(error)
+          console.error(`[chat] legacy migration of task ${taskId} failed; continuing:`, failure)
+          await ledger.record(
+            {
+              pass: 'hub-legacy-chat-migration',
+              itemKey: taskId,
+              taskId,
+              kind: classifyFault(failure),
+              error: failure
+            },
+            Date.now()
+          )
         }
       }
     },
     async captureHook(hook: ResolvedAgentHook, reportedComputer?: string | null) {
       if (!hook.taskId || !agentHookPrompt(hook) || !isPromptCaptureMode(hook.agentId)) return
-      const owner = hook.sessionId
-        ? await ownership.forProviderSession(hook.sessionId, hook.mode)
-        : null
-      const pc = reportedComputer ?? owner?.computerId ?? (await opts.resolveComputer(hook.taskId))
+      // The computer that ran the agent reported the hook: its prompt is stored there.
+      const pc = reportedComputer ?? (await opts.resolveComputer(hook.taskId))
       if (!pc) throw new Error('Prompt storage computer is unavailable')
       await opts.gate?.(pc, hook.taskId)
       await recoverComputer(pc)
@@ -833,8 +1514,13 @@ export function createComputerChatServices(opts: {
       await relay.resetCaches()
     },
     async artifactOwner(taskId: string, preferredComputer?: string) {
-      const pc = preferredComputer ?? (await opts.resolveComputer(taskId))
-      if (!pc) throw new Error('Artifact computer is unavailable')
+      const named = preferredComputer ?? (await opts.resolveComputer(taskId))
+      if (!named) throw new Error('Artifact computer is unavailable')
+      // Never a store on a removed computer (nothing is ever delivered there); a
+      // re-enrolled one's is its successor's.
+      const standing = await computerStanding(opts.db, named)
+      if (standing.kind === 'removed') throw new ChatUnavailableError('computer-removed')
+      const pc = standing.id
       await opts.gate?.(pc, taskId)
       await recoverComputer(pc)
       const existing = (await ownership.forTask(taskId)).find(
@@ -842,7 +1528,7 @@ export function createComputerChatServices(opts: {
       )
       if (existing) {
         const unavailable = await ownership.unavailable(existing.id)
-        if (unavailable) throw new Error(unavailable.reason)
+        if (unavailable) throw new ChatUnavailableError(unavailable.reason)
         return existing
       }
       const identity = {
@@ -878,7 +1564,9 @@ export function createComputerChatServices(opts: {
         for (const o of await ownership.forTask(taskId)) {
           if (o.state !== 'active' || isStorageOnlyChatOwner(o)) continue
           const missing = await ownership.unavailable(o.id)
-          if (missing) throw new Error(missing.reason)
+          if (missing) throw new ChatUnavailableError(missing.reason)
+          const fenced = conversationFence(o.id)
+          if (fenced) throw fenced
         }
       }
       const lifecycleState = await opts.db.get<{ state: string }>(
@@ -932,8 +1620,8 @@ export function createComputerChatServices(opts: {
         (context?.mode
           ? await opts.legacyData.getCurrentConversationId(taskId, context.mode)
           : null)
-      const owner =
-        native && context?.mode ? await ownership.forProviderSession(native, context.mode) : null
+      let owner =
+        native && context?.mode ? await sessionChatOwner(taskId, context.mode, native) : null
       if (
         !owner &&
         native &&
@@ -944,8 +1632,12 @@ export function createComputerChatServices(opts: {
           'Original computer for this historical provider session is ambiguous. Open its original chat before continuing.'
         )
       if (owner) {
+        // Recovery repoints a re-enrolled owner; read it again after.
         await recoverComputer(owner.computerId!)
+        owner = (await ownership.get(owner.id)) ?? owner
         await assertTaskHistory()
+        if ((await chatComputer(opts.db, owner))?.kind === 'removed')
+          throw new ChatUnavailableError('computer-removed')
         await lifecycle.sync(owner.computerId!)
         if (owner.taskId !== taskId) {
           const ownerTask = await opts.db.get<{ title: string | null }>(
@@ -956,19 +1648,26 @@ export function createComputerChatServices(opts: {
         }
         if (owner.state !== 'active' || !owner.computerId)
           throw new Error('Provider session ownership is unavailable')
-        await opts.gate?.(owner.computerId, taskId)
+        await gate(owner.computerId, taskId)
         return owner.computerId
       }
-      const computerId = await opts.resolveComputer(taskId)
+      const placed = await opts.resolveComputer(taskId)
+      const standing = placed ? await computerStanding(opts.db, placed) : null
+      if (standing?.kind === 'removed') throw new ChatUnavailableError('computer-removed')
+      const computerId = standing?.id ?? null
       if (computerId) {
         // Chat recovery guards this task's own chat history on the computer. A
         // task with none there must not inherit another conversation's (or a
         // broken chat store's) recovery failure: native agents and shells start.
+        // Storage-only owners (task files, legacy prompt history) are not chat
+        // an agent resumes from: their failures surface where they are read.
         const ownsChat = async () =>
-          !!(await opts.db.get(
-            "SELECT 1 FROM chat_ownership WHERE task_id=? AND state<>'deleted' AND (computer_id=? OR destination_computer_id=?) LIMIT 1",
-            [taskId, computerId, computerId]
-          ))
+          (await ownership.forTask(taskId)).some(
+            (o) =>
+              o.state !== 'deleted' &&
+              !isStorageOnlyChatOwner(o) &&
+              (o.computerId === computerId || o.destinationComputerId === computerId)
+          )
         await recoverComputer(computerId).catch(async (error: unknown) => {
           if (await ownsChat()) throw error
         })
@@ -981,6 +1680,9 @@ export function createComputerChatServices(opts: {
           if (await ownsChat()) throw error
           await lifecycle.syncNative(computerId)
         })
+        // A chat task needs all its state delivered (its history depends on
+        // it); native work only an undelivered pause or delete.
+        assertTaskDelivered(computerId, taskId, !(await ownsChat()))
       }
       return computerId
     },
@@ -989,19 +1691,10 @@ export function createComputerChatServices(opts: {
       conversationIds: string[]
     ): Promise<Array<{ conversationId: string; count: number; firstPrompt: string }>> {
       if (!conversationIds.length) return []
-      return readHistory(
-        taskId,
-        () => computerPromptSummaries(taskId, conversationIds),
-        () =>
-          legacySessionPromptSummaries(opts.db, taskId, conversationIds, { codexChatEvents: true })
-      )
+      return computerPromptSummaries(taskId, conversationIds)
     },
     async prompts(taskId: string, agentId?: string) {
-      return readHistory(
-        taskId,
-        () => computerPrompts(taskId, agentId),
-        () => listPromptsForTask(opts.db, taskId, agentId)
-      )
+      return computerPrompts(taskId, agentId)
     }
   }
 }

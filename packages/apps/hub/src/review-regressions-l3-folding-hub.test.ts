@@ -16,7 +16,6 @@ vi.mock('@slayzone/platform/computer-path', async (importOriginal) => {
 
 const { createTestHarness } = await import('../../../shared/test-utils/ipc-harness.js')
 const { canAccess, invalidateAccessCache, resource } = await import('@slayzone/api')
-const { gitTargetForPath } = await import('@slayzone/worktrees/hub')
 
 const h = await createTestHarness()
 const sql = (s: string, ...p: unknown[]): void => void h.db.prepare(s).run(...p)
@@ -33,14 +32,9 @@ const project = (id: string, owner: string, path: string) =>
 // Two users' roots on a (case-sensitive) Linux computer, differing only in case.
 project('pA', A, '/home/u/proj')
 project('pB', B, '/home/u/PROJ')
-sql(
-  `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES ('tA', 'pA', 'T', ?)`,
-  '/home/u/wt'
-)
-sql(
-  `INSERT INTO tasks (id, project_id, title, worktree_path) VALUES ('tB', 'pB', 'T', ?)`,
-  '/home/u/WT'
-)
+// Task folders are not on the hub (§9 7e): only project roots decide a path here.
+sql(`INSERT INTO tasks (id, project_id, title, has_worktree) VALUES ('tA', 'pA', 'T', 1)`)
+sql(`INSERT INTO tasks (id, project_id, title, has_worktree) VALUES ('tB', 'pB', 'T', 1)`)
 
 const can = async (user: string, path: string): Promise<boolean> => {
   invalidateAccessCache()
@@ -58,9 +52,5 @@ describe("L3 with a case-insensitive hub disk: the computer's case still decides
     expect(await can(B, '/home/u/PROJ/.env')).toBe(true)
     expect(await can(A, '/home/u/PROJ/.env')).toBe(false)
   })
-
-  test('routing picks the exact case', async () => {
-    expect(await gitTargetForPath(h.slayDb, '/home/u/wt/x')).toEqual({ taskId: 'tA' })
-    expect(await gitTargetForPath(h.slayDb, '/home/u/WT/x')).toEqual({ taskId: 'tB' })
-  })
+  // Routing by path is gone (§9 Phase 7c): a request names its scope.
 })

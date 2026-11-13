@@ -163,6 +163,45 @@ describe('ProcessDialog', () => {
     expect(screen.queryByText('boom')).toBeNull()
   })
 
+  it("S7: a new task process waits for the task's folder — never stored with a guessed cwd", async () => {
+    const onSaved = vi.fn()
+    const el = (cwd: string | null, cwdUnavailable: string | null) => (
+      <ProcessDialog
+        open
+        onOpenChange={vi.fn()}
+        process={null}
+        taskId="t1"
+        projectId="proj"
+        cwd={cwd}
+        cwdUnavailable={cwdUnavailable}
+        onSaved={onSaved}
+        onSpawned={vi.fn()}
+      />
+    )
+    const r = render(el(null, 'Waiting for the task’s folder…'))
+    fireEvent.change(labelInput(), { target: { value: 'Web' } })
+    fireEvent.change(commandInput(), { target: { value: 'npm run dev' } })
+    fireEvent.click(screen.getByText('This task'))
+    expect(screen.getByText('Waiting for the task’s folder…')).toBeDefined()
+    expect((screen.getByText('Run') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => {
+      fireEvent.keyDown(commandInput(), { key: 'Enter' })
+    })
+    expect(create).not.toHaveBeenCalled()
+    // A project process is not run in the task's folder: not blocked.
+    fireEvent.click(screen.getByText('Project'))
+    expect((screen.getByText('Run') as HTMLButtonElement).disabled).toBe(false)
+    // The folder becomes known: the task process may be created with it.
+    fireEvent.click(screen.getByText('This task'))
+    r.rerender(el('/wt', null))
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(false)
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'))
+    })
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ taskId: 't1', cwd: '/wt' }))
+  })
+
   it('a successful save hands off and asks to close', async () => {
     const a = proc({})
     update.mockResolvedValue(undefined)

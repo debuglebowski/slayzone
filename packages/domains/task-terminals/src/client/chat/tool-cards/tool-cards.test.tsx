@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import type React from 'react'
 import { useContext } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { TooltipProvider } from '@slayzone/ui'
 import type { TimelineItem, ToolInvocation } from '@slayzone/terminal/client'
 
 // DiffView renders its lines as plain rows so tests can read what it was given.
@@ -472,5 +473,74 @@ describe('a call a PreToolUse hook blocked', () => {
       blockedBy
     })
     expect(screen.getByTestId('chat-tool-blocked').textContent).toContain('Blocked by policy')
+  })
+})
+
+describe('Read card: image', () => {
+  const imageRead = (path = '/tmp/m5.png') =>
+    inv(
+      'Read',
+      { file_path: path },
+      {
+        rawContent: [
+          { type: 'image', source: { type: 'base64', data: 'AAA', media_type: 'image/png' } }
+        ],
+        structured: { type: 'image', file: { base64: 'AAA', type: 'image/png' } }
+      }
+    )
+  const showWithTooltips = (invocation: ToolInvocation) =>
+    render(
+      <TooltipProvider>
+        <View>{renderTool(invocation, 0)}</View>
+      </TooltipProvider>
+    )
+
+  beforeEach(() => {
+    // Radix Popper measures its trigger; jsdom does not implement ResizeObserver.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    )
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('hovering the path previews the image; clicking the preview opens it full size', async () => {
+    showWithTooltips(imageRead())
+    expect(screen.queryByRole('img')).toBeNull()
+    fireEvent.pointerMove(screen.getByText('/tmp/m5.png'), { pointerType: 'mouse' })
+    const tooltip = await screen.findByRole('tooltip')
+    const preview = within(tooltip).getByAltText('m5.png')
+    expect(preview.getAttribute('src')).toBe('data:image/png;base64,AAA')
+    fireEvent.click(within(tooltip).getByRole('button', { name: 'Open m5.png full size' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByAltText('m5.png').getAttribute('src')).toBe(
+      'data:image/png;base64,AAA'
+    )
+  })
+
+  it('the opened card shows the image; clicking it opens it full size', async () => {
+    showWithTooltips(imageRead())
+    openCard(/Read/)
+    fireEvent.click(screen.getByRole('button', { name: 'Open m5.png full size' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByAltText('m5.png')).toBeTruthy()
+  })
+
+  it('a text read has no image preview', () => {
+    showWithTooltips(
+      inv(
+        'Read',
+        { file_path: '/r/a.ts' },
+        {
+          rawContent: '1\tconst a = 1',
+          structured: { type: 'text', file: { content: 'const a = 1' } }
+        }
+      )
+    )
+    expect(screen.queryByRole('button', { name: /full size/ })).toBeNull()
   })
 })

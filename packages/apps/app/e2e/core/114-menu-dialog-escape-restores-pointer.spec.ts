@@ -95,7 +95,7 @@ test.describe('Menu-opened dialogs closed with Escape', () => {
       {
         name: 'delete',
         role: 'alertdialog',
-        text: 'Move "Esc task',
+        text: 'Permanently delete "Esc task',
         open: async (i) => {
           const menu = await openMenu(i)
           await menu.getByRole('menuitem', { name: 'Delete' }).click()

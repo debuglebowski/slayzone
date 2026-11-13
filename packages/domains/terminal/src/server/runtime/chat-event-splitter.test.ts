@@ -250,4 +250,32 @@ test('cli-command-details describes the CLI, not the conversation: live only, ne
     commands: [{ name: 'compact', description: 'Free up context', argumentHint: '' }]
   }
   expect(s.route(event)).toEqual({ live: [event], saved: [] })
+  // A viewer subscribing after initialize must still receive the command details.
+  expect(s.snapshot()).toEqual([event])
+})
+
+test('snapshot retains the latest CLI metadata alongside streaming blocks and after the turn', () => {
+  const s = new ChatEventSplitter()
+  const old = { kind: 'cli-command-details' as const, commands: [] }
+  const details = {
+    kind: 'cli-command-details' as const,
+    commands: [{ name: 'compact', description: 'Free context', argumentHint: '<instructions>' }]
+  }
+  const models = { kind: 'cli-models' as const, models: [] }
+  s.route(old)
+  s.route(details)
+  s.route(models)
+  s.route(start('m1'))
+  s.route(blockStart(0, 'text'))
+  s.route(delta(0, 'reply'))
+  expect(s.snapshot()).toEqual([
+    details,
+    models,
+    start('m1'),
+    blockStart(0, 'text'),
+    delta(0, 'reply')
+  ])
+  s.route({ kind: 'interrupted' })
+  expect(s.snapshot()).toEqual([details, models])
+  expect(new ChatEventSplitter().snapshot()).toEqual([])
 })

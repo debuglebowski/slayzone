@@ -11,6 +11,12 @@
  *     unref'd;
  *   - no Entra sign-in (the desktop app's hub, a password hub): no timer at all.
  *
+ * THE IdP-ROLE MODE (hub-auth `idp-roles.ts`) replaces this re-check: its authority is the
+ * gate at every request, which revalidates at the issuer when an account's evidence is
+ * due. Here it gets a sweep every {@link IDP_SWEEP_TICK_MS} that refreshes signed-in
+ * accounts shortly before their deadline, so the inline path is rarely taken. The two
+ * never run together.
+ *
  * A refusal ends the account's web sessions and open sockets (`endSessions`) — NOT its
  * computers, which only disabling the account in the hub revokes (owner decision O-24:
  * a refusal also follows a password change). A role change closes its sockets so they
@@ -20,8 +26,9 @@
  */
 import {
   createEntraRecheck,
+  idpRolesOf,
   type EntraFetch,
-  type EntraSsoConfig,
+  type SsoConfig,
   type HubAuth,
   type RecheckReport
 } from '@slayzone/hub-auth/server'
@@ -29,16 +36,23 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { UserAccessRevoker } from './user-access.js'
 import { hasLiveWebSession, SSO_WEB_SESSION_LIFETIME } from './web-sessions.js'
 
+/** The IdP-role mode's sweep tick. */
+export const IDP_SWEEP_TICK_MS = 60_000
+
 /** O-8: hourly. */
 export const RECHECK_INTERVAL_MS = 60 * 60 * 1000
 /** First pass this long after boot: after the hub listens, out of the boot steps' way. */
 export const BOOT_RECHECK_DELAY_MS = 60_000
 
+/** The scheduled callback: it returns its pass, so a test holding the timer can await
+ *  the pass it fired. Real timers ignore the result (the pass never rejects). */
+export type RecheckTick = () => Promise<RecheckReport | null>
+
 /** The timer functions the schedule uses; swapped by tests. */
 export interface RecheckTimers {
-  setTimeout: (fn: () => void, ms: number) => unknown
+  setTimeout: (fn: RecheckTick, ms: number) => unknown
   clearTimeout: (handle: unknown) => void
-  setInterval: (fn: () => void, ms: number) => unknown
+  setInterval: (fn: RecheckTick, ms: number) => unknown
   clearInterval: (handle: unknown) => void
 }
 
@@ -60,7 +74,7 @@ export interface SsoRecheckHandle {
 export function startSsoRecheck(opts: {
   auth: HubAuth
   /** Entra sign-in; absent = off. */
-  sso: EntraSsoConfig | null | undefined
+  sso: SsoConfig | null | undefined
   db: SlayzoneDb
   revoker: UserAccessRevoker
   timers?: RecheckTimers
@@ -79,6 +93,34 @@ export function startSsoRecheck(opts: {
   }
   const log = opts.log ?? ((m: string) => console.log(m))
   const timers = opts.timers ?? realTimers
+  const idp = idpRolesOf(opts.auth)
+  if (idp) {
+    let sweeping = false
+    let stoppedSweep = false
+    const runSweep = async (): Promise<null> => {
+      if (stoppedSweep || sweeping) return null
+      sweeping = true
+      try {
+        await idp.sweep()
+      } finally {
+        sweeping = false
+      }
+      return null
+    }
+    const handle = timers.setInterval(runSweep, IDP_SWEEP_TICK_MS)
+    ;(handle as { unref?: () => void } | null)?.unref?.()
+    log(
+      `[idp-roles] roles come from the identity provider; evidence is re-proven at least every ${idp.config.intervalSec}s`
+    )
+    return {
+      active: true,
+      runNow: runSweep,
+      stop: () => {
+        stoppedSweep = true
+        timers.clearInterval(handle)
+      }
+    }
+  }
   const recheck = createEntraRecheck(opts.auth, {
     cfg: opts.sso,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
@@ -107,9 +149,7 @@ export function startSsoRecheck(opts: {
       running = false
     }
   }
-  const tick = (): void => {
-    void runNow()
-  }
+  const tick: RecheckTick = () => runNow()
   const unref = (h: unknown): unknown => {
     ;(h as { unref?: () => void } | null)?.unref?.()
     return h

@@ -7,9 +7,9 @@
  *   conversation resumes, its history shows.
  * Against the scripted fake CLI.
  */
-import { resetApp } from '../fixtures/electron'
+import { lastLedgerConversation, resetApp } from '../fixtures/electron'
 import path from 'node:path'
-import type { ElectronApplication } from '@playwright/test'
+import type { ElectronApplication, Page } from '@playwright/test'
 import { echoTurn, expect, reply, test } from '../fixtures/chat'
 
 /**
@@ -61,26 +61,13 @@ function alive(pid: number): boolean {
 }
 
 /** The newest ledger row of a task's mode with that origin: its conversation. */
-function ledgerConversation(
-  electronApp: ElectronApplication,
+async function ledgerConversation(
+  page: Page,
   taskId: string,
   mode: string,
   origin: string
 ): Promise<string | null> {
-  return electronApp.evaluate(
-    async ({}, a) => {
-      const db = (globalThis as Record<string, unknown>).__db as {
-        get: (sql: string, params?: unknown[]) => Promise<{ conv: string } | undefined>
-      }
-      const row = await db.get(
-        `SELECT conversation_id AS conv FROM task_conversations
-          WHERE task_id = ? AND mode = ? AND origin = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
-        [a.taskId, a.mode, a.origin]
-      )
-      return row?.conv ?? null
-    },
-    { taskId, mode, origin }
-  )
+  return (await lastLedgerConversation(page, taskId, mode, origin))?.conv ?? null
 }
 
 test.describe('Chat hand-off and live settings', () => {
@@ -172,7 +159,7 @@ test.describe('Chat hand-off and live settings', () => {
       expect(tui.tui).toBe(true)
       expect(tui.flag('--resume')).toBe(conv)
       expect(tui.peersAliveAtStart).toEqual([])
-      expect(await ledgerConversation(electronApp, t.taskId, 'claude-code', 'handoff')).toBe(conv)
+      expect(await ledgerConversation(t.page, t.taskId, 'claude-code', 'handoff')).toBe(conv)
 
       // --- terminal → chat (the terminal's … menu) ---
       await t.page.locator('[data-testid="terminal-menu-trigger"]:visible').first().click()
@@ -180,7 +167,7 @@ test.describe('Chat hand-off and live settings', () => {
       await expect(t.panel).toBeVisible({ timeout: 10_000 })
       await expect(t.panel.getByText('Continued from the terminal')).toBeVisible()
       await expect(t.panel.getByText('echo: one').last()).toBeVisible()
-      expect(await ledgerConversation(electronApp, t.taskId, 'claude-chat', 'handoff')).toBe(conv)
+      expect(await ledgerConversation(t.page, t.taskId, 'claude-chat', 'handoff')).toBe(conv)
       expect(alive(tui.pid)).toBe(false)
 
       await t.send('two')
@@ -234,7 +221,7 @@ test.describe('Chat hand-off and live settings', () => {
       const here = await t.run(2)
       expect(here.flag('--resume')).toBe(conv)
       expect(alive(tui.pid)).toBe(false)
-      expect(await ledgerConversation(electronApp, t.taskId, 'claude-code', 'handoff')).toBe(conv)
+      expect(await ledgerConversation(t.page, t.taskId, 'claude-code', 'handoff')).toBe(conv)
     } finally {
       await undo()
     }

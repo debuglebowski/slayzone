@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
+import { useTaskFolders } from './task-folders'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { Task, UpdateTaskInput } from '@slayzone/task-contracts'
@@ -134,8 +135,11 @@ export function useConsolidatedGeneralData(
   )
   const { mutateAsync: pushBranch } = useMutation(trpc.worktrees.push.mutationOptions())
   const { mutateAsync: pullBranch } = useMutation(trpc.worktrees.pull.mutationOptions())
-  const hasWorktree = !!task.worktree_path
-  const targetPath = task.worktree_path ?? task.base_dir ?? projectPath
+  const hasWorktree = task.has_worktree
+  // The task's folders live on its computer (§9 Phase 7d): null until it answers.
+  const { worktreePath, baseDir } = useTaskFolders(task)
+  const targetPath =
+    task.has_worktree || task.has_base_dir ? (worktreePath ?? baseDir) : projectPath
   // The task's own checkout (worktree or custom working directory), when it isn't
   // the project's — its branch is then independent of the project's.
   const ownCheckout = targetPath && targetPath !== projectPath ? targetPath : null
@@ -426,10 +430,10 @@ export function useConsolidatedGeneralData(
 
   // Metadata — one-time per worktree path
   useEffect(() => {
-    if (!task.worktree_path) return
+    if (!worktreePath) return
     let cancelled = false
     queryClient
-      .fetchQuery(trpc.worktrees.getWorktreeMetadata.queryOptions({ path: task.worktree_path }))
+      .fetchQuery(trpc.worktrees.getWorktreeMetadata.queryOptions({ path: worktreePath }))
       .then((meta) => {
         if (!cancelled) setMetadata(meta)
       })
@@ -439,7 +443,7 @@ export function useConsolidatedGeneralData(
     return () => {
       cancelled = true
     }
-  }, [task.worktree_path, queryClient, trpc])
+  }, [worktreePath, queryClient, trpc])
 
   // Actions
   const handleInitGit = useCallback(async () => {
@@ -666,12 +670,12 @@ export function useConsolidatedGeneralData(
 
   const handleRemoveWorktree = useCallback(
     async (branchToDelete?: string) => {
-      if (!projectPath || !task.worktree_path) return
+      if (!projectPath || !worktreePath) return
       setRemoving(true)
       try {
         const result = await removeWorktree({
           repoPath: projectPath,
-          worktreePath: task.worktree_path,
+          worktreePath,
           branchHint: branchToDelete
         })
         await onUpdateTask({ id: task.id, worktreePath: null, worktreeParentBranch: null })
@@ -684,7 +688,7 @@ export function useConsolidatedGeneralData(
         setRemoving(false)
       }
     },
-    [projectPath, task.id, task.worktree_path, onUpdateTask, removeWorktree]
+    [projectPath, task.id, worktreePath, onUpdateTask, removeWorktree]
   )
 
   // Fetch detected worktrees when no worktree is linked. With a linked worktree or no

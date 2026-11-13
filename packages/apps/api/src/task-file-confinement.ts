@@ -2,23 +2,21 @@
  * What the `files` scope means: a scoped (non-`full`) session — a browser signed in
  * to the hub — may use the file editor for ONE TASK, inside that task's own folders.
  *
- * The scope gate (`isPathAllowed`) only sees the procedure path, and the owner gate
- * (`owner-gate.ts`) deliberately lets a path inside nobody's project through
- * (`HUB_WIDE`: e.g. `~/.ssh`). Neither is enough for a weaker, internet-reachable
- * credential, so this runs after both, for every `files`-classified call by a
- * non-`full` principal:
+ * The scope gate (`isPathAllowed`) only sees the procedure path, so this runs after
+ * it and the owner gate (`owner-gate.ts`, which checks the task is the caller's), for
+ * every `files`-classified call by a non-`full` principal: the input must name a
+ * `taskId`, and must NOT name a `computerId` or `projectId` — the task alone is the
+ * call's path scope and decides which machine it runs on (computer-placement).
  *
- *   - the input must name a `taskId`, and must NOT name a `computerId` or `projectId`
- *     (the task alone decides which machine the call runs on — computer-placement);
- *   - its `rootPath` must lie under one of that task's folders: its worktree, its
- *     base dir, its project's path, or a computer placement of its project.
+ * Its folders are the computer's to judge (§9 Phase 7c: the hub keeps no task
+ * path): the file editor runs every call in that task's path scope, and the computer
+ * confines `rootPath` and every path under it to the task's own folders there — its
+ * worktree, else its base dir, plus its project's folder, other tasks' carved out
+ * (`path-jail.ts` `judgeScope`; links resolved, `..` refused).
  *
- * Every file op already keeps its relative path(s) under `rootPath`
- * (`assertWithinRoot` in file-editor's `file-ops.ts`), so pinning `rootPath` pins
- * the whole call. Refusals are FORBIDDEN: they reveal nothing about anyone else's
- * content, and name the rule so the editor can show why.
- *
- * A `full` principal (desktop, CLI, co-located `slay`) never reaches this.
+ * Refusals are FORBIDDEN: they reveal nothing about anyone else's content, and name
+ * the rule so the editor can show why. A `full` principal (desktop, CLI, co-located
+ * `slay`) never reaches this.
  *
  * @module api/task-file-confinement
  */
@@ -27,30 +25,6 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { securityEvent } from '@slayzone/platform/security-log'
 import type { Scope } from '@slayzone/trpc-server'
 import { requiredScope } from '@slayzone/transport/scopes'
-import { pathIsWithin } from './access'
-
-const TASK_ROOTS_SQL = `
-  SELECT t.worktree_path AS root FROM tasks t WHERE t.id = ?
-  UNION ALL SELECT t.base_dir FROM tasks t WHERE t.id = ?
-  UNION ALL SELECT p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?
-  UNION ALL SELECT pp.root_path FROM tasks t
-    JOIN project_placements pp ON pp.project_id = t.project_id WHERE t.id = ?`
-
-/** `rawPath` lies under one of the task's folders (see the module doc). */
-export async function taskRootsContain(
-  db: SlayzoneDb,
-  taskId: string,
-  rawPath: string
-): Promise<boolean> {
-  if (!rawPath) return false
-  const rows = await db.all<{ root: string | null }>(TASK_ROOTS_SQL, [
-    taskId,
-    taskId,
-    taskId,
-    taskId
-  ])
-  return rows.some((r) => !!r.root && pathIsWithin(rawPath, r.root))
-}
 
 function refuse(path: string, reason: string): TRPCError {
   securityEvent({
@@ -83,9 +57,5 @@ export async function confineTaskFileCall(opts: {
   if (!taskId) throw refuse(opts.path, 'no task')
   if (input.computerId != null || input.projectId != null) {
     throw refuse(opts.path, 'names a computer or project')
-  }
-  const rootPath = str(input.rootPath)
-  if (!rootPath || !(await taskRootsContain(opts.db, taskId, rootPath))) {
-    throw refuse(opts.path, 'outside the task')
   }
 }

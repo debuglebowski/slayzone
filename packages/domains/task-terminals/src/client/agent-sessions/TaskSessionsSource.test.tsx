@@ -16,7 +16,9 @@ const row: TaskSessionRow = {
   lastActiveAt: 2,
   messageCount: 3,
   firstPrompt: 'hi',
-  isCurrent: true
+  isCurrent: true,
+  ownerTabId: 't1',
+  currentInOtherTab: false
 }
 
 afterEach(() => resetTaskSessionsSourceForTests())
@@ -34,7 +36,11 @@ describe('TaskSessionsSource', () => {
     registerTaskSessionsSource({ useTaskSessions: hook })
     const { result } = renderHook(() => useTaskSessions('t1', 'claude-code', false))
     expect(result.current).toEqual([row])
-    expect(hook).toHaveBeenCalledWith('t1', 'claude-code', false)
+    // No tab = the main tab's view.
+    expect(hook).toHaveBeenCalledWith('t1', 'claude-code', false, undefined)
+    // A secondary terminal tab asks for its own view (sessions are per tab).
+    renderHook(() => useTaskSessions('t1', 'claude-code', true, 'deploy'))
+    expect(hook).toHaveBeenLastCalledWith('t1', 'claude-code', true, 'deploy')
   })
 
   it('re-registering the same source is a no-op; a different one throws', () => {

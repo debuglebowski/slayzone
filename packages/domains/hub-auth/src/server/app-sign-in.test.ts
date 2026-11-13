@@ -11,6 +11,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { webcrypto } from 'node:crypto'
+import { parseConfig, type RoleConfig } from '@normain/idp-role-contract'
 import { setSecurityLogSink } from '@slayzone/platform/security-log'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -36,7 +37,9 @@ import {
 import { createHubAuth, type HubAuth } from './auth'
 import { ENTRA_PROVIDER_ID, loadEntraClientCredential } from './entra'
 import { CLIENT_ID, type Claims, FakeEntra, TENANT, writeHubCredential } from './fake-entra-harness'
+import { idpRolesOf } from './idp-roles'
 import { createHubUser, disableHubUser } from './users'
+import { verifySession } from './verify'
 
 const SECRET = 'hub-auth-app-sign-in-test-secret-at-least-32'
 const MFA: Claims = { oid: 'ada', amr: ['pwd', 'mfa'] }
@@ -70,12 +73,18 @@ afterAll(async () => {
 
 let dbCounter = 0
 
-async function serve(opts: { maxPendingCodes?: number } = {}): Promise<void> {
+let lastDbPath = ''
+
+async function serve(
+  opts: { maxPendingCodes?: number; idpRoles?: RoleConfig } = {}
+): Promise<void> {
+  const { idpRoles, ...appOpts } = opts
   server = createServer()
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  lastDbPath = join(tmpDir, `auth-${++dbCounter}.sqlite`)
   auth = await createHubAuth({
-    dbPath: join(tmpDir, `auth-${++dbCounter}.sqlite`),
+    dbPath: lastDbPath,
     baseURL: base,
     secret: SECRET,
     sso: {
@@ -83,11 +92,12 @@ async function serve(opts: { maxPendingCodes?: number } = {}): Promise<void> {
       clientId: CLIENT_ID,
       credential: loadEntraClientCredential(credentialPaths),
       requireMfa: true,
-      authority: entra.authority
+      authority: entra.authority,
+      ...(idpRoles ? { idpRoles } : {})
     }
   })
   const authApp = createAuthExpressApp(auth)
-  const appSignIn = createAppSignIn(auth, { secureCookie: false, ...opts })
+  const appSignIn = createAppSignIn(auth, { secureCookie: false, ...appOpts })
   server.on('request', (req, res) => {
     if (appSignIn(req, res)) return
     if ((req.url ?? '').startsWith('/api/auth/')) authApp(req, res)
@@ -636,5 +646,89 @@ describe('the return leg and the confirm page', () => {
     expect(locationOf(res)).toBe(
       `${APP_SIGN_IN_REDIRECT_URI}?error=no_session&state=${pending.state}`
     )
+  })
+})
+
+describe('IdP-role mode: a code never outlives the grant it was confirmed under', () => {
+  const MANAGED = () =>
+    parseConfig(
+      {
+        IDP_ROLES_ENABLED: 'true',
+        IDP_ROLE_CLAIM: 'roles',
+        IDP_ROLE_MAPPING: JSON.stringify({ 'SlayZone.Admin': ['admin'], 'SlayZone.User': ['user'] })
+      },
+      ['admin', 'user']
+    )
+
+  beforeEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()))
+    await serve({ idpRoles: MANAGED() })
+    advance(1100) // sign-in evidence counts from the second after the activation
+  })
+
+  it('a code confirmed under the current grant mints a session that the gate accepts', async () => {
+    const { pending, code } = await codeFor()
+    const res = await exchange(code, pending.verifier)
+    expect(res.status).toBe(200)
+    const { token } = (await res.json()) as { token: string }
+    expect(
+      (await verifySession(auth, new Headers({ authorization: `Bearer ${token}` })))?.role
+    ).toBe('user')
+  })
+
+  it('approve code → access revoked (no mapped role) → valid SSO again → the OLD code mints nothing', async () => {
+    const { pending, code } = await codeFor()
+    advance(1000)
+    // The person loses the role at the IdP and signs in: refused, access revoked.
+    const denied = await toConfirmPage(new Browser(), { ...MFA, roles: ['Other'] })
+    expect(denied.page.status).not.toBe(200)
+    advance(1000)
+    // The role is given back; a valid sign-in re-grants access.
+    const again = await toConfirmPage(new Browser(), MFA)
+    expect(again.page.status).toBe(200)
+    advance(1000)
+    const res = await exchange(code, pending.verifier)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'access_denied', code: 'IDP_REVALIDATION_REQUIRED' })
+    expect(audit.filter((l) => l.event === 'idp_roles.denied').at(-1)).toMatchObject({
+      detail: { reason: 'stale_authorization' }
+    })
+  })
+
+  it('the confirm page mints no code from a browser session whose evidence is past its deadline and cannot be re-proven', async () => {
+    await new Promise<void>((r) => server.close(() => r()))
+    await serve({ idpRoles: { ...MANAGED(), intervalSec: 60 } })
+    advance(1100)
+    const browser = new Browser()
+    const { page } = await toConfirmPage(browser)
+    expect(page.status).toBe(200)
+    // A minute later (inside the app flow's 10 minutes): the evidence is due, and the
+    // issuer refuses the refresh (the fake knows no refresh tokens).
+    advance(61_000)
+    const confirm = await browser.post(APP_SIGN_IN_CONFIRM_PATH, { decision: 'continue' }, base)
+    expect(locationOf(confirm)).not.toMatch(/[?&]code=/)
+    expect(audit.some((l) => l.event === 'auth.app_sso.code' && l.outcome === 'success')).toBe(
+      false
+    )
+  })
+
+  it('approve code → another boot activates a new config → valid SSO there → the old process mints nothing', async () => {
+    const { pending, code } = await codeFor()
+    const newer = await createHubAuth({
+      dbPath: lastDbPath,
+      baseURL: base,
+      secret: SECRET,
+      sso: {
+        tenantId: TENANT,
+        clientId: CLIENT_ID,
+        credential: loadEntraClientCredential(credentialPaths),
+        requireMfa: true,
+        authority: entra.authority,
+        idpRoles: { ...MANAGED(), intervalSec: 1800 }
+      }
+    })
+    expect(idpRolesOf(newer)?.activation.epoch).toBe(2)
+    const res = await exchange(code, pending.verifier)
+    expect(res.status).toBe(403)
   })
 })

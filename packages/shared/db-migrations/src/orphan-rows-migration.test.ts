@@ -18,9 +18,21 @@
  */
 import Database from 'better-sqlite3'
 import { describe, expect, test } from 'vitest'
-import { migrations, runMigrations } from './index'
+import type Database2 from 'better-sqlite3'
+import { migrations } from './index'
 
-const LATEST = migrations[migrations.length - 1].version
+/** The chain through v205: v206 moved the session ledger to the computer (§9). */
+function runMigrations(db: Database2.Database): void {
+  const current = db.pragma('user_version', { simple: true }) as number
+  for (const m of migrations)
+    if (m.version > current && m.version <= 205)
+      db.transaction(() => {
+        m.up(db)
+        db.pragma(`user_version = ${m.version}`)
+      })()
+}
+
+const LATEST = 205 // the chain under test ends where v206 moved the ledger (§9)
 
 /** A database exactly as v0.35.0 leaves it: migrated to v145, enforcement on. */
 function dbAtV145(): Database.Database {

@@ -50,6 +50,12 @@ export interface ProcedurePolicy {
    * the result, or null when there is nothing to enforce for this call.
    */
   ownerCheck(req: OwnerCheckRequest): Promise<OwnedResultFilter | null>
+  /**
+   * The move lock, before a mutation's handler, with or without login: throws when the
+   * call writes to a task that is being moved to another hub. Absent = no tasks move
+   * on this server (a composition without the task domain).
+   */
+  moveLockCheck?(req: OwnerCheckRequest): Promise<void>
 }
 
 let registered: ProcedurePolicy | null = null
@@ -57,6 +63,11 @@ let registered: ProcedurePolicy | null = null
 /** Called once by the composition (`@slayzone/api`). A later call replaces it. */
 export function setProcedurePolicy(policy: ProcedurePolicy): void {
   registered = policy
+}
+
+/** The registered policy, or null — for a gate that has nothing to enforce without one. */
+export function registeredProcedurePolicy(): ProcedurePolicy | null {
+  return registered
 }
 
 /** The registered policy. Throws when none is: a gate must not run unchecked. */

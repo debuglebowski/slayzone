@@ -2,7 +2,6 @@ import path from 'node:path'
 import {
   existsSync,
   readFileSync,
-  unlinkSync,
   rmSync,
   statSync,
   mkdtempSync,
@@ -26,6 +25,8 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
 import { VersionError } from './errors'
+import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
+import { eraseContent } from '@slayzone/content-erasure/server'
 import { cleanupTaskWorkingCopies, workingCopyJournalDir } from './working-copy'
 import {
   artifactFilePathIn,
@@ -202,9 +203,10 @@ export function createArtifactStore(dataDir: string) {
     async deleteArtifact(db: SlayzoneDb, id: string): Promise<boolean> {
       const existing = await getRow(db, id)
       if (!existing) return false
-      const filePath = getArtifactFilePath(existing.task_id as string, id, existing.title as string)
-      if (existsSync(filePath)) unlinkSync(filePath)
-      await db.prepare('DELETE FROM task_artifacts WHERE id = ?').run(id)
+      const report = await eraseContent(db, dataDir, { kind: 'artifacts', ids: [id] })
+      // A scheduled database compaction is not a failure: it completes the job later.
+      if (!isErasureDoneOrCompacting(report))
+        throw new Error(`Deletion is incomplete. Cleanup will retry. Operation ${report.id}`)
       return true
     },
 
@@ -294,6 +296,28 @@ export function createArtifactStore(dataDir: string) {
         if (copy) result.push(copy)
       }
       return result
+    },
+
+    /**
+     * Moves entries (artifacts, and folders with their subtrees) from
+     * `sourceTaskId` to `destTaskId`, keeping ids, versions and working copies.
+     * Retrying a partly applied move completes it. Returns the entries moved now.
+     */
+    async moveArtifacts(
+      db: SlayzoneDb,
+      data: {
+        artifactIds: string[]
+        folderIds: string[]
+        sourceTaskId: string
+        destTaskId: string
+        destFolderId: string | null
+      }
+    ): Promise<{ artifacts: TaskArtifact[]; folders: ArtifactFolder[] }> {
+      const result = await db.namedTxn('task-artifacts:move', { dataDir, ...data })
+      return {
+        artifacts: result.artifacts.map(parseArtifact).filter(Boolean) as TaskArtifact[],
+        folders: result.folders.map(parseFolder).filter(Boolean) as ArtifactFolder[]
+      }
     },
 
     async pasteArtifactFiles(

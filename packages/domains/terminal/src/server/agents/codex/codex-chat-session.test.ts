@@ -983,3 +983,41 @@ describe('steerUserTurn', () => {
     expect(h.sent.some((m) => m.method === 'turn/steer')).toBe(false)
   })
 })
+
+describe('Codex watchdog health probe', () => {
+  test('reads only the same thread, without resume, input, or interrupt', async () => {
+    const h = makeHarness()
+    await handshake(h, 'audit-thread')
+    const before = h.sent.length
+    const health = h.driver.probeLiveness!(100)
+    const request = h.sent.at(-1)!
+    expect(request).toMatchObject({
+      method: 'thread/read',
+      params: { threadId: 'audit-thread', includeTurns: false }
+    })
+    h.driver.handleLine(
+      JSON.stringify({
+        id: request.id,
+        result: { thread: { id: 'audit-thread' } }
+      })
+    )
+    expect(await health).toBe(true)
+    expect(h.sent.slice(before).map((m) => m.method)).toEqual(['thread/read'])
+    h.driver.dispose?.()
+  })
+
+  test('bounds a non-responsive server and rejects a wrong thread', async () => {
+    const h = makeHarness()
+    await handshake(h)
+    expect(await h.driver.probeLiveness!(20)).toBe(false)
+    const health = h.driver.probeLiveness!(100)
+    h.driver.handleLine(
+      JSON.stringify({
+        id: h.sent.at(-1)!.id,
+        result: { thread: { id: 'other-thread' } }
+      })
+    )
+    expect(await health).toBe(false)
+    h.driver.dispose?.()
+  })
+})

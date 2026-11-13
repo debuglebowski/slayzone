@@ -70,6 +70,9 @@ export interface GitDiffChangedPayload {
   worktreePath: string
   /** A ref moved in this debounce window (commit, checkout, fetch, branch create/delete). */
   refsChanged: boolean
+  /** The task / project the watch was opened for (the event's owner check). */
+  taskId?: string
+  projectId?: string
 }
 
 export interface GitWatcherEvents {
@@ -80,7 +83,11 @@ export interface GitWatcherEvents {
    * cadence — without this it would stay pinned at WATCHER_FALLBACK_POLL_MS
    * (30s) forever, since `watchStart` already resolved successfully.
    */
-  'git:diff-watch-failed': (payload: { worktreePath: string }) => void
+  'git:diff-watch-failed': (payload: {
+    worktreePath: string
+    taskId?: string
+    projectId?: string
+  }) => void
 }
 
 export interface GitWatcher extends EventEmitter {

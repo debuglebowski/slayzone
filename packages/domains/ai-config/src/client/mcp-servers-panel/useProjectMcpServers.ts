@@ -28,7 +28,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
   const fetchConfigs = useCallback(
     async () =>
       Promise.all([
-        trpcClient.aiConfig.discoverMcpConfigs.query({ projectPath }),
+        trpcClient.aiConfig.discoverMcpConfigs.query({ projectId, projectPath }),
         loadCustomServers(trpcClient),
         trpcClient.aiConfig.getProjectProviders.query({ projectId })
       ]).then(
@@ -144,6 +144,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
     const targets = enabledMcpTargets.filter((p) => !server.providers.includes(p))
     await writeEach(targets, (provider) =>
       trpcClient.aiConfig.writeMcpServer.mutate({
+        projectId,
         projectPath,
         provider,
         serverKey: server.key,
@@ -157,6 +158,7 @@ export function useProjectMcpServers(projectPath: string, projectId: string) {
     const targets = server.providers.filter((p) => writableProviders.has(p))
     await writeEach(targets, (provider) =>
       trpcClient.aiConfig.removeMcpServer.mutate({
+        projectId,
         projectPath,
         provider,
         serverKey: server.key

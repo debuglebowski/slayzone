@@ -90,6 +90,7 @@ function homeBoard(): BoardData {
 
 interface Calls {
   create: unknown[]
+  createTask: unknown[]
   update: unknown[]
   reorder: unknown[]
   setBlockers: unknown[]
@@ -97,8 +98,15 @@ interface Calls {
 }
 
 function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
-  const calls: Calls = { create: [], update: [], reorder: [], setBlockers: [], archiveMany: [] }
-  const write = (kind: Exclude<keyof Calls, 'create'>) => (input: unknown) => {
+  const calls: Calls = {
+    create: [],
+    createTask: [],
+    update: [],
+    reorder: [],
+    setBlockers: [],
+    archiveMany: []
+  }
+  const write = (kind: Exclude<keyof Calls, 'create' | 'createTask'>) => (input: unknown) => {
     calls[kind].push(input)
     if (fail === kind) throw new Error('hub said no')
     return null
@@ -107,6 +115,11 @@ function serve(hubId: string, board: () => BoardData, fail?: string): Calls {
     procedures: {
       'task.loadBoardData': board,
       'task.update': write('update'),
+      'task.create': (input: { title: string }) => {
+        calls.createTask.push(input)
+        if (fail === 'createTask') throw new Error('hub said no')
+        return taskOf('new-t', { title: input.title, is_temporary: true })
+      },
       'task.reorder': write('reorder'),
       'task.setBlockers': write('setBlockers'),
       'task.archiveMany': write('archiveMany'),
@@ -422,21 +435,57 @@ describe('BoardHome: the board (phone)', () => {
     expect(work.update).toEqual([{ id: 'a', status: 'doing' }])
   })
 
-  it('the floating "＋" creates a task in the shown project and column; no other "＋"', async () => {
+  it('a tap on the floating "＋" starts a temporary task in the shown project and opens it', async () => {
+    const onNewTask = jest.fn()
+    const onOpenTask = jest.fn()
+    await renderBoard({ prefs: createBoardPrefs(memory()), onNewTask, onOpenTask })
+    await pickWork()
+    await userEvent.setup().press(screen.getByLabelText('New session'))
+    await settle()
+    expect(work.createTask).toEqual([
+      {
+        projectId: 'p',
+        title: 'Terminal 1',
+        status: 'queued',
+        isTemporary: true,
+        openAfterCreate: true
+      }
+    ])
+    expect(onOpenTask).toHaveBeenCalledWith(
+      expect.objectContaining({ hubId: workHub.id, task: expect.objectContaining({ id: 'new-t' }) })
+    )
+    expect(onNewTask).not.toHaveBeenCalled()
+  })
+
+  it('a temporary task the hub refuses: an alert, and the ＋ is back', async () => {
+    work = serve(workHub.id, workBoard, 'createTask')
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
+    const onOpenTask = jest.fn()
+    await renderBoard({ prefs: createBoardPrefs(memory()), onOpenTask })
+    await pickWork()
+    await userEvent.setup().press(screen.getByTestId('new-task'))
+    await settle()
+    expect(alert).toHaveBeenCalledWith("Couldn't start a session", 'hub said no')
+    expect(onOpenTask).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('new-session-creating')).toBeNull()
+    alert.mockRestore()
+  })
+
+  it('a long-press on the floating "＋" creates a task in the shown project and column; no other "＋"', async () => {
     const onNewTask = jest.fn()
     await renderBoard({ prefs: createBoardPrefs(memory()), onNewTask })
     await pickWork()
     const user = userEvent.setup()
     expect(screen.queryByTestId('new-task-queued')).toBeNull()
-    expect(screen.getByLabelText('New task in Queued')).toBeOnTheScreen()
-    await user.press(screen.getByTestId('new-task'))
+    expect(screen.getByHintText('Long-press: New task in Queued')).toBeOnTheScreen()
+    await user.longPress(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
       status: 'queued'
     })
     await user.press(screen.getByTestId('column-chip-doing'))
-    await user.press(screen.getByTestId('new-task'))
+    await user.longPress(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
@@ -444,7 +493,7 @@ describe('BoardHome: the board (phone)', () => {
     })
     // The list has no current column: the project's default status.
     await menu('List view')
-    await user.press(screen.getByTestId('new-task'))
+    await user.longPress(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({
       hub: workHub.label,
       project: 'p',
@@ -543,7 +592,7 @@ describe('BoardHome: the board (phone)', () => {
 
     // The ＋ creates in the shown group: its priority (desktop's column ＋).
     await press('column-chip-p3')
-    await press('new-task')
+    await userEvent.setup().longPress(screen.getByTestId('new-task'))
     expect(onNewTask).toHaveBeenLastCalledWith({ hub: workHub.label, project: 'p', priority: 3 })
 
     // Bravo (Medium) onto the Urgent pill.

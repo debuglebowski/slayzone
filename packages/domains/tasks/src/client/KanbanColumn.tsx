@@ -48,7 +48,7 @@ interface SortableKanbanCardProps {
   onBulkUpdateTasks?: (taskIds: string[], updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
   onArchiveAllTasks?: (taskIds: string[]) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => Promise<void>
   onBulkDeleteTasks?: (taskIds: string[]) => void
   activeAgentTaskIds?: Set<string>
   onShutdownAgent?: (taskId: string) => void
@@ -212,7 +212,7 @@ interface KanbanColumnProps {
   onUpdateTask?: (taskId: string, updates: Partial<Task>) => void
   onBulkUpdateTasks?: (taskIds: string[], updates: Partial<Task>) => void
   onArchiveTask?: (taskId: string) => void
-  onDeleteTask?: (taskId: string) => void
+  onDeleteTask?: (taskId: string) => Promise<void>
   onBulkDeleteTasks?: (taskIds: string[]) => void
   onArchiveAllTasks?: (taskIds: string[]) => void
   activeAgentTaskIds?: Set<string>

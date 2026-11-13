@@ -1,0 +1,11 @@
+{
+  "release": "v0.35.0",
+  "journey": "v0.35.0-chat",
+  "summary": "Desktop-only v0.35.0 user (schema v145) with Claude chat history: two chat tasks in a git repo, three turns, a file change between turns, one chat task done.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": ["local-computer"],
+    "hubs": [],
+    "computers": []
+  }
+}

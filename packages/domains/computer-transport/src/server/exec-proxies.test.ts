@@ -10,6 +10,7 @@ import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { describe, expect, it, vi } from 'vitest'
+import { currentPathScope, runInPathScope, type WirePathScope } from '@slayzone/platform/path-scope'
 import { TypedEventEmitter } from '../shared/events'
 import {
   ComputerTransportErrorCodes,
@@ -42,6 +43,8 @@ interface RecordedCall {
   params: unknown
   /** The caller's per-request timeout, as passed (undefined = the rpc default). */
   timeoutMs?: number
+  /** The path scope the real gateway would stamp on this request's actor. */
+  scope?: WirePathScope
 }
 
 class FakeGateway implements RoutingGateway {
@@ -60,7 +63,8 @@ class FakeGateway implements RoutingGateway {
     params?: unknown,
     timeoutMs?: number
   ): Promise<T> {
-    this.calls.push({ computerId, method, params, timeoutMs })
+    const scope = currentPathScope()
+    this.calls.push({ computerId, method, params, timeoutMs, ...(scope ? { scope } : {}) })
     const handler = this.handlers.get(method)
     if (!handler) return Promise.resolve(undefined as T)
     try {
@@ -1461,6 +1465,7 @@ describe('createRoutingPtyBackend', () => {
     })
     await backend.warmSpawn?.('computer-1', {
       warmId: 'warm:1',
+      projectId: 'p1',
       command: 'zsh',
       args: [],
       cwd: '/tmp',
@@ -1613,6 +1618,38 @@ describe('createRoutingPtyBackend', () => {
     connect(gateway, 'epoch-a')
 
     await vi.waitFor(() => expect(handle.pid).toBe(11))
+    expect(exit).toBeNull()
+  })
+
+  it('a spawn sent before the computer ever connected is started on its first hello', async () => {
+    // A restarted app opens its task before the local computer's first hello: the
+    // spawn waits for it. With no earlier connection this hub saw, nothing can have
+    // reached a previous process, so this is no "reconnected as a different
+    // process" (which killed it: e2e terminal/108, exit 1 computer-restarted).
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => {
+      throw new RpcError(
+        ComputerTransportErrorCodes.unknownComputer,
+        "computer 'computer-1' is not connected"
+      )
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (s) => s.computerId ?? null
+    })
+    const handle = backend.spawn(ptySpec()) as PtyHandle
+    let exit: PtyExitEvent | null = null
+    handle.onExit((e) => {
+      exit = e
+    })
+    await settle()
+    expect(exit).toBeNull()
+
+    gateway.onMethod('pty.list', () => ({ sessions: [], exited: [] }))
+    gateway.onMethod('pty.spawn', () => ({ pid: 12 }))
+    connect(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(handle.pid).toBe(12))
     expect(exit).toBeNull()
   })
 
@@ -1819,6 +1856,26 @@ describe('createRoutingProcessBackend', () => {
       computerId: 'computer-1',
       params: { sessionIds: ['proc-1'] }
     })
+  })
+
+  it("a process row's own folder travels as declared (B3); none, or one not declared, does not", () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec({ id: 'p-a', cwd: '/home/u/backend', declaredCwd: true }))
+    backend.spawn(procSpec({ id: 'p-b', cwd: '', declaredCwd: true }))
+    backend.spawn(procSpec({ id: 'p-c', cwd: '/home/u/app' }))
+    const sent = gateway.calls
+      .filter((c) => c.method === 'proc.spawn')
+      .map((c) => c.params as { cwd?: string; declaredCwd?: boolean })
+    expect(sent.map((p) => [p.cwd, p.declaredCwd])).toEqual([
+      ['/home/u/backend', true],
+      [undefined, undefined],
+      ['/home/u/app', undefined]
+    ])
   })
 
   it('lists the runs a computer holds that this hub does not track, and ends one there', async () => {
@@ -2078,6 +2135,23 @@ describe('createRoutingProcessBackend', () => {
     return { handle, exit: () => exit, spawnId }
   }
 
+  // B1: a background process with no task and no project is declared global, so the
+  // computer starts it as before §9 Phase 7c instead of refusing an unscoped spawn.
+  it('marks a process with no task and no project as global, and only that one', () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
+    const backend = createRoutingProcessBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    backend.spawn(procSpec({ id: 'global-1', taskId: null, projectId: null }))
+    backend.spawn(procSpec({ id: 'task-1', projectId: null }))
+    backend.spawn(procSpec({ id: 'project-1', taskId: null }))
+    expect(
+      gateway.requestsOf('proc.spawn').map((c) => (c.params as { global?: boolean }).global)
+    ).toEqual([true, undefined, undefined])
+  })
+
   it('sends proc.spawn with an idempotency key and no request timeout', () => {
     const gateway = new FakeGateway()
     gateway.onMethod('proc.spawn', () => ({ pid: 1 }))
@@ -2123,6 +2197,22 @@ describe('createRoutingProcessBackend', () => {
     const spawns = gateway.requestsOf('proc.spawn')
     expect(spawns).toHaveLength(2)
     expect((spawns[1]!.params as { spawnId: string }).spawnId).toBe(spawnId)
+  })
+
+  // B1: the hub scopes a task's process to the task's project (the computer does not
+  // know task → project for a task with no worktree). The scope is the spawn's, not
+  // the moment's: a re-send after a lost reply (outside any request) carries it too.
+  it('a proc.spawn carries the path scope it was started in, on its re-send as well', async () => {
+    const gateway = new FakeGateway()
+    const scope: WirePathScope = { kind: 'task', taskId: 'task-1', projectId: 'proj-1' }
+    const { handle } = runInPathScope(scope, () => spawnProcInFlight(gateway))
+    gateway.onMethod('proc.list', () => ({ sessions: [], exited: [] }))
+    gateway.onMethod('proc.spawn', () => ({ pid: 81 }))
+
+    connectProc(gateway, 'epoch-a')
+
+    await vi.waitFor(() => expect(handle.pid).toBe(81))
+    expect(gateway.requestsOf('proc.spawn').map((c) => c.scope)).toEqual([scope, scope])
   })
 
   it('a process that exited while detached reports its real exit', async () => {
@@ -2171,16 +2261,12 @@ describe('createRoutingProcessBackend', () => {
 
 function makeLocalWorktrees(over: Partial<WorktreeExecAdapters> = {}): WorktreeExecAdapters {
   return {
-    createWorktree: vi.fn(async () => {}),
+    createWorktree: vi.fn(async () => ({ computerId: null })),
     removeWorktree: vi.fn(async () => ({})),
     runWorktreeSetupScript: vi.fn(async () => ({ ran: false })),
     copyIgnoredFiles: vi.fn(async () => {}),
     getCurrentBranch: vi.fn(async () => null),
     isGitRepo: vi.fn(async () => false),
-    getWorktreeColor: vi.fn(() => '#abcdef'),
-    ensureProjectWorktreeColors: vi.fn(
-      async () => new Map([['/wt', '#abcdef']]) as ReadonlyMap<string, string>
-    ),
     pathExists: vi.fn(async () => false),
     hubPathExists: vi.fn(() => false),
     removeArtifactDir: vi.fn(async () => {}),
@@ -2225,6 +2311,25 @@ describe('createRemoteWorktreeAdapters', () => {
     ]) {
       expect(requireCall(gateway, method).timeoutMs, method).toBeGreaterThan(5 * 60_000)
     }
+  })
+
+  // Trash purge, no-login multi-computer hub: an unbound task's computer is the
+  // default NOW; its worktree stays on the computer that made it. Create answers
+  // that computer (the hub records it), removal goes to the worktree's computer.
+  it('create answers its computer; remove goes to the computer holding the worktree', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('git.removeWorktree', () => ({}))
+    const adapters = createRemoteWorktreeAdapters({
+      gateway,
+      local: makeLocalWorktrees(),
+      resolveComputerId: () => 'default-now',
+      resolveWorktreeComputerId: () => 'made-it'
+    })
+    expect(await adapters.createWorktree(TASK, '/repo', '/wt', 'b')).toEqual({
+      computerId: 'default-now'
+    })
+    await adapters.removeWorktree(TASK, '/proj', '/wt')
+    expect(requireCall(gateway, 'git.removeWorktree').computerId).toBe('made-it')
   })
 
   it('forwards git/fs ops to the right frames and parses the computer replies', async () => {
@@ -2311,26 +2416,6 @@ describe('createRemoteWorktreeAdapters', () => {
     expect(local.pathExists).not.toHaveBeenCalled()
   })
 
-  it('keeps getWorktreeColor + ensureProjectWorktreeColors local (never over the wire)', async () => {
-    const gateway = new FakeGateway()
-    const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({
-      gateway,
-      local,
-      resolveComputerId: () => 'computer-1'
-    })
-
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
-    expect(local.getWorktreeColor).toHaveBeenCalledWith('/proj', '/wt')
-
-    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(
-      new Map([['/wt', '#abcdef']])
-    )
-    expect(local.ensureProjectWorktreeColors).toHaveBeenCalledWith('/proj')
-
-    expect(gateway.calls).toHaveLength(0)
-  })
-
   it('throws for every WORKSPACE method, but keeps hub-owned ops working', async () => {
     const gateway = new FakeGateway()
     const local = makeLocalWorktrees()
@@ -2352,26 +2437,7 @@ describe('createRemoteWorktreeAdapters', () => {
     // and rendering the task list must not require one (docs/exec-boundary.md).
     expect(await adapters.hubPathExists('/storage/artifacts/x')).toBe(false)
     await adapters.removeArtifactDir('/storage/artifacts/x')
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
 
-    expect(gateway.calls).toHaveLength(0)
-  })
-
-  it('serves the color ops locally even with no computer (hub-local UI state)', async () => {
-    const gateway = new FakeGateway()
-    const local = makeLocalWorktrees()
-    const adapters = createRemoteWorktreeAdapters({
-      gateway,
-      local,
-      resolveComputerId: () => null
-    })
-
-    // The documented exception to the invariant: colors are hub-local UI state and
-    // `getWorktreeColor` is sync, so it could never be a network call.
-    expect(adapters.getWorktreeColor('/proj', '/wt')).toBe('#abcdef')
-    expect(await adapters.ensureProjectWorktreeColors('/proj')).toEqual(
-      new Map([['/wt', '#abcdef']])
-    )
     expect(gateway.calls).toHaveLength(0)
   })
 })

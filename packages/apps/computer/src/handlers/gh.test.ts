@@ -68,6 +68,7 @@ describe('gh.exec', () => {
   // gh uses exit codes for ordinary answers ("no pull requests found") as well as
   // real errors, and every caller above already branches on status. Rejecting
   // would turn a normal answer into an exception.
+  // Keep this real-exec contract test: a stub cannot prove argv, cwd and a nonzero child exit reach the caller together. gh is a local fixture; no login or network. An occasional outer timeout under deliberately oversubscribed host load is acceptable as a capacity signal; reproduce in isolation before treating it as a gh regression.
   it.skipIf(isWin)('resolves with a non-zero status rather than rejecting', async () => {
     fakeGh(['echo "args: $*" >&2', 'echo "cwd: $(pwd)" >&2', 'exit 1'])
     const handlers = handlersFor([dir])

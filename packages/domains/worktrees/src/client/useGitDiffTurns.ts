@@ -6,13 +6,13 @@ import { useAgentTurns, type AgentTurnRange } from '@slayzone/agent-turns/client
  * the refresh key that re-runs the server-side turn filter, and the derived
  * from/to sha range used to scope the snapshot fetch.
  */
-export function useGitDiffTurns(targetPath: string | null) {
+export function useGitDiffTurns(taskId: string | null, targetPath: string | null) {
   const [selectedTurnId, setSelectedTurnId] = useState<string | 'all'>('all')
   // Bumped after each working-tree snapshot fetch (via refreshTurns) so the turn
   // list re-runs the server-side filter — turns whose files no longer appear in
   // `git status` get pruned (and stop occupying a numbered slot).
   const [turnsRefreshKey, setTurnsRefreshKey] = useState(0)
-  const turns = useAgentTurns(targetPath, turnsRefreshKey)
+  const turns = useAgentTurns(taskId, targetPath, turnsRefreshKey)
   const selectedTurn: AgentTurnRange | null = useMemo(
     () => (selectedTurnId === 'all' ? null : (turns.find((t) => t.id === selectedTurnId) ?? null)),
     [selectedTurnId, turns]

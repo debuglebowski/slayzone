@@ -57,6 +57,19 @@ interface Detail {
 }
 
 describe('GET /api/tasks/:id', () => {
+  test('§9 7d: no worktree path / base dir leaves the hub, only whether one is set', async () => {
+    // The hub records only the flags (§9 7e); the paths are on the task's computer.
+    h.db.prepare('UPDATE tasks SET has_worktree = 1, has_base_dir = 1 WHERE id = ?').run(blockedId)
+    const res = await rest.request<{ data: Record<string, unknown> }>(
+      'GET',
+      `/api/tasks/${blockedId}`
+    )
+    const body = res.body
+    expect(body.data).not.toHaveProperty('worktree_path')
+    expect(body.data).not.toHaveProperty('base_dir')
+    expect(body.data).toMatchObject({ has_worktree: true, has_base_dir: true })
+  })
+
   test('happy: full id returns task + project_name + tags + blockers + blocking', async () => {
     const res = await rest.request<Detail>('GET', `/api/tasks/${taskId}`)
     expect(res.status).toBe(200)

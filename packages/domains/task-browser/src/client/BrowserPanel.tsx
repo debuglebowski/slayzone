@@ -163,6 +163,25 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     [tabs, onTabsChange]
   )
 
+  // Refs for stable event handler closures (avoids tearing down listeners on every tabs change).
+  // Written every commit (no deps), before any effect or handler reads them.
+  const tabsRef = useRef(tabs)
+  const onTabsChangeRef = useRef(onTabsChange)
+  useInsertionEffect(() => {
+    tabsRef.current = tabs
+    onTabsChangeRef.current = onTabsChange
+  })
+
+  // Eagerly update tabsRef + notify parent. Prevents stale-ref races when
+  // multiple webview events (did-navigate, page-title-updated, page-favicon-updated)
+  // fire in the same React batch before a re-render can refresh the ref.
+  const commitTabsUpdate = useCallback((next: BrowserTabsState) => {
+    tabsRef.current = next
+    onTabsChangeRef.current(next)
+  }, [])
+  /** The latest tabs, as every write through commitTabsUpdate leaves them. */
+  const latestTabs = useCallback(() => tabsRef.current, [])
+
   // --- Concern-grouped hooks ---
   const {
     extensionsManagerOpen,
@@ -209,7 +228,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
   const { activeLocked, toggleActiveLock } = useBrowserLock({
     taskId,
     tabs,
-    onTabsChange,
+    latestTabs,
+    commitTabs: commitTabsUpdate,
     activeTab
   })
 
@@ -282,23 +302,6 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       })
     }
   }, [tabs.activeTabId, extensionsManagerOpen, trpcClient])
-
-  // Refs for stable event handler closures (avoids tearing down listeners on every tabs change).
-  // Written every commit (no deps), before any effect or handler reads them.
-  const tabsRef = useRef(tabs)
-  const onTabsChangeRef = useRef(onTabsChange)
-  useInsertionEffect(() => {
-    tabsRef.current = tabs
-    onTabsChangeRef.current = onTabsChange
-  })
-
-  // Eagerly update tabsRef + notify parent. Prevents stale-ref races when
-  // multiple webview events (did-navigate, page-title-updated, page-favicon-updated)
-  // fire in the same React batch before a re-render can refresh the ref.
-  const commitTabsUpdate = useCallback((next: BrowserTabsState) => {
-    tabsRef.current = next
-    onTabsChangeRef.current(next)
-  }, [])
 
   // Sync active view state to tab data (url, title, favicon). An Effect Event:
   // each sync runs only when its view field changes, reading the active tab and

@@ -1,6 +1,6 @@
 import { test, expect, seed, goHome, clickProject, resetApp } from '../fixtures/electron'
 import { TEST_PROJECT_PATH } from '../fixtures/electron'
-import { switchAgent } from '../fixtures/terminal'
+import { switchAgent, currentSession } from '../fixtures/terminal'
 
 /**
  * Tests that:
@@ -165,11 +165,7 @@ test.describe('Session banner behavior', () => {
     expect(statusCount).toBe(0)
 
     // Session should NOT be saved
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      noAutoTaskId
-    )
-    expect(task?.codex_conversation_id ?? null).toBeNull()
+    expect(await currentSession(mainWindow, noAutoTaskId, 'codex')).toBeNull()
   })
 
   // QUARANTINED 2026-05-16: fixture fallback handles the mode switches, but
@@ -294,11 +290,7 @@ test.describe('Session banner behavior', () => {
 
     // Banner still visible, session not saved
     await expect(mainWindow.getByText('Session not saved').last()).toBeVisible()
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      noPtyTaskId
-    )
-    expect(task?.codex_conversation_id ?? null).toBeNull()
+    expect(await currentSession(mainWindow, noPtyTaskId, 'codex')).toBeNull()
 
     // Restore pty:exists
     await electronApp.evaluate(() => {

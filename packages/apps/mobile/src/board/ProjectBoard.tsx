@@ -1,6 +1,7 @@
 import { columnToCreateTaskDraft } from '@slayzone/tasks/board'
 import { type ReactNode, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   FlatList,
   type HostInstance,
   Pressable,
@@ -31,6 +32,7 @@ import { type DropTargets, dropTarget, type Rect } from './drag'
 import { dragAllowed, type Grouping, planDrop, planStatusChange, reorderAllowed } from './moves'
 import { type CardMoves, TaskCard } from './TaskCard'
 import { useBoardMoves } from './use-board-moves'
+import { useScratchTask } from './use-scratch-task'
 
 /** Measures a view in window coordinates (null = not on screen). Injected by tests. */
 export type Measure = (view: HostInstance) => Promise<Rect | null>
@@ -109,8 +111,9 @@ export interface NewTaskDraft {
  * a reorder sticks only in Manual order (or Priority order, among the same priority).
  * `activeColumn`: the phone's page, kept by the screen across re-renders.
  *
- * A floating ＋ (bottom right) creates a task — on a phone's board in the shown column
- * (its status, priority or due date).
+ * The floating ＋ (bottom right): a tap starts a temporary task (a session, desktop's ⌘T;
+ * `use-scratch-task.ts`), a long-press creates a task — on a phone's board in the shown
+ * column (its status, priority or due date).
  */
 export function ProjectBoard({
   feed,
@@ -143,6 +146,15 @@ export function ProjectBoard({
   const theme = useTheme()
   const styles = makeStyles(theme)
   const move = useBoardMoves()
+  const scratch = useScratchTask((task) =>
+    onOpen({
+      key: rowKey(feed.hub.id, task.id),
+      hubId: feed.hub.id,
+      hubLabel: feed.hub.label,
+      task,
+      project
+    })
+  )
   const { width: windowWidth } = useWindowDimensions()
   const data = feed.board.data
   const [activeColumn, setActiveColumn] = useState<string | null>(initialColumn ?? null)
@@ -387,6 +399,7 @@ export function ProjectBoard({
   const created = newTaskColumn
     ? columnToCreateTaskDraft({ ...newTaskColumn, tasks: [] }, grouping.groupBy)
     : {}
+  const newTaskLabel = newTaskColumn ? `New task in ${newTaskColumn.title}` : 'New task'
   const newTaskDraft: NewTaskDraft = {
     status: created.status,
     priority: created.priority,
@@ -548,13 +561,24 @@ export function ProjectBoard({
       {body}
       {drag ? null : (
         <Pressable
-          onPress={() => onNewTask(newTaskDraft)}
+          onPress={() => scratch.create(project, data.tasks)}
+          onLongPress={() => onNewTask(newTaskDraft)}
+          disabled={scratch.creating}
           accessibilityRole="button"
-          accessibilityLabel={newTaskColumn ? `New task in ${newTaskColumn.title}` : 'New task'}
+          accessibilityLabel="New session"
+          accessibilityHint={`Long-press: ${newTaskLabel}`}
+          accessibilityActions={[{ name: 'longpress', label: newTaskLabel }]}
+          onAccessibilityAction={(e) => {
+            if (e.nativeEvent.actionName === 'longpress') onNewTask(newTaskDraft)
+          }}
           testID="new-task"
           style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
         >
-          <Text style={styles.fabGlyph}>＋</Text>
+          {scratch.creating ? (
+            <ActivityIndicator color={theme.primaryForeground} testID="new-session-creating" />
+          ) : (
+            <Text style={styles.fabGlyph}>＋</Text>
+          )}
         </Pressable>
       )}
       {drag ? (

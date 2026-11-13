@@ -29,6 +29,13 @@ async function focusTerminal(page: import('@playwright/test').Page) {
     .toBe(true)
 }
 
+/**
+ * The open search bar's match count. Not any `span.tabular-nums`: other widgets use
+ * that class too (the startup progress card showed "100%" / "Nothing left" beside it).
+ */
+const searchCount = (page: import('@playwright/test').Page) =>
+  page.locator('[data-testid="terminal-search-count"]:visible')
+
 test.describe('Terminal search', () => {
   let projectAbbrev: string
   let taskId: string
@@ -79,7 +86,7 @@ test.describe('Terminal search', () => {
 
     // Search — should find at least 1 match
     await searchInput.fill(marker)
-    const countSpan = mainWindow.locator('span.tabular-nums')
+    const countSpan = searchCount(mainWindow)
     await expect(countSpan).toHaveText(/\d+\/[1-9]\d*/, { timeout: 3_000 })
 
     // Close for next test
@@ -107,7 +114,7 @@ test.describe('Terminal search', () => {
 
     await searchInput.fill('XYZNONEXISTENT999')
 
-    const countSpan = mainWindow.locator('span.tabular-nums')
+    const countSpan = searchCount(mainWindow)
     await expect(countSpan).toHaveText('0/0', { timeout: 3_000 })
 
     await mainWindow.keyboard.press('Escape')
@@ -127,7 +134,7 @@ test.describe('Terminal search', () => {
     await expect(searchInput).toBeVisible()
 
     await searchInput.fill(marker)
-    const countSpan = mainWindow.locator('span.tabular-nums')
+    const countSpan = searchCount(mainWindow)
     await expect(countSpan).toHaveText(/\d+\/[1-9]\d*/, { timeout: 3_000 })
 
     // Read initial index
@@ -158,7 +165,7 @@ test.describe('Terminal search', () => {
     const searchInput = mainWindow.getByPlaceholder('Find...')
     await expect(searchInput).toBeVisible()
 
-    const countSpan = mainWindow.locator('span.tabular-nums')
+    const countSpan = searchCount(mainWindow)
 
     // Search uppercase — case-insensitive (default) should find matches
     await searchInput.fill(lower.toUpperCase())

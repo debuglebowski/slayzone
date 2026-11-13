@@ -249,6 +249,13 @@ export interface TransportDeps {
 export type ChatEventMap = {
   'threads-changed': [parentTabId: string]
   'pinned-messages-changed': [tabId: string]
+  /** The task of this tab recorded a session (the computer's ledger; the hub refreshes lists). */
+  'sessions-changed': [tabId: string]
+  /**
+   * The task's chat settings changed outside a client's own write (the hub's staged
+   * settings landed on its computer): open chats of the task re-read them.
+   */
+  'settings-changed': [taskId: string]
   'replay-required': [tabId: string, generation: string]
   event: [tabId: string, agentEvent: AgentEvent, seq: number, live?: number, at?: number]
   /**
@@ -851,7 +858,7 @@ export function createChatTransport(
     })
   }
 
-  function fireWatchdog(tab: ChatTab): void {
+  async function fireWatchdog(tab: ChatTab): Promise<void> {
     tab.watchdogTimer = null
     // Already terminal / replaced — nothing to do.
     if (tab.closed || tab.ended || tab.terminalState === 'dead' || tabs.get(tab.tabId) !== tab) {
@@ -927,6 +934,45 @@ export function createChatTransport(
       proc.reap(null, 'SIGKILL')
       return
     }
+    if (
+      vector === 'running-stall' &&
+      tab.watchdogKillStage === 'none' &&
+      proc.driver.probeLiveness
+    ) {
+      const progressAt = tab.watchdogLastProgress
+      const responsive = await proc.driver.probeLiveness(5_000).catch(() => false)
+      // An answer belongs to this process and this silence window only. Stop,
+      // completion, new input, replacement, or progress while probing wins.
+      if (
+        tab.closed ||
+        tab.ended ||
+        tabs.get(tab.tabId) !== tab ||
+        tab.proc !== proc ||
+        proc.ended ||
+        proc.stopRequested ||
+        proc.stoppingTurn ||
+        tab.terminalState !== 'running' ||
+        tab.watchdogKillStage !== 'none'
+      )
+        return
+      if (
+        responsive ||
+        tab.watchdogLastProgress !== progressAt ||
+        runningDeadlineOf(tab) > Date.now()
+      ) {
+        if (responsive) {
+          diagnostic(
+            tab,
+            'info',
+            'chat.watchdog_responsive',
+            'silent provider answered health probe'
+          )
+          tab.watchdogLastProgress = Date.now()
+        }
+        armWatchdog(tab)
+        return
+      }
+    }
     if (tab.watchdogKillStage === 'sigkill' && !canProbe) {
       // Routed: SIGKILL sent a grace ago and still no exit (computer unreachable,
       // or the frame lost). Nothing more can be learned — end it as dead rather
@@ -947,6 +993,7 @@ export function createChatTransport(
         // conversation), unless it already hung that often in a row.
         const restart = tab.watchdogRestarts < WATCHDOG_MAX_RESTARTS
         proc.watchdogRestart = restart
+        proc.watchdogKilled = true
         const name = tab.backend.displayName
         // Every failure is visible: say why the agent is being stopped.
         routeHostEvent(tab, {
@@ -1832,7 +1879,12 @@ export function createChatTransport(
         console.error('[chat-transport] agent state (stopped) write failed:', err)
       }
     }
-    routeHostEvent(tab, { kind: 'process-exit', code, signal })
+    routeHostEvent(tab, {
+      kind: 'process-exit',
+      code,
+      signal,
+      ...(proc.watchdogKilled ? { reason: 'watchdog' as const } : {})
+    })
     deps.broadcastExit(tab.tabId, tab.sessionId, code, signal)
     deps.userInputTracker.clear(stateKey(tab))
     if (restart) {
@@ -2202,8 +2254,15 @@ export function createChatTransport(
    *
    * Throws if the tab has no hydrated session (caller must hydrate first), or if
    * the agent could not be started (the error is also shown in the chat).
+   *
+   * `prioritize`: someone is waiting on it now (a user start). A start already
+   * queued for an agent-start slot on its computer — e.g. the hub's boot restore —
+   * is moved to the front instead of waiting its FIFO turn.
    */
-  async function ensureSpawned(tabId: string): Promise<ChatSessionInfo> {
+  async function ensureSpawned(
+    tabId: string,
+    opts: { prioritize?: boolean } = {}
+  ): Promise<ChatSessionInfo> {
     if (isShuttingDown) {
       throw new ChatTransportError('Cannot spawn chat session while app is shutting down.')
     }
@@ -2225,7 +2284,10 @@ export function createChatTransport(
       return toInfo(tab)
     }
     const pending = inFlightSpawns.get(tabId)
-    if (pending) return pending
+    if (pending) {
+      if (opts.prioritize) deps.backend?.prioritize?.(stateKey(tab))
+      return pending
+    }
     const promise = (async (): Promise<ChatSessionInfo> => {
       try {
         const started = await startProcess(tab)
@@ -2860,7 +2922,7 @@ export function createChatTransport(
       tab.proc.interruptIssued = true
       tab.proc.stoppingTurn = true
     }
-    routeHostEvent(tab, { kind: 'interrupted' })
+    routeHostEvent(tab, { kind: 'interrupted', reason: 'stop-request' })
   }
 
   /**

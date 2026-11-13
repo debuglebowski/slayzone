@@ -10,13 +10,19 @@ import {
   isHubSwitchedOffError
 } from '@slayzone/platform/hub-switch-refusal'
 import { isUnsafePathError } from '@slayzone/platform/safe-path'
+import {
+  COMPUTER_REFUSED,
+  isComputerRefusal,
+  PathScopeRequiredError,
+  UnknownScopeError
+} from '@slayzone/platform/path-scope'
 import type { TrpcContext } from './context'
 import { getAuthGate } from './auth-gate'
 import { trpcTransformer } from './trpc-transformer'
 import { ADMIN_ONLY, roleAllows } from './access-class'
 import { adminOnlyTrpcError, isAdminOnlyError } from './admin-gate'
 import { registeredAppCodes } from './app-codes'
-import { procedurePolicy } from './procedure-policy'
+import { procedurePolicy, registeredProcedurePolicy } from './procedure-policy'
 
 const t = initTRPC.context<TrpcContext>().create({
   // superjson on the wire; responses skip superjson's walk when they are plain
@@ -33,6 +39,8 @@ const t = initTRPC.context<TrpcContext>().create({
       ...(isAdminOnlyError(error.cause) ? { appCode: ADMIN_ONLY } : {}),
       // An id refused as a path segment (T-104): `INVALID_ID` / `PATH_OUTSIDE_BASE`.
       ...(isUnsafePathError(error.cause) ? { appCode: error.cause.code } : {}),
+      // A computer's refusal by its own policy (its path jail, T-27): `COMPUTER_REFUSED`.
+      ...(isComputerRefusal(error.cause) ? { appCode: COMPUTER_REFUSED } : {}),
       // A domain's own refusal, registered by the module defining its error (see
       // app-codes.ts) — e.g. a refused join-token mint (T-20, `@slayzone/api`'s
       // join-token-policy.ts): `JOIN_TOKEN_OWNER_REQUIRED`, `…_TTL_TOO_LONG`, ….
@@ -106,6 +114,99 @@ function withSecurityContext(sc: SecurityContext, data: unknown): unknown {
   }
   return data
 }
+
+/** The error a connection whose principal no longer stands gets (operation or output). */
+function notLiveError(): TRPCError {
+  return new TRPCError({ code: 'UNAUTHORIZED', message: 'session no longer valid; sign in again' })
+}
+
+/**
+ * `data` (a subscription's observable or async iterable) that delivers nothing once
+ * `live()` turns false: every output is checked first, synchronously; a failed check ends
+ * the subscription with UNAUTHORIZED instead of delivering.
+ */
+function withLiveness(live: () => boolean, data: unknown): unknown {
+  if (typeof data === 'object' && data !== null && 'subscribe' in data) {
+    const inner = data as {
+      subscribe: (observer: {
+        next: (v: unknown) => void
+        error: (e: unknown) => void
+        complete: () => void
+      }) => { unsubscribe: () => void }
+    }
+    type Op = (prev: unknown) => unknown
+    const wrapped = {
+      subscribe: (observer: {
+        next: (v: unknown) => void
+        error: (e: unknown) => void
+        complete: () => void
+      }) => {
+        let ended = false
+        let sub: { unsubscribe: () => void } | null = null
+        const stop = (): void => {
+          if (ended) return
+          ended = true
+          sub?.unsubscribe()
+          observer.error(notLiveError())
+        }
+        sub = inner.subscribe({
+          next: (v) => {
+            if (ended) return
+            if (!live()) return stop()
+            observer.next(v)
+          },
+          error: (e) => !ended && observer.error(e),
+          complete: () => !ended && observer.complete()
+        })
+        if (ended) sub.unsubscribe()
+        return { unsubscribe: () => ((ended = true), sub?.unsubscribe()) }
+      },
+      pipe: (...ops: Op[]): unknown => ops.reduce((prev: unknown, op) => op(prev), wrapped)
+    }
+    return wrapped
+  }
+  if (data && typeof (data as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function') {
+    const inner = data as AsyncIterable<unknown>
+    return {
+      [Symbol.asyncIterator]() {
+        const it = inner[Symbol.asyncIterator]()
+        return {
+          async next(...a: [] | [unknown]) {
+            const r = await it.next(...a)
+            if (!r.done && !live()) {
+              await it.return?.()
+              throw notLiveError()
+            }
+            return r
+          },
+          ...(it.return ? { return: (v?: unknown) => it.return!(v) } : {}),
+          ...(it.throw ? { throw: (e?: unknown) => it.throw!(e) } : {})
+        }
+      }
+    }
+  }
+  return data
+}
+
+/**
+ * Liveness gate: on a connection whose context carries `principalLive` (the hub, for an
+ * authenticated socket), the principal is re-checked SYNCHRONOUSLY from persisted state
+ * before the operation — and, for a subscription, before every output. A failure is
+ * UNAUTHORIZED at once; nothing waits on a network refresh while the cached principal
+ * keeps working. No `principalLive` (every other host, login off): a pass-through.
+ */
+const livenessGate = t.middleware(async ({ ctx, next, path, type }) => {
+  const live = ctx.principalLive
+  if (!ctx.principal || !live) return next()
+  if (!live()) {
+    auditDenied(path, { reason: 'principal_not_live' })
+    throw notLiveError()
+  }
+  const result = await next()
+  if (type === 'subscription' && result.ok)
+    return { ...result, data: withLiveness(live, result.data) }
+  return result
+})
 
 /** One `authz.denied` line for a gate refusal; actor/ip/route come from the context. */
 function auditDenied(path: string, detail: Record<string, unknown>): void {
@@ -207,6 +308,19 @@ const ownerGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) =>
 })
 
 /**
+ * Move lock — the decision is `@slayzone/api`'s `move-lock.ts`, through the registered
+ * policy. A mutation that writes to a task being moved to another hub is refused
+ * (PRECONDITION_FAILED), login or not: the task's rows are on their way out. The
+ * move's own journal (`taskMoves.*`) is what runs the move, so it is never refused.
+ */
+const moveLockGate = t.middleware(async ({ ctx, next, path, type, getRawInput }) => {
+  if (type === 'mutation' && !path.startsWith('taskMoves.')) {
+    await registeredProcedurePolicy()?.moveLockCheck?.({ ctx, path, type, getRawInput })
+  }
+  return next()
+})
+
+/**
  * Work a hub switch turned off (`SLAYZONE_HUB_ENABLE_PROCESSES=0`, …) is refused by
  * a chokepoint deep in a domain, which audits and throws `HubSwitchedOffError`.
  * Surface it as FORBIDDEN with the same message wherever it was thrown, instead of
@@ -231,9 +345,45 @@ const switchRefusal = t.middleware(async ({ next }) => {
  */
 const unsafePathRefusal = t.middleware(async ({ next }) => {
   const result = await next()
+  // A path-taking call that names no task or project (or one that does not exist):
+  // its path scope is unknowable (`@slayzone/platform/path-scope`, §9 Phase 7b).
+  if (!result.ok && result.error.cause instanceof PathScopeRequiredError) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  // Names a task or project this hub does not have (another hub's): NOT_FOUND, named.
+  if (!result.ok && result.error.cause instanceof UnknownScopeError) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
   if (!result.ok && isUnsafePathError(result.error.cause)) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
+      message: result.error.cause.message,
+      cause: result.error.cause
+    })
+  }
+  return result
+})
+
+/**
+ * A computer refused the request by its own policy — its path jail refused a folder
+ * (outside the task's or project's folders and every folder the user declared, a
+ * link out of the machine bound, its own state) — answered as CONFLICT with the
+ * computer's message (B3): the caller can pick another folder. Not the
+ * INTERNAL_SERVER_ERROR an unknown throw becomes.
+ */
+const computerRefusal = t.middleware(async ({ next }) => {
+  const result = await next()
+  if (!result.ok && isComputerRefusal(result.error.cause)) {
+    throw new TRPCError({
+      code: 'CONFLICT',
       message: result.error.cause.message,
       cause: result.error.cause
     })
@@ -249,12 +399,15 @@ const unsafePathRefusal = t.middleware(async ({ next }) => {
  */
 export const publicProcedure = t.procedure
   .use(securityContext)
+  .use(livenessGate)
   .use(authGate)
   .use(adminGate)
   .use(scopeGate)
   .use(ownerGate)
+  .use(moveLockGate)
   .use(switchRefusal)
   .use(unsafePathRefusal)
+  .use(computerRefusal)
 
 /**
  * A procedure that works on the hub's OWN disk — git, `gh` probes, the OS opener,

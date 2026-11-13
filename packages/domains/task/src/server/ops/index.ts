@@ -5,16 +5,15 @@ export {
   cleanupTaskImmediate,
   updateTask,
   InvalidTaskUpdateError,
+  TaskFoldersUnavailableError,
+  ProjectNotFoundError,
   parseTask,
   parseTasks,
-  parseAndColorTask,
-  parseAndColorTasks,
-  attachWorktreeColors,
-  colorOne,
   getProjectColumns,
   getEnabledModeDefaults,
   getModeDefaultFlags,
   maybeAutoCreateWorktree,
+  readTaskPaths,
   safeJsonParse
 } from './shared.js'
 export type {
@@ -39,6 +38,15 @@ export { restoreTaskOp } from './restore.js'
 export { archiveTaskOp } from './archive.js'
 export { archiveManyTasksOp } from './archive-many.js'
 export { updateManyTasksOp, type UpdateManyTasksInput } from './update-many.js'
+export {
+  moveTasksToProject,
+  moveTasksToProjectOp,
+  moveTasksToProjectRequestOp,
+  previewMoveToProjectOp,
+  type MoveOutcome,
+  type MoveOptions
+} from './move-to-project.js'
+export { duplicateTaskOp, TASK_NOT_FOUND } from './duplicate.js'
 export { deleteManyTasksOp, type DeleteManyTasksResult } from './delete-many.js'
 export { unarchiveTaskOp } from './unarchive.js'
 export { reorderTasksOp, reorderPinnedTasksOp } from './reorder.js'
@@ -55,46 +63,23 @@ export {
   type BoardData,
   type BoardRows
 } from './load-board-data.js'
+export { resetConversation, switchConversation } from './task-conversations.js'
+// The session ledger lives on the computer running a task's agents (robustness
+// plan §9, P0): the hub reads it through the wired client and keeps only the
+// user's intent (resets, deletions).
 export {
-  collectReferencedConversationIds,
-  casRepointConversationId
-} from './conversation-id-heal.js'
-// Writes still go through the v145 ledger writer (which triple-writes into the
-// v147 agent-session tables during the transition slice).
-export {
-  recordConversation,
-  switchConversation,
-  recordPendingSpawn,
-  prunePendingSpawns
-} from './task-conversations.js'
-// Reads cut over to the first-class agent-session tables (slice 2 — see
-// plans/agent-sessions.md). Same fn names + semantics, new source of truth
-// (`agent_sessions` + `session_resets`). task_conversations is still written
-// for rollback safety until the "drop legacy" slice.
-export {
-  getCurrentConversationId,
-  listConversationHistory,
+  setTaskSessionLedger,
+  taskSessionLedger,
+  SessionsOfflineError,
   listTaskSessions,
   setTaskSessionPromptReader,
-  legacySessionPromptSummaries,
+  legacyCodexChatPromptSummaries,
   isHonoredConversation,
   deleteSession,
-  findPendingSpawn,
-  findOwnedSpawnForConversation
+  relinquishSession
 } from './agent-sessions.js'
-export type { SharedSessionClaim, TaskSessionSummary } from './agent-sessions.js'
-// Entity-model B write lifecycle (one row per spawn). Wired into the spawn path
-// in the runtime-key-decouple slice; exported now for that wiring + tests.
-export {
-  recordSessionSpawn,
-  confirmSessionConversation,
-  confirmSessionConversationByTaskMode,
-  markSessionDead,
-  markSessionFirstTurn,
-  listResumeCandidates,
-  getConversationFirstSeenAt,
-  bindSessionToTask,
-  relinquishSession,
-  claimedByOtherTasks,
-  listSharedSessionClaims
+export type {
+  LedgerSessionRow,
+  SessionLedgerClient,
+  TaskSessionSummary
 } from './agent-sessions.js'

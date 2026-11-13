@@ -31,12 +31,14 @@ export function createDiagnosticTaskResolver(db: SlayzoneDb) {
         [id]
       ))
         tasks.add(row.task_id)
-    for (const id of evidence.sessionIds)
-      for (const row of await db.all<{ task_id: string }>(
-        'SELECT DISTINCT task_id FROM agent_sessions WHERE (id=? OR conversation_id=?) AND task_id IS NOT NULL',
-        [id, id]
-      ))
-        tasks.add(row.task_id)
+    // A runtime session key `taskId:tabId` names its task. Provider session ids are
+    // not resolved: the session ledger is on the agents' computers (§9).
+    for (const id of evidence.sessionIds) {
+      const colon = id.indexOf(':')
+      if (colon <= 0) continue
+      const taskId = id.slice(0, colon)
+      if (await db.get('SELECT 1 FROM tasks WHERE id=?', [taskId])) tasks.add(taskId)
+    }
     return tasks.size === 1 ? [...tasks][0] : null
   }
 }
@@ -309,6 +311,7 @@ CREATE TRIGGER IF NOT EXISTS chat_diagnostic_update_pending BEFORE UPDATE ON dia
           [taskId, cutoff]
         ),
         paths = new Set<string>()
+      // isolation: fatal — one task's diagnostic content: all of it must be cleaned or the task stays locked (retried)
       for (const row of rows)
         if (row.payload_json) {
           try {
@@ -321,7 +324,15 @@ CREATE TRIGGER IF NOT EXISTS chat_diagnostic_update_pending BEFORE UPDATE ON dia
         'SELECT blobs FROM chat_content_locks WHERE task_id=?',
         [taskId]
       )
-      for (const path of JSON.parse(prior?.blobs ?? '[]') as string[]) paths.add(path)
+      // A damaged prior lock lists no paths it can prove; this pass's own paths still go.
+      let priorPaths: unknown = []
+      try {
+        priorPaths = JSON.parse(prior?.blobs ?? '[]')
+      } catch {
+        console.error(`[chat] diagnostic cleanup lock of task ${taskId} is unreadable; ignored`)
+      }
+      if (Array.isArray(priorPaths))
+        for (const path of priorPaths) if (typeof path === 'string') paths.add(path)
       await db.batchTxn([
         {
           type: 'run',
@@ -344,6 +355,7 @@ CREATE TRIGGER IF NOT EXISTS chat_diagnostic_update_pending BEFORE UPDATE ON dia
           params: []
         }
       ])
+      // isolation: fatal — one task's diagnostic files: all must go before the lock is marked cleaned (retried)
       for (const path of paths)
         if (
           safeBlob(path) &&
@@ -352,7 +364,12 @@ CREATE TRIGGER IF NOT EXISTS chat_diagnostic_update_pending BEFORE UPDATE ON dia
             [path]
           ))
         )
-          unlinkSync(path)
+          try {
+            unlinkSync(path)
+          } catch (error) {
+            // Already gone (a crash after an earlier unlink): that is the goal.
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
       await db.run("UPDATE chat_content_locks SET state='cleaned',blobs='[]' WHERE task_id=?", [
         taskId
       ])

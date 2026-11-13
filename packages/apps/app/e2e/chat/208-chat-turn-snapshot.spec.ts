@@ -26,13 +26,13 @@ test.describe('Chat turn snapshot', () => {
     await t.send('edit the readme')
     await expect(t.panel.getByText('edited')).toBeVisible()
 
-    const worktreePath = fs.realpathSync(t.cwd)
+    // The list names only the task: its computer resolves the checkout (§9 7d).
     await expect
       .poll(
         async () => {
           const turns = (await mainWindow.evaluate(
-            (p) => window.getTrpcVanillaClient().agentTurns.list.query({ worktreePath: p }),
-            worktreePath
+            ({ taskId }) => window.getTrpcVanillaClient().agentTurns.list.query({ taskId }),
+            { taskId: t.taskId }
           )) as Array<{ prompt_preview?: string }>
           return turns.map((x) => x.prompt_preview ?? null)
         },

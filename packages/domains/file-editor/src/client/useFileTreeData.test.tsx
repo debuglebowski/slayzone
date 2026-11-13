@@ -4,6 +4,20 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { createTrpcTest } from '@slayzone/transport/testing'
 import { useFileTreeData } from './useFileTreeData'
+import { createElement } from 'react'
+import { WorkspaceTargetProvider } from './workspace-target'
+
+/** The trpc test wrapper inside a project panel's path scope (every call names one). */
+function scopedWrapper(
+  base: (props: { children: ReactNode }) => ReactNode
+): (props: { children: ReactNode }) => ReactNode {
+  return ({ children }) =>
+    createElement(
+      base,
+      null,
+      createElement(WorkspaceTargetProvider, { target: { projectId: 'p1' }, children })
+    )
+}
 
 type GitResult = { isGitRepo: boolean; files: Record<string, string> }
 
@@ -20,6 +34,7 @@ beforeEach(() => {
     },
     subscriptions: { 'fileEditor.watch': () => () => undefined }
   }).wrapper
+  wrapper = scopedWrapper(wrapper)
 })
 
 afterEach(() => {

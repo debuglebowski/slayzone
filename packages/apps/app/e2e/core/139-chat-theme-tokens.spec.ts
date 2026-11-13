@@ -6,13 +6,14 @@
  * terminal-panel override theme (TerminalContainer sets chrome vars on the chat
  * subtree).
  *
- * No agent subprocess: the history is seeded straight into `chat_events`, which
+ * No agent subprocess: the history is seeded straight into the chat's event log on its computer (`chat.testSeedEvents`), which
  * chat.hydrate loads without spawning (startup = manual). The render test also
  * attaches screenshots of every coloured row kind in light + dark.
  */
 import type { Locator, Page, TestInfo } from '@playwright/test'
 import { test, expect, seed, resetApp, TEST_PROJECT_PATH } from '../fixtures/electron'
 import { openTaskViaSearch } from '../fixtures/browser-view'
+import { seedChatEvents } from '../fixtures/chat-seed'
 import { expandActivities } from '../fixtures/chat-activity'
 
 const TASK = 'Chat theme tokens task'
@@ -346,7 +347,7 @@ test.describe('Chat theme tokens', () => {
   let projectId = ''
   let startedDark = false
 
-  test.beforeAll(async ({ mainWindow, electronApp }) => {
+  test.beforeAll(async ({ mainWindow }) => {
     await resetApp(mainWindow)
     startedDark = await mainWindow.evaluate(() =>
       document.documentElement.classList.contains('dark')
@@ -365,21 +366,9 @@ test.describe('Chat theme tokens', () => {
     projectId = p.id
     const tabId = await createChatTask(mainWindow, projectId, TASK)
     await createChatTask(mainWindow, projectId, EMPTY_TASK)
-    await electronApp.evaluate(
-      async ({}, { tab, evs }) => {
-        const db = (globalThis as Record<string, unknown>).__db as {
-          run: (sql: string, params?: unknown[]) => Promise<unknown>
-        }
-        for (const [seq, ev] of evs.entries()) {
-          await db.run('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)', [
-            tab,
-            seq,
-            JSON.stringify(ev)
-          ])
-        }
-      },
-      { tab: tabId, evs: EVENTS }
-    )
+    // Seeded on the chat's computer, where chat history lives (robustness plan §9;
+    // the hub's legacy chat tables are gone once nothing is left to migrate).
+    await seedChatEvents(mainWindow, tabId, EVENTS)
     await seed(mainWindow).refreshData()
   })
 
@@ -392,62 +381,69 @@ test.describe('Chat theme tokens', () => {
     await seed(mainWindow).setTheme(startedDark ? 'dark' : 'light')
   })
 
-  test('renders every coloured row kind in light and dark', async ({ mainWindow }, testInfo) => {
-    await openTaskViaSearch(mainWindow, EMPTY_TASK)
-    await expect(mainWindow.getByText('Chat with Claude Code')).toBeVisible({
-      timeout: 10_000
-    })
-    await openTaskViaSearch(mainWindow, TASK)
-    const scroller = chatScroller(mainWindow)
-    await expect(scroller).toBeVisible({ timeout: 10_000 })
-    await revealFixture(mainWindow)
-    for (const text of [
-      'Assistant reply fixture',
-      '+ seeded-new-string',
-      'In-flight sub-agent fixture',
-      'Pick a colour fixture?',
-      'Final plan',
-      'Turn interrupted',
-      'stderr fixture line',
-      'Plan explanation fixture'
-    ]) {
-      await expect(mainWindow.getByText(text).first(), text).toBeVisible()
-    }
-    await expect(mainWindow.getByText(/API request retried once/)).toBeVisible()
-    await expect(mainWindow.getByText('rate limit: rejected')).toBeVisible()
-
-    // Selected option: filled radio + tinted row.
-    await scroller.getByText('Option A', { exact: true }).click()
-
-    for (const theme of ['light', 'dark'] as const) {
-      await seed(mainWindow).setTheme(theme)
-      const dark = mainWindow.locator('html.dark')
-      await (theme === 'dark' ? expect(dark).toBeAttached() : expect(dark).not.toBeAttached())
-      await captureChat(mainWindow, scroller, testInfo, `chat-${theme}`)
-
-      // Find-in-chat: <mark> hits + the active case-sensitive toggle.
-      await scroller.click({ button: 'right', position: { x: 20, y: 20 } })
-      await mainWindow.getByRole('menuitem', { name: /Find in chat/ }).click()
-      await mainWindow.getByPlaceholder('Find in chat…').fill('fixture')
-      await mainWindow.getByTitle('Case sensitive').click()
-      await expect(scroller.locator('mark').first()).toBeVisible()
-      await captureChat(mainWindow, scroller, testInfo, `search-${theme}`, {
-        fromTop: false,
-        maxSlices: 1
-      })
-      await mainWindow.getByTitle('Case sensitive').click()
-      await mainWindow.getByTitle('Close (Escape)').click()
-
+  // One test per theme: both passes in one test ran 10-28 s against its 30 s budget,
+  // and a loaded machine ran it out mid-way. The rows are revealed once, for both.
+  test.describe('every coloured row kind', () => {
+    test.beforeAll(async ({ mainWindow }) => {
       await openTaskViaSearch(mainWindow, EMPTY_TASK)
-      const empty = mainWindow
-        .getByText('Chat with Claude Code', { exact: true })
-        .locator('xpath=ancestor::div[contains(@class, "inset-0")][1]')
-      await expect(empty).toBeVisible()
-      await captureChat(mainWindow, empty, testInfo, `empty-${theme}`, {
-        maxSlices: 1
+      await expect(mainWindow.getByText('Chat with Claude Code')).toBeVisible({
+        timeout: 10_000
       })
       await openTaskViaSearch(mainWindow, TASK)
-      await expect(scroller).toBeVisible()
+      const scroller = chatScroller(mainWindow)
+      await expect(scroller).toBeVisible({ timeout: 10_000 })
+      await revealFixture(mainWindow)
+      for (const text of [
+        'Assistant reply fixture',
+        '+ seeded-new-string',
+        'In-flight sub-agent fixture',
+        'Pick a colour fixture?',
+        'Final plan',
+        'Turn interrupted',
+        'stderr fixture line',
+        'Plan explanation fixture'
+      ]) {
+        await expect(mainWindow.getByText(text).first(), text).toBeVisible()
+      }
+      await expect(mainWindow.getByText(/API request retried once/)).toBeVisible()
+      await expect(mainWindow.getByText('rate limit: rejected')).toBeVisible()
+
+      // Selected option: filled radio + tinted row.
+      await scroller.getByText('Option A', { exact: true }).click()
+    })
+
+    for (const theme of ['light', 'dark'] as const) {
+      test(`renders in ${theme}`, async ({ mainWindow }, testInfo) => {
+        const scroller = chatScroller(mainWindow)
+        await seed(mainWindow).setTheme(theme)
+        const dark = mainWindow.locator('html.dark')
+        await (theme === 'dark' ? expect(dark).toBeAttached() : expect(dark).not.toBeAttached())
+        await captureChat(mainWindow, scroller, testInfo, `chat-${theme}`)
+
+        // Find-in-chat: <mark> hits + the active case-sensitive toggle.
+        await scroller.click({ button: 'right', position: { x: 20, y: 20 } })
+        await mainWindow.getByRole('menuitem', { name: /Find in chat/ }).click()
+        await mainWindow.getByPlaceholder('Find in chat…').fill('fixture')
+        await mainWindow.getByTitle('Case sensitive').click()
+        await expect(scroller.locator('mark').first()).toBeVisible()
+        await captureChat(mainWindow, scroller, testInfo, `search-${theme}`, {
+          fromTop: false,
+          maxSlices: 1
+        })
+        await mainWindow.getByTitle('Case sensitive').click()
+        await mainWindow.getByTitle('Close (Escape)').click()
+
+        await openTaskViaSearch(mainWindow, EMPTY_TASK)
+        const empty = mainWindow
+          .getByText('Chat with Claude Code', { exact: true })
+          .locator('xpath=ancestor::div[contains(@class, "inset-0")][1]')
+        await expect(empty).toBeVisible()
+        await captureChat(mainWindow, empty, testInfo, `empty-${theme}`, {
+          maxSlices: 1
+        })
+        await openTaskViaSearch(mainWindow, TASK)
+        await expect(scroller).toBeVisible()
+      })
     }
   })
 

@@ -1,3 +1,4 @@
+import { legacyChatTables } from '@slayzone/platform/legacy-chat-tables'
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { SlayzoneDb } from '@slayzone/platform'
@@ -39,6 +40,7 @@ function rowToMessage(row: Row): QueuedChatMessage {
 }
 
 export async function listChatQueue(db: SlayzoneDb, tabId: string): Promise<QueuedChatMessage[]> {
+  if (!(await legacyChatTables(db))) return []
   const rows = (await db
     .prepare('SELECT * FROM chat_queue WHERE tab_id = ? ORDER BY position ASC')
     .all(tabId)) as Row[]
@@ -78,11 +80,13 @@ export function pushChatQueue(
 }
 
 export async function removeChatQueueItem(db: SlayzoneDb, id: string): Promise<boolean> {
+  if (!(await legacyChatTables(db))) return false
   const info = await db.prepare('DELETE FROM chat_queue WHERE id = ?').run(id)
   return info.changes > 0
 }
 
 export async function clearChatQueue(db: SlayzoneDb, tabId: string): Promise<number> {
+  if (!(await legacyChatTables(db))) return 0
   const info = await db.prepare('DELETE FROM chat_queue WHERE tab_id = ?').run(tabId)
   return info.changes
 }
@@ -97,6 +101,7 @@ export async function updateChatQueueItem(
   id: string,
   next: { send: string; original: string; content: UserContentBlock[] }
 ): Promise<boolean> {
+  if (!(await legacyChatTables(db))) return false
   const info = await db
     .prepare(
       `UPDATE chat_queue SET send = ?, original = ?, content = ?, created_at = datetime('now') WHERE id = ?`

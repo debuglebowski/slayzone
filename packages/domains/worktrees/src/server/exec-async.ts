@@ -3,7 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import { basename } from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/record'
 import type { DiagnosticEvent, DiagnosticSource } from '@slayzone/diagnostics/shared'
-import { mergePathLists } from '@slayzone/platform'
+import { gitCommand, mergePathLists } from '@slayzone/platform'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getEnrichedPath } from '@slayzone/terminal/shell-env'
 
@@ -68,16 +68,28 @@ function withLoginShellPath(rest: unknown[]): unknown[] {
   return next
 }
 
+/**
+ * `git` → its absolute path on the PATH the child gets (gitCommand, cached): a bare
+ * name makes the OS try every PATH entry on every spawn. Any other command as is.
+ */
+function resolveGit(command: string, args: unknown[]): string {
+  if (command !== 'git') return command
+  const options = (args[Array.isArray(args[0]) ? 1 : 0] ?? {}) as { env?: NodeJS.ProcessEnv }
+  return gitCommand(options.env ?? process.env)
+}
+
 /** `spawn` with the login-shell PATH, refused first on a hub with processes switched off. */
 export const hubSpawn = ((command: string, ...rest: unknown[]): ChildProcess => {
   refuseOnSwitchedOffHub(command)
-  return (spawn as (...a: unknown[]) => ChildProcess)(command, ...withLoginShellPath(rest))
+  const args = withLoginShellPath(rest)
+  return (spawn as (...a: unknown[]) => ChildProcess)(resolveGit(command, args), ...args)
 }) as typeof spawn
 
 /** `spawnSync` with the login-shell PATH, refused first on a hub with processes switched off. */
 export const hubSpawnSync = ((command: string, ...rest: unknown[]) => {
   refuseOnSwitchedOffHub(command)
-  return (spawnSync as (...a: unknown[]) => unknown)(command, ...withLoginShellPath(rest))
+  const args = withLoginShellPath(rest)
+  return (spawnSync as (...a: unknown[]) => unknown)(resolveGit(command, args), ...args)
 }) as typeof spawnSync
 
 export function trimOutput(value: unknown, maxLength = 1200): string | null {

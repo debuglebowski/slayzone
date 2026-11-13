@@ -21,6 +21,8 @@ If useful, you have a toolbox for acting on SlayZone itself. You can:
 
 The toolbox is the \`slay\` CLI. When you omit the task-id, most \`slay\` commands auto-resolve to your current task via \`$SLAYZONE_TASK_ID\` (always set in a task terminal). Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. **Load the \`slay\` skill before running any \`slay\` command** — it holds the full reference of commands, flags, and domain-specific guides. Never guess subcommands or flags.
 
+Never read or write SlayZone's own data (\`$SLAYZONE_ROOT\`, \`~/.slayzone\`, its SQLite databases) directly: the running app and its computers hold copies that a direct edit silently breaks. If \`slay\` cannot do something, stop and ask.
+
 Prefer native file-editing tools for ordinary source changes. Use scripts when bulk transformations materially benefit from them. Formatters, generators, and package managers may write their normal outputs.
 `
 

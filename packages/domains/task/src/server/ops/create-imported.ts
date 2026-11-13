@@ -2,7 +2,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { ProviderConfig, Task } from '@slayzone/task-contracts'
 import { chatOwnsSpawnFlags } from '@slayzone/terminal-contracts'
 import { taskEvents } from '../events.js'
-import { colorOne, getEnabledModeDefaults, maybeAutoCreateWorktree, parseTask } from './shared.js'
+import { getEnabledModeDefaults, maybeAutoCreateWorktree, parseTask } from './shared.js'
 import { insertTaskRow } from './insert.js'
 
 /**
@@ -78,5 +78,5 @@ export async function createImportedTaskOp(
     taskEvents.emit('task:created', { taskId: id, projectId: data.projectId })
     // No db:tasks:create:done emit — prevents push-back loop to source provider.
   }
-  return colorOne(db, task)
+  return task
 }

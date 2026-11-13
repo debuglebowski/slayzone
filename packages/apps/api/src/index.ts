@@ -63,6 +63,7 @@ export {
   getHubDescribeDepsOrNull,
   type HubDescribeDeps
 } from './app-deps'
+export { setHubAdminDeps, getHubAdminDeps, type HubAdminDeps } from './hub-admin-deps'
 export {
   setPowerResumeEvents,
   getPowerResumeEvents,
@@ -123,7 +124,9 @@ export {
   type Ownership,
   type ResourceKind,
   requestComputerOf,
-  setHubDiskComputer
+  setHubDiskComputer,
+  setHubDiskTaskRoots,
+  type TaskRoot
 } from './access'
 export {
   TRPC_OWNER_POLICY,

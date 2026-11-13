@@ -55,13 +55,17 @@ test('hook, network and setup ops get minutes', () => {
 })
 
 test("the routed request carries the op's timeout", async () => {
-  await executeGitOp('push', { repoPath: '/r', target: { computerId: 'c1' } } as never, true).catch(
-    () => undefined
-  )
-  // …and what it works on, resolved: the hub gates the op on that.
+  const db = { get: async () => ({ project_id: null }) } as never
+  await executeGitOp(
+    'push',
+    { repoPath: '/r', target: { projectId: 'p1' } } as never,
+    true,
+    db
+  ).catch(() => undefined)
+  // …and what it works on (its path scope): the hub gates the op on that.
   expect(sent.at(-1)).toEqual({
     op: 'push',
     timeoutMs: gitOpTimeoutMs('push'),
-    target: { computerId: 'c1' }
+    target: { projectId: 'p1' }
   })
 })

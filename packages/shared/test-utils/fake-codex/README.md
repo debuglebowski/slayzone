@@ -59,6 +59,7 @@ fake.setScenario({
       defaultTurn: codexEchoTurn(),      // every turn past `turns`
       handshake: { threadResume: { error: { code: -32000, message: 'stream disconnected' } } },
       turnStart: { replyDelayMs: 2_000 },// hold back the reply AND turn/started (no turn id yet)
+      // or turnStart: { gate: 'id' } — held until epoch.openGate('id')
       interrupt: 'ignore',               // or 'error'; default: ack {} + interrupted turn
       onSigterm: [cstep.emit(cx.error('late'))], sigtermExitCode: 143,
       methods: { 'model/list': { result: { data: [] } } }, // other client methods (else -32601)
@@ -75,6 +76,7 @@ fake.setScenario({
 | `emit(...notifications)` / `emitGap(ms, ...)` | Write notifications (`{method, params}`), templates substituted. |
 | `raw(line)` | Write a raw line (malformed output). |
 | `stderr(text)`, `sleep(ms)`, `hang()`, `exit(code)` | As named. An interrupt aborts `sleep` / `hang`. |
+| `gate(name)` | Block until the test calls `epoch.openGate(name)`. An interrupt aborts it. Prefer it to `sleep` whenever a test must look at something mid-turn: the turn goes on when the test has seen it, not after a guessed delay. |
 | `request(method, params, branches)` | A server→client request. Blocks until the app replies; then runs `branches[decision]` (`accept`, `acceptForSession`, `decline`, `cancel`, a legacy `approved`/…, an object variant's key), `branches.error` for an error reply, else `branches.default`. |
 | `approveCommand(cmd, branches)` / `approveFileChange(itemId, branches)` | The two v2 approvals with 0.159.2's params. |
 | `endTurn(status, message?)` | End the turn yourself (`failed`, …). |

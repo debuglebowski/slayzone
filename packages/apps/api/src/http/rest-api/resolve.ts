@@ -1,4 +1,5 @@
 import type { SlayzoneDb } from '@slayzone/platform'
+import { projectNotInTransitSql } from '@slayzone/projects/server'
 import { ownedRowsClause, PROJECT_ID_PREFIX_SQL, projectIdPrefixParam } from '../owner-scope'
 
 /**
@@ -89,12 +90,14 @@ export async function resolveProjectRef(
 ): Promise<Resolved<ResolvedProject>> {
   const owned = await ownedRowsClause('projects')
   let rows = await db.all<ResolvedProject & { id: string }>(
-    `SELECT id, name FROM projects WHERE (id = ? OR LOWER(name) LIKE ?)${owned.sql} LIMIT 10`,
+    `SELECT id, name FROM projects p WHERE (id = ? OR LOWER(name) LIKE ?)
+       AND ${projectNotInTransitSql('p')}${owned.sql} LIMIT 10`,
     [ref, `%${ref.toLowerCase()}%`, ...owned.params]
   )
   if (rows.length === 0 && ref) {
     rows = await db.all<ResolvedProject & { id: string }>(
-      `SELECT id, name FROM projects WHERE ${PROJECT_ID_PREFIX_SQL}${owned.sql} LIMIT 10`,
+      `SELECT id, name FROM projects p WHERE ${PROJECT_ID_PREFIX_SQL}
+         AND ${projectNotInTransitSql('p')}${owned.sql} LIMIT 10`,
       [projectIdPrefixParam(ref), ...owned.params]
     )
   }
@@ -103,7 +106,7 @@ export async function resolveProjectRef(
     // and that hint is most of what makes a typo recoverable. Only read on the
     // failure path, so the happy path stays a single query.
     const all = await db.all<{ name: string }>(
-      `SELECT name FROM projects WHERE 1=1${owned.sql} ORDER BY name`,
+      `SELECT name FROM projects p WHERE ${projectNotInTransitSql('p')}${owned.sql} ORDER BY name`,
       owned.params
     )
     const available = all.length > 0 ? ` Available: ${all.map((p) => p.name).join(', ')}` : ''

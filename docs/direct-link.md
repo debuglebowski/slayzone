@@ -10,9 +10,11 @@ permanent fallback.
 
 1. **Issue.** The client asks the hub: `computers.issueDirectLink({ target })`, where
    `target` is a computer target like every other computer-routed call (`taskId`,
-   optionally `computerId`) plus the resource in it: `{ kind: 'pty', sessionId }` or
-   `{ kind: 'chat', tabId }`. Owner-policy checks the task (and computer) as for any
-   target (G2), and the hub answers `wrong-target` for a resource outside them.
+   optionally `computerId`) plus the resource in it: `{ kind: 'pty', sessionId }`,
+   `{ kind: 'chat', tabId }`, or `{ kind: 'task', taskId }` for a task's computer-only
+   data (the hub first hands that computer whatever it still held of the task).
+   Owner-policy checks the task (and computer) as for any target (G2), and the hub
+   answers `wrong-target` for a resource outside them.
 2. **Gate and register.** The hub runs the gates the relayed call would run:
    - the owner gate on the session or tab (owner-policy);
    - scope `agent`;
@@ -36,6 +38,7 @@ permanent fallback.
 | | Direct (client ↔ computer) | Hub (control) |
 |---|---|---|
 | Terminal | attach, backfill (`getBufferSince`), live output, keystrokes | create, kill, resize, touch, interrupt, submit, state, exit, prompts |
+| Task data | reads of a task's computer-only data (`task.read`, robustness plan §9: sessions, prompt history, settings as they move off the hub) | the same reads through the relay (`taskData`); the hub keeps no copy, so an offline computer answers `computer-offline` |
 | Chat | history reads (`getReplay`, `openTimeline`, `timelinePages`, `searchTimeline`), the event stream, `saveDraft` without attachments, `saveScroll` | hydrate, `send`, queue, rewind / fork, `takeOver`, `interrupt`, `abortAndPop`, `respondPermission` and `sendToolResult` (the hub refuses them while the conversation runs in the terminal), drafts with attachments (the hub seals their bytes), exit, availability |
 
 Clients today use only the direct reads and event stream; drafts and scroll stay on
@@ -55,6 +58,11 @@ the chat's bootstrap first, checks the computer cannot make.
 - **Lifetime.** 5 minutes, counted on the computer's monotonic clock, so clock skew
   cannot stretch it. Clients renew at half the lifetime through the hub, and every
   renewal re-runs the gates.
+- **Absolute end (IdP-role mode).** A grant may also carry `notAfter` (wall-clock Unix ms):
+  the computer ends it at `min(receipt + TTL, notAfter)` and refuses one that arrives at
+  or after it, so delivery delay never extends it. The hub sends it only to computers
+  that advertise `directNotAfter` in `enroll`/`hello`, and while a deadline applies gives
+  other computers no direct link (the relay serves them). See docs/hub-sso-roles.md.
 - **Revocation** (`direct.revoke` by grant id, or `all`) is pushed:
   - **Account disabled, or refused by SSO:** every grant of that user.
   - **Task closed** (its agents stopped): the task's grants.
@@ -115,8 +123,8 @@ the client's `transports`):
 1. The computer's WebSocket listener, when this client can dial it (loopback on one
    machine, or the operator's public address).
 2. Otherwise WebRTC, when the client says it speaks it (`transports` includes
-   `webrtc`) and the computer advertises `directRtc` in `hello` (node-datachannel
-   loaded and its listener bound).
+   `webrtc`) and the computer advertises `directRtc` in `hello` (its listener bound,
+   and node-datachannel's binary for its platform and arch on disk).
 3. Otherwise the hub relay, with the same reasons as before. An older client sends no
    `transports` and an older computer no `directRtc`: both keep today's behaviour.
 
@@ -159,12 +167,18 @@ relay, as for an unreachable listener. The hub hands both peers its STUN servers
 
 **Runtimes.**
 - Computer: `node-datachannel` (libdatachannel), Node-API prebuilds per platform; loaded
-  lazily and optional — a computer where it does not load advertises no `directRtc`.
+  lazily (on the first offer) and optional. At boot the computer only checks that the
+  binary for its own platform and arch is on disk (`findRtcBinary`, no load) and
+  advertises no `directRtc` without it; a load that then fails refuses that offer and
+  drops `directRtc` from later hellos.
   A standalone computer (session host + connector) answers offers in its host; the
   host hands the connector its direct identity as values (`directIdentity`), since
   JSON-RPC drops functions.
-  Unpacked from the desktop app's asar; optional in the npm computer; checked by the
-  packaged-app smoke.
+  Unpacked from the desktop app's asar; optional in the npm computer. Each release job
+  installs the TARGET arch's per-platform package (`pnpm install --os/--cpu`, since
+  macOS x64 and Windows arm64 are cross-built), `check-native-arch.mjs` asserts every
+  build ships it with the right Mach-O/PE/ELF arch, and the packaged-app smoke loads it
+  where the runner can run the build.
 - Desktop: the renderer's `RTCPeerConnection`. A failed WebRTC connect is not a failed
   WebSocket, so it cannot slow the hub's socket.
 - Mobile: `react-native-webrtc`, data channels only (no camera or microphone

@@ -42,9 +42,16 @@ beforeEach(() => {
             }
           ]
   }))
-  wrapper = createTrpcTest({
+  const base = createTrpcTest({
     procedures: { 'fileEditor.searchFiles': (input) => search(input as SearchInput) }
   }).wrapper
+  // Every file call names its path scope: render inside a project panel.
+  wrapper = ({ children }) =>
+    base({
+      children: (
+        <WorkspaceTargetProvider target={{ projectId: 'p1' }}>{children}</WorkspaceTargetProvider>
+      )
+    })
 })
 
 afterEach(() => {
@@ -188,13 +195,13 @@ describe('SearchPanel — out-of-date searches', () => {
         </WorkspaceTargetProvider>
       </Wrapper>
     )
-    const view = render(at({ computerId: 'c1' }))
+    const view = render(at({ projectId: 'p1', computerId: 'c1' }))
     fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'fo' } })
     await settle(300)
     expect(search).toHaveBeenCalledTimes(1)
     expect(search.mock.calls[0][0]).toMatchObject({ computerId: 'c1' })
 
-    view.rerender(at({ computerId: 'c2' }))
+    view.rerender(at({ projectId: 'p1', computerId: 'c2' }))
     await settle(300)
     expect(search).toHaveBeenCalledTimes(2)
     expect(search.mock.calls[1][0]).toMatchObject({ computerId: 'c2', query: 'fo' })

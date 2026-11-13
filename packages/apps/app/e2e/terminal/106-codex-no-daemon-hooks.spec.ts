@@ -6,7 +6,7 @@
  * ≥0.157 runs turns in a SHARED background daemon started by whoever launched
  * codex first, and runs hooks there with THAT process's env. The task's
  * SLAYZONE_AGENT_HOOK_URL / _CONTEXT never reached notify.sh, so nothing arrived:
- * spinner stuck on Idle, no unread dot, `provider_config.codex.conversationId`
+ * spinner stuck on Idle, no unread dot, the task's codex session id
  * null ("Session not saved yet"), no resume, no turn snapshots, task cost 0.
  *
  * The fake `codex` (bin override dir, so the computer resolves it for both the
@@ -27,7 +27,7 @@ import {
   seed,
   TEST_PROJECT_PATH
 } from '../fixtures/electron'
-import { openTaskTerminal, waitForBufferContains } from '../fixtures/terminal'
+import { currentSession, openTaskTerminal, waitForBufferContains } from '../fixtures/terminal'
 
 const SESSION_ID = '01a1b277-b4d0-7052-a200-eb63b10c21d2'
 
@@ -139,16 +139,7 @@ test.describe('Codex hooks with a daemon-era Codex', () => {
     await expect
       .poll(
         async () => {
-          const t = await mainWindow.evaluate(
-            (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-            taskId
-          )
-          const pc = (t as { provider_config?: unknown } | null)?.provider_config
-          const parsed = (typeof pc === 'string' ? JSON.parse(pc) : pc) as Record<
-            string,
-            { conversationId?: string } | undefined
-          > | null
-          return parsed?.[MODE]?.conversationId ?? null
+          return currentSession(mainWindow, taskId, MODE)
         },
         { timeout: 15_000 }
       )

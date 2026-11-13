@@ -72,6 +72,8 @@ export interface CheckCliOptions {
   expectedVersion?: string | null
   /** The PATH to resolve `slay` on. Default: the login shell's (cached), merged with ours. */
   resolvePath?: () => Promise<string | null>
+  /** The app's own install target. Default: getCliBinTarget(). Tests point it into a temp dir. */
+  cliTarget?: string
 }
 
 const CLI_VERSION_TIMEOUT_MS = 5000
@@ -120,7 +122,7 @@ function samePath(a: string, b: string): boolean {
 
 export async function checkCliInstalled(opts: CheckCliOptions = {}): Promise<CliStatus> {
   const expectedVersion = opts.expectedVersion ?? null
-  const target = getCliBinTarget()
+  const target = opts.cliTarget ?? getCliBinTarget()
   const searchPath = (await (opts.resolvePath ?? defaultResolvePath)()) ?? process.env.PATH ?? ''
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: searchPath }
 

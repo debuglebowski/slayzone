@@ -17,12 +17,18 @@ export const COMPUTER_HAS_RUNNING_WORK = 'COMPUTER_HAS_RUNNING_WORK'
 export const COMPUTER_IS_LOCAL = 'COMPUTER_IS_LOCAL'
 /** The name the desktop hub reserves for its own computer. */
 export const COMPUTER_NAME_RESERVED = 'COMPUTER_NAME_RESERVED'
+/** Only an offline computer can be replaced: a connected one is still itself. */
+export const COMPUTER_IS_CONNECTED = 'COMPUTER_IS_CONNECTED'
+/** A replacement the hub refuses whatever the connections: by itself, by a revoked one. */
+export const COMPUTER_REPLACE_REFUSED = 'COMPUTER_REPLACE_REFUSED'
 
 export type ComputerStateCode =
   | typeof COMPUTER_DISABLED
   | typeof COMPUTER_HAS_RUNNING_WORK
   | typeof COMPUTER_IS_LOCAL
   | typeof COMPUTER_NAME_RESERVED
+  | typeof COMPUTER_IS_CONNECTED
+  | typeof COMPUTER_REPLACE_REFUSED
 
 export class ComputerStateError extends Error {
   constructor(
@@ -76,8 +82,19 @@ export function computerNameReservedError(name: string): ComputerStateError {
   )
 }
 
+export function computerIsConnectedError(name: string): ComputerStateError {
+  return new ComputerStateError(
+    COMPUTER_IS_CONNECTED,
+    `"${name}" is connected, so it is not gone: only an offline computer can be replaced.`
+  )
+}
+
+export function computerReplacesItselfError(): ComputerStateError {
+  return new ComputerStateError(COMPUTER_REPLACE_REFUSED, 'A computer cannot replace itself.')
+}
+
 export function computerIsLocalError(
-  action: 'disabled' | 'deleted' | 'renamed'
+  action: 'disabled' | 'deleted' | 'renamed' | 'replaced'
 ): ComputerStateError {
   const why =
     action === 'renamed'

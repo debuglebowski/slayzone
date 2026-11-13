@@ -267,6 +267,17 @@ export interface VersionsSearchTxnParams extends Omit<ArtifactSearchOptions, 'qu
   query: string
 }
 
+export interface MoveTxnParams {
+  dataDir: string
+  /** Artifacts moved on their own (into `destFolderId`). */
+  artifactIds: string[]
+  /** Folders moved with their whole subtree (into `destFolderId`). */
+  folderIds: string[]
+  sourceTaskId: string
+  destTaskId: string
+  destFolderId: string | null
+}
+
 export interface FolderCreateTxnParams {
   taskId: string
   parentId: string | null
@@ -880,6 +891,135 @@ const implementations = {
         excludeArtifactIds: p.excludeArtifactIds
       })
     ),
+
+  /**
+   * Moves entries to another task, keeping their ids, versions and working copies.
+   * Every entry still in a source task must come from ONE task. Entries already in
+   * `destTaskId` are skipped, so a retry of a partly applied move completes it.
+   */
+  'task-artifacts:move': (
+    db: Database,
+    p: MoveTxnParams
+  ): { artifacts: NonNullable<Row>[]; folders: NonNullable<Row>[] } => {
+    assertPathSafeId(p.sourceTaskId, 'taskId')
+    assertPathSafeId(p.destTaskId, 'taskId')
+    if (p.sourceTaskId === p.destTaskId)
+      throw new Error('Entries are already in the same task; move them between folders instead')
+    if (p.destFolderId) {
+      const dest = selectFolder(db, p.destFolderId)
+      if (!dest || dest.task_id !== p.destTaskId)
+        throw new Error('Destination folder is not in the destination task')
+    }
+    // Entries already in the destination were moved by an earlier attempt.
+    const pick = (row: Row, kind: string, id: string): NonNullable<Row> | null => {
+      if (!row) throw new Error(`${kind} not found: ${id}`)
+      if (row.task_id === p.destTaskId) return null
+      if (row.task_id !== p.sourceTaskId) throw new Error('Entries to move must come from one task')
+      return row
+    }
+    const rootFolders = [...new Set(p.folderIds)]
+      .map((id) => pick(selectFolder(db, id), 'Folder', id))
+      .filter((r): r is NonNullable<Row> => r !== null)
+    const rootArtifacts = [...new Set(p.artifactIds)]
+      .map((id) => pick(selectArtifact(db, id), 'Artifact', id))
+      .filter((r): r is NonNullable<Row> => r !== null)
+    const sourceTaskId = p.sourceTaskId
+
+    // Whole subtrees of the moved folders, within the source task.
+    const subtree = new Set<string>()
+    const descend = db.prepare('SELECT id FROM artifact_folders WHERE parent_id=? AND task_id=?')
+    const visit = (id: string) => {
+      if (subtree.has(id)) return
+      subtree.add(id)
+      for (const child of descend.all(id, sourceTaskId) as Array<{ id: string }>) visit(child.id)
+    }
+    for (const f of rootFolders) visit(f.id as string)
+    // A folder nested in another moved folder moves with its ancestor; a lone
+    // artifact inside a moved folder likewise.
+    const topFolders = rootFolders.filter((f) => !subtree.has(f.parent_id as string))
+    const topArtifacts = rootArtifacts.filter((a) => !subtree.has(a.folder_id as string))
+    const artifacts = new Map<string, NonNullable<Row>>(
+      rootArtifacts.map((a) => [a.id as string, a])
+    )
+    if (subtree.size)
+      for (const row of db
+        .prepare(
+          `SELECT * FROM task_artifacts WHERE task_id=? AND folder_id IN (${[...subtree].map(() => '?').join(',')})`
+        )
+        .all(sourceTaskId, ...subtree) as NonNullable<Row>[])
+        artifacts.set(row.id as string, row)
+
+    const nextOrder = (table: string, column: string) =>
+      ((
+        db
+          .prepare(
+            p.destFolderId
+              ? `SELECT MAX("order") AS m FROM ${table} WHERE task_id=? AND ${column}=?`
+              : `SELECT MAX("order") AS m FROM ${table} WHERE task_id=? AND ${column} IS NULL`
+          )
+          .get(...(p.destFolderId ? [p.destTaskId, p.destFolderId] : [p.destTaskId])) as {
+          m: number | null
+        }
+      ).m ?? -1) + 1
+    let folderOrder = nextOrder('artifact_folders', 'parent_id')
+    for (const f of topFolders)
+      db.prepare('UPDATE artifact_folders SET parent_id=?,"order"=? WHERE id=?').run(
+        p.destFolderId,
+        folderOrder++,
+        f.id
+      )
+    let artifactOrder = nextOrder('task_artifacts', 'folder_id')
+    for (const a of topArtifacts)
+      db.prepare('UPDATE task_artifacts SET folder_id=?,"order"=? WHERE id=?').run(
+        p.destFolderId,
+        artifactOrder++,
+        a.id
+      )
+    for (const id of subtree)
+      db.prepare('UPDATE artifact_folders SET task_id=? WHERE id=?').run(p.destTaskId, id)
+    for (const a of artifacts.values()) {
+      const id = a.id as string,
+        title = a.title as string
+      db.prepare("UPDATE task_artifacts SET task_id=?,updated_at=datetime('now') WHERE id=?").run(
+        p.destTaskId,
+        id
+      )
+      // Pre-v127 boot migration may have left the working copy under assets/.
+      const current = artifactFilePath(p.dataDir, sourceTaskId, id, title)
+      const legacy = artifactFilePathIn(path.join(p.dataDir, 'assets'), sourceTaskId, id, title)
+      const source = existsSync(current) ? current : existsSync(legacy) ? legacy : null
+      if (source === current)
+        publishWorkingCopy(
+          db,
+          p.dataDir,
+          {
+            taskId: p.destTaskId,
+            previousTaskId: sourceTaskId,
+            artifactId: id,
+            previousTitle: title,
+            title
+          },
+          { sourcePath: current }
+        )
+      else if (source)
+        publishWorkingCopy(
+          db,
+          p.dataDir,
+          { taskId: p.destTaskId, artifactId: id, previousTitle: title, title },
+          { sourcePath: source }
+        )
+    }
+    // Hub schema only: the source task must not keep showing a moved artifact.
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'").get())
+      for (const id of artifacts.keys())
+        db.prepare(
+          'UPDATE tasks SET active_artifact_id=NULL WHERE id=? AND active_artifact_id=?'
+        ).run(sourceTaskId, id)
+    return {
+      artifacts: [...artifacts.keys()].map((id) => selectArtifact(db, id)!),
+      folders: [...subtree].map((id) => selectFolder(db, id)!)
+    }
+  },
 
   'task-artifacts:folders:create': (db: Database, p: FolderCreateTxnParams): Row => {
     const id = randomUUID()

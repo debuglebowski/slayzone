@@ -139,11 +139,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     agent_id: 'terminal',
     provider_config: {},
     terminal_shell: null,
-    claude_conversation_id: null,
-    codex_conversation_id: null,
-    cursor_conversation_id: null,
-    gemini_conversation_id: null,
-    opencode_conversation_id: null,
     claude_flags: '',
     codex_flags: '',
     cursor_flags: '',
@@ -297,8 +292,24 @@ vi.mock('@slayzone/transport/client', () => ({
     },
     tags: {
       setForTask: { mutationOptions: () => ({ __mutationKey: 'tags.setForTask' }) }
+    },
+    // Cross-hub blockers (RemoteBlockersSection): none here.
+    taskMoves: {
+      remoteBlockers: {
+        queryOptions: (input: { taskId: string }) => ({
+          queryKey: ['taskMoves.remoteBlockers', input],
+          queryFn: () => []
+        }),
+        queryKey: (input: { taskId: string }) => ['taskMoves.remoteBlockers', input]
+      },
+      removeRemoteBlocker: {
+        mutationOptions: () => ({ __mutationKey: 'taskMoves.removeRemoteBlocker' })
+      }
     }
   }),
+  useFederationOrNull: () => null,
+  // ProjectStatusCard re-reads a moved task through the vanilla client.
+  useTRPCClient: () => ({ task: { get: { query: async () => null } } }),
   useSubscription: () => undefined
 }))
 
@@ -315,7 +326,8 @@ vi.mock('@tanstack/react-query', () => ({
     mutate: mutationMocks[opts.__mutationKey],
     isPending: false,
     reset: vi.fn()
-  })
+  }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn() })
 }))
 
 import { TaskMetadataSidebar } from './TaskMetadataSidebar'

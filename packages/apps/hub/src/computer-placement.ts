@@ -42,7 +42,13 @@ import {
 import type { ComputerWork, ComputerWorkGate } from '@slayzone/computer-transport/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { currentSecurityContext, securityEvent } from '@slayzone/platform/security-log'
-import { computerServes, mayUseComputer, resource, type OwnedResource } from '@slayzone/api'
+import {
+  computerOwnerOf,
+  computerServes,
+  mayUseComputer,
+  resource,
+  type OwnedResource
+} from '@slayzone/api'
 import type { WorkspaceComputerTarget } from '@slayzone/file-editor/server'
 
 /** A connected computer, as the gateway lists it. */
@@ -95,6 +101,10 @@ export interface ComputerPlacement {
   forTarget(target: WorkspaceComputerTarget): Promise<string | null>
   /** The caller's default computer (`gh`, a picker with no target). */
   forCaller(): Promise<string | null>
+  /** The connected default for work owned by `ownerUserId` whose task and project rows
+   *  may already be gone (permanent deletion's worktree cleanup). Without login: the
+   *  connected default. With login: among the owner's own computers; no owner, none. */
+  forOwner(ownerUserId: string | null): Promise<string | null>
   /** The check before a request leaves for a computer; undefined without login. */
   readonly gate: ComputerWorkGate | undefined
   /** Whether this computer may hold a project's paths (its owner owns the project).
@@ -198,12 +208,23 @@ export function createComputerPlacement(deps: ComputerPlacementDeps): ComputerPl
   const forCaller = async (): Promise<string | null> =>
     requireLogin ? pickFor(null) : pickDefault(await enabledUsable())
 
+  const forOwner = async (ownerUserId: string | null): Promise<string | null> => {
+    if (!requireLogin) return pickDefault(await enabledUsable())
+    if (ownerUserId === null) return null
+    const candidates: UsableComputer[] = []
+    for (const c of await enabledUsable()) {
+      if ((await computerOwnerOf(db, c.computerId)) === ownerUserId) candidates.push(c)
+    }
+    return pickDefault(candidates)
+  }
+
   return {
     forSpec: (computerId) =>
       computerId != null ? computerId : requireLogin ? null : pickDefault(deps.usable()),
     forTask,
     forProject,
     forCaller,
+    forOwner,
     async forTarget({ computerId, taskId, projectId }) {
       // An id the user explicitly chose wins — the create-project flow picks a
       // computer before any task or project row exists to resolve from.

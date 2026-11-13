@@ -45,3 +45,11 @@ export { supportsChatMode } from './agents/registry'
 export type { ChatTerminalState } from './runtime/chat-transport-manager'
 
 export { defaultConversationRegistry } from './runtime/live-conversations'
+
+// The agent-session ledger seam (computer-routed, robustness plan §9).
+export type {
+  TaskSessionStore,
+  RecordConversationInput,
+  PendingSpawnInput,
+  SessionSpawnInput
+} from './runtime/task-session-store'

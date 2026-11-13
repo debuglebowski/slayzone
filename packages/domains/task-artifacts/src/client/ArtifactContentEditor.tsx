@@ -139,6 +139,27 @@ function ZoomPane({ zoom, children }: { zoom: number; children: React.ReactNode 
 
 // --- Artifact content editor ---
 
+/**
+ * Run one write of the editor's own, counted in `saving`. A change event that
+ * arrived meanwhile (`pending`) is judged once no write is in flight: before the
+ * write has its new mtime, its own echo looks like an outside change.
+ */
+function countedSave(
+  saving: { current: number },
+  pending: { current: boolean },
+  recheck: () => void,
+  write: () => Promise<void>
+): Promise<void> {
+  saving.current++
+  return write().finally(() => {
+    saving.current--
+    if (saving.current === 0 && pending.current) {
+      pending.current = false
+      recheck()
+    }
+  })
+}
+
 export function ArtifactContentEditor({
   artifact,
   viewMode,
@@ -223,6 +244,12 @@ export function ArtifactContentEditor({
   const [previewVersion, setPreviewVersion] = useState(0)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const baselineMtimeRef = useRef<number | null>(null)
+  // Saves in flight, and whether a change event arrived during one. The watcher
+  // reports the editor's OWN writes too: read before the save has its new mtime,
+  // that echo looked like an outside write (false conflict, or a reload over keys
+  // typed meanwhile). Checked once the save is done instead.
+  const savingRef = useRef(0)
+  const recheckAfterSaveRef = useRef(false)
   const contentRef = useRef(content)
   const isDirtyRef = useRef(false)
   const splitCodeRef = useRef<SearchableCodeViewHandle>(null)
@@ -308,15 +335,30 @@ export function ArtifactContentEditor({
     }
   }, [artifact.id, isBinary, readFromDisk, applyDisk, saveContent, getMtime])
 
-  // fs.watch subscription — disk is the single source of truth for content.
+  // fs.watch subscription — disk is the single source of truth for content. The
+  // version this editor last wrote or read (its baseline mtime) is no change: that
+  // is the echo of its own save.
   const handleContentChanged = useStableCallback((changedId: string) => {
     if (changedId !== artifact.id) return
-    if (isDirtyRef.current) {
-      setExternalChangePending(true)
-    } else {
-      loadFromDisk()
+    if (savingRef.current > 0) {
+      recheckAfterSaveRef.current = true
+      return
     }
+    void (async () => {
+      const currentMtime = await getMtime(artifact.id)
+      if (savingRef.current > 0) {
+        recheckAfterSaveRef.current = true
+        return
+      }
+      if (currentMtime != null && currentMtime === baselineMtimeRef.current) return
+      if (isDirtyRef.current) {
+        setExternalChangePending(true)
+      } else {
+        await loadFromDisk()
+      }
+    })()
   })
+  const recheckAfterSave = useStableCallback(() => handleContentChanged(artifact.id))
   useSubscription(
     trpc.artifacts.onContentChanged.subscriptionOptions(undefined, {
       onData: handleContentChanged
@@ -337,6 +379,8 @@ export function ArtifactContentEditor({
           return
         }
         if (currentMtime <= baseline) return
+        // Mid-save the new mtime is ours, before the baseline has it.
+        if (savingRef.current > 0) return
         if (isDirtyRef.current) {
           setExternalChangePending(true)
         } else {
@@ -358,29 +402,33 @@ export function ArtifactContentEditor({
       setContent(value)
       setIsDirty(true)
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = setTimeout(async () => {
+      saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null
-        const currentMtime = await getMtime(artifact.id)
-        if (
-          currentMtime != null &&
-          baselineMtimeRef.current != null &&
-          currentMtime > baselineMtimeRef.current
-        ) {
-          // External write happened while we were holding a draft. Surface conflict
-          // instead of clobbering disk.
-          setExternalChangePending(true)
-          return
-        }
-        await saveContent(artifact.id, value)
-        const newMtime = await getMtime(artifact.id)
-        baselineMtimeRef.current = newMtime
-        setIsDirty(false)
-        // Cache-bust preview iframes only. Editor must NOT see this bump or
-        // CodeMirror replaceAll resets the caret mid-typing.
-        setPreviewVersion((v) => v + 1)
+        void countedSave(savingRef, recheckAfterSaveRef, recheckAfterSave, async () => {
+          const currentMtime = await getMtime(artifact.id)
+          if (
+            currentMtime != null &&
+            baselineMtimeRef.current != null &&
+            currentMtime > baselineMtimeRef.current
+          ) {
+            // External write happened while we were holding a draft. Surface conflict
+            // instead of clobbering disk.
+            setExternalChangePending(true)
+            return
+          }
+          await saveContent(artifact.id, value)
+          const newMtime = await getMtime(artifact.id)
+          baselineMtimeRef.current = newMtime
+          // Clean only if nothing was typed during the save: newer keys are still
+          // unsaved (their own debounced save is pending).
+          if (contentRef.current === value) setIsDirty(false)
+          // Cache-bust preview iframes only. Editor must NOT see this bump or
+          // CodeMirror replaceAll resets the caret mid-typing.
+          setPreviewVersion((v) => v + 1)
+        })
       }, 500)
     },
-    [artifact.id, saveContent, getMtime]
+    [artifact.id, saveContent, getMtime, recheckAfterSave]
   )
 
   const handleReloadFromDisk = useCallback((): void => {
@@ -396,13 +444,16 @@ export function ArtifactContentEditor({
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (contentRef.current == null) return
-    await saveContent(artifact.id, contentRef.current)
-    const newMtime = await getMtime(artifact.id)
-    baselineMtimeRef.current = newMtime
-    setIsDirty(false)
-    setExternalChangePending(false)
-  }, [artifact.id, saveContent, getMtime])
+    const draft = contentRef.current
+    if (draft == null) return
+    await countedSave(savingRef, recheckAfterSaveRef, recheckAfterSave, async () => {
+      await saveContent(artifact.id, draft)
+      const newMtime = await getMtime(artifact.id)
+      baselineMtimeRef.current = newMtime
+      setIsDirty(false)
+      setExternalChangePending(false)
+    })
+  }, [artifact.id, saveContent, getMtime, recheckAfterSave])
 
   const banner = externalChangePending ? (
     <div

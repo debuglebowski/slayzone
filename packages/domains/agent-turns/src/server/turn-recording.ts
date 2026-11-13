@@ -1,8 +1,9 @@
 /**
  * Where turn boundaries come from, wired once by the hub's composition.
  *
- * The hub owns `agent_turns`; the snapshot's git runs on the checkout's computer
- * (`turn-git-routing`). The two boundary sources both reach the hub:
+ * The turns (rows and git) live on the checkout's computer (robustness plan §9;
+ * `turn-git-routing`); the hub detects the boundaries, from two sources that both
+ * reach it:
  *  - an AGENT terminal: every submitted prompt (`onPtyInputSubmit` — every pty's
  *    input goes through the hub, wherever the pty runs). Plain shells are skipped
  *    by `initPtyTurnSubscriber`.

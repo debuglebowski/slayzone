@@ -173,15 +173,140 @@ describe('task terminal history across a computer restart', () => {
     after.pty.disposeAll()
   })
 
-  it('a continuing spawn (the hub still has the output) restores nothing', async () => {
+  it('a continuing spawn with its old buffer at hand adds nothing from disk', async () => {
+    const dir = historyDir()
+    const c = computer(dir)
+    await c.spawn({ spawnId: 'agent-1', detection: { mode: 'codex', resuming: false } })
+    c.child.out('AGENT_OUTPUT_ONCE\r\n')
+    await settle()
+    // A piped agent exits: its tombstone keeps the buffer for the recovery shell.
+    c.child.exit()
+    const reply = (await c.spawn({
+      spawnId: 'shell-1',
+      carryOutput: { fromSpawnId: 'agent-1', preamble: '[recovered]\r\n' }
+    })) as { seq?: number }
+    const text = await c.replay()
+    expect(text.split('AGENT_OUTPUT_ONCE').length - 1).toBe(1)
+    expect(text).not.toContain(PTY_HISTORY_DIVIDER_TEXT)
+    expect(reply.seq).toBeGreaterThanOrEqual(0)
+    c.pty.disposeAll()
+  })
+
+  // Regression vs v0.38.0 (82e4c7737 made the computer's ring buffer the only copy):
+  // the computer restarted, the hub ended the agent (`computer-restarted`) and started
+  // a recovery shell continuing the session (`carryOutput`). The NEW computer has no
+  // tombstone, so the carried buffer held only the hub's preamble, the saved history
+  // was skipped (a continuing spawn), and the new session's tracker overwrote the file
+  // with that near-empty buffer — the agent's whole scrollback gone at the next reload.
+  it('a recovery shell after a computer restart keeps the earlier output, under the seqs the hub already has', async () => {
+    const dir = historyDir()
+    const before = computer(dir)
+    await before.spawn({ spawnId: 'agent-1' })
+    before.child.out('$ claude\r\nAGENT_SCROLLBACK_MARKER\r\n')
+    for (let i = 1; i <= 40; i++) before.child.out(`agent line ${i}\r\n`)
+    await settle()
+    before.pty.disposeAll() // the computer restarts; its tombstones go with it
+
+    const after = computer(dir)
+    const reply = (await after.spawn({
+      spawnId: 'shell-1',
+      carryOutput: {
+        fromSpawnId: 'agent-1',
+        preamble: '[SlayZone] claude exited. Switched to interactive shell for recovery.\r\n',
+        afterSeq: 41
+      }
+    })) as { seq?: number }
+    after.child.out('$ RECOVERY_SHELL_PROMPT')
+    const res = (await after.pty.handlers['pty.getReplay']({
+      sessionId: SESSION,
+      afterSeq: -1
+    })) as { prelude?: string; chunks: Array<{ seq: number; data: string }> }
+    const text = (res.prelude ?? '') + res.chunks.map((c) => c.data).join('')
+    const marker = text.indexOf('AGENT_SCROLLBACK_MARKER')
+    expect(marker).toBeGreaterThanOrEqual(0)
+    expect(text.split('AGENT_SCROLLBACK_MARKER').length - 1).toBe(1)
+    expect(text.indexOf('Switched to interactive shell')).toBeGreaterThan(
+      text.indexOf('agent line 40')
+    )
+    expect(text.indexOf('RECOVERY_SHELL_PROMPT')).toBeGreaterThan(
+      text.indexOf('Switched to interactive shell')
+    )
+    // The restored output sits at or below the seq the hub already reached: never
+    // streamed to a terminal that still shows it, never in a backfill after it.
+    const restoredSeq = res.chunks.find((c) => c.data.includes('AGENT_SCROLLBACK_MARKER'))?.seq
+    expect(restoredSeq).toBeLessThanOrEqual(41)
+    expect(reply.seq).toBeGreaterThanOrEqual(42)
+    const since = (await after.pty.handlers['pty.getBufferSince']({
+      sessionId: SESSION,
+      seq: 41
+    })) as { frames: Array<{ data: string }> }
+    expect(since.frames.map((f) => f.data).join('')).not.toContain('AGENT_SCROLLBACK_MARKER')
+
+    // And the file keeps it: the next start (app reload, another restart) shows it too.
+    await settle()
+    after.pty.disposeAll()
+    const third = computer(dir)
+    await third.spawn()
+    expect(await third.replay()).toContain('AGENT_SCROLLBACK_MARKER')
+    third.pty.disposeAll()
+  })
+
+  it('a restored recovery shell numbers on even when the history outnumbers the seqs the hub names', async () => {
     const dir = historyDir()
     const before = computer(dir)
     await before.spawn()
-    before.child.out('ALREADY_ON_SCREEN')
+    before.child.out(`BIG_HISTORY_HEAD${'x'.repeat(100 * 1024)}BIG_HISTORY_TAIL\r\n`)
+    await settle()
     before.pty.disposeAll()
     const after = computer(dir)
-    await after.spawn({ carryOutput: { preamble: '', afterSeq: 5 } })
-    expect(await after.replay()).not.toContain('ALREADY_ON_SCREEN')
+    const reply = (await after.spawn({
+      carryOutput: { preamble: '[recovered]\r\n', afterSeq: 0 }
+    })) as { seq?: number }
+    after.child.out('NEXT')
+    const text = await after.replay()
+    expect(text).toContain('BIG_HISTORY_TAIL')
+    expect(text.indexOf('[recovered]')).toBeGreaterThan(text.indexOf('BIG_HISTORY_TAIL'))
+    expect(text.indexOf('NEXT')).toBeGreaterThan(text.indexOf('[recovered]'))
+    expect(reply.seq).toBeGreaterThan(0)
+    after.pty.disposeAll()
+  })
+
+  // A replacement spawn (the hub restarted and starts the session again) stops the old
+  // process, whose final write is still in flight: the file is up to a flush behind.
+  // The old session's buffer is right here — it is what comes back, not the file.
+  it('a replacement spawn restores the old session up to its last byte', async () => {
+    const dir = historyDir()
+    const c = computer(dir)
+    await c.spawn()
+    c.child.out('FLUSHED_OUTPUT\r\n')
+    await settle()
+    c.child.out('NOT_YET_FLUSHED_OUTPUT\r\n')
+    await c.spawn() // same session, a new process: the old one is stopped first
+    c.child.out('$ NEW_PROCESS')
+    const text = await c.replay()
+    expect(text).toContain('FLUSHED_OUTPUT')
+    expect(text).toContain('NOT_YET_FLUSHED_OUTPUT')
+    expect(text.split('NOT_YET_FLUSHED_OUTPUT').length - 1).toBe(1)
+    expect(text.indexOf('NEW_PROCESS')).toBeGreaterThan(text.indexOf(PTY_HISTORY_DIVIDER_TEXT))
+    c.pty.disposeAll()
+  })
+
+  it('a cleared terminal saves the cleared buffer, not the output before the clear', async () => {
+    const dir = historyDir()
+    const before = computer(dir)
+    await before.spawn()
+    before.child.out('BEFORE_CLEAR\r\n')
+    await settle()
+    await before.pty.handlers['pty.clearBuffer']({ sessionId: SESSION })
+    before.child.out('AFTER_CLEAR\r\n')
+    await settle()
+    before.child.out('AFTER_CLEAR_UNFLUSHED\r\n')
+    before.pty.disposeAll()
+    const after = computer(dir)
+    await after.spawn()
+    const text = await after.replay()
+    expect(text).not.toContain('BEFORE_CLEAR')
+    expect(text).toContain('AFTER_CLEAR\r\nAFTER_CLEAR_UNFLUSHED')
     after.pty.disposeAll()
   })
 

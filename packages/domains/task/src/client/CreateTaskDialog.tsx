@@ -189,13 +189,13 @@ export function CreateTaskDialog({
     if (data.tagIds.length > 0) {
       await setTagsMutation.mutateAsync({ taskId: task.id, tagIds: data.tagIds })
     }
-    if (shouldAutoCreateWorktree && !task.worktree_path) {
+    if (shouldAutoCreateWorktree && !task.has_worktree) {
       window.alert(
         'Task created, but worktree auto-create failed. You can add one from the Git panel.'
       )
     }
 
-    if (shouldAutoCreateWorktree && task.worktree_path) {
+    if (shouldAutoCreateWorktree && task.has_worktree) {
       trackTask(task.id, 'worktree_created', { auto_vs_manual: 'auto' })
     }
     toast.success(`Created "${task.title}"`)

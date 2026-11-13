@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { observable } from '@trpc/server/observable'
 import { randomUUID } from 'node:crypto'
-import { router, publicProcedure } from '@slayzone/trpc-server'
+import { router, publicProcedure, type TrpcContext } from '@slayzone/trpc-server'
+import { TRPCError } from '@trpc/server'
 import {
   CHAT_IMAGE_MEDIA_TYPES,
   chatPermissionArgsSchema,
@@ -16,6 +17,8 @@ import { getChatDeps } from './chat-router-deps'
 const ops = (): ReturnType<typeof getChatDeps>['ops'] => getChatDeps().ops
 const chatContext = z.object({ taskId: z.string().optional(), tabId: z.string().optional() })
 const catalog = () => getChatDeps().catalog
+/** A queued message and the tab holding it: routed and authorized by the tab (v208). */
+const queueItemInput = z.object({ id: z.string(), tabId: z.string() })
 const queueOps = (): ReturnType<typeof getChatDeps>['queueOps'] => getChatDeps().queueOps
 
 // Structural input schemas. Value-level validation (which chatMode/effort/model/
@@ -31,6 +34,17 @@ const chatCreateOpts = z.object({
   cwd: z.string(),
   providerFlagsOverride: z.string().nullish()
 })
+
+async function launchOpts<T extends z.infer<typeof chatCreateOpts>>(
+  ctx: TrpcContext,
+  input: T
+): Promise<T> {
+  if (!ctx.principal || ctx.principal.scopes.includes('full')) return input
+  const resolve = getChatDeps().resolveScopedLaunch
+  if (!resolve)
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Scoped chat launch is unavailable' })
+  return { ...input, ...(await resolve({ taskId: input.taskId, tabId: input.tabId }, ctx)) }
+}
 const pinnedMessageKey = z.string().min(1).max(PINNED_MESSAGE_KEY_MAX)
 const pinnedMessageInput = z
   .object({
@@ -171,6 +185,9 @@ export const chatRouter = router({
       await testing().seedPrompts(input.taskId, input.prompts)
       return { ok: true }
     }),
+  testProviderConfig: publicProcedure
+    .input(z.object({ tabId: z.string().min(1) }))
+    .query(({ input }) => testing().providerConfig(input.tabId)),
   availability: publicProcedure.input(z.object({ tabId: z.string().min(1) })).query(({ input }) => {
     const read = getChatDeps().availability
     if (!read) throw new Error('Chat availability is unavailable')
@@ -287,10 +304,14 @@ export const chatRouter = router({
   supports: publicProcedure
     .input(z.object({ mode: z.string() }))
     .query(({ input }) => ops().supports(input.mode)),
-  hydrate: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().hydrate(input)),
+  hydrate: publicProcedure
+    .input(chatCreateOpts)
+    .mutation(async ({ input, ctx }) => ops().hydrate(await launchOpts(ctx, input))),
   start: publicProcedure
     .input(chatCreateOpts.extend({ reason: z.enum(['user', 'restore']).optional() }))
-    .mutation(({ input }) => ops().start(input)),
+    .mutation(async ({ input, ctx }) =>
+      ops().start({ ...(await launchOpts(ctx, input)), reason: input.reason })
+    ),
   restart: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().restart(input)),
   send: publicProcedure.input(sendInput).mutation(({ input }) => {
     const message =
@@ -307,7 +328,9 @@ export const chatRouter = router({
   respondPermission: publicProcedure
     .input(z.object({ tabId: z.string(), args: permissionArgs }))
     .mutation(({ input }) => ops().respondPermission(input.tabId, input.args)),
-  interrupt: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().interrupt(input)),
+  interrupt: publicProcedure
+    .input(chatCreateOpts)
+    .mutation(async ({ input, ctx }) => ops().interrupt(await launchOpts(ctx, input))),
   abortAndPop: publicProcedure
     .input(chatCreateOpts)
     .mutation(({ input }) => ops().abortAndPop(input)),
@@ -335,15 +358,29 @@ export const chatRouter = router({
     ),
     list: publicProcedure
       .input(chatCreateOpts.extend({ conversationId: z.string().nullish() }))
-      .query(({ input: { conversationId: _key, ...o } }) => ops().listPinnedMessages(o)),
+      .query(async ({ input: { conversationId: _key, ...o }, ctx }) =>
+        ops().listPinnedMessages(await launchOpts(ctx, o))
+      ),
     pin: publicProcedure
       .input(chatCreateOpts.extend({ pin: pinnedMessageInput }))
-      .mutation(({ input }) => ops().pinMessage(input)),
+      .mutation(async ({ input, ctx }) => ops().pinMessage(await launchOpts(ctx, input))),
     unpin: publicProcedure
       .input(
         chatCreateOpts.extend({ conversationId: z.string().min(1).max(500), key: pinnedMessageKey })
       )
-      .mutation(({ input }) => ops().unpinMessage(input))
+      .mutation(async ({ input, ctx }) => ops().unpinMessage(await launchOpts(ctx, input)))
+  }),
+  settings: router({
+    /** The task's chat settings changed outside this client's own write: re-read them. */
+    onChanged: publicProcedure.input(z.object({ taskId: z.string() })).subscription(({ input }) =>
+      observable<void>((emit) => {
+        const handler = (taskId: string) => {
+          if (taskId === input.taskId) emit.next()
+        }
+        getChatDeps().events.on('settings-changed', handler)
+        return () => getChatDeps().events.off('settings-changed', handler)
+      })
+    )
   }),
   threads: router({
     onChanged: publicProcedure.input(z.object({ tabId: z.string() })).subscription(({ input }) =>
@@ -357,7 +394,7 @@ export const chatRouter = router({
     ),
     list: publicProcedure
       .input(chatCreateOpts.extend({ conversationId: z.string().nullish() }))
-      .query(({ input }) => ops().listThreads(input)),
+      .query(async ({ input, ctx }) => ops().listThreads(await launchOpts(ctx, input))),
     create: publicProcedure
       .input(
         chatCreateOpts.extend({
@@ -367,11 +404,11 @@ export const chatRouter = router({
           text: z.string().trim().min(1).max(1_000_000)
         })
       )
-      .mutation(({ input }) => ops().createThread(input)),
+      .mutation(async ({ input, ctx }) => ops().createThread(await launchOpts(ctx, input))),
     // Close (resolve) a thread: its agent stops, it leaves the tabs; reopen restores it.
     setClosed: publicProcedure
       .input(chatCreateOpts.extend({ threadId: z.string().min(1).max(200), closed: z.boolean() }))
-      .mutation(({ input }) => ops().setThreadClosed(input))
+      .mutation(async ({ input, ctx }) => ops().setThreadClosed(await launchOpts(ctx, input)))
   }),
   // `/btw`: a side question answered from the conversation, never part of it.
   sideQuestion: router({
@@ -391,7 +428,7 @@ export const chatRouter = router({
             .max(50)
         })
       )
-      .mutation(({ input }) => ops().askSideQuestion(input)),
+      .mutation(async ({ input, ctx }) => ops().askSideQuestion(await launchOpts(ctx, input))),
     cancel: publicProcedure
       .input(z.object({ tabId: z.string(), requestId: z.string().min(1).max(200) }))
       .mutation(({ input }) => ops().cancelSideQuestion(input))
@@ -478,25 +515,25 @@ export const chatRouter = router({
     .query(({ input }) => catalog()?.getAutoEligibility(input ?? {}) ?? ops().getAutoEligibility()),
   setMode: publicProcedure
     .input(chatCreateOpts.extend({ chatMode: z.string(), stopAndResume: z.boolean().optional() }))
-    .mutation(({ input }) => ops().setMode(input)),
+    .mutation(async ({ input, ctx }) => ops().setMode(await launchOpts(ctx, input))),
   getModel: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getModel(input.taskId, input.mode)),
   setModel: publicProcedure
     .input(chatCreateOpts.extend({ chatModel: z.string() }))
-    .mutation(({ input }) => ops().setModel(input)),
+    .mutation(async ({ input, ctx }) => ops().setModel(await launchOpts(ctx, input))),
   getEffort: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getEffort(input.taskId, input.mode)),
   setEffort: publicProcedure
     .input(chatCreateOpts.extend({ chatEffort: z.string() }))
-    .mutation(({ input }) => ops().setEffort(input)),
+    .mutation(async ({ input, ctx }) => ops().setEffort(await launchOpts(ctx, input))),
   getCollaboration: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getCollaboration(input.taskId, input.mode)),
   setCollaboration: publicProcedure
     .input(chatCreateOpts.extend({ chatCollaboration: z.string() }))
-    .mutation(({ input }) => ops().setCollaboration(input)),
+    .mutation(async ({ input, ctx }) => ops().setCollaboration(await launchOpts(ctx, input))),
   decidePlan: publicProcedure
     .input(
       chatCreateOpts.extend({
@@ -505,13 +542,13 @@ export const chatRouter = router({
         messageId: z.string().optional()
       })
     )
-    .mutation(({ input }) => ops().decidePlan(input)),
+    .mutation(async ({ input, ctx }) => ops().decidePlan(await launchOpts(ctx, input))),
   getFastMode: publicProcedure
     .input(z.object({ taskId: z.string(), mode: z.string() }))
     .query(({ input }) => ops().getFastMode(input.taskId, input.mode)),
   setFastMode: publicProcedure
     .input(chatCreateOpts.extend({ chatFastMode: z.boolean() }))
-    .mutation(({ input }) => ops().setFastMode(input)),
+    .mutation(async ({ input, ctx }) => ops().setFastMode(await launchOpts(ctx, input))),
 
   // Project metadata
   listSkills: publicProcedure
@@ -652,39 +689,42 @@ export const chatRouter = router({
       .input(
         z.object({
           id: z.string(),
+          tabId: z.string(),
           send: z.string(),
           original: z.string(),
           content: z.array(userContentBlock).min(1)
         })
       )
       .mutation(({ input }) =>
-        queueOps().update(input.id, {
-          send: input.send,
-          original: input.original,
-          content: input.content
-        })
+        queueOps().update(
+          input.id,
+          { send: input.send, original: input.original, content: input.content },
+          input.tabId
+        )
       ),
     move: publicProcedure
-      .input(z.object({ id: z.string(), toIndex: z.number().int().nonnegative() }))
-      .mutation(({ input }) => queueOps().move(input.id, input.toIndex)),
+      .input(
+        z.object({ id: z.string(), tabId: z.string(), toIndex: z.number().int().nonnegative() })
+      )
+      .mutation(({ input }) => queueOps().move(input.id, input.toIndex, input.tabId)),
     /** Hold a message while it is edited (renew while the editor is open); false when already sent. */
     hold: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().hold(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().hold(input.id, input.tabId)),
     release: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().release(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().release(input.id, input.tabId)),
     /**
      * Add a queued message to the running turn ("Send now"): the
      * agent takes it after its current tool call. `ok: false` + why when it
      * can't (the message stays queued).
      */
     steer: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().steer(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().steer(input.id, input.tabId)),
     remove: publicProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(({ input }) => queueOps().remove(input.id)),
+      .input(queueItemInput)
+      .mutation(({ input }) => queueOps().remove(input.id, input.tabId)),
     clear: publicProcedure
       .input(z.object({ tabId: z.string() }))
       .mutation(({ input }) => queueOps().clear(input.tabId))

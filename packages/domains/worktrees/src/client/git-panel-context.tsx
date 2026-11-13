@@ -12,6 +12,12 @@ interface GitPanelContextValue {
   onTaskClick?: (task: Task) => void
   onUpdateTask?: (data: UpdateTaskInput) => Promise<Task>
   onTaskUpdated?: (task: Task) => void
+  /**
+   * A task's worktree path as its computer answered (§9 Phase 7d: the hub keeps no
+   * copy). `undefined` = not known yet (loading, computer away) — never "none":
+   * a task without a worktree is `!task.has_worktree`.
+   */
+  worktreeOf: (task: Task) => string | undefined
 }
 
 export const GitPanelContext = createContext<GitPanelContextValue | null>(null)

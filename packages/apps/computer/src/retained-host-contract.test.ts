@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
+import { placeTestProject } from './project-scope.fixture'
 import { HOST_CONTRACT_VERSION } from '@slayzone/computer-runtime'
 import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
 import { startConnector } from './connector'
@@ -71,6 +72,7 @@ test.each([1, 2])(
       process.platform === 'win32' ? 'junction' : 'dir'
     )
     const hub = await startLoopbackHub({ floodLimits: false })
+    placeTestProject(root, hub.url, 'p1', root)
     const config = {
       hubUrl: hub.url,
       name: 'retained-contract-test',
@@ -132,6 +134,7 @@ test.each([1, 2])(
         method: 'proc.spawn',
         params: {
           sessionId: 'running-native',
+          projectId: 'p1',
           command: process.execPath,
           args: ['-e', 'setInterval(()=>{},1000)'],
           cwd: root
@@ -165,7 +168,7 @@ test.each([1, 2])(
               mode: 'claude-chat',
               epoch: 1
             },
-            projectId: null,
+            projectId: 'p1',
             cwd: root,
             revision: 1,
             providerConfig: {},
@@ -229,6 +232,7 @@ test.each([1, 2])(
       await expect(
         hub.gateway.request(retained.computerId, 'proc.spawn', {
           sessionId: 'new-work',
+          projectId: 'p1',
           command: process.execPath,
           args: ['-e', 'process.exit(0)'],
           cwd: root
@@ -297,6 +301,7 @@ test('supervisor defers retained v2 replacement while busy, then publishes v3 ho
     process.platform === 'win32' ? 'junction' : 'dir'
   )
   const hub = await startLoopbackHub({ floodLimits: false })
+  placeTestProject(root, hub.url, 'p1', root)
   const config = {
     hubUrl: hub.url,
     name: 'retained-supervisor',
@@ -372,6 +377,7 @@ test('supervisor defers retained v2 replacement while busy, then publishes v3 ho
       actor,
       params: {
         sessionId: 'retained-native',
+        projectId: 'p1',
         command: process.execPath,
         args: ['-e', 'setInterval(()=>{},1000)'],
         cwd: root

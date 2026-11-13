@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { spawn } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import ignore from 'ignore'
 import type {
   DirEntry,
@@ -213,7 +214,7 @@ export function gitStatus(rootPath: string): Promise<GitStatusMap> {
 
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
-    const proc = spawn('git', ['status', '--porcelain'], { cwd: root })
+    const proc = spawn(gitCommand(), ['status', '--porcelain'], { cwd: root })
     proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
     proc.on('error', () => resolve({ files: {}, isGitRepo: false }))
     proc.on('close', (code) => {

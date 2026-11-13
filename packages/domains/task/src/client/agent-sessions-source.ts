@@ -23,11 +23,17 @@ export { registerTaskSessionsSource } from '@slayzone/task-terminals/client/Task
 function useAgentSessions(
   taskId: string,
   agentId: string,
-  enabled: boolean
+  enabled: boolean,
+  tabId?: string
 ): readonly TaskSessionRow[] {
   const trpc = useTRPC()
 
-  const query = useQuery(trpc.agentSessions.list.queryOptions({ taskId, agentId }, { enabled }))
+  const query = useQuery(
+    trpc.agentSessions.list.queryOptions(
+      { taskId, agentId, ...(tabId ? { tabId } : {}) },
+      { enabled }
+    )
+  )
 
   useSubscription(
     trpc.agentSessions.onChanged.subscriptionOptions(undefined, {
@@ -50,5 +56,28 @@ function useAgentSessions(
   return query.data ?? []
 }
 
+/**
+ * Whether the task's sessions cannot be read: the computer holding them is offline
+ * (the list answers PRECONDITION_FAILED; robustness plan §9). Shares the list's query.
+ */
+function useAgentSessionsOffline(
+  taskId: string,
+  agentId: string,
+  enabled: boolean,
+  tabId?: string
+): boolean {
+  const trpc = useTRPC()
+  const { error } = useQuery(
+    trpc.agentSessions.list.queryOptions(
+      { taskId, agentId, ...(tabId ? { tabId } : {}) },
+      { enabled }
+    )
+  )
+  return (error as { data?: { code?: string } } | null)?.data?.code === 'PRECONDITION_FAILED'
+}
+
 /** Pass to `registerTaskSessionsSource` at app startup (module scope, before any render). */
-export const taskSessionsSource: TaskSessionsSource = { useTaskSessions: useAgentSessions }
+export const taskSessionsSource: TaskSessionsSource = {
+  useTaskSessions: useAgentSessions,
+  useTaskSessionsOffline: useAgentSessionsOffline
+}

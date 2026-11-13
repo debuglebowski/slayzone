@@ -43,6 +43,12 @@ interface ProcessDialogProps {
   taskId: string | null
   projectId: string | null
   cwd: string | null
+  /**
+   * Why the task's folder is not known yet (loading, its computer away, missing
+   * there), or null. A NEW task process needs it: it is stored with that folder,
+   * so it waits rather than guess the project folder (S7).
+   */
+  cwdUnavailable?: string | null
   onSaved: () => void
   onSpawned: (id: string) => void
 }
@@ -54,6 +60,7 @@ export function ProcessDialog({
   taskId,
   projectId,
   cwd,
+  cwdUnavailable = null,
   onSaved,
   onSpawned
 }: ProcessDialogProps) {
@@ -79,7 +86,9 @@ export function ProcessDialog({
     setSaving(false)
   }
 
-  const isValid = form.label.trim() && form.command.trim()
+  // A new task process runs in the task's folder: not before it is known.
+  const cwdBlocked = !process && form.scope === 'task' && cwdUnavailable !== null
+  const isValid = !!(form.label.trim() && form.command.trim()) && !cwdBlocked
 
   const resolveScope = useCallback(() => {
     const isProject = form.scope === 'project'
@@ -271,6 +280,12 @@ export function ProcessDialog({
               you stop it manually.
             </TooltipContent>
           </Tooltip>
+
+          {cwdBlocked && (
+            <p className="text-[11px] text-muted-foreground bg-muted/50 border border-border rounded-md px-3 py-2">
+              {cwdUnavailable}
+            </p>
+          )}
 
           {saveError && (
             <p className="text-[11px] text-red-500 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2">

@@ -3,15 +3,12 @@ import http from 'http'
 import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { registerAgentHookRoute } from './agent-hook'
 
-// Verifies the seam: POST /api/agent-hook → capturePrompt(...). The capture
-// LOGIC (gating by event/mode, extraction, dedupe, ordering) is covered in
-// @slayzone/agent-turns prompt-capture.test.ts; here we only assert the route
-// forwards the right payload, gated on taskId presence.
+// Verifies the seam: POST /api/agent-hook → deps.captureAgentPrompt(hook, computer).
+// Prompts are kept on the computer (robustness plan §9; the capture LOGIC — gating
+// by event/mode, extraction — is the computer's, covered in chat-runtime); here we
+// only assert the route forwards the right hook, gated on taskId presence.
 
 const capturePromptSpy = vi.fn()
-vi.mock('@slayzone/agent-turns/server', () => ({
-  capturePrompt: (...args: unknown[]) => capturePromptSpy(...args)
-}))
 
 // Keep the route's other domain imports out of vitest (no Electron / DB / adapter
 // registry) — mirror agent-hook.test.ts.
@@ -39,7 +36,8 @@ function startServer(): Promise<ServerHandle> {
   const app = express()
   registerAgentHookRoute(app, {
     db: {} as never,
-    notifyRenderer: () => {}
+    notifyRenderer: () => {},
+    captureAgentPrompt: async (...args: unknown[]) => capturePromptSpy(...args)
   } as never)
   return new Promise((resolve) => {
     const server = http.createServer(app).listen(0, '127.0.0.1', () => {
@@ -78,14 +76,14 @@ function postJson(port: number, body: unknown): Promise<{ status: number }> {
   })
 }
 
-describe('POST /api/agent-hook → capturePrompt', () => {
+describe('POST /api/agent-hook → captureAgentPrompt', () => {
   beforeEach(() => {
     capturePromptSpy.mockReset()
     unadoptedWarmAgentSpy.mockReset()
     unadoptedWarmAgentSpy.mockReturnValue(null)
   })
 
-  test('forwards UserPromptSubmit payload to capturePrompt', async () => {
+  test('forwards the UserPromptSubmit hook to the computer capture', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, {
@@ -96,7 +94,7 @@ describe('POST /api/agent-hook → capturePrompt', () => {
         raw: { prompt: 'fix the auth bug' }
       })
       expect(capturePromptSpy).toHaveBeenCalledTimes(1)
-      const [, input] = capturePromptSpy.mock.calls[0]
+      const [input] = capturePromptSpy.mock.calls[0]
       expect(input).toMatchObject({
         agentId: 'claude-code',
         hookEvent: 'UserPromptSubmit',
@@ -109,7 +107,7 @@ describe('POST /api/agent-hook → capturePrompt', () => {
     }
   })
 
-  test('does not call capturePrompt when taskId is absent', async () => {
+  test('does not capture when taskId is absent', async () => {
     const srv = await startServer()
     try {
       await postJson(srv.port, {
@@ -134,7 +132,7 @@ describe('POST /api/agent-hook → capturePrompt', () => {
         raw: { prompt: 'hello from adopted agent' }
       })
       expect(capturePromptSpy).toHaveBeenCalledTimes(1)
-      expect(capturePromptSpy.mock.calls[0][1]).toMatchObject({ taskId: 'adopted-task-7' })
+      expect(capturePromptSpy.mock.calls[0][0]).toMatchObject({ taskId: 'adopted-task-7' })
     } finally {
       await srv.close()
     }

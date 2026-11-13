@@ -9,9 +9,14 @@
  *  (b) the real computer pty handlers (fake node-pty) → routing backend → hub mirror;
  * and the hub-visible results must be identical: state transitions, prompts, titles,
  * dev-server URLs, conversation ids, terminal-query answers, and the idle clock.
+ *
+ * Time is ONE fake clock (vitest fake timers fake `Date` and every timer), shared by
+ * the hub runtime, the computer pipeline and the fixture: chunks land at exact
+ * instants, the debounce / coalescing windows are advanced deliberately, and the
+ * idle clock both paths report is compared exactly — no wall-clock tolerance.
  */
 import { tmpdir } from 'node:os'
-import { afterAll, describe, expect, test, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
 import type * as nodePty from 'node-pty'
 import { TypedEventEmitter } from '@slayzone/computer-transport/shared'
 import {
@@ -36,6 +41,7 @@ import { createFakeTaskSessionStore } from '../../../domains/terminal/src/server
 import type { PtySessionWindow } from '../../../domains/terminal/src/server/pty-host'
 import type { ComputerConfig } from './config'
 import { createPtyHandlers } from './handlers/pty'
+import { IDLE_CLOCK_SIGNAL_MS } from './pty-signals'
 import type { ComputerDialer } from './handlers/types'
 
 const computerId = 'parity-computer'
@@ -195,7 +201,12 @@ function record(sessionId: string): { seen: Seen; stop: () => void } {
   }
 }
 
-const tick = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** Fixture spacing between chunks, on the fake clock. */
+const CHUNK_SPACING_MS = 25
+/** The hub's state debounce for non-running transitions (pty-manager). */
+const STATE_DEBOUNCE_MS = 100
+/** Advance the shared fake clock, running due timers and draining microtasks. */
+const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 async function run(
   path: 'a' | 'b',
@@ -215,7 +226,9 @@ async function run(
     ...(m.patternError ? { patternError: m.patternError } : {})
   } as never)
   expect(res.success, JSON.stringify(res)).toBe(true)
-  await vi.waitFor(() => expect(talkers.length).toBe(before + 1))
+  // Drain the spawn round trip without moving the clock.
+  await tick(0)
+  expect(talkers.length).toBe(before + 1)
   const t = talkers[before]!
   const cmd = getAdapter({ mode: m.mode }).sessionIdCommand ?? '/status'
   let outputAt = 0
@@ -226,16 +239,21 @@ async function run(
     } else {
       writePty(sessionId, `${cmd}\r`)
     }
-    await tick(25)
+    await tick(CHUNK_SPACING_MS)
   }
-  // Past the computer's idle-clock coalescing window and the state debounce.
-  await tick(700)
+  // Past the computer's idle-clock coalescing window (its trailing signal carries the
+  // coalesced chunk's age) and the hub's state debounce — every notification drained.
+  await tick(IDLE_CLOCK_SIGNAL_MS + STATE_DEBOUNCE_MS + CHUNK_SPACING_MS)
   const info = (await listPtys()).find((p) => p.sessionId === sessionId)
   rec.stop()
   killPty(sessionId)
   const answers = t.writes.filter((w) => w.startsWith('\x1b'))
   return { seen: rec.seen, answers, lastOutputTime: info?.lastOutputTime ?? -1, outputAt }
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 afterAll(() => {
   computer.disposeAll()
@@ -244,6 +262,10 @@ afterAll(() => {
 describe('pty detection parity: hub-side vs computer → signal → mirror', () => {
   for (const m of MODES) {
     test(m.mode, async () => {
+      // One clock for hub, computer and fixture. `setImmediate` stays real (node internals).
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']
+      })
       const a = await run('a', m)
       const b = await run('b', m)
       // Per kind, in order. Kinds are compared separately: process-title polling runs
@@ -257,12 +279,12 @@ describe('pty detection parity: hub-side vs computer → signal → mirror', () 
         )
       expect(byKind(b.seen)).toEqual(byKind(a.seen))
       expect(b.answers).toEqual(a.answers)
-      // Both clocks read the output's own time (coalescing must not move it later).
-      expect(
-        Math.abs(b.lastOutputTime - b.outputAt - (a.lastOutputTime - a.outputAt))
-      ).toBeLessThan(60)
+      // Both clocks read the output's own time, exactly (coalescing must not move it).
+      expect(a.lastOutputTime).toBeGreaterThan(0)
+      expect(b.lastOutputTime).toBeGreaterThan(0)
+      expect(b.lastOutputTime - b.outputAt).toBe(a.lastOutputTime - a.outputAt)
       // The fixture says something to every adapter (titles at least).
       expect(a.seen.length).toBeGreaterThan(0)
-    }, 20_000)
+    })
   }
 })

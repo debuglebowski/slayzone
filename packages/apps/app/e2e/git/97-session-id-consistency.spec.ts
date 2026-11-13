@@ -6,7 +6,9 @@ import {
   getMainSessionId,
   waitForPtySession,
   readFullBuffer,
-  binaryOnPath
+  binaryOnPath,
+  currentSession,
+  seedSession
 } from '../fixtures/terminal'
 
 const hasCodex = binaryOnPath('codex')
@@ -37,7 +39,7 @@ test.describe('Session ID consistency (real CLIs)', () => {
 
   // --- No bogus UUID for providers without {id} in initialCommand ---
 
-  test('codex fresh start: no conversationId in DB', async ({ mainWindow }) => {
+  test('codex fresh start: no session recorded', async ({ mainWindow }) => {
     test.skip(!hasCodex, 'codex not on PATH')
     test.setTimeout(90_000)
 
@@ -73,11 +75,7 @@ test.describe('Session ID consistency (real CLIs)', () => {
       )
       .toBe(true)
 
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      t.id
-    )
-    expect(task?.provider_config?.codex?.conversationId ?? null).toBeNull()
+    expect(await currentSession(mainWindow, t.id, 'codex')).toBeNull()
   })
 
   // --- Codex: stored session ID not overwritten ---
@@ -95,15 +93,14 @@ test.describe('Session ID consistency (real CLIs)', () => {
       agentId: 'codex'
     })
     await mainWindow.evaluate(
-      ({ id, cid }) =>
+      ({ id }) =>
         window.getTrpcVanillaClient().task.update.mutate({
           id,
-          providerConfig: {
-            codex: { conversationId: cid, flags: '--sandbox workspace-write --disable apps' }
-          }
+          providerConfig: { codex: { flags: '--sandbox workspace-write --disable apps' } }
         }),
-      { id: t.id, cid: storedId }
+      { id: t.id }
     )
+    await seedSession(mainWindow, t.id, 'codex', storedId)
     await s.refreshData()
 
     await openTaskTerminal(mainWindow, { projectAbbrev, taskTitle: 'SIC codex persist' })
@@ -124,10 +121,6 @@ test.describe('Session ID consistency (real CLIs)', () => {
     // Wait for any async detection to potentially overwrite
     await mainWindow.waitForTimeout(5000)
 
-    const task = await mainWindow.evaluate(
-      (id) => window.getTrpcVanillaClient().task.get.query({ id }),
-      t.id
-    )
-    expect(task?.provider_config?.codex?.conversationId).toBe(storedId)
+    expect(await currentSession(mainWindow, t.id, 'codex')).toBe(storedId)
   })
 })

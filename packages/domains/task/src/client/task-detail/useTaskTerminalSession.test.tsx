@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-// Pins useTaskTerminalSession's detected-conversation-id persist: one task.update per
-// detected id, never re-issued by re-renders — including the re-renders the mutation's
-// own state changes cause. Uses the REAL TanStack useMutation (new result object every
-// render, host re-render on every mutation state change), because that identity churn is
-// exactly what turned a failing write into an endless task.update retry loop.
+// Pins useTaskTerminalSession's detected-conversation-id persist: one
+// agentSessions.recordDetected per detected id (on the task's computer, robustness plan
+// §9), never re-issued by re-renders — including the re-renders the mutation's own state
+// changes cause. Uses the REAL TanStack useMutation (new result object every render, host
+// re-render on every mutation state change), because that identity churn is exactly what
+// turned a failing write into an endless retry loop.
 import type React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
@@ -11,6 +12,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Task } from '@slayzone/task-contracts'
 
 const updateFn = vi.fn<(input: unknown) => Promise<Task>>()
+const recordFn = vi.fn<(input: unknown) => Promise<{ ok: true }>>()
+/** The main tab's current conversation as the computer answers it. */
+let currentId: string | null = null
+/** How the computer answers (default: at once with `currentId`). */
+let answerCurrent: () => Promise<string | null> = async () => currentId
 const sub = { subscriptionOptions: () => ({}) }
 // The respawn subscription hands its onData to useSubscription — capture it so a
 // test can fire a `pty:respawn-suggested` at the hook.
@@ -31,6 +37,19 @@ const trpcClient = {
 const trpc = {
   task: {
     update: { mutationOptions: () => ({ mutationFn: (input: unknown) => updateFn(input) }) }
+  },
+  agentSessions: {
+    current: {
+      queryOptions: (input: unknown, opts: object) => ({
+        queryKey: ['agentSessions.current', input],
+        queryFn: () => answerCurrent(),
+        ...opts
+      })
+    },
+    recordDetected: {
+      mutationOptions: () => ({ mutationFn: (input: unknown) => recordFn(input) })
+    },
+    onChanged: sub
   },
   menu: { onSyncSessionId: sub },
   pty: { onRespawnSuggested: respawnSub, onEnsureAlive: sub }
@@ -53,13 +72,10 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
 const { useTaskTerminalSession } = await import('./useTaskTerminalSession')
 
 // codex has a session-id discovery command, so detected ids are persisted.
-const task = (conversationId: string | null = null): Task =>
-  ({
-    id: 't1',
-    agent_id: 'codex',
-    provider_config: {},
-    currentConversationByMode: conversationId ? { codex: conversationId } : {}
-  }) as unknown as Task
+const task = (conversationId: string | null = null): Task => {
+  currentId = conversationId
+  return { id: 't1', agent_id: 'codex', provider_config: {} } as unknown as Task
+}
 
 const getMainSessionId = (id: string): string => `${id}:main`
 const settle = (): Promise<void> => act(() => new Promise<void>((r) => setTimeout(r, 100)))
@@ -67,12 +83,17 @@ const settle = (): Promise<void> => act(() => new Promise<void>((r) => setTimeou
 afterEach(() => {
   cleanup()
   updateFn.mockReset()
+  recordFn.mockReset()
+  currentId = null
+  answerCurrent = async () => currentId
   respawnSuggested = null
   vi.clearAllMocks()
 })
 
 function setup(initial: Task) {
-  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } }
+  })
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
@@ -114,8 +135,7 @@ describe('useTaskTerminalSession — restart routing', () => {
       const initial = {
         ...task(),
         agent_id: mode,
-        provider_config: { [mode]: { flags: '--verbose' } },
-        currentConversationByMode: { [mode]: 'existing-session' }
+        provider_config: { [mode]: { flags: '--verbose' } }
       } as Task
       const { result, resetTaskState, setTerminalKey, onTaskUpdated } = setup(initial)
 
@@ -151,56 +171,55 @@ describe('useTaskTerminalSession — restart routing', () => {
 
 describe('useTaskTerminalSession — detected conversation id persist', () => {
   it('a failing write is not retried by re-renders; a new task object retries once', async () => {
-    updateFn.mockRejectedValue(new Error('hub unreachable'))
+    recordFn.mockRejectedValue(new Error('computer offline'))
     const first = task()
-    const { rerender, detect, onTaskUpdated } = setup(first)
+    const { rerender, detect } = setup(first)
     detect('sess-1')
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(1)
-    expect(updateFn).toHaveBeenCalledWith({
-      id: 't1',
-      providerConfig: { codex: { conversationId: 'sess-1' } }
+    expect(recordFn).toHaveBeenCalledTimes(1)
+    expect(recordFn).toHaveBeenCalledWith({
+      taskId: 't1',
+      agentId: 'codex',
+      conversationId: 'sess-1'
     })
+    expect(updateFn).not.toHaveBeenCalled()
 
     // A parent re-render with the same task: no retry.
     rerender({ t: first })
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(1)
+    expect(recordFn).toHaveBeenCalledTimes(1)
 
     // A board refetch (fresh task object) is the transient-failure retry — once.
     rerender({ t: task() })
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(2)
-    expect(onTaskUpdated).not.toHaveBeenCalled()
+    expect(recordFn).toHaveBeenCalledTimes(2)
   })
 
-  it('a successful write fires once, hands the task up, and clears the detected id', async () => {
-    const updated = task('sess-1')
-    updateFn.mockResolvedValue(updated)
-    const { result, rerender, detect, onTaskUpdated } = setup(task())
+  it('a successful write fires once and clears the detected id', async () => {
+    recordFn.mockResolvedValue({ ok: true })
+    const { result, rerender, detect } = setup(task())
     detect('sess-1')
     expect(result.current.detectedSessionId).toBe('sess-1')
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(1)
-    expect(onTaskUpdated).toHaveBeenCalledExactlyOnceWith(updated)
+    expect(recordFn).toHaveBeenCalledTimes(1)
     expect(result.current.detectedSessionId).toBeNull()
 
-    rerender({ t: updated })
+    rerender({ t: task('sess-1') })
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(1)
+    expect(recordFn).toHaveBeenCalledTimes(1)
   })
 
   it('re-renders while the write is in flight do not issue a second write', async () => {
-    let resolve: (t: Task) => void = () => {}
-    updateFn.mockImplementation(() => new Promise<Task>((r) => (resolve = r)))
+    let resolve: (v: { ok: true }) => void = () => {}
+    recordFn.mockImplementation(() => new Promise<{ ok: true }>((r) => (resolve = r)))
     const { rerender, detect } = setup(task())
     detect('sess-1')
     rerender({ t: task() })
     rerender({ t: task() })
     await settle()
-    expect(updateFn).toHaveBeenCalledTimes(1)
-    await act(async () => resolve(task('sess-1')))
-    expect(updateFn).toHaveBeenCalledTimes(1)
+    expect(recordFn).toHaveBeenCalledTimes(1)
+    await act(async () => resolve({ ok: true }))
+    expect(recordFn).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -215,5 +234,76 @@ describe('useTaskTerminalSession — revive (task leaves a terminal status)', ()
     await settle()
     expect(trpcClient.pty.kill.mutate).toHaveBeenCalled()
     expect(trpcClient.task.resetConversation.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useTaskTerminalSession — S8: an unknown current session is not "no session"', () => {
+  /** The computer's answer, held until the test releases it. */
+  function heldAnswer() {
+    let release: (v: string | null) => void = () => {}
+    let fail: (e: Error) => void = () => {}
+    answerCurrent = () =>
+      new Promise<string | null>((resolve, reject) => {
+        release = resolve
+        fail = reject
+      })
+    return { release: (v: string | null) => release(v), fail: (e: Error) => fail(e) }
+  }
+
+  it('no banner while the answer is loading; shown once the computer answers "none"', async () => {
+    const held = heldAnswer()
+    const { result } = setup(task())
+    await settle()
+    expect(result.current.showSessionBanner).toBe(false)
+    await act(async () => held.release(null))
+    await settle()
+    expect(result.current.showSessionBanner).toBe(true)
+  })
+
+  it('no banner while the computer is offline (the read failed)', async () => {
+    const held = heldAnswer()
+    const { result } = setup(task())
+    await act(async () => held.fail(new Error('PRECONDITION_FAILED: computer offline')))
+    await settle()
+    expect(result.current.showSessionBanner).toBe(false)
+  })
+
+  it('"resume won\'t work" (no detection possible) waits for the answer too', async () => {
+    const held = heldAnswer()
+    const { result } = setup({ ...task(), agent_id: 'cursor-agent' } as Task)
+    await settle()
+    expect(result.current.showUnavailableBanner).toBe(false)
+    await act(async () => held.release(null))
+    await settle()
+    expect(result.current.showUnavailableBanner).toBe(true)
+  })
+
+  it('a /status detection before the answer is not recorded when it IS the current id', async () => {
+    recordFn.mockResolvedValue({ ok: true })
+    const held = heldAnswer()
+    const { result, detect } = setup(task())
+    detect('sess-current')
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    await act(async () => held.release('sess-current'))
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    expect(result.current.detectedSessionId).toBeNull()
+  })
+
+  it('a /status detection before the answer IS recorded once the answer shows it is new', async () => {
+    recordFn.mockResolvedValue({ ok: true })
+    const held = heldAnswer()
+    const { detect } = setup(task())
+    detect('sess-new')
+    await settle()
+    expect(recordFn).not.toHaveBeenCalled()
+    await act(async () => held.release('sess-old'))
+    await settle()
+    expect(recordFn).toHaveBeenCalledExactlyOnceWith({
+      taskId: 't1',
+      agentId: 'codex',
+      conversationId: 'sess-new'
+    })
   })
 })

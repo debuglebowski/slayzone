@@ -35,52 +35,26 @@ export interface MergeContext {
 /** Per-provider config stored as JSON in the provider_config column. Key = AgentId value. */
 export interface ProviderConfig {
   [mode: string]: {
-    conversationId?: string | null
+    // No session ids: which conversations a task's agents ran (and resume) is the
+    // session ledger on the computer running them (robustness plan §9, P0).
     flags?: string
-    // Most-recent-last list of CONFIRMED conversation ids (each was reported by the
-    // agent's real SessionStart hook, so it provably existed on disk). Lets a task
-    // self-heal to a prior real conversation if its current `conversationId` ever
-    // goes missing, WITHOUT guessing — these ids are known to belong to this task.
-    // Appended by the SessionStart persist path; capped at CONVERSATION_HISTORY_CAP.
-    // See plans/conv-id-robustness-v2.md.
-    conversationHistory?: string[]
+    // A chat mode's settings (robustness plan §9, decision 2): only the chat's
+    // computer holds them. Here they are starting values — a template's, seeded at
+    // task creation — of a chat no computer holds yet; the hub removes them once
+    // its computer has its own. A task update carrying them for a chat a computer
+    // owns changes them on that computer.
+    chatMode?: string
+    chatModel?: string
+    chatEffort?: string
+    chatCollaboration?: 'default' | 'plan'
+    chatFastMode?: boolean
+    /** Computer-owned; only a not-yet-moved (legacy) chat still carries it here. */
+    chatConversationId?: string | null
   }
-}
-
-/** Max confirmed conversation ids retained per mode for the self-heal fallback. */
-export const CONVERSATION_HISTORY_CAP = 10
-
-/** Append a CONFIRMED conversation id to the per-mode history (most-recent last),
- *  deduped (an existing id moves to the end) and capped at CONVERSATION_HISTORY_CAP.
- *  Returns a new ProviderConfig; preserves all other fields of the mode entry.
- *  Caller must pass a non-empty id (a real SessionStart session_id). */
-export function appendProviderConversationId(
-  cfg: ProviderConfig | undefined | null,
-  mode: string,
-  id: string
-): ProviderConfig {
-  const prev = cfg?.[mode]?.conversationHistory ?? []
-  const next = [...prev.filter((x) => x !== id), id].slice(-CONVERSATION_HISTORY_CAP)
-  return { ...cfg, [mode]: { ...cfg?.[mode], conversationHistory: next } }
-}
-
-export function getProviderConversationId(
-  cfg: ProviderConfig | undefined | null,
-  mode: string
-): string | null {
-  return cfg?.[mode]?.conversationId ?? null
 }
 
 export function getProviderFlags(cfg: ProviderConfig | undefined | null, mode: string): string {
   return cfg?.[mode]?.flags ?? ''
-}
-
-export function setProviderConversationId(
-  cfg: ProviderConfig | undefined | null,
-  mode: string,
-  val: string | null
-): ProviderConfig {
-  return { ...cfg, [mode]: { ...cfg?.[mode], conversationId: val } }
 }
 
 export function setProviderFlags(
@@ -101,16 +75,6 @@ export function parseSqliteUtc(s: string | null | undefined): number {
   // SQLite form as UTC by normalizing to 'YYYY-MM-DDTHH:MM:SSZ'.
   const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z'
   return Date.parse(iso)
-}
-
-/** Returns a partial ProviderConfig that sets conversationId=null for all modes in cfg.
- *  Does NOT include flags — the handler deep-merges, so existing flags survive. */
-export function clearAllConversationIds(cfg: ProviderConfig | undefined | null): ProviderConfig {
-  const result: ProviderConfig = {}
-  for (const mode of Object.keys(cfg ?? {})) {
-    result[mode] = { conversationId: null }
-  }
-  return result
 }
 
 export interface PanelVisibility extends Record<string, boolean> {
@@ -718,25 +682,6 @@ export interface Task {
   agent_id: AgentId
   provider_config: ProviderConfig
   terminal_shell: string | null
-  /**
-   * Server-computed: for each provider mode the task has touched, the current
-   * honored conversation id from `task_conversations` (resolved through the
-   * SQL cutoff so manual-reset rows hide every earlier row).
-   *
-   * This is the ONLY conversation-id shape the renderer should read. Direct
-   * access to `provider_config.{mode}.conversationId` /
-   * `provider_config.{mode}.chatConversationId` / `*_conversation_id` columns
-   * bypasses the append-only ledger and is rejected by the
-   * `lint:server-boundary` guard. Optional on the type so older code paths
-   * that build Task objects without server hydration don't break.
-   */
-  currentConversationByMode?: Record<string, string | null>
-  // @deprecated — use provider_config[mode].conversationId
-  claude_conversation_id: string | null
-  codex_conversation_id: string | null
-  cursor_conversation_id: string | null
-  gemini_conversation_id: string | null
-  opencode_conversation_id: string | null
   // @deprecated — use provider_config[mode].flags
   claude_flags: string
   codex_flags: string
@@ -751,13 +696,16 @@ export interface Task {
   panel_sizes: PanelSizes | null
   // The computer this task's work runs on; null = its project's (v149 column).
   computer_id?: string | null
-  // Worktree
-  worktree_path: string | null
+  // Worktree. The PATHS (worktree, custom working folder) live only on the computer
+  // holding the task's work (robustness plan §9, P0; Phase 7): read them with
+  // `useTaskPath` / `task.paths`. The hub knows only whether they are set and
+  // which computer made the worktree.
+  has_worktree: boolean
   worktree_parent_branch: string | null
-  // Transient — populated by main handlers from worktree color-registry. NOT a DB column.
-  worktree_color?: string | null
-  // Custom working directory (overrides project.path, overridden by worktree_path)
-  base_dir: string | null
+  /** The computer the worktree was made on; null = the task's computer. */
+  worktree_computer_id?: string | null
+  // A custom working directory is set (overrides the project folder; a worktree wins).
+  has_base_dir: boolean
   browser_url: string | null
   // Browser tabs (JSON)
   browser_tabs: BrowserTabsState | null
@@ -802,7 +750,7 @@ export interface Task {
   // reappears for the task again.
   dev_url_toast_dismissed: boolean
   // Epoch ms of last user→agent or agent→user interaction. Bumped from
-  // chat-event user-messages and agent_turns inserts; null until first event.
+  // chat-event user-messages and recorded agent turns; null until first event.
   last_interaction_at: number | null
   // Tree-view: task pinned to top of the sidebar tree (was viewState.treePinnedTaskIds)
   pinned: boolean
@@ -881,11 +829,6 @@ export interface UpdateTaskInput {
   providerConfig?: ProviderConfig
   terminalShell?: string | null
   // @deprecated — use providerConfig
-  claudeConversationId?: string | null
-  codexConversationId?: string | null
-  cursorConversationId?: string | null
-  geminiConversationId?: string | null
-  opencodeConversationId?: string | null
   claudeFlags?: string
   codexFlags?: string
   cursorFlags?: string

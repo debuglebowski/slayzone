@@ -85,8 +85,7 @@ export async function signInWithMicrosoft(
   if (!probe.ok) {
     return probe.reason === 'address' ? { ok: false, error: probe.error } : unreachable(probe.error)
   }
-  if (!probe.offer.microsoft)
-    return { ok: false, error: 'This hub does not offer Microsoft sign-in' }
+  if (!probe.offer.microsoft) return { ok: false, error: 'This hub does not offer single sign-on' }
 
   const pending = await startAppSignIn(probe.baseUrl, deps.crypto)
   let ended: AuthSessionResult
@@ -108,7 +107,15 @@ export async function signInWithMicrosoft(
     }
   }
   const callback = readAppSignInCallback(ended.url, pending)
-  if (!callback.ok) return { ok: false, error: callback.message }
+  if (!callback.ok) {
+    // Worded for this hub's provider (`/health` `ssoLabel`).
+    return {
+      ok: false,
+      error: callback.code
+        ? signInErrorMessage(callback.code, probe.offer.ssoLabel)
+        : callback.message
+    }
+  }
 
   const exchanged = await exchangeAppSignInCode(deps.transport, probe.baseUrl, {
     code: callback.code,

@@ -4,6 +4,7 @@
  * `chat.getReplay`), the rest streams into the same row, and the block is saved
  * once.
  */
+import { writeFileSync } from 'node:fs'
 import { resetApp } from '../fixtures/electron'
 import { ev, expect, step, streamEv, streamMessage, test } from '../fixtures/chat'
 import { openActivityTool } from '../fixtures/chat-activity'
@@ -13,7 +14,10 @@ test.describe('Chat streaming: reload mid-stream', () => {
     await resetApp(mainWindow)
   })
 
-  test('partial text survives a reload and the reply finishes in one row', async ({ chat }) => {
+  test('partial text survives a reload and the reply finishes in one row', async ({
+    chat
+  }, info) => {
+    const resumeFile = info.outputPath('continue')
     const t = await chat.openTask({
       title: 'Chat stream reload text',
       scenario: {
@@ -25,7 +29,7 @@ test.describe('Chat streaming: reload mid-stream', () => {
                 ...streamMessage('msg_157', [{ text: ['Before ', 'the reload, '] }], {
                   open: true
                 }),
-                step.sleep(5_000),
+                step.waitForFile(resumeFile),
                 step.emit(
                   streamEv.textDelta(0, 'after '),
                   streamEv.textDelta(0, 'the reload.'),
@@ -48,6 +52,7 @@ test.describe('Chat streaming: reload mid-stream', () => {
     await t.reload()
     await expect(row).toHaveText('Before the reload,', { timeout: 5_000 })
     await expect(t.stopButton).toBeVisible()
+    writeFileSync(resumeFile, '')
     await expect(t.panel.locator('[data-chat-text]')).toHaveText(
       'Before the reload, after the reload.',
       { timeout: 10_000 }
@@ -59,7 +64,10 @@ test.describe('Chat streaming: reload mid-stream', () => {
     expect(texts.map((e) => e.event.text)).toEqual(['Before the reload, after the reload.'])
   })
 
-  test('a tool input streaming at reload time is still shown, then completes', async ({ chat }) => {
+  test('a tool input streaming at reload time is still shown, then completes', async ({
+    chat
+  }, info) => {
+    const resumeFile = info.outputPath('continue')
     const t = await chat.openTask({
       title: 'Chat stream reload tool input',
       scenario: {
@@ -74,7 +82,7 @@ test.describe('Chat streaming: reload mid-stream', () => {
                   streamEv.inputJsonDelta(0, '{"command": "npm run '),
                   streamEv.inputJsonDelta(0, 'build')
                 ),
-                step.sleep(5_000),
+                step.waitForFile(resumeFile),
                 step.emit(
                   streamEv.inputJsonDelta(0, ' --watch"}'),
                   ev.toolUse({
@@ -103,6 +111,7 @@ test.describe('Chat streaming: reload mid-stream', () => {
     await t.reload()
     await openActivityTool(t.panel, 'tool-bash')
     await expect(command).toHaveText('npm run build', { timeout: 5_000 })
+    writeFileSync(resumeFile, '')
     await expect(t.sendButton).toBeVisible({ timeout: 10_000 })
     await openActivityTool(t.panel, 'tool-bash')
     await expect(command).toHaveText('npm run build --watch', { timeout: 10_000 })

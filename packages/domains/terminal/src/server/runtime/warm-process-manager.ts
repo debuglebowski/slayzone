@@ -112,6 +112,8 @@ export interface WarmPoolDataOps {
   /** Record the pooled session entity at warm spawn (status='pooled', no task/tab yet —
    *  the reserved task id has no `tasks` row, and `task_id` is a foreign key). */
   recordSessionSpawn(input: {
+    /** The computer the warm agent runs on: it holds the session row. */
+    computerId: string
     id: string
     taskId: string | null
     tabId: string | null
@@ -122,7 +124,7 @@ export interface WarmPoolDataOps {
     status: 'pooled'
   }): Promise<void>
   /** Mark a pooled session's process dead (reap/crash) so it never lingers as resumable. */
-  markSessionDead(sessionId: string): Promise<void>
+  markSessionDead(computerId: string, sessionId: string): Promise<void>
 }
 
 /** Default local-DB impl — same SQL / task-owned calls (the injected `taskStore`,
@@ -139,8 +141,9 @@ export function createDbWarmPoolDataOps(
       }>(`SELECT initial_command, default_flags FROM agents WHERE id = ?`, [modeId])
       return row ?? null
     },
-    recordSessionSpawn: (input) => taskStore.recordSessionSpawn(db, input),
-    markSessionDead: (sessionId) => taskStore.markSessionDead(db, sessionId)
+    recordSessionSpawn: ({ computerId, ...input }) =>
+      taskStore.recordSessionSpawn(computerId, input),
+    markSessionDead: (computerId, sessionId) => taskStore.markSessionDead(computerId, sessionId)
   }
 }
 
@@ -174,6 +177,13 @@ interface WarmDeps {
   resolveComputerId: (projectId: string) => Promise<string | null>
   /** Override of {@link DEFAULT_RESERVE_TTL_MS} (tests). */
   reserveTtlMs?: number
+  /**
+   * False holds NEW warm spawns (existing warm agents stay): the hub holds them
+   * while its boot restore brings back the agents that ran at shutdown, so the
+   * pool never boots agents in front of them. Call {@link reconcileWarmPool} when
+   * it turns true. Omitted = always allowed.
+   */
+  spawnsAllowed?: () => boolean
 }
 
 type ResolvedWarmDeps = WarmDeps & { ops: WarmPoolDataOps }
@@ -224,6 +234,11 @@ export function setProjectTabCounts(windowId: number, counts: Record<string, num
 }
 
 /** Drop a window's contribution (on window close) and reconcile. */
+/** Reconcile the pool now (debounced) — e.g. once `spawnsAllowed` turned true. */
+export function reconcileWarmPool(): void {
+  scheduleReconcile()
+}
+
 export function clearWindowTabCounts(windowId: number): void {
   if (tabCountsByWindow.delete(windowId)) scheduleReconcile()
 }
@@ -479,6 +494,10 @@ async function reconcile(): Promise<void> {
   for (const projectId of [...warm.keys()]) {
     if (!desired.has(projectId)) killWarm(projectId)
   }
+  if (deps.spawnsAllowed && !deps.spawnsAllowed()) {
+    recordDiagnosticEvent({ level: 'info', source: 'pty', event: 'warm.reconcile_held' })
+    return
+  }
   // Spawn warm shells for newly active projects.
   for (const projectId of desired) {
     if (!warm.has(projectId) && !spawning.has(projectId)) void spawnWarm(projectId)
@@ -487,6 +506,8 @@ async function reconcile(): Promise<void> {
 
 async function spawnWarm(projectId: string): Promise<void> {
   if (!deps || shuttingDown || !deps.isEnabled()) return
+  // Held (see `spawnsAllowed`): the reconcile on release spawns what is missing.
+  if (deps.spawnsAllowed && !deps.spawnsAllowed()) return
   if (warm.has(projectId) || spawning.has(projectId)) return
   spawning.add(projectId)
   const spawnEpoch = epoch
@@ -590,6 +611,7 @@ async function spawnWarm(projectId: string): Promise<void> {
     warm.set(projectId, handle)
     try {
       await deps.ops.recordSessionSpawn({
+        computerId,
         id: sessionId,
         taskId: null,
         tabId: null,
@@ -602,6 +624,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       const shell = resolveUserShell()
       await backend.warmSpawn(computerId, {
         warmId,
+        projectId,
         command: shell,
         args: getShellStartupArgs(shell),
         cwd,
@@ -610,7 +633,7 @@ async function spawnWarm(projectId: string): Promise<void> {
       })
     } catch (err) {
       if (warm.get(projectId) === handle) warm.delete(projectId)
-      void deps.ops.markSessionDead(sessionId).catch(() => {
+      void deps.ops.markSessionDead(computerId, sessionId).catch(() => {
         // Best-effort: a pooled row is only ever bound through this handle, which is
         // gone, so a stale one is never resumed.
       })
@@ -682,7 +705,7 @@ function releaseHandle(handle: WarmHandle): void {
   // never lingers as resumable. Previously driven by the local pty's onExit,
   // which no longer exists here (warm output/exit is the computer's business until
   // adoption).
-  void deps?.ops.markSessionDead(handle.sessionId).catch(() => {
+  void deps?.ops.markSessionDead(handle.computerId, handle.sessionId).catch(() => {
     // The row is already off the pool map, so a failed write can only leave a
     // stale `pooled` row that the next `reapOrphanWarms` pass clears anyway.
   })

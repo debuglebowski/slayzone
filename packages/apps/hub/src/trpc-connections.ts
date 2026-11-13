@@ -13,6 +13,14 @@
  *     and a socket whose session has ended for any other reason (expired, signed out,
  *     revoked by hand) is closed — so a socket never outlives its session by more than
  *     that.
+ *   - IdP-role mode ({@link TrpcConnectionRegistry.setDeadline}): each socket ALSO has a
+ *     timer at its account's persisted evidence deadline (signed `iat` + interval). When
+ *     it fires the deadline is read again, synchronously: if the evidence was re-proven
+ *     meanwhile (the hub's sweep refreshes accounts minutes ahead) the timer re-arms for
+ *     the new deadline; otherwise the socket is closed AT ONCE — no await, so no
+ *     operation or subscription output runs past the deadline while a refresh is
+ *     pending. The client reconnects, and the gate re-proves (or refuses) the account
+ *     on the new socket. So no socket outlives its account's role evidence.
  * A closed client reconnects as it does after any drop and is then unauthenticated.
  *
  * Only authenticated sockets are tracked: on a hub with login off (the desktop app's)
@@ -39,12 +47,21 @@ export interface TrackedSocket {
 export interface ConnectionTimers {
   setInterval: (fn: () => void, ms: number) => unknown
   clearInterval: (handle: unknown) => void
+  setTimeout?: (fn: () => void, ms: number) => unknown
+  clearTimeout?: (handle: unknown) => void
+  now?: () => number
 }
 
-const realTimers: ConnectionTimers = {
+const realTimers: Required<ConnectionTimers> = {
   setInterval: (fn, ms) => setInterval(fn, ms),
-  clearInterval: (h) => clearInterval(h as NodeJS.Timeout)
+  clearInterval: (h) => clearInterval(h as NodeJS.Timeout),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+  now: () => Date.now()
 }
+
+/** Longest single timer (setTimeout's 32-bit limit); a later deadline re-arms. */
+const MAX_TIMER_MS = 2_147_483_647
 
 export interface TrpcConnectionRegistry {
   /**
@@ -59,6 +76,12 @@ export interface TrpcConnectionRegistry {
   revalidateAll(): Promise<number>
   /** Open tracked sockets, of one user or all. */
   count(userId?: string): number
+  /**
+   * IdP-role mode: the account's evidence deadline (Unix ms; null = none). From then on
+   * every tracked socket — and every one tracked later — closes at that deadline unless
+   * its credential, resolved again, re-proved the account.
+   */
+  setDeadline(deadlineMs: (userId: string) => number | null): void
   /** Clear the timer and forget every socket (closes none). */
   stop(): void
 }
@@ -68,16 +91,61 @@ const CLOSING = 2
 export function createTrpcConnectionRegistry(
   opts: { timers?: ConnectionTimers; intervalMs?: number } = {}
 ): TrpcConnectionRegistry {
-  const timers = opts.timers ?? realTimers
+  const timers = { ...realTimers, ...(opts.timers ?? {}) }
   const intervalMs = opts.intervalMs ?? REVALIDATE_INTERVAL_MS
   const sockets = new Map<
     TrackedSocket,
-    { userId: string; revalidate: () => Promise<string | null> }
+    { userId: string; revalidate: () => Promise<string | null>; deadlineTimer?: unknown }
   >()
   let timer: unknown = null
   let sweeping = false
+  let deadlineOf: ((userId: string) => number | null) | null = null
+
+  const clearDeadline = (socket: TrackedSocket): void => {
+    const entry = sockets.get(socket)
+    if (entry?.deadlineTimer !== undefined) {
+      timers.clearTimeout(entry.deadlineTimer)
+      entry.deadlineTimer = undefined
+    }
+  }
+
+  /** Arm the socket's deadline timer from its account's current deadline. */
+  const armDeadline = (socket: TrackedSocket): void => {
+    const entry = sockets.get(socket)
+    if (!entry || !deadlineOf) return
+    clearDeadline(socket)
+    let deadline: number | null
+    try {
+      deadline = deadlineOf(entry.userId)
+    } catch {
+      deadline = 0 // unknown: check now, fail closed
+    }
+    if (deadline === null) return
+    const wait = Math.max(0, Math.min(deadline - timers.now(), MAX_TIMER_MS))
+    const handle = timers.setTimeout(() => onDeadline(socket), wait)
+    ;(handle as { unref?: () => void } | null)?.unref?.()
+    entry.deadlineTimer = handle
+  }
+
+  /** Synchronous on purpose: nothing is awaited between the deadline and the close. */
+  const onDeadline = (socket: TrackedSocket): void => {
+    const entry = sockets.get(socket)
+    if (!entry) return
+    entry.deadlineTimer = undefined
+    let next: number | null = 0
+    try {
+      next = deadlineOf?.(entry.userId) ?? null
+    } catch {
+      next = 0 // unreadable: fail closed
+    }
+    // Re-proven already (a later persisted deadline), or a long deadline re-armed in
+    // steps: keep and re-arm. Anything else: close now.
+    if (next !== null && next > timers.now()) armDeadline(socket)
+    else close(socket, 'role evidence expired')
+  }
 
   const close = (socket: TrackedSocket, reason: string): void => {
+    clearDeadline(socket)
     sockets.delete(socket)
     try {
       socket.close(SESSION_ENDED_CLOSE_CODE, reason.slice(0, 120))
@@ -122,9 +190,11 @@ export function createTrpcConnectionRegistry(
       if (socket.readyState >= CLOSING) return
       sockets.set(socket, { userId, revalidate })
       socket.once('close', () => {
+        clearDeadline(socket)
         sockets.delete(socket)
         if (sockets.size === 0) stopTimer()
       })
+      armDeadline(socket)
       if (timer === null) {
         timer = timers.setInterval(() => void revalidateAll(), intervalMs)
         // Never what keeps the hub alive.
@@ -147,8 +217,13 @@ export function createTrpcConnectionRegistry(
       for (const entry of sockets.values()) if (entry.userId === userId) n++
       return n
     },
+    setDeadline(fn) {
+      deadlineOf = fn
+      for (const socket of sockets.keys()) armDeadline(socket)
+    },
     stop() {
       stopTimer()
+      for (const socket of sockets.keys()) clearDeadline(socket)
       sockets.clear()
     }
   }

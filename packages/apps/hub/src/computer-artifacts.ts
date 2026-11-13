@@ -49,9 +49,27 @@ export function createComputerArtifactStorage(opts: {
   request: ChatComputerRequest
 }): ArtifactStore {
   const { db, local, chat } = opts
-  async function assertFolderResolved(id: string | null | undefined) {
+  /**
+   * Decision 4: an entry its computer no longer holds (restored from an older
+   * backup) keeps its hub row, marked on its location. It stays listed and
+   * deletable, never a target for content.
+   */
+  async function isUnavailable(id: string, folder: boolean) {
+    return !!(await db.get(
+      folder
+        ? 'SELECT 1 FROM chat_folder_locations WHERE folder_id=? AND unavailable_reason IS NOT NULL'
+        : 'SELECT 1 FROM chat_artifact_locations WHERE artifact_id=? AND unavailable_reason IS NOT NULL',
+      [id]
+    ))
+  }
+  const unavailableError = (folder: boolean) =>
+    new Error(
+      `${folder ? 'Folder' : 'File'} is unavailable on its computer (the computer was restored from an older backup)`
+    )
+  async function assertFolderResolved(id: string | null | undefined, allowUnavailable = false) {
     if (id && (await db.get('SELECT 1 FROM chat_folder_placeholders WHERE folder_id=?', [id])))
       throw new Error('Folder unavailable until its owning computer reconnects')
+    if (id && !allowUnavailable && (await isUnavailable(id, true))) throw unavailableError(true)
   }
   async function location(id: string, folder = false) {
     if (folder) await assertFolderResolved(id)
@@ -87,7 +105,8 @@ export function createComputerArtifactStorage(opts: {
         ...(!read ? { operationId: operationId ?? randomUUID() } : {})
       }
     })
-    if (!read) await chat.relay.drainMetadata(current.computerId!)
+    if (!read)
+      await chat.relay.drainMetadata(current.computerId!, false, undefined, undefined, current.id)
     return result
   }
   async function ensureFolder(owner: HubChatOwnership, id: string): Promise<void> {
@@ -111,8 +130,13 @@ export function createComputerArtifactStorage(opts: {
     const rows = folder
       ? await local.listFoldersByTask(db, taskId)
       : await local.listArtifactsByTask(db, taskId)
-    const locators = await db.all<{ id: string; conversation_id: string; computer_id: string }>(
-      `SELECT a.id,l.conversation_id,o.computer_id FROM ${folder ? 'artifact_folders' : 'task_artifacts'} a JOIN ${folder ? 'chat_folder_locations' : 'chat_artifact_locations'} l ON l.${folder ? 'folder_id' : 'artifact_id'}=a.id JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.task_id=?`,
+    const locators = await db.all<{
+      id: string
+      conversation_id: string
+      computer_id: string
+      unavailable_reason: string | null
+    }>(
+      `SELECT a.id,l.conversation_id,o.computer_id,l.unavailable_reason FROM ${folder ? 'artifact_folders' : 'task_artifacts'} a JOIN ${folder ? 'chat_folder_locations' : 'chat_artifact_locations'} l ON l.${folder ? 'folder_id' : 'artifact_id'}=a.id JOIN chat_ownership o ON o.id=l.conversation_id WHERE a.task_id=?`,
       [taskId]
     )
     const ids = new Set(locators.map((r) => r.id)),
@@ -146,9 +170,14 @@ export function createComputerArtifactStorage(opts: {
           taskId
         ])) as typeof result
         const canonical = new Map(rows.map((row) => [row.id, row]))
+        const missing = new Set(
+          locators
+            .filter((l) => l.computer_id === computerId && l.unavailable_reason !== null)
+            .map((l) => l.id)
+        )
         result.push(
           ...remote
-            .filter((r) => ids.has(r.id))
+            .filter((r) => ids.has(r.id) && !missing.has(r.id))
             .map((r) => {
               const row = canonical.get(r.id)!
               return {
@@ -159,7 +188,17 @@ export function createComputerArtifactStorage(opts: {
                   : { folder_id: row.folder_id }),
                 storage: { computerId, available: true }
               }
-            })
+            }),
+          // Known to the hub, no longer held by its computer: listed, never gone.
+          ...rows
+            .filter((row) => missing.has(row.id))
+            .map((row) => ({
+              ...row,
+              ...(folder
+                ? { name: 'Chat files · unavailable on computer' }
+                : { title: 'Chat attachment · unavailable on computer' }),
+              storage: { computerId, available: false }
+            }))
         )
       } catch {
         for (const row of rows.filter(
@@ -215,6 +254,57 @@ export function createComputerArtifactStorage(opts: {
       operationId
     ) as Promise<TaskArtifact | null>
   }
+  /**
+   * Moves entries to another task, keeping their ids. The hub's rows move first
+   * (canonical rows and the mirrors of computer-held entries); then every
+   * computer holding some of them re-owns its copies under the destination
+   * task. Each step skips what is already moved, so a retry completes a partial
+   * move; until then a computer's own report keeps the hub truthful.
+   */
+  async function move(data: Parameters<ArtifactStore['moveArtifacts']>[1]) {
+    await assertFolderResolved(data.destFolderId)
+    for (const id of data.folderIds) await assertFolderResolved(id)
+    if (!(await db.get('SELECT 1 FROM tasks WHERE id=?', [data.destTaskId])))
+      throw new Error('Destination task not found')
+    // Every entry the move touches, as the hub sees them now.
+    const folders = await db.all<{ id: string }>(
+      `WITH RECURSIVE tree(id) AS (
+        SELECT id FROM artifact_folders WHERE task_id=? AND id IN (SELECT value FROM json_each(?))
+        UNION SELECT f.id FROM artifact_folders f JOIN tree ON f.parent_id=tree.id WHERE f.task_id=?
+      ) SELECT id FROM tree`,
+      [data.sourceTaskId, JSON.stringify(data.folderIds), data.sourceTaskId]
+    )
+    const folderIds = folders.map((f) => f.id)
+    const held = await db.all<{ computer_id: string }>(
+      `SELECT DISTINCT o.computer_id FROM chat_artifact_locations l
+        JOIN chat_ownership o ON o.id=l.conversation_id
+        JOIN task_artifacts a ON a.id=l.artifact_id
+        WHERE o.computer_id IS NOT NULL AND (a.id IN (SELECT value FROM json_each(?)) OR a.folder_id IN (SELECT value FROM json_each(?)))
+      UNION SELECT DISTINCT o.computer_id FROM chat_folder_locations l
+        JOIN chat_ownership o ON o.id=l.conversation_id
+        WHERE o.computer_id IS NOT NULL AND l.folder_id IN (SELECT value FROM json_each(?))`,
+      [JSON.stringify(data.artifactIds), JSON.stringify(folderIds), JSON.stringify(folderIds)]
+    )
+    // Reach every holding computer BEFORE the hub commits: an offline one
+    // refuses the move instead of leaving it half applied.
+    const targets: HubChatOwnership[] = []
+    for (const { computer_id } of held) {
+      const owner = await chat.artifactOwner(data.destTaskId, computer_id)
+      if (data.destFolderId) await ensureFolder(owner, data.destFolderId)
+      targets.push(owner)
+    }
+    const result = await local.moveArtifacts(db, data)
+    for (const owner of targets)
+      await call(owner, 'moveToTask', [
+        {
+          sourceTaskId: data.sourceTaskId,
+          artifactIds: data.artifactIds,
+          folderIds: data.folderIds,
+          destFolderId: data.destFolderId
+        }
+      ])
+    return result
+  }
   const passthrough = new Set([
     'artifactsDir',
     'getArtifactFilePath',
@@ -236,7 +326,7 @@ export function createComputerArtifactStorage(opts: {
           upload(data)
       if (key === 'deleteFolder')
         return async (_db: SlayzoneDb, id: string) => {
-          await assertFolderResolved(id)
+          await assertFolderResolved(id, true)
           const folder = await db.get<{ task_id: string }>(
             'SELECT task_id FROM artifact_folders WHERE id=?',
             [id]
@@ -253,6 +343,8 @@ export function createComputerArtifactStorage(opts: {
             })
           return true
         }
+      if (key === 'moveArtifacts')
+        return (_db: SlayzoneDb, data: Parameters<ArtifactStore['moveArtifacts']>[1]) => move(data)
       if (key === 'copyArtifacts')
         return async (_db: SlayzoneDb, data: Parameters<ArtifactStore['copyArtifacts']>[1]) => {
           await assertFolderResolved(data.destFolderId)
@@ -449,8 +541,20 @@ export function createComputerArtifactStorage(opts: {
         if (first && typeof first === 'object')
           await assertFolderResolved(first.folderId ?? first.parentId)
         if (!id) return base.apply(target, [db, ...args])
-        const owner = await location(id, key === 'updateFolder' || key === 'deleteFolder')
+        const isFolder = key === 'updateFolder' || key === 'deleteFolder'
+        const owner = await location(id, isFolder)
         if (!owner) return base.apply(target, [db, ...args])
+        if (await isUnavailable(id, isFolder)) {
+          // Only the hub's row is left: it can be read and removed.
+          if (key === 'getArtifact') {
+            const row = await base.apply(target, [db, ...args])
+            return row
+              ? { ...row, storage: { computerId: owner.computerId!, available: false } }
+              : row
+          }
+          if (key === 'deleteArtifact') return base.apply(target, [db, ...args])
+          throw unavailableError(isFolder)
+        }
         if (key === 'readArtifactBytes') {
           const result = (await call(owner, 'readBytes', args)) as { data: string }
           return Buffer.from(result.data, 'base64')

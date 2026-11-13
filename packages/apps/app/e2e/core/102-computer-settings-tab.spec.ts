@@ -1,4 +1,4 @@
-import { test, expect, clickSettings, resetApp } from '../fixtures/electron'
+import { test, expect, clickSettings, resetApp, seed } from '../fixtures/electron'
 
 /**
  * Computer settings for the LOCAL hub (nested inside its card, in Connections).
@@ -122,6 +122,61 @@ test.describe('Computer settings tab', () => {
       // business.
       await expect(start.first()).toBeEnabled()
     }
+
+    await mainWindow.keyboard.press('Escape')
+  })
+
+  // A computer enrolled again under a new id (its credentials lost) leaves its old row
+  // offline. "Replace with…" moves the old row's work to the computer picked, and the
+  // old row goes. Seeded straight into the DB: a second real computer is not needed to
+  // show the row, the dialog and the move.
+  test('replaces an offline computer with another, moving its tasks', async ({
+    mainWindow,
+    electronApp
+  }) => {
+    const s = seed(mainWindow)
+    const project = await s.createProject({ name: 'Replace computer', color: '#123456' })
+    const task = await s.createTask({ projectId: project.id, title: 'Bound to old box' })
+    const db = (method: 'all' | 'run', query: string, params: unknown[] = []) =>
+      electronApp.evaluate(
+        async (_electron, { m, q, p }) => {
+          const handle = (globalThis as Record<string, unknown>).__db as Record<
+            'all' | 'run',
+            (sql: string, params?: unknown[]) => Promise<unknown>
+          >
+          return handle[m](q, p)
+        },
+        { m: method, q: query, p: params }
+      )
+    const sql = (query: string, params: unknown[] = []) => db('all', query, params)
+    const group = await openComputersTab(mainWindow)
+    // The successor: the app's own computer, once auto-enroll has landed.
+    await expect
+      .poll(async () => group.getByTestId('computer-row').count(), { timeout: 30_000 })
+      .toBeGreaterThan(0)
+    const [local] = (await sql("SELECT id FROM computers WHERE name = 'local-computer'")) as Array<{
+      id: string
+    }>
+    expect(local).toBeTruthy()
+    await db(
+      'run',
+      `INSERT INTO computers (id, name, platform, version, capabilities_json, last_seen_at, created_at)
+       VALUES ('e2e-old-box', 'old-box', 'linux-x64', '0.0.0', '{}', 1, 1)`
+    )
+    await db('run', 'UPDATE tasks SET computer_id = ? WHERE id = ?', ['e2e-old-box', task.id])
+
+    const oldRow = group.getByTestId('computer-row').filter({ hasText: 'old-box' })
+    await expect(oldRow).toHaveCount(1, { timeout: 15_000 })
+    await oldRow.getByTestId('computer-replace').click()
+    // The dialog renders in its own portal: query from the window.
+    await mainWindow.getByTestId(`computer-replace-option-${local.id}`).check()
+    await mainWindow.getByTestId('computer-replace-confirm').click()
+
+    await expect(oldRow).toHaveCount(0, { timeout: 15_000 })
+    await expect
+      .poll(async () => sql('SELECT computer_id FROM tasks WHERE id = ?', [task.id]))
+      .toEqual([{ computer_id: local.id }])
+    expect(await sql("SELECT 1 FROM computers WHERE id = 'e2e-old-box'")).toEqual([])
 
     await mainWindow.keyboard.press('Escape')
   })

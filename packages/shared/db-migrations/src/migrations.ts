@@ -1,6 +1,9 @@
 import Database from 'better-sqlite3'
+import { CONTENT_ERASURE_SCHEMA, CONTENT_ERASURE_ARTIFACT_FENCES } from './content-erasure-schema'
+import { installContentErasureFences } from './content-erasure-fences'
 // eslint-disable-next-line no-restricted-imports -- boot-time DB migration, finishes before the hub serves anything.
 import { spawnSync } from 'node:child_process'
+import { gitCommand } from '@slayzone/platform/resolve-command'
 import { hubProcessesEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { randomUUID } from 'node:crypto'
 // v78 uses a frozen copy of ai-config's frontmatter helpers (see the file header).
@@ -2285,7 +2288,7 @@ export const migrations: Migration[] = [
         .all() as Array<{ id: string; worktree_path: string; snapshot_sha: string }>
       const update = db.prepare(`UPDATE agent_turns SET head_sha_at_snap = ? WHERE id = ?`)
       for (const row of rows) {
-        const r = spawnSync('git', ['rev-parse', `${row.snapshot_sha}^`], {
+        const r = spawnSync(gitCommand(), ['rev-parse', `${row.snapshot_sha}^`], {
           cwd: row.worktree_path,
           encoding: 'utf-8'
         })
@@ -4758,6 +4761,1021 @@ export const migrations: Migration[] = [
           WHERE w2.tab_id = w.tab_id AND w2.computer_id IS NOT NULL
           ORDER BY w2.created_at DESC, w2.id DESC LIMIT 1
         );`)
+    }
+  },
+  {
+    version: 197,
+    up(db) {
+      // The computer a task's worktree was made on — where it is removed (Trash purge,
+      // archive). Without it the removal went to the task's CURRENT computer, which for
+      // an unbound task is whichever computer is the default now: on a hub with several
+      // computers that may not be the one holding the worktree. NULL = not recorded
+      // (worktrees made before this, linked by hand): the task's computer, as before.
+      // Kept when that computer is deleted, so the purge sees it is gone.
+      db.exec('ALTER TABLE tasks ADD COLUMN worktree_computer_id TEXT DEFAULT NULL')
+    }
+  },
+  {
+    version: 198,
+    up(db) {
+      db.exec(CONTENT_ERASURE_SCHEMA)
+      db.exec(CONTENT_ERASURE_ARTIFACT_FENCES)
+      // Sealed legacy chat copies are independent consumers of immutable bytes.
+      // Their pins must outlive deletion/pruning of the original artifact and be
+      // respected by every GC path, not only the new erasure operation.
+      for (const spec of [
+        {
+          table: 'chat_attachment_messages',
+          owner: 'task_id',
+          token: 'message_id',
+          document: 'attachments',
+          scope: 'legacy-chat-reference',
+          task: (row: string) => `${row}.task_id`
+        },
+        {
+          table: 'chat_events',
+          owner: 'tab_id',
+          token: 'seq',
+          document: 'event',
+          scope: 'legacy-chat-event',
+          task: (row: string) => `(SELECT task_id FROM terminal_tabs WHERE id=${row}.tab_id)`
+        }
+      ]) {
+        const source = (row: string, from = '') =>
+          `SELECT ${row}.${spec.owner} AS owner,CAST(${row}.${spec.token} AS TEXT) AS token,${row}.${spec.document} AS document,${spec.task(row)} AS task_id ${from}`
+        const pin = (
+          select: string
+        ) => `INSERT OR IGNORE INTO artifact_blob_pins(scope,owner_id,token,reference_key,task_id,artifact_id,owner_epoch,content_hash,size)
+          SELECT '${spec.scope}',r.owner,r.token,j.fullkey,r.task_id,
+            COALESCE(json_extract(r.document,substr(j.fullkey,1,length(j.fullkey)-12)||'.artifactId'),'__sealed__'),
+            1,j.atom,COALESCE(json_extract(r.document,substr(j.fullkey,1,length(j.fullkey)-12)||'.size'),(SELECT size FROM artifact_blobs WHERE hash=j.atom),0)
+          FROM (${select}) r,json_tree(CASE WHEN json_valid(r.document) THEN r.document ELSE '{}' END) j
+          WHERE r.task_id IS NOT NULL AND j.key='contentHash' AND j.type='text'
+            AND length(j.atom)=64 AND j.atom NOT GLOB '*[^a-f0-9]*';`
+        const release = `DELETE FROM artifact_blob_pins WHERE scope='${spec.scope}' AND owner_id=OLD.${spec.owner} AND token=CAST(OLD.${spec.token} AS TEXT);`
+        db.exec(`CREATE TRIGGER ${spec.table}_sealed_pins_insert AFTER INSERT ON ${spec.table} BEGIN ${pin(source('NEW'))} END;
+          CREATE TRIGGER ${spec.table}_sealed_pins_update AFTER UPDATE ON ${spec.table} BEGIN ${release} ${pin(source('NEW'))} END;
+          CREATE TRIGGER ${spec.table}_sealed_pins_delete AFTER DELETE ON ${spec.table} BEGIN ${release} END;`)
+        db.exec(pin(source('s', `FROM ${spec.table} s`)))
+      }
+      db.exec(`
+        CREATE TRIGGER erased_task_cannot_return BEFORE INSERT ON tasks
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks WHERE task_id=NEW.id)
+          BEGIN SELECT RAISE(ABORT,'Task was permanently erased'); END;
+        CREATE TRIGGER erasing_task_has_no_new_artifacts BEFORE INSERT ON task_artifacts
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks t JOIN content_erasure_jobs j ON j.id=t.job_id WHERE t.task_id=NEW.task_id AND j.db_erased=0)
+          BEGIN SELECT RAISE(ABORT,'Task is being permanently erased'); END;
+        CREATE TRIGGER erasing_task_has_no_updated_artifacts BEFORE UPDATE ON task_artifacts
+          WHEN EXISTS(SELECT 1 FROM content_erasure_tasks t JOIN content_erasure_jobs j ON j.id=t.job_id WHERE t.task_id=NEW.task_id AND j.db_erased=0)
+          BEGIN SELECT RAISE(ABORT,'Task is being permanently erased'); END;
+      `)
+      // Preserve existing recoverable items when Trash is removed. Updating both
+      // columns together keeps computer lifecycle paused, never active.
+      db.exec(`UPDATE tasks SET archived_at=COALESCE(archived_at,deleted_at),deleted_at=NULL
+        WHERE deleted_at IS NOT NULL`)
+      // A late agent hook/editor save must not recreate erased content. Delivery
+      // metadata is exempt: offline computers still need their deletion fences.
+      const delivery = new Set([
+        'chat_task_lifecycle',
+        'chat_task_computers',
+        'chat_lifecycle_acks',
+        'chat_ownership',
+        'chat_deletion_targets',
+        'chat_tab_bindings',
+        'chat_provider_bindings',
+        'chat_metadata_progress',
+        'chat_bootstrap_reservations',
+        'chat_unavailable_owners',
+        'chat_folder_deletions',
+        'chat_folder_deletion_acks'
+      ])
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .all() as Array<{ name: string }>
+      for (const { name } of tables) {
+        if (name.startsWith('content_erasure_') || delivery.has(name) || name === 'tasks') continue
+        const quoted = '"' + name.replaceAll('"', '""') + '"'
+        const columns = new Set(
+          (db.prepare(`PRAGMA table_info(${quoted})`).all() as Array<{ name: string }>).map(
+            (c) => c.name
+          )
+        )
+        for (const action of ['INSERT', 'UPDATE']) {
+          if (name === 'task_artifacts' && action === 'UPDATE') continue
+          const conditions: string[] = []
+          if (columns.has('task_id'))
+            conditions.push('EXISTS(SELECT 1 FROM content_erasure_tasks WHERE task_id=NEW.task_id)')
+          if (columns.has('tab_id'))
+            conditions.push('EXISTS(SELECT 1 FROM content_erasure_tabs WHERE tab_id=NEW.tab_id)')
+          if (!conditions.length) continue
+          const trigger =
+            '"content_erasure_' + name.replaceAll('"', '""') + '_' + action.toLowerCase() + '"'
+          db.exec(`CREATE TRIGGER ${trigger} BEFORE ${action} ON ${quoted} WHEN ${conditions.join(' OR ')}
+            BEGIN SELECT RAISE(ABORT,'Content was permanently erased'); END;`)
+        }
+      }
+    }
+  },
+  {
+    version: 199,
+    up(db) {
+      // v198 fenced artifact_blob_pins like content. Backup pins are retention
+      // metadata for bytes a retained backup still holds (erasure keeps them until
+      // that backup is gone), so the hub's startup re-pin of every backup taken
+      // before an erasure aborted: GC stayed deferred and every later deletion
+      // stayed incomplete. Reinstall all fences from the one shared definition,
+      // which keeps 'hub-backup' pins writable. Future migrations that create or
+      // rebuild a task_id/tab_id table call it too (see content-erasure-fences.ts).
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 200,
+    up(db) {
+      const exists = (table: string) =>
+        !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      // 1. A computer id that is gone for good: re-enrolled under `successor_id`,
+      //    or deleted / missing (no successor). Written in the same transaction
+      //    as the computer change; the chat domain repoints or retires the work
+      //    that still names it (applyComputerRetirements), idempotently.
+      //    Revoked computers are NOT retired: their work waits for them.
+      db.exec(`CREATE TABLE computer_retirements (
+        computer_id TEXT PRIMARY KEY, successor_id TEXT,
+        reason TEXT NOT NULL CHECK(reason IN ('re-enrolled','deleted','missing')),
+        retired_at INTEGER NOT NULL
+      );
+      CREATE TABLE chat_retired_work (
+        kind TEXT NOT NULL, item_id TEXT NOT NULL, computer_id TEXT NOT NULL,
+        reason TEXT NOT NULL, retired_at INTEGER NOT NULL,
+        PRIMARY KEY(kind,item_id,computer_id)
+      );`)
+      // 2. Pending = an unacknowledged deletion target exists. Enforced here, so
+      //    every writer (triggers, deleteForTask, acks, retirements) conforms: a
+      //    deleted chat with nothing left to deliver never blocks its task.
+      const pending = (id: string) =>
+        `EXISTS(SELECT 1 FROM chat_deletion_targets d WHERE d.conversation_id=${id} AND d.acknowledged=0)`
+      db.exec(`CREATE TRIGGER chat_deleted_pending_sync AFTER UPDATE OF state,cleanup_pending ON chat_ownership
+        WHEN NEW.state='deleted' AND NEW.cleanup_pending<>${pending('NEW.id')}
+        BEGIN UPDATE chat_ownership SET cleanup_pending=${pending('NEW.id')} WHERE id=NEW.id; END;
+      CREATE TRIGGER chat_deleted_pending_insert AFTER INSERT ON chat_ownership
+        WHEN NEW.state='deleted' AND NEW.cleanup_pending<>${pending('NEW.id')}
+        BEGIN UPDATE chat_ownership SET cleanup_pending=${pending('NEW.id')} WHERE id=NEW.id; END;`)
+      for (const [action, row] of [
+        ['INSERT', 'NEW'],
+        ['UPDATE', 'NEW'],
+        ['DELETE', 'OLD']
+      ])
+        db.exec(`CREATE TRIGGER chat_deletion_targets_pending_${action.toLowerCase()} AFTER ${action} ON chat_deletion_targets BEGIN
+          UPDATE chat_ownership SET cleanup_pending=${pending('chat_ownership.id')}
+          WHERE id=${row}.conversation_id AND state='deleted' AND cleanup_pending<>${pending('chat_ownership.id')};
+        END;`)
+      // Purges target every computer of the task AND the conversation's own
+      // computers (a chat whose task was never tracked still reaches its holder);
+      // the tab purge targets exactly the conversations it deletes (by binding).
+      // A retired computer (re-enrolled or removed) never becomes a new target:
+      // nothing could ever be delivered to its id.
+      const live = (column: string) =>
+        `${column} IS NOT NULL AND NOT EXISTS(SELECT 1 FROM computer_retirements r WHERE r.computer_id=${column})`
+      for (const action of ['INSERT', 'UPDATE'])
+        db.exec(`DROP TRIGGER IF EXISTS chat_ownership_targets_${action.toLowerCase()};
+          CREATE TRIGGER chat_ownership_targets_${action.toLowerCase()} AFTER ${action} ON chat_ownership BEGIN
+          ${['computer_id', 'source_computer_id', 'destination_computer_id']
+            .map(
+              (c) =>
+                `INSERT INTO chat_task_computers SELECT NEW.task_id,NEW.${c} WHERE ${live(`NEW.${c}`)} ON CONFLICT(task_id,computer_id) DO NOTHING;`
+            )
+            .join('\n')}
+        END;`)
+      const target = (
+        where: string
+      ) => `INSERT INTO chat_deletion_targets(conversation_id,computer_id,epoch)
+        SELECT o.id,c.computer_id,o.epoch FROM chat_ownership o JOIN chat_task_computers c ON c.task_id=o.task_id WHERE ${where} AND ${live('c.computer_id')}
+        UNION SELECT o.id,o.computer_id,o.epoch FROM chat_ownership o WHERE ${where} AND ${live('o.computer_id')}
+        UNION SELECT o.id,o.source_computer_id,o.epoch FROM chat_ownership o WHERE ${where} AND ${live('o.source_computer_id')}
+        UNION SELECT o.id,o.destination_computer_id,o.epoch FROM chat_ownership o WHERE ${where} AND ${live('o.destination_computer_id')}
+        ON CONFLICT(conversation_id,computer_id) DO UPDATE SET epoch=MAX(chat_deletion_targets.epoch,excluded.epoch),acknowledged=CASE WHEN excluded.epoch>chat_deletion_targets.epoch THEN 0 ELSE chat_deletion_targets.acknowledged END;`
+      if (exists('tasks'))
+        db.exec(`DROP TRIGGER IF EXISTS chat_task_purge;
+          CREATE TRIGGER chat_task_purge BEFORE DELETE ON tasks BEGIN
+            INSERT INTO chat_task_lifecycle(task_id,state) VALUES(OLD.id,'deleted')
+            ON CONFLICT(task_id) DO UPDATE SET state='deleted',revision=revision+CASE WHEN state='deleted' THEN 0 ELSE 1 END;
+            UPDATE chat_ownership SET state='deleted',epoch=epoch+1 WHERE task_id=OLD.id AND state<>'deleted';
+            ${target("o.task_id=OLD.id AND o.state='deleted'")}
+          END;`)
+      if (exists('terminal_tabs'))
+        db.exec(`DROP TRIGGER IF EXISTS chat_tab_purge;
+          CREATE TRIGGER chat_tab_purge BEFORE DELETE ON terminal_tabs BEGIN
+            UPDATE chat_ownership SET state='deleted',epoch=epoch+1 WHERE id IN(SELECT conversation_id FROM chat_tab_bindings WHERE tab_id=OLD.id) AND state<>'deleted';
+            ${target("o.id IN(SELECT conversation_id FROM chat_tab_bindings WHERE tab_id=OLD.id) AND o.state='deleted'")}
+          END;`)
+      // One-time repair: deleted chats marked pending with nothing to deliver.
+      db.exec(`UPDATE chat_ownership SET cleanup_pending=${pending('chat_ownership.id')}
+        WHERE state='deleted' AND cleanup_pending<>${pending('chat_ownership.id')}`)
+      // 3. A reserved provider transition that ownership moved past is
+      //    'superseded' (logged, never shown): the tab can switch again.
+      db.exec(`CREATE TABLE chat_provider_transitions_v200 (
+        id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+        task_id TEXT NOT NULL,tab_id TEXT NOT NULL,archive_tab_id TEXT NOT NULL UNIQUE,
+        next_conversation_id TEXT NOT NULL UNIQUE,next_mode TEXT NOT NULL,computer_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,state TEXT NOT NULL CHECK(state IN ('reserved','complete','superseded'))
+      );
+      INSERT INTO chat_provider_transitions_v200 SELECT * FROM chat_provider_transitions;
+      DROP TABLE chat_provider_transitions;
+      ALTER TABLE chat_provider_transitions_v200 RENAME TO chat_provider_transitions;
+      CREATE UNIQUE INDEX chat_provider_transition_pending ON chat_provider_transitions(conversation_id) WHERE state='reserved';`)
+      // 4. Which conversations a placeholder folder waits on: those holding
+      //    entries inside it. Once each was re-read without the folder's own
+      //    record (or is gone), the placeholder resolves to a normal folder.
+      //    One no chat holds anything in awaits nothing: resolved now.
+      db.exec(`CREATE TABLE chat_folder_placeholder_waits (
+        folder_id TEXT NOT NULL REFERENCES artifact_folders(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL,
+        PRIMARY KEY(folder_id,conversation_id)
+      );
+      INSERT OR IGNORE INTO chat_folder_placeholder_waits
+        SELECT p.folder_id,l.conversation_id FROM chat_folder_placeholders p
+          JOIN task_artifacts a ON a.folder_id=p.folder_id JOIN chat_artifact_locations l ON l.artifact_id=a.id
+        UNION SELECT p.folder_id,l.conversation_id FROM chat_folder_placeholders p
+          JOIN artifact_folders f ON f.parent_id=p.folder_id JOIN chat_folder_locations l ON l.folder_id=f.id;
+      DELETE FROM chat_folder_placeholders WHERE NOT EXISTS(
+        SELECT 1 FROM chat_folder_placeholder_waits w WHERE w.folder_id=chat_folder_placeholders.folder_id);`)
+      // 5. Backfill retirements for computer ids live chat bookkeeping still
+      //    names but that no longer exist. Only a computer that connected writes
+      //    these tables, and a connected computer has a row; tasks, projects and
+      //    placements are rewritten whenever a computer is retired or deleted
+      //    (tasks.worktree_computer_id deliberately keeps a deleted id: not checked).
+      //    So an id with neither a row nor any such reference was removed (or
+      //    restored away). The local computer before it enrolls has no chat
+      //    references, so it never matches. chat_legacy_tab_computers is a
+      //    migration-source hint copied from legacy data: not proof of a connection.
+      db.exec(`INSERT INTO computer_retirements(computer_id,successor_id,reason,retired_at)
+        SELECT r.id,NULL,'missing',CAST(strftime('%s','now') AS INTEGER)*1000 FROM (
+          SELECT computer_id AS id FROM chat_ownership UNION SELECT source_computer_id FROM chat_ownership
+          UNION SELECT destination_computer_id FROM chat_ownership UNION SELECT computer_id FROM chat_task_computers
+          UNION SELECT computer_id FROM chat_lifecycle_acks UNION SELECT computer_id FROM chat_deletion_targets
+          UNION SELECT computer_id FROM chat_bootstrap_reservations UNION SELECT computer_id FROM chat_unavailable_owners
+          UNION SELECT computer_id FROM chat_provider_transitions UNION SELECT computer_id FROM chat_folder_deletion_acks
+        ) r WHERE r.id IS NOT NULL
+          AND NOT EXISTS(SELECT 1 FROM computers c WHERE c.id=r.id)
+          AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.computer_id=r.id)
+          AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.default_computer_id=r.id)
+          AND NOT EXISTS(SELECT 1 FROM project_placements pp WHERE pp.computer_id=r.id)`)
+      // The provider-transition rebuild dropped its erasure fences.
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 201,
+    up(db) {
+      // Terminal agent sessions are scoped per TAB: (task, mode, tab). Until now the
+      // ledger was keyed (task, mode), so a second agent tab of the same mode resolved
+      // the main tab's session, and a reset for the main tab (e.g. switching the main
+      // agent's mode) cut off every tab of the task — the lost "deploy" tab session.
+      //
+      // The main tab's id IS the task id (terminal_tabs v19), so every pre-existing
+      // row is backfilled to the main tab = exactly today's behaviour. A reset row
+      // with `tab_id IS NULL` is a WHOLE-TASK reset (worktree/project change,
+      // `reset-conversation --all-tabs`); none exist before this migration.
+      //
+      // Rows of erased content are skipped: their erasure fence aborts any UPDATE,
+      // and nothing can resume them.
+      db.exec(`
+        ALTER TABLE session_resets ADD COLUMN tab_id TEXT;
+        ALTER TABLE task_conversations ADD COLUMN tab_id TEXT;
+
+        UPDATE session_resets SET tab_id = task_id
+         WHERE NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = session_resets.task_id);
+        UPDATE task_conversations SET tab_id = task_id
+         WHERE NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = task_conversations.task_id);
+        UPDATE agent_sessions SET tab_id = task_id
+         WHERE task_id IS NOT NULL AND tab_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = agent_sessions.task_id);
+
+        DROP INDEX IF EXISTS session_resets_lookup;
+        CREATE INDEX session_resets_lookup
+          ON session_resets (task_id, mode, tab_id, created_at DESC);
+        CREATE INDEX agent_sessions_task_tab
+          ON agent_sessions (task_id, mode, tab_id, created_at DESC);
+
+        -- One-time work list for the hub's session-tab recovery
+        -- (apps/hub/src/session-tab-recovery.ts): every backfilled conversation of a
+        -- task that has a NON-main tab of the same mode — the only conversations whose
+        -- real tab can differ from the main tab. The recovery re-attributes them from
+        -- diagnostics evidence and deletes each row once tried. \`backfilled_at\` is
+        -- the moment of this migration: resets before it were applied task-wide.
+        CREATE TABLE session_tab_recovery (
+          task_id         TEXT NOT NULL,
+          mode            TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          backfilled_at   INTEGER NOT NULL,
+          PRIMARY KEY (task_id, mode, conversation_id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+      `)
+      db.prepare(
+        `INSERT OR IGNORE INTO session_tab_recovery (task_id, mode, conversation_id, backfilled_at)
+         SELECT DISTINCT s.task_id, s.mode, s.conversation_id, ?
+           FROM agent_sessions s
+          WHERE s.task_id IS NOT NULL AND s.conversation_id IS NOT NULL
+            AND s.task_id IN (SELECT id FROM tasks)
+            AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = s.task_id)
+            AND EXISTS (SELECT 1 FROM terminal_tabs t
+                         WHERE t.task_id = s.task_id AND t.is_main = 0 AND t.mode = s.mode)`
+      ).run(Date.now())
+      // New tab_id columns (session_resets, task_conversations) and the work table.
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 202,
+    up(db) {
+      // Chat metadata stamps are never trusted as proof (the computer is the
+      // authority). A receipt names an update the hub applied (`acked`=1 once the
+      // computer confirmed it; the newest acked ones are kept so a late duplicate
+      // delivery is still recognized). An update at an already-consumed position
+      // WITHOUT a receipt means the computer's counter went back (restored from
+      // a backup) → the hub re-reads the conversation in full instead of
+      // acking and dropping it. `store_id`: the computer chat database the
+      // cursor counts in; another store means its counters are not comparable.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_metadata_receipts (
+          conversation_id TEXT NOT NULL REFERENCES chat_ownership(id),
+          operation_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          acked INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (conversation_id, operation_id)
+        );
+        ALTER TABLE chat_metadata_progress ADD COLUMN store_id TEXT;
+        ALTER TABLE chat_artifact_locations ADD COLUMN unavailable_reason TEXT;
+        ALTER TABLE chat_artifact_locations ADD COLUMN unavailable_since INTEGER;
+        ALTER TABLE chat_folder_locations ADD COLUMN unavailable_reason TEXT;
+        ALTER TABLE chat_folder_locations ADD COLUMN unavailable_since INTEGER;
+      `)
+      // A computer restored from an older backup no longer lists files the hub
+      // knows: their rows stay, marked `unavailable_reason`, instead of being
+      // deleted (they may still be wanted, and the hub cannot tell).
+    }
+  },
+  {
+    version: 203,
+    up(db) {
+      // Per-item fault ledger: a pass (cleanup, erasure fan-out, backup pins, project
+      // sync, session refresh, …) records the ONE item it could not process instead of
+      // aborting for every other item. Transient faults retry with backoff; structural
+      // ones stay quarantined until the item's fingerprint changes. Rows with
+      // origin='computer' are the latest snapshot a computer reported of its own
+      // ledger (replaced wholesale, never merged). Frozen copy of ITEM_FAULTS_DDL
+      // (@slayzone/platform isolation.ts); v203's test asserts they match.
+      db.exec(`CREATE TABLE IF NOT EXISTS item_faults (
+  origin TEXT NOT NULL CHECK (origin IN ('hub','computer')),
+  computer_id TEXT NOT NULL DEFAULT '',
+  pass TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  task_id TEXT,
+  kind TEXT NOT NULL CHECK (kind IN ('transient','structural')),
+  fingerprint TEXT,
+  message TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  next_retry_at INTEGER,
+  PRIMARY KEY (origin, computer_id, pass, item_key)
+);
+        CREATE INDEX IF NOT EXISTS idx_item_faults_task ON item_faults(task_id) WHERE task_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_item_faults_computer ON item_faults(computer_id);`)
+      // task_id column: fenced like every task table, so a late fault cannot outlive erasure.
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 204,
+    up(db) {
+      // Computer-only data moves off the hub (robustness plan §9, P0). A row here is
+      // one item the hub still holds that belongs to the computer owning its task
+      // (`kind`: what it is, e.g. a session record; `payload`: its JSON). The hub
+      // delivers a task's rows to that computer (`data.import`) when it connects and
+      // before an agent or chat of the task starts there, and deletes each row once
+      // the computer confirmed it. Nothing reads these rows otherwise: the computer
+      // is the only copy from then on. Fenced like every task table.
+      db.exec(`CREATE TABLE IF NOT EXISTS computer_data_handoff (
+        kind TEXT NOT NULL,
+        item_key TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (kind, item_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_computer_data_handoff_task ON computer_data_handoff(task_id);`)
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 205,
+    up(db) {
+      // Chat settings (permission mode, model, effort, collaboration, fast) and the
+      // chat session id live only on the chat's computer (robustness plan §9,
+      // decision 2): the hub keeps no copy, so there is no revision to reconcile.
+      // A task's chat keys go for every mode whose chat a computer owns (it holds
+      // them already). A chat not on a computer yet (legacy, or mid-migration)
+      // keeps them: they are the starting values its computer is seeded with, and
+      // the hub removes them once that computer has its own (hub-relay). Hub-owned
+      // keys (spawn `flags`, terminal session ids) stay.
+      db.exec('DROP TABLE IF EXISTS chat_provider_config_revisions')
+      const keys = [
+        'chatMode',
+        'chatModel',
+        'chatEffort',
+        'chatCollaboration',
+        'chatFastMode',
+        'chatConversationId'
+      ]
+      const owned = db
+        .prepare(
+          `SELECT DISTINCT o.task_id AS taskId,o.mode FROM chat_ownership o JOIN tasks t ON t.id=o.task_id
+           WHERE o.state='active' AND json_valid(t.provider_config)
+             AND json_type(t.provider_config,'$.'||json_quote(o.mode))='object'`
+        )
+        .all() as Array<{ taskId: string; mode: string }>
+      const strip = db.prepare(
+        `UPDATE tasks SET provider_config=json_remove(provider_config,${keys.map(() => '?').join(',')}) WHERE id=?`
+      )
+      // The computer may not hold them all (seen on a production copy: an active
+      // chat whose computer had no configuration — its auto-accept mode was lost).
+      // The settings are staged for the task's computer first (computer_data_handoff,
+      // v204), which fills only what it lacks: its own values are newer. The session
+      // id is not: the session ledger is the computer's.
+      const settingKeys = keys.filter((key) => key !== 'chatConversationId')
+      const read = db.prepare(
+        `SELECT ${settingKeys.map((key) => `json_extract(provider_config,?) AS ${key}`).join(',')}
+           FROM tasks WHERE id=? AND NOT EXISTS
+             (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)`
+      )
+      const stage = db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         VALUES ('chat-settings', ?, ?, ?, ?)`
+      )
+      const now = Date.now()
+      for (const { taskId, mode } of owned) {
+        const row = read.get(
+          ...settingKeys.map((key) => `$.${JSON.stringify(mode)}.${key}`),
+          taskId
+        ) as Record<string, unknown> | undefined
+        const settings = Object.fromEntries(
+          Object.entries(row ?? {}).filter(([, value]) => value !== null && value !== undefined)
+        )
+        // json_extract answers a JSON boolean as 0/1: keep the setting's type.
+        if (typeof settings.chatFastMode === 'number')
+          settings.chatFastMode = settings.chatFastMode === 1
+        if (Object.keys(settings).length)
+          stage.run(`${taskId}:${mode}`, taskId, JSON.stringify({ mode, settings }), now)
+        strip.run(...keys.map((key) => `$.${JSON.stringify(mode)}.${key}`), taskId)
+      }
+    }
+  },
+  {
+    version: 206,
+    up(db) {
+      // The agent-session ledger lives only on the computer running a task's agents
+      // (robustness plan §9, P0): which conversations its agents ran, per (task,
+      // mode, tab), and which one each tab resumes. The hub keeps the user's intent
+      // about sessions — resets and deletions — and delivers it to every computer of
+      // the task (`session_intent_acks`: what each confirmed).
+      //
+      // Existing ledger rows are staged in `computer_data_handoff` (v204) for the
+      // task's computer, then the hub copies go: `agent_sessions` (warm-pool rows
+      // without a task are dead after any restart and are dropped),
+      // `task_conversations`, `session_turns` (staged per task that names the
+      // conversation), the task row's `provider_config.<mode>.conversationId` /
+      // `conversationHistory` and the legacy `*_conversation_id` columns (staged as
+      // the task's pre-ledger history, which the heal path still reads). Erased
+      // tasks' rows are not staged (their fences refuse it; nothing could use them).
+      db.exec(`ALTER TABLE session_resets ADD COLUMN except_chat INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE session_intent_acks (
+          intent_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          computer_id TEXT NOT NULL,
+          PRIMARY KEY (intent_id, computer_id)
+        );
+        CREATE INDEX idx_session_intent_acks_task ON session_intent_acks(task_id);`)
+      const live = (alias: string) =>
+        `${alias}.task_id IN (SELECT id FROM tasks)
+         AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = ${alias}.task_id)`
+      const now = Date.now()
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'agent-session', s.id, s.task_id, json_object(
+           'id', s.id, 'mode', s.mode, 'cwd', s.cwd, 'taskId', s.task_id, 'tabId', s.tab_id,
+           'conversationId', s.conversation_id, 'origin', s.origin, 'status', s.status,
+           'pendingMeta', s.pending_meta, 'createdAt', s.created_at, 'boundAt', s.bound_at,
+           'endedAt', s.ended_at), ?
+         FROM agent_sessions s WHERE s.task_id IS NOT NULL AND ${live('s')}`
+      ).run(now)
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'task-conversation', c.id, c.task_id, json_object(
+           'id', c.id, 'taskId', c.task_id, 'mode', c.mode, 'tabId', c.tab_id,
+           'conversationId', c.conversation_id, 'origin', c.origin,
+           'pendingMeta', c.pending_meta, 'createdAt', c.created_at), ?
+         FROM task_conversations c WHERE ${live('c')}`
+      ).run(now)
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'session-turn', x.task_id || ':' || t.conversation_id, x.task_id,
+           json_object('conversationId', t.conversation_id, 'firstTurnAt', t.first_turn_at), ?
+         FROM session_turns t JOIN (
+           SELECT task_id, conversation_id FROM agent_sessions WHERE task_id IS NOT NULL
+           UNION SELECT task_id, conversation_id FROM task_conversations
+         ) x ON x.conversation_id = t.conversation_id
+         WHERE ${live('x')}`
+      ).run(now)
+      // The pre-ledger history per (task, mode): conversationHistory, the current
+      // conversationId and the legacy column.
+      const legacyCol: Record<string, string> = {
+        'claude-code': 'claude_conversation_id',
+        codex: 'codex_conversation_id',
+        'cursor-agent': 'cursor_conversation_id',
+        gemini: 'gemini_conversation_id',
+        opencode: 'opencode_conversation_id'
+      }
+      const tasks = db
+        .prepare(
+          `SELECT t.id, t.provider_config, t.claude_conversation_id, t.codex_conversation_id,
+             t.cursor_conversation_id, t.gemini_conversation_id, t.opencode_conversation_id
+           FROM tasks t WHERE NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = t.id)`
+        )
+        .all() as Array<Record<string, string | null> & { id: string }>
+      const stage = db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         VALUES ('legacy-conversation-history', ?, ?, ?, ?)`
+      )
+      for (const t of tasks) {
+        let config: Record<string, unknown> = {}
+        try {
+          const parsed = JSON.parse(t.provider_config ?? '{}') as unknown
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+            config = parsed as Record<string, unknown>
+        } catch {
+          /* unreadable: no history */
+        }
+        const byMode = new Map<string, string[]>()
+        const add = (mode: string, id: unknown) => {
+          if (typeof id !== 'string' || !id) return
+          const list = byMode.get(mode) ?? []
+          if (!list.includes(id)) list.push(id)
+          byMode.set(mode, list)
+        }
+        for (const [mode, entry] of Object.entries(config)) {
+          if (!entry || typeof entry !== 'object') continue
+          const e = entry as { conversationHistory?: unknown; conversationId?: unknown }
+          if (Array.isArray(e.conversationHistory))
+            for (const id of e.conversationHistory) add(mode, id)
+          add(mode, e.conversationId)
+        }
+        for (const [mode, col] of Object.entries(legacyCol)) add(mode, t[col])
+        for (const [mode, ids] of byMode)
+          stage.run(
+            `${t.id}:${mode}`,
+            t.id,
+            JSON.stringify({ mode, ids: ids.slice(0, 10_000) }),
+            now
+          )
+      }
+      // The hub copies go.
+      const strip = db.prepare(
+        `UPDATE tasks SET provider_config = (
+           SELECT json_group_object(m.key, CASE WHEN json_type(m.value) = 'object'
+             THEN json(json_remove(m.value, '$.conversationId', '$.conversationHistory'))
+             ELSE json(m.value) END)
+           FROM json_each(tasks.provider_config) m)
+         WHERE json_valid(provider_config) AND json_type(provider_config) = 'object'
+           AND EXISTS (SELECT 1 FROM json_each(tasks.provider_config) m
+             WHERE json_type(m.value) = 'object'
+               AND (json_type(m.value, '$.conversationId') IS NOT NULL
+                 OR json_type(m.value, '$.conversationHistory') IS NOT NULL))
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)`
+      )
+      strip.run()
+      db.exec(`DROP TABLE agent_sessions;
+        DROP TABLE task_conversations;
+        DROP TABLE session_turns;
+        ALTER TABLE tasks DROP COLUMN claude_conversation_id;
+        ALTER TABLE tasks DROP COLUMN codex_conversation_id;
+        ALTER TABLE tasks DROP COLUMN cursor_conversation_id;
+        ALTER TABLE tasks DROP COLUMN gemini_conversation_id;
+        ALTER TABLE tasks DROP COLUMN opencode_conversation_id;`)
+      // New task_id table (session_intent_acks).
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 207,
+    up(db) {
+      // A task's prompt history (`agent_prompts`) and turn snapshots (`agent_turns`)
+      // live only on the computer running its agents (robustness plan §9, P0): the
+      // computer captures prompts, snapshots turns and keeps both; the hub keeps the
+      // task's "last interaction" and nothing else.
+      //
+      // Existing rows are staged in `computer_data_handoff` (v204) for the task's
+      // computer, then both hub tables go (with their v187/v189 fences). A turn whose
+      // task the hub deleted (`task_id` NULL) still belongs to its checkout's history:
+      // it is staged under the live task that last recorded in the same checkout,
+      // else it goes (no computer could be told). Erased tasks' rows are not staged.
+      const live = (column: string) =>
+        `${column} IN (SELECT id FROM tasks)
+         AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = ${column})`
+      const now = Date.now()
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'agent-prompt', p.id, p.task_id, json_object(
+           'id', p.id, 'agentId', p.agent_id, 'cliSessionId', p.cli_session_id,
+           'text', p.text, 'createdAt', p.created_at), ?
+         FROM agent_prompts p WHERE ${live('p.task_id')}`
+      ).run(now)
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'agent-turn', a.id, COALESCE(a.task_id, (
+             SELECT o.task_id FROM agent_turns o
+              WHERE o.worktree_path = a.worktree_path AND o.task_id IS NOT NULL AND ${live('o.task_id')}
+              ORDER BY o.created_at DESC LIMIT 1)),
+           json_object(
+             'id', a.id, 'worktreePath', a.worktree_path, 'taskId', a.task_id,
+             'tabId', a.terminal_tab_id, 'snapshotSha', a.snapshot_sha,
+             'headShaAtSnap', a.head_sha_at_snap, 'promptPreview', a.prompt_preview,
+             'createdAt', a.created_at), ?
+         FROM agent_turns a
+         WHERE (a.task_id IS NULL OR ${live('a.task_id')})
+           AND COALESCE(a.task_id, (
+             SELECT o.task_id FROM agent_turns o
+              WHERE o.worktree_path = a.worktree_path AND o.task_id IS NOT NULL AND ${live('o.task_id')}
+              ORDER BY o.created_at DESC LIMIT 1)) IS NOT NULL`
+      ).run(now)
+      db.exec(`DROP TABLE agent_prompts;
+        DROP TABLE agent_turns;`)
+    }
+  },
+  {
+    version: 208,
+    up(db) {
+      // Mirror bookkeeping the hub no longer needs (robustness plan §9, P0):
+      // - `chat_provider_bindings` mirrored which chat holds a provider session. The
+      //   chat's computer records it (its `session:*` record) and answers
+      //   (`chatSessionOwner`); the session ledger lives there too (v206).
+      // - `chat_queue_routes` mirrored which chat holds each queued message. A queue
+      //   operation names the message's tab; the hub routes and authorizes by the tab,
+      //   the computer refuses an item that tab does not hold.
+      // The metadata cursor and receipts stay: they still guard the hub-owned caches
+      // (file locations, agent state, activity). No trigger reads either table, and
+      // dropping a table drops its own erasure fences.
+      db.exec(`DROP TABLE chat_provider_bindings;
+        DROP TABLE chat_queue_routes;`)
+    }
+  },
+  {
+    version: 209,
+    up(db) {
+      // Robustness plan §9 (P0): data only the computer running the work uses lives
+      // only there.
+      // - Usage-log read offsets: each computer keeps its own (its per-hub chat store)
+      //   and commits one only after the hub stored that page's records. The hub's
+      //   cursors become a one-time handoff: each computer's rows (and the hub-disk
+      //   rows, computer_id '', which the hub machine's own computer reads) go with
+      //   its next collect; the hub drops the table once it is empty
+      //   (usage-analytics cache.ts). Records keep deterministic ids, so a re-parse
+      //   never double counts.
+      // - `processes.pid` / `process_pids`: no writer since runs live on computers
+      //   (the live pid is in memory, adopted from the computer's `proc.list`).
+      db.exec(`ALTER TABLE usage_parse_state RENAME TO usage_cursor_handoff;
+        DROP TABLE process_pids;
+        ALTER TABLE processes DROP COLUMN pid;`)
+    }
+  },
+  {
+    version: 210,
+    up(db) {
+      // Robustness plan §9 (P0), Phase 7a: a task's worktree path and base dir live
+      // on the computer holding its work (chat-runtime task-paths.ts); that computer
+      // runs every write (set, inherit, clear). Each task holding either is staged
+      // once (kind `task-path`, keyed by task) for its worktree computer, else its
+      // task computer (hub computer-task-paths.ts picks the target at delivery).
+      // The hub columns stay until Phase 7e: until every path-taking request names a
+      // task or project, they are the hub's authorization input, written alongside
+      // the computer's row (consistency rule `task-path-hub-computer-drift`).
+      // Erased tasks' paths are not staged. A path cleared to '' (the API accepted it)
+      // is unset, as v211 counts it: the computer takes only absolute paths, and a ''
+      // row faulted for good (found by tools/migration-personas, p10-v0380-worktrees;
+      // v214 repairs a database that already ran this).
+      db.prepare(
+        `INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+         SELECT 'task-path', t.id, t.id, json_object(
+           'projectId', t.project_id, 'worktreePath', NULLIF(t.worktree_path, ''),
+           'baseDir', NULLIF(t.base_dir, ''), 'at', ?), ?
+         FROM tasks t
+         WHERE (NULLIF(t.worktree_path, '') IS NOT NULL OR NULLIF(t.base_dir, '') IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = t.id)`
+      ).run(Date.now(), Date.now())
+    }
+  },
+  {
+    version: 211,
+    up(db) {
+      // Robustness plan §9 (P0), Phase 7e: the hub keeps no task path. Every
+      // path-taking request names its task or project and the computer confines the
+      // path there; the worktree path and base dir live only on the computer holding
+      // the task's folders (`worktree_computer_id`). The hub keeps whether each is set.
+      //
+      // 1. Where the folders are: a task holding a path but no recorded computer gets
+      //    its task's computer, else its project's (where its work ran). Still none:
+      //    the hand-off picks one at delivery (hub computer-task-paths.ts) and records it.
+      //    A subtask holding its parent's folders (it inherited them: the same worktree
+      //    and base dir) is where its parent's are, not where its own pin or project
+      //    points — the subtask inherited the folder, not the pin (found by
+      //    tools/migration-personas, p10-v0380-worktrees; v214 repairs a database that
+      //    already ran this). A holder recorded before this (v197 on) is kept.
+      db.exec(`
+        CREATE TEMP TABLE v211_derived AS SELECT id FROM tasks
+         WHERE worktree_computer_id IS NULL
+           AND (NULLIF(worktree_path, '') IS NOT NULL OR NULLIF(base_dir, '') IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id);
+        UPDATE tasks SET worktree_computer_id = COALESCE(computer_id,
+          (SELECT p.default_computer_id FROM projects p WHERE p.id = tasks.project_id))
+        WHERE id IN (SELECT id FROM v211_derived);`)
+      const followParent = db.prepare(`
+        UPDATE tasks SET worktree_computer_id = (
+            SELECT p.worktree_computer_id FROM tasks p WHERE p.id = tasks.parent_id)
+         WHERE id IN (SELECT id FROM v211_derived)
+           AND EXISTS (SELECT 1 FROM tasks p WHERE p.id = tasks.parent_id
+             AND p.worktree_computer_id IS NOT NULL
+             AND p.worktree_computer_id IS NOT tasks.worktree_computer_id
+             AND NULLIF(p.worktree_path, '') IS NULLIF(tasks.worktree_path, '')
+             AND NULLIF(p.base_dir, '') IS NULLIF(tasks.base_dir, ''))`)
+      // One generation per pass (a grandchild follows its corrected parent); a task
+      // tree is acyclic, the bound only guards.
+      for (let i = 0; i < 1000 && followParent.run().changes > 0; i++);
+      db.exec('DROP TABLE v211_derived')
+      // 2. Staged once more at `at` 0 (the oldest): a computer already holding the row
+      //    keeps its own; one that never took it (a quarantined v210 item, a computer
+      //    restored from an older backup) gets it. A row still pending is newer: kept.
+      db.exec(`
+        INSERT OR IGNORE INTO computer_data_handoff(kind,item_key,task_id,payload,created_at)
+          SELECT 'task-path', t.id, t.id, json_object(
+            'projectId', t.project_id,
+            'worktreePath', NULLIF(t.worktree_path, ''),
+            'baseDir', NULLIF(t.base_dir, ''), 'at', 0), 0
+          FROM tasks t
+          WHERE ((t.worktree_path IS NOT NULL AND t.worktree_path <> '')
+              OR (t.base_dir IS NOT NULL AND t.base_dir <> ''))
+            AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = t.id);`)
+      // 3. Flags, then the columns go.
+      db.exec(`
+        ALTER TABLE tasks ADD COLUMN has_worktree INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN has_base_dir INTEGER NOT NULL DEFAULT 0;
+        UPDATE tasks SET
+          has_worktree = (worktree_path IS NOT NULL AND worktree_path <> ''),
+          has_base_dir = (base_dir IS NOT NULL AND base_dir <> '')
+        WHERE NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id);
+        ALTER TABLE tasks DROP COLUMN worktree_path;
+        ALTER TABLE tasks DROP COLUMN base_dir;`)
+    }
+  },
+  {
+    version: 212,
+    up: (db) => {
+      // A project's legacy folder reaches every computer its work was bound to.
+      // v176 (shipped, so it stays as it is) handed each `projects.path` to the LOCAL
+      // computer only. But before folders were per computer, that one path served
+      // whichever computer ran the work: the project's default computer and every
+      // computer a task was pinned to lost it, and on a standalone hub — which has no
+      // local computer — the project had a folder nowhere. Found by the migration
+      // persona suite (tools/migration-personas, p02-v0362-multi).
+      // Staged `pending` like v176's rows, so the hub delivers (and the computer checks)
+      // each one on connect. A folder a computer already holds is left as it is.
+      db.prepare(
+        `INSERT INTO project_placements (computer_id, project_id, root_path, status, updated_at)
+           SELECT DISTINCT b.computer_id, p.id, p.path, 'pending', ?
+             FROM projects p
+             JOIN (SELECT id AS project_id, default_computer_id AS computer_id FROM projects
+                   UNION
+                   SELECT project_id, computer_id FROM tasks) b ON b.project_id = p.id
+            WHERE p.path IS NOT NULL AND p.path <> '' AND b.computer_id IS NOT NULL
+         ON CONFLICT(computer_id, project_id) DO NOTHING`
+      ).run(Date.now())
+    }
+  },
+  {
+    version: 213,
+    up: (db) => {
+      // The per-tab session recovery queue (v201) holds terminal sessions only. v201
+      // queued chat-mode sessions too, but the recovery (hub session-tab-recovery.ts)
+      // re-attributes a session only from the `pty.create` diagnostics of the spawn
+      // that minted it, and runs only when the hub prepares a task before a terminal
+      // resume. A chat session has neither: its row could only ever settle on the main
+      // tab — which it already is — yet stayed queued forever. Found by the migration
+      // persona suite (tools/migration-personas, p08-v0380-tabs-usage).
+      // The chat modes as of this migration (CHAT_SUPPORTED_MODES), frozen.
+      db.exec(`DELETE FROM session_tab_recovery WHERE mode IN ('claude-chat', 'codex-chat')`)
+    }
+  },
+  {
+    version: 214,
+    up: (db) => {
+      // Repairs the task-path hand-off of v210/v211 (both unreleased then), from the
+      // staged `task-path` rows — the only copy of the paths left on the hub. Found by
+      // the migration persona suite (tools/migration-personas, p10-v0380-worktrees).
+      //
+      // 1. A path cleared to '' (the pre-v210 API accepted it) was staged by v210 as ''.
+      //    The computer takes only absolute paths, so the row faulted for good and
+      //    never drained. '' is unset (as v211 already counts it): staged as null.
+      const notErased = `NOT EXISTS (SELECT 1 FROM content_erasure_tasks e
+        WHERE e.task_id = computer_data_handoff.task_id)`
+      for (const field of ['worktreePath', 'baseDir'])
+        db.exec(`
+          UPDATE computer_data_handoff SET payload = json_set(payload, '$.${field}', json('null'))
+           WHERE kind = 'task-path' AND json_extract(payload, '$.${field}') = '' AND ${notErased};`)
+      // 2. A subtask inherits its parent's worktree and base dir — the parent's folder,
+      //    on the parent's computer — but not the parent's pin. v211 recorded its holder
+      //    as its own pin, else its project's default computer: not where the folder is
+      //    when the parent was pinned elsewhere. A task whose staged paths equal its
+      //    parent's (both fields given in both rows, one set) takes the parent's holder;
+      //    repeated so a grandchild follows its corrected parent. Only a holder the old
+      //    v211 derived (its pin, else its project's default) moves: one a real write
+      //    recorded (v197 on) is kept, as v211 keeps it.
+      //    Not derivable: a hub that delivered its staged rows (ran v211 with computers
+      //    connected) before this migration keeps no path to compare — the holder v211
+      //    chose stays there (no release shipped v210/v211 before this one).
+      const both = (alias: string) =>
+        `json_type(${alias}.payload, '$.worktreePath') IS NOT NULL
+         AND json_type(${alias}.payload, '$.baseDir') IS NOT NULL
+         AND json_type(${alias}.payload, '$.inheritFrom') IS NULL`
+      const inherit = db.prepare(`
+        UPDATE tasks SET worktree_computer_id = (
+            SELECT p.worktree_computer_id FROM tasks p WHERE p.id = tasks.parent_id)
+         WHERE tasks.parent_id IS NOT NULL
+           AND (tasks.has_worktree = 1 OR tasks.has_base_dir = 1)
+           AND tasks.worktree_computer_id IS COALESCE(tasks.computer_id,
+                 (SELECT d.default_computer_id FROM projects d WHERE d.id = tasks.project_id))
+           AND NOT EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = tasks.id)
+           AND EXISTS (
+             SELECT 1 FROM tasks p
+               JOIN computer_data_handoff hp ON hp.kind = 'task-path' AND hp.item_key = p.id
+               JOIN computer_data_handoff hc ON hc.kind = 'task-path' AND hc.item_key = tasks.id
+              WHERE p.id = tasks.parent_id
+                AND p.worktree_computer_id IS NOT NULL
+                AND p.worktree_computer_id IS NOT tasks.worktree_computer_id
+                AND ${both('hp')} AND ${both('hc')}
+                AND json_extract(hc.payload, '$.worktreePath') IS json_extract(hp.payload, '$.worktreePath')
+                AND json_extract(hc.payload, '$.baseDir') IS json_extract(hp.payload, '$.baseDir')
+                AND COALESCE(json_extract(hc.payload, '$.worktreePath'),
+                             json_extract(hc.payload, '$.baseDir')) IS NOT NULL)`)
+      // Each pass moves one generation; a task tree is acyclic, the bound only guards.
+      for (let i = 0; i < 1000 && inherit.run().changes > 0; i++);
+    }
+  },
+  {
+    version: 215,
+    up: (db) => {
+      // One answer about a removed computer (post-v0.39.0 review).
+      //
+      // 1. A retirement names its final successor, or none (computers store
+      //    `computerStanding`; its writers keep it so from now on). A computer
+      //    re-enrolled as one that was re-enrolled again names the last; one whose
+      //    successor was deleted or went missing is removed for good, with that reason.
+      //    Every single-row check (SQL and code) then reads a chain right. A cycle names
+      //    no live computer: removed, 'missing'.
+      const rows = db
+        .prepare('SELECT computer_id, successor_id, reason FROM computer_retirements')
+        .all() as Array<{ computer_id: string; successor_id: string | null; reason: string }>
+      const byId = new Map(rows.map((r) => [r.computer_id, r]))
+      const collapse = db.prepare(
+        'UPDATE computer_retirements SET successor_id = ?, reason = ? WHERE computer_id = ?'
+      )
+      for (const r of rows) {
+        if (r.successor_id === null) continue
+        const seen = new Set([r.computer_id])
+        let next: string = r.successor_id
+        let end: { successor: string | null; reason: string }
+        for (;;) {
+          const further = byId.get(next)
+          if (!further) {
+            end = { successor: next, reason: r.reason }
+            break
+          }
+          if (further.successor_id === null) {
+            end = { successor: null, reason: further.reason }
+            break
+          }
+          seen.add(next)
+          if (seen.has(further.successor_id)) {
+            end = { successor: null, reason: 'missing' }
+            break
+          }
+          next = further.successor_id
+        }
+        if (end.successor !== r.successor_id || end.reason !== r.reason)
+          collapse.run(end.successor, end.reason, r.computer_id)
+      }
+      // 2. A chat's unavailable reason is a code; its text lives in one place
+      //    (terminal-contracts `chatUnavailableDetail`). The hub only ever stored these
+      //    two texts (v0.39.0), frozen here; any other reads as not returned.
+      db.prepare(
+        `UPDATE chat_unavailable_owners SET reason = CASE reason WHEN ? THEN 'computer-removed' ELSE 'not-returned' END
+          WHERE reason NOT IN ('computer-removed', 'not-returned')`
+      ).run(
+        'Chat history unavailable. Its computer was removed. Connect a computer that holds this chat (e.g. the same machine re-enrolled with its chat data) to restore it.'
+      )
+    }
+  },
+  {
+    version: 216,
+    up: (db) => {
+      // Moving tasks to another hub (cross-hub move, slice 3a). The hub the tasks
+      // leave keeps the move's journal: every step is recorded, so a paused or
+      // interrupted move resumes from any device. While a move is running or paused,
+      // its tasks are locked (writes refused). Once released, a redirect names the hub
+      // each task went to, so old links and open tabs find it.
+      db.exec(`
+        CREATE TABLE task_moves (
+          id                TEXT PRIMARY KEY,
+          direction         TEXT NOT NULL CHECK (direction IN ('out', 'in')),
+          peer_hub_id       TEXT NOT NULL,
+          target_project_id TEXT NOT NULL,
+          root_task_ids     TEXT NOT NULL,
+          include_subtasks  INTEGER NOT NULL,
+          include_sessions  INTEGER NOT NULL DEFAULT 1,
+          step              TEXT NOT NULL,
+          status            TEXT NOT NULL
+                            CHECK (status IN ('running', 'paused', 'failed', 'canceled', 'done')),
+          error             TEXT,
+          progress          TEXT,
+          created_by        TEXT,
+          created_at        INTEGER NOT NULL,
+          updated_at        INTEGER NOT NULL
+        );
+        CREATE INDEX idx_task_moves_status ON task_moves(status);
+        CREATE TABLE task_move_tasks (
+          move_id TEXT NOT NULL REFERENCES task_moves(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL,
+          PRIMARY KEY (move_id, task_id)
+        );
+        CREATE INDEX idx_task_move_tasks_task ON task_move_tasks(task_id);
+        CREATE TABLE task_move_redirects (
+          task_id    TEXT PRIMARY KEY,
+          hub_id     TEXT NOT NULL,
+          move_id    TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `)
+      // A blocker between tasks on two hubs (a move split them): each hub keeps its
+      // side — its own task, and whether it blocks or is blocked by the other hub's.
+      db.exec(`
+        CREATE TABLE task_remote_blockers (
+          task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          role           TEXT NOT NULL CHECK (role IN ('blocks', 'blocked_by')),
+          remote_hub_id  TEXT NOT NULL,
+          remote_task_id TEXT NOT NULL,
+          remote_title   TEXT,
+          created_at     INTEGER NOT NULL,
+          PRIMARY KEY (task_id, role, remote_hub_id, remote_task_id)
+        );
+      `)
+      // The chats of tasks that moved away: their computer still holds them (a move
+      // never erases them), so a task moving back takes them up again — each with the
+      // ownership it had when it left (the delete triggers mark it deleted meanwhile).
+      db.exec(`
+        CREATE TABLE task_move_parked_chats (
+          conversation_id TEXT PRIMARY KEY,
+          task_id         TEXT NOT NULL,
+          state           TEXT NOT NULL,
+          epoch           INTEGER NOT NULL,
+          cleanup_pending INTEGER NOT NULL
+        );
+        CREATE INDEX idx_task_move_parked_chats_task ON task_move_parked_chats(task_id);
+      `)
+      // task_move_tasks / task_move_redirects / task_remote_blockers /
+      // task_move_parked_chats carry a task_id:
+      // fenced like every such table.
+      installContentErasureFences(db)
+    }
+  },
+  {
+    version: 217,
+    up: (db) => {
+      // Moving a whole project to another hub: a move of every task in the project,
+      // plus the project's own rows. `scope` says which; `project_id` names the
+      // project (its id is kept, so the target project is the same id). One unfinished
+      // project move per project, either direction.
+      db.exec(`
+        ALTER TABLE task_moves ADD COLUMN scope TEXT NOT NULL DEFAULT 'task'
+          CHECK (scope IN ('task', 'project'));
+        ALTER TABLE task_moves ADD COLUMN project_id TEXT;
+        CREATE UNIQUE INDEX idx_task_moves_project_unfinished ON task_moves(project_id)
+          WHERE scope = 'project' AND status IN ('running', 'paused', 'failed');
+        CREATE TABLE project_move_redirects (
+          project_id TEXT PRIMARY KEY,
+          hub_id     TEXT NOT NULL,
+          move_id    TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `)
     }
   }
 ]

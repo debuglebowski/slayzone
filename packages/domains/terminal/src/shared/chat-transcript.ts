@@ -110,7 +110,15 @@ function rowOf(item: TimelineItem, verbose: boolean): Omit<ChatTranscriptRow, 'r
     case 'agent-problem':
       return { role: 'status', text: `agent problem: ${item.message}` }
     case 'interrupted':
-      return { role: 'status', text: 'interrupted' }
+      return {
+        role: 'status',
+        text:
+          item.reason === 'watchdog'
+            ? 'interrupted by watchdog'
+            : item.reason === 'stop-request'
+              ? 'stopped by request'
+              : 'interrupted'
+      }
     case 'compaction':
       return {
         role: 'status',

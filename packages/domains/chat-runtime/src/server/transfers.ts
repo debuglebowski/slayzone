@@ -22,7 +22,7 @@ import type { ChatMigrationSnapshot, ChatTransferHeader, ChatTransferManifest } 
 import { chatTransferManifestSchema } from '../shared'
 import type { ChatStorage } from './storage'
 export const TRANSFER_CHUNK_BYTES = 256 * 1024
-export function encodeTransfer(snapshot: ChatMigrationSnapshot) {
+export function encodeTransfer(snapshot: ChatMigrationSnapshot, opts?: { move?: boolean }) {
   const header: ChatTransferHeader = {
     format: 'slayzone-chat',
     version: 1,
@@ -30,7 +30,8 @@ export function encodeTransfer(snapshot: ChatMigrationSnapshot) {
     identity: snapshot.identity,
     events: snapshot.events.length,
     records: snapshot.records.length,
-    receipts: snapshot.receipts.length
+    receipts: snapshot.receipts.length,
+    ...(opts?.move ? { move: true as const } : {})
   }
   const lines = [
     JSON.stringify(header),
@@ -242,6 +243,14 @@ export function createChatTransfers(store: ChatStorage) {
         return { offset: p.offset }
       } finally {
         closeSync(fd)
+      }
+    },
+    /** The manifest a transfer was begun with, or null when there is none for `id`. */
+    manifestOf(id: string): ChatTransferManifest | null {
+      try {
+        return load(id).manifest
+      } catch {
+        return null
       }
     },
     finish(id: string) {

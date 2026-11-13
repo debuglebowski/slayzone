@@ -5,8 +5,8 @@ import { expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import { defaultConversationRegistry } from '@slayzone/terminal/runtime'
-import { taskSessionStore } from '@slayzone/task/server'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { taskSessionStore } from './test-session-store'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
 import { openChatStorage } from '../../../domains/chat-runtime/src/server/storage'
 import { createLocalChatData } from '../../../domains/chat-runtime/src/server/local-data'
@@ -33,12 +33,13 @@ async function fixture() {
   }
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare('INSERT INTO tasks(id,project_id,title,worktree_path) VALUES(?,?,?,?)')
-    .run('task', 'p', 'Task', dir)
+    .prepare('INSERT INTO tasks(id,project_id,title,has_worktree) VALUES(?,?,?,1)')
+    .run('task', 'p', 'Task')
 
   const processStarts: string[] = []
   const open = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',
@@ -191,13 +192,15 @@ test('second pass control: distinct tab drafts and queue item routing survive re
     expect(await reopened.relay.ops.getTabState('a')).toMatchObject({ draft: { text: 'draft a' } })
     expect(await reopened.relay.ops.getTabState('b')).toMatchObject({ draft: { text: 'draft b' } })
     expect(
-      await reopened.relay.queueOps.update('queued-a', {
-        send: 'edited',
-        original: 'edited',
-        content: [{ type: 'text', text: 'edited' }]
-      })
+      await reopened.relay.queueOps.update(
+        'queued-a',
+        { send: 'edited', original: 'edited', content: [{ type: 'text', text: 'edited' }] },
+        'a'
+      )
     ).toBe(true)
-    expect(await reopened.relay.queueOps.remove('queued-b')).toBe(true)
+    // Reached through its tab (v208): another tab finds nothing.
+    expect(await reopened.relay.queueOps.remove('queued-b', 'a')).toBe(false)
+    expect(await reopened.relay.queueOps.remove('queued-b', 'b')).toBe(true)
     expect(await reopened.relay.queueOps.list('a')).toMatchObject([
       { id: 'queued-a', send: 'edited' }
     ])
@@ -208,7 +211,7 @@ test('second pass control: distinct tab drafts and queue item routing survive re
   }
 })
 
-test('second pass control: retrying a queue push after lost metadata acknowledgement does not duplicate its client id', async () => {
+test('second pass control: retrying a queue push after its reply was lost does not duplicate its client id', async () => {
   const f = await fixture()
   try {
     f.addTab('a')
@@ -216,14 +219,20 @@ test('second pass control: retrying a queue push after lost metadata acknowledge
     await hub.relay.ops.getTabState('a')
     let dropped = false
     f.afterRequest(async (body) => {
-      if (body.kind === 'ackMetadata' && !dropped) {
+      const value = body.value as { target?: string; method?: string } | undefined
+      if (
+        body.kind === 'invoke' &&
+        value?.target === 'queue' &&
+        value.method === 'push' &&
+        !dropped
+      ) {
         dropped = true
-        throw new Error('Reply lost after metadata ack')
+        throw new Error('Reply lost after the push')
       }
     })
     await expect(
       hub.relay.queueOps.push('a', 'one', 'one', { id: 'stable-client-message' })
-    ).rejects.toThrow('Reply lost after metadata ack')
+    ).rejects.toThrow('Reply lost after the push')
     f.afterRequest(async () => {})
     await f.restart()
     const reopened = f.services()
@@ -278,11 +287,22 @@ test.each(['chatMode', 'chatModel', 'chatConversationId'] as const)(
         }
       }
       await hub.relay.drainMetadata('pc')
-      expect((await f.legacyData.readProviderConfig('task', 'claude-chat'))[key]).toBe(newValue)
+      // The computer holds the only copy (decision 2); the hub keeps none.
+      const computerValue = async () =>
+        (
+          (await f.request({
+            kind: 'taskData',
+            taskId: 'task',
+            request: { kind: 'providerConfig', mode: 'claude-chat' }
+          })) as Record<string, unknown>
+        )[key]
+      expect(await computerValue()).toBe(newValue)
+      expect((await f.legacyData.readProviderConfig('task', 'claude-chat'))[key]).toBeUndefined()
       await f.restart()
       const reopened = f.services()
       await reopened.recoverComputer('pc')
-      expect((await f.legacyData.readProviderConfig('task', 'claude-chat'))[key]).toBe(newValue)
+      expect(await computerValue()).toBe(newValue)
+      expect((await f.legacyData.readProviderConfig('task', 'claude-chat'))[key]).toBeUndefined()
       expect(f.processStarts).toEqual([])
     } finally {
       await f.close()
@@ -317,11 +337,18 @@ test('second pass: selecting a live native conversation must await its terminal 
   try {
     f.addTab('a')
     const sessionId = '11111111-1111-4111-8111-111111111111'
-    await f.legacyData.recordConversation({
-      taskId: 'task',
-      mode: 'claude-code',
-      conversationId: sessionId,
-      origin: 'slay-spawned-fresh'
+    // The terminal's session, on the computer's session ledger (robustness plan §9).
+    await f.request({
+      kind: 'ledger',
+      value: {
+        op: 'recordConversation',
+        args: {
+          taskId: 'task',
+          mode: 'claude-code',
+          conversationId: sessionId,
+          origin: 'slay-spawned-resume'
+        }
+      }
     })
     const release = vi.fn(async () => {})
     defaultConversationRegistry.registerConversationHolder('terminal', {
@@ -359,16 +386,56 @@ test('second pass: selecting a live native conversation must await its terminal 
   }
 })
 
+test('a chat command reads its session id from the computer only while a terminal of the task runs one (v208)', async () => {
+  const f = await fixture()
+  const live: string[] = []
+  try {
+    f.addTab('a')
+    defaultConversationRegistry.registerConversationHolder('terminal', {
+      isLive: (_task, session) => live.includes(session),
+      release: async () => {},
+      liveConversations: () => [...live]
+    })
+    const hub = f.services()
+    await f.seedOwner(hub, 'a-root-storage', 'a')
+    const context = { tabId: 'a', taskId: 'task', mode: 'claude-chat', cwd: f.dir }
+    await hub.relay.ops.hydrate(context)
+    const reads: unknown[] = []
+    f.beforeRequest(async (body) => {
+      if (body.kind === 'taskData') reads.push(body)
+    })
+    await hub.relay.ops.setModel({ ...context, chatModel: 'opus' })
+    expect(reads).toEqual([])
+    live.push('terminal-session')
+    await hub.relay.ops.setModel({ ...context, chatModel: 'sonnet' })
+    expect(reads).toHaveLength(1)
+    expect(f.processStarts).toEqual([])
+  } finally {
+    defaultConversationRegistry.registerConversationHolder('terminal', {
+      isLive: () => false,
+      release: async () => {}
+    })
+    await f.close()
+  }
+})
+
 test('second pass control: continue-in-chat releases a live native conversation and persists handoff', async () => {
   const f = await fixture()
   try {
     f.addTab('a')
     const sessionId = '11111111-1111-4111-8111-111111111111'
-    await f.legacyData.recordConversation({
-      taskId: 'task',
-      mode: 'claude-code',
-      conversationId: sessionId,
-      origin: 'slay-spawned-fresh'
+    // The terminal's session, on the computer's session ledger (robustness plan §9).
+    await f.request({
+      kind: 'ledger',
+      value: {
+        op: 'recordConversation',
+        args: {
+          taskId: 'task',
+          mode: 'claude-code',
+          conversationId: sessionId,
+          origin: 'slay-spawned-resume'
+        }
+      }
     })
     const release = vi.fn(async () => {})
     defaultConversationRegistry.registerConversationHolder('terminal', {
@@ -385,9 +452,14 @@ test('second pass control: continue-in-chat releases a live native conversation 
       })
     ).toMatchObject({ sessionId })
     expect(release).toHaveBeenCalledWith('task', sessionId)
-    expect(await f.legacyData.readProviderConfig('task', 'claude-chat')).toMatchObject({
-      chatConversationId: sessionId
-    })
+    // The chat's computer holds its session id (decision 2), not the hub.
+    expect(
+      await f.request({
+        kind: 'taskData',
+        taskId: 'task',
+        request: { kind: 'providerConfig', mode: 'claude-chat' }
+      })
+    ).toMatchObject({ chatConversationId: sessionId })
     expect(f.processStarts).toEqual([])
   } finally {
     defaultConversationRegistry.registerConversationHolder('terminal', {

@@ -4,6 +4,7 @@ import { createLocalArtifacts } from './artifacts'
 import { createChatBackups } from './backups'
 import { createLocalPrompts } from './prompts'
 import { createChatTransfers } from './transfers'
+import { createSessionMoves, sessionLedgerMoveImport } from './session-moves'
 import { createLocalWorkspaceStore } from './workspace-store'
 import { createChatInvoker } from './invocation'
 import { createLocalAttachments } from './attachments'
@@ -19,17 +20,48 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage } from './storage'
 import { createLocalChatData, type ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
+import { createComputerTaskData, type DataImportKinds } from './task-data'
+import { createSessionLedgerService } from './session-ledger-service'
+import type { ConversationHealIo } from './conversation-heal'
+import { sessionLedgerImports } from './session-ledger-imports'
+import { historyImports } from './history-imports'
+import { chatSettingsImport } from './chat-settings-import'
+import { createTaskPaths, taskPathImport } from './task-paths'
+import { createAgentTurns, type TurnGit } from './agent-turns'
+
+/** No turn git wired (a runtime without a checkout): every turn operation refuses. */
+const refuseTurnGit = () =>
+  Promise.reject(new Error('Agent turns are unavailable on this computer'))
+const refusingTurnGit: TurnGit = {
+  canonical: refuseTurnGit,
+  snapshot: refuseTurnGit,
+  deleteTurnRef: refuseTurnGit,
+  diffIsEmpty: refuseTurnGit,
+  filterTurns: refuseTurnGit
+}
+import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
 
 export function createComputerChatRuntime(opts: {
   stateDir: string
   hubScope: string
   computerId: string
+  /** Offline maintenance must not run another task's scheduled retention/backups. */
+  maintenance?: boolean
   hasExternalTaskWork?(taskId: string): boolean
   sessionReader?: ClaudeSessionReader
   transport?: Partial<TransportDeps>
   onMetadata?: (update: ChatMetadataUpdate) => void
+  /** Kinds of hub data this computer accepts (`data.import`); default: the built-in ones. */
+  dataImports?: DataImportKinds
+  /** This computer's disk and checkout, jailed: the session ledger's conversation heal. */
+  healIo?: ConversationHealIo
+  /** Turn git on this computer, jailed (agent-turn snapshots); none = turns refused. */
+  turnGit?: TurnGit
 }) {
   const storage = openChatStorage(opts)
+  // Register before artifact purge listeners: every deletion delivery captures
+  // retry identifiers before its source records disappear, including old clients.
+  storage.onTaskPurge((taskId) => storage.compose((raw) => prepareStoredTaskErasure(raw, taskId)))
   const diagnosticsConfig = () =>
     storage.getRecord<{ enabled: boolean; verbose: boolean }>(
       '__slz_settings__',
@@ -54,15 +86,39 @@ export function createComputerChatRuntime(opts: {
     })
   }
   const prompts = createLocalPrompts(storage)
-  const local = createLocalChatData(storage, opts.onMetadata)
+  // Agent-turn snapshots (robustness plan §9, P0): only here, never on the hub.
+  const turns = createAgentTurns(storage, opts.turnGit ?? refusingTurnGit)
+  // The agent-session ledger (robustness plan §9, P0): only here, never on the hub.
+  const ledger = createSessionLedgerService(storage, { healIo: opts.healIo })
+  // Bound once the transport exists: a session recorded before that has no listener.
+  let sessionsChanged: (tabId: string) => void = () => undefined
+  // Task worktree paths / base dirs (robustness plan §9, P0, Phase 7a): only here.
+  const taskPaths = createTaskPaths(storage)
+  const local = createLocalChatData(storage, opts.onMetadata, ledger, (tabId) =>
+    sessionsChanged(tabId)
+  )
+  const taskData = createComputerTaskData({
+    storage,
+    computerId: opts.computerId,
+    imports: opts.dataImports ?? {
+      ...sessionLedgerImports,
+      ...historyImports,
+      'task-path': taskPathImport,
+      'chat-settings': chatSettingsImport,
+      'session-ledger-move': sessionLedgerMoveImport
+    },
+    providerConfig: local.providerConfig,
+    taskPath: taskPaths.get
+  })
   // A restarted runtime has no in-flight admission to renew these slots. Cancel
   // them before draining so a lost hub/host cannot block later accepted messages.
   local.cancelPendingQueueAdmissions()
   const transfers = createChatTransfers(storage)
   transfers.collectActivated()
+  const sessionMoves = createSessionMoves(storage)
   const attachments = createLocalAttachments(storage, local)
   const artifacts = createLocalArtifacts(storage, local, attachments)
-  const backups = createChatBackups(storage)
+  const backups = createChatBackups(storage, { automatic: !opts.maintenance })
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
@@ -126,6 +182,8 @@ export function createComputerChatRuntime(opts: {
     },
     conversations
   )
+  sessionsChanged = (tabId) => transport.chatEvents.emit('sessions-changed', tabId)
+
   let retention: ReturnType<typeof createChatRetention> | undefined
   const transitioning = (tabId: string) => {
     const owner = storage.forTab(tabId)
@@ -169,6 +227,7 @@ export function createComputerChatRuntime(opts: {
   const invoke = createChatInvoker({ storage, local, ops, queueOps })
   const tabTransitions = new Map<string, Promise<ChatTabTransition['to']>>()
   retention = createChatRetention({
+    automatic: !opts.maintenance,
     storage,
     local,
     busy: (owner) => {
@@ -203,6 +262,10 @@ export function createComputerChatRuntime(opts: {
   const retentionService = retention
   return {
     diagnosticsConfig,
+    taskData,
+    ledger,
+    turns,
+    taskPaths,
     configureDiagnostics,
     invoke: async (input: unknown) =>
       retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
@@ -212,6 +275,7 @@ export function createComputerChatRuntime(opts: {
     promptSummaries: prompts.summaries,
     storage,
     transfers,
+    sessionMoves,
     attachments,
     backups,
     artifacts,
@@ -262,7 +326,7 @@ export function createComputerChatRuntime(opts: {
       const previous = storage.taskLifecycle(taskId)
       if (previous.state === 'deleted') {
         const applied = storage.applyTaskLifecycle(taskId, state, revision)
-        artifacts.cleanupDeletedTasks()
+        artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
@@ -279,13 +343,36 @@ export function createComputerChatRuntime(opts: {
       const applied = storage.applyTaskLifecycle(taskId, state, revision)
       await Promise.all(closing)
       if (applied.state === 'deleted') {
-        artifacts.cleanupDeletedTasks()
+        artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
         artifacts.collectGarbage()
         storage.checkpoint()
       }
       return applied
+    },
+    async eraseTask(taskId: string, revision: number, stopExternal?: () => Promise<void>) {
+      storage.compose((raw) => prepareStoredTaskErasure(raw, taskId))
+      const closing = storage
+        .listForTask(taskId)
+        .map((o) => transport.removeSession(o.identity.tabId))
+      const applied = storage.applyTaskLifecycle(taskId, 'deleted', revision)
+      // Already deleted at a newer revision (the hub was restored from a
+      // backup): the same deletion, erased again idempotently. A task this
+      // computer has not deleted is never erased.
+      if (applied.state !== 'deleted' || applied.revision < revision)
+        throw new Error('Stale computer erasure request')
+      await stopExternal?.()
+      await Promise.all(closing)
+      transfers.removeTask(taskId)
+      artifacts.cleanupDeletedTasks(taskId)
+      await artifacts.retryErasures(taskId)
+      artifacts.collectGarbage()
+      storage.compose((raw) => finishStoredTaskErasure(raw, storage.dir, taskId))
+      await backups.eraseTask(taskId)
+      // Needs-attention records name the task (and quote its errors): erased too.
+      storage.deleteTaskFaults(taskId)
+      return { taskId, revision: applied.revision, erased: true as const }
     },
     async close() {
       if (closed) return
@@ -295,7 +382,7 @@ export function createComputerChatRuntime(opts: {
       await queueRuntime.close()
       await transport.shutdownAll()
       transfers.close()
-      artifacts.close()
+      await artifacts.close()
       storage.close()
     }
   }

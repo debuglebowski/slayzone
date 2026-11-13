@@ -6,9 +6,9 @@ import { expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import { createTestHarness, createSlayzoneDbAdapter } from '../../../shared/test-utils/ipc-harness'
 import { createComputerChatServices } from './computer-chat'
-import { createChatRuntimeHandlers } from '../../computer/src/handlers/chat-runtime'
+import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
-import { taskSessionStore } from '@slayzone/task/server'
+import { taskSessionStore } from './test-session-store'
 import { deleteTab } from '@slayzone/task-terminals/server'
 import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import {
@@ -24,15 +24,16 @@ async function fixture() {
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'provider-transition-'))
   h.db.prepare("INSERT INTO projects(id,name,color) VALUES('p','Project','#000')").run()
   h.db
-    .prepare("INSERT INTO tasks(id,project_id,title,worktree_path) VALUES('task','p','Task',?)")
-    .run(dir)
+    .prepare("INSERT INTO tasks(id,project_id,title,has_worktree) VALUES('task','p','Task',1)")
+    .run()
   h.db
     .prepare(
       "INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES('tab','task','claude-chat',0)"
     )
     .run()
   const open = () =>
-    createChatRuntimeHandlers({
+    createFixtureChatRuntime({
+      taskFolder: () => dir,
       stateDir: dir,
       hubScope: 'hub',
       computerId: () => 'pc',

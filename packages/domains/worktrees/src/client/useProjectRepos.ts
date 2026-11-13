@@ -10,7 +10,7 @@
  * `gitViewRepoPath`). This hook is purely a data source.
  */
 import { useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { skipToken, useQuery } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import type { RepoEntry } from '@slayzone/worktrees/shared'
 
@@ -28,9 +28,9 @@ export function useProjectRepos(
 ): UseProjectReposResult {
   const trpc = useTRPC()
   const query = useQuery(
+    // No project → no scope to name: nothing to scan (the hub would refuse it).
     trpc.worktrees.listProjectRepos.queryOptions(
-      { projectPath: projectPath ?? '', projectId, opts: { taskBoundPath } },
-      { enabled: !!projectPath }
+      projectPath && projectId ? { projectPath, projectId, opts: { taskBoundPath } } : skipToken
     )
   )
 

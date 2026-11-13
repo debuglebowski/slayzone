@@ -68,14 +68,20 @@ const TERM_GRACE_MS = 2_000
 export const LEDGER_HEARTBEAT_MS = 30_000
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** `ps` output in a fixed format whatever the user's locale. */
-function ps(args: string[]): Promise<string> {
+/** Attempts per probe (`ps`, `sysctl`) before it counts as unreadable. */
+const PROBE_ATTEMPTS = 3
+
+/**
+ * `ps` output in a fixed format whatever the user's locale; null when `ps` itself
+ * failed (timed out on a loaded machine) — never the same as "no such process".
+ */
+function ps(args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       'ps',
       args,
       { timeout: 5000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } },
-      (err, stdout) => resolve(err ? '' : stdout)
+      (err, stdout) => resolve(err ? null : stdout)
     )
   })
 }
@@ -86,8 +92,8 @@ function ps(args: string[]): Promise<string> {
  * unrecorded group could never be reaped after a crash.
  */
 export async function processStartedAt(pid: number): Promise<string> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const out = (await ps(['-o', 'lstart=', '-p', String(pid)])).trim()
+  for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
+    const out = (await ps(['-o', 'lstart=', '-p', String(pid)]))?.trim() ?? ''
     if (out || !pidAlive(pid)) return out
   }
   return ''
@@ -98,24 +104,35 @@ function lstartMs(lstart: string): number {
   return Date.parse(lstart.replace(/\s+/g, ' '))
 }
 
+/** Read once it succeeds: a boot's identity never changes while this process runs. */
+let knownBootId: string | null = null
+
 /**
  * This boot's identity, or '' when it cannot be read (then no entry ever proves
  * itself: nothing is killed). Linux: the kernel's boot id; macOS/BSD: boot time.
+ * A `sysctl` that fails (timed out on a loaded machine) is retried: one slow probe
+ * made a crashed computer's groups unprovable, and the reaper forgot them.
  */
-export function currentBootId(): Promise<string> {
+export async function currentBootId(): Promise<string> {
+  if (knownBootId !== null) return knownBootId
   if (process.platform === 'linux') {
     try {
-      return Promise.resolve(readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim())
+      knownBootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()
+      return knownBootId
     } catch {
-      return Promise.resolve('')
+      return ''
     }
   }
-  return new Promise((resolve) => {
-    execFile('sysctl', ['-n', 'kern.boottime'], { timeout: 2000 }, (err, stdout) => {
-      const sec = err ? null : /sec\s*=\s*(\d+)/.exec(stdout)
-      resolve(sec ? `boottime:${sec[1]}` : '')
+  for (let attempt = 0; attempt < PROBE_ATTEMPTS; attempt++) {
+    const id = await new Promise<string>((resolve) => {
+      execFile('sysctl', ['-n', 'kern.boottime'], { timeout: 2000 }, (err, stdout) => {
+        const sec = err ? null : /sec\s*=\s*(\d+)/.exec(stdout)
+        resolve(sec ? `boottime:${sec[1]}` : '')
+      })
     })
-  })
+    if (id) return (knownBootId = id)
+  }
+  return ''
 }
 
 function pidAlive(pid: number): boolean {
@@ -136,10 +153,14 @@ function groupAlive(pgid: number): boolean {
   }
 }
 
-/** Start times (epoch ms) of the live members of group `pgid`. */
-async function memberStarts(pgid: number): Promise<number[]> {
+/** Start times (epoch ms) of the live members of group `pgid`; null when `ps` kept failing. */
+async function memberStarts(pgid: number): Promise<number[] | null> {
+  let listing: string | null = null
+  for (let attempt = 0; attempt < PROBE_ATTEMPTS && listing === null; attempt++)
+    listing = await ps(['-A', '-o', 'pgid=,lstart='])
+  if (listing === null) return null
   const starts: number[] = []
-  for (const line of (await ps(['-A', '-o', 'pgid=,lstart='])).split('\n')) {
+  for (const line of listing.split('\n')) {
     const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(line)
     if (!m || Number(m[1]) !== pgid) continue
     const at = lstartMs(m[2] as string)
@@ -206,15 +227,18 @@ export function createProcGroupLedger(
     return (await processStartedAt(o.pid)) === o.startedAt
   }
 
-  /** Positive proof that `entry`'s live group is the one recorded — see the module doc. */
-  async function provenOurs(entry: LedgerEntry): Promise<boolean> {
+  /**
+   * Positive proof that `entry`'s live group is the one recorded — see the module doc.
+   * 'unknown' when the members could not be listed: not proof either way.
+   */
+  async function provenOurs(entry: LedgerEntry): Promise<boolean | 'unknown'> {
     if (pidAlive(entry.pgid)) return (await processStartedAt(entry.pgid)) === entry.startedAt
     if (!groupAlive(entry.pgid) || typeof entry.aliveAt !== 'number') return false
     const leaderStart = lstartMs(entry.startedAt)
     if (!Number.isFinite(leaderStart)) return false
-    return (await memberStarts(entry.pgid)).some(
-      (start) => start >= leaderStart && start <= entry.aliveAt!
-    )
+    const starts = await memberStarts(entry.pgid)
+    if (starts === null) return 'unknown'
+    return starts.some((start) => start >= leaderStart && start <= entry.aliveAt!)
   }
 
   async function endGroup(pgid: number): Promise<void> {
@@ -296,7 +320,17 @@ export function createProcGroupLedger(
       for (const entry of read()) {
         if (sameOwner(entry.owner, me) || (await ownerAlive(entry.owner))) continue
         const sameBoot = !!bootId && entry.boot === bootId
-        if (sameBoot && (await provenOurs(entry))) {
+        // Unreadable boot id or member listing: nothing is proven either way. Killed
+        // nothing, and KEPT for the next start — forgetting it on one slow probe left
+        // a crashed computer's group running for good.
+        const proof = !bootId ? 'unknown' : sameBoot ? await provenOurs(entry) : false
+        if (proof === 'unknown') {
+          log('could not check a recorded process group; kept for the next start', {
+            pgid: entry.pgid
+          })
+          continue
+        }
+        if (proof) {
           await endGroup(entry.pgid)
           ended++
           log('ended a process group a crashed computer left running', { pgid: entry.pgid })

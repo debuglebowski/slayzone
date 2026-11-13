@@ -1,6 +1,6 @@
 {
   "name": "@slayzone/mobile",
-  "version": "0.38.0",
+  "version": "0.40.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -65,7 +65,7 @@
     "@xterm/headless": "6.1.0-beta.313",
     "jest": "^30.5.2",
     "jest-expo": "~58.0.13",
-    "test-renderer": "1.3.0"
+    "test-renderer": "1.3.1"
   },
   "expo": {
     "install": {

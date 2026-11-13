@@ -450,12 +450,15 @@ test.describe('Artifacts panel', () => {
     )
     expect(filePath).toBeTruthy()
 
-    // Dirty the buffer
-    await editor.locator('.cm-content').click()
-    await mainWindow.keyboard.type('local edits')
-
     const before = await editor.boundingBox()
     expect(before).toBeTruthy()
+
+    // Dirty the buffer, then write the file at once: the draft is held only until its
+    // 500 ms autosave, and a save that lands first leaves nothing to conflict with
+    // (the bounding-box round trip used to sit between the two, and on a loaded
+    // machine outlasted the debounce).
+    await editor.locator('.cm-content').click()
+    await mainWindow.keyboard.type('local edits')
 
     // External write to provoke mtime mismatch → conflict banner
     fs.writeFileSync(filePath as string, 'external write\n')

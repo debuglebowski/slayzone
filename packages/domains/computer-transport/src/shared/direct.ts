@@ -54,7 +54,12 @@ export const directResourceSchema = z.discriminatedUnion('kind', [
     kind: z.literal('chat'),
     tabId: idField,
     epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
-  })
+  }),
+  /**
+   * One task's computer-only data (robustness plan §9): the reads the hub would
+   * otherwise relay to this computer (`taskData`).
+   */
+  z.object({ kind: z.literal('task'), taskId: idField })
 ])
 export type DirectResource = z.infer<typeof directResourceSchema>
 
@@ -66,7 +71,15 @@ export const directGrantParamsSchema = z.object({
   /** The user the hub gated. `null` = a hub without login (its one local user). */
   userId: idField.nullable(),
   resource: directResourceSchema,
-  ttlMs: z.number().int().positive().max(DIRECT_GRANT_MAX_TTL_MS)
+  ttlMs: z.number().int().positive().max(DIRECT_GRANT_MAX_TTL_MS),
+  /**
+   * Absolute end (Unix ms, wall clock): the grant — and every connection it opened —
+   * ends at `min(receipt + ttlMs, notAfter)`, and a grant received at or after it is
+   * refused. Lets the hub bound a grant by an absolute deadline (IdP-role evidence)
+   * whatever the delivery delay. Sent only to a computer that advertised
+   * `directNotAfter`. Assumes synchronised clocks.
+   */
+  notAfter: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()
 })
 export type DirectGrantParams = z.infer<typeof directGrantParamsSchema>
 
@@ -83,7 +96,8 @@ export const directRevokeParamsSchema = z.discriminatedUnion('by', [
     by: z.literal('resource'),
     resource: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('pty'), sessionId: idField }),
-      z.object({ kind: z.literal('chat'), tabId: idField })
+      z.object({ kind: z.literal('chat'), tabId: idField }),
+      z.object({ kind: z.literal('task'), taskId: idField })
     ])
   }),
   /** Every grant from this hub (computer revoked, hub shutting down). */

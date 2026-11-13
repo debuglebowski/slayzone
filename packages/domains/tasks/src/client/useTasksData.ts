@@ -15,7 +15,7 @@ import {
   type TasksTrpcClient
 } from './trpc'
 import type { Task, TaskStatus, TasksChangedEvent } from '@slayzone/task-contracts'
-import { refreshTaskScopedQueries } from '@slayzone/task/client'
+import { refreshTaskScopedQueries, settleDeleteTaskResult } from '@slayzone/task/client'
 import type { Project, ProjectGroup, TopLevelEntryRef } from '@slayzone/projects-contracts'
 import type { Tag } from '@slayzone/tags/shared'
 import { useTabStore } from '@slayzone/tabs-state'
@@ -113,7 +113,9 @@ function toastBulkFailure(verb: string, total: number, outcome: PerHubOutcome): 
  * Maps a snake_case `Partial<Task>` patch to the camelCase fields accepted by
  * `updateTask` / `updateTasks`. Single source of truth for the context-menu
  * update paths — a field omitted here is silently dropped before it reaches
- * the DB, so every editable task field must be listed.
+ * the DB, so every editable task field must be listed. Except the project: a
+ * move goes only through the move dialog (`MoveTaskDialog` → `task.moveToProject`),
+ * which says what it does and can't be undone.
  */
 function toUpdateTaskFields(updates: Partial<Task>) {
   return {
@@ -121,7 +123,6 @@ function toUpdateTaskFields(updates: Partial<Task>) {
     status: updates.status,
     priority: updates.priority,
     progress: updates.progress,
-    projectId: updates.project_id,
     snoozedUntil: updates.snoozed_until,
     isBlocked: updates.is_blocked,
     blockedComment: updates.blocked_comment,
@@ -177,7 +178,8 @@ interface UseTasksDataReturn {
   archiveTasks: (taskIds: string[]) => Promise<string[]>
   deleteTask: (taskId: string) => Promise<void>
   bulkDelete: (taskIds: string[]) => Promise<string[]>
-  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<void>
+  /** Answers whether the hub took the update (on failure: rolled back, toasted). */
+  contextMenuUpdate: (taskId: string, updates: Partial<Task>) => Promise<boolean>
   bulkContextMenuUpdate: (taskIds: string[], updates: Partial<Task>) => Promise<string[]>
   setTaskPinned: (taskId: string, pinned: boolean) => void
   setTasksPinned: (taskIds: string[], pinned: boolean) => void
@@ -934,8 +936,9 @@ export function useTasksData(): UseTasksDataReturn {
   const deleteTask = useCallback(
     async (taskId: string) => {
       const c = clientForTask(taskId)
+      // Throws (already reported) when the task still exists, so it stays on the board.
+      settleDeleteTaskResult(await c.task.delete.mutate({ id: taskId }))
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
-      await c.task.delete.mutate({ id: taskId })
     },
     [clientForTask]
   )
@@ -950,9 +953,24 @@ export function useTasksData(): UseTasksDataReturn {
         removed = prev.filter((t) => idSet.has(t.id))
         return prev.filter((t) => !idSet.has(t.id))
       })
-      const outcome = await runPerHub(taskIds, ownedTasks(), defaultHubId, clientForHub, (c, ids) =>
-        c.task.deleteMany.mutate({ ids })
+      let incomplete = false
+      const blockedIds = new Set<string>()
+      const outcome = await runPerHub(
+        taskIds,
+        ownedTasks(),
+        defaultHubId,
+        clientForHub,
+        async (c, ids) => {
+          const result = await c.task.deleteMany.mutate({ ids })
+          for (const id of result.blockedIds) blockedIds.add(id)
+          if (result.erasure?.state === 'incomplete') incomplete = true
+          return result
+        }
       )
+      for (const id of blockedIds) outcome.failedIds.add(id)
+      if (blockedIds.size)
+        if (outcome.error === undefined)
+          outcome.error = new Error('Unlink tasks from their external provider first.')
       if (outcome.failedIds.size > 0) {
         setTasks((prev) => {
           const present = new Set(prev.map((t) => t.id))
@@ -961,6 +979,10 @@ export function useTasksData(): UseTasksDataReturn {
         })
         toastBulkFailure('delete', taskIds.length, outcome)
       }
+      if (incomplete)
+        toast.warning('Some data has not been deleted. Check cleanup status in Settings → Hubs.')
+      else if (outcome.failedIds.size < taskIds.length)
+        toast.success(`${taskIds.length - outcome.failedIds.size} tasks permanently deleted.`)
       return taskIds.filter((id) => !outcome.failedIds.has(id))
     },
     [clientForHub, defaultHubId]
@@ -970,7 +992,7 @@ export function useTasksData(): UseTasksDataReturn {
   // Snapshot pattern keeps deps empty so the callback ref stays stable across
   // renders — prevents fanout re-renders in consumers (e.g. useUndoableTaskActions).
   const contextMenuUpdate = useCallback(
-    async (taskId: string, updates: Partial<Task>) => {
+    async (taskId: string, updates: Partial<Task>): Promise<boolean> => {
       let previousTasks: Task[] = []
       setTasks((prev) => {
         previousTasks = prev
@@ -991,7 +1013,12 @@ export function useTasksData(): UseTasksDataReturn {
           id: taskId,
           ...toUpdateTaskFields(updates)
         })
-      } catch {
+        return true
+      } catch (error) {
+        // Never a silent snap-back (nor, through the undo wrapper, a false "Updated").
+        toast.error(
+          `Couldn't update the task: ${error instanceof Error ? error.message : String(error)}`
+        )
         setTasks(previousTasks)
         if (updates.is_blocked !== undefined) {
           setBlockedTaskIds((prev) => {
@@ -1001,6 +1028,7 @@ export function useTasksData(): UseTasksDataReturn {
             return next
           })
         }
+        return false
       }
     },
     [clientForTask]

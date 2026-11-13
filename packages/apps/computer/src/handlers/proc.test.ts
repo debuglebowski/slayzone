@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { PassThrough } from 'node:stream'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComputerConfig } from '../config'
 import { ComputerTransportErrorCodes, RpcError } from '@slayzone/computer-transport/shared'
 import { createSpawnAdmission } from '../spawn-admission'
@@ -20,12 +22,25 @@ function makeCtx(
   { online = true, config: extra = {} }: { online?: boolean; config?: Partial<ComputerConfig> } = {}
 ) {
   const notifies: Notify[] = []
+  const waiters = new Set<() => void>()
   const dialer: ComputerDialer = {
     notify: (method, params) => {
       notifies.push({ method, params: (params ?? {}) as Record<string, unknown> })
+      for (const waiter of [...waiters]) waiter()
       return online
     }
   }
+  /** Resolves on the notification that makes `pred` true — awaits the event, never polls. */
+  const until = (pred: () => boolean): Promise<void> =>
+    new Promise((resolve) => {
+      if (pred()) return resolve()
+      const waiter = () => {
+        if (!pred()) return
+        waiters.delete(waiter)
+        resolve()
+      }
+      waiters.add(waiter)
+    })
   const config: ComputerConfig = {
     hubUrl: 'ws://localhost:0/computers',
     name: 'test',
@@ -33,7 +48,7 @@ function makeCtx(
     capabilities: ['proc'],
     ...extra
   }
-  return { notifies, ctx: { dialer, config, log: () => {} } }
+  return { notifies, until, ctx: { dialer, config, log: () => {} } }
 }
 
 async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {
@@ -71,6 +86,28 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+})
+
+it('task erasure stops its processes and clears buffers while preserving another task', async () => {
+  const { ctx } = makeCtx(roots)
+  const proc = createProcHandlers(ctx)
+  try {
+    for (const id of ['alice', 'bob'])
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: id,
+        taskId: id,
+        command: process.execPath,
+        args: ['-e', 'setInterval(()=>{},1000)'],
+        cwd: dir
+      })
+    await proc.stopTask('alice')
+    const result = (await proc.handlers[ProcMethods.procList]({})) as {
+      sessions: Array<{ sessionId: string }>
+    }
+    expect(result.sessions.map((s) => s.sessionId)).toEqual(['bob'])
+  } finally {
+    proc.disposeAll()
+  }
 })
 
 describe('createProcHandlers — proc.spawn streaming', () => {
@@ -358,36 +395,132 @@ describe('createProcHandlers — proc.write confirms delivery', () => {
 })
 
 describe('createProcHandlers — agent-start admission', () => {
+  /** A child process whose output the test produces, synchronously. */
+  function controlledChild() {
+    const child = Object.assign(new EventEmitter(), {
+      pid: undefined,
+      stdin: new PassThrough(),
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: () => true
+    })
+    return {
+      child: child as unknown as ChildProcess,
+      print: (data: string) => child.stdout.emit('data', Buffer.from(data))
+    }
+  }
+
   it('a spawn with an admission lane waits for a free start slot', async () => {
     const { notifies, ctx } = makeCtx(roots)
     const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 10_000 })
-    const proc = createProcHandlers(ctx, undefined, { admission })
-    const first = proc.handlers[ProcMethods.procSpawn]({
-      sessionId: 'a1',
-      command: 'sh',
-      args: ['-c', 'sleep 0.3; printf up; sleep 5'],
-      admission: 'background'
-    })
-    let secondDone = false
-    const second = Promise.resolve(
-      proc.handlers[ProcMethods.procSpawn]({
-        sessionId: 'a2',
+    const first = controlledChild()
+    const second = controlledChild()
+    const spawnProcess = vi
+      .fn()
+      .mockReturnValueOnce(first.child)
+      .mockReturnValueOnce(second.child) as unknown as typeof spawn
+    const proc = createProcHandlers(ctx, undefined, { admission, spawnProcess })
+    try {
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'a1',
         command: 'sh',
-        args: ['-c', 'printf two; sleep 5'],
         admission: 'background'
       })
-    ).then((r) => {
-      secondDone = true
-      return r
-    })
-    await first
-    await new Promise((r) => setTimeout(r, 150))
-    // The first start still holds the only slot (no output yet).
-    expect(secondDone).toBe(false)
-    await waitFor(() => dataFor(notifies, 'a1', 'stdout') === 'up')
-    await second
-    await waitFor(() => dataFor(notifies, 'a2', 'stdout') === 'two')
-    proc.disposeAll()
+      let secondDone = false
+      const secondReply = Promise.resolve(
+        proc.handlers[ProcMethods.procSpawn]({
+          sessionId: 'a2',
+          command: 'sh',
+          admission: 'background'
+        })
+      ).then(() => {
+        secondDone = true
+      })
+      await new Promise((r) => setImmediate(r))
+      // The first start holds the only slot until it prints: the second waits, unstarted.
+      expect(secondDone).toBe(false)
+      expect(spawnProcess).toHaveBeenCalledTimes(1)
+      first.print('up')
+      await secondReply
+      expect(spawnProcess).toHaveBeenCalledTimes(2)
+      second.print('two')
+      expect(dataFor(notifies, 'a1', 'stdout')).toBe('up')
+      expect(dataFor(notifies, 'a2', 'stdout')).toBe('two')
+    } finally {
+      proc.disposeAll()
+    }
+  })
+
+  // The hub restores every chat that ran at shutdown in the background lane; the
+  // one the user opens meanwhile must not wait its FIFO turn.
+  it('prioritize moves a queued chat agent start to the front', async () => {
+    const { ctx } = makeCtx(roots)
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 10_000 })
+    const children = [controlledChild(), controlledChild(), controlledChild()]
+    const started: string[] = []
+    let next = 0
+    const spawnProcess = vi.fn(() => children[next++].child) as unknown as typeof spawn
+    const proc = createProcHandlers(ctx, undefined, { admission, spawnProcess })
+    const spawnOf = (sessionId: string) =>
+      Promise.resolve(
+        proc.handlers[ProcMethods.procSpawn]({ sessionId, command: 'sh', admission: 'background' })
+      ).then(() => started.push(sessionId))
+    try {
+      await spawnOf('b1')
+      const queued = [spawnOf('b2'), spawnOf('b3')]
+      await new Promise((r) => setImmediate(r))
+      expect(await proc.handlers[ProcMethods.procPrioritize]({ sessionId: 'b3' })).toEqual({
+        ok: true,
+        queued: true
+      })
+      children[0].print('up')
+      await new Promise((r) => setImmediate(r))
+      expect(started).toEqual(['b1', 'b3'])
+      children[1].print('up')
+      await Promise.all(queued)
+      expect(started).toEqual(['b1', 'b3', 'b2'])
+      // Already started: nothing to move.
+      expect(await proc.handlers[ProcMethods.procPrioritize]({ sessionId: 'b3' })).toEqual({
+        ok: true,
+        queued: false
+      })
+    } finally {
+      proc.disposeAll()
+    }
+  })
+
+  it('a spawn with an admission lane waits for a free start slot (real processes)', async () => {
+    const { notifies, until, ctx } = makeCtx(roots)
+    const admission = createSpawnAdmission({ concurrency: 1, startCapMs: 60_000 })
+    const proc = createProcHandlers(ctx, undefined, { admission })
+    try {
+      // `cat` prints nothing until written to, so it holds the slot until the test says.
+      await proc.handlers[ProcMethods.procSpawn]({
+        sessionId: 'a1',
+        command: 'cat',
+        admission: 'background'
+      })
+      let secondDone = false
+      const secondReply = Promise.resolve(
+        proc.handlers[ProcMethods.procSpawn]({
+          sessionId: 'a2',
+          command: 'sh',
+          args: ['-c', 'printf two; exec cat'],
+          admission: 'background'
+        })
+      ).then(() => {
+        secondDone = true
+      })
+      // Every microtask settled: nothing but the slot holds it back.
+      await new Promise((r) => setImmediate(r))
+      expect(secondDone).toBe(false)
+      await proc.handlers[ProcMethods.procWrite]({ sessionId: 'a1', data: 'up' })
+      await until(() => dataFor(notifies, 'a1', 'stdout') === 'up')
+      await secondReply
+      await until(() => dataFor(notifies, 'a2', 'stdout') === 'two')
+    } finally {
+      proc.disposeAll()
+    }
   })
 })
 

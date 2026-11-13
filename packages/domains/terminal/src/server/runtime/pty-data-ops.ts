@@ -29,17 +29,28 @@ import type { TaskSessionStore } from './task-session-store'
 export interface PtySessionLedger {
   /** Spawn-intent anchor — durable BEFORE the child process can race ahead. */
   recordPendingSpawn(args: {
+    /** The computer the agent runs on: it holds the task's sessions. */
+    computerId: string | null
     taskId: string
     mode: string
+    /** The spawning tab (main tab id = task id). */
+    tabId: string
     /** `null` = fresh spawn without a pre-minted id (agent mints its own). */
     expectedSessionId: string | null
     usedResume: boolean
     spawnToken?: string
-  }): Promise<void>
-  /** Drop pending rows for (taskId, mode) — called on PTY exit, best-effort. */
-  prunePendingSpawns(scope: { taskId: string; mode: string }): Promise<number>
+  }): Promise<string>
+  /** Drop the pending rows one PTY wrote (by id) — called on its exit, best-effort. */
+  prunePendingSpawns(scope: { computerId: string | null; ids: string[] }): Promise<number>
+  /** A tab's display name (its label; "Main" for the main tab), or null if gone. */
+  tabLabel(taskId: string, tabId: string): Promise<string | null>
   /** Bind a pooled agent session to a task+tab (set-once). True if it bound. */
-  bindSessionToTask(args: { sessionId: string; taskId: string; tabId: string }): Promise<boolean>
+  bindSessionToTask(args: {
+    computerId: string | null
+    sessionId: string
+    taskId: string
+    tabId: string
+  }): Promise<boolean>
   /**
    * Task-scoped MCP env for agent subprocesses (SLAYZONE_TASK_ID etc.).
    *
@@ -62,9 +73,17 @@ export function createDbPtySessionLedger(
   taskStore: TaskSessionStore
 ): PtySessionLedger {
   return {
-    recordPendingSpawn: (args) => taskStore.recordPendingSpawn(db, args),
-    prunePendingSpawns: (scope) => taskStore.prunePendingSpawns(db, scope),
-    bindSessionToTask: (args) => taskStore.bindSessionToTask(db, args),
+    recordPendingSpawn: ({ computerId, ...args }) => taskStore.recordPendingSpawn(computerId, args),
+    prunePendingSpawns: ({ computerId, ids }) => taskStore.prunePendingSpawns(computerId, { ids }),
+    bindSessionToTask: ({ computerId, ...args }) => taskStore.bindSessionToTask(computerId, args),
+    tabLabel: async (taskId, tabId) => {
+      const row = await db.get<{ label: string | null; is_main: number }>(
+        'SELECT label, is_main FROM terminal_tabs WHERE id = ? AND task_id = ?',
+        [tabId, taskId]
+      )
+      if (!row) return null
+      return row.label || (row.is_main ? 'Main' : null)
+    },
     buildMcpEnv: (taskId, mode, remote) => buildMcpEnvDb(db, taskId, mode, undefined, remote)
   }
 }
