@@ -1,5 +1,52 @@
 [
   {
+    "version": "0.40.0",
+    "date": "2026-11-13",
+    "tagline": "Tasks on the move",
+    "items": [
+      {
+        "category": "breaking",
+        "title": "Completing a task waits for its agents",
+        "description": "slay tasks done (and setting a done status from the CLI or MCP) refuses while any of the task's agents is still replying unless you pass --force, and completing a task stops all its agents, chats included."
+      },
+      {
+        "category": "feature",
+        "title": "Move a task to another project",
+        "description": "Move a task with its subtasks and tags to another project from its menu, the palette or the project field, and choose which agent sessions come along."
+      },
+      {
+        "category": "feature",
+        "title": "Duplicate a task",
+        "description": "Duplicate a task as a fresh follow-up in any project, copying its title, description, priority, agent and tags."
+      },
+      {
+        "category": "feature",
+        "title": "Image previews in chat",
+        "description": "Images an agent reads show a hover preview and appear in the opened card; click any image or attachment preview to see it full size."
+      },
+      {
+        "category": "improvement",
+        "title": "Chats resume faster after launch",
+        "description": "Chat agents restart as soon as the app starts, active tab first, instead of waiting for each tab to load."
+      },
+      {
+        "category": "improvement",
+        "title": "Codex file citations as chips",
+        "description": "File references in Codex chat replies render as clickable chips."
+      },
+      {
+        "category": "fix",
+        "title": "Git diff in several projects",
+        "description": "Git diff panels open in more than one project no longer fail with an \"outside the folders of project\" error."
+      },
+      {
+        "category": "fix",
+        "title": "Link hover underline",
+        "description": "Hovering a link in a chat message underlines only that link, not every link in the message."
+      }
+    ]
+  },
+  {
     "version": "0.39.0",
     "date": "2026-11-11",
     "tagline": "Scrollback survives restarts",

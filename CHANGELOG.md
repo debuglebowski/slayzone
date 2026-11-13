@@ -1,6 +1,79 @@
 # Changelog
 
 
+## v0.40.0
+
+[compare changes](https://github.com/debuglebowski/slayzone/compare/v0.39.0...v0.40.0)
+
+### 🚀 Enhancements
+
+- **computers:** Replace a re-enrolled computer's offline predecessor ([7d9e405ec](https://github.com/debuglebowski/slayzone/commit/7d9e405ec))
+- **computer:** Computer.log with agent start wait times ([de2a0a9e1](https://github.com/debuglebowski/slayzone/commit/de2a0a9e1))
+- **tasks:** Move to project via confirm dialog; subtasks + tags follow ([4400c8e57](https://github.com/debuglebowski/slayzone/commit/4400c8e57))
+- **tasks:** Agent sessions follow a task moved to another project ([2fdab4ec8](https://github.com/debuglebowski/slayzone/commit/2fdab4ec8))
+- **tasks:** Cross-hub move journal, lock and step engine (slice 3a) ([9aba82fe1](https://github.com/debuglebowski/slayzone/commit/9aba82fe1))
+- **tasks:** Cross-hub move carries the task rows (slice 3b) ([3e8463e7c](https://github.com/debuglebowski/slayzone/commit/3e8463e7c))
+- **tasks:** Cross-hub move copies artifact files (slice 3c) ([08bcb8962](https://github.com/debuglebowski/slayzone/commit/08bcb8962))
+- **tasks:** Blockers split by a cross-hub move become remote links (slice 3d) ([f8a1f5278](https://github.com/debuglebowski/slayzone/commit/f8a1f5278))
+- **tasks:** Move tasks to another hub from the board (slice 3e) ([2a7d13672](https://github.com/debuglebowski/slayzone/commit/2a7d13672))
+- **chat-runtime:** A computer hands out a task's sessions for a move (slice 4a) ([b980bc136](https://github.com/debuglebowski/slayzone/commit/b980bc136))
+- **tasks:** A moved task's chats go with it to the other hub (slice 4b) ([b16ba5768](https://github.com/debuglebowski/slayzone/commit/b16ba5768))
+- **tasks:** Claude transcripts and scrollback move with a task's chats (slice 4a-2) ([3c8e3bd45](https://github.com/debuglebowski/slayzone/commit/3c8e3bd45))
+- **tasks:** The sessions a move carried are forgotten where they were left (slice 4d) ([5a82036a2](https://github.com/debuglebowski/slayzone/commit/5a82036a2))
+- **tasks:** A task's sessions follow it to a project on another computer (slice 4c) ([673189f20](https://github.com/debuglebowski/slayzone/commit/673189f20))
+- **tasks:** Codex chat sessions follow a task too (slice 4a-3) ([747d69931](https://github.com/debuglebowski/slayzone/commit/747d69931))
+- **tasks:** A move can go on without its sessions; legacy chats migrate before export ([8af31ba1a](https://github.com/debuglebowski/slayzone/commit/8af31ba1a))
+- **chat:** Image Read hover preview + full-size lightbox ([f2c72b99d](https://github.com/debuglebowski/slayzone/commit/f2c72b99d))
+- **chat:** Render Codex file-citation directives as chips ([1194658eb](https://github.com/debuglebowski/slayzone/commit/1194658eb))
+- **tasks:** Duplicate task as fresh follow-up ([9233282b0](https://github.com/debuglebowski/slayzone/commit/9233282b0))
+- **projects:** Move a whole project to another hub ([38d9d06fd](https://github.com/debuglebowski/slayzone/commit/38d9d06fd))
+
+### 🩹 Fixes
+
+- **release:** Linux build runs in a prebuilt image, no apt at release time ([c088b62f4](https://github.com/debuglebowski/slayzone/commit/c088b62f4))
+- **tasks:** Completion stops every agent; CLI refuses mid-reply w/o --force ([2c7f88e64](https://github.com/debuglebowski/slayzone/commit/2c7f88e64))
+- **worktrees:** Git diff store calls in each panel's own scope ([e592643bf](https://github.com/debuglebowski/slayzone/commit/e592643bf))
+- **computers:** Replace dialog says shared access is not carried over ([3f07fc09f](https://github.com/debuglebowski/slayzone/commit/3f07fc09f))
+- **federation:** Shell calls for another hub's project go to that hub ([75d3f3400](https://github.com/debuglebowski/slayzone/commit/75d3f3400))
+- **chat:** Hub restarts running chat agents at boot ([3e0b3ad0d](https://github.com/debuglebowski/slayzone/commit/3e0b3ad0d))
+- **chat:** Cut per-tab requests on restore ([00c8ec481](https://github.com/debuglebowski/slayzone/commit/00c8ec481))
+- **hub:** Unknown task/project in a request → NOT_FOUND, not default computer ([ce3ed2d74](https://github.com/debuglebowski/slayzone/commit/ce3ed2d74))
+- **scopes:** Task.moveToProject + movePreview need the tasks scope ([cb0736381](https://github.com/debuglebowski/slayzone/commit/cb0736381))
+- **chat:** One answer for removed computers; task paths judged once ([fa34a97f6](https://github.com/debuglebowski/slayzone/commit/fa34a97f6))
+- **tasks:** A task leaving a hub is not erased on its computers ([10b42b2c8](https://github.com/debuglebowski/slayzone/commit/10b42b2c8))
+- **tasks:** A task moving back takes up its chats again ([3ebff0df6](https://github.com/debuglebowski/slayzone/commit/3ebff0df6))
+- **markdown:** Underline only hovered link, not all links in message ([8812e96f3](https://github.com/debuglebowski/slayzone/commit/8812e96f3))
+- Resolve E2E regressions and test races ([e4ddc8073](https://github.com/debuglebowski/slayzone/commit/e4ddc8073))
+
+### 📖 Documentation
+
+- **skills:** Commit-and-done passes --force to slay tasks done ([5b7de68c1](https://github.com/debuglebowski/slayzone/commit/5b7de68c1))
+
+### 🏡 Chore
+
+- **nix:** Update sources to 0.39.0 ([76878d10b](https://github.com/debuglebowski/slayzone/commit/76878d10b))
+
+### ✅ Tests
+
+- **migrations:** V0.39.0 persona ([5d93bd26a](https://github.com/debuglebowski/slayzone/commit/5d93bd26a))
+- **migrations:** Re-record persona expected outputs at 0.39.0 ([50ae396ed](https://github.com/debuglebowski/slayzone/commit/50ae396ed))
+- **e2e:** Git diff panels in two projects, one renderer load ([ab5bcfdc1](https://github.com/debuglebowski/slayzone/commit/ab5bcfdc1))
+- **e2e:** 140 opens git panel by toggle state, retried ([7a228e476](https://github.com/debuglebowski/slayzone/commit/7a228e476))
+- **e2e:** 112 bulk delete expects permanent erasure, no undo ([c8029aba5](https://github.com/debuglebowski/slayzone/commit/c8029aba5))
+- **migrations:** Confirm computer replacement ([f5bff392e](https://github.com/debuglebowski/slayzone/commit/f5bff392e))
+- **e2e:** 140 waits for the opened task's page before clicking Git ([ffdf0ed42](https://github.com/debuglebowski/slayzone/commit/ffdf0ed42))
+- **computer:** Pty-remote-integration runs the computer shell as /bin/sh ([04dd7b5a2](https://github.com/debuglebowski/slayzone/commit/04dd7b5a2))
+- **tasks:** E2e for pause, cancel, quit mid-move and what a move carries ([706c5f9e6](https://github.com/debuglebowski/slayzone/commit/706c5f9e6))
+- **agent-hooks:** Task/server mocks export projectMovingSql ([9acf9aa2c](https://github.com/debuglebowski/slayzone/commit/9acf9aa2c))
+
+### 🎨 Styles
+
+- **migrations:** Biome format p11 persona facts ([712e76fcd](https://github.com/debuglebowski/slayzone/commit/712e76fcd))
+
+### ❤️ Contributors
+
+- Debuglebowski
+
 ## v0.39.0
 
 [compare changes](https://github.com/debuglebowski/slayzone/compare/v0.38.0...v0.39.0)
