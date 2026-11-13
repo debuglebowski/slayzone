@@ -35,6 +35,7 @@ import type { GitDiffSnapshot } from '../shared/types'
 // it the transport mock below.
 vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => ({
+  useHubId: () => null,
   useTRPC: () => ({
     worktrees: {
       getWorkingDiff: { queryOptions: () => ({}) },

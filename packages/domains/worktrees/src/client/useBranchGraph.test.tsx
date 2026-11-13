@@ -57,6 +57,7 @@ vi.mock('@slayzone/transport/client', () => {
   }
   const client = {}
   return {
+    useHubId: () => null,
     useTRPC: () => trpc,
     useTRPCClient: () => client,
     useSubscription: () => undefined

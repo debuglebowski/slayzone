@@ -12,6 +12,11 @@
  * shared one would run in whichever panel came first, and be refused (or, worse,
  * allowed) for the other.
  *
+ * Hub: with several hubs signed in, each panel lives in the `HubScope` of its task's
+ * hub, with that hub's own tRPC client. The store keeps one transport PER HUB and
+ * every entry / watch / change event belongs to one hub — a remote hub's task read
+ * through the local hub's client is "task <id> is not on this hub".
+ *
  * Lifecycle:
  *   - First subscriber for a key creates an entry, triggers an immediate
  *     fetch, and starts a polling interval.
@@ -33,7 +38,7 @@
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useSubscription } from '@slayzone/transport/client'
+import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { useGitScope, useUnscopedTRPC, useUnscopedTRPCClient, type GitScopeTarget } from './trpc'
 import type { GitDiffSnapshot } from '../shared/types'
 
@@ -50,6 +55,7 @@ export type GitStoreScope = GitScopeTarget | null
  *
  * Built on the UNSCOPED client: every method takes the scope of the entry / watch
  * it serves and names it as the call's `target`. Never a panel's scoped proxy.
+ * One per hub (see {@link transportFor}): a hub's client reaches only that hub.
  *
  * The fs-watcher broadcasts (`onDiffChanged` / `onDiffWatchFailed`) are NOT here
  * — those flow in via `useSubscription` in the hook and are routed to the store
@@ -70,16 +76,30 @@ interface StoreTransport {
   watchStop: (scope: GitStoreScope, worktreePath: string) => Promise<void>
 }
 
-let transport: StoreTransport | null = null
+/**
+ * Key of the hub a panel talks to: its `HubScope`'s id, or {@link NO_HUB} outside
+ * one (a single-hub window — every call goes to the one client in the tree).
+ */
+type HubKey = string
+const NO_HUB: HubKey = ''
+
+/** Each hub's transport, wired by the hooks from that hub's client (`source`). */
+const hubTransports = new Map<HubKey, { transport: StoreTransport; source: unknown }>()
+/** A test's fake: serves every hub, and the hooks leave it alone. */
+let injectedTransport: StoreTransport | null = null
+
+/** The transport that reaches `hub`, or null before a panel of that hub wired one. */
+function transportFor(hub: HubKey): StoreTransport | null {
+  return injectedTransport ?? hubTransports.get(hub)?.transport ?? null
+}
 
 /**
- * Wire the store to the tRPC transport. Idempotent — called by every
- * `useGitDiffSnapshot` mount; the first wins and later calls no-op (the client +
- * queryClient are app-singletons, so the captured refs stay valid). Exposed for
- * the unit test to inject a controllable fake.
+ * Inject a fake transport for every hub (unit tests); `null` drops it and every
+ * hook-wired transport, so the next mount wires afresh.
  */
 export function _setGitDiffStoreTransport(t: StoreTransport | null): void {
-  transport = t
+  injectedTransport = t
+  if (!t) hubTransports.clear()
 }
 
 export interface GitDiffStoreParams {
@@ -99,6 +119,8 @@ export interface GitDiffState {
 
 interface StoreEntry {
   key: string
+  /** The hub this entry's reads go to. */
+  hub: HubKey
   state: GitDiffState
   listeners: Set<() => void>
   /** Refcount keyed by subscriber id, value is that subscriber's requested poll interval. */
@@ -135,6 +157,8 @@ interface StoreEntry {
  * struct no longer owns listener teardown.
  */
 interface PathWatcherState {
+  /** The hub that watches — and whose change events concern this state. */
+  hub: HubKey
   scope: GitStoreScope
   targetPath: string
   /** Entries currently subscribed to this path (any params). Used for fanning out change events. */
@@ -170,14 +194,21 @@ function scopeKeyOf(scope: GitStoreScope): string {
   ])
 }
 
-function watchKeyOf(scope: GitStoreScope, targetPath: string): string {
-  return JSON.stringify([scopeKeyOf(scope), targetPath])
+function watchKeyOf(hub: HubKey, scope: GitStoreScope, targetPath: string): string {
+  return JSON.stringify([hub, scopeKeyOf(scope), targetPath])
 }
 
-/** Every scope's watcher of `targetPath` (a change broadcast names the path only). */
-function watchersOfPath(targetPath: string): PathWatcherState[] {
+/**
+ * Every scope's watcher of `targetPath` on `hub` (a change broadcast names the path
+ * only; the hub is the one whose subscription delivered it). No hub → every hub's.
+ */
+function watchersOfPath(targetPath: string, hub?: HubKey): PathWatcherState[] {
   const out: PathWatcherState[] = []
-  for (const state of pathWatchers.values()) if (state.targetPath === targetPath) out.push(state)
+  for (const state of pathWatchers.values()) {
+    if (state.targetPath !== targetPath) continue
+    if (hub !== undefined && state.hub !== hub) continue
+    out.push(state)
+  }
   return out
 }
 
@@ -252,6 +283,7 @@ const entries = new Map<string, StoreEntry>()
 let nextSubscriberId = 1
 
 function makeKey(
+  hub: HubKey,
   scope: GitStoreScope,
   targetPath: string,
   ignoreWhitespace: boolean,
@@ -260,6 +292,7 @@ function makeKey(
   contextLines: GitDiffContextLines
 ): string {
   return JSON.stringify({
+    hub,
     scope: scopeKeyOf(scope),
     targetPath,
     ignoreWhitespace,
@@ -287,6 +320,7 @@ function updateState(entry: StoreEntry, patch: Partial<GitDiffState>): void {
 }
 
 async function runFetch(entry: StoreEntry): Promise<void> {
+  const transport = transportFor(entry.hub)
   if (!transport) return
   if (entry.inFlight) {
     entry.dirty = true
@@ -373,8 +407,8 @@ function ensureTimer(entry: StoreEntry): void {
  * different context levels, whitespace on/off) need a refresh. We don't
  * narrow to specific keys because they share the underlying git HEAD / index.
  */
-function handleDiffChanged(worktreePath: string, change: GitPathChange): void {
-  for (const state of watchersOfPath(worktreePath)) {
+function handleDiffChanged(worktreePath: string, change: GitPathChange, hub?: HubKey): void {
+  for (const state of watchersOfPath(worktreePath, hub)) {
     for (const entry of state.entries) {
       void runFetch(entry)
     }
@@ -386,9 +420,10 @@ function handleDiffChanged(worktreePath: string, change: GitPathChange): void {
  * Routes an `onDiffChanged` broadcast (delivered by the hook's useSubscription)
  * into the store. Only re-fetches when an entry for that exact path exists, so
  * unrelated worktrees ignore the event — same gate as the old IPC listener.
+ * `hub`: the hub whose subscription delivered it (omitted → every hub's watchers).
  */
-export function notifyDiffChanged(changedPath: string, refsChanged?: boolean): void {
-  handleDiffChanged(changedPath, { refsChanged: refsChanged ?? true })
+export function notifyDiffChanged(changedPath: string, refsChanged?: boolean, hub?: HubKey): void {
+  handleDiffChanged(changedPath, { refsChanged: refsChanged ?? true }, hub)
 }
 
 /**
@@ -396,8 +431,8 @@ export function notifyDiffChanged(changedPath: string, refsChanged?: boolean): v
  * inactive so the poll timer tightens back to the subscriber cadence, then
  * fires an immediate catch-up fetch for each entry on the path.
  */
-export function notifyDiffWatchFailed(failedPath: string): void {
-  for (const state of watchersOfPath(failedPath)) {
+export function notifyDiffWatchFailed(failedPath: string, hub?: HubKey): void {
+  for (const state of watchersOfPath(failedPath, hub)) {
     if (!state.watcherActive) continue
     state.watcherActive = false
     retimeAll(state)
@@ -418,16 +453,18 @@ function pathRefCount(state: PathWatcherState): number {
   return state.entries.size + state.listeners.size
 }
 
-/** Join the path's watcher in `scope` (creating it + starting the watch on first use). */
+/** Join the path's watcher in `scope` on `hub` (creating it + starting the watch on first use). */
 function acquirePath(
+  hub: HubKey,
   scope: GitStoreScope,
   targetPath: string,
   join: (state: PathWatcherState) => void
 ): void {
-  const watchKey = watchKeyOf(scope, targetPath)
+  const watchKey = watchKeyOf(hub, scope, targetPath)
   let state = pathWatchers.get(watchKey)
   if (!state) {
     state = {
+      hub,
       scope,
       targetPath,
       entries: new Set(),
@@ -449,6 +486,7 @@ function acquirePath(
 
 /** Start the computer's watch for a path (refused or failed: poll-only until retried). */
 function startWatch(watchKey: string, capturedState: PathWatcherState): void {
+  const transport = transportFor(capturedState.hub)
   if (!transport) {
     // Transport not wired yet (SSR / tests without injection) → poll-only.
     return
@@ -486,17 +524,19 @@ export function retryFailedGitWatches(): void {
   }
 }
 
-/** Leave the path's watcher in `scope`; the last one out stops the watch, in that scope. */
+/** Leave the path's watcher in `scope` on `hub`; the last one out stops the watch there. */
 function releasePath(
+  hub: HubKey,
   scope: GitStoreScope,
   targetPath: string,
   leave: (state: PathWatcherState) => void
 ): void {
-  const watchKey = watchKeyOf(scope, targetPath)
+  const watchKey = watchKeyOf(hub, scope, targetPath)
   const state = pathWatchers.get(watchKey)
   if (!state) return
   leave(state)
   if (pathRefCount(state) > 0) return
+  const transport = transportFor(hub)
   // Last subscriber — tear down the main-process watcher refcount.
   if (state.watcherActive && transport) {
     // Best-effort — we don't await.
@@ -520,11 +560,11 @@ function releasePath(
 }
 
 function acquirePathWatcher(entry: StoreEntry): void {
-  acquirePath(entry.scope, entry.targetPath, (state) => state.entries.add(entry))
+  acquirePath(entry.hub, entry.scope, entry.targetPath, (state) => state.entries.add(entry))
 }
 
 function releasePathWatcher(entry: StoreEntry): void {
-  releasePath(entry.scope, entry.targetPath, (state) => state.entries.delete(entry))
+  releasePath(entry.hub, entry.scope, entry.targetPath, (state) => state.entries.delete(entry))
 }
 
 /**
@@ -532,20 +572,22 @@ function releasePathWatcher(entry: StoreEntry): void {
  * watcher failing — then the caller's own poll is the only signal, so refresh now).
  * Shares the diff store's refcounted watcher, so a panel that reads git without the
  * diff (status counts, branch graph) still refreshes on change instead of waiting
- * for its backed-off poll.
+ * for its backed-off poll. `hub`: the hub the watch runs on (default: no HubScope).
  */
 export function subscribeGitPathChanges(
   scope: GitStoreScope,
   targetPath: string,
-  onChange: (change: GitPathChange) => void
+  onChange: (change: GitPathChange) => void,
+  hub: HubKey = NO_HUB
 ): () => void {
   // A fresh wrapper per subscription: the same callback subscribed twice counts twice.
   const listener = (change: GitPathChange): void => onChange(change)
-  acquirePath(scope, targetPath, (state) => state.listeners.add(listener))
-  return () => releasePath(scope, targetPath, (state) => state.listeners.delete(listener))
+  acquirePath(hub, scope, targetPath, (state) => state.listeners.add(listener))
+  return () => releasePath(hub, scope, targetPath, (state) => state.listeners.delete(listener))
 }
 
 interface SubscribeArgs {
+  hub: HubKey
   scope: GitStoreScope
   targetPath: string
   ignoreWhitespace: boolean
@@ -557,6 +599,7 @@ interface SubscribeArgs {
 
 function subscribeEntry(args: SubscribeArgs, listener: () => void): () => void {
   const key = makeKey(
+    args.hub,
     args.scope,
     args.targetPath,
     args.ignoreWhitespace,
@@ -569,13 +612,14 @@ function subscribeEntry(args: SubscribeArgs, listener: () => void): () => void {
   if (!entry) {
     entry = {
       key,
+      hub: args.hub,
       state: { snapshot: null, loading: false, error: null },
       listeners: new Set(),
       subscribers: new Map(),
       timer: null,
       timerIntervalMs: 0,
       scope: args.scope,
-      watchKey: watchKeyOf(args.scope, args.targetPath),
+      watchKey: watchKeyOf(args.hub, args.scope, args.targetPath),
       targetPath: args.targetPath,
       ignoreWhitespace: args.ignoreWhitespace,
       fromSha: args.fromSha,
@@ -639,26 +683,28 @@ export interface UseGitDiffSnapshotResult extends GitDiffState {
 const EMPTY_STATE: GitDiffState = { snapshot: null, loading: false, error: null }
 
 /**
- * Wires the module-level store to tRPC (first mount wins) and routes the fs-watcher
- * broadcasts into it. Every hook reading the store calls this.
+ * Wires the module-level store to the panel's HUB's tRPC client and routes that
+ * hub's fs-watcher broadcasts into it. Every hook reading the store calls this, and
+ * returns the hub key its entries and watches belong to.
  *
  * UNSCOPED client, explicit `target` per call: the transport outlives the panel that
- * wired it and serves every panel, so it must not carry that panel's scope.
+ * wired it and serves every panel of its hub, so it must not carry that panel's scope.
  */
-function useGitStoreTransport(): void {
+function useGitStoreTransport(): HubKey {
+  const hub = useHubId() ?? NO_HUB
   const trpc = useUnscopedTRPC()
   const trpcClient = useUnscopedTRPCClient()
   const queryClient = useQueryClient()
 
-  // Guarded on `transport === null` so a test that pre-injects a fake transport (or a
-  // later mount) isn't clobbered — the unscoped client/queryClient are app-singletons,
-  // so the first real wire-up stays valid for the app's lifetime.
+  // One per hub, rewired only when that hub's client changes (a hub signed out and
+  // in again gets a new one). A test's injected fake is never clobbered.
   useEffect(() => {
-    if (transport) return
+    if (injectedTransport) return
+    if (hubTransports.get(hub)?.source === trpcClient) return
     // `target: undefined` outside any panel: the hub refuses the call, as it would
     // any unscoped git call.
     const target = (scope: GitStoreScope) => scope ?? undefined
-    _setGitDiffStoreTransport({
+    const transport: StoreTransport = {
       // staleTime:0 — the working-tree diff is real-time; the store's own poll +
       // fs-watcher decide WHEN to fetch, so each fetch must hit the server, never
       // return a react-query-cached snapshot (otherwise a refresh/poll within the
@@ -674,21 +720,23 @@ function useGitStoreTransport(): void {
         trpcClient.worktrees.watchStart.mutate({ worktreePath, target: target(scope) }),
       watchStop: (scope, worktreePath) =>
         trpcClient.worktrees.watchStop.mutate({ worktreePath, target: target(scope) })
-    })
-  }, [trpc, trpcClient, queryClient])
+    }
+    hubTransports.set(hub, { transport, source: trpcClient })
+  }, [hub, trpc, trpcClient, queryClient])
 
   // Route fs-watcher broadcasts into the store. The store gates on whether a
   // path entry exists, so events for unrelated worktrees are dropped cheaply.
   useSubscription(
     trpc.worktrees.onDiffChanged.subscriptionOptions(undefined, {
-      onData: ({ worktreePath, refsChanged }) => notifyDiffChanged(worktreePath, refsChanged)
+      onData: ({ worktreePath, refsChanged }) => notifyDiffChanged(worktreePath, refsChanged, hub)
     })
   )
   useSubscription(
     trpc.worktrees.onDiffWatchFailed.subscriptionOptions(undefined, {
-      onData: ({ worktreePath }) => notifyDiffWatchFailed(worktreePath)
+      onData: ({ worktreePath }) => notifyDiffWatchFailed(worktreePath, hub)
     })
   )
+  return hub
 }
 
 /**
@@ -703,7 +751,7 @@ export function useGitPathChanges(
   onChange: () => void,
   opts: { refsOnly?: boolean } = {}
 ): void {
-  useGitStoreTransport()
+  const hub = useGitStoreTransport()
   const scope = useGitScope()
   const onChangeRef = useRef(onChange)
   useEffect(() => {
@@ -712,10 +760,15 @@ export function useGitPathChanges(
   const refsOnly = opts.refsOnly ?? false
   useEffect(() => {
     if (!enabled || !targetPath) return
-    return subscribeGitPathChanges(scope, targetPath, (change) => {
-      if (!refsOnly || change.refsChanged) onChangeRef.current()
-    })
-  }, [scope, targetPath, enabled, refsOnly])
+    return subscribeGitPathChanges(
+      scope,
+      targetPath,
+      (change) => {
+        if (!refsOnly || change.refsChanged) onChangeRef.current()
+      },
+      hub
+    )
+  }, [hub, scope, targetPath, enabled, refsOnly])
 }
 
 /**
@@ -727,7 +780,7 @@ export function useGitDiffSnapshot(
   targetPath: string | null,
   params: GitDiffStoreParams & { visible: boolean }
 ): UseGitDiffSnapshotResult {
-  useGitStoreTransport()
+  const hub = useGitStoreTransport()
   const scope = useGitScope()
 
   const contextLines: GitDiffContextLines = params.contextLines ?? 'all'
@@ -735,6 +788,7 @@ export function useGitDiffSnapshot(
   const key =
     active && targetPath
       ? makeKey(
+          hub,
           scope,
           targetPath,
           params.ignoreWhitespace,
@@ -757,6 +811,7 @@ export function useGitDiffSnapshot(
           // nothing for useSyncExternalStore to tear down.
         }
       const args: SubscribeArgs = {
+        hub,
         scope,
         targetPath,
         ignoreWhitespace: params.ignoreWhitespace,
@@ -769,6 +824,7 @@ export function useGitDiffSnapshot(
     },
     [
       active,
+      hub,
       scope,
       targetPath,
       params.ignoreWhitespace,
@@ -825,6 +881,7 @@ export function _resetStore(): void {
   }
   entries.clear()
   for (const state of pathWatchers.values()) {
+    const transport = transportFor(state.hub)
     if (state.watcherActive && transport) {
       void transport.watchStop(state.scope, state.targetPath).catch(() => {
         /* ignore */

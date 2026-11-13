@@ -69,6 +69,7 @@ const withPaths = <T extends object>(o: T): T =>
   }) as T
 vi.mock('./trpc', async () => (await import('./trpc.passthrough-mock')).trpcPassthroughMock())
 vi.mock('@slayzone/transport/client', () => ({
+  useHubId: () => null,
   useTRPC: () => trpc,
   useTRPCClient: () => trpcClient,
   useSubscription: () => undefined

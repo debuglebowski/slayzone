@@ -39,6 +39,7 @@ const proc = (name: string) => ({
 const ns = new Proxy({}, { get: (_t, name: string) => proc(name) })
 const root = { worktrees: ns }
 vi.mock('@slayzone/transport/client', () => ({
+  useHubId: () => null,
   typedTrpc: () => ({ useTRPC: () => root, useTRPCClient: () => root }),
   useTRPC: () => root,
   useTRPCClient: () => root,
