@@ -1,0 +1,34 @@
+{
+  "release": "v0.40.0",
+  "journey": "v0.40.0-full",
+  "summary": "v0.40.0 user (schema v217), the release current users upgrade from: desktop hub + local computer, a standalone team hub, build-box on both hubs from one process, gpu-box on the team hub; per-computer project folders, bindings, tags/template/subtask/artifact, Claude chat history on every computer.",
+  "topology": {
+    "desktop": true,
+    "desktopComputers": ["local-computer", "build-box"],
+    "hubs": [
+      {
+        "name": "team-hub",
+        "root": "hubs/hub2",
+        "env": {
+          "SLAYZONE_HUB_LISTEN_ADDRESS": "127.0.0.1:51110",
+          "SLAYZONE_HUB_NAME": "team-hub",
+          "SLAYZONE_HUB_ENABLE_TELEMETRY": "0"
+        },
+        "computers": ["build-box", "gpu-box"]
+      }
+    ],
+    "computers": [
+      {
+        "name": "build-box",
+        "root": "computers/c2"
+      },
+      {
+        "name": "gpu-box",
+        "root": "computers/c3",
+        "env": {
+          "SLAYZONE_HUB_ADDRESS": "127.0.0.1:51110"
+        }
+      }
+    ]
+  }
+}
