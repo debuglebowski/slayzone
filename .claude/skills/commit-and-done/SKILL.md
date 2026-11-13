@@ -20,9 +20,11 @@ If the commit fails, is cancelled by the user, or there is nothing to commit, **
 
 Only after a successful commit:
 
-Run: `slay tasks done --close --dev`
+Run: `slay tasks done --close --dev --force`
 
 This marks the task as done using the project's configured "done" status and closes the task tab in the SlayZone app.
+
+`--force` is required: the agent running this skill is itself mid-reply, so without it the CLI refuses ("has an agent mid-reply"). Completing stops every agent of the task, including this one — expected, since the task is finished.
 
 No explicit task ID is needed — `$SLAYZONE_TASK_ID` is set automatically in task terminals.
 
