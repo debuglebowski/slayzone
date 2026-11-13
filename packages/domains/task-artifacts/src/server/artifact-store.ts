@@ -8,6 +8,7 @@ import {
   writeFileSync,
   mkdirSync
 } from 'node:fs'
+import { open } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateArtifactInput,
@@ -443,6 +444,59 @@ export function createArtifactStore(dataDir: string) {
       }
       const { version } = await this.resolveArtifactVersion(db, { artifactId: id, versionRef })
       return new BlobStore(dataDir).read(version.content_hash)
+    },
+
+    /**
+     * Up to `length` bytes of the artifact's current content from `offset`, and its
+     * total size: a download reads in bounded pieces, so no message or string ever
+     * holds a whole (possibly multi-GB) file. Null only when there is no such
+     * artifact or it has neither a working file nor a version; any other failure
+     * (unreadable file, damaged blob) throws, so a client never mistakes it for a
+     * missing file. A blob's hash is checked on the first piece, not on every one.
+     */
+    async readArtifactBytesRange(
+      db: SlayzoneDb,
+      id: string,
+      offset: number,
+      length: number
+    ): Promise<{ bytes: Uint8Array; size: number } | null> {
+      const row = await getRow(db, id)
+      if (!row) return null
+      const taskId = row.task_id as string,
+        title = row.title as string
+      let file = [
+        getArtifactFilePath(taskId, id, title),
+        getLegacyArtifactFilePath(taskId, id, title)
+      ].find((p) => existsSync(p))
+      if (!file) {
+        if (row.current_version_id == null) return null
+        const version = (await db.namedTxn('task-artifacts:versions:resolve', {
+          artifactId: id,
+          versionRef: 'current'
+        })) as ArtifactVersion
+        const blobs = new BlobStore(dataDir)
+        if (offset === 0 && !(await blobs.verifyAsync(version.content_hash)))
+          throw new VersionError(
+            'BLOB_HASH_MISMATCH',
+            'Artifact version hash integrity check failed'
+          )
+        file = blobs.blobPath(version.content_hash)
+      }
+      const handle = await open(file, 'r')
+      return handle
+        .stat()
+        .then(async ({ size }) => {
+          const want = Math.max(0, Math.min(length, size - offset))
+          const bytes = Buffer.alloc(want)
+          let read = 0
+          while (read < want) {
+            const { bytesRead } = await handle.read(bytes, read, want - read, offset + read)
+            if (bytesRead === 0) break
+            read += bytesRead
+          }
+          return { bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, read), size }
+        })
+        .finally(() => handle.close())
     },
 
     /** The current (HEAD) version row, or null when the artifact has none. */

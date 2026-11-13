@@ -37,28 +37,24 @@ export type HostSaveResult =
 
 export type ArtifactExportResult = HostSaveResult
 
-/** One file to save on this device (see `saveFile`). */
-export interface SaveFileRequest {
-  /** The suggested name (save dialog default / the download's name). */
-  fileName: string
-  data: Uint8Array
-  /** Save dialog title. */
-  title: string
-  /** Show the saved file in the OS file manager afterwards. */
-  reveal?: boolean
-}
+/**
+ * Where a download is saved on THIS device, written in pieces (see `saveTargetOpen`):
+ * a download streams through, so its size never has to fit in one message or in
+ * memory.
+ *  - `file`: one file, under a name the person confirms.
+ *  - `directory`: a tree of files, inside a directory the person picks (the web shell,
+ *    which cannot write into a folder, saves it as `<folderName>.zip`).
+ *  - `zip`: one archive of the files written.
+ */
+export type SaveTargetRequest =
+  | { kind: 'file'; fileName: string; title: string; reveal?: boolean }
+  | { kind: 'directory'; folderName: string; title: string }
+  | { kind: 'zip'; fileName: string; title: string; reveal?: boolean }
 
-/** A set of files kept in their folders (see `saveFiles`). */
-export interface SaveFilesRequest {
-  /** What the set is called where one name is needed (the web shell's `<name>.zip`). */
-  folderName: string
-  /** `/`-separated relative paths. */
-  files: { path: string; data: Uint8Array }[]
-  /** Folders to create even when empty (same form as `files[].path`). */
-  dirs?: string[]
-  /** Directory picker title. */
-  title: string
-}
+export type SaveTargetOpenResult =
+  | { ok: true; targetId: string }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
 
 export interface ElectronBootstrapApp {
   getServerUrl: () => Promise<{ mode: 'local' | 'remote'; url: string }>
@@ -149,15 +145,21 @@ export interface ElectronBootstrapApp {
    */
   exportArtifact?: (request: ArtifactExportRequest) => Promise<ArtifactExportResult>
   /**
-   * Save bytes the client already holds as a file on THIS device (desktop: save
-   * dialog; web: a download). Optional, like `exportArtifact`.
+   * Save a download on THIS device in pieces: open (asks where), then write each
+   * file's bytes in order, then close. Optional, like `exportArtifact`.
    */
-  saveFile?: (request: SaveFileRequest) => Promise<HostSaveResult>
+  saveTargetOpen?: (request: SaveTargetRequest) => Promise<SaveTargetOpenResult>
   /**
-   * Save files into a directory the person picks, keeping their relative paths
-   * (desktop); the web shell downloads them as one zip. Optional.
+   * Append `data` to the file at `path` (`/`-separated, relative; `''` for a `file`
+   * target). Writing a new path finishes the previous file and starts this one.
    */
-  saveFiles?: (request: SaveFilesRequest) => Promise<HostSaveResult>
+  saveTargetWrite?: (targetId: string, path: string, data: Uint8Array) => Promise<void>
+  /** Create a (possibly empty) folder at `path`. */
+  saveTargetMkdir?: (targetId: string, path: string) => Promise<void>
+  /** Finish: everything written is saved (and revealed, when asked). */
+  saveTargetClose?: (targetId: string) => Promise<HostSaveResult>
+  /** Give up: nothing partial is left behind. */
+  saveTargetAbort?: (targetId: string) => Promise<void>
   restartSidecar: () => Promise<{ ok: boolean; error?: string }>
   /** Cycle the co-located computer, or start it if it never came up. Stops every
    *  agent pty on this machine — they are all children of that process. */

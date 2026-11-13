@@ -10,6 +10,12 @@
  * Supported: stored (0) and deflate (8), zip64, unix modes (exec bits), directories,
  * symlinks. Refused, as a `ZipError`: encryption, other methods, multi-disk archives,
  * any entry or symlink target that would land outside `destDir`.
+ *
+ * Symlinks are checked as the FILESYSTEM will follow them, not lexically: an entry may
+ * not lie under a symlink (of the archive or already on disk), and a link target may
+ * not pass through another link on its way — a chain like `s → ..`, `s/t → ../../x`
+ * looks inside `destDir` lexically and lands outside. The whole archive is validated
+ * before anything is written, and links are created last.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -222,6 +228,60 @@ async function readEntry(zipPath: string, fd: number, e: Entry): Promise<Buffer>
   return Buffer.concat(chunks)
 }
 
+const typeOf = (e: Entry): number => (e.mode === null ? 0 : e.mode & S_IFMT)
+const isDirEntry = (e: Entry): boolean => e.name.endsWith('/') || typeOf(e) === S_IFDIR
+const isLinkEntry = (e: Entry): boolean => typeOf(e) === S_IFLNK
+
+/** No ancestor of `target` below `dest` may be a symlink already on disk. */
+function assertNoLinkAncestor(dest: string, target: string, name: string): void {
+  let dir = path.dirname(target)
+  while (dir !== dest && dir.startsWith(dest + path.sep)) {
+    let isLink = false
+    try {
+      isLink = fs.lstatSync(dir).isSymbolicLink()
+    } catch {
+      // Not created yet: nothing to follow.
+    }
+    if (isLink) throw new ZipError(`Refusing zip entry under a symlink: ${name}`)
+    dir = path.dirname(dir)
+  }
+}
+
+/**
+ * A link at `target` → `linkTarget` must stay inside `dest` walking its path the way
+ * the filesystem does: every component before the last must be a plain directory, not
+ * one of the archive's links (`links`) nor a symlink on disk.
+ */
+function assertLinkInside(
+  dest: string,
+  target: string,
+  linkTarget: string,
+  links: Set<string>,
+  name: string
+): void {
+  const refuse = (): never => {
+    throw new ZipError(`Refusing symlink outside the destination: ${name} -> ${linkTarget}`)
+  }
+  if (path.isAbsolute(linkTarget) || /^[a-zA-Z]:/.test(linkTarget)) refuse()
+  const parts = linkTarget
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((p) => p !== '' && p !== '.')
+  let at = path.dirname(target)
+  for (const [i, part] of parts.entries()) {
+    at = part === '..' ? path.dirname(at) : path.join(at, part)
+    if (at !== dest && !at.startsWith(dest + path.sep)) refuse()
+    if (i === parts.length - 1) break
+    let onDiskLink = false
+    try {
+      onDiskLink = fs.lstatSync(at).isSymbolicLink()
+    } catch {
+      // Absent: a plain path component.
+    }
+    if (links.has(at) || onDiskLink) refuse()
+  }
+}
+
 /** Unpack every entry of `zipPath` under `destDir` (created if missing). */
 export async function extractZip(zipPath: string, destDir: string): Promise<void> {
   const dest = path.resolve(destDir)
@@ -229,29 +289,40 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
   const fd = fs.openSync(zipPath, 'r')
   try {
     const entries = readCentralDirectory(fd, fs.fstatSync(fd).size)
-    // Validate every name before writing anything.
+    // Validate every name — and every symlink — before writing anything.
     const targets = entries.map((e) => safeTarget(dest, e.name))
+    const links = new Set(targets.filter((_, i) => isLinkEntry(entries[i])))
+    for (const [i, e] of entries.entries()) {
+      for (
+        let dir = path.dirname(targets[i]);
+        dir.startsWith(dest + path.sep);
+        dir = path.dirname(dir)
+      )
+        if (links.has(dir)) throw new ZipError(`Refusing zip entry under a symlink: ${e.name}`)
+      assertNoLinkAncestor(dest, targets[i], e.name)
+    }
+    const linkTargets = new Map<number, string>()
+    for (const [i, e] of entries.entries()) {
+      if (!isLinkEntry(e)) continue
+      const linkTarget = (await readEntry(zipPath, fd, e)).toString('utf8')
+      assertLinkInside(dest, targets[i], linkTarget, links, e.name)
+      linkTargets.set(i, linkTarget)
+    }
 
     for (const [i, e] of entries.entries()) {
       const target = targets[i]
-      const type = e.mode === null ? 0 : e.mode & S_IFMT
-      if (e.name.endsWith('/') || type === S_IFDIR) {
+      if (isLinkEntry(e)) continue
+      if (isDirEntry(e)) {
         fs.mkdirSync(target, { recursive: true })
         continue
       }
       fs.mkdirSync(path.dirname(target), { recursive: true })
-
-      if (type === S_IFLNK) {
-        const linkTarget = (await readEntry(zipPath, fd, e)).toString('utf8')
-        const resolved = path.resolve(path.dirname(target), linkTarget)
-        if (path.isAbsolute(linkTarget) || !resolved.startsWith(dest + path.sep)) {
-          throw new ZipError(`Refusing symlink outside the destination: ${e.name} -> ${linkTarget}`)
-        }
-        fs.rmSync(target, { force: true })
-        fs.symlinkSync(linkTarget, target)
-        continue
+      // Never write THROUGH a symlink already sitting at the target.
+      try {
+        if (fs.lstatSync(target).isSymbolicLink()) fs.rmSync(target, { force: true })
+      } catch {
+        // Absent: nothing to replace.
       }
-
       const perm = e.mode !== null && e.mode & 0o777 ? e.mode & 0o777 : 0o644
       await pipeline([
         ...entrySource(zipPath, fd, e),
@@ -260,6 +331,14 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
       ])
       // createWriteStream's mode is filtered by the umask and ignored for an existing file.
       if (process.platform !== 'win32') fs.chmodSync(target, perm)
+    }
+
+    // Links last: nothing above was written through one.
+    for (const [i, linkTarget] of linkTargets) {
+      const target = targets[i]
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.rmSync(target, { force: true })
+      fs.symlinkSync(linkTarget, target)
     }
   } finally {
     fs.closeSync(fd)

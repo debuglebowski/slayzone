@@ -112,7 +112,11 @@ interface CliResult {
 }
 function runCli(
   args: string[],
-  opts: { input?: string | Buffer; envOverrides?: Record<string, string | undefined> } = {}
+  opts: {
+    input?: string | Buffer
+    envOverrides?: Record<string, string | undefined>
+    cwd?: string
+  } = {}
 ): Promise<CliResult> {
   return new Promise((resolve) => {
     const env: Record<string, string> = {
@@ -127,6 +131,7 @@ function runCli(
     }
     const p = spawn('node', [SLAY_BIN, ...args], {
       env,
+      cwd: opts.cwd,
       stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe']
     })
     const outChunks: Buffer[] = []
@@ -536,6 +541,31 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
     expect(html).toContain('<title>notes.md</title>')
     expect(html).toContain('<h1>hello</h1>')
+  })
+
+  // Review 1, L2: with no --output the file lands in the current directory under a
+  // name made safe from the title — an agent-named artifact cannot point it elsewhere
+  // (the hub's owned-path guard on the old export route no longer stands in front).
+  test('download without --output: a title that climbs or is absolute stays in the cwd', async () => {
+    const cwd = path.join(tmpDir, 'l2', 'a', 'b')
+    fs.mkdirSync(cwd, { recursive: true })
+    for (const [title, type, expected] of [
+      ['../../escape-l2.md', 'html', 'escape-l2.html'],
+      ['../../escape-raw.md', 'raw', 'escape-raw.md'],
+      ['/abs/dir/abs-l2.md', 'html', 'abs_dir_abs-l2.html']
+    ] as const) {
+      const c = await runCli(
+        ['tasks', 'artifacts', 'create', title, '--task', short(taskId), '--json'],
+        { input: '# x\n' }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+      const id = (JSON.parse(c.stdout) as { id: string }).id
+      const r = await runCli(['tasks', 'artifacts', 'download', short(id), '--type', type], { cwd })
+      expect(r.exitCode, r.stderr).toBe(0)
+      expect(fs.realpathSync(r.stdout.trim())).toBe(fs.realpathSync(path.join(cwd, expected)))
+    }
+    expect(fs.existsSync(path.join(tmpDir, 'l2', 'escape-l2.html'))).toBe(false)
+    expect(fs.existsSync(path.join(tmpDir, 'l2', 'escape-raw.md'))).toBe(false)
   })
 
   test('download --type html of a mermaid artifact embeds the bundled mermaid build', async () => {

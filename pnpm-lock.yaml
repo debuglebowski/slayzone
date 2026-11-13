@@ -393,6 +393,9 @@ importers:
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
+      archiver:
+        specifier: ^8.0.0
+        version: 8.0.0
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -604,6 +607,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@types/archiver':
+        specifier: ^8.0.0
+        version: 8.0.0
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -649,6 +655,9 @@ importers:
       electron-vite:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@7.2.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
       fzf:
         specifier: ^0.5.2
         version: 0.5.2
@@ -1334,6 +1343,9 @@ importers:
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
       mermaid:
         specifier: ^12.0.0
         version: 12.2.0
@@ -1362,9 +1374,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.1.2(@rolldown/plugin-babel@0.2.4(@babel/core@7.29.7(supports-color@7.2.0))(@babel/plugin-transform-runtime@7.29.7(@babel/core@7.29.7(supports-color@7.2.0))(supports-color@7.2.0))(@babel/runtime@8.0.7)(rolldown@1.2.15)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)))(babel-plugin-react-compiler@1.0.0)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-      fflate:
-        specifier: ^0.8.2
-        version: 0.8.3
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -2835,9 +2844,6 @@ importers:
       diff:
         specifier: ^9.0.0
         version: 9.0.0
-      fflate:
-        specifier: ^0.8.2
-        version: 0.8.3
       lucide-react:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)

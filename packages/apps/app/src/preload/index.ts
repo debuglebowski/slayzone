@@ -4,8 +4,8 @@ import type {
   ArtifactExportRequest,
   ArtifactExportResult,
   HostSaveResult,
-  SaveFileRequest,
-  SaveFilesRequest
+  SaveTargetOpenResult,
+  SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 
 // Intentional bootstrap + client-local host surface (ARCHITECTURE.md). Do not add domain
@@ -98,10 +98,16 @@ const api: ElectronAPI = {
     // Client-local host capability, not a domain API: the export renders on THIS device.
     exportArtifact: (request: ArtifactExportRequest) =>
       ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
-    saveFile: (request: SaveFileRequest) =>
-      ipcRenderer.invoke('app:save-file', request) as Promise<HostSaveResult>,
-    saveFiles: (request: SaveFilesRequest) =>
-      ipcRenderer.invoke('app:save-files', request) as Promise<HostSaveResult>,
+    saveTargetOpen: (request: SaveTargetRequest) =>
+      ipcRenderer.invoke('app:save-target-open', request) as Promise<SaveTargetOpenResult>,
+    saveTargetWrite: (targetId: string, path: string, data: Uint8Array) =>
+      ipcRenderer.invoke('app:save-target-write', targetId, path, data) as Promise<void>,
+    saveTargetMkdir: (targetId: string, path: string) =>
+      ipcRenderer.invoke('app:save-target-mkdir', targetId, path) as Promise<void>,
+    saveTargetClose: (targetId: string) =>
+      ipcRenderer.invoke('app:save-target-close', targetId) as Promise<HostSaveResult>,
+    saveTargetAbort: (targetId: string) =>
+      ipcRenderer.invoke('app:save-target-abort', targetId) as Promise<void>,
     restartSidecar: () =>
       ipcRenderer.invoke('app:restart-sidecar') as Promise<{ ok: boolean; error?: string }>,
     restartLocalComputer: () =>

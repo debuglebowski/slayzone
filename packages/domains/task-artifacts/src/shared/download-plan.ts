@@ -2,15 +2,13 @@
  * What a client writes when the person downloads a folder or a whole task's artifacts:
  * every file's path inside the download, from the task's folder tree. Pure and
  * isomorphic — the client plans, reads the bytes from the hub, and saves on its own
- * device (desktop into a picked directory, the web shell as a zip).
+ * device (desktop into a picked directory or a zip, the web shell as a zip).
  *
  * Folder names and titles are free text (an agent can name an artifact `../../.zshrc`),
  * so every path is reduced to plain segments here: no `..`, `.`, empty or absolute
  * part survives, and the desktop writer still refuses any path that would leave the
  * picked directory.
  */
-import { zipSync } from 'fflate'
-
 interface FolderRow {
   id: string
   name: string
@@ -70,7 +68,11 @@ export function folderAndDescendants(folders: FolderRow[], rootId: string): Set<
   return ids
 }
 
-function fileName(title: string, fallback: string): string {
+/**
+ * A title as ONE safe file name: path separators can't climb or nest (`../../x.md` →
+ * `x.md`, `/a/b.md` → `a_b.md`); `fallback` when nothing usable is left.
+ */
+export function safeFileName(title: string, fallback: string): string {
   const segs = safeSegments(title)
   return segs.length ? segs.join('_') : fallback
 }
@@ -82,7 +84,7 @@ export function planTaskDownload(folders: FolderRow[], artifacts: ArtifactRow[])
   const segs = folderSegments(folders)
   return artifacts.map((a) => ({
     artifactId: a.id,
-    path: [...segs(a.folder_id), fileName(a.title, a.id)].join('/')
+    path: [...segs(a.folder_id), safeFileName(a.title, a.id)].join('/')
   }))
 }
 
@@ -105,7 +107,7 @@ export function planFolderDownload(
     .filter((a) => a.folder_id !== null && ids.has(a.folder_id))
     .map((a) => ({
       artifactId: a.id,
-      path: [...segs(a.folder_id).slice(parentDepth), fileName(a.title, a.id)].join('/')
+      path: [...segs(a.folder_id).slice(parentDepth), safeFileName(a.title, a.id)].join('/')
     }))
   // Every folder of the subtree, so an empty one still arrives (as it always did).
   const dirs = folders
@@ -114,22 +116,4 @@ export function planFolderDownload(
     .filter((d) => d !== '')
   const folderName = safeSegments(root.name).join('_') || 'folder'
   return { folderName, dirs, entries }
-}
-
-/** A zip archive of `files` (paths as given, already safe). */
-export function zipFiles(files: { path: string; data: Uint8Array }[]): Uint8Array {
-  const tree: Record<string, Uint8Array> = {}
-  for (const f of files) {
-    // Two artifacts can share a title in one folder; keep both.
-    let path = f.path
-    for (let n = 2; path in tree; n++) path = withSuffix(f.path, n)
-    tree[path] = f.data
-  }
-  return zipSync(tree, { level: 9 })
-}
-
-function withSuffix(path: string, n: number): string {
-  const slash = path.lastIndexOf('/')
-  const dot = path.lastIndexOf('.')
-  return dot > slash + 1 ? `${path.slice(0, dot)} (${n})${path.slice(dot)}` : `${path} (${n})`
 }

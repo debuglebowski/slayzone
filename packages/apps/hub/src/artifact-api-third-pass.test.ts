@@ -485,7 +485,7 @@ test('third-pass: pruning all versions preserves REST access to a surviving comp
   }
 })
 
-test('third-pass control: REST stream create and mixed-owner folder download (readBytes) preserve bytes and tree names', async () => {
+test('third-pass control: REST stream create and mixed-owner folder download (chunked reads) preserve bytes and tree names', async () => {
   const f = await fixture()
   try {
     setArtifactsRouterDeps({ onTasksChanged: () => {} })
@@ -526,8 +526,19 @@ test('third-pass control: REST stream create and mixed-owner folder download (re
       content: 'hub'
     })
     // A folder download as a client makes it: plan from the task's rows, then every
-    // file's bytes over `readBytes` — hub-held and computer-held alike.
+    // file's bytes in bounded pieces over `readBytesChunk` — hub-held and
+    // computer-held alike (the computer reads its own range, never the whole file).
     const caller = artifactsRouter.createCaller({ db: f.h.slayDb, dataRoot: f.hubDir })
+    const readChunked = async (id: string): Promise<Buffer | null> => {
+      const parts: Buffer[] = []
+      for (let offset = 0; ; ) {
+        const chunk = await caller.readBytesChunk({ id, offset, length: 2 })
+        if (!chunk) return null
+        parts.push(Buffer.from(chunk.data, 'base64'))
+        offset += 2
+        if (offset >= chunk.size) return Buffer.concat(parts)
+      }
+    }
     const plan = planFolderDownload(
       await f.store.listFoldersByTask(f.h.slayDb, 't'),
       await f.store.listArtifactsByTask(f.h.slayDb, 't'),
@@ -535,13 +546,13 @@ test('third-pass control: REST stream create and mixed-owner folder download (re
     )!
     const got = new Map<string, Buffer>()
     for (const e of plan.entries) {
-      got.set(e.path, Buffer.from((await caller.readBytes({ id: e.artifactId }))!, 'base64'))
+      got.set(e.path, (await readChunked(e.artifactId))!)
     }
     expect(got.get('General/hub.txt')?.toString('utf8')).toBe('hub')
     expect(got.get('General/PC A/a.txt')?.toString('utf8')).toBe('bytes a')
     expect(got.get('General/PC B/b.txt')?.toString('utf8')).toBe('bytes b')
     expect(got.get('General/PC A/Nested/file.png')).toEqual(bytes)
-    expect(await caller.readBytes({ id: 'no-such-artifact' })).toBeNull()
+    expect(await caller.readBytesChunk({ id: 'no-such-artifact', offset: 0, length: 2 })).toBeNull()
   } finally {
     await f.close()
   }

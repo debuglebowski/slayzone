@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { chromium, test, expect, type Browser, type Page } from '@playwright/test'
+import { unzipSync } from 'fflate'
 
 /**
  * Artifact export in the web shell, against a REAL standalone hub — the case that used
@@ -220,44 +221,71 @@ test.describe('web shell — artifact export renders in the browser', () => {
     )
   })
 
-  test('downloads: a file as itself, a folder as one zip', async () => {
+  test('downloads stream in pieces: a file as itself, a folder zipped by the worker', async () => {
+    // Drives the streaming save target the way the shared client does, piece by piece.
+    const stream = (
+      request: unknown,
+      writes: Array<{ path: string; bytes: number[] }>,
+      dirs: string[] = []
+    ) =>
+      page.evaluate(
+        async ({ request, writes, dirs }) => {
+          const app = (
+            window as unknown as {
+              api: {
+                app: {
+                  saveTargetOpen: (r: unknown) => Promise<{ ok: boolean; targetId?: string }>
+                  saveTargetWrite: (id: string, p: string, d: Uint8Array) => Promise<void>
+                  saveTargetMkdir: (id: string, p: string) => Promise<void>
+                  saveTargetClose: (id: string) => Promise<unknown>
+                }
+              }
+            }
+          ).api.app
+          const opened = await app.saveTargetOpen(request)
+          if (!opened.ok || !opened.targetId) return opened
+          for (const d of dirs) await app.saveTargetMkdir(opened.targetId, d)
+          for (const w of writes)
+            await app.saveTargetWrite(opened.targetId, w.path, new Uint8Array(w.bytes))
+          return app.saveTargetClose(opened.targetId)
+        },
+        { request, writes, dirs }
+      )
+
     const file = page.waitForEvent('download')
     expect(
-      await page.evaluate(() =>
-        (
-          window as unknown as {
-            api: { app: { saveFile: (req: unknown) => Promise<unknown> } }
-          }
-        ).api.app.saveFile({
-          fileName: 'pic.bin',
-          title: 'Download Artifact',
-          data: new Uint8Array([0, 1, 254, 255])
-        })
-      )
+      await stream({ kind: 'file', fileName: 'pic.bin', title: 'Download Artifact' }, [
+        { path: '', bytes: [0, 1] },
+        { path: '', bytes: [254, 255] }
+      ])
     ).toEqual({ ok: true })
     const f = await file
     expect(f.suggestedFilename()).toBe('pic.bin')
     expect(Array.from(fs.readFileSync(await f.path()))).toEqual([0, 1, 254, 255])
 
+    // The zip is built in a module worker loaded from the hub's own origin: proves the
+    // worker runs under the hub's CSP (worker-src falls back to script-src 'self').
+    const big = Array.from({ length: 300_000 }, (_, i) => (i * 7) & 255)
     const folder = page.waitForEvent('download')
     expect(
-      await page.evaluate(() =>
-        (
-          window as unknown as {
-            api: { app: { saveFiles: (req: unknown) => Promise<unknown> } }
-          }
-        ).api.app.saveFiles({
-          folderName: 'docs',
-          title: 'Download Folder To',
-          files: [{ path: 'docs/a.md', data: new TextEncoder().encode('A') }]
-        })
+      await stream(
+        { kind: 'directory', folderName: 'docs', title: 'Download Folder To' },
+        [
+          { path: 'docs/a.md', bytes: Array.from(new TextEncoder().encode('A')) },
+          { path: 'docs/big.bin', bytes: big.slice(0, 150_000) },
+          { path: 'docs/big.bin', bytes: big.slice(150_000) }
+        ],
+        ['docs/empty']
       )
     ).toEqual({ ok: true })
     const z = await folder
     expect(z.suggestedFilename()).toBe('docs.zip')
     const zip = fs.readFileSync(await z.path())
     expect(zip.subarray(0, 2).toString('latin1')).toBe('PK')
-    expect(zip.toString('latin1')).toContain('docs/a.md')
+    const entries = unzipSync(new Uint8Array(zip))
+    expect(new TextDecoder().decode(entries['docs/a.md'])).toBe('A')
+    expect(Array.from(entries['docs/big.bin'])).toEqual(big)
+    expect(Object.keys(entries)).toContain('docs/empty/')
   })
 
   test('PDF goes to the browser print dialog', async () => {

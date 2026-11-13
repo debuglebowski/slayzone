@@ -129,6 +129,16 @@ export const artifactMethodSchemas = {
     })
   ]),
   readBytes: z.tuple([id, ref.optional()]),
+  /** [artifactId, offset, length]: one bounded piece of the current content (≤ 8 MiB). */
+  readBytesRange: z.tuple([
+    id,
+    z.number().int().min(0),
+    z
+      .number()
+      .int()
+      .min(1)
+      .max(8 * 1024 * 1024)
+  ]),
   seal: z.tuple([chatAttachmentSchema]),
   searchArtifacts: z.tuple([
     z.object({
@@ -156,6 +166,7 @@ const reads = new Set([
   'diffArtifactVersions',
   'listFoldersByTask',
   'readBytes',
+  'readBytesRange',
   'searchArtifacts'
 ])
 export const computerArtifactRequestSchema = z.object({
@@ -518,6 +529,9 @@ export function createLocalArtifacts(
         } finally {
           rmSync(dir, { recursive: true, force: true })
         }
+      } else if (req.method === 'readBytesRange') {
+        const r = await store.readArtifactBytesRange(db, first, args[1], args[2])
+        result = r ? { data: Buffer.from(r.bytes).toString('base64'), size: r.size } : null
       } else if (req.method === 'readBytes' || req.method === 'resolveArtifactVersion') {
         const artifactId = req.method === 'readBytes' ? first : first.artifactId,
           versionRef = req.method === 'readBytes' ? (args[1] ?? 'current') : first.versionRef

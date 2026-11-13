@@ -76,6 +76,10 @@ function launchFailure(executable: string, stderr: string, cause: string): Brows
   )
 }
 
+/** Ends `slay` without an 'exit' event; cleaned up for while a browser runs. */
+const SIGNALS: NodeJS.Signals[] =
+  process.platform === 'win32' ? ['SIGINT', 'SIGTERM'] : ['SIGINT', 'SIGTERM', 'SIGHUP']
+
 /** Start `executable` headless and complete a CDP round trip with it. */
 export async function launchBrowser(executable: string): Promise<Browser> {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-export-profile-'))
@@ -150,9 +154,25 @@ export async function launchBrowser(executable: string): Promise<Browser> {
     })
   })
 
-  // A Ctrl-C'd or crashing `slay` must not leave a headless browser behind.
-  const killOnExit = () => child.kill('SIGKILL')
-  process.once('exit', killOnExit)
+  // A Ctrl-C'd, killed or crashing `slay` must not leave a headless browser or its
+  // temp profile behind. Node emits no 'exit' for a signal it has no handler for, so
+  // the signals are handled too: clean up, then re-raise so the process still ends
+  // the way it was told to.
+  const cleanUpNow = (): void => {
+    child.kill('SIGKILL')
+    fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+  }
+  const onSignal = (signal: NodeJS.Signals): void => {
+    removeHooks()
+    cleanUpNow()
+    process.kill(process.pid, signal)
+  }
+  const removeHooks = (): void => {
+    process.removeListener('exit', cleanUpNow)
+    for (const s of SIGNALS) process.removeListener(s, onSignal)
+  }
+  process.once('exit', cleanUpNow)
+  for (const s of SIGNALS) process.once(s, onSignal)
 
   function send<T>(
     method: string,
@@ -183,7 +203,7 @@ export async function launchBrowser(executable: string): Promise<Browser> {
       await exitPromise
       clearTimeout(timer)
     }
-    process.removeListener('exit', killOnExit)
+    removeHooks()
     // Windows may hold profile files for a moment after exit.
     fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }

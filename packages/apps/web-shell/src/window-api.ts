@@ -14,7 +14,7 @@
 import type { ElectronAPI, HubEntry } from '@slayzone/types'
 import { resolveServerUrl, resolveWindowId } from './server-url'
 import { exportArtifactInBrowser } from './artifact-export'
-import { saveFileInBrowser, saveFilesInBrowser } from './client-save'
+import { createBrowserSaveTargets } from './client-save'
 
 const NOT_SUPPORTED = 'Not supported in the browser'
 
@@ -49,6 +49,8 @@ async function hubLogin(payload: {
     return { ok: false, error: err instanceof Error ? err.message : 'Network error' }
   }
 }
+
+const saveTargets = createBrowserSaveTargets()
 
 const webApiTarget: ElectronAPI = {
   app: {
@@ -85,10 +87,13 @@ const webApiTarget: ElectronAPI = {
     setBootSettings: async () => ({ ok: true }),
     probeServerHealth: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // Rendered by this browser (print dialog / canvas / download) — see artifact-export.ts.
-    exportArtifact: exportArtifactInBrowser,
-    // Downloads: the browser saves the bytes (a folder as one zip) — see client-save.ts.
-    saveFile: saveFileInBrowser,
-    saveFiles: saveFilesInBrowser,
+    exportArtifact: (request) => exportArtifactInBrowser(request),
+    // Downloads stream into browser downloads (a folder as one zip) — see client-save.ts.
+    saveTargetOpen: (request) => saveTargets.open(request),
+    saveTargetWrite: (id, path, data) => saveTargets.write(id, path, data),
+    saveTargetMkdir: (id, path) => saveTargets.mkdir(id, path),
+    saveTargetClose: (id) => saveTargets.close(id),
+    saveTargetAbort: (id) => saveTargets.abort(id),
     restartSidecar: async () => ({ ok: false, error: NOT_SUPPORTED }),
     restartLocalComputer: async () => ({ ok: false, error: NOT_SUPPORTED }),
     // A browser tab supervises no computer.

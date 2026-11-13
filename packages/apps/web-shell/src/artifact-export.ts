@@ -56,13 +56,29 @@ let drawCount = 0
  * Draw a mermaid diagram to SVG with the app's own mermaid, the way desktop's export
  * does (light theme, dagre). A directive rather than `initialize`: the in-app
  * MermaidBlock owns the global config (its dark/light theme), and a directive applies
- * to this one render only.
+ * to this one render only. `htmlLabels: false` draws labels as SVG text instead of
+ * HTML (`<foreignObject>`), which a tainting browser can rasterise.
  */
-export async function drawMermaidSvg(code: string): Promise<string> {
+export async function drawMermaidSvg(
+  code: string,
+  opts: { htmlLabels: boolean } = { htmlLabels: true }
+): Promise<string> {
   const { default: mermaid } = await import('mermaid')
-  const directive = '%%{init: {"theme": "default", "layout": "dagre"}}%%\n'
+  const labels = opts.htmlLabels ? '' : ', "htmlLabels": false, "flowchart": {"htmlLabels": false}'
+  const directive = `%%{init: {"theme": "default", "layout": "dagre"${labels}}}%%\n`
   const { svg } = await mermaid.render(`slz-export-mermaid-${++drawCount}`, directive + code)
   return svg
+}
+
+/**
+ * The canvas a drawing went onto cannot be read back: WebKit (Safari) taints it when
+ * the SVG holds HTML (`<foreignObject>`, as mermaid's default labels do).
+ */
+export class TaintedCanvasError extends Error {
+  constructor() {
+    super('The drawing could not be read back from the canvas')
+    this.name = 'TaintedCanvasError'
+  }
 }
 
 /** Hand `blob` to the browser as a download named `fileName`. */
@@ -172,15 +188,33 @@ async function drawFrame(frame: HTMLIFrameElement): Promise<Blob> {
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, w, h)
   ctx.drawImage(img, 0, 0, w, h)
-  return new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('No image produced'))),
-      'image/png'
-    )
-  )
+  return new Promise<Blob>((resolve, reject) => {
+    try {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('No image produced'))),
+        'image/png'
+      )
+    } catch (err) {
+      // WebKit throws SecurityError here for a tainted canvas.
+      reject(
+        err instanceof DOMException && err.name === 'SecurityError' ? new TaintedCanvasError() : err
+      )
+    }
+  })
 }
 
-async function exportOrThrow(request: ArtifactExportRequest): Promise<ArtifactExportResult> {
+/** What a PNG export needs from the page; injectable so the fallback can be tested. */
+export interface PngExportDeps {
+  rasterise: (html: string) => Promise<Blob>
+  drawMermaid: (code: string, opts: { htmlLabels: boolean }) => Promise<string>
+}
+
+const browserPngDeps: PngExportDeps = { rasterise, drawMermaid: drawMermaidSvg }
+
+async function exportOrThrow(
+  request: ArtifactExportRequest,
+  deps: PngExportDeps
+): Promise<ArtifactExportResult> {
   const { format, content, mode, title } = request
   if (!CAN_EXPORT[format](mode as RenderMode)) {
     return { ok: false, error: `Cannot export ${mode} as ${format.toUpperCase()}` }
@@ -197,7 +231,7 @@ async function exportOrThrow(request: ArtifactExportRequest): Promise<ArtifactEx
     return { ok: true }
   }
 
-  const svg = isMermaid ? await drawMermaidSvg(content) : null
+  const svg = isMermaid ? await deps.drawMermaid(content, { htmlLabels: true }) : null
 
   if (format === 'pdf') {
     // The dialog's own Cancel is indistinguishable from Save here; both end the export.
@@ -210,16 +244,26 @@ async function exportOrThrow(request: ArtifactExportRequest): Promise<ArtifactEx
   }
 
   // A drawn mermaid diagram is just an SVG now.
-  const pngHtml = buildPngHtml(svg ?? content, 'svg-preview', title)
-  if (!pngHtml) return { ok: false, error: 'Failed to build PNG HTML' }
-  saveBlob(await rasterise(pngHtml), fileName)
+  const png = (drawing: string): Promise<Blob> => {
+    const html = buildPngHtml(drawing, 'svg-preview', title)
+    return html ? deps.rasterise(html) : Promise.reject(new Error('Failed to build PNG HTML'))
+  }
+  const blob = await png(svg ?? content).catch(async (err: unknown) => {
+    if (!(err instanceof TaintedCanvasError)) throw err
+    // The same fallback the phone has: draw the diagram again with SVG text labels.
+    if (!isMermaid)
+      throw new Error("This SVG embeds HTML, which this browser can't turn into a PNG.")
+    return png(await deps.drawMermaid(content, { htmlLabels: false }))
+  })
+  saveBlob(blob, fileName)
   return { ok: true }
 }
 
 export function exportArtifactInBrowser(
-  request: ArtifactExportRequest
+  request: ArtifactExportRequest,
+  deps: PngExportDeps = browserPngDeps
 ): Promise<ArtifactExportResult> {
-  return exportOrThrow(request).catch((err: unknown) => ({
+  return exportOrThrow(request, deps).catch((err: unknown) => ({
     ok: false as const,
     error: err instanceof Error ? err.message : String(err)
   }))

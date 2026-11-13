@@ -12,11 +12,12 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-// Artifact downloads and exports never write on the hub. The renderer reads the
-// bytes/content over tRPC (`artifacts.readBytes` / `readContent`), then hands them to
-// its OWN host — `window.api.app.saveFile`/`saveFiles`/`exportArtifact` → preload →
-// main, which shows the dialog and writes (export also renders offscreen) — so they
-// work the same against a remote hub.
+// Artifact downloads and exports never write on the hub. The renderer reads the bytes
+// in bounded pieces (`artifacts.readBytesChunk`) or the content (`readContent`) over
+// tRPC, then hands them to its OWN host — `window.api.app.saveTarget*` (streamed) /
+// `exportArtifact` → preload → main, which shows the dialog and writes (a zip is built
+// there by archiver; export renders offscreen) — so they work the same against a
+// remote hub.
 //
 // Downloads are driven through the artifact panel's real menus: the folder tree,
 // zip and dialogs all run as they do for a person.

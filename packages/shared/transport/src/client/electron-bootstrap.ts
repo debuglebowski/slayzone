@@ -3,8 +3,8 @@ import type {
   ArtifactExportResult,
   ElectronBootstrapAPI,
   HostSaveResult,
-  SaveFileRequest,
-  SaveFilesRequest
+  SaveTargetOpenResult,
+  SaveTargetRequest
 } from '@slayzone/platform/electron-bootstrap-contract'
 import type { HubEntry } from '@slayzone/platform/hub-registry'
 import type {
@@ -45,6 +45,7 @@ function api(): ElectronBootstrapAPI {
  * the read methods) — never a value a caller could mistake for success.
  */
 const NOT_IMPLEMENTED = 'Not implemented by this host'
+const SAVE_NOT_SUPPORTED = 'Saving files is not supported in this app'
 
 export const electronBootstrap = {
   getServerUrl: () =>
@@ -100,14 +101,20 @@ export const electronBootstrap = {
   exportArtifact: (request: ArtifactExportRequest): Promise<ArtifactExportResult> =>
     api().app.exportArtifact?.(request) ??
     Promise.resolve({ ok: false as const, error: 'Export is not supported in this app' }),
-  /** Save bytes as a file on this device (desktop: save dialog; web: download). */
-  saveFile: (request: SaveFileRequest): Promise<HostSaveResult> =>
-    api().app.saveFile?.(request) ??
-    Promise.resolve({ ok: false as const, error: 'Saving files is not supported in this app' }),
-  /** Save files into a picked directory (desktop) or one zip download (web). */
-  saveFiles: (request: SaveFilesRequest): Promise<HostSaveResult> =>
-    api().app.saveFiles?.(request) ??
-    Promise.resolve({ ok: false as const, error: 'Saving files is not supported in this app' }),
+  /** Open a streaming save target on this device (desktop: dialogs + disk; web: download). */
+  saveTargetOpen: (request: SaveTargetRequest): Promise<SaveTargetOpenResult> =>
+    api().app.saveTargetOpen?.(request) ??
+    Promise.resolve({ ok: false as const, error: SAVE_NOT_SUPPORTED }),
+  saveTargetWrite: (targetId: string, path: string, data: Uint8Array): Promise<void> =>
+    api().app.saveTargetWrite?.(targetId, path, data) ??
+    Promise.reject(new Error(SAVE_NOT_SUPPORTED)),
+  saveTargetMkdir: (targetId: string, path: string): Promise<void> =>
+    api().app.saveTargetMkdir?.(targetId, path) ?? Promise.reject(new Error(SAVE_NOT_SUPPORTED)),
+  saveTargetClose: (targetId: string): Promise<HostSaveResult> =>
+    api().app.saveTargetClose?.(targetId) ??
+    Promise.resolve({ ok: false as const, error: SAVE_NOT_SUPPORTED }),
+  saveTargetAbort: (targetId: string): Promise<void> =>
+    api().app.saveTargetAbort?.(targetId) ?? Promise.resolve(),
   relaunch: () => api().app.relaunch?.() ?? Promise.resolve(),
   restartSidecar: () =>
     api().app.restartSidecar?.() ?? Promise.resolve({ ok: false as const, error: NOT_IMPLEMENTED }),

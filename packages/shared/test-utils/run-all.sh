@@ -476,6 +476,7 @@ run_harness packages/apps/cli/src/commands/tasks/cli-author.test.ts
 # reader, the missing-library hint, the export branching (all pure), then real
 # renders in a locally installed Chrome (skipped when the machine has none).
 run_harness packages/apps/cli/src/export/browser.test.ts
+run_harness packages/apps/cli/src/export/cdp.test.ts
 run_harness packages/apps/cli/src/export/browser-install.test.ts
 run_harness packages/apps/cli/src/export/zip-extract.test.ts
 run_harness packages/apps/cli/src/export/missing-libs.test.ts
@@ -1343,6 +1344,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/web-shell/src/window-api.test.ts \
   packages/apps/web-shell/src/artifact-export.test.ts \
   packages/apps/web-shell/src/client-save.test.ts \
+  packages/apps/web-shell/src/zip-stream.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \

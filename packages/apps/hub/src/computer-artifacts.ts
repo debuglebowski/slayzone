@@ -19,6 +19,7 @@ const reads = new Set([
   'diffArtifactVersions',
   'listFoldersByTask',
   'readBytes',
+  'readBytesRange',
   'searchArtifacts'
 ])
 const mimeOf = (title: string) =>
@@ -554,6 +555,20 @@ export function createComputerArtifactStorage(opts: {
           }
           if (key === 'deleteArtifact') return base.apply(target, [db, ...args])
           throw unavailableError(isFolder)
+        }
+        if (key === 'readArtifactBytesRange') {
+          const [, offset, length] = args as [string, number, number]
+          // The computer reads only this window. A computer from before
+          // `readBytesRange` refuses the method: read whole once and cut the window
+          // (a real read failure then surfaces from that read).
+          const ranged = await call(owner, 'readBytesRange', args).catch(() => undefined)
+          if (ranged !== undefined) {
+            const r = ranged as { data: string; size: number } | null
+            return r ? { bytes: Buffer.from(r.data, 'base64'), size: r.size } : null
+          }
+          const whole = (await call(owner, 'readBytes', [id])) as { data: string }
+          const all = Buffer.from(whole.data, 'base64')
+          return { bytes: all.subarray(offset, offset + length), size: all.byteLength }
         }
         if (key === 'readArtifactBytes') {
           const result = (await call(owner, 'readBytes', args)) as { data: string }

@@ -1,96 +1,209 @@
 // @vitest-environment jsdom
-import { unzipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SaveTargetRequest } from '@slayzone/platform/electron-bootstrap-contract'
 import {
-  base64ToBytes,
+  DOWNLOAD_CHUNK_BYTES,
   downloadArtifactOnThisDevice,
   downloadFolderOnThisDevice,
-  downloadTaskZipOnThisDevice
+  downloadTaskZipOnThisDevice,
+  type ReadArtifactChunk
 } from './artifact-downloads'
 
-const saveFile = vi.fn()
-const saveFiles = vi.fn()
-const enc = (s: string) => new TextEncoder().encode(s)
+// The host's streaming save target, recorded: which target opened, every write's path
+// and size, whether it was closed or aborted. Bytes are only checksummed, never kept,
+// so a test can push hundreds of MB through without holding them.
+interface Recorded {
+  request: SaveTargetRequest | null
+  writes: { path: string; bytes: number }[]
+  dirs: string[]
+  sums: Map<string, number>
+  closed: boolean
+  aborted: boolean
+}
+let rec: Recorded
+let openResult: unknown
+
+function installHost() {
+  rec = { request: null, writes: [], dirs: [], sums: new Map(), closed: false, aborted: false }
+  openResult = { ok: true, targetId: 't1' }
+  const app = {
+    saveTargetOpen: vi.fn(async (req: SaveTargetRequest) => {
+      rec.request = req
+      return openResult
+    }),
+    saveTargetWrite: vi.fn(async (_id: string, path: string, data: Uint8Array) => {
+      rec.writes.push({ path, bytes: data.byteLength })
+      let sum = rec.sums.get(path) ?? 0
+      for (let i = 0; i < data.length; i += 4096) sum = (sum + data[i]) % 1_000_003
+      rec.sums.set(path, sum)
+    }),
+    saveTargetMkdir: vi.fn(async (_id: string, path: string) => {
+      rec.dirs.push(path)
+    }),
+    saveTargetClose: vi.fn(async () => {
+      rec.closed = true
+      return { ok: true }
+    }),
+    saveTargetAbort: vi.fn(async () => {
+      rec.aborted = true
+    })
+  }
+  ;(window as unknown as { api: unknown }).api = { app, files: {} }
+  return app
+}
+
+/** Synthetic artifacts: byte i of file `id` is (i * seed) & 255; generated per chunk. */
+function fakeHub(files: Record<string, { size: number; seed: number } | 'missing' | 'broken'>) {
+  let inFlight = 0
+  let maxInFlight = 0
+  let maxLength = 0
+  const read: ReadArtifactChunk = async (id, offset, length) => {
+    inFlight++
+    maxInFlight = Math.max(maxInFlight, inFlight)
+    maxLength = Math.max(maxLength, length)
+    await new Promise((r) => setTimeout(r, 0))
+    inFlight--
+    const f = files[id]
+    if (f === 'missing' || f === undefined) return null
+    if (f === 'broken') throw new Error('EIO: i/o error')
+    const n = Math.max(0, Math.min(length, f.size - offset))
+    const data = new Uint8Array(n)
+    for (let i = 0; i < n; i++) data[i] = ((offset + i) * f.seed) & 255
+    return { data, size: f.size }
+  }
+  return { read, stats: () => ({ maxInFlight, maxLength }) }
+}
+
+function expectedSum(size: number, seed: number): number {
+  let sum = 0
+  for (let chunk = 0; chunk < size; chunk += DOWNLOAD_CHUNK_BYTES) {
+    const end = Math.min(size, chunk + DOWNLOAD_CHUNK_BYTES)
+    for (let i = chunk; i < end; i += 4096) sum = (sum + ((i * seed) & 255)) % 1_000_003
+  }
+  return sum
+}
 
 const folders = [
   { id: 'f1', name: 'docs', parent_id: null },
   { id: 'f2', name: 'empty', parent_id: 'f1' }
 ]
-const artifacts = [
-  { id: 'a', title: 'root.md', folder_id: null },
-  { id: 'b', title: 'top.md', folder_id: 'f1' },
-  { id: 'gone', title: 'gone.md', folder_id: 'f1' }
-]
-const read = vi.fn(async (id: string) => (id === 'gone' ? null : enc(`bytes of ${id}`)))
 
 beforeEach(() => {
-  saveFile.mockReset().mockResolvedValue({ ok: true })
-  saveFiles.mockReset().mockResolvedValue({ ok: true })
-  ;(window as unknown as { api: unknown }).api = { app: { saveFile, saveFiles }, files: {} }
+  installHost()
 })
-
 afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
+describe('streaming a large artifact', () => {
+  it('600 MB in bounded pieces: ≤ 2 reads in flight, no piece above the chunk size', async () => {
+    const size = 600 * 1024 * 1024 + 123
+    const hub = fakeHub({ big: { size, seed: 7 } })
+    const outcome = await downloadArtifactOnThisDevice(
+      { id: 'big', title: 'big.bin', folder_id: null },
+      hub.read
+    )
+    expect(outcome).toEqual({ saved: true, skipped: [] })
+    expect(rec.request).toEqual({ kind: 'file', fileName: 'big.bin', title: 'Download Artifact' })
+    expect(rec.writes.reduce((n, w) => n + w.bytes, 0)).toBe(size)
+    expect(Math.max(...rec.writes.map((w) => w.bytes))).toBeLessThanOrEqual(DOWNLOAD_CHUNK_BYTES)
+    expect(rec.sums.get('')).toBe(expectedSum(size, 7))
+    expect(hub.stats().maxInFlight).toBeLessThanOrEqual(2)
+    expect(hub.stats().maxLength).toBe(DOWNLOAD_CHUNK_BYTES)
+    expect(rec.closed).toBe(true)
+  }, 60_000)
+})
+
 describe('downloadArtifactOnThisDevice', () => {
-  it('saves the bytes under the title', async () => {
-    await expect(downloadArtifactOnThisDevice(artifacts[0], read)).resolves.toBe(true)
-    expect(saveFile).toHaveBeenCalledWith({
-      fileName: 'root.md',
-      title: 'Download Artifact',
-      data: enc('bytes of a')
-    })
+  it('names the file safely and saves an empty file too', async () => {
+    const hub = fakeHub({ e: { size: 0, seed: 1 } })
+    await downloadArtifactOnThisDevice(
+      { id: 'e', title: '../../.zshrc', folder_id: null },
+      hub.read
+    )
+    expect(rec.request).toMatchObject({ kind: 'file', fileName: '.zshrc' })
+    expect(rec.writes).toEqual([{ path: '', bytes: 0 }])
   })
 
-  it('throws when the file is gone, and is false on cancel', async () => {
-    await expect(downloadArtifactOnThisDevice(artifacts[2], read)).rejects.toThrow('not found')
-    saveFile.mockResolvedValue({ ok: false, canceled: true })
-    await expect(downloadArtifactOnThisDevice(artifacts[0], read)).resolves.toBe(false)
+  it('throws when the file is gone, before opening a save dialog', async () => {
+    const hub = fakeHub({ gone: 'missing' })
+    await expect(
+      downloadArtifactOnThisDevice({ id: 'gone', title: 'g.md', folder_id: null }, hub.read)
+    ).rejects.toThrow('not found')
+    expect(rec.request).toBeNull()
   })
 
-  it('surfaces a host error', async () => {
-    saveFile.mockResolvedValue({ ok: false, error: 'EACCES' })
-    await expect(downloadArtifactOnThisDevice(artifacts[0], read)).rejects.toThrow('EACCES')
+  it('is not saved when the person cancels', async () => {
+    openResult = { ok: false, canceled: true }
+    const hub = fakeHub({ a: { size: 3, seed: 1 } })
+    expect(
+      await downloadArtifactOnThisDevice({ id: 'a', title: 'a.md', folder_id: null }, hub.read)
+    ).toEqual({ saved: false, skipped: [] })
   })
 })
 
 describe('downloadFolderOnThisDevice', () => {
-  it('saves the folder tree, empty folders included, missing files left out', async () => {
-    await expect(downloadFolderOnThisDevice(folders, artifacts, 'f1', read)).resolves.toBe(true)
-    expect(saveFiles).toHaveBeenCalledWith({
+  it('writes the tree, empty folders included, and REPORTS files it could not find', async () => {
+    const hub = fakeHub({ b: { size: 5, seed: 3 }, gone: 'missing' })
+    const outcome = await downloadFolderOnThisDevice(
+      folders,
+      [
+        { id: 'b', title: 'top.md', folder_id: 'f1' },
+        { id: 'gone', title: 'gone.md', folder_id: 'f1' }
+      ],
+      'f1',
+      hub.read
+    )
+    expect(outcome).toEqual({ saved: true, skipped: ['docs/gone.md'] })
+    expect(rec.request).toEqual({
+      kind: 'directory',
       folderName: 'docs',
-      title: 'Download Folder To',
-      dirs: ['docs', 'docs/empty'],
-      files: [{ path: 'docs/top.md', data: enc('bytes of b') }]
+      title: 'Download Folder To'
     })
+    expect(rec.dirs).toEqual(['docs', 'docs/empty'])
+    expect(rec.writes).toEqual([{ path: 'docs/top.md', bytes: 5 }])
   })
 
-  it('is false for an unknown folder', async () => {
-    await expect(downloadFolderOnThisDevice(folders, artifacts, 'x', read)).resolves.toBe(false)
-    expect(saveFiles).not.toHaveBeenCalled()
+  it('a read error aborts the download and is thrown, never a silent omission', async () => {
+    const hub = fakeHub({ b: 'broken' })
+    await expect(
+      downloadFolderOnThisDevice(
+        folders,
+        [{ id: 'b', title: 'top.md', folder_id: 'f1' }],
+        'f1',
+        hub.read
+      )
+    ).rejects.toThrow('EIO')
+    expect(rec.aborted).toBe(true)
+    expect(rec.closed).toBe(false)
   })
 })
 
 describe('downloadTaskZipOnThisDevice', () => {
-  it('zips every artifact at its folder path and reveals it', async () => {
-    await expect(downloadTaskZipOnThisDevice(folders, artifacts, read)).resolves.toBe(true)
-    const req = saveFile.mock.calls[0][0]
-    expect(req).toMatchObject({
+  it('streams every artifact into a zip target at its folder path', async () => {
+    const hub = fakeHub({ a: { size: 2, seed: 1 }, b: { size: 9, seed: 2 } })
+    const outcome = await downloadTaskZipOnThisDevice(
+      folders,
+      [
+        { id: 'a', title: 'root.md', folder_id: null },
+        { id: 'b', title: 'top.md', folder_id: 'f1' }
+      ],
+      hub.read
+    )
+    expect(outcome).toEqual({ saved: true, skipped: [] })
+    expect(rec.request).toEqual({
+      kind: 'zip',
       fileName: 'artifacts.zip',
       title: 'Download All as ZIP',
       reveal: true
     })
-    const zip = unzipSync(req.data)
-    expect(Object.keys(zip).sort()).toEqual(['docs/top.md', 'root.md'])
-    expect(new TextDecoder().decode(zip['root.md'])).toBe('bytes of a')
+    expect(rec.writes.map((w) => w.path)).toEqual(['root.md', 'docs/top.md'])
   })
 
-  it('is false with no artifacts', async () => {
-    await expect(downloadTaskZipOnThisDevice(folders, [], read)).resolves.toBe(false)
+  it('nothing to save with no artifacts', async () => {
+    expect(await downloadTaskZipOnThisDevice(folders, [], fakeHub({}).read)).toEqual({
+      saved: false,
+      skipped: []
+    })
   })
-})
-
-it('decodes base64', () => {
-  expect(Array.from(base64ToBytes('AAH/'))).toEqual([0, 1, 255])
 })

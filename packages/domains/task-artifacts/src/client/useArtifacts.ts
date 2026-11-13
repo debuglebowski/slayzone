@@ -22,7 +22,9 @@ import {
   base64ToBytes,
   downloadArtifactOnThisDevice,
   downloadFolderOnThisDevice,
-  downloadTaskZipOnThisDevice
+  downloadTaskZipOnThisDevice,
+  type DownloadOutcome,
+  type ReadArtifactChunk
 } from './artifact-downloads'
 
 // Downloads and exports save on this device's host (desktop dialogs, browser download),
@@ -38,6 +40,17 @@ async function runDownload(label: string, run: () => Promise<boolean>): Promise<
     toast.error(`${label} failed`, { description: e instanceof Error ? e.message : String(e) })
     return false
   }
+}
+
+/** A download that saved without some files says which — never a silent omission. */
+function reportOutcome(outcome: DownloadOutcome): boolean {
+  if (outcome.skipped.length > 0) {
+    const n = outcome.skipped.length
+    toast.warning(`${n} ${n === 1 ? 'file was' : 'files were'} not found and left out`, {
+      description: outcome.skipped.join(', ')
+    })
+  }
+  return outcome.saved
 }
 
 export interface UseArtifactsReturn {
@@ -373,14 +386,17 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
-  // Downloads save on THIS device (see artifact-downloads.ts): the hub only serves
-  // the bytes. A fresh read every time, never a cached one.
-  const readBytes = useCallback(
-    async (id: string): Promise<Uint8Array | null> => {
-      const base64 = await queryClient.fetchQuery(
-        trpc.artifacts.readBytes.queryOptions({ id }, { staleTime: 0, gcTime: 0 })
+  // Downloads save on THIS device (see artifact-downloads.ts): the hub serves the
+  // bytes in bounded pieces. A fresh read every time, never a cached one.
+  const readChunk = useCallback<ReadArtifactChunk>(
+    async (id, offset, length) => {
+      const piece = await queryClient.fetchQuery(
+        trpc.artifacts.readBytesChunk.queryOptions(
+          { id, offset, length },
+          { staleTime: 0, gcTime: 0 }
+        )
       )
-      return base64 === null ? null : base64ToBytes(base64)
+      return piece === null ? null : { data: base64ToBytes(piece.data), size: piece.size }
     },
     [queryClient, trpc]
   )
@@ -389,17 +405,19 @@ export function useArtifacts(
     async (id: string): Promise<boolean> =>
       runDownload('Download', async () => {
         const artifact = artifacts.find((a) => a.id === id)
-        return artifact ? downloadArtifactOnThisDevice(artifact, readBytes) : false
+        return artifact
+          ? reportOutcome(await downloadArtifactOnThisDevice(artifact, readChunk))
+          : false
       }),
-    [artifacts, readBytes]
+    [artifacts, readChunk]
   )
 
   const downloadFolder = useCallback(
     async (id: string): Promise<boolean> =>
-      runDownload('Folder download', () =>
-        downloadFolderOnThisDevice(folders, artifacts, id, readBytes)
+      runDownload('Folder download', async () =>
+        reportOutcome(await downloadFolderOnThisDevice(folders, artifacts, id, readChunk))
       ),
-    [folders, artifacts, readBytes]
+    [folders, artifacts, readChunk]
   )
 
   // PDF/PNG/HTML render on THIS device (see exportArtifactOnThisDevice): the hub
@@ -435,10 +453,10 @@ export function useArtifacts(
 
   const downloadAllAsZip = useCallback(async (): Promise<boolean> => {
     if (!taskId) return false
-    return runDownload('ZIP export', () =>
-      downloadTaskZipOnThisDevice(folders, artifacts, readBytes)
+    return runDownload('ZIP export', async () =>
+      reportOutcome(await downloadTaskZipOnThisDevice(folders, artifacts, readChunk))
     )
-  }, [taskId, folders, artifacts, readBytes])
+  }, [taskId, folders, artifacts, readChunk])
 
   const uploadDir = useCallback(
     async (dirPath: string, parentFolderId?: string | null): Promise<void> => {

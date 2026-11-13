@@ -27,6 +27,7 @@ import {
 } from '../../api'
 import { cliAuthor, resolveId } from './_shared'
 import type { ArtifactExportFormat } from '@slayzone/task-artifacts/export-html'
+import { safeFileName } from '@slayzone/task-artifacts/download-plan'
 
 /*
  * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
@@ -963,7 +964,10 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
         const { body } = await apiGetStream(
           `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
         )
-        const outputPath = opts.output ? path.resolve(opts.output) : path.resolve(artifact.title)
+        // No --output: the title's name in the cwd, never a path the title spells out.
+        const outputPath = opts.output
+          ? path.resolve(opts.output)
+          : path.resolve(safeFileName(artifact.title, artifact.id))
         fs.mkdirSync(path.dirname(outputPath), { recursive: true })
         await pipeline(
           Readable.fromWeb(body as StreamWebReadable),
@@ -1014,7 +1018,7 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
       const ext = opts.type
       const outputPath = opts.output
         ? path.resolve(opts.output)
-        : path.resolve(`${exportBaseName(artifact.title)}.${ext}`)
+        : path.resolve(`${exportBaseName(safeFileName(artifact.title, artifact.id))}.${ext}`)
       fs.mkdirSync(path.dirname(outputPath), { recursive: true })
       fs.writeFileSync(outputPath, bytes)
 

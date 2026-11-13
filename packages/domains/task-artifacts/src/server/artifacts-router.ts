@@ -19,6 +19,9 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
 import { signalTasksChanged } from './artifacts-router-deps'
+
+/** The largest piece `readBytesChunk` serves (bytes before base64). */
+export const ARTIFACT_CHUNK_MAX = 8 * 1024 * 1024
 import { TRPCError } from '@trpc/server'
 import {
   clearMoveStaging,
@@ -313,17 +316,35 @@ export const artifactsRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactContent(ctx.db, input.id)),
 
-  // Raw bytes for a download the CLIENT saves on its own device (file, folder, zip —
-  // see useArtifacts). Base64: superjson would carry a typed array as a JSON number
-  // array, ~3.6× the size. Null when the artifact or its file is gone.
-  readBytes: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-    const bytes = await store(ctx.dataRoot)
-      .readArtifactBytes(ctx.db, input.id)
-      .catch(() => null)
-    return bytes
-      ? Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
-      : null
-  }),
+  // One bounded piece of an artifact's bytes, for a download the CLIENT saves on its
+  // own device (file, folder, zip — see useArtifacts): no message or string ever holds
+  // a whole file, so size has no ceiling. Base64: superjson would carry a typed array
+  // as a JSON number array, ~3.6× the size. Null ONLY when there is no such artifact
+  // or file; any other read failure is an error the client surfaces.
+  readBytesChunk: publicProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        offset: z.number().int().min(0),
+        length: z.number().int().min(1).max(ARTIFACT_CHUNK_MAX)
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const r = await store(ctx.dataRoot).readArtifactBytesRange(
+        ctx.db,
+        input.id,
+        input.offset,
+        input.length
+      )
+      return r
+        ? {
+            data: Buffer.from(r.bytes.buffer, r.bytes.byteOffset, r.bytes.byteLength).toString(
+              'base64'
+            ),
+            size: r.size
+          }
+        : null
+    }),
 
   getFilePath: publicProcedure
     .input(z.object({ id: z.string() }))

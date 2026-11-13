@@ -155,6 +155,52 @@ describe('extractZip', () => {
     await expect(extractZip(zip, fresh('out'))).rejects.toBeInstanceOf(ZipError)
   })
 
+  // Review 1, M2: a lexical check passes every link here (`t` "points" at dest/a), yet
+  // `k/m/s` → `..` makes `k/m/s/t` really `k/t` → `../../../a` = outside dest, and
+  // the file lands there. Checked against the real filesystem, the chain is refused.
+  test.skipIf(process.platform === 'win32')(
+    'refuses a symlink CHAIN that escapes the destination (PoC shape)',
+    async () => {
+      const zip = await archiverZip((a) => {
+        a.append(null as unknown as Buffer, { name: 'k/m/' })
+        a.symlink('k/m/s', '..')
+        a.symlink('k/m/s/t', '../../../a')
+        a.append(Buffer.from('pwned'), { name: 'k/m/s/t/pwned.txt' })
+      })
+      const root = fresh('chain')
+      const dest = path.join(root, 'dest')
+      await expect(extractZip(zip, dest)).rejects.toBeInstanceOf(ZipError)
+      for (const p of [path.join(root, 'pwned.txt'), path.join(root, 'a', 'pwned.txt')])
+        expect(fs.existsSync(p), p).toBe(false)
+    }
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'refuses a link whose target walks through another link and then up',
+    async () => {
+      // Lexically `k/m/L` → `s/../../..` is dest/k; really it follows s → .. (dest/k)
+      // first, then climbs two more levels: outside.
+      const zip = await archiverZip((a) => {
+        a.append(null as unknown as Buffer, { name: 'k/m/' })
+        a.symlink('k/m/s', '..')
+        a.symlink('k/m/L', 's/../../..')
+      })
+      await expect(extractZip(zip, fresh('out'))).rejects.toBeInstanceOf(ZipError)
+    }
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'refuses writing THROUGH any symlink the archive created',
+    async () => {
+      const zip = await archiverZip((a) => {
+        a.append(Buffer.from('x'), { name: 'pkg/real/keep.txt' })
+        a.symlink('pkg/alias', 'real')
+        a.append(Buffer.from('via link'), { name: 'pkg/alias/sneaky.txt' })
+      })
+      await expect(extractZip(zip, fresh('out'))).rejects.toBeInstanceOf(ZipError)
+    }
+  )
+
   test('a CRC mismatch is an error, not a silently corrupt binary', async () => {
     const zip = writeTmp(handZip([{ name: 'a.txt', data: Buffer.from('hello'), crc: 1234 }]))
     await expect(extractZip(zip, fresh('out'))).rejects.toThrow(/CRC/)

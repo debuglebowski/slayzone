@@ -1,6 +1,5 @@
-import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
-import { planFolderDownload, planTaskDownload, zipFiles } from './download-plan'
+import { planFolderDownload, planTaskDownload, safeFileName } from './download-plan'
 
 const folders = [
   { id: 'f1', name: 'docs', parent_id: null },
@@ -74,18 +73,11 @@ describe('planFolderDownload', () => {
   })
 })
 
-describe('zipFiles', () => {
-  it('round-trips bytes and keeps same-named files apart', () => {
-    const enc = new TextEncoder()
-    const zip = zipFiles([
-      { path: 'docs/a.md', data: enc.encode('one') },
-      { path: 'docs/a.md', data: enc.encode('two') },
-      { path: 'bin', data: new Uint8Array([0, 255]) }
-    ])
-    expect(Array.from(zip.subarray(0, 2))).toEqual([0x50, 0x4b])
-    const out = unzipSync(zip)
-    expect(new TextDecoder().decode(out['docs/a.md'])).toBe('one')
-    expect(new TextDecoder().decode(out['docs/a (2).md'])).toBe('two')
-    expect(Array.from(out.bin)).toEqual([0, 255])
+describe('safeFileName', () => {
+  it('reduces a title to one name in place', () => {
+    expect(safeFileName('notes.md', 'x')).toBe('notes.md')
+    expect(safeFileName('../../x.md', 'x')).toBe('x.md')
+    expect(safeFileName('/abs/dir/x.md', 'x')).toBe('abs_dir_x.md')
+    expect(safeFileName('..', 'fallback')).toBe('fallback')
   })
 })

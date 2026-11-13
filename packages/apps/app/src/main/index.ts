@@ -464,7 +464,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
 import { exportArtifactOnDesktop } from './artifact-export'
-import { saveFileOnDesktop, saveFilesOnDesktop } from './client-save'
+import { SaveTargets } from './client-save'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -3901,13 +3901,34 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
         mermaidScriptPath
       })
     )
-    // Downloads land on THIS machine too: the renderer holds the bytes it read from
-    // the hub, main only asks where and writes.
-    ipcMain.handle('app:save-file', (event, request: unknown) =>
-      saveFileOnDesktop(BrowserWindow.fromWebContents(event.sender), request)
+    // Downloads land on THIS machine too: the renderer streams the pieces it reads
+    // from the hub, main writes them (client-save.ts). A target belongs to the window
+    // that opened it and is aborted if that window goes away mid-download.
+    const saveTargets = new SaveTargets()
+    const watchedSenders = new Set<number>()
+    ipcMain.handle('app:save-target-open', (event, request: unknown) => {
+      const sender = event.sender
+      if (!watchedSenders.has(sender.id)) {
+        watchedSenders.add(sender.id)
+        const id = sender.id
+        sender.once('destroyed', () => {
+          watchedSenders.delete(id)
+          void saveTargets.dropOwner(id)
+        })
+      }
+      return saveTargets.open(sender.id, BrowserWindow.fromWebContents(sender), request)
+    })
+    ipcMain.handle('app:save-target-write', (event, id: unknown, path: unknown, data: unknown) =>
+      saveTargets.write(event.sender.id, id, path, data)
     )
-    ipcMain.handle('app:save-files', (event, request: unknown) =>
-      saveFilesOnDesktop(BrowserWindow.fromWebContents(event.sender), request)
+    ipcMain.handle('app:save-target-mkdir', (event, id: unknown, path: unknown) =>
+      saveTargets.mkdir(event.sender.id, id, path)
+    )
+    ipcMain.handle('app:save-target-close', (event, id: unknown) =>
+      saveTargets.close(event.sender.id, id)
+    )
+    ipcMain.handle('app:save-target-abort', (event, id: unknown) =>
+      saveTargets.abort(event.sender.id, id)
     )
     if (isPlaywright) {
       ipcMain.handle('app:get-sidecar-status', () => getSidecarStatusSnapshot())
