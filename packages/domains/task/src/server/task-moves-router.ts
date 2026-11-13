@@ -7,6 +7,9 @@ import {
   removeRemoteBlockerInputSchema,
   remoteBlockersInputSchema,
   beginTaskMoveInputSchema,
+  beginProjectMoveInputSchema,
+  projectMovePreviewInputSchema,
+  projectMoveRedirectsInputSchema,
   exportTaskMoveInputSchema,
   importTaskMoveInputSchema,
   failTaskMoveInputSchema,
@@ -38,6 +41,9 @@ import {
   removeRemoteBlocker,
   advanceTaskMove,
   beginTaskMove,
+  beginProjectMove,
+  previewProjectMove,
+  projectMoveRedirects,
   commitTaskMoveIn,
   exportTaskMove,
   importTaskMove,
@@ -103,6 +109,25 @@ export const taskMovesRouter = router({
       )
     ),
 
+  /** Move a whole project to another hub: every task in it and its own rows (ids kept). */
+  beginProject: publicProcedure
+    .input(beginProjectMoveInputSchema)
+    .mutation(({ ctx, input }) =>
+      boardChanged(() =>
+        mapped(() => beginProjectMove(ctx.db, input, { createdBy: ctx.principal?.userId ?? null }))
+      )
+    ),
+
+  /** What moving this project to another hub would carry, and what stops it (the dialog). */
+  projectPreview: publicProcedure
+    .input(projectMovePreviewInputSchema)
+    .query(({ ctx, input }) => previewProjectMove(ctx.db, input.projectId)),
+
+  /** Where moved projects went. */
+  projectRedirects: publicProcedure
+    .input(projectMoveRedirectsInputSchema)
+    .query(({ ctx, input }) => projectMoveRedirects(ctx.db, input.projectIds)),
+
   /** What a move of these tasks to another hub would carry (the dialog). */
   preview: publicProcedure
     .input(crossHubMovePreviewInputSchema)
@@ -166,12 +191,22 @@ export const taskMovesRouter = router({
   /** Source: the bundle of the move's tasks (a read; safe to repeat). */
   export: publicProcedure
     .input(exportTaskMoveInputSchema)
-    .query(({ ctx, input }) => mapped(() => exportTaskMove(ctx.db, input.id))),
+    .query(({ ctx, input }) =>
+      mapped(() => exportTaskMove(ctx.db, input.id, { userId: ctx.principal?.userId ?? null }))
+    ),
 
   /** Target: take the bundle, hidden and locked until `commit`. Idempotent. */
-  import: publicProcedure
-    .input(importTaskMoveInputSchema)
-    .mutation(({ ctx, input }) => boardChanged(() => mapped(() => importTaskMove(ctx.db, input)))),
+  import: publicProcedure.input(importTaskMoveInputSchema).mutation(({ ctx, input }) =>
+    boardChanged(() =>
+      mapped(() =>
+        importTaskMove(ctx.db, input, {
+          // A moved project belongs to whoever brings it here.
+          ownerUserId: ctx.principal?.userId ?? null,
+          dataRoot: ctx.dataRoot
+        })
+      )
+    )
+  ),
 
   /** Target: the tasks are this hub's now. */
   commit: publicProcedure
@@ -198,7 +233,7 @@ export const taskMovesRouter = router({
   abort: publicProcedure
     .input(taskMoveIdInputSchema)
     .mutation(({ ctx, input }) =>
-      boardChanged(() => mapped(() => abortTaskMoveIn(ctx.db, input.id)))
+      boardChanged(() => mapped(() => abortTaskMoveIn(ctx.db, input.id, ctx.dataRoot)))
     ),
 
   // --- `copy-sessions`: a moved task's agent sessions, computer to computer through

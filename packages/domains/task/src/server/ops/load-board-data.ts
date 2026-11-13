@@ -1,3 +1,4 @@
+import { projectNotInTransitSql } from '@slayzone/projects/server'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { Task } from '@slayzone/task-contracts'
 import type { Project } from '@slayzone/projects-contracts'
@@ -21,8 +22,9 @@ export async function loadBoardDataOp(db: SlayzoneDb): Promise<BoardData> {
       ${TASK_ORDER_BY}`
   )
 
+  // A project moving between hubs shows on one of them only.
   const projectRows = await db.all<Record<string, unknown>>(
-    'SELECT * FROM projects ORDER BY sort_order'
+    `SELECT * FROM projects p WHERE ${projectNotInTransitSql('p')} ORDER BY sort_order`
   )
 
   const tagRows = await db.all('SELECT * FROM tags ORDER BY sort_order, name')

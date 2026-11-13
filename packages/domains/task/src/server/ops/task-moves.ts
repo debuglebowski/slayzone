@@ -2,10 +2,23 @@ import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/server'
 import { getDefaultStatus, isKnownStatus, parseColumnsConfig } from '@slayzone/projects-contracts'
+import path from 'node:path'
+import { isMachineLocalSetting, settingScope } from '@slayzone/settings-core/server'
+import {
+  getProjectFolderHost,
+  parseProject,
+  projectFolders,
+  projectIconsDirOf,
+  projectMovingSql,
+  unlinkProjectIconFiles
+} from '@slayzone/projects/server'
 import {
   nextTaskMoveStep,
   TASK_MOVE_LOCKING_STATUSES,
   TASK_MOVE_STEPS,
+  TASK_MOVE_TABLES,
+  type BeginProjectMoveInput,
+  type ProjectMoveBundle,
   type BeginTaskMoveInput,
   type CrossHubMovePreview,
   type ImportTaskMoveInput,
@@ -13,6 +26,9 @@ import {
   type TaskRemoteBlocker,
   type TaskMove,
   type TaskMoveRedirects,
+  type TaskMoveScope,
+  type ProjectMoveRedirects,
+  type ProjectMovePreview,
   type TaskMoveStatus,
   type TaskMoveStep
 } from '@slayzone/task-contracts'
@@ -53,6 +69,8 @@ export class TaskMoveRefusedError extends Error {
 interface MoveRow {
   id: string
   direction: 'out' | 'in'
+  scope: TaskMoveScope
+  project_id: string | null
   peer_hub_id: string
   target_project_id: string
   root_task_ids: string
@@ -77,6 +95,8 @@ async function toMove(db: SlayzoneDb, row: MoveRow): Promise<TaskMove> {
   return {
     id: row.id,
     direction: row.direction,
+    scope: row.scope,
+    projectId: row.project_id,
     peerHubId: row.peer_hub_id,
     targetProjectId: row.target_project_id,
     rootTaskIds: JSON.parse(row.root_task_ids) as string[],
@@ -171,6 +191,8 @@ export async function beginTaskMove(
     taskIds,
     includeSubtasks,
     includeSessions: input.includeSessions ?? true,
+    scope: 'task',
+    projectId: null,
     createdBy: opts.createdBy ?? null,
     now: Date.now()
   })
@@ -178,8 +200,12 @@ export async function beginTaskMove(
     throw new TaskAlreadyMovingError(
       `Already being moved to another hub: ${result.taskIds.join(', ')}`
     )
+  await stopMovingTasks(taskIds)
+  return advanceTaskMove(db, { id, completed: 'lock' })
+}
 
-  // The lock step: nothing of these tasks may keep running here while they move.
+/** The lock step: nothing of these tasks may keep running here while they move. */
+async function stopMovingTasks(taskIds: readonly string[]): Promise<void> {
   const runtime = getRuntimeAdapters()
   for (const taskId of taskIds) {
     runtime.killPtysByTaskId(taskId)
@@ -187,6 +213,91 @@ export async function beginTaskMove(
       console.warn(`[task] agents of moving task ${taskId} not stopped:`, error)
     })
   }
+}
+
+/** Why a project cannot move to another hub now, or null when it can. */
+async function projectMoveRefusal(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<{ reason: 'integration' | 'deleting'; message: string } | null> {
+  const linked = await db.get(
+    `SELECT 1 FROM integration_project_mappings WHERE project_id = ?
+     UNION ALL
+     SELECT 1 FROM external_links l JOIN tasks t ON t.id = l.task_id WHERE t.project_id = ?
+     LIMIT 1`,
+    [projectId, projectId]
+  )
+  if (linked)
+    return {
+      reason: 'integration',
+      message:
+        'The project is linked to an integration on this hub. Unlink it before moving it to another hub.'
+    }
+  // Deleting a task erases it for good; until that finishes its rows are fenced, not gone.
+  const erasing = await db.get(
+    `SELECT 1 FROM tasks t WHERE t.project_id = ?
+       AND (t.deleted_at IS NOT NULL
+            OR EXISTS (SELECT 1 FROM content_erasure_tasks e WHERE e.task_id = t.id))
+     LIMIT 1`,
+    [projectId]
+  )
+  if (erasing)
+    return {
+      reason: 'deleting',
+      message: 'A task of this project is still being deleted. Wait for the deletion to finish.'
+    }
+  return null
+}
+
+/**
+ * Begin moving project `projectId` — every task in it, archived ones too, and the
+ * project's own rows — to `targetHubId`, where it keeps its id. The journal row, the
+ * lock on the project and every task, and every agent stopped; then the move waits at
+ * its `export` step. Refused for a project linked to an integration, one with a
+ * deletion still running, or one (or a task of it) already moving.
+ */
+export async function beginProjectMove(
+  db: SlayzoneDb,
+  input: BeginProjectMoveInput,
+  opts: { createdBy?: string | null } = {}
+): Promise<TaskMove> {
+  const id = input.id ?? randomUUID()
+  const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [id])
+  if (existing) return toMove(db, existing)
+  const project = await db.get('SELECT 1 FROM projects WHERE id = ?', [input.projectId])
+  if (!project) throw new TaskMoveRefusedError(`Project not found: ${input.projectId}`)
+  const refusal = await projectMoveRefusal(db, input.projectId)
+  if (refusal) throw new TaskMoveRefusedError(refusal.message)
+
+  const tasks = await db.all<{ id: string; parent_id: string | null }>(
+    'SELECT id, parent_id FROM tasks WHERE project_id = ?',
+    [input.projectId]
+  )
+  const taskIds = tasks.map((t) => t.id)
+  const inside = new Set(taskIds)
+  // A root: no parent, or one in another project (the move detaches it).
+  const rootTaskIds = tasks.filter((t) => !t.parent_id || !inside.has(t.parent_id)).map((t) => t.id)
+
+  const result = await db.namedTxn('task:begin-move', {
+    id,
+    peerHubId: input.targetHubId,
+    targetProjectId: input.projectId,
+    rootTaskIds,
+    taskIds,
+    includeSubtasks: true,
+    includeSessions: input.includeSessions ?? true,
+    scope: 'project',
+    projectId: input.projectId,
+    createdBy: opts.createdBy ?? null,
+    now: Date.now()
+  })
+  if (result.outcome === 'conflict')
+    throw new TaskAlreadyMovingError(
+      result.taskIds.length > 0
+        ? `Already being moved to another hub: ${result.taskIds.join(', ')}`
+        : 'The project is already being moved'
+    )
+  await stopMovingTasks(taskIds)
   return advanceTaskMove(db, { id, completed: 'lock' })
 }
 
@@ -366,9 +477,12 @@ export async function releaseTaskMove(
           error
         )
       })
+  const placements = await projectPlacementsOf(db, move)
   await db.namedTxn('task:release-move', { id, now: Date.now() })
-  // Their artifact files are the target's now (copied in `copy-files`).
   const runtime = getRuntimeAdapters()
+  if (move.scope === 'project' && move.projectId)
+    await letGoOfProject(move.projectId, placements, dataRoot ?? runtime.getDataRoot())
+  // Their artifact files are the target's now (copied in `copy-files`).
   for (const taskId of move.taskIds) {
     await Promise.resolve()
       .then(() =>
@@ -396,6 +510,65 @@ export async function taskMoveRedirects(
   return Object.fromEntries(rows.map((r) => [r.task_id, { hubId: r.hub_id, moveId: r.move_id }]))
 }
 
+/** Where moved projects went (project id → hub and move); one not listed did not move away. */
+export async function projectMoveRedirects(
+  db: SlayzoneDb,
+  projectIds: readonly string[]
+): Promise<ProjectMoveRedirects> {
+  if (projectIds.length === 0) return {}
+  const rows = await db.all<{ project_id: string; hub_id: string; move_id: string }>(
+    `SELECT project_id, hub_id, move_id FROM project_move_redirects
+      WHERE project_id IN (${placeholders(projectIds.length)})`,
+    [...projectIds]
+  )
+  return Object.fromEntries(rows.map((r) => [r.project_id, { hubId: r.hub_id, moveId: r.move_id }]))
+}
+
+/** Which of `projectIds` an unfinished project move locks (either direction). */
+export async function lockedProjectIds(
+  db: SlayzoneDb,
+  projectIds: readonly string[]
+): Promise<string[]> {
+  if (projectIds.length === 0) return []
+  const rows = await db.all<{ project_id: string }>(
+    `SELECT DISTINCT project_id FROM task_moves
+      WHERE scope = 'project' AND status IN ${LOCKING_SQL}
+        AND project_id IN (${placeholders(projectIds.length)})`,
+    [...projectIds]
+  )
+  return rows.map((r) => r.project_id)
+}
+
+/** What moving project `projectId` to another hub would carry, and what stops it. */
+export async function previewProjectMove(
+  db: SlayzoneDb,
+  projectId: string
+): Promise<ProjectMovePreview> {
+  const count = async (sql: string, params: unknown[]): Promise<number> =>
+    (await db.get<{ n: number }>(sql, params))?.n ?? 0
+  const refusal = await projectMoveRefusal(db, projectId)
+  return {
+    taskCount: await count('SELECT COUNT(*) AS n FROM tasks WHERE project_id = ?', [projectId]),
+    linkedToIntegration: refusal?.reason === 'integration',
+    deletionPending: refusal?.reason === 'deleting',
+    alreadyMoving:
+      (await count(
+        `SELECT COUNT(*) AS n FROM task_moves m
+          WHERE m.status IN ${LOCKING_SQL}
+            AND ((m.scope = 'project' AND m.project_id = ?)
+                 OR EXISTS (SELECT 1 FROM task_move_tasks mt JOIN tasks t ON t.id = mt.task_id
+                             WHERE mt.move_id = m.id AND t.project_id = ?))`,
+        [projectId, projectId]
+      )) > 0,
+    externalBlockerCount: await count(
+      `SELECT COUNT(*) AS n FROM task_dependencies d
+         JOIN tasks a ON a.id = d.task_id JOIN tasks b ON b.id = d.blocks_task_id
+        WHERE (a.project_id = ?) <> (b.project_id = ?)`,
+      [projectId, projectId]
+    )
+  }
+}
+
 /** Whether any move holds a lock now — the write gate's cheap first question. */
 export async function anyTaskMoveLocking(db: SlayzoneDb): Promise<boolean> {
   return !!(await db.get(`SELECT 1 FROM task_moves WHERE status IN ${LOCKING_SQL} LIMIT 1`))
@@ -421,13 +594,33 @@ type Row = Record<string, unknown>
  * hub they leave. Safe to read again (a retried export); only while the move holds
  * its lock, so the rows cannot change underneath.
  */
-export async function exportTaskMove(db: SlayzoneDb, id: string): Promise<TaskMoveBundle> {
+export async function exportTaskMove(
+  db: SlayzoneDb,
+  id: string,
+  /** Who runs the move: a project move carries their own per-user settings of it. */
+  opts: { userId?: string | null } = {}
+): Promise<TaskMoveBundle> {
   const move = await getTaskMove(db, id)
   if (move.direction !== 'out' || !TASK_MOVE_LOCKING_STATUSES.includes(move.status))
     throw new TaskMoveStateError(`The move is ${move.status}: nothing to export`)
   if (TASK_MOVE_STEPS.indexOf(move.step) < TASK_MOVE_STEPS.indexOf('export'))
     throw new TaskMoveStateError('The move has not locked its tasks yet')
+  const project =
+    move.scope === 'project' && move.projectId
+      ? await exportProjectRows(db, move.projectId, opts.userId ?? null)
+      : undefined
   const ids = move.taskIds
+  if (ids.length === 0)
+    return {
+      moveId: move.id,
+      ...(project ? { project } : {}),
+      rootTaskIds: [],
+      rows: Object.fromEntries(
+        TASK_MOVE_TABLES.map((t) => [t, [] as Row[]])
+      ) as TaskMoveBundle['rows'],
+      tags: [],
+      externalDependencies: []
+    }
   const ph = placeholders(ids.length)
   const all = (sql: string, params: unknown[] = ids): Promise<Row[]> => db.all<Row>(sql, params)
   const artifacts = await all(`SELECT * FROM task_artifacts WHERE task_id IN (${ph})`)
@@ -442,6 +635,7 @@ export async function exportTaskMove(db: SlayzoneDb, id: string): Promise<TaskMo
     inside.has(d.task_id as string) && inside.has(d.blocks_task_id as string)
   return {
     moveId: move.id,
+    ...(project ? { project } : {}),
     rootTaskIds: move.rootTaskIds,
     rows: {
       tasks: await all(`SELECT * FROM tasks WHERE id IN (${ph})`),
@@ -474,6 +668,86 @@ export async function exportTaskMove(db: SlayzoneDb, id: string): Promise<TaskMo
   }
 }
 
+/** Settings whose key names the project (`ai_providers:<id>`, `filter:<id>`, …). */
+const PROJECT_SETTING_KEY = "key LIKE '%' || ? || '%'"
+
+/**
+ * The settings naming the project, by scope (`settingScope`): hub-wide keys, and the
+ * mover's own per-user ones (a hub without login keeps those in `settings` too; the
+ * mover's `user_settings` row wins). Internal and machine-local keys stay: they
+ * describe this hub or this machine.
+ */
+async function projectSettings(
+  db: SlayzoneDb,
+  projectId: string,
+  userId: string | null
+): Promise<Pick<ProjectMoveBundle, 'settings' | 'userSettings'>> {
+  const hubWide: ProjectMoveBundle['settings'] = []
+  const own = new Map<string, string>()
+  const rows = await db.all<{ key: string; value: string }>(
+    `SELECT key, value FROM settings WHERE ${PROJECT_SETTING_KEY}`,
+    [projectId]
+  )
+  for (const row of rows) {
+    if (isMachineLocalSetting(row.key)) continue
+    const scope = settingScope(row.key)
+    if (scope === 'hub') hubWide.push(row)
+    else if (scope === 'user') own.set(row.key, row.value)
+  }
+  if (userId) {
+    const mine = await db.all<{ key: string; value: string }>(
+      `SELECT key, value FROM user_settings WHERE user_id = ? AND ${PROJECT_SETTING_KEY}`,
+      [userId, projectId]
+    )
+    for (const row of mine)
+      if (!isMachineLocalSetting(row.key) && settingScope(row.key) === 'user')
+        own.set(row.key, row.value)
+  }
+  return {
+    settings: hubWide,
+    userSettings: [...own].map(([key, value]) => ({ key, value }))
+  }
+}
+
+/**
+ * A project move's own rows (`PROJECT_MOVE_TABLES`), read while the move holds the
+ * project's lock. `activity_events`: the project's own entries (its tasks' come with
+ * the tasks). Settings: hub-wide keys naming the project, and the mover's own.
+ */
+async function exportProjectRows(
+  db: SlayzoneDb,
+  projectId: string,
+  userId: string | null
+): Promise<ProjectMoveBundle> {
+  const all = (sql: string): Promise<Row[]> => db.all<Row>(sql, [projectId])
+  const projectRow = await db.get<Row>('SELECT * FROM projects WHERE id = ?', [projectId])
+  if (!projectRow) throw new TaskMoveStateError(`Project ${projectId} is not on this hub`)
+  const record = parseProject(projectRow)
+  const folder = record ? ((await projectFolders(db, [record])).get(projectId) ?? null) : null
+  return {
+    projectId,
+    rows: {
+      projects: [projectRow],
+      tags: await all('SELECT * FROM tags WHERE project_id = ?'),
+      automations: await all('SELECT * FROM automations WHERE project_id = ?'),
+      task_templates: await all('SELECT * FROM task_templates WHERE project_id = ?'),
+      test_categories: await all('SELECT * FROM test_categories WHERE project_id = ?'),
+      test_labels: await all('SELECT * FROM test_labels WHERE project_id = ?'),
+      test_file_labels: await all('SELECT * FROM test_file_labels WHERE project_id = ?'),
+      test_file_notes: await all('SELECT * FROM test_file_notes WHERE project_id = ?'),
+      ai_config_items: await all('SELECT * FROM ai_config_items WHERE project_id = ?'),
+      ai_config_project_selections: await all(
+        'SELECT * FROM ai_config_project_selections WHERE project_id = ?'
+      ),
+      activity_events: await all(
+        'SELECT * FROM activity_events WHERE project_id = ? AND task_id IS NULL'
+      )
+    },
+    ...(await projectSettings(db, projectId, userId)),
+    folder
+  }
+}
+
 /** Clears what belonged to the source hub's folders and computers (as a same-hub move). */
 const LEFT_BEHIND: Readonly<Row> = {
   computer_id: null,
@@ -495,20 +769,40 @@ const LEFT_BEHIND: Readonly<Row> = {
  */
 export async function importTaskMove(
   db: SlayzoneDb,
-  input: ImportTaskMoveInput
+  input: ImportTaskMoveInput,
+  opts: {
+    /** Who a moved project belongs to here: the importer; null on a hub without login. */
+    ownerUserId?: string | null
+    /** This hub's data root (its `project-icons/`); default: the runtime's. */
+    dataRoot?: string
+  } = {}
 ): Promise<TaskMove> {
   const { bundle } = input
   const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [bundle.moveId])
   if (existing) return toMove(db, existing)
-  const target = await db.get<{ id: string; name: string; columns_config: string | null }>(
-    'SELECT id, name, columns_config FROM projects WHERE id = ?',
-    [input.targetProjectId]
-  )
+  const incoming = bundle.project
+    ? await incomingProject(db, bundle.project, {
+        ownerUserId: opts.ownerUserId ?? null,
+        dataRoot: opts.dataRoot ?? getRuntimeAdapters().getDataRoot()
+      })
+    : null
+  const target = incoming
+    ? {
+        id: incoming.row.id as string,
+        name: incoming.row.name as string,
+        columns_config: (incoming.row.columns_config as string | null) ?? null
+      }
+    : await db.get<{ id: string; name: string; columns_config: string | null }>(
+        'SELECT id, name, columns_config FROM projects WHERE id = ?',
+        [input.targetProjectId]
+      )
   if (!target) throw new TaskMoveRefusedError(`Project not found: ${input.targetProjectId}`)
+  if (!incoming && (await db.get(`SELECT 1 WHERE ${projectMovingSql('?')}`, [target.id])))
+    throw new TaskMoveRefusedError('The project is being moved between hubs. Try again after.')
   const columns = parseColumnsConfig(target.columns_config)
   const tasks = bundle.rows.tasks ?? []
   const taskIds = tasks.map((t) => t.id as string)
-  if (taskIds.length === 0) throw new TaskMoveRefusedError('The move carries no tasks')
+  if (taskIds.length === 0 && !incoming) throw new TaskMoveRefusedError('The move carries no tasks')
   const inside = new Set(taskIds)
 
   const events: RecordActivityEventInput[] = []
@@ -556,9 +850,74 @@ export async function importTaskMove(
     },
     tags: bundle.tags,
     events,
+    project: incoming
+      ? {
+          id: target.id,
+          row: incoming.row,
+          rows: incoming.rows,
+          settings: bundle.project!.settings,
+          userSettings: bundle.project!.userSettings,
+          ownerUserId: opts.ownerUserId ?? null
+        }
+      : null,
     now: Date.now()
   })
+  // The project's folder, offered to this hub's computer like a new project's: kept
+  // when it is there, recorded missing when not, dropped when the computer refuses it.
+  if (incoming?.computerId && incoming.folder) {
+    const host = getProjectFolderHost()
+    await host
+      ?.setFolder(incoming.computerId, target.id, incoming.folder)
+      .catch((error: unknown) => {
+        console.warn(`[task] folder of moved project ${target.id} not placed:`, error)
+      })
+  }
   return getTaskMove(db, bundle.moveId)
+}
+
+/**
+ * A moved project as this hub takes it in: the project row made this hub's (owner =
+ * the importer, ungrouped, the default computer of a new project, its icon in this
+ * hub's `project-icons/`), the rest of its rows as they came. Refused when a project
+ * with that id is here already.
+ */
+async function incomingProject(
+  db: SlayzoneDb,
+  project: ProjectMoveBundle,
+  opts: { ownerUserId: string | null; dataRoot: string }
+): Promise<{
+  row: Row
+  rows: Omit<ProjectMoveBundle['rows'], 'projects'>
+  computerId: string | null
+  folder: string | null
+}> {
+  const source = project.rows.projects?.[0]
+  if (!source || source.id !== project.projectId)
+    throw new TaskMoveRefusedError('The move carries no project row')
+  if (await db.get('SELECT 1 FROM projects WHERE id = ?', [project.projectId]))
+    throw new TaskMoveRefusedError('A project with this id is already on this hub')
+  const host = getProjectFolderHost()
+  const computerId = host ? await host.computerForNewProject() : null
+  const icon = typeof source.icon_image_path === 'string' ? source.icon_image_path : null
+  const iconName = icon?.split(/[\\/]/).pop() ?? null
+  const { projects: _row, ...rows } = project.rows
+  return {
+    row: {
+      ...source,
+      owner_user_id: opts.ownerUserId,
+      group_id: null,
+      default_computer_id: computerId,
+      // No computers at all: the hub column is the only place for the folder.
+      path: host ? null : project.folder,
+      icon_image_path:
+        iconName && iconName.startsWith(`${project.projectId}.`)
+          ? path.join(projectIconsDirOf(opts.dataRoot), iconName)
+          : null
+    },
+    rows,
+    computerId,
+    folder: host ? project.folder : null
+  }
 }
 
 /** The target hub takes the tasks as its own: shown, unlocked. Repeated: no change. */
@@ -572,7 +931,12 @@ export async function commitTaskMoveIn(db: SlayzoneDb, id: string): Promise<Task
 }
 
 /** A canceled move: the target hub drops what it took (before it committed). */
-export async function abortTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskMove> {
+export async function abortTaskMoveIn(
+  db: SlayzoneDb,
+  id: string,
+  /** This hub's data root (a moved project's icon); default: the runtime's. */
+  dataRoot?: string
+): Promise<TaskMove> {
   const move = await getTaskMove(db, id)
   if (move.direction !== 'in') throw new TaskMoveStateError('Not a move into this hub')
   if (move.status === 'done') throw new TaskMoveStateError('The move is committed here')
@@ -583,8 +947,40 @@ export async function abortTaskMoveIn(db: SlayzoneDb, id: string): Promise<TaskM
       .catch((error: unknown) => {
         console.warn(`[task] sessions of canceled move ${id} not forgotten:`, error)
       })
+  const placements = await projectPlacementsOf(db, move)
   await db.namedTxn('task:abort-import', { id, now: Date.now() })
+  if (move.scope === 'project' && move.projectId)
+    await letGoOfProject(move.projectId, placements, dataRoot ?? getRuntimeAdapters().getDataRoot())
   return getTaskMove(db, id)
+}
+
+/** The computers holding a project move's folder here (none for a move of tasks). */
+async function projectPlacementsOf(db: SlayzoneDb, move: TaskMove): Promise<string[]> {
+  if (move.scope !== 'project' || !move.projectId) return []
+  return (
+    await db.all<{ computer_id: string }>(
+      'SELECT computer_id FROM project_placements WHERE project_id = ?',
+      [move.projectId]
+    )
+  ).map((r) => r.computer_id)
+}
+
+/**
+ * After a project left this hub (its rows removed): its computers here forget its
+ * folder (the folder itself stays), and its icon file goes. Best effort: a computer
+ * that is away keeps an entry for a project this hub no longer has.
+ */
+async function letGoOfProject(
+  projectId: string,
+  computerIds: readonly string[],
+  dataRoot: string
+): Promise<void> {
+  const host = getProjectFolderHost()
+  for (const computerId of computerIds)
+    await host?.forgetFolder(computerId, projectId).catch((error: unknown) => {
+      console.warn(`[task] folder of moved project ${projectId} not forgotten:`, error)
+    })
+  unlinkProjectIconFiles(projectIconsDirOf(dataRoot), projectId)
 }
 
 async function withStayingTitles(

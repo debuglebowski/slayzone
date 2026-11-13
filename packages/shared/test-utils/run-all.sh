@@ -715,6 +715,11 @@ run_harness packages/apps/api/src/routers/task-duplicate.test.ts
 run_harness packages/apps/api/src/routers/task-moves.test.ts
 # Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.
 run_harness packages/apps/api/src/routers/task-moves-two-hubs.test.ts
+# Moving a whole project between two hubs: its own rows, settings and icon with ids,
+# hidden/locked while moving, cancel, move back, empty project, refusals.
+run_harness packages/apps/api/src/routers/project-moves-two-hubs.test.ts
+# Every table holding project or task rows is carried by a move or left behind on purpose.
+run_harness packages/apps/api/src/routers/move-tables-classified.test.ts
 # Order/blocker, tag and artifact writes signal notify.onTasksChanged naming their tasks
 # (they emitted nothing, so other clients never saw them live); a burst stays merged.
 run_harness packages/apps/api/src/routers/task-change-signals.test.ts

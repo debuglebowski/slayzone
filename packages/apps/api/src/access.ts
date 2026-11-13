@@ -776,6 +776,13 @@ async function resolveTaskMove(db: SlayzoneDb, id: string): Promise<Ownership> {
     [id]
   )
   if (here) return viaTask(db, here.task_id)
+  // A project move (one with no task, or none left here): its project, while here.
+  const project = await db.get<{ project_id: string }>(
+    `SELECT m.project_id FROM task_moves m JOIN projects p ON p.id = m.project_id
+      WHERE m.id = ? AND m.scope = 'project'`,
+    [id]
+  )
+  if (project) return viaQuery(OWNER_OF_PROJECT)(db, project.project_id)
   return viaQuery('SELECT created_by AS owner_user_id FROM task_moves WHERE id = ?')(db, id)
 }
 

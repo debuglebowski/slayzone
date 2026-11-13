@@ -19,7 +19,7 @@ import { checkOwnership, ownedResult } from './owner-gate'
 import { confineTaskFileCall } from './task-file-confinement'
 import { getAuthGate } from '@slayzone/trpc-server'
 import { TRPC_OWNER_POLICY, resourcesIn } from './owner-policy'
-import { assertNotMoving, TaskMovingError } from './move-lock'
+import { assertNotMoving, MOVE_LOCK_EXEMPT, TaskMovingError } from './move-lock'
 
 setProcedurePolicy({
   scopeAllows: isPathAllowed,
@@ -40,7 +40,7 @@ setProcedurePolicy({
   // The move lock (move-lock.ts): the resources the owner rule lists, login or not.
   moveLockCheck: async (req) => {
     const rule = TRPC_OWNER_POLICY[req.path]
-    if (!rule) return
+    if (!rule || MOVE_LOCK_EXEMPT.has(req.path)) return
     try {
       await assertNotMoving(req.ctx.db, resourcesIn(await req.getRawInput(), rule))
     } catch (err) {

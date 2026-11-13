@@ -13,12 +13,15 @@ import {
   resolveTemplate,
   type TemplateContext
 } from '@slayzone/automations/shared'
-import { taskEvents } from '@slayzone/task/server'
+import { projectMovingSql, taskEvents } from '@slayzone/task/server'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import { recordedProjectRoot } from '@slayzone/computers/server'
 import { getAutomationCommandRouting } from './command-routing'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './automations-txns'
+
+/** An automation of a project moving between hubs runs on neither until the move ends. */
+const NOT_MOVING = `NOT ${projectMovingSql('automations.project_id')}`
 
 const MAX_DEPTH = 5
 const ACTION_TIMEOUT_MS = 30_000
@@ -189,7 +192,7 @@ export class AutomationEngine {
    */
   async runCatchup(): Promise<void> {
     const rows = (await this.db.all<AutomationRow>(
-      "SELECT * FROM automations WHERE enabled = 1 AND catchup_on_start = 1 AND last_run_at IS NOT NULL AND json_extract(trigger_config, '$.type') = 'cron'"
+      `SELECT * FROM automations WHERE enabled = 1 AND catchup_on_start = 1 AND last_run_at IS NOT NULL AND json_extract(trigger_config, '$.type') = 'cron' AND ${NOT_MOVING}`
     )) as AutomationRow[]
 
     const now = new Date()
@@ -294,7 +297,7 @@ export class AutomationEngine {
   private async tickCron(): Promise<void> {
     const now = new Date()
     const rows = (await this.db.all<AutomationRow>(
-      "SELECT * FROM automations WHERE enabled = 1 AND json_extract(trigger_config, '$.type') = 'cron'"
+      `SELECT * FROM automations WHERE enabled = 1 AND json_extract(trigger_config, '$.type') = 'cron' AND ${NOT_MOVING}`
     )) as AutomationRow[]
 
     for (const row of rows) {
@@ -328,7 +331,7 @@ export class AutomationEngine {
     if (!event.projectId) return
 
     const rows = await this.db.all<AutomationRow>(
-      'SELECT * FROM automations WHERE project_id = ? AND enabled = 1',
+      `SELECT * FROM automations WHERE project_id = ? AND enabled = 1 AND ${NOT_MOVING}`,
       [event.projectId]
     )
 

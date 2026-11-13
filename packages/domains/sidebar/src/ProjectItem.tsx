@@ -11,7 +11,8 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { FolderPlus } from 'lucide-react'
 import type { Project } from '@slayzone/projects-contracts'
-import { useHubBadge, useHubIdForProject } from '@slayzone/transport/client'
+import { useDialogStore } from '@slayzone/dialogs'
+import { useFederationOrNull, useHubBadge, useHubIdForProject } from '@slayzone/transport/client'
 import { HubDot, HubTooltipSuffix } from './HubDot'
 import { ProjectAvatar } from './ProjectAvatar'
 
@@ -49,6 +50,8 @@ export function ProjectItem({
     data: dragData
   })
   const hubBadge = useHubBadge(useHubIdForProject(project.id))
+  // Moving a project somewhere needs somewhere else: a second hub the app is connected to.
+  const canMoveToHub = (useFederationOrNull()?.hubs.length ?? 0) > 1
 
   const style = {
     // Stay put while dragging — the DragOverlay renders the moving copy and the
@@ -119,6 +122,14 @@ export function ProjectItem({
             <ContextMenuItem onSelect={onSettings}>Settings</ContextMenuItem>
             {onRemoveFromGroup && (
               <ContextMenuItem onSelect={onRemoveFromGroup}>Remove from group</ContextMenuItem>
+            )}
+            {canMoveToHub && (
+              <ContextMenuItem
+                onSelect={() => useDialogStore.getState().openMoveProjectToHub(project)}
+                data-testid="project-move-to-hub"
+              >
+                Move to hub…
+              </ContextMenuItem>
             )}
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={onDelete} className="text-destructive">

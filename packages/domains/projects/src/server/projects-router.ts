@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { z } from 'zod'
 import {
   listAllProjects,
@@ -6,7 +5,8 @@ import {
   updateProject,
   deleteProject,
   uploadProjectIcon,
-  reorderProjects
+  reorderProjects,
+  projectIconsDirOf
 } from './project-store'
 import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-contracts'
 import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-server'
@@ -27,7 +27,7 @@ const createProjectInput = z.object({
 const updateProjectInput = z.unknown() as unknown as z.ZodType<UpdateProjectInput>
 
 // Icon dir derived from the context's dataRoot so the store stays electron-free.
-const iconsDir = (dataRoot: string): string => join(dataRoot, 'project-icons')
+const iconsDir = projectIconsDirOf
 
 export const projectsRouter = router({
   list: publicProcedure.query(({ ctx }) => listAllProjects(ctx.db)),

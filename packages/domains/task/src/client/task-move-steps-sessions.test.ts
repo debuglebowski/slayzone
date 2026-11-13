@@ -9,6 +9,8 @@ import {
 const move = (over: Partial<TaskMove> = {}): TaskMove => ({
   id: 'm1',
   direction: 'out',
+  scope: 'task',
+  projectId: null,
   peerHubId: 'hub-b',
   targetProjectId: 'p',
   rootTaskIds: ['t1'],

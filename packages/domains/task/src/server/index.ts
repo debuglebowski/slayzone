@@ -15,7 +15,9 @@ export {
 // the deps are injected by the composition roots (hub, Electron main).
 export { taskRouter } from './task-router'
 export { taskMovesRouter } from './task-moves-router'
-export { anyTaskMoveLocking, lockedTaskIds } from './ops/task-moves'
+export { anyTaskMoveLocking, lockedProjectIds, lockedTaskIds } from './ops/task-moves'
+// For project-scoped jobs (the automation engine) that do not depend on @slayzone/projects.
+export { projectMovingSql } from '@slayzone/projects/server'
 export {
   setTaskMoveSessionsDelegate,
   type TaskMoveSessionsDelegate

@@ -11,17 +11,65 @@
  * @module api/move-lock
  */
 import type { SlayzoneDb } from '@slayzone/platform'
-import { anyTaskMoveLocking, lockedTaskIds } from '@slayzone/task/server'
+import { anyTaskMoveLocking, lockedProjectIds, lockedTaskIds } from '@slayzone/task/server'
 import type { OwnedResource } from './access'
 import type { HttpIdRef } from './http-owner-policy'
 import { idValuesAt } from './http/owner-scope'
 
-/** A write to a task that is being moved to another hub. */
+/**
+ * Writes the lock lets through though they name a moving project: the order of the
+ * project list is not the project's content (a reorder names every listed project).
+ */
+export const MOVE_LOCK_EXEMPT: ReadonlySet<string> = new Set(['projects.reorder'])
+
+/** A write to a task, or to a project, that is being moved to another hub. */
 export class TaskMovingError extends Error {
   override name = 'TaskMovingError'
-  constructor(readonly taskIds: readonly string[]) {
-    super('This task is being moved to another hub. Wait for the move to finish, or cancel it.')
+  constructor(
+    readonly taskIds: readonly string[],
+    readonly projectIds: readonly string[] = []
+  ) {
+    super(
+      projectIds.length > 0
+        ? 'This project is being moved to another hub. Wait for the move to finish, or cancel it.'
+        : 'This task is being moved to another hub. Wait for the move to finish, or cancel it.'
+    )
   }
+}
+
+/**
+ * The project each kind belongs to, for a project move's lock (the project's own id
+ * for a project). Its tasks, tabs and artifacts are locked as tasks of the move.
+ */
+const PROJECT_OF: Partial<Record<OwnedResource['kind'], string | null>> = {
+  project: null,
+  tag: 'SELECT project_id FROM tags WHERE id = ?',
+  template: 'SELECT project_id FROM task_templates WHERE id = ?',
+  testCategory: 'SELECT project_id FROM test_categories WHERE id = ?',
+  testLabel: 'SELECT project_id FROM test_labels WHERE id = ?',
+  automation: 'SELECT project_id FROM automations WHERE id = ?',
+  automationRun: `SELECT a.project_id FROM automation_runs r
+    JOIN automations a ON a.id = r.automation_id WHERE r.id = ?`,
+  aiConfigItem: 'SELECT project_id FROM ai_config_items WHERE id = ?',
+  process: 'SELECT project_id FROM processes WHERE id = ?'
+}
+
+async function projectIdsOf(
+  db: SlayzoneDb,
+  resources: readonly OwnedResource[]
+): Promise<string[]> {
+  const out = new Set<string>()
+  for (const r of resources) {
+    if (!(r.kind in PROJECT_OF)) continue
+    const sql = PROJECT_OF[r.kind]
+    if (sql === null) {
+      out.add(r.id)
+      continue
+    }
+    const row = sql ? await db.get<{ project_id: string | null }>(sql, [r.id]) : undefined
+    if (row?.project_id) out.add(row.project_id)
+  }
+  return [...out]
 }
 
 /** The table holding each kind's task id (the resource's own id for a task). */
@@ -47,7 +95,10 @@ async function taskIdsOf(db: SlayzoneDb, resources: readonly OwnedResource[]): P
   return [...out]
 }
 
-/** Throws {@link TaskMovingError} when a resource belongs to a task that is moving. */
+/**
+ * Throws {@link TaskMovingError} when a resource belongs to a task that is moving, or
+ * to a project that is (a project move locks the project's own rows too).
+ */
 export async function assertNotMoving(
   db: SlayzoneDb,
   resources: readonly OwnedResource[]
@@ -56,7 +107,9 @@ export async function assertNotMoving(
   // The common case — no move anywhere on this hub — costs one indexed read.
   if (!(await anyTaskMoveLocking(db))) return
   const locked = await lockedTaskIds(db, await taskIdsOf(db, resources))
-  if (locked.length > 0) throw new TaskMovingError(locked)
+  const lockedProjects = await lockedProjectIds(db, await projectIdsOf(db, resources))
+  if (locked.length > 0 || lockedProjects.length > 0)
+    throw new TaskMovingError(locked, lockedProjects)
 }
 
 /** The tables a REST / MCP id PREFIX resolves in, per kind the lock cares about. */
@@ -64,7 +117,8 @@ const TABLE_OF: Partial<Record<OwnedResource['kind'], string>> = {
   task: 'tasks',
   artifact: 'task_artifacts',
   artifactFolder: 'artifact_folders',
-  tab: 'terminal_tabs'
+  tab: 'terminal_tabs',
+  project: 'projects'
 }
 
 /**

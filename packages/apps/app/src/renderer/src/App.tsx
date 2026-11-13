@@ -1800,6 +1800,7 @@ function App(): React.JSX.Element {
           <TaskMovesPanel
             hubIds={[...registeredHubIds]}
             hubName={(hubId) => fed?.hubs.find((h) => h.id === hubId)?.label ?? hubId}
+            projectName={(projectId) => projects.find((p) => p.id === projectId)?.name}
             syncKey={tasks}
           />
           <AppDialogs

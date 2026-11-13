@@ -38,9 +38,16 @@ export type TaskMoveStatus = (typeof TASK_MOVE_STATUSES)[number]
 /** A move in these states holds its tasks' lock. */
 export const TASK_MOVE_LOCKING_STATUSES: readonly TaskMoveStatus[] = ['running', 'paused', 'failed']
 
+/** What a move carries: tasks into an existing project, or a whole project (its id kept). */
+export const TASK_MOVE_SCOPES = ['task', 'project'] as const
+export type TaskMoveScope = (typeof TASK_MOVE_SCOPES)[number]
+
 export interface TaskMove {
   id: string
   direction: 'out' | 'in'
+  scope: TaskMoveScope
+  /** A project move: the project (the same id on both hubs, so also `targetProjectId`). */
+  projectId: string | null
   /** The other hub: where the tasks go ('out'), or where they come from ('in'). */
   peerHubId: string
   targetProjectId: string
@@ -72,6 +79,19 @@ export const beginTaskMoveInputSchema = z.object({
 })
 export type BeginTaskMoveInput = z.input<typeof beginTaskMoveInputSchema>
 
+/**
+ * Move a whole project to another hub: every task in it (archived ones too) and the
+ * project's own rows, all under one move. The project keeps its id on the target.
+ */
+export const beginProjectMoveInputSchema = z.object({
+  /** Client-chosen, so a retried begin is the same move. */
+  id: z.string().uuid().optional(),
+  projectId: z.string().min(1),
+  targetHubId: z.string().min(1),
+  includeSessions: z.boolean().default(true)
+})
+export type BeginProjectMoveInput = z.input<typeof beginProjectMoveInputSchema>
+
 export const taskMoveIdInputSchema = z.object({ id: z.string().min(1) })
 
 export const advanceTaskMoveInputSchema = z.object({
@@ -102,6 +122,12 @@ export const taskMoveRedirectsInputSchema = z.object({
 /** Where moved tasks went: task id → the hub, by which move. A task not listed did not move away. */
 export type TaskMoveRedirects = Record<string, { hubId: string; moveId: string }>
 
+export const projectMoveRedirectsInputSchema = z.object({
+  projectIds: z.array(z.string().min(1)).min(1).max(500)
+})
+/** Where moved projects went: project id → the hub, by which move. */
+export type ProjectMoveRedirects = Record<string, { hubId: string; moveId: string }>
+
 /**
  * What a move carries from hub to hub: the moved tasks' rows in every table that
  * holds task content on a hub. Ids are kept. Artifact bytes travel in their own step
@@ -122,8 +148,102 @@ export const TASK_MOVE_TABLES = [
 ] as const
 export type TaskMoveTable = (typeof TASK_MOVE_TABLES)[number]
 
+/**
+ * The project's own rows a project move carries (its tasks travel as in any move).
+ * Ids are kept. Left out, on purpose: automation run history, processes, chat CLI
+ * caches, folder placements (the folder is offered to the target's computer instead),
+ * group membership (the project arrives ungrouped). A project linked to an
+ * integration does not move. `MOVE_DROPPED_TABLES` lists what is left behind, and why.
+ */
+export const PROJECT_MOVE_TABLES = [
+  'projects',
+  'tags',
+  'automations',
+  'task_templates',
+  'test_categories',
+  'test_labels',
+  'test_file_labels',
+  'test_file_notes',
+  'ai_config_items',
+  'ai_config_project_selections',
+  'activity_events'
+] as const
+export type ProjectMoveTable = (typeof PROJECT_MOVE_TABLES)[number]
+
+/**
+ * Every other hub table holding a project's or a task's rows, and why a move between
+ * hubs leaves it behind (`move-tables-classified.test.ts` fails on a table in neither
+ * list). Chats travel in `copy-sessions` through the computers, not as hub rows.
+ */
+const LEGACY_CHAT =
+  'legacy hub-held chat content: migrated to its computer, then copied by copy-sessions'
+const DELIVERY =
+  "hub-to-computer delivery or ownership state of the source hub's computers: the target rebuilds its own"
+export const MOVE_DROPPED_TABLES: Readonly<Record<string, string>> = {
+  // A project's
+  automation_action_runs: 'automation run history: the automations move, their runs do not',
+  processes: 'running processes belong to the source computers',
+  chat_cli_snapshots: 'cache the target rebuilds',
+  chat_cli_command_details: 'cache the target rebuilds',
+  chat_cli_models: 'cache the target rebuilds',
+  project_placements: "the source hub's computers; the folder is offered to the target's",
+  integration_project_mappings: 'a linked project is refused',
+  external_links: 'a linked task is refused',
+  // Legacy chat storage
+  chat_events: LEGACY_CHAT,
+  chat_queue: LEGACY_CHAT,
+  chat_tab_state: LEGACY_CHAT,
+  chat_timeline_checkpoints: LEGACY_CHAT,
+  chat_timeline_pages: LEGACY_CHAT,
+  chat_threads: LEGACY_CHAT,
+  chat_attachment_messages: LEGACY_CHAT,
+  chat_workspace_changes: LEGACY_CHAT,
+  // Delivery and ownership
+  chat_ownership: DELIVERY,
+  chat_tab_bindings: DELIVERY,
+  chat_task_lifecycle: DELIVERY,
+  chat_task_computers: DELIVERY,
+  chat_lifecycle_acks: DELIVERY,
+  chat_folder_deletions: DELIVERY,
+  chat_folder_deletion_acks: DELIVERY,
+  chat_folder_placeholders: DELIVERY,
+  chat_legacy_task_authority: DELIVERY,
+  chat_legacy_session_authority: DELIVERY,
+  chat_legacy_tab_computers: DELIVERY,
+  chat_provider_transitions: DELIVERY,
+  session_resets: DELIVERY,
+  session_deletions: DELIVERY,
+  session_tab_recovery: DELIVERY,
+  session_intent_acks: DELIVERY,
+  computer_data_handoff: DELIVERY,
+  item_faults: "faults of the source hub's own deliveries",
+  artifact_blob_pins:
+    "the source hub's blob pins: the target pins each blob as copy-files writes it",
+  // The source hub's own move records
+  task_moves: "the source hub's own journal",
+  task_move_tasks: "the source hub's own journal",
+  task_move_redirects: "the source hub's own redirects",
+  task_move_parked_chats: "the source hub's own record of chats parked for a return",
+  task_remote_blockers: 'links to tasks on other hubs, kept by each hub for its own side',
+  project_move_redirects: "the source hub's own redirects"
+}
+
+export interface ProjectMoveBundle {
+  projectId: string
+  /** Rows per table, as the source stores them. `activity_events`: the project's own (no task). */
+  rows: Record<ProjectMoveTable, Array<Record<string, unknown>>>
+  /** Hub-wide settings whose key names the project. */
+  settings: Array<{ key: string; value: string }>
+  /** The mover's own per-user settings whose key names the project. */
+  userSettings: Array<{ key: string; value: string }>
+  /** The project's folder on the computer the source hub uses for it. */
+  folder: string | null
+}
+
 export interface TaskMoveBundle {
   moveId: string
+  /** A project move: the project's own rows. */
+  project?: ProjectMoveBundle
   rootTaskIds: string[]
   /** Rows per table, as the source stores them (column → value). */
   rows: Record<TaskMoveTable, Array<Record<string, unknown>>>
@@ -323,6 +443,21 @@ export const sessionsRegisterInputSchema = z.object({
     )
     .max(1000)
 })
+
+/** What moving a project to another hub would carry — the dialog's summary. Writes nothing. */
+export const projectMovePreviewInputSchema = z.object({ projectId: z.string().min(1) })
+export interface ProjectMovePreview {
+  /** Every task in the project, archived ones and subtasks included. */
+  taskCount: number
+  /** The project, or one of its tasks, is linked to an integration here: it cannot move. */
+  linkedToIntegration: boolean
+  /** A deletion of one of its tasks is still running: wait for it to finish. */
+  deletionPending: boolean
+  /** The project, or one of its tasks, is already being moved. */
+  alreadyMoving: boolean
+  /** Blockers to tasks in other projects: they become links between the hubs. */
+  externalBlockerCount: number
+}
 
 /** What a move to another hub would carry — the move dialog's summary. Writes nothing. */
 export const crossHubMovePreviewInputSchema = z.object({

@@ -145,8 +145,9 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
   setMove(id, { move: done, running: false })
   if (done.status === 'done') {
     // The tasks are the target hub's: every open tab and link resolves there now.
-    const { noteTaskHub } = useHubOwnershipStore.getState()
+    const { noteProjectHub, noteTaskHub } = useHubOwnershipStore.getState()
     for (const taskId of done.taskIds) noteTaskHub(taskId, done.peerHubId)
+    if (done.scope === 'project' && done.projectId) noteProjectHub(done.projectId, done.peerHubId)
     forget(id)
   }
 }
@@ -167,6 +168,28 @@ export async function startCrossHubMove(input: {
     targetHubId: input.targetHubId,
     targetProjectId: input.targetProjectId,
     includeSubtasks: input.includeSubtasks,
+    includeSessions: input.includeSessions ?? true
+  })
+  setMove(move.id, { move, sourceHubId: input.sourceHubId, running: false, pauseRequested: false })
+  void drive(move.id, input.sourceHubId)
+  return move
+}
+
+/**
+ * Begin moving project `projectId` (every task in it and its own rows) from
+ * `sourceHubId` to `targetHubId`, and run it. The project keeps its id there.
+ */
+export async function startProjectMove(input: {
+  sourceHubId: string
+  targetHubId: string
+  projectId: string
+  includeSessions?: boolean
+}): Promise<TaskMove> {
+  const source = getClientForHub(input.sourceHubId) as unknown as TasksTrpcClient
+  const move = await source.taskMoves.beginProject.mutate({
+    id: crypto.randomUUID(),
+    projectId: input.projectId,
+    targetHubId: input.targetHubId,
     includeSessions: input.includeSessions ?? true
   })
   setMove(move.id, { move, sourceHubId: input.sourceHubId, running: false, pauseRequested: false })

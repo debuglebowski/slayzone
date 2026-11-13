@@ -37,6 +37,20 @@ function percent(m: TrackedMove): number {
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+/** What a card says it moves: the project by name, or how many tasks. */
+function moveTitle(
+  m: TrackedMove,
+  hub: string,
+  projectName?: (projectId: string) => string | undefined
+): string {
+  if (m.move.scope === 'project' && m.move.projectId) {
+    const name = projectName?.(m.move.projectId)
+    return name ? `Moving project “${name}” to ${hub}` : `Moving a project to ${hub}`
+  }
+  const n = m.move.taskIds.length
+  return `Moving ${n === 1 ? '1 task' : `${n} tasks`} to ${hub}`
+}
+
 /**
  * Moves of tasks to another hub (cross-hub-moves.ts): a progress card per unfinished
  * move, with pause, resume and cancel. Mounted once, by the app shell. It also keeps
@@ -46,11 +60,14 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
 export function TaskMovesPanel({
   hubIds,
   hubName,
+  projectName,
   syncKey
 }: {
   /** The hubs the app is connected to. */
   hubIds: readonly string[]
   hubName: (hubId: string) => string
+  /** A project move's card names its project (undefined: not known here). */
+  projectName?: (projectId: string) => string | undefined
   /** Changes when a board reloads: the moves are read again. */
   syncKey: unknown
 }): React.JSX.Element | null {
@@ -78,7 +95,6 @@ export function TaskMovesPanel({
     >
       {list.map((m) => {
         const pct = percent(m)
-        const n = m.move.taskIds.length
         const canCancel =
           !m.running && TASK_MOVE_STEPS.indexOf(m.move.step) <= TASK_MOVE_STEPS.indexOf('commit')
         const run = (action: () => Promise<void>) => () => {
@@ -93,7 +109,7 @@ export function TaskMovesPanel({
           >
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">
-                Moving {n === 1 ? '1 task' : `${n} tasks`} to {hubName(m.move.peerHubId)}
+                {moveTitle(m, hubName(m.move.peerHubId), projectName)}
               </span>
               <span className="text-muted-foreground">{pct}%</span>
             </div>

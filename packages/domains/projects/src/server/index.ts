@@ -10,8 +10,11 @@ export {
   parseProject,
   projectFolder,
   projectFolders,
-  projectFolderOf
+  projectFolderOf,
+  projectIconsDirOf,
+  unlinkProjectIconFiles
 } from './project-store'
+export { projectMovingSql, projectNotInTransitSql } from './project-move-sql'
 export {
   listProjectGroups,
   createProjectGroup,

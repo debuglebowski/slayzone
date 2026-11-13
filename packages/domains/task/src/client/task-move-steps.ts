@@ -6,10 +6,14 @@ import {
   type SessionsTargetApi
 } from '../shared/copy-sessions'
 
-/** One artifact file a move copies (`artifacts.move*`): a version blob or a working copy. */
+/**
+ * One file a move copies (`artifacts.move*`): a version blob, a working copy, or a
+ * moved project's icon.
+ */
 export type TaskMoveFileRef =
   | { kind: 'blob'; hash: string }
   | { kind: 'file'; taskId: string; path: string }
+  | { kind: 'project-icon'; projectId: string; name: string }
 export interface TaskMoveFileEntry {
   ref: TaskMoveFileRef
   size: number

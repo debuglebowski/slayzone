@@ -5755,6 +5755,28 @@ export const migrations: Migration[] = [
       // fenced like every such table.
       installContentErasureFences(db)
     }
+  },
+  {
+    version: 217,
+    up: (db) => {
+      // Moving a whole project to another hub: a move of every task in the project,
+      // plus the project's own rows. `scope` says which; `project_id` names the
+      // project (its id is kept, so the target project is the same id). One unfinished
+      // project move per project, either direction.
+      db.exec(`
+        ALTER TABLE task_moves ADD COLUMN scope TEXT NOT NULL DEFAULT 'task'
+          CHECK (scope IN ('task', 'project'));
+        ALTER TABLE task_moves ADD COLUMN project_id TEXT;
+        CREATE UNIQUE INDEX idx_task_moves_project_unfinished ON task_moves(project_id)
+          WHERE scope = 'project' AND status IN ('running', 'paused', 'failed');
+        CREATE TABLE project_move_redirects (
+          project_id TEXT PRIMARY KEY,
+          hub_id     TEXT NOT NULL,
+          move_id    TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `)
+    }
   }
 ]
 

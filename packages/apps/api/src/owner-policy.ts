@@ -205,7 +205,7 @@ const ids =
   (data, scope) =>
     Array.isArray(data) ? scope.filter(data, (id) => res(kind, id)) : Promise.resolve(data)
 
-/** `taskMoves.redirects`: task id → { hubId, moveId }; the move decides each entry. */
+/** `taskMoves.redirects` / `projectRedirects`: id → { hubId, moveId }; the move decides each entry. */
 const redirectsByMove: OutputFilter = async (data, scope) => {
   if (!isRecord(data)) return data
   const out: Record<string, unknown> = {}
@@ -316,6 +316,27 @@ const settingKey = (at: string): CustomRef => ({
   },
   sample: { kind: 'project', input: (id) => ({ key: `ai_providers:${id}`, value: '[]' }) }
 })
+
+/**
+ * `taskMoves.import`: the project the tasks arrive in decides. A project move brings
+ * its project, new here (the import refuses an id that exists), so it names nothing
+ * owned, like `projects.create`: the importer becomes the project's owner.
+ */
+const importTarget: CustomRef = {
+  pick: (raw) => {
+    if (!isRecord(raw) || (isRecord(raw.bundle) && raw.bundle.project !== undefined)) return []
+    const r = res('project', raw.targetProjectId)
+    return r ? [r] : []
+  },
+  sample: {
+    kind: 'project',
+    input: (id) => ({
+      sourceHubId: 'hub',
+      targetProjectId: id,
+      bundle: { moveId: 'move', rootTaskIds: [], rows: {} }
+    })
+  }
+}
 
 const settingsMap: OutputFilter = async (data, scope) => {
   if (!isRecord(data)) return data
@@ -1190,6 +1211,10 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // The target project is on the other hub: that hub checks it on import.
   'taskMoves.begin': checked(task('taskIds[]')),
   'taskMoves.preview': checked(task('taskIds[]')),
+  'taskMoves.beginProject': checked(project('projectId')),
+  'taskMoves.projectPreview': checked(project('projectId')),
+  // Keyed by project id; each answer names its move, which decides.
+  'taskMoves.projectRedirects': listed(redirectsByMove),
   'taskMoves.get': checked(taskMove('id')),
   'taskMoves.list': listed(rows('id', 'taskMove')),
   'taskMoves.advance': checked(taskMove('id')),
@@ -1203,8 +1228,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // Keyed by task id; each answer names its move, which decides.
   'taskMoves.redirects': listed(redirectsByMove),
   'taskMoves.export': checked(taskMove('id')),
-  // The tasks do not exist here yet: the project they arrive in decides.
-  'taskMoves.import': checked(project('targetProjectId')),
+  // The tasks do not exist here yet: the project they arrive in decides (importTarget).
+  'taskMoves.import': checked(importTarget),
   'taskMoves.commit': checked(taskMove('id')),
   'taskMoves.abort': checked(taskMove('id')),
   'taskMoves.addRemoteBlockers': checked(taskMove('moveId'), task('links[].taskId')),

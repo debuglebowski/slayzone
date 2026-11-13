@@ -255,7 +255,12 @@ function downloadSource(
 // ── a move between hubs: the artifacts' bytes (move-files.ts) ──
 const moveFileRef = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('blob'), hash: z.string().regex(/^[0-9a-f]{64}$/) }),
-  z.object({ kind: z.literal('file'), taskId: z.string().min(1), path: z.string().min(1) })
+  z.object({ kind: z.literal('file'), taskId: z.string().min(1), path: z.string().min(1) }),
+  z.object({
+    kind: z.literal('project-icon'),
+    projectId: z.string().min(1),
+    name: z.string().min(1)
+  })
 ])
 const moveFileEntry = z.object({
   ref: moveFileRef,

@@ -33,6 +33,7 @@ import {
   CreateProjectDialog,
   ProjectSettingsDialog,
   DeleteProjectDialog,
+  MoveProjectToHubDialog,
   GroupSettingsDialog,
   UserSettingsDialog,
   SearchDialog,
@@ -207,6 +208,8 @@ export function AppDialogs({
   updateVersion,
   setUpdateToastDismissed
 }: AppDialogsProps): React.JSX.Element {
+  // "Move to hub…" on a project's menu (store-driven, like the sidebar's other menus).
+  const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
   // Dialogs about one project or task talk to the hub that owns it; the rest
   // stay on the default hub.
   const ownerHubIds = {
@@ -308,6 +311,18 @@ export function AppDialogs({
               onDeleted={handleProjectDeleted}
             />
           </OwnerHubScope>
+        </Suspense>
+      )}
+      {shouldMount('moveProjectToHub', !!movingProjectToHub) && (
+        <Suspense fallback={null}>
+          {/* Scopes itself to the project's hub; the move runs in TaskMovesPanel. */}
+          <MoveProjectToHubDialog
+            project={movingProjectToHub}
+            open={!!movingProjectToHub}
+            onOpenChange={(open) => {
+              if (!open) useDialogStore.getState().closeMoveProjectToHub()
+            }}
+          />
         </Suspense>
       )}
       {groupSettingsTarget && (

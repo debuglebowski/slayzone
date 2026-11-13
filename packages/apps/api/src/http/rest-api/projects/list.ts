@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { listAllProjects, projectFolderOf } from '@slayzone/projects/server'
+import { listAllProjects, projectFolderOf, projectNotInTransitSql } from '@slayzone/projects/server'
 import type { RestApiDeps } from '../types'
 
 /**
@@ -24,6 +24,7 @@ export function registerProjectsListRoute(app: Express, deps: RestApiDeps): void
            COUNT(t.id) FILTER (WHERE t.archived_at IS NULL AND t.deleted_at IS NULL AND t.is_temporary = 0) AS task_count
          FROM projects p
          LEFT JOIN tasks t ON t.project_id = p.id
+         WHERE ${projectNotInTransitSql('p')}
          GROUP BY p.id
          ORDER BY p.name ASC`
       )

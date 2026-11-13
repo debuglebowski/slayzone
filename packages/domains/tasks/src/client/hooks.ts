@@ -20,10 +20,12 @@ export { TaskContextMenu } from './TaskContextMenu'
 export { BulkTaskContextMenu } from './BulkTaskContextMenu'
 // Moving tasks to another hub: the progress panel, and which tasks are moving.
 export { TaskMovesPanel } from './TaskMovesPanel'
+export { MoveProjectToHubDialog } from './MoveProjectToHubDialog'
 export {
   useIsTaskMoving,
   useTaskMovesStore,
   startCrossHubMove,
+  startProjectMove,
   pauseCrossHubMove,
   resumeCrossHubMove,
   cancelCrossHubMove,
