@@ -848,6 +848,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'task.update': 'tasks',
   'task.updateMany': 'tasks',
   'task.moveToProject': 'tasks',
+  'task.duplicate': 'tasks',
   'task.movePreview': 'tasks',
   'taskMoves.abort': 'tasks',
   'taskMoves.addRemoteBlockers': 'tasks',

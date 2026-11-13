@@ -727,6 +727,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'task.get': 'user',
   'task.movePreview': 'user',
   'task.moveToProject': 'user',
+  'task.duplicate': 'user',
   'task.paths': 'user',
   'task.getAll': 'user',
   'task.getAllBlockedTaskIds': 'user',

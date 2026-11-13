@@ -46,6 +46,7 @@ export {
   type MoveOutcome,
   type MoveOptions
 } from './move-to-project.js'
+export { duplicateTaskOp, TASK_NOT_FOUND } from './duplicate.js'
 export { deleteManyTasksOp, type DeleteManyTasksResult } from './delete-many.js'
 export { unarchiveTaskOp } from './unarchive.js'
 export { reorderTasksOp, reorderPinnedTasksOp } from './reorder.js'

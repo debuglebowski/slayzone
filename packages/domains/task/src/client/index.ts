@@ -18,6 +18,7 @@ export {
   type TaskMoveSourceApi,
   type TaskMoveTargetApi
 } from './task-move-steps'
+export { DuplicateTaskDialog, type DuplicateTaskDialogProps } from './DuplicateTaskDialog'
 export {
   MoveTaskDialog,
   useProjectsOnTaskHub,

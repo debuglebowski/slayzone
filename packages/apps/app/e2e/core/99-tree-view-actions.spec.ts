@@ -422,6 +422,54 @@ test.describe('TreeView actions', () => {
       .toEqual({ aArchived: false, cArchived: true })
   })
 
+  test('duplicate via context menu creates a fresh follow-up in the picked project and opens it', async ({
+    mainWindow
+  }) => {
+    await rightClickRow(mainWindow, rootA)
+    await menuItem(mainWindow, /^Duplicate…$/).click()
+
+    const dialog = mainWindow.getByTestId('duplicate-task-dialog')
+    await expect(dialog).toBeVisible({ timeout: 3_000 })
+    await dialog.getByTestId('duplicate-task-title').fill('TA A follow-up')
+    await dialog.getByTestId('duplicate-task-project-select').click()
+    await mainWindow.getByRole('option', { name: otherName }).click()
+    await dialog.getByTestId('duplicate-task-confirm').click()
+    await expect(dialog).toBeHidden({ timeout: 5_000 })
+
+    await expect
+      .poll(
+        async () => {
+          const all = await seed(mainWindow).getTasks()
+          const copy = all.find((t: { title: string }) => t.title === 'TA A follow-up')
+          return copy ? [copy.project_id, copy.parent_id] : null
+        },
+        { timeout: 5_000 }
+      )
+      .toEqual([otherProjectId, null])
+    // The source is untouched.
+    expect((await getTaskById(mainWindow, rootA))?.project_id).toBe(projectId)
+    // The copy opens in a tab.
+    const copyId = (await seed(mainWindow).getTasks()).find(
+      (t: { title: string }) => t.title === 'TA A follow-up'
+    )!.id
+    await expect
+      .poll(
+        () =>
+          mainWindow.evaluate((id) => {
+            const store = (
+              window as unknown as {
+                __slayzone_tabStore: {
+                  getState: () => { tabs: Array<{ type: string; taskId?: string }> }
+                }
+              }
+            ).__slayzone_tabStore
+            return store.getState().tabs.some((t) => t.type === 'task' && t.taskId === id)
+          }, copyId),
+        { timeout: 5_000 }
+      )
+      .toBe(true)
+  })
+
   test('inline rename persists to DB and survives a data refresh', async ({ mainWindow }) => {
     const row = taskRow(mainWindow, rootB)
     await row.scrollIntoViewIfNeeded().catch(() => {})

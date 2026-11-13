@@ -42,6 +42,7 @@ import {
   Tag as TagIcon,
   FolderInput,
   Copy,
+  CopyPlus,
   Archive,
   Trash2,
   ShieldAlert,
@@ -60,6 +61,7 @@ import {
   getSnoozePresets,
   CustomSnoozeDialog,
   BlockerDialog,
+  DuplicateTaskDialog,
   MoveTaskDialog,
   reportDeleteTaskError,
   useProjectsOnTaskHub
@@ -124,6 +126,7 @@ export function TaskContextMenu({
   const [blockedComment, setBlockedComment] = useState('')
   /** The project picked in "Move to": the move dialog confirms it. */
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const statusOptions = buildStatusOptions(columns)
   // A task moves only between projects of its own hub.
   const moveTargets = useProjectsOnTaskHub(projects, [task.id])
@@ -441,6 +444,12 @@ export function TaskContextMenu({
             </ContextMenuSubContent>
           </ContextMenuSub>
 
+          {/* Duplicate as a fresh follow-up */}
+          <ContextMenuItem onSelect={() => setDuplicateDialogOpen(true)}>
+            <CopyPlus className="mr-2 size-3.5" />
+            Duplicate…
+          </ContextMenuItem>
+
           {/* Copy submenu */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -550,6 +559,14 @@ export function TaskContextMenu({
           initialProjectId={moveTargetId ?? undefined}
           otherHubProjects={otherHubProjects}
           onMoveToOtherHub={onMoveToOtherHub}
+        />
+      </MountWhenOpened>
+
+      <MountWhenOpened open={duplicateDialogOpen}>
+        <DuplicateTaskDialog
+          open={duplicateDialogOpen}
+          onOpenChange={setDuplicateDialogOpen}
+          task={task}
         />
       </MountWhenOpened>
 

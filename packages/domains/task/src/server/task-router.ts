@@ -21,6 +21,7 @@ import {
   TASK_PATHS_MAX,
   moveTasksToProjectInputSchema,
   movePreviewInputSchema,
+  duplicateTaskInputSchema,
   type CreateTaskInput,
   type UpdateTaskInput
 } from '@slayzone/task-contracts'
@@ -339,6 +340,20 @@ export const taskRouter = router({
   movePreview: publicProcedure
     .input(movePreviewInputSchema)
     .query(({ ctx, input }) => asBadRequest(() => ops().previewMoveToProjectOp(ctx.db, input))),
+
+  // A fresh follow-up of a task, in a project of this hub (ops/duplicate.ts).
+  duplicate: publicProcedure.input(duplicateTaskInputSchema).mutation(async ({ ctx, input }) => {
+    try {
+      return await ops().duplicateTaskOp(ctx.db, input, deps())
+    } catch (e) {
+      // Matched by `code` (ops/duplicate.ts, ops/create.ts): this router stays free
+      // of those electron-coupled imports.
+      const code = (e as { code?: string })?.code
+      if (code === 'TASK_NOT_FOUND' || code === 'PROJECT_NOT_FOUND')
+        throw new TRPCError({ code: 'NOT_FOUND', message: (e as Error).message })
+      throw e
+    }
+  }),
 
   delete: publicProcedure
     .input(z.object({ id: z.string() }))

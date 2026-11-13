@@ -710,6 +710,7 @@ run_harness packages/domains/terminal/src/server/pty-router.test.ts
 run_harness packages/apps/api/src/routers/task.test.ts
 # Moving tasks to another project: subtree, detach, tags, re-home; update/updateMany delegate to it.
 run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
+run_harness packages/apps/api/src/routers/task-duplicate.test.ts
 # Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
 run_harness packages/apps/api/src/routers/task-moves.test.ts
 # Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.

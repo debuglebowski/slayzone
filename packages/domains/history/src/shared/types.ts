@@ -12,6 +12,8 @@ export type ActivityEventKind =
   | 'task.due_date_changed'
   | 'task.tags_changed'
   | 'task.project_changed'
+  | 'task.duplicated'
+  | 'task.duplicate_created'
   | 'task.archived'
   | 'task.unarchived'
   | 'task.deleted'

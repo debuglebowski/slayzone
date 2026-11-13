@@ -5,6 +5,7 @@ import {
   ArrowUpLeft,
   Camera,
   ClipboardCopy,
+  CopyPlus,
   ExternalLink,
   FilePlus,
   Flag,
@@ -99,6 +100,8 @@ interface UseTaskPaletteCommandsParams {
   onTagsChange: (tagIds: string[]) => void
   /** A project was picked: the move dialog confirms it (a move can't be undone). */
   onMoveToProject: (projectId: string) => void
+  /** Opens the duplicate dialog (a fresh follow-up of the task). */
+  onDuplicate: () => void
   /** The header's inline title editor is on screen (not zen / compact). */
   canRenameInline: boolean
   onRenameInline: () => void
@@ -171,6 +174,7 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
   const onTaskUpdated = useStableCallback(params.onTaskUpdated)
   const onTagsChange = useStableCallback(params.onTagsChange)
   const onMoveToProject = useStableCallback(params.onMoveToProject)
+  const onDuplicate = useStableCallback(params.onDuplicate)
   const onRenameInline = useStableCallback(params.onRenameInline)
   const onRename = useStableCallback(params.onRename)
   const onArchive = useStableCallback(params.onArchive)
@@ -352,6 +356,13 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
           }
         })
       }
+      commands.push({
+        id: 'duplicate',
+        label: 'Duplicate task…',
+        keywords: 'duplicate copy clone follow-up followup',
+        icon: CopyPlus,
+        run: onDuplicate
+      })
       commands.push({
         id: 'progress',
         label: 'Set progress…',

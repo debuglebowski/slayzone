@@ -121,6 +121,28 @@ export function buildTaskProjectChangedEvents(
   ]
 }
 
+/**
+ * A follow-up duplicate: an entry on the copy naming its source, and one on the
+ * source naming the copy and where it went.
+ */
+export function buildTaskDuplicatedEvents(
+  source: Pick<Task, 'id' | 'project_id' | 'title'>,
+  copy: Pick<Task, 'id' | 'project_id' | 'title'>,
+  copyProjectName: string
+): RecordActivityEventInput[] {
+  return [
+    buildTaskEvent(copy, 'task.duplicated', `Duplicated from “${source.title}”`, {
+      sourceTaskId: source.id
+    }),
+    buildTaskEvent(
+      source,
+      'task.duplicate_created',
+      `Duplicated to “${copy.title}” in ${copyProjectName}`,
+      { taskId: copy.id, projectId: copy.project_id }
+    )
+  ]
+}
+
 export function buildTaskArchivedEvents(tasks: Task[]): RecordActivityEventInput[] {
   return tasks.map((task) => buildTaskEvent(task, 'task.archived', 'Task archived'))
 }

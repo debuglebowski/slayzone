@@ -102,6 +102,7 @@ import {
 } from '@slayzone/ui'
 import { DeleteTaskDialog } from './DeleteTaskDialog'
 import { MoveTaskDialog } from './MoveTaskDialog'
+import { DuplicateTaskDialog } from './DuplicateTaskDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -549,6 +550,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   /** The project picked in the palette's "Move to project…": the move dialog confirms it. */
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
   // Custom snooze date/time, opened from Cmd+K (Snooze → Pick date & time…).
   const [snoozeDialogOpen, setSnoozeDialogOpen] = useState(false)
@@ -1847,6 +1849,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     onTaskUpdated: handleTaskUpdate,
     onTagsChange: handleTagsChange,
     onMoveToProject: setMoveTargetId,
+    onDuplicate: () => setDuplicateDialogOpen(true),
     onRenameInline: () => {
       setEditingTitle(true)
       titleInputRef.current?.focus()
@@ -3869,6 +3872,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
           setLoopDialogOpen(false)
         }}
       />
+
+      {task && duplicateDialogOpen && (
+        <DuplicateTaskDialog open onOpenChange={setDuplicateDialogOpen} task={task} />
+      )}
 
       {task && moveTargetId !== null && (
         <MoveTaskDialog

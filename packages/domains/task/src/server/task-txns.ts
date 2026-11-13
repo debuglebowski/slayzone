@@ -453,6 +453,36 @@ function removeMovedTasks(db: Database, movedSql: string, param: string): void {
     db.prepare(`DELETE FROM ${table} WHERE task_id IN (${movedSql})`).run(param)
 }
 
+/**
+ * Finish a duplicate created by `createTaskOp`: its description keeps the source's
+ * format, it takes the source's tags (re-pointed by name at the copy's project,
+ * created there when missing) and both tasks record the duplicate — atomically.
+ * Answers the created tag ids.
+ */
+function finishDuplicate(
+  db: Database,
+  p: {
+    sourceTaskId: string
+    copyTaskId: string
+    targetProjectId: string
+    descriptionFormat: string
+    events: RecordActivityEventInput[]
+  }
+): { createdTagIds: string[] } {
+  return db.transaction(() => {
+    db.prepare('UPDATE tasks SET description_format = ? WHERE id = ?').run(
+      p.descriptionFormat,
+      p.copyTaskId
+    )
+    db.prepare(
+      'INSERT OR IGNORE INTO task_tags (task_id, tag_id) SELECT ?, tag_id FROM task_tags WHERE task_id = ?'
+    ).run(p.copyTaskId, p.sourceTaskId)
+    const createdTagIds = remapTaskTagsToProject(db, [p.copyTaskId], p.targetProjectId)
+    if (p.events.length > 0) recordActivityEvents(db, p.events)
+    return { createdTagIds }
+  })()
+}
+
 export const taskTxns = {
   'task:insert-row': insertRow,
   'task:soft-delete': softDelete,
@@ -460,6 +490,7 @@ export const taskTxns = {
   'task:archive': archive,
   'task:update': update,
   'task:move-project': moveProject,
+  'task:finish-duplicate': finishDuplicate,
   'task:begin-move': beginMove,
   'task:release-move': releaseMove,
   'task:import-move': importMove,

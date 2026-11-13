@@ -8,6 +8,7 @@ import {
   Calendar,
   CheckCircle2,
   Clock3,
+  CopyPlus,
   Flag,
   FolderInput,
   Pencil,
@@ -97,6 +98,13 @@ function getEventMarkerMeta(event: ActivityEvent): {
         icon: <FolderInput className="size-3.5" />,
         wrapperClassName: 'text-primary',
         testId: 'history-marker-task-project-changed'
+      }
+    case 'task.duplicated':
+    case 'task.duplicate_created':
+      return {
+        icon: <CopyPlus className="size-3.5" />,
+        wrapperClassName: 'text-primary',
+        testId: 'history-marker-task-duplicated'
       }
     case 'task.archived':
       return {

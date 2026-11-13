@@ -1185,6 +1185,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.deleteConversation': checked(task('id')),
   'task.updateMany': checked(task('ids[]'), project('updates.projectId'), task('updates.parentId')),
   'task.moveToProject': checked(task('taskIds[]'), project('targetProjectId')),
+  'task.duplicate': checked(task('taskId'), project('targetProjectId')),
   // ── moving tasks to another hub (this hub's journal) ──
   // The target project is on the other hub: that hub checks it on import.
   'taskMoves.begin': checked(task('taskIds[]')),
