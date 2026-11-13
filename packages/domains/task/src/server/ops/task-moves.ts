@@ -272,6 +272,24 @@ export async function pauseTaskMove(db: SlayzoneDb, id: string): Promise<TaskMov
 }
 
 /** Resume a paused or failed move from the step it stopped at. */
+/**
+ * The tasks' sessions are left behind after all (their computer is away, the user would
+ * rather start fresh): a paused or failed move that has not copied them yet no longer
+ * will. The move then resumes without them — the tasks arrive with fresh sessions, and
+ * the source keeps the old ones.
+ */
+export async function skipTaskMoveSessions(db: SlayzoneDb, id: string): Promise<TaskMove> {
+  const move = await getTaskMove(db, id)
+  if (move.direction !== 'out') throw new TaskMoveStateError('Not a move out of this hub')
+  if (!move.includeSessions) return move
+  if (move.status !== 'paused' && move.status !== 'failed')
+    throw new TaskMoveStateError(`The move is ${move.status}: pause it first`)
+  if (TASK_MOVE_STEPS.indexOf(move.step) > TASK_MOVE_STEPS.indexOf('copy-sessions'))
+    throw new TaskMoveStateError('The sessions are copied already')
+  await setMove(db, id, { include_sessions: 0 }, { status: ['paused', 'failed'] })
+  return getTaskMove(db, id)
+}
+
 export async function resumeTaskMove(db: SlayzoneDb, id: string): Promise<TaskMove> {
   const move = await getTaskMove(db, id)
   if (move.status === 'running') return move

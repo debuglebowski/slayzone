@@ -195,6 +195,15 @@ export async function resumeCrossHubMove(id: string): Promise<void> {
   await drive(id, tracked.sourceHubId)
 }
 
+/** Leave the sessions behind after all and go on: only before they were copied. */
+export async function skipSessionsOfCrossHubMove(id: string): Promise<void> {
+  const tracked = useTaskMovesStore.getState().moves[id]
+  if (!tracked || tracked.running) return
+  const client = getClientForHub(tracked.sourceHubId) as unknown as TasksTrpcClient
+  setMove(id, { move: await client.taskMoves.skipSessions.mutate({ id }) })
+  await resumeCrossHubMove(id)
+}
+
 /**
  * Give up a move the target has not taken yet: the target drops what it imported,
  * the source lifts the lock. Refused by the hub once the target committed.

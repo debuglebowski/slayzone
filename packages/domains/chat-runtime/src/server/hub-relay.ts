@@ -1598,6 +1598,8 @@ export function createHubChatRelay(opts: {
     ensureTab,
     ensureTask,
     ensurePromptTask,
+    /** Every chat of the task still needing migration to its computer, migrated (throws the first failure). */
+    migrateWholeTask,
     initializeOwner: initialize,
     resumeProviderTransitions: providerTransitions.resume,
     recoverProviderTransitions: providerTransitions.recover,

@@ -1195,6 +1195,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'taskMoves.progress': checked(taskMove('id')),
   'taskMoves.pause': checked(taskMove('id')),
   'taskMoves.resume': checked(taskMove('id')),
+  'taskMoves.skipSessions': checked(taskMove('id')),
   'taskMoves.fail': checked(taskMove('id')),
   'taskMoves.cancel': checked(taskMove('id')),
   'taskMoves.release': checked(taskMove('id')),

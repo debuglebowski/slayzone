@@ -233,6 +233,37 @@ describe('the journal', () => {
     await caller.taskMoves.cancel({ id: move.id })
   })
 
+  test('a move that failed copying the sessions can go on without them', async () => {
+    const t = await create('Skip the sessions')
+    const move = await advanceTo(await begin([t.id]), 'copy-sessions')
+    expect(move.includeSessions).toBe(true)
+    // Running: not yet.
+    const running = await errOf(() => caller.taskMoves.skipSessions({ id: move.id }))
+    expect(running.code).toBe('PRECONDITION_FAILED')
+
+    await caller.taskMoves.fail({ id: move.id, error: 'computer away' })
+    const skipped = await caller.taskMoves.skipSessions({ id: move.id })
+    expect(skipped).toMatchObject({
+      includeSessions: false,
+      status: 'failed',
+      step: 'copy-sessions'
+    })
+    // Saying it again changes nothing.
+    expect((await caller.taskMoves.skipSessions({ id: move.id })).includeSessions).toBe(false)
+    const resumed = await caller.taskMoves.resume({ id: move.id })
+    expect(resumed).toMatchObject({ status: 'running', includeSessions: false })
+    await caller.taskMoves.cancel({ id: move.id })
+  })
+
+  test('the sessions cannot be skipped once they were copied', async () => {
+    const t = await create('Too late to skip')
+    const move = await advanceTo(await begin([t.id]), 'links')
+    await caller.taskMoves.pause({ id: move.id })
+    const err = await errOf(() => caller.taskMoves.skipSessions({ id: move.id }))
+    expect(err.code).toBe('PRECONDITION_FAILED')
+    await caller.taskMoves.cancel({ id: move.id })
+  })
+
   test('cancel is refused once the target took the tasks', async () => {
     const t = await create('Committed')
     const move = await advanceTo(await begin([t.id]), 'release')

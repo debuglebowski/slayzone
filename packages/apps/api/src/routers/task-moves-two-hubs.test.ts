@@ -66,24 +66,29 @@ const computers = {
   discarded: [] as string[],
   /** Each `forget` call: the tasks a computer was told to let go of. */
   forgotten: [] as string[][],
+  /** The source computer is away: exporting fails. */
+  failExport: false,
   settled: [] as string[]
 }
 const TARGET_COMPUTER = 'computer-b'
 const fakeDelegate: TaskMoveSessionsDelegate = {
-  exportTask: async (moveId, taskId) => ({
-    transfers: (computers.holds.get(taskId) ?? []).map((c) => ({
-      computerId: 'computer-a',
-      manifest: {
-        header: {
-          migrationId: `move:${moveId}`,
-          identity: { id: c.id, taskId, tabId: c.tabId, mode: c.mode, epoch: c.epoch }
-        },
-        hash: crypto.createHash('sha256').update(c.bytes).digest('hex'),
-        bytes: c.bytes.length
-      }
-    })),
-    ledger: { sessions: (computers.holds.get(taskId) ?? []).length }
-  }),
+  exportTask: async (moveId, taskId) => {
+    if (computers.failExport) throw new Error('the computer is away')
+    return {
+      transfers: (computers.holds.get(taskId) ?? []).map((c) => ({
+        computerId: 'computer-a',
+        manifest: {
+          header: {
+            migrationId: `move:${moveId}`,
+            identity: { id: c.id, taskId, tabId: c.tabId, mode: c.mode, epoch: c.epoch }
+          },
+          hash: crypto.createHash('sha256').update(c.bytes).digest('hex'),
+          bytes: c.bytes.length
+        }
+      })),
+      ledger: { sessions: (computers.holds.get(taskId) ?? []).length }
+    }
+  },
   read: async (i) => {
     const chat = [...computers.holds.values()].flat().find((c) => c.id === i.conversationId)!
     return chat.bytes.subarray(i.offset, i.offset + i.length).toString('base64')
@@ -175,14 +180,16 @@ async function move(
   from: { hub: typeof hubA; id: string },
   to: { hub: typeof hubA; id: string; projectId: string },
   taskIds: string[],
-  opts: { pauseAfter?: TaskMove['step']; includeSessions?: boolean } = {}
+  opts: { pauseAfter?: TaskMove['step']; includeSessions?: boolean; resumeId?: string } = {}
 ): Promise<TaskMove> {
-  const begun = await from.hub.taskMoves.begin({
-    taskIds,
-    targetHubId: to.id,
-    targetProjectId: to.projectId,
-    includeSessions: opts.includeSessions ?? true
-  })
+  const begun = opts.resumeId
+    ? await from.hub.taskMoves.resume({ id: opts.resumeId })
+    : await from.hub.taskMoves.begin({
+        taskIds,
+        targetHubId: to.id,
+        targetProjectId: to.projectId,
+        includeSessions: opts.includeSessions ?? true
+      })
   let lastStep: TaskMove['step'] = begun.step
   return runTaskMove(begun.id, {
     journal: {
@@ -785,5 +792,50 @@ describe('a move from hub A to hub B', () => {
     })
     // The source's exports are discarded.
     expect(computers.discarded).toContain(paused.id)
+  })
+
+  test('a move whose sessions cannot be copied goes on without them', async () => {
+    const t = await createOn(hubA, projectA, 'Computer away')
+    const tab = crypto.randomUUID()
+    A.db
+      .prepare(
+        "INSERT INTO terminal_tabs (id, task_id, label, mode, position) VALUES (?, ?, 'Chat', 'claude-chat', 0)"
+      )
+      .run(tab, t.id)
+    const conversation = crypto.randomUUID()
+    A.db
+      .prepare(
+        `INSERT INTO chat_ownership (id, task_id, tab_id, mode, computer_id, epoch, state)
+         VALUES (?, ?, ?, 'claude-chat', 'computer-a', 3, 'active')`
+      )
+      .run(conversation, t.id, tab)
+    computers.holds.set(t.id, [
+      { id: conversation, tabId: tab, mode: 'claude-chat', epoch: 3, bytes: Buffer.from('x') }
+    ])
+    computers.forgotten.length = 0
+    const from = { hub: hubA, id: 'hub-a' }
+    const to = { hub: hubB, id: 'hub-b', projectId: projectB }
+
+    computers.failExport = true
+    const failed = await move(from, to, [t.id])
+    computers.failExport = false
+    expect(failed).toMatchObject({
+      status: 'failed',
+      step: 'copy-sessions',
+      error: 'the computer is away'
+    })
+    // The tasks are still locked here; nothing arrived as theirs on B.
+    expect(row(A, t.id)).toBeDefined()
+
+    await hubA.taskMoves.skipSessions({ id: failed.id })
+    const done = await move(from, to, [t.id], { resumeId: failed.id })
+    expect(done).toMatchObject({ status: 'done', includeSessions: false })
+    // No chat was copied; the source keeps its chat on its computer, parked for a return.
+    expect(computers.staged.has(`t-${conversation}`)).toBe(false)
+    expect(computers.forgotten).toEqual([])
+    expect(
+      count(A, 'SELECT COUNT(*) AS n FROM task_move_parked_chats WHERE task_id = ?', t.id)
+    ).toBe(1)
+    expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(0)
   })
 })

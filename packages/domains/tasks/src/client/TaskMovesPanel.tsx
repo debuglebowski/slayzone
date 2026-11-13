@@ -6,6 +6,7 @@ import {
   cancelCrossHubMove,
   pauseCrossHubMove,
   resumeCrossHubMove,
+  skipSessionsOfCrossHubMove,
   syncCrossHubMoves,
   useTaskMovesStore,
   type TrackedMove
@@ -118,6 +119,18 @@ export function TaskMovesPanel({
                   Pause
                 </Button>
               )}
+              {(m.move.status === 'paused' || m.move.status === 'failed') &&
+                m.move.includeSessions &&
+                m.move.step === 'copy-sessions' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="task-move-skip-sessions"
+                    onClick={run(() => skipSessionsOfCrossHubMove(m.move.id))}
+                  >
+                    Resume without sessions
+                  </Button>
+                )}
               {(m.move.status === 'paused' || m.move.status === 'failed') && (
                 <Button size="sm" onClick={run(() => resumeCrossHubMove(m.move.id))}>
                   Resume

@@ -866,6 +866,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'taskMoves.redirects': 'tasks',
   'taskMoves.release': 'tasks',
   'taskMoves.sessionsExport': 'tasks',
+  'taskMoves.skipSessions': 'tasks',
   'taskMoves.sessionsRead': 'tasks',
   'taskMoves.sessionsReadAttachment': 'tasks',
   'taskMoves.sessionsDiscard': 'tasks',

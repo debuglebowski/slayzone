@@ -771,6 +771,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'taskMoves.redirects': 'user',
   'taskMoves.release': 'user',
   'taskMoves.sessionsExport': 'user',
+  'taskMoves.skipSessions': 'user',
   'taskMoves.sessionsRead': 'user',
   'taskMoves.sessionsReadAttachment': 'user',
   'taskMoves.sessionsDiscard': 'user',

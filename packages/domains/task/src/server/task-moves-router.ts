@@ -49,6 +49,7 @@ import {
   releaseTaskMove,
   reportTaskMoveProgress,
   resumeTaskMove,
+  skipTaskMoveSessions,
   taskMoveRedirects,
   TaskAlreadyMovingError,
   TaskMoveNotFoundError,
@@ -127,6 +128,12 @@ export const taskMovesRouter = router({
     .input(taskMoveIdInputSchema)
     .mutation(({ ctx, input }) =>
       boardChanged(() => mapped(() => pauseTaskMove(ctx.db, input.id)))
+    ),
+
+  skipSessions: publicProcedure
+    .input(taskMoveIdInputSchema)
+    .mutation(({ ctx, input }) =>
+      boardChanged(() => mapped(() => skipTaskMoveSessions(ctx.db, input.id)))
     ),
 
   resume: publicProcedure

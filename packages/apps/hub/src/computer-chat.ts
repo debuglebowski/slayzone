@@ -1113,6 +1113,19 @@ export function createComputerChatServices(opts: {
      */
     taskMoveSessions: {
       async exportTask(moveId, taskId, only) {
+        // Chats whose history still sits in this hub's own tables (older versions), or whose
+        // migration to a computer is not finished, go to their computer first: only what a
+        // computer holds can be exported.
+        const owners = await ownership.forTask(taskId)
+        const tables = await legacyChatTables(opts.db)
+        if (
+          owners.some((o) => !['active', 'deleted'].includes(o.state) || o.cleanupPending) ||
+          (await opts.db.get(
+            `SELECT 1 FROM terminal_tabs t WHERE t.task_id = ? AND ${legacyChatTabContentSql(tables)}`,
+            [taskId]
+          ))
+        )
+          await relay.migrateWholeTask(taskId)
         const computers = new Set<string>(only ?? [])
         if (!only) {
           for (const o of await ownership.forTask(taskId))
