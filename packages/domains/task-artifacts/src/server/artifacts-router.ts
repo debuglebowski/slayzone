@@ -341,7 +341,8 @@ export const artifactsRouter = router({
             data: Buffer.from(r.bytes.buffer, r.bytes.byteOffset, r.bytes.byteLength).toString(
               'base64'
             ),
-            size: r.size
+            size: r.size,
+            version: r.version
           }
         : null
     }),

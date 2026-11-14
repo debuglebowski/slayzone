@@ -557,18 +557,16 @@ export function createComputerArtifactStorage(opts: {
           throw unavailableError(isFolder)
         }
         if (key === 'readArtifactBytesRange') {
-          const [, offset, length] = args as [string, number, number]
-          // The computer reads only this window. A computer from before
-          // `readBytesRange` refuses the method: read whole once and cut the window
-          // (a real read failure then surfaces from that read).
-          const ranged = await call(owner, 'readBytesRange', args).catch(() => undefined)
-          if (ranged !== undefined) {
-            const r = ranged as { data: string; size: number } | null
-            return r ? { bytes: Buffer.from(r.data, 'base64'), size: r.size } : null
-          }
-          const whole = (await call(owner, 'readBytes', [id])) as { data: string }
-          const all = Buffer.from(whole.data, 'base64')
-          return { bytes: all.subarray(offset, offset + length), size: all.byteLength }
+          // The computer reads only this window (computer protocol v9: every computer
+          // this hub accepts has `readBytesRange`). Its errors surface as they are.
+          const r = (await call(owner, 'readBytesRange', args)) as {
+            data: string
+            size: number
+            version: string
+          } | null
+          return r
+            ? { bytes: Buffer.from(r.data, 'base64'), size: r.size, version: r.version }
+            : null
         }
         if (key === 'readArtifactBytes') {
           const result = (await call(owner, 'readBytes', args)) as { data: string }

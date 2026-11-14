@@ -69,7 +69,7 @@ function fakeHub(files: Record<string, { size: number; seed: number } | 'missing
     const n = Math.max(0, Math.min(length, f.size - offset))
     const data = new Uint8Array(n)
     for (let i = 0; i < n; i++) data[i] = ((offset + i) * f.seed) & 255
-    return { data, size: f.size }
+    return { data, size: f.size, version: `v${f.seed}:${f.size}` }
   }
   return { read, stats: () => ({ maxInFlight, maxLength }) }
 }
@@ -205,5 +205,50 @@ describe('downloadTaskZipOnThisDevice', () => {
       saved: false,
       skipped: []
     })
+  })
+})
+
+// Review 2, M1: an artifact rewritten while it downloads must never be saved truncated
+// or spliced. The first piece pins the version; any later piece from another version
+// aborts the download (partial removed) with a clear error.
+describe('an artifact that changes mid-download', () => {
+  const big = DOWNLOAD_CHUNK_BYTES * 2 + 10
+  function changing(after: { size: number; version: string }): ReadArtifactChunk {
+    return async (_id, offset, length) => {
+      const size = offset === 0 ? big : after.size
+      const n = Math.max(0, Math.min(length, size - offset))
+      return { data: new Uint8Array(n), size, version: offset === 0 ? 'v1' : after.version }
+    }
+  }
+
+  it('truncated after the first piece: aborted, never a short "complete" file', async () => {
+    await expect(
+      downloadArtifactOnThisDevice(
+        { id: 'a', title: 'a.bin', folder_id: null },
+        changing({ size: 0, version: 'v2' })
+      )
+    ).rejects.toThrow('changed while it was being downloaded')
+    expect(rec.aborted).toBe(true)
+    expect(rec.closed).toBe(false)
+  })
+
+  it('replaced by a same-sized version: aborted, never spliced', async () => {
+    await expect(
+      downloadTaskZipOnThisDevice(
+        folders,
+        [{ id: 'a', title: 'a.bin', folder_id: null }],
+        changing({ size: big, version: 'v2' })
+      )
+    ).rejects.toThrow('changed while it was being downloaded')
+    expect(rec.aborted).toBe(true)
+  })
+
+  it('a size change alone is caught too', async () => {
+    await expect(
+      downloadArtifactOnThisDevice(
+        { id: 'a', title: 'a.bin', folder_id: null },
+        changing({ size: big + 5, version: 'v1' })
+      )
+    ).rejects.toThrow('changed while it was being downloaded')
   })
 })

@@ -59,6 +59,18 @@ describe('createZipEncoder', () => {
     expect(Object.keys(out)).toContain('docs/empty/')
   })
 
+  // Review 2, M2: a finished entry is never continued — the archive would merge two
+  // artifacts into one entry, or hold two entries of the same name.
+  it('refuses a path that was already written (case-insensitively)', () => {
+    expect(() =>
+      encode((z) => {
+        z.write('a.md', enc.encode('first'))
+        z.write('b.md', enc.encode('other'))
+        z.write('A.md', enc.encode('second'))
+      })
+    ).toThrow('already written')
+  })
+
   it('deflates text and stores what is already compressed', () => {
     const text = enc.encode('a'.repeat(100_000))
     const zip = encode((z) => {

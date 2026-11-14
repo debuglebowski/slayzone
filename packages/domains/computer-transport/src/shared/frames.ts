@@ -54,6 +54,11 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
 /**
  * Bump on any breaking change to the frames below.
  *
+ * v9: artifacts are read in bounded pieces (`artifact.invoke` method
+ * `readBytesRange` → `{ data, size, version }`), so a download of any size never
+ * moves a whole file in one frame. A v8 computer lacks it and is refused rather than
+ * served by whole-file reads. Both peers upgrade together.
+ *
  * v8: direct client ↔ computer link. `enroll` / `hello` carry the computer's
  * advertised direct-listener authority (`directAddress`), and the hub registers,
  * revokes and resets client capabilities with `direct.grant` / `direct.revoke` /
@@ -80,7 +85,7 @@ export const COMPUTER_EXIT_NEEDS_RE_ENROLLMENT = 78
  * and a v3 hub refuses a computer that cannot prove it keeps one. Hub, computer
  * and CLI ship in the same release.
  */
-export const COMPUTER_PROTOCOL_VERSION = 8
+export const COMPUTER_PROTOCOL_VERSION = 9
 
 /** JSON-RPC application error codes used by the computer protocol. */
 export const ComputerTransportErrorCodes = {

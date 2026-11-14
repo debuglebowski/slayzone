@@ -464,7 +464,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
 import { exportArtifactOnDesktop } from './artifact-export'
-import { SaveTargets } from './client-save'
+import { SaveTargets, watchSaveTargetOwner } from './client-save'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -3905,18 +3905,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // from the hub, main writes them (client-save.ts). A target belongs to the window
     // that opened it and is aborted if that window goes away mid-download.
     const saveTargets = new SaveTargets()
-    const watchedSenders = new Set<number>()
+    // Quitting mid-download leaves no hidden partial in the person's folder.
+    app.on('will-quit', () => saveTargets.abortAllNow())
     ipcMain.handle('app:save-target-open', (event, request: unknown) => {
-      const sender = event.sender
-      if (!watchedSenders.has(sender.id)) {
-        watchedSenders.add(sender.id)
-        const id = sender.id
-        sender.once('destroyed', () => {
-          watchedSenders.delete(id)
-          void saveTargets.dropOwner(id)
-        })
-      }
-      return saveTargets.open(sender.id, BrowserWindow.fromWebContents(sender), request)
+      watchSaveTargetOwner(event.sender, saveTargets)
+      return saveTargets.open(event.sender.id, BrowserWindow.fromWebContents(event.sender), request)
     })
     ipcMain.handle('app:save-target-write', (event, id: unknown, path: unknown, data: unknown) =>
       saveTargets.write(event.sender.id, id, path, data)

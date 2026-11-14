@@ -63,8 +63,8 @@ function enrollFrame(directAddress?: string | null, directRtc?: boolean) {
 }
 
 describe('protocol v8: direct-link address', () => {
-  it('is v8', () => {
-    expect(COMPUTER_PROTOCOL_VERSION).toBe(8)
+  it('is at least v8', () => {
+    expect(COMPUTER_PROTOCOL_VERSION).toBeGreaterThanOrEqual(8)
   })
 
   it('keeps the address an enrolling computer advertises, and its loopback-ness', async () => {

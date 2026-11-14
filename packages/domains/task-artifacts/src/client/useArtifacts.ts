@@ -396,7 +396,9 @@ export function useArtifacts(
           { staleTime: 0, gcTime: 0 }
         )
       )
-      return piece === null ? null : { data: base64ToBytes(piece.data), size: piece.size }
+      return piece === null
+        ? null
+        : { data: base64ToBytes(piece.data), size: piece.size, version: piece.version }
     },
     [queryClient, trpc]
   )

@@ -18,7 +18,8 @@ vi.mock('electron', () => ({
   shell: { showItemInFolder: (p: string) => revealed.push(p) }
 }))
 
-const { SaveTargets } = await import('./client-save')
+const { SaveTargets, watchSaveTargetOwner } = await import('./client-save')
+const { EventEmitter } = await import('node:events')
 
 let root: string
 let targets: InstanceType<typeof SaveTargets>
@@ -147,9 +148,114 @@ describe('zip target', () => {
   })
 })
 
+// Review 2, M2: a path already written and finished is never continued by another
+// entry — the planner makes paths unique; the host refuses rather than append.
+describe('a repeated path is refused, never appended to', () => {
+  test('directory target', async () => {
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('first'))
+    await targets.write(SENDER, id, 'docs/b.md', bytes('other'))
+    await expect(targets.write(SENDER, id, 'docs/A.md', bytes('second'))).rejects.toThrow(
+      'already written'
+    )
+  })
+
+  test('zip target', async () => {
+    picked.file = path.join(root, 'dup.zip')
+    const id = await openOk({ kind: 'zip', fileName: 'dup.zip', title: 't' })
+    await targets.write(SENDER, id, 'a.md', bytes('first'))
+    await targets.write(SENDER, id, 'b.md', bytes('other'))
+    await expect(targets.write(SENDER, id, 'a.md', bytes('second'))).rejects.toThrow(
+      'already written'
+    )
+  })
+})
+
 test('rejects a malformed request', async () => {
   expect(await targets.open(SENDER, null, { kind: 'nope' })).toEqual({
     ok: false,
     error: 'Invalid save request'
+  })
+})
+
+const partials = (dir: string): string[] =>
+  fs
+    .readdirSync(dir, { recursive: true })
+    .map(String)
+    .filter((n) => n.includes('partial'))
+
+// Review 2, L3: an abort while a write is still opening its file must not leave that
+// file (or its handle) behind. Operations on a target run one at a time; abort waits
+// for the one in flight, then cleans up — and refuses anything after it.
+describe('abort racing a write', () => {
+  test('directory: abort issued mid-write leaves no partial and no file', async () => {
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('A'))
+    const writing = targets.write(SENDER, id, 'docs/b.md', bytes('B'))
+    const aborting = targets.abort(SENDER, id)
+    await Promise.allSettled([writing, aborting])
+    expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+    expect(partials(picked.dir)).toEqual([])
+  })
+
+  test('zip: abort issued mid-write leaves nothing', async () => {
+    picked.file = path.join(root, 'race.zip')
+    const id = await openOk({ kind: 'zip', fileName: 'race.zip', title: 't' })
+    const writing = targets.write(SENDER, id, 'a.md', bytes('A'))
+    const aborting = targets.abort(SENDER, id)
+    await Promise.allSettled([writing, aborting])
+    expect(fs.existsSync(picked.file)).toBe(false)
+    expect(partials(root)).toEqual([])
+  })
+})
+
+// Review 2, L2: a renderer that crashes, reloads or navigates keeps its webContents, so
+// 'destroyed' never fires; its open targets are aborted on those events too. On quit,
+// every partial is removed synchronously.
+describe('targets of a window that goes away', () => {
+  async function openDir(): Promise<string> {
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('A'))
+    await targets.write(SENDER, id, 'docs/b.md', bytes('B'))
+    return id
+  }
+
+  for (const [event, args, aborted] of [
+    ['render-process-gone', [{}, { reason: 'oom' }], true],
+    ['did-start-navigation', [{ isMainFrame: true, isSameDocument: false }], true],
+    ['did-start-navigation', [{ isMainFrame: false, isSameDocument: false }], false],
+    ['did-start-navigation', [{ isMainFrame: true, isSameDocument: true }], false],
+    ['destroyed', [], true]
+  ] as const) {
+    test(`${event} ${JSON.stringify(args[0] ?? {})} → ${aborted ? 'aborted' : 'kept'}`, async () => {
+      const sender = Object.assign(new EventEmitter(), { id: SENDER })
+      watchSaveTargetOwner(sender, targets)
+      const id = await openDir()
+      sender.emit(event, ...args)
+      await new Promise((r) => setTimeout(r, 50))
+      if (aborted) {
+        expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+        expect(partials(picked.dir)).toEqual([])
+        await expect(targets.write(SENDER, id, 'docs/c.md', bytes('C'))).rejects.toThrow()
+      } else {
+        expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+      }
+    })
+  }
+
+  test('quit removes every partial synchronously', async () => {
+    picked.file = path.join(root, 'quit.zip')
+    await openOk({ kind: 'zip', fileName: 'quit.zip', title: 't' }).then((id) =>
+      targets.write(SENDER, id, 'a.md', bytes('A'))
+    )
+    picked.file = path.join(root, 'quit.bin')
+    await openOk({ kind: 'file', fileName: 'quit.bin', title: 't' }).then((id) =>
+      targets.write(SENDER, id, '', bytes('B'))
+    )
+    await openDir()
+    expect(partials(root).length).toBeGreaterThan(0)
+    targets.abortAllNow()
+    expect(partials(root)).toEqual([])
+    expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
   })
 })

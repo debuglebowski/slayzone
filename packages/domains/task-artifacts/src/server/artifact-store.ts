@@ -453,13 +453,18 @@ export function createArtifactStore(dataDir: string) {
      * artifact or it has neither a working file nor a version; any other failure
      * (unreadable file, damaged blob) throws, so a client never mistakes it for a
      * missing file. A blob's hash is checked on the first piece, not on every one.
+     *
+     * `version` names the exact content the piece came from — `blob:<hash>`, or the
+     * working file's inode, size and nanosecond mtime — so a client reading several
+     * pieces can refuse to stitch pieces of different versions. A file that changes
+     * while this one piece is read throws instead of returning a mixed piece.
      */
     async readArtifactBytesRange(
       db: SlayzoneDb,
       id: string,
       offset: number,
       length: number
-    ): Promise<{ bytes: Uint8Array; size: number } | null> {
+    ): Promise<{ bytes: Uint8Array; size: number; version: string } | null> {
       const row = await getRow(db, id)
       if (!row) return null
       const taskId = row.task_id as string,
@@ -468,6 +473,7 @@ export function createArtifactStore(dataDir: string) {
         getArtifactFilePath(taskId, id, title),
         getLegacyArtifactFilePath(taskId, id, title)
       ].find((p) => existsSync(p))
+      let blobVersion: string | null = null
       if (!file) {
         if (row.current_version_id == null) return null
         const version = (await db.namedTxn('task-artifacts:versions:resolve', {
@@ -481,12 +487,19 @@ export function createArtifactStore(dataDir: string) {
             'Artifact version hash integrity check failed'
           )
         file = blobs.blobPath(version.content_hash)
+        blobVersion = `blob:${version.content_hash}`
       }
       const handle = await open(file, 'r')
-      return handle
-        .stat()
-        .then(async ({ size }) => {
-          const want = Math.max(0, Math.min(length, size - offset))
+      const stamp = async (): Promise<{ size: number; version: string }> => {
+        const st = await handle.stat({ bigint: true })
+        return {
+          size: Number(st.size),
+          version: blobVersion ?? `file:${st.ino}:${st.size}:${st.mtimeNs}`
+        }
+      }
+      return stamp()
+        .then(async (before) => {
+          const want = Math.max(0, Math.min(length, before.size - offset))
           const bytes = Buffer.alloc(want)
           let read = 0
           while (read < want) {
@@ -494,7 +507,13 @@ export function createArtifactStore(dataDir: string) {
             if (bytesRead === 0) break
             read += bytesRead
           }
-          return { bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, read), size }
+          if ((await stamp()).version !== before.version)
+            throw new Error('The artifact changed while it was being read')
+          return {
+            bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, read),
+            size: before.size,
+            version: before.version
+          }
         })
         .finally(() => handle.close())
     },

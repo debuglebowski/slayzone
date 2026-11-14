@@ -531,7 +531,9 @@ export function createLocalArtifacts(
         }
       } else if (req.method === 'readBytesRange') {
         const r = await store.readArtifactBytesRange(db, first, args[1], args[2])
-        result = r ? { data: Buffer.from(r.bytes).toString('base64'), size: r.size } : null
+        result = r
+          ? { data: Buffer.from(r.bytes).toString('base64'), size: r.size, version: r.version }
+          : null
       } else if (req.method === 'readBytes' || req.method === 'resolveArtifactVersion') {
         const artifactId = req.method === 'readBytes' ? first : first.artifactId,
           versionRef = req.method === 'readBytes' ? (args[1] ?? 'current') : first.versionRef

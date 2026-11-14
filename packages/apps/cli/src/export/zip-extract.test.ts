@@ -189,6 +189,36 @@ describe('extractZip', () => {
     }
   )
 
+  // Review 2, L1 (PoC on APFS): `S` is `s` on a case-blind filesystem, so `L` walks
+  // through the link `s` → .. and lands outside. Refused on every platform: a name
+  // that differs from a link only in case is treated as that link.
+  test.skipIf(process.platform === 'win32')(
+    'refuses a link that walks through another link spelled in a different case',
+    async () => {
+      const zip = await archiverZip((a) => {
+        a.append(null as unknown as Buffer, { name: 'a/b/' })
+        a.symlink('a/b/s', '..')
+        a.symlink('a/b/L', 'S/../../x')
+      })
+      const root = fresh('case')
+      const dest = path.join(root, 'dest')
+      await expect(extractZip(zip, dest)).rejects.toBeInstanceOf(ZipError)
+      expect(fs.existsSync(path.join(dest, 'a/b/L'))).toBe(false)
+    }
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'refuses an entry under a link spelled in a different case',
+    async () => {
+      const zip = await archiverZip((a) => {
+        a.append(Buffer.from('x'), { name: 'pkg/real/keep.txt' })
+        a.symlink('pkg/alias', 'real')
+        a.append(Buffer.from('via link'), { name: 'pkg/ALIAS/sneaky.txt' })
+      })
+      await expect(extractZip(zip, fresh('out'))).rejects.toBeInstanceOf(ZipError)
+    }
+  )
+
   test.skipIf(process.platform === 'win32')(
     'refuses writing THROUGH any symlink the archive created',
     async () => {

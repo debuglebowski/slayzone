@@ -27,12 +27,15 @@ const ignore = (): void => undefined
 /** The size of each piece read from the hub. */
 export const DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 
-/** One piece of an artifact's bytes and its total size; null = no such artifact/file. */
+/**
+ * One piece of an artifact's bytes, its total size and the version it came from;
+ * null = no such artifact/file.
+ */
 export type ReadArtifactChunk = (
   id: string,
   offset: number,
   length: number
-) => Promise<{ data: Uint8Array; size: number } | null>
+) => Promise<{ data: Uint8Array; size: number; version: string } | null>
 
 /** `saved` false = nothing to save or the person cancelled. `skipped`: paths not found. */
 export interface DownloadOutcome {
@@ -57,20 +60,27 @@ class ArtifactGoneError extends Error {
   }
 }
 
+const CHANGED = 'The artifact changed while it was being downloaded. Download it again.'
+
 /**
  * The artifact's pieces in order, the next one fetched while this one is written
  * (two reads in flight at most). Throws {@link ArtifactGoneError} before the first
- * piece when the hub has no such file.
+ * piece when the hub has no such file. The first piece pins the version and size:
+ * a later piece from any other version (rewritten, truncated, replaced, deleted)
+ * throws, so a download is never saved truncated or spliced.
  */
 async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint8Array> {
   let offset = 0
+  let pinned: { version: string; size: number } | null = null
   let next = read(id, 0, DOWNLOAD_CHUNK_BYTES)
   for (;;) {
     const piece = await next
     if (!piece) {
       if (offset === 0) throw new ArtifactGoneError()
-      throw new Error('The artifact changed while it was being downloaded')
+      throw new Error(CHANGED)
     }
+    pinned ??= { version: piece.version, size: piece.size }
+    if (piece.version !== pinned.version || piece.size !== pinned.size) throw new Error(CHANGED)
     const end = offset + piece.data.byteLength
     const more = piece.data.byteLength > 0 && end < piece.size
     if (more) {

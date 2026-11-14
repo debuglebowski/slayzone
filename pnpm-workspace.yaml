@@ -79,11 +79,6 @@ minimumReleaseAgeExclude:
   # Mobile wave 1, Microsoft sign-in (2026-10-30): the auth session (ASWebAuthenticationSession)
   # and PKCE hashing (Hermes has no crypto.subtle), at SDK 58's pins.
   - expo-web-browser@58.0.7 # 2026-11-10
-  # Mobile artifact export (2026-11-04): PDF via the OS print renderer, the share sheet
-  # for the exported file — the versions SDK 58 pins (bundledNativeModules.json of expo
-  # 58.0.21).
-  - expo-print@58.0.8 # 2026-11-11
-  - expo-sharing@58.0.21 # 2026-11-11
 
 # Electron's ABI and electron-builder need a flat node_modules (no symlinked tree).
 nodeLinker: hoisted

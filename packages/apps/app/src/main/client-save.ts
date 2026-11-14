@@ -4,7 +4,7 @@
 // person's own disk whether the hub is local or remote, and no size has to fit in
 // memory. A zip is compressed by archiver on zlib's thread pool: off the UI and off
 // main's event loop. Reached over `app:save-target-*`.
-import { createWriteStream, mkdirSync, rmSync, type WriteStream } from 'fs'
+import { createWriteStream, mkdirSync, rmSync, unlinkSync, type WriteStream } from 'fs'
 import { open, rename, unlink, type FileHandle } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, extname, join } from 'path'
@@ -40,6 +40,30 @@ interface Target {
   mkdir(path: string): Promise<void>
   close(): Promise<void>
   abort(): Promise<void>
+  /** The app is quitting: remove what is on disk now, synchronously, best effort. */
+  abortNow(): void
+}
+
+const unlinkNow = (p: string): void => {
+  try {
+    unlinkSync(p)
+  } catch {
+    // Already gone, or held open on Windows: nothing more to do while quitting.
+  }
+}
+
+/**
+ * Paths a target has started, case-folded (APFS and NTFS are case-blind): a repeated
+ * one is refused rather than continued, so two artifacts never merge into one file
+ * or zip entry (the planner makes paths unique; this is the host's own guard).
+ */
+function newPathGuard(): (path: string) => void {
+  const started = new Set<string>()
+  return (path) => {
+    const key = path.normalize('NFC').toLowerCase()
+    if (started.has(key)) throw new Error(`${path} was already written in this download`)
+    started.add(key)
+  }
 }
 
 /** Already compressed: stored as is, not deflated again. */
@@ -98,6 +122,9 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
     async abort() {
       if (!closed) await handle.close().catch(ignore)
       await unlink(partial).catch(ignore)
+    },
+    abortNow() {
+      unlinkNow(partial)
     }
   }
 }
@@ -109,6 +136,7 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
  */
 function directoryTarget(root: string): Target {
   const placed: string[] = []
+  const startPath = newPathGuard()
   let current: { path: string; dest: string; partial: string; handle: FileHandle } | null = null
   const finishCurrent = async (): Promise<void> => {
     const c = current
@@ -121,6 +149,7 @@ function directoryTarget(root: string): Target {
   return {
     async write(path, data) {
       if (current?.path !== path) {
+        startPath(path)
         await finishCurrent()
         const dest = containedPath(root, ...path.split('/'))
         mkdirSync(dirname(dest), { recursive: true })
@@ -141,6 +170,11 @@ function directoryTarget(root: string): Target {
         await unlink(c.partial).catch(ignore)
       }
       for (const f of placed) rmSync(f, { force: true })
+    },
+    abortNow() {
+      if (current) unlinkNow(current.partial)
+      current = null
+      for (const f of placed) rmSync(f, { force: true })
     }
   }
 }
@@ -159,6 +193,7 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
   output.on('error', fail)
   archive.pipe(output)
   let current: { path: string; stream: PassThrough } | null = null
+  const startPath = newPathGuard()
   const check = (): void => {
     if (failure) throw failure
   }
@@ -170,6 +205,7 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
     async write(path, data) {
       check()
       if (current?.path !== path) {
+        startPath(path)
         finishCurrent()
         const stream = new PassThrough()
         archive.append(stream, { name: path, store: STORED.has(extname(path).toLowerCase()) })
@@ -202,18 +238,54 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
       output.destroy()
       await closed
       await unlink(partial).catch(ignore)
+    },
+    abortNow() {
+      current?.stream.destroy()
+      archive.abort()
+      output.destroy()
+      unlinkNow(partial)
     }
   }
 }
 
 /** Open targets, each usable only by the window that opened it. */
-export class SaveTargets {
-  private readonly targets = new Map<string, { owner: number; target: Target }>()
+interface Entry {
+  owner: number
+  target: Target
+  /** The operation in flight: each runs after the previous one settles. */
+  chain: Promise<unknown>
+  aborted: boolean
+}
 
-  private get(owner: number, id: unknown): Target {
+export class SaveTargets {
+  private readonly targets = new Map<string, Entry>()
+
+  private entry(owner: number, id: unknown): Entry {
     const entry = typeof id === 'string' ? this.targets.get(id) : undefined
-    if (!entry || entry.owner !== owner) throw new Error('Unknown save target')
-    return entry.target
+    if (!entry || entry.owner !== owner || entry.aborted) throw new Error('Unknown save target')
+    return entry
+  }
+
+  /**
+   * Run one operation on a target after the one before it: a write still opening its
+   * file is never overtaken by an abort, which would leave that file behind.
+   */
+  private run<T>(entry: Entry, op: (target: Target) => Promise<T>): Promise<T> {
+    const result = entry.chain.then(() => {
+      if (entry.aborted) throw new Error('The download was cancelled')
+      return op(entry.target)
+    })
+    entry.chain = result.catch(ignore)
+    return result
+  }
+
+  /** Abort after whatever is in flight; nothing queued after this runs. */
+  private async abortEntry(id: string, entry: Entry): Promise<void> {
+    if (entry.aborted) return
+    entry.aborted = true
+    this.targets.delete(id)
+    await entry.chain
+    await entry.target.abort().catch(ignore)
   }
 
   async open(
@@ -251,28 +323,30 @@ export class SaveTargets {
           : await fileTarget(picked.filePath, req.reveal === true)
     }
     const targetId = randomUUID()
-    this.targets.set(targetId, { owner, target })
+    this.targets.set(targetId, { owner, target, chain: Promise.resolve(), aborted: false })
     return { ok: true, targetId }
   }
 
   async write(owner: number, id: unknown, path: unknown, data: unknown): Promise<void> {
     if (typeof path !== 'string' || !(data instanceof Uint8Array))
       throw new Error('Invalid save write')
-    await this.get(owner, id).write(path, data)
+    await this.run(this.entry(owner, id), (t) => t.write(path, data))
   }
 
   async mkdir(owner: number, id: unknown, path: unknown): Promise<void> {
     if (typeof path !== 'string') throw new Error('Invalid save folder')
-    await this.get(owner, id).mkdir(path)
+    await this.run(this.entry(owner, id), (t) => t.mkdir(path))
   }
 
   async close(owner: number, id: unknown): Promise<HostSaveResult> {
-    const target = this.get(owner, id)
+    const entry = this.entry(owner, id)
+    const closed = this.run(entry, (t) => t.close())
     this.targets.delete(id as string)
-    return target.close().then(
+    return closed.then(
       () => ({ ok: true }) as const,
       async (err: unknown) => {
-        await target.abort().catch(ignore)
+        entry.aborted = true
+        await entry.target.abort().catch(ignore)
         return { ok: false, error: err instanceof Error ? err.message : String(err) } as const
       }
     )
@@ -281,16 +355,47 @@ export class SaveTargets {
   async abort(owner: number, id: unknown): Promise<void> {
     const entry = typeof id === 'string' ? this.targets.get(id) : undefined
     if (!entry || entry.owner !== owner) return
-    this.targets.delete(id as string)
-    await entry.target.abort()
+    await this.abortEntry(id as string, entry)
   }
 
-  /** A window went away: abort what it left open. */
+  /** A window went away (closed, crashed, reloaded, navigated): abort what it left open. */
   async dropOwner(owner: number): Promise<void> {
-    for (const [id, entry] of this.targets)
-      if (entry.owner === owner) {
-        this.targets.delete(id)
-        await entry.target.abort().catch(ignore)
-      }
+    const mine = [...this.targets].filter(([, e]) => e.owner === owner)
+    await Promise.all(mine.map(([id, e]) => this.abortEntry(id, e)))
   }
+
+  /** The app is quitting: remove every partial now, synchronously. */
+  abortAllNow(): void {
+    for (const [id, entry] of this.targets) {
+      entry.aborted = true
+      this.targets.delete(id)
+      entry.target.abortNow()
+    }
+  }
+}
+
+/** The part of a webContents a save target's owner is watched through. */
+export interface SaveTargetOwner {
+  readonly id: number
+  on(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
+const watchedOwners = new WeakSet<object>()
+
+/**
+ * Abort a window's open targets when its page goes away. A crash or a reload keeps
+ * the same webContents ('destroyed' never fires), so those count too: a renderer
+ * crash, and a main-frame navigation to a new document. Watched once per webContents.
+ */
+export function watchSaveTargetOwner(sender: SaveTargetOwner, targets: SaveTargets): void {
+  if (watchedOwners.has(sender)) return
+  watchedOwners.add(sender)
+  const id = sender.id
+  const drop = (): void => void targets.dropOwner(id)
+  sender.on('destroyed', drop)
+  sender.on('render-process-gone', drop)
+  sender.on('did-start-navigation', (...args: unknown[]) => {
+    const details = args[0] as { isMainFrame?: boolean; isSameDocument?: boolean } | undefined
+    if (details?.isMainFrame && !details.isSameDocument) drop()
+  })
 }

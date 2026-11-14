@@ -143,6 +143,8 @@ export function createZipEncoder(
   const entries: Entry[] = []
   let written = 0
   let current: (Entry & { path: string; deflater: Deflater | null }) | null = null
+  /** Case-folded paths already started: a repeat is refused, never continued. */
+  const started = new Set<string>()
 
   const out = (chunk: Uint8Array): void => {
     if (chunk.byteLength === 0) return
@@ -188,6 +190,9 @@ export function createZipEncoder(
   return {
     write(path, data) {
       if (current?.path !== path) {
+        const key = path.normalize('NFC').toLowerCase()
+        if (started.has(key)) throw new Error(`${path} was already written in this download`)
+        started.add(key)
         endCurrent()
         const stored = isStored(path)
         current = {

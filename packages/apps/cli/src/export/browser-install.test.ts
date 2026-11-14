@@ -276,3 +276,91 @@ describe('installHeadlessShell', () => {
     expect(String((err as Error).message)).toContain('503')
   })
 })
+
+// Review 2, L4: an interrupted install must not leave 100–300 MB in the cache for good.
+describe('interrupted installs', () => {
+  const cacheRoot = (home: string) => path.join(home, '.cache/slayzone/chrome-headless-shell')
+  const zipWithShell = () =>
+    makeZip([
+      {
+        name: 'chrome-headless-shell-linux64/chrome-headless-shell',
+        data: Buffer.from('#!/bin/sh\n'),
+        mode: 0o755
+      }
+    ])
+
+  test("the next install sweeps an earlier run's leftovers (but not a live one's)", async () => {
+    const home = path.join(tmp, 'home-sweep')
+    const root = cacheRoot(home)
+    fs.mkdirSync(root, { recursive: true })
+    const stale = ['.install-dead', '.download-dead.zip', '157.0.8103.38.partial-dead']
+    for (const n of stale) {
+      const p = path.join(root, n)
+      if (n.endsWith('.zip')) fs.writeFileSync(p, 'x'.repeat(1000))
+      else fs.mkdirSync(path.join(p, 'deep'), { recursive: true })
+      const old = new Date(Date.now() - 2 * 3600_000)
+      fs.utimesSync(p, old, old)
+    }
+    fs.mkdirSync(path.join(root, '.install-live'))
+    await installHeadlessShell({
+      ctx: realCtx(home),
+      fetchImpl: fakeFetch(zipWithShell(), []),
+      log: () => {}
+    })
+    expect(fs.readdirSync(root).sort()).toEqual(['.install-live', '157.0.8103.38'])
+  })
+
+  test.skipIf(process.platform === 'win32').each(['SIGTERM', 'SIGINT'] as const)(
+    '%s mid-download removes the work dir and still ends the process',
+    async (signal) => {
+      const home = fs.mkdtempSync(path.join(tmp, `sig-${signal}-`))
+      const driver = path.join(home, 'driver.mts')
+      const mod = path.resolve(__dirname, 'browser-install.ts')
+      fs.writeFileSync(
+        driver,
+        `import fs from 'node:fs'
+import { installHeadlessShell } from ${JSON.stringify(mod)}
+const sample = ${JSON.stringify(SAMPLE)}
+const fetchImpl = async (input) => {
+  if (String(input).endsWith('.json')) return new Response(JSON.stringify(sample))
+  // A download that sends a first piece, then stalls: the install is mid-download.
+  return new Response(new ReadableStream({
+    start(c) { c.enqueue(new Uint8Array(64 * 1024)); console.log('downloading') }
+  }))
+}
+const ctx = {
+  platform: 'linux', arch: 'x64', env: { PATH: '' }, homedir: ${JSON.stringify(home)},
+  isExecutable: () => false,
+  listDir: (p) => { try { return fs.readdirSync(p) } catch { return [] } }
+}
+await installHeadlessShell({ ctx, fetchImpl, log: () => {} })
+`
+      )
+      const { spawn } = await import('node:child_process')
+      const child = spawn('node', ['--import', 'tsx', driver], {
+        cwd: path.resolve(__dirname, '../../../../..'),
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+      let stderr = ''
+      child.stderr.on('data', (d) => {
+        stderr += d
+      })
+      await new Promise<void>((resolve, reject) => {
+        child.stdout.on('data', (d) => String(d).includes('downloading') && resolve())
+        child.once('exit', () => reject(new Error(`driver exited early: ${stderr}`)))
+      })
+      // The work dir exists while it downloads.
+      await expect
+        .poll(() => fs.readdirSync(cacheRoot(home)).filter((n) => n.startsWith('.install-')))
+        .toHaveLength(1)
+      const ended = new Promise<NodeJS.Signals | null>((r) =>
+        child.once('exit', (_c, sig) => r(sig))
+      )
+      child.kill(signal)
+      expect(await ended).toBe(signal)
+      expect(fs.readdirSync(cacheRoot(home))).toEqual([])
+    },
+    30_000
+  )
+})

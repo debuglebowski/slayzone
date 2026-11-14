@@ -13,7 +13,8 @@
  *
  * Symlinks are checked as the FILESYSTEM will follow them, not lexically: an entry may
  * not lie under a symlink (of the archive or already on disk), and a link target may
- * not pass through another link on its way — a chain like `s → ..`, `s/t → ../../x`
+ * not pass through another link on its way (names compared case-folded, as APFS/NTFS
+ * do), and every created link that resolves is confirmed inside by `realpath` — a chain like `s → ..`, `s/t → ../../x`
  * looks inside `destDir` lexically and lands outside. The whole archive is validated
  * before anything is written, and links are created last.
  */
@@ -228,6 +229,13 @@ async function readEntry(zipPath: string, fd: number, e: Entry): Promise<Buffer>
   return Buffer.concat(chunks)
 }
 
+/**
+ * A path as the filesystem may see it: APFS and NTFS are case-blind and compare names
+ * unicode-normalised, so `S` and `s` (or two forms of `é`) can be one entry. Link
+ * checks compare these keys, so a differently spelled name cannot slip past a link.
+ */
+const fold = (p: string): string => p.normalize('NFC').toLowerCase()
+
 const typeOf = (e: Entry): number => (e.mode === null ? 0 : e.mode & S_IFMT)
 const isDirEntry = (e: Entry): boolean => e.name.endsWith('/') || typeOf(e) === S_IFDIR
 const isLinkEntry = (e: Entry): boolean => typeOf(e) === S_IFLNK
@@ -278,7 +286,7 @@ function assertLinkInside(
     } catch {
       // Absent: a plain path component.
     }
-    if (links.has(at) || onDiskLink) refuse()
+    if (links.has(fold(at)) || onDiskLink) refuse()
   }
 }
 
@@ -291,14 +299,15 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
     const entries = readCentralDirectory(fd, fs.fstatSync(fd).size)
     // Validate every name — and every symlink — before writing anything.
     const targets = entries.map((e) => safeTarget(dest, e.name))
-    const links = new Set(targets.filter((_, i) => isLinkEntry(entries[i])))
+    const links = new Set(targets.filter((_, i) => isLinkEntry(entries[i])).map(fold))
     for (const [i, e] of entries.entries()) {
       for (
         let dir = path.dirname(targets[i]);
         dir.startsWith(dest + path.sep);
         dir = path.dirname(dir)
       )
-        if (links.has(dir)) throw new ZipError(`Refusing zip entry under a symlink: ${e.name}`)
+        if (links.has(fold(dir)))
+          throw new ZipError(`Refusing zip entry under a symlink: ${e.name}`)
       assertNoLinkAncestor(dest, targets[i], e.name)
     }
     const linkTargets = new Map<number, string>()
@@ -334,11 +343,29 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
     }
 
     // Links last: nothing above was written through one.
+    const created: string[] = []
     for (const [i, linkTarget] of linkTargets) {
       const target = targets[i]
       fs.mkdirSync(path.dirname(target), { recursive: true })
       fs.rmSync(target, { force: true })
       fs.symlinkSync(linkTarget, target)
+      created.push(target)
+    }
+    // And the filesystem's own answer: every link that resolves must stay inside.
+    if (created.length > 0) {
+      const realDest = fs.realpathSync.native(dest)
+      for (const link of created) {
+        let real: string | null = null
+        try {
+          real = fs.realpathSync.native(link)
+        } catch {
+          // Dangling (its target is not in the archive): nothing to follow.
+        }
+        if (real !== null && real !== realDest && !real.startsWith(realDest + path.sep)) {
+          for (const l of created) fs.rmSync(l, { force: true })
+          throw new ZipError(`Refusing symlink outside the destination: ${link}`)
+        }
+      }
     }
   } finally {
     fs.closeSync(fd)

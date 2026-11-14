@@ -81,3 +81,48 @@ describe('safeFileName', () => {
     expect(safeFileName('..', 'fallback')).toBe('fallback')
   })
 })
+
+// Review 2, M2: titles are not unique (and safeFileName maps `a/b.md` and `a_b.md` to
+// one name). Every output path is unique — case-insensitively, and never equal to a
+// folder's path — so no two artifacts are ever merged into one file or zip entry.
+describe('duplicate names', () => {
+  it('numbers repeats like a file manager: name (2).ext, case-insensitively', () => {
+    const plan = planTaskDownload(
+      [{ id: 'f', name: 'docs', parent_id: null }],
+      [
+        { id: '1', title: 'a.md', folder_id: 'f' },
+        { id: '2', title: 'a.md', folder_id: 'f' },
+        { id: '3', title: 'A.md', folder_id: 'f' },
+        { id: '4', title: 'a (2).md', folder_id: null },
+        { id: '5', title: 'a/b.md', folder_id: null },
+        { id: '6', title: 'a_b.md', folder_id: null },
+        { id: '7', title: 'docs', folder_id: null },
+        { id: '8', title: 'README', folder_id: null },
+        { id: '9', title: 'readme', folder_id: null }
+      ]
+    )
+    expect(plan.map((e) => e.path)).toEqual([
+      'docs/a.md',
+      'docs/a (2).md',
+      'docs/A (3).md',
+      'a (2).md',
+      'a_b.md',
+      'a_b (2).md',
+      'docs (2)',
+      'README',
+      'readme (2)'
+    ])
+  })
+
+  it('folder downloads are unique too', () => {
+    const plan = planFolderDownload(
+      [{ id: 'f', name: 'docs', parent_id: null }],
+      [
+        { id: '1', title: 'x.txt', folder_id: 'f' },
+        { id: '2', title: 'x.txt', folder_id: 'f' }
+      ],
+      'f'
+    )
+    expect(plan?.entries.map((e) => e.path)).toEqual(['docs/x.txt', 'docs/x (2).txt'])
+  })
+})

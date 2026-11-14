@@ -23,6 +23,7 @@ import {
   VERSION_RE
 } from './browser'
 import { extractZip } from './zip-extract'
+import { onExitOrSignal } from './signal-cleanup'
 
 export { cftPlatformFor }
 
@@ -92,6 +93,28 @@ export interface InstallOptions {
   log: (line: string) => void
 }
 
+/** Leftovers older than this belong to an install that died; younger may be running. */
+const STALE_INSTALL_MS = 3600_000
+
+/**
+ * Remove what an interrupted install left in the cache: its work dir (`.install-*`)
+ * and the layout older releases used (`.download-*.zip`, `<version>.partial-*`).
+ * Only entries over an hour old — a younger one may be another `slay` installing now.
+ */
+function sweepStaleInstalls(root: string, now = Date.now()): void {
+  for (const name of fs.readdirSync(root)) {
+    // Each leftover on its own: one that cannot be removed must not stop the sweep.
+    try {
+      if (!/^\.install-|^\.download-|\.partial-/.test(name)) continue
+      const p = path.join(root, name)
+      if (now - fs.lstatSync(p).mtimeMs > STALE_INSTALL_MS)
+        fs.rmSync(p, { recursive: true, force: true })
+    } catch {
+      // Gone already (another run swept it), or not removable: the next run retries.
+    }
+  }
+}
+
 /** Ensure a headless shell is in the cache; returns its executable path. */
 export async function installHeadlessShell({
   ctx,
@@ -110,11 +133,17 @@ export async function installHeadlessShell({
 
   const root = headlessShellCacheRoot(ctx)
   fs.mkdirSync(root, { recursive: true })
-  const tag = randomBytes(4).toString('hex')
-  const zipPath = path.join(root, `.download-${tag}.zip`)
-  const staging = path.join(root, `${pick.version}.partial-${tag}`)
+  sweepStaleInstalls(root)
+  // Download and unpack inside one work dir, moved into place only when complete; on
+  // any failure, exit or signal the work dir goes, so nothing half-installed stays.
+  const work = path.join(root, `.install-${randomBytes(4).toString('hex')}`)
+  fs.mkdirSync(work)
+  const zipPath = path.join(work, 'download.zip')
+  const staging = path.join(work, 'unpacked')
   const finalDir = path.join(root, pick.version)
   const rel = headlessShellBinaryRel(ctx.platform, cft)
+  const removeWork = (): void => fs.rmSync(work, { recursive: true, force: true })
+  const unhook = onExitOrSignal(removeWork)
 
   log(`Downloading Chromium headless shell ${pick.version} (${cft})…`)
   try {
@@ -133,12 +162,12 @@ export async function installHeadlessShell({
     fs.rmSync(finalDir, { recursive: true, force: true })
     fs.renameSync(staging, finalDir)
   } catch (err) {
-    fs.rmSync(staging, { recursive: true, force: true })
     throw err instanceof BrowserInstallError
       ? err
       : new BrowserInstallError(`Installing Chromium failed: ${(err as Error).message}`)
   } finally {
-    fs.rmSync(zipPath, { force: true })
+    unhook()
+    removeWork()
   }
   const installed = path.join(finalDir, rel)
   log(`Installed: ${installed}`)

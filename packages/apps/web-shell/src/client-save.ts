@@ -3,8 +3,10 @@
 // and writes them here. A file becomes one browser download; a folder (a browser
 // cannot write into a folder the person picks everywhere) and a zip are built by the
 // zip worker as the pieces arrive, so compression never blocks the page and no size
-// has a ceiling (zip64 past 4 GB). The download's bytes are held as Blob parts, which
-// the browser may keep on disk rather than in memory.
+// has a ceiling (zip64 past 4 GB). Each piece — and each chunk of zip output — becomes
+// its own Blob the moment it arrives: Chromium moves Blob data out of the tab into
+// browser-process storage, which pages to disk, so the tab never holds the download
+// as one growing buffer. Close only joins those Blobs.
 import type {
   HostSaveResult,
   SaveTargetOpenResult,
@@ -91,26 +93,34 @@ interface Target {
   abort(): void
 }
 
-/** The parts are copied off the caller's buffer: it may be reused or transferred. */
-const part = (data: Uint8Array): BlobPart => new Uint8Array(data)
+/** A BlobPart over `data` (a view on a shared buffer is copied: not a BlobPart). */
+const bytesPart = (data: Uint8Array): BlobPart =>
+  data.buffer instanceof ArrayBuffer ? (data as Uint8Array<ArrayBuffer>) : new Uint8Array(data)
 
 export function createBrowserSaveTargets(
-  deps: { createZipSink?: (onOut: (chunk: Uint8Array) => void) => ZipSink } = {}
+  deps: {
+    createZipSink?: (onOut: (chunk: Uint8Array) => void) => ZipSink
+    /** Blob construction, injectable so tests can see the memory shape. */
+    makeBlob?: (parts: BlobPart[], opts?: BlobPropertyBag) => Blob
+  } = {}
 ) {
   const createZipSink = deps.createZipSink ?? workerZipSink
+  const makeBlob = deps.makeBlob ?? ((parts, opts) => new Blob(parts, opts))
+  /** One piece out of the tab's memory: a Blob snapshots its bytes. */
+  const stash = (data: Uint8Array): Blob => makeBlob([bytesPart(data)])
   const targets = new Map<string, Target>()
   let next = 0
 
   const fileTarget = (fileName: string): Target => {
-    let parts: BlobPart[] = []
+    let parts: Blob[] = []
     return {
       write: async (_path, data) => {
-        parts.push(part(data))
+        parts.push(stash(data))
       },
       mkdir: async () => {
         throw new Error('A file download has no folders')
       },
-      close: async () => saveBlob(new Blob(parts), fileName),
+      close: async () => saveBlob(makeBlob(parts), fileName),
       abort: () => {
         parts = []
       }
@@ -118,19 +128,14 @@ export function createBrowserSaveTargets(
   }
 
   const zipTarget = (fileName: string): Target => {
-    let parts: BlobPart[] = []
-    // Worker output arrives on its own (transferred) buffer: kept as is, never copied.
-    const sink = createZipSink((chunk) =>
-      parts.push(
-        chunk.buffer instanceof ArrayBuffer ? (chunk as Uint8Array<ArrayBuffer>) : part(chunk)
-      )
-    )
+    let parts: Blob[] = []
+    const sink = createZipSink((chunk) => parts.push(stash(chunk)))
     return {
       write: (path, data) => sink.write(path, data),
       mkdir: (path) => sink.mkdir(path),
       close: async () => {
         await sink.finish().finally(() => sink.dispose())
-        saveBlob(new Blob(parts, { type: 'application/zip' }), fileName)
+        saveBlob(makeBlob(parts, { type: 'application/zip' }), fileName)
       },
       abort: () => {
         sink.dispose()

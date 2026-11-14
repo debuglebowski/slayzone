@@ -77,15 +77,55 @@ export function safeFileName(title: string, fallback: string): string {
   return segs.length ? segs.join('_') : fallback
 }
 
+/** How two paths compare on the filesystems people save to (APFS, NTFS: case-blind). */
+const pathKey = (p: string): string => p.normalize('NFC').toLowerCase()
+
 /**
- * Every artifact of the task, at `<folder path>/<title>`, for "Download all as ZIP".
+ * Make every entry's path unique, the way a file manager numbers copies
+ * (`a.md`, `a (2).md`, …): case-insensitively, and never equal to a folder (every
+ * entry's parent counts as one, as do `dirs`). Titles are not unique, and two
+ * titles can sanitise to one name; without this, two artifacts would end up in one
+ * file or zip entry.
+ */
+function uniquePaths(entries: DownloadEntry[], dirs: string[] = []): DownloadEntry[] {
+  const folders = new Set<string>()
+  const addFolders = (p: string): void => {
+    for (let i = p.indexOf('/'); i !== -1; i = p.indexOf('/', i + 1))
+      folders.add(pathKey(p.slice(0, i)))
+  }
+  for (const d of dirs) {
+    addFolders(`${d}/`)
+  }
+  for (const e of entries) addFolders(e.path)
+  const taken = new Set<string>()
+  return entries.map((e) => {
+    let path = e.path
+    if (taken.has(pathKey(path)) || folders.has(pathKey(path))) {
+      const slash = path.lastIndexOf('/')
+      const dot = path.lastIndexOf('.')
+      const [stem, ext] = dot > slash + 1 ? [path.slice(0, dot), path.slice(dot)] : [path, '']
+      for (let n = 2; ; n++) {
+        path = `${stem} (${n})${ext}`
+        if (!taken.has(pathKey(path)) && !folders.has(pathKey(path))) break
+      }
+    }
+    taken.add(pathKey(path))
+    return { artifactId: e.artifactId, path }
+  })
+}
+
+/**
+ * Every artifact of the task, at `<folder path>/<title>` (unique), for "Download all
+ * as ZIP".
  */
 export function planTaskDownload(folders: FolderRow[], artifacts: ArtifactRow[]): DownloadEntry[] {
   const segs = folderSegments(folders)
-  return artifacts.map((a) => ({
-    artifactId: a.id,
-    path: [...segs(a.folder_id), safeFileName(a.title, a.id)].join('/')
-  }))
+  return uniquePaths(
+    artifacts.map((a) => ({
+      artifactId: a.id,
+      path: [...segs(a.folder_id), safeFileName(a.title, a.id)].join('/')
+    }))
+  )
 }
 
 /**
@@ -103,17 +143,20 @@ export function planFolderDownload(
   const segs = folderSegments(folders)
   const parentDepth = segs(root.parent_id).length
   const ids = folderAndDescendants(folders, folderId)
-  const entries = artifacts
-    .filter((a) => a.folder_id !== null && ids.has(a.folder_id))
-    .map((a) => ({
-      artifactId: a.id,
-      path: [...segs(a.folder_id).slice(parentDepth), safeFileName(a.title, a.id)].join('/')
-    }))
   // Every folder of the subtree, so an empty one still arrives (as it always did).
   const dirs = folders
     .filter((f) => ids.has(f.id))
     .map((f) => segs(f.id).slice(parentDepth).join('/'))
     .filter((d) => d !== '')
+  const entries = uniquePaths(
+    artifacts
+      .filter((a) => a.folder_id !== null && ids.has(a.folder_id))
+      .map((a) => ({
+        artifactId: a.id,
+        path: [...segs(a.folder_id).slice(parentDepth), safeFileName(a.title, a.id)].join('/')
+      })),
+    dirs
+  )
   const folderName = safeSegments(root.name).join('_') || 'folder'
   return { folderName, dirs, entries }
 }

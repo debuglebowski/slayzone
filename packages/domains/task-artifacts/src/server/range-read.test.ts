@@ -28,11 +28,11 @@ test('reads any window of the working file and reports the total size', async ()
     title: 'a.txt',
     content: '0123456789'
   }))!
-  expect(await store.readArtifactBytesRange(db, a.id, 0, 4)).toEqual({
+  expect(await store.readArtifactBytesRange(db, a.id, 0, 4)).toMatchObject({
     bytes: new Uint8Array(Buffer.from('0123')),
     size: 10
   })
-  expect(await store.readArtifactBytesRange(db, a.id, 8, 100)).toEqual({
+  expect(await store.readArtifactBytesRange(db, a.id, 8, 100)).toMatchObject({
     bytes: new Uint8Array(Buffer.from('89')),
     size: 10
   })
@@ -61,4 +61,27 @@ test('a damaged blob is an error, never "not found"', async () => {
   // The hash no longer matches the blob's content.
   writeFileSync(new BlobStore(roots[roots.length - 1]).blobPath(version.content_hash), 'tampered')
   await expect(store.readArtifactBytesRange(db, a.id, 0, 4)).rejects.toThrow()
+})
+
+// Review 2, M1: every piece names the exact content it came from, so a client can tell
+// a file rewritten between pieces from one that stayed the same.
+test('every piece carries a version token that changes when the content does', async () => {
+  const { store, db } = setup()
+  const a = (await store.createArtifact(db, { taskId: 't', title: 'v.txt', content: 'one' }))!
+  const p1 = await store.readArtifactBytesRange(db, a.id, 0, 2)
+  const p2 = await store.readArtifactBytesRange(db, a.id, 2, 2)
+  expect(p1!.version).toBeTruthy()
+  expect(p2!.version).toBe(p1!.version)
+  writeFileSync((await store.getArtifactPath(db, a.id))!, 'two!')
+  expect((await store.readArtifactBytesRange(db, a.id, 0, 2))!.version).not.toBe(p1!.version)
+})
+
+test('a blob-backed artifact is versioned by its content hash', async () => {
+  const { store, db } = setup()
+  const a = (await store.createArtifact(db, { taskId: 't', title: 'h.txt', content: 'hash me' }))!
+  unlinkSync((await store.getArtifactPath(db, a.id))!)
+  const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
+  expect((await store.readArtifactBytesRange(db, a.id, 0, 2))!.version).toBe(
+    `blob:${version.content_hash}`
+  )
 })

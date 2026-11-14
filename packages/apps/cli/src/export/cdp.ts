@@ -16,6 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { missingLibraryHint, missingSharedLibrary } from './missing-libs'
+import { onExitOrSignal } from './signal-cleanup'
 
 export class BrowserLaunchError extends Error {
   constructor(message: string) {
@@ -75,10 +76,6 @@ function launchFailure(executable: string, stderr: string, cause: string): Brows
     `The browser could not start (${cause}): ${executable}${tail ? `\n${tail}` : ''}`
   )
 }
-
-/** Ends `slay` without an 'exit' event; cleaned up for while a browser runs. */
-const SIGNALS: NodeJS.Signals[] =
-  process.platform === 'win32' ? ['SIGINT', 'SIGTERM'] : ['SIGINT', 'SIGTERM', 'SIGHUP']
 
 /** Start `executable` headless and complete a CDP round trip with it. */
 export async function launchBrowser(executable: string): Promise<Browser> {
@@ -162,17 +159,7 @@ export async function launchBrowser(executable: string): Promise<Browser> {
     child.kill('SIGKILL')
     fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
-  const onSignal = (signal: NodeJS.Signals): void => {
-    removeHooks()
-    cleanUpNow()
-    process.kill(process.pid, signal)
-  }
-  const removeHooks = (): void => {
-    process.removeListener('exit', cleanUpNow)
-    for (const s of SIGNALS) process.removeListener(s, onSignal)
-  }
-  process.once('exit', cleanUpNow)
-  for (const s of SIGNALS) process.once(s, onSignal)
+  const removeHooks = onExitOrSignal(cleanUpNow)
 
   function send<T>(
     method: string,

@@ -81,6 +81,14 @@ describe('web shell save targets', () => {
     ).toBe('A')
   })
 
+  it('a folder (zip) refuses a path already written, never appends to it', async () => {
+    const targets = t()
+    const id = await open(targets, { kind: 'directory', folderName: 'docs', title: 'x' })
+    await targets.write(id, 'docs/a.md', bytes('first'))
+    await targets.write(id, 'docs/b.md', bytes('other'))
+    await expect(targets.write(id, 'docs/a.md', bytes('second'))).rejects.toThrow('already written')
+  })
+
   it('abort downloads nothing; an unknown target is refused', async () => {
     const targets = t()
     const id = await open(targets, { kind: 'zip', fileName: 'a.zip', title: 'x' })
@@ -88,5 +96,54 @@ describe('web shell save targets', () => {
     await targets.abort(id)
     expect(clicked).toHaveLength(0)
     await expect(targets.write(id, 'a.md', bytes('A'))).rejects.toThrow('Unknown save target')
+  })
+})
+
+// Review 2, M4: the tab never holds the download as one growing buffer. Each piece (and
+// each chunk of zip output) becomes its own Blob as it arrives — Chromium moves Blob
+// data to browser-process storage, which pages to disk — and close only joins Blobs.
+describe('memory shape', () => {
+  function recordingBlobs() {
+    const made: { parts: unknown[] }[] = []
+    const makeBlob = (parts: BlobPart[], opts?: BlobPropertyBag) => {
+      made.push({ parts })
+      return new Blob(parts, opts)
+    }
+    return { made, makeBlob }
+  }
+
+  it('a file: one Blob per piece as it arrives, joined from Blobs at close', async () => {
+    const { made, makeBlob } = recordingBlobs()
+    const targets = createBrowserSaveTargets({ createZipSink: inlineZipSink, makeBlob })
+    const id = await open(targets, { kind: 'file', fileName: 'f.bin', title: 'x' })
+    for (let i = 0; i < 5; i++) await targets.write(id, '', new Uint8Array(1000).fill(i))
+    expect(made).toHaveLength(5)
+    for (const m of made) expect(m.parts).toHaveLength(1)
+    await targets.close(id)
+    const final = made[made.length - 1]
+    expect(final.parts).toHaveLength(5)
+    for (const p of final.parts) expect(p).toBeInstanceOf(Blob)
+    expect((await clicked[0].blob.arrayBuffer()).byteLength).toBe(5000)
+  })
+
+  it('a zip: the archive output becomes Blobs as it is produced, not at close', async () => {
+    const { made, makeBlob } = recordingBlobs()
+    const targets = createBrowserSaveTargets({ createZipSink: inlineZipSink, makeBlob })
+    const id = await open(targets, { kind: 'zip', fileName: 'z.zip', title: 'x' })
+    await targets.write(
+      id,
+      'a.bin',
+      new Uint8Array(50_000).map((_, i) => i & 255)
+    )
+    await targets.write(
+      id,
+      'b.bin',
+      new Uint8Array(50_000).map((_, i) => (i * 3) & 255)
+    )
+    const beforeClose = made.length
+    expect(beforeClose).toBeGreaterThan(0)
+    await targets.close(id)
+    const final = made[made.length - 1]
+    for (const p of final.parts) expect(p).toBeInstanceOf(Blob)
   })
 })
