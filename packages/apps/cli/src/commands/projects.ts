@@ -1,3 +1,4 @@
+import { registerProjectTransfers } from './transfers'
 import { Command } from 'commander'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -342,5 +343,6 @@ export function projectsCommand(): Command {
       }
     )
 
+  registerProjectTransfers(cmd)
   return cmd
 }

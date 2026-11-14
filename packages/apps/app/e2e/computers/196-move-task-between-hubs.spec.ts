@@ -1,8 +1,12 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test as base, expect, type ElectronApplication, type Page } from '@playwright/test'
 import {
+  cliRoot,
+  cliEnv,
   bootConfigPath,
   clickProject,
   launchIsolatedElectron,
@@ -801,5 +805,146 @@ base.describe('move a task to another hub', () => {
         CLAUDE_CONFIG_DIR: claudeConfigDir
       }
     )
+  })
+})
+
+base('copy task/project UI and CLI transfers preserve originals', async () => {
+  base.setTimeout(300_000)
+  await inTwoHubs('copy-ui-cli', async ({ page, launched, hub, targetProjectId }) => {
+    const sourceProjectId = await projectOnA(page, 'Copy Source')
+    const parent = await createTaskOnA(page, sourceProjectId, 'Copy payload')
+    await createTaskOnA(page, sourceProjectId, 'Copied child', { parentId: parent })
+    await page.reload()
+    await page.waitForSelector('#root', { timeout: 30_000 })
+    const dialog = await openMoveDialog(page, 'CO', 'Copy payload', /Target On B/)
+    await dialog.getByRole('combobox', { name: 'Operation' }).click()
+    await page.getByRole('option', { name: 'Copy', exact: true }).click()
+    await confirmMove(page)
+    await expect
+      .poll(
+        async () => {
+          const tasks = (await withHubClient(hub, (c) => c.task.getAll.query())) as Array<{
+            id: string
+            title: string
+            parent_id: string | null
+          }>
+          const root = tasks.find((task) => task.title === 'Copy payload')
+          return Boolean(
+            root && root.id !== parent && tasks.some((task) => task.parent_id === root.id)
+          )
+        },
+        { timeout: 60_000 }
+      )
+      .toBe(true)
+    expect(await projectOnAppHub(page, parent)).toBe(sourceProjectId)
+    await expect(page.getByTestId('task-moves-panel')).toHaveCount(0, { timeout: 30_000 })
+
+    const tile = page
+      .locator('[data-slot="sidebar"]')
+      .first()
+      .getByRole('button', { name: 'CO', exact: true })
+    await tile.last().click({ button: 'right' })
+    await page.getByTestId('project-copy-to-hub').click()
+    const projectDialog = page.getByTestId('move-project-dialog')
+    await projectDialog.getByTestId('move-project-hub-select').click()
+    await page.getByRole('option', { name: 'Hub B', exact: true }).click()
+    await projectDialog.getByTestId('move-project-confirm').click()
+    await expect(projectDialog).toBeHidden()
+    await expect
+      .poll(
+        async () => {
+          const projects = (await withHubClient(hub, (c) => c.projects.list.query())) as Array<{
+            id: string
+            name: string
+          }>
+          return projects.some(
+            (project) => project.name === 'Copy Source (copy)' && project.id !== sourceProjectId
+          )
+        },
+        { timeout: 60_000 }
+      )
+      .toBe(true)
+    expect(await projectOnAppHub(page, parent)).toBe(sourceProjectId)
+
+    const rootDir = await cliRoot(launched.app)
+    const sidecarPort = await launched.app.evaluate(
+      () => (globalThis as Record<string, unknown>).__serverPort as number
+    )
+    expect(sidecarPort).toBeGreaterThan(0)
+    const run = (args: string[]) =>
+      promisify(execFile)('node', [path.resolve(APP_DIR, '../cli/dist/slay.js'), ...args], {
+        env: cliEnv(rootDir, sidecarPort),
+        timeout: 90_000
+      })
+    const localCopy = JSON.parse(
+      (
+        await run([
+          'tasks',
+          'copy',
+          parent,
+          '--project',
+          sourceProjectId,
+          '--title',
+          'CLI fork',
+          '--json'
+        ])
+      ).stdout
+    )
+    expect(localCopy.status).toBe('done')
+    const fork = localCopy.copyIds[parent]
+    const remoteCopy = JSON.parse(
+      (
+        await run([
+          'tasks',
+          'copy',
+          parent,
+          '--project',
+          targetProjectId,
+          '--hub',
+          'Hub B',
+          '--json'
+        ])
+      ).stdout
+    )
+    expect(remoteCopy.status).toBe('done')
+    expect(await projectOnAppHub(page, parent)).toBe(sourceProjectId)
+    const moved = JSON.parse(
+      (
+        await run([
+          'tasks',
+          'move',
+          fork,
+          '--project',
+          targetProjectId,
+          '--hub',
+          'Hub B',
+          '--no-sessions',
+          '--json'
+        ])
+      ).stdout
+    )
+    expect(moved.status).toBe('done')
+    expect(await projectOnAppHub(page, fork)).toBe(null)
+    const projectCopy = JSON.parse(
+      (await run(['projects', 'copy', sourceProjectId, '--name', 'CLI project copy', '--json']))
+        .stdout
+    )
+    expect(projectCopy.status).toBe('done')
+    const projectMove = JSON.parse(
+      (
+        await run([
+          'projects',
+          'move',
+          projectCopy.targetProjectId,
+          '--hub',
+          'Hub B',
+          '--no-sessions',
+          '--json'
+        ])
+      ).stdout
+    )
+    expect(projectMove.status).toBe('done')
+    const list = JSON.parse((await run(['tasks', 'moves', 'list', '--json'])).stdout)
+    expect(list.some((move: { id: string }) => move.id === remoteCopy.id)).toBe(true)
   })
 })

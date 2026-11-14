@@ -1,4 +1,5 @@
 import type { ImportTaskMoveInput, TaskMoveBundle } from '@slayzone/task-contracts'
+import { copiedTaskBundle, copyImportId, remapCopyFilePath } from '../shared/task-copy-bundle'
 import type { TaskMoveStepRunner, TaskMoveWorkStep } from './task-move-engine'
 import {
   copyMovedSessions,
@@ -90,28 +91,53 @@ export function createTaskMoveSteps(opts: {
     },
     import: async ({ move }) => {
       await opts.target.importBundle({
+        mode: move.mode,
         sourceHubId: opts.sourceHubId,
         targetProjectId: move.targetProjectId,
         includeSessions: move.includeSessions,
-        bundle: await bundleOf(move.id)
+        bundle: copiedTaskBundle(await bundleOf(move.id))
       })
     },
     // Every file the target lacks, chunk by chunk from where its copy stands; progress
     // in bytes over everything still to copy.
     'copy-files': async ({ move, reportProgress }) => {
+      const bundle = await bundleOf(move.id)
+      const ids = bundle.copy?.ids
+      const targetMoveId = ids ? copyImportId(move.id) : move.id
+      const toTarget = (ref: TaskMoveFileRef): TaskMoveFileRef => {
+        if (!ids || ref.kind === 'blob') return ref
+        if (ref.kind === 'file')
+          return { ...ref, taskId: ids[ref.taskId], path: remapCopyFilePath(ref.path, ids) }
+        return {
+          ...ref,
+          projectId: ids[ref.projectId],
+          name: ref.name.replace(ref.projectId, ids[ref.projectId])
+        }
+      }
       const manifest = await opts.source.fileManifest(move.id)
-      const missing = await opts.target.missingFiles(move.id, manifest)
+      const sourceRefs = new Map(
+        manifest.map((file) => [JSON.stringify(toTarget(file.ref)), file.ref])
+      )
+      const missing = await opts.target.missingFiles(
+        targetMoveId,
+        manifest.map((file) => ({ ...file, ref: toTarget(file.ref) }))
+      )
       const total = missing.reduce((n, f) => n + f.size, 0)
       let done = missing.reduce((n, f) => n + f.offset, 0)
       await reportProgress(done, total)
       for (const file of missing) {
         let offset = file.offset
         for (;;) {
-          const chunk = await opts.source.readFile(move.id, file.ref, offset, TASK_MOVE_CHUNK_BYTES)
+          const chunk = await opts.source.readFile(
+            move.id,
+            sourceRefs.get(JSON.stringify(file.ref))!,
+            offset,
+            TASK_MOVE_CHUNK_BYTES
+          )
           const bytes =
             Math.ceil((chunk.data.length * 3) / 4) - (chunk.data.match(/=*$/)?.[0].length ?? 0)
           await opts.target.writeFile({
-            moveId: move.id,
+            moveId: targetMoveId,
             ref: file.ref,
             offset,
             data: chunk.data,
@@ -123,11 +149,11 @@ export function createTaskMoveSteps(opts: {
           if (chunk.eof) break
         }
       }
-      await opts.target.clearStaging(move.id)
+      await opts.target.clearStaging(targetMoveId)
     },
     // The tasks' agent sessions: chats, files beside them, ledger, ownership (copy-sessions.ts).
     'copy-sessions': async ({ move, reportProgress }) => {
-      if (!move.includeSessions) return
+      if (move.mode === 'copy' || !move.includeSessions) return
       await copyMovedSessions({
         move,
         source: opts.source,
@@ -137,6 +163,7 @@ export function createTaskMoveSteps(opts: {
     },
     // A blocker between a moved task and one staying behind: each hub keeps its side.
     links: async ({ move }) => {
+      if (move.mode === 'copy') return
       const bundle = await bundleOf(move.id)
       if (bundle.externalDependencies.length === 0) return
       const titles = new Map(
@@ -168,7 +195,7 @@ export function createTaskMoveSteps(opts: {
       await opts.source.addRemoteBlockers(move.id, onSource)
     },
     commit: async ({ move }) => {
-      await opts.target.commit(move.id)
+      await opts.target.commit(move.mode === 'copy' ? copyImportId(move.id) : move.id)
       bundles.delete(move.id)
     }
   }

@@ -186,6 +186,7 @@ export function AppDialogs({
     (s) => s.projectSettingsOnboardingProvider
   )
   const deletingProject = useDialogStore((s) => s.deletingProject)
+  const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
   const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
 
@@ -483,6 +484,7 @@ export function AppDialogs({
       {shouldMount('moveProjectToHub', !!movingProjectToHub) && (
         <Suspense fallback={null}>
           <MoveProjectToHubDialog
+            initialMode={projectTransferMode}
             project={movingProjectToHub}
             open={!!movingProjectToHub}
             onOpenChange={(open) => {

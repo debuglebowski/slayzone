@@ -209,6 +209,7 @@ export function AppDialogs({
   setUpdateToastDismissed
 }: AppDialogsProps): React.JSX.Element {
   // "Move to hub…" on a project's menu (store-driven, like the sidebar's other menus).
+  const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
   // Dialogs about one project or task talk to the hub that owns it; the rest
   // stay on the default hub.
@@ -317,6 +318,7 @@ export function AppDialogs({
         <Suspense fallback={null}>
           {/* Scopes itself to the project's hub; the move runs in TaskMovesPanel. */}
           <MoveProjectToHubDialog
+            initialMode={projectTransferMode}
             project={movingProjectToHub}
             open={!!movingProjectToHub}
             onOpenChange={(open) => {

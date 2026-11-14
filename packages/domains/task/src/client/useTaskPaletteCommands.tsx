@@ -99,7 +99,7 @@ interface UseTaskPaletteCommandsParams {
   onTaskUpdated: (task: Task) => void
   onTagsChange: (tagIds: string[]) => void
   /** A project was picked: the move dialog confirms it (a move can't be undone). */
-  onMoveToProject: (projectId: string) => void
+  onMoveToProject: (projectId: string, mode?: 'move' | 'copy') => void
   /** Opens the duplicate dialog (a fresh follow-up of the task). */
   onDuplicate: () => void
   /** The header's inline title editor is on screen (not zen / compact). */
@@ -356,6 +356,13 @@ export function useTaskPaletteCommands(params: UseTaskPaletteCommandsParams): vo
           }
         })
       }
+      commands.push({
+        id: 'copy-project',
+        label: 'Copy to project…',
+        keywords: 'copy project clone',
+        icon: CopyPlus,
+        run: () => onMoveToProject(task.project_id, 'copy')
+      })
       commands.push({
         id: 'duplicate',
         label: 'Duplicate task…',

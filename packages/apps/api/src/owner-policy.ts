@@ -1209,12 +1209,17 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'task.duplicate': checked(task('taskId'), project('targetProjectId')),
   // ── moving tasks to another hub (this hub's journal) ──
   // The target project is on the other hub: that hub checks it on import.
+  'taskMoves.copy': checked(task('taskIds[]'), project('targetProjectId')),
+  'taskMoves.copyProject': checked(project('projectId')),
   'taskMoves.begin': checked(task('taskIds[]')),
   'taskMoves.preview': checked(task('taskIds[]')),
   'taskMoves.beginProject': checked(project('projectId')),
   'taskMoves.projectPreview': checked(project('projectId')),
   // Keyed by project id; each answer names its move, which decides.
   'taskMoves.projectRedirects': listed(redirectsByMove),
+  'taskMoves.finishLocal': checked(taskMove('id'), project('projectId')),
+  'taskMoves.resolveTarget': checked(taskMove('id')),
+  'taskMoves.clearAction': checked(taskMove('id')),
   'taskMoves.get': checked(taskMove('id')),
   'taskMoves.list': listed(rows('id', 'taskMove')),
   'taskMoves.advance': checked(taskMove('id')),

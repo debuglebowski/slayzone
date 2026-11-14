@@ -713,6 +713,7 @@ run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
 run_harness packages/apps/api/src/routers/task-duplicate.test.ts
 # Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
 run_harness packages/apps/api/src/routers/task-moves.test.ts
+run_harness packages/domains/task/src/server/copy-snapshot-files.test.ts
 # Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.
 run_harness packages/apps/api/src/routers/task-moves-two-hubs.test.ts
 # Moving a whole project between two hubs: its own rows, settings and icon with ids,
@@ -1138,6 +1139,8 @@ run_harness packages/apps/cli/test/cli-read-rest.test.ts
 run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
 run_harness packages/apps/cli/src/commands/completions.test.ts
+run_harness packages/apps/cli/src/commands/transfers.test.ts
+run_harness packages/apps/api/src/http/rest-api/transfers.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
 run_harness packages/apps/cli/test/cli-artifacts-rest.test.ts
@@ -1585,6 +1588,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \
+  packages/domains/worktrees/src/client/git-diff-store.hub.test.tsx \
   packages/shared/diff-view/src/highlight.test.ts \
   packages/shared/diff-view/src/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \

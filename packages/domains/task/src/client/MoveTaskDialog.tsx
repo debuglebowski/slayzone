@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { HubScope, useHubId, useHubOwnershipStore } from '@slayzone/transport/client'
+import {
+  HubScope,
+  useHubId,
+  useHubOwnershipStore,
+  useFederationOrNull
+} from '@slayzone/transport/client'
 import type {
   CrossHubMovePreview,
   MoveTasksToProjectResult,
@@ -26,7 +31,7 @@ import {
   toast
 } from '@slayzone/ui'
 import { useTrack } from '@slayzone/telemetry/client'
-import { useTRPC } from './trpc'
+import { getHubClient, useTRPC } from './trpc'
 
 export interface MoveTaskDialogProps {
   open: boolean
@@ -35,6 +40,7 @@ export interface MoveTaskDialogProps {
   taskIds: string[]
   /** The project picked where the dialog was opened from (a menu's project list). */
   initialProjectId?: string
+  initialMode?: 'move' | 'copy'
   /** Runs once the move is committed. */
   onMoved?: (result: MoveTasksToProjectResult) => void
   /** Projects on the app's OTHER hubs, by hub: offered when moving there is possible. */
@@ -44,6 +50,7 @@ export interface MoveTaskDialogProps {
    * pause and resume). Absent: only projects of the tasks' own hub are offered.
    */
   onMoveToOtherHub?: (input: {
+    mode?: 'move' | 'copy'
     targetHubId: string
     targetProjectId: string
     includeSubtasks: boolean
@@ -139,14 +146,33 @@ function MixedHubsBody({ onClose }: { onClose: () => void }): React.JSX.Element 
 function MoveTaskDialogBody({
   taskIds,
   initialProjectId,
+  initialMode = 'move',
   onOpenChange,
   onMoved,
   otherHubProjects,
   onMoveToOtherHub
 }: MoveTaskDialogProps): React.JSX.Element {
   const trpc = useTRPC()
+  const sourceHubId = useHubId()
+  const [mode, setMode] = useState<'move' | 'copy'>(initialMode)
+  const copy = useMutation(trpc.taskMoves.copy.mutationOptions())
   const { trackTask } = useTrack()
-  const otherHubs = onMoveToOtherHub ? (otherHubProjects ?? []) : []
+  const federation = useFederationOrNull()
+  const remoteHubs = (federation?.hubs ?? []).filter((hub) => hub.id !== sourceHubId)
+  const { data: discoveredTargets } = useQuery({
+    queryKey: ['transfer-targets', sourceHubId, remoteHubs.map((hub) => hub.id).join(',')],
+    enabled: !onMoveToOtherHub && remoteHubs.length > 0,
+    queryFn: async () =>
+      Promise.all(
+        remoteHubs.map(async (hub) => ({
+          hubId: hub.id,
+          hubLabel: hub.label,
+          projects: await getHubClient(hub.id)!.client.projects.list.query()
+        }))
+      )
+  })
+  const beginTransfer = useMutation(trpc.taskMoves.begin.mutationOptions())
+  const otherHubs = onMoveToOtherHub ? (otherHubProjects ?? []) : (discoveredTargets ?? [])
   const initialOtherHub = otherHubs.find((h) => h.projects.some((p) => p.id === initialProjectId))
   const [targetValue, setTargetValue] = useState(
     initialProjectId
@@ -171,7 +197,7 @@ function MoveTaskDialogBody({
   )
   const preview = previewQuery.data
   const { data: crossPreview } = useQuery(
-    trpc.taskMoves.preview.queryOptions({ taskIds }, { enabled: crossHub })
+    trpc.taskMoves.preview.queryOptions({ taskIds }, { enabled: crossHub || mode === 'copy' })
   )
   const move = useMutation(trpc.task.moveToProject.mutationOptions())
   const [starting, setStarting] = useState(false)
@@ -186,24 +212,50 @@ function MoveTaskDialogBody({
       !crossPreview.linkedToIntegration &&
       !crossPreview.alreadyMoving &&
       !starting
-    : target !== undefined && preview !== undefined && !nothingToMove && !move.isPending
+    : target !== undefined &&
+      preview !== undefined &&
+      (mode === 'copy' || !nothingToMove) &&
+      !move.isPending &&
+      !copy.isPending
 
   const confirm = (): void => {
     if (!canMove) return
     for (const id of taskIds) trackTask(id, 'task_moved_to_project')
-    if (crossHub && targetHubId && onMoveToOtherHub) {
+    if (crossHub && targetHubId) {
       setStarting(true)
-      onMoveToOtherHub({
+      const input = {
+        mode,
         targetHubId,
         targetProjectId: targetId,
         includeSubtasks,
-        includeSessions
-      })
+        includeSessions: mode === 'copy' ? false : includeSessions
+      }
+      const operation = onMoveToOtherHub
+        ? onMoveToOtherHub(input)
+        : beginTransfer.mutateAsync({ ...input, taskIds, requestRunner: true })
+      operation
         .then(() => onOpenChange(false))
         .catch((error: unknown) => {
           setStarting(false)
           toast.error(`Couldn't move: ${error instanceof Error ? error.message : String(error)}`)
         })
+      return
+    }
+    if (mode === 'copy') {
+      setStarting(true)
+      copy
+        .mutateAsync({
+          taskIds,
+          targetProjectId: targetId,
+          targetHubId: sourceHubId ?? 'same-hub',
+          includeSubtasks,
+          mode: 'copy'
+        })
+        .then(() => onOpenChange(false))
+        .catch((error: unknown) =>
+          toast.error(`Couldn't copy: ${error instanceof Error ? error.message : String(error)}`)
+        )
+        .finally(() => setStarting(false))
       return
     }
     move
@@ -244,11 +296,42 @@ function MoveTaskDialogBody({
     >
       <DialogHeader>
         <DialogTitle>
-          {count === 1 ? 'Move task to project' : `Move ${count} tasks to project`}
+          {mode === 'copy'
+            ? 'Copy to project'
+            : count === 1
+              ? 'Move task to project'
+              : `Move ${count} tasks to project`}
         </DialogTitle>
-        <DialogDescription>This can't be undone.</DialogDescription>
+        <DialogDescription>
+          {mode === 'copy' ? 'Original tasks stay in place.' : "This can't be undone."}
+        </DialogDescription>
       </DialogHeader>
 
+      <Select value={mode} onValueChange={(value) => setMode(value as 'move' | 'copy')}>
+        <SelectTrigger aria-label="Operation">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="move">Move</SelectItem>
+          <SelectItem value="copy">Copy</SelectItem>
+        </SelectContent>
+      </Select>
+      {mode === 'copy' && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="copy-task-subtasks"
+            checked={includeSubtasks}
+            onCheckedChange={(v) => setIncludeSubtasks(v === true)}
+          />
+          <Label htmlFor="copy-task-subtasks">Include subtasks</Label>
+        </div>
+      )}
+      {mode === 'copy' && (
+        <p className="text-sm text-muted-foreground">
+          Copy tasks, subtasks, tags, tabs and artifacts with new IDs. Chats start fresh; blockers
+          outside the copy are dropped. Originals stay here.
+        </p>
+      )}
       <Select value={targetValue} onValueChange={setTargetValue}>
         <SelectTrigger className="w-full" data-testid="move-task-project-select">
           <SelectValue placeholder="Choose a project" />
@@ -284,19 +367,23 @@ function MoveTaskDialogBody({
         </SelectContent>
       </Select>
 
-      {crossHub && crossPreview && target && otherHub && (
-        <CrossHubSummary
-          preview={crossPreview}
-          hubLabel={otherHub.hubLabel}
-          targetName={target.name}
-          includeSubtasks={includeSubtasks}
-          onIncludeSubtasksChange={setIncludeSubtasks}
-          includeSessions={includeSessions}
-          onIncludeSessionsChange={setIncludeSessions}
-        />
-      )}
+      {(mode === 'move' || crossPreview?.linkedToIntegration || crossPreview?.alreadyMoving) &&
+        crossHub &&
+        crossPreview &&
+        target &&
+        otherHub && (
+          <CrossHubSummary
+            preview={crossPreview}
+            hubLabel={otherHub.hubLabel}
+            targetName={target.name}
+            includeSubtasks={includeSubtasks}
+            onIncludeSubtasksChange={setIncludeSubtasks}
+            includeSessions={includeSessions}
+            onIncludeSessionsChange={setIncludeSessions}
+          />
+        )}
 
-      {!crossHub && preview && target && (
+      {mode === 'move' && !crossHub && preview && target && (
         <MoveSummary
           preview={preview}
           targetName={target.name}
@@ -319,7 +406,13 @@ function MoveTaskDialogBody({
           Cancel
         </Button>
         <Button type="submit" disabled={!canMove} data-testid="move-task-confirm">
-          {move.isPending || starting ? 'Moving…' : 'Move'}
+          {move.isPending || starting
+            ? mode === 'copy'
+              ? 'Copying…'
+              : 'Moving…'
+            : mode === 'copy'
+              ? 'Copy'
+              : 'Move'}
         </Button>
       </DialogFooter>
     </form>

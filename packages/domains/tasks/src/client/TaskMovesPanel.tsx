@@ -15,7 +15,7 @@ import {
 const STEP_LABELS: Record<TaskMoveStep, string> = {
   lock: 'Locking',
   export: 'Reading',
-  import: 'Writing to the other hub',
+  import: 'Writing content',
   'copy-files': 'Copying files',
   'copy-sessions': 'Copying agent sessions',
   links: 'Linking blockers',
@@ -24,7 +24,7 @@ const STEP_LABELS: Record<TaskMoveStep, string> = {
 }
 
 const QUIT_MESSAGE =
-  'A task is being moved to another hub. If you quit, the move pauses and resumes the next time SlayZone starts.'
+  'A task or project transfer is running. If you quit, it resumes the next time SlayZone starts.'
 
 /** Whole-move progress: finished steps, plus the running step's share. */
 function percent(m: TrackedMove): number {
@@ -43,12 +43,13 @@ function moveTitle(
   hub: string,
   projectName?: (projectId: string) => string | undefined
 ): string {
+  const verb = m.move.mode === 'copy' ? 'Copying' : 'Moving'
   if (m.move.scope === 'project' && m.move.projectId) {
     const name = projectName?.(m.move.projectId)
-    return name ? `Moving project “${name}” to ${hub}` : `Moving a project to ${hub}`
+    return name ? `${verb} project “${name}” to ${hub}` : `${verb} a project to ${hub}`
   }
   const n = m.move.taskIds.length
-  return `Moving ${n === 1 ? '1 task' : `${n} tasks`} to ${hub}`
+  return `${verb} ${n === 1 ? '1 task' : `${n} tasks`} to ${hub}`
 }
 
 /**
@@ -77,10 +78,21 @@ export function TaskMovesPanel({
 
   useEffect(() => {
     void syncKey
-    void syncCrossHubMoves(hubKey ? hubKey.split('\n') : []).catch((e: unknown) => {
-      console.warn('[task-moves] sync failed:', e)
-    })
-  }, [hubKey, syncKey])
+    let syncing = false
+    const sync = (): void => {
+      if (syncing) return
+      syncing = true
+      void syncCrossHubMoves(hubKey ? hubKey.split('\n') : [], hubName)
+        .catch((e: unknown) => console.warn('[task-moves] sync failed:', e))
+        .finally(() => {
+          syncing = false
+        })
+    }
+    sync()
+    // eslint-disable-next-line no-restricted-syntax -- CLI handoffs and transfers must progress while the window is hidden.
+    const timer = setInterval(sync, 2000)
+    return () => clearInterval(timer)
+  }, [hubKey, syncKey, hubName])
 
   useEffect(() => {
     void electronBootstrap.setQuitGuard(anyRunning ? { message: QUIT_MESSAGE } : null)

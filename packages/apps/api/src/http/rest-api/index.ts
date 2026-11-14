@@ -1,3 +1,4 @@
+import { registerTransferRoutes } from './transfers'
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { withAdminGate } from './admin-routes'
@@ -91,6 +92,8 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // then the owner guard (T-18): a `user` route touches only the caller's content.
   // Then the move lock: a write to a task moving to another hub is refused (409).
   const app = withMoveLockGate(withOwnerGate(withAdminGate(rawApp), deps.db), deps.db)
+
+  registerTransferRoutes(app, deps)
 
   // Notify
   registerNotifyRoute(app, deps)

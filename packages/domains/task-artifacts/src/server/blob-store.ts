@@ -1,3 +1,4 @@
+import { artifactBlobPath } from '@slayzone/task/server/artifact-paths'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
@@ -49,7 +50,7 @@ export class BlobStore {
 
   /** Strictly inside `rootDir` whatever `hash` holds (`UnsafePathError`): `delete` rm's it. */
   blobPath(hash: ContentHash | string): string {
-    return containedPath(this.rootDir, hash.slice(0, 2), hash.slice(2))
+    return artifactBlobPath(path.dirname(this.rootDir), hash)
   }
 
   has(hash: ContentHash | string): boolean {

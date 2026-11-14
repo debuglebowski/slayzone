@@ -14,6 +14,7 @@ export function useCrossHubMoveTargets(
 ): {
   otherHubProjects: OtherHubProjects[]
   onMoveToOtherHub?: (input: {
+    mode?: 'move' | 'copy'
     targetHubId: string
     targetProjectId: string
     includeSubtasks: boolean

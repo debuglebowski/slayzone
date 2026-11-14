@@ -89,6 +89,7 @@ export function BulkTaskContextMenu({
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveMode, setMoveMode] = useState<'move' | 'copy'>('move')
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   // Tasks move only between projects of their own hub (the dialog refuses a mix).
   const moveTargets = useProjectsOnTaskHub(projects, taskIds)
@@ -135,6 +136,7 @@ export function BulkTaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
+    setMoveMode('move')
     setMoveTargetId(projectId)
   }
 
@@ -324,6 +326,14 @@ export function BulkTaskContextMenu({
 
           <ContextMenuSeparator />
 
+          <ContextMenuItem
+            onSelect={() => {
+              setMoveMode('copy')
+              setMoveTargetId(projects[0]?.id ?? '')
+            }}
+          >
+            Copy to project…
+          </ContextMenuItem>
           {/* Move to project */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -387,6 +397,7 @@ export function BulkTaskContextMenu({
 
       {moveTargetId !== null && (
         <MoveTaskDialog
+          initialMode={moveMode}
           open
           onOpenChange={(open) => {
             if (!open) setMoveTargetId(null)

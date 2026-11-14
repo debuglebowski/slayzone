@@ -41,8 +41,9 @@ interface DialogState {
   closeDeleteProject: () => void
 
   // Move a project to another hub
+  projectTransferMode: 'move' | 'copy'
   movingProjectToHub: Project | null
-  openMoveProjectToHub: (project: Project) => void
+  openMoveProjectToHub: (project: Project, mode?: 'move' | 'copy') => void
   closeMoveProjectToHub: () => void
 
   // Project-group (folder) settings
@@ -122,8 +123,10 @@ export const useDialogStore = create<DialogState>()((set) => ({
   openDeleteProject: (project) => set({ deletingProject: project }),
   closeDeleteProject: () => set({ deletingProject: null }),
 
+  projectTransferMode: 'move',
   movingProjectToHub: null,
-  openMoveProjectToHub: (project) => set({ movingProjectToHub: project }),
+  openMoveProjectToHub: (project, mode = 'move') =>
+    set({ movingProjectToHub: project, projectTransferMode: mode }),
   closeMoveProjectToHub: () => set({ movingProjectToHub: null }),
 
   groupSettingsTarget: null,

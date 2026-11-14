@@ -123,6 +123,12 @@ export function ProjectItem({
             {onRemoveFromGroup && (
               <ContextMenuItem onSelect={onRemoveFromGroup}>Remove from group</ContextMenuItem>
             )}
+            <ContextMenuItem
+              onSelect={() => useDialogStore.getState().openMoveProjectToHub(project, 'copy')}
+              data-testid="project-copy-to-hub"
+            >
+              Copy project…
+            </ContextMenuItem>
             {canMoveToHub && (
               <ContextMenuItem
                 onSelect={() => useDialogStore.getState().openMoveProjectToHub(project)}

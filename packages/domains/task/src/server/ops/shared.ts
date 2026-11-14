@@ -72,7 +72,7 @@ export const TASK_ORDER_BY = `ORDER BY t."order" ASC, t.created_at DESC, t.rowid
  */
 export const NOT_IN_TRANSIT = `NOT EXISTS (
   SELECT 1 FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
-   WHERE mt.task_id = t.id AND m.status IN ('running', 'paused', 'failed')
+   WHERE mt.task_id = t.id AND (m.direction = 'in' OR m.mode = 'move') AND m.status IN ('running', 'paused', 'failed')
      AND (m.direction = 'in' OR m.step = 'release'))`
 
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error'

@@ -163,6 +163,8 @@ function beginMove(
     rootTaskIds: string[]
     taskIds: string[]
     includeSubtasks: boolean
+    mode?: 'move' | 'copy'
+    requestRunner?: boolean
     includeSessions: boolean
     /** 'project': the whole project `projectId` moves (its tasks are `taskIds`). */
     scope: 'task' | 'project'
@@ -179,7 +181,7 @@ function beginMove(
       const busy = db
         .prepare(
           `SELECT DISTINCT mt.task_id FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
-            WHERE m.status IN ('running', 'paused', 'failed') AND mt.task_id IN (${placeholders})`
+            WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ('running', 'paused', 'failed') AND mt.task_id IN (${placeholders})`
         )
         .all(...p.taskIds) as Array<{ task_id: string }>
       if (busy.length > 0)
@@ -189,7 +191,7 @@ function beginMove(
     const project = p.scope === 'project' ? p.projectId : p.targetProjectId
     const projectBusy = db
       .prepare(
-        `SELECT 1 FROM task_moves WHERE status IN ('running', 'paused', 'failed')
+        `SELECT 1 FROM task_moves WHERE (direction = 'in' OR mode = 'move') AND status IN ('running', 'paused', 'failed')
           AND ((scope = 'project' AND project_id = ?)
                OR (? = 'project' AND direction = 'in' AND target_project_id = ?))`
       )
@@ -198,8 +200,8 @@ function beginMove(
     db.prepare(
       `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
          include_subtasks, include_sessions, step, status, created_by, created_at, updated_at,
-         scope, project_id)
-       VALUES (?, 'out', ?, ?, ?, ?, ?, 'lock', 'running', ?, ?, ?, ?, ?)`
+         scope, project_id, mode, runner_requested)
+       VALUES (?, 'out', ?, ?, ?, ?, ?, 'lock', 'running', ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       p.id,
       p.peerHubId,
@@ -211,7 +213,9 @@ function beginMove(
       p.now,
       p.now,
       p.scope,
-      p.projectId
+      p.projectId,
+      p.mode ?? 'move',
+      p.requestRunner ? 1 : 0
     )
     const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
     for (const taskId of p.taskIds) lock.run(p.id, taskId)
@@ -286,6 +290,7 @@ function importMove(
   db: Database,
   p: {
     moveId: string
+    mode?: 'move' | 'copy'
     sourceHubId: string
     targetProjectId: string
     includeSessions: boolean
@@ -341,8 +346,8 @@ function importMove(
     db.prepare(
       `INSERT INTO task_moves (id, direction, peer_hub_id, target_project_id, root_task_ids,
          include_subtasks, include_sessions, step, status, created_at, updated_at,
-         scope, project_id)
-       VALUES (?, 'in', ?, ?, ?, 1, ?, 'commit', 'running', ?, ?, ?, ?)`
+         scope, project_id, mode)
+       VALUES (?, 'in', ?, ?, ?, 1, ?, 'commit', 'running', ?, ?, ?, ?, ?)`
     ).run(
       p.moveId,
       p.sourceHubId,
@@ -352,7 +357,8 @@ function importMove(
       p.now,
       p.now,
       p.project ? 'project' : 'task',
-      p.project?.id ?? null
+      p.project?.id ?? null,
+      p.mode ?? 'move'
     )
     const lock = db.prepare('INSERT INTO task_move_tasks (move_id, task_id) VALUES (?, ?)')
     for (const taskId of p.taskIds) lock.run(p.moveId, taskId)

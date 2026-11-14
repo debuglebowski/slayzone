@@ -803,8 +803,8 @@ function cliHome(): string {
   return cliHomeDir
 }
 
-export function cliEnv(root: string): Record<string, string> {
-  if (!sharedSidecarPort) {
+export function cliEnv(root: string, sidecarPort = sharedSidecarPort): Record<string, string> {
+  if (!sidecarPort) {
     throw new Error(
       'cliEnv(): the app under test never published a sidecar port, so `slay` cannot be ' +
         'pinned to it. Refusing to spawn the CLI unpinned — it would probe the fixed port ' +
@@ -826,7 +826,7 @@ export function cliEnv(root: string): Record<string, string> {
         (e): e is [string, string] => TEST_ISOLATION_ENV.has(e[0]) && e[1] !== undefined
       )
     ),
-    SLAYZONE_HUB_ADDRESS: `127.0.0.1:${sharedSidecarPort}`,
+    SLAYZONE_HUB_ADDRESS: `127.0.0.1:${sidecarPort}`,
     SLAYZONE_ROOT: supervisedHubRoot(root),
     SLAYZONE_DEV: '1'
   }
