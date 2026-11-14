@@ -125,6 +125,7 @@ export function TaskContextMenu({
   const [commentDialogOpen, setCommentDialogOpen] = useState(false)
   const [blockedComment, setBlockedComment] = useState('')
   /** The project picked in "Move to": the move dialog confirms it. */
+  const [moveMode, setMoveMode] = useState<'move' | 'copy'>('move')
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const statusOptions = buildStatusOptions(columns)
@@ -151,7 +152,10 @@ export function TaskContextMenu({
   }
 
   const handleProjectChange = (projectId: string): void => {
-    if (projectId !== task.project_id) setMoveTargetId(projectId)
+    if (projectId !== task.project_id) {
+      setMoveMode('move')
+      setMoveTargetId(projectId)
+    }
   }
 
   const handleSnooze = (date: Date): void => {
@@ -406,6 +410,14 @@ export function TaskContextMenu({
 
           <ContextMenuSeparator />
 
+          <ContextMenuItem
+            onSelect={() => {
+              setMoveMode('copy')
+              setMoveTargetId(task.project_id)
+            }}
+          >
+            Copy to project…
+          </ContextMenuItem>
           {/* Move to project */}
           <ContextMenuSub>
             <ContextMenuSubTrigger>
@@ -551,6 +563,7 @@ export function TaskContextMenu({
       {/* Move to project: confirms the pick, says what the move does */}
       <MountWhenOpened open={moveTargetId !== null}>
         <MoveTaskDialog
+          initialMode={moveMode}
           open={moveTargetId !== null}
           onOpenChange={(open) => {
             if (!open) setMoveTargetId(null)

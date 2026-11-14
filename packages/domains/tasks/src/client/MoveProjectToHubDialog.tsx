@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import type { Project } from '@slayzone/projects-contracts'
 import type { ProjectMovePreview } from '@slayzone/task-contracts'
 import {
@@ -36,10 +36,12 @@ import { useTRPC } from './trpc'
  */
 export function MoveProjectToHubDialog({
   project,
+  initialMode = 'move',
   open,
   onOpenChange
 }: {
   project: Project | null
+  initialMode?: 'move' | 'copy'
   open: boolean
   onOpenChange: (open: boolean) => void
 }): React.JSX.Element {
@@ -50,6 +52,7 @@ export function MoveProjectToHubDialog({
     body = (
       <MoveProjectBody
         project={project}
+        initialMode={initialMode}
         sourceHubId={projectHubId}
         onClose={() => onOpenChange(false)}
       />
@@ -68,16 +71,22 @@ export function MoveProjectToHubDialog({
 
 function MoveProjectBody({
   project,
+  initialMode,
   sourceHubId,
   onClose
 }: {
   project: Project
+  initialMode: 'move' | 'copy'
   sourceHubId: string
   onClose: () => void
 }): React.JSX.Element {
   const trpc = useTRPC()
+  const copyProject = useMutation(trpc.taskMoves.copyProject.mutationOptions())
   const federation = useFederationOrNull()
-  const otherHubs = (federation?.hubs ?? []).filter((h) => h.id !== sourceHubId)
+  const [mode, setMode] = useState<'move' | 'copy'>(initialMode)
+  const otherHubs = (federation?.hubs ?? [{ id: sourceHubId, label: 'This hub' }]).filter(
+    (h) => mode === 'copy' || h.id !== sourceHubId
+  )
   const [targetHubId, setTargetHubId] = useState(otherHubs.length === 1 ? otherHubs[0].id : '')
   const [includeSessions, setIncludeSessions] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -93,7 +102,17 @@ function MoveProjectBody({
   const confirm = (): void => {
     if (!canMove) return
     setStarting(true)
-    startProjectMove({ sourceHubId, targetHubId, projectId: project.id, includeSessions })
+    const operation =
+      mode === 'copy' && targetHubId === sourceHubId
+        ? copyProject.mutateAsync({ projectId: project.id, targetHubId, mode: 'copy' })
+        : startProjectMove({
+            sourceHubId,
+            targetHubId,
+            projectId: project.id,
+            mode,
+            includeSessions: mode === 'copy' ? false : includeSessions
+          })
+    void operation
       .then(() => onClose())
       .catch((error: unknown) => {
         setStarting(false)
@@ -110,10 +129,31 @@ function MoveProjectBody({
       className="flex flex-col gap-4"
     >
       <DialogHeader>
-        <DialogTitle>Move “{project.name}” to another hub</DialogTitle>
-        <DialogDescription>The project leaves this hub when the move is done.</DialogDescription>
+        <DialogTitle>
+          {mode === 'copy' ? 'Copy' : 'Move'} “{project.name}”
+        </DialogTitle>
+        <DialogDescription>
+          {mode === 'copy'
+            ? 'Choose a hub, including this one.'
+            : 'The project leaves this hub when the move is done.'}
+        </DialogDescription>
       </DialogHeader>
 
+      <Select value={mode} onValueChange={(value) => setMode(value as 'move' | 'copy')}>
+        <SelectTrigger aria-label="Operation">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="move">Move</SelectItem>
+          <SelectItem value="copy">Copy</SelectItem>
+        </SelectContent>
+      </Select>
+      {mode === 'copy' && (
+        <p className="text-sm text-muted-foreground">
+          New project and task IDs. Copies subtasks, artifacts and project settings. Chats start
+          fresh; external blockers are dropped. Originals stay here.
+        </p>
+      )}
       <Select value={targetHubId} onValueChange={setTargetHubId}>
         <SelectTrigger className="w-full" data-testid="move-project-hub-select">
           <SelectValue placeholder="Choose a hub" />
@@ -127,7 +167,7 @@ function MoveProjectBody({
         </SelectContent>
       </Select>
 
-      {preview && (
+      {(mode === 'move' || refused) && preview && (
         <ProjectMoveSummary
           preview={preview}
           hubLabel={target?.label ?? null}
@@ -141,7 +181,13 @@ function MoveProjectBody({
           Cancel
         </Button>
         <Button type="submit" disabled={!canMove} data-testid="move-project-confirm">
-          {starting ? 'Moving…' : 'Move'}
+          {starting
+            ? mode === 'copy'
+              ? 'Copying…'
+              : 'Moving…'
+            : mode === 'copy'
+              ? 'Copy'
+              : 'Move'}
         </Button>
       </DialogFooter>
     </form>

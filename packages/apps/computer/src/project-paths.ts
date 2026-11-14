@@ -20,9 +20,9 @@
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, isAbsolute, relative, sep } from 'node:path'
 import { z } from 'zod'
 
 /** Mirrors the credential store's precedence: `SLAYZONE_ROOT` > `$HOME/.slayzone`. */
@@ -43,6 +43,9 @@ const projectMapSchema = z.record(z.string(), projectPathEntrySchema)
 type ProjectMap = z.infer<typeof projectMapSchema>
 
 export interface ProjectPathStore {
+  assertRelocatable?(projectId: string, source: string): Promise<void>
+  /** Relocation recovery belongs to this hub, even when several share the map. */
+  readonly relocationFilePath?: string
   /** Null when this computer has no checkout of that project — a real state. */
   get(projectId: string): ProjectPathEntry | null
   set(projectId: string, path: string): Promise<ProjectPathEntry>
@@ -139,6 +142,23 @@ export async function createProjectPathStore(
 
   return {
     filePath,
+    relocationFilePath: `${filePath}.${createHash('sha256').update(hubHost).digest('hex').slice(0, 16)}.relocation.json`,
+
+    async assertRelocatable(projectId, source) {
+      const all = await readFileMap(filePath)
+      for (const [host, projects] of Object.entries(all))
+        for (const [id, entry] of Object.entries(projects)) {
+          if (host === hubHost && id === projectId) continue
+          const suffix = relative(source, entry.path)
+          if (
+            suffix === '' ||
+            (!isAbsolute(suffix) && suffix !== '..' && !suffix.startsWith(`..${sep}`))
+          )
+            throw new Error(
+              'Another project uses this folder or a folder inside it. Relocate that project first, or move the folders manually and update each path.'
+            )
+        }
+    },
 
     get(projectId) {
       return cache[projectId] ?? null

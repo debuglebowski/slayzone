@@ -14,6 +14,7 @@ import { DISABLED_MARK } from '@slayzone/computers/labels'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import { useDialogStore } from '@slayzone/dialogs'
 import { SettingsTabIntro } from './project-settings-shared'
+import { RelocateProjectDialog } from './RelocateProjectDialog'
 
 /** Select sentinel for the project's Local (in-process) default computer (null). */
 const LOCAL_COMPUTER_VALUE = '__local__'
@@ -56,13 +57,18 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   // shows the empty defaults or a previous project's values.
   const [formSource, setFormSource] = useState<Project | null>(null)
   if (!Object.is(formSource, project)) {
+    const sameProject = formSource?.id === project.id
     setFormSource(project)
-    setName(project.name)
-    setColor(project.color)
+    setName(sameProject && name !== formSource.name ? name : project.name)
+    setColor(sameProject && color !== formSource.color ? color : project.color)
     const recorded = placementOn(project, project.resolved_computer_id)?.path ?? ''
-    setPath(recorded)
+    setPath(sameProject && path !== savedPath ? path : recorded)
     setSavedPath(recorded)
-    setIconLetters(project.icon_letters || '')
+    setIconLetters(
+      sameProject && iconLetters !== (formSource.icon_letters || '')
+        ? iconLetters
+        : project.icon_letters || ''
+    )
     setIconImagePath(project.icon_image_path)
     setIconCacheKey(project.updated_at)
     setDefaultComputerId(project.default_computer_id)
@@ -77,6 +83,7 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
   // which need not be this one. A native dialog browses THIS desktop and would
   // hand back a path that does not exist there — the picker browses the computer.
   const [browseOpen, setBrowseOpen] = useState(false)
+  const [relocateOpen, setRelocateOpen] = useState(false)
 
   const handleUploadIcon = async () => {
     const result = await showOpenDialog.mutateAsync({
@@ -153,6 +160,9 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
           <div className="space-y-1">
             <Label htmlFor="edit-name">Name</Label>
             <Input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Changes the project label only. To rename the folder, use Relocate.
+            </p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="edit-path">Repository Path</Label>
@@ -186,8 +196,11 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
               allowCreate
             />
             <p className="text-xs text-muted-foreground">
-              Claude Code terminal will open in this directory
+              Updates the folder reference only; files stay where they are.
             </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => setRelocateOpen(true)}>
+              Relocate…
+            </Button>
           </div>
           <div className="space-y-1">
             <Label htmlFor="default-computer">Default computer</Label>
@@ -315,6 +328,18 @@ export function GeneralTab({ project, onUpdated, onChanged, onClose }: GeneralTa
         </form>
       </div>
 
+      {relocateOpen && (
+        <RelocateProjectDialog
+          project={project}
+          onClose={() => setRelocateOpen(false)}
+          onUpdated={(updated) => {
+            const recorded = placementOn(updated, updated.resolved_computer_id)?.path ?? ''
+            setPath(recorded)
+            setSavedPath(recorded)
+            onChanged(updated)
+          }}
+        />
+      )}
       <div className="mt-auto space-y-3 rounded-md border border-destructive/40 p-4">
         <div className="space-y-1">
           <h3 className="text-sm font-medium text-destructive">Danger Zone</h3>

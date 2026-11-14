@@ -32,6 +32,7 @@ import { reloadLocalRoots } from './handlers/computer-config'
 import type { ComputerDialer } from './handlers/types'
 import { projectScopedDeps } from './project-scope.fixture'
 import { createHubRequestHandler, startComputer } from './main'
+import { createProjectPathStore } from './project-paths'
 import { createRequestLog, REQUEST_LOG_DIR_NAME, type RequestLog } from './request-log'
 
 const dialer: ComputerDialer = { notify: () => true }
@@ -94,6 +95,96 @@ function logLines(): Record<string, unknown>[] {
     .filter((l) => l.length > 0)
     .map((l) => JSON.parse(l) as Record<string, unknown>)
 }
+
+describe('project relocation and unrelated terminal controls', () => {
+  it('keeps terminal input, resize and stop available while disk mutations are fenced', async () => {
+    const source = join(root, 'before')
+    const target = join(root, 'after')
+    const other = join(root, 'other')
+    mkdirSync(source)
+    mkdirSync(other)
+    const store = await createProjectPathStore('hub.example.com', { baseDir: stateDir })
+    await store.set('p1', source)
+    await store.set('p2', other)
+    let release!: () => void
+    let reached!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const writing = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    const dispatch = createHubRequestHandler({
+      getComputerId: () => 'fixture-computer',
+      stateDir,
+      config: configWith([root]),
+      dialer,
+      shutdown: () => {},
+      hubHost: 'hub.example.com',
+      getProjectPaths: () => ({
+        ...store,
+        set: async (projectId, path) => {
+          if (projectId === 'p1' && path === target) {
+            reached()
+            await blocked
+          }
+          return store.set(projectId, path)
+        }
+      })
+    })
+    let moving: Promise<unknown> | undefined
+    try {
+      await dispatch.handle(
+        HubToComputerMethods.ptySpawn,
+        {
+          sessionId: 'unrelated',
+          command: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+          projectId: 'p2'
+        },
+        ACTOR
+      )
+      moving = dispatch.handle(
+        HubToComputerMethods.projectRelocate,
+        { projectId: 'p1', sourcePath: source, path: target },
+        ACTOR
+      )
+      await writing
+      await expect(
+        dispatch.handle(
+          HubToComputerMethods.ptyWrite,
+          { sessionId: 'unrelated', data: 'echo still-running\n' },
+          ACTOR
+        )
+      ).resolves.toBeDefined()
+      await expect(
+        dispatch.handle(
+          HubToComputerMethods.ptyResize,
+          { sessionId: 'unrelated', cols: 90, rows: 30 },
+          ACTOR
+        )
+      ).resolves.toBeDefined()
+      await expect(dispatch.handle(HubToComputerMethods.procList, {}, ACTOR)).resolves.toBeDefined()
+      await expect(
+        dispatch.handle(
+          HubToComputerMethods.fsWriteFile,
+          { path: join(other, 'blocked'), content: 'blocked' },
+          ACTOR
+        )
+      ).rejects.toThrow(/relocation/i)
+      await expect(
+        dispatch.handle(HubToComputerMethods.ptyKill, { sessionId: 'unrelated' }, ACTOR)
+      ).resolves.toBeDefined()
+    } finally {
+      release()
+      try {
+        await moving
+      } finally {
+        await dispatch.dispose()
+      }
+    }
+    expect(store.get('p1')?.path).toBe(target)
+  })
+})
 
 async function rejection(p: Promise<unknown>): Promise<RpcError> {
   const err = await p.then(

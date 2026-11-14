@@ -180,8 +180,13 @@ export {
   SLZ_FILE_HOST,
   SLZ_FILE_PREFIX,
   toSlzFileUrl,
+  toSlzSourceUrl,
+  toArtifactFileUrl,
+  parseSlzFileUrl,
   fileUrlToSlzFileUrl,
-  slzFileUrlToFileUrl
+  slzFileUrlToFileUrl,
+  type SlzFileSource,
+  type ParsedSlzFileUrl
 } from './slz-file-url'
 export {
   buildEmulatedMediaParams,

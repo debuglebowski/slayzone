@@ -291,3 +291,5 @@ It also shows how many terminals and chats are on the direct link.
 - `interrupt` / `abortAndPop` direct, once the relay's not-ready bypass path is
   mirrored on the computer.
 - A diagnostics e2e for the Direct link card.
+- Previews of a computer's files (`GET /api/files/raw`, `fs.readBytes` slices) relay
+  through the hub; they could stream over the direct link instead.

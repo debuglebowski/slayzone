@@ -82,6 +82,7 @@ import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
 import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
+import { isWithinDirectory } from './project-relocation'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
 import {
@@ -95,6 +96,13 @@ import { createStallReporter } from './stall-report'
 declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
 export const COMPUTER_VERSION =
   typeof __SLAYZONE_COMPUTER_VERSION__ === 'string' ? __SLAYZONE_COMPUTER_VERSION__ : '0.0.0'
+
+// All hub connections share this computer's disk. A relocation must also fence
+// starts and detect processes belonging to another connected hub.
+const relocationHosts = new Set<{
+  assertAvailable(): void
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
+}>()
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
@@ -386,6 +394,35 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       }
     }
   })
+  const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
+    createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
+      assertIdle: (projectId) => {
+        chat.assertProjectIdle(projectId)
+        const roots = chat.scopeBounds({ kind: 'project', projectId }).roots
+        const contains = (cwd: string) => roots.some((root) => isWithinDirectory(cwd, root))
+        if (
+          [...relocationHosts].some((host) => host.hasFolderWork(contains)) ||
+          chat
+            .projectTaskIds(projectId)
+            .some((id) => pty.hasTaskWork(id) || proc.hasTaskWork(id) || chat.hasTaskWork(id))
+        )
+          throw new Error(
+            'Stop this project’s running terminals, agents and processes before relocating it.'
+          )
+      },
+      remap: chat.relocateProjectPaths
+    })
+  const relocationHost = {
+    assertAvailable: () => {
+      if (deps.getProjectPaths?.()) assertRelocationAvailable()
+    },
+    hasFolderWork: (contains: (cwd: string) => boolean) =>
+      pty.hasFolderWork(contains) || proc.hasFolderWork(contains) || chat.hasFolderWork(contains)
+  }
+  relocationHosts.add(relocationHost)
+  ctx.assertWorkAllowed = () => {
+    for (const host of relocationHosts) host.assertAvailable()
+  }
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
@@ -420,7 +457,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGhHandlers(ctx),
     ...createSlayHandlers(ctx),
     ...createClaudeSessionHandlers(ctx, deps.getProjectPaths ?? (() => null)),
-    ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
+    ...projectHandlers
   }
 
   const directGrantHandlers = deps.directGrants
@@ -462,6 +499,19 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     HubToComputerMethods.ptySpawn,
     HubToComputerMethods.ptyWarmSpawn,
     HubToComputerMethods.procSpawn
+  ])
+
+  // Existing processes and direct-link grants don't touch the relocated folder.
+  // Keep their controls available, including when recovery needs user intervention.
+  const relocationControls = new Set([
+    ...[...ptyMethods].filter((method) => !SCOPED_SPAWNS.has(method)),
+    HubToComputerMethods.procList,
+    HubToComputerMethods.procStats,
+    HubToComputerMethods.procWrite,
+    HubToComputerMethods.procKill,
+    HubToComputerMethods.procPrioritize,
+    HubToComputerMethods.ping,
+    HubToComputerMethods.computerShutdown
   ])
 
   /** A `proc.spawn` the hub declared a global background process (see its `global` field). */
@@ -566,9 +616,16 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       // folder lists) inside the task's folders too, from the same map.
       if (
         deps.projectPathsReady &&
-        (scope || SCOPED_SPAWNS.has(method) || method === HubToComputerMethods.chatRequest)
+        (scope ||
+          SCOPED_SPAWNS.has(method) ||
+          method === HubToComputerMethods.chatRequest ||
+          method.startsWith('project.'))
       )
         await deps.projectPathsReady
+      if (deps.getProjectPaths?.() && !relocationControls.has(method)) {
+        await recoverRelocation()
+        ctx.assertWorkAllowed?.()
+      }
       const result = await entry(params)
       record('ok')
       return result
@@ -591,6 +648,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const dispose = async (): Promise<void> => {
+    relocationHosts.delete(relocationHost)
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()

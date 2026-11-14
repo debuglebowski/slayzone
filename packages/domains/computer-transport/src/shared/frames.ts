@@ -724,6 +724,8 @@ export const HubToComputerMethods = {
   // imports directly rather than reimplementing.
   fsReadDir: 'fs.readDir',
   fsReadFile: 'fs.readFile',
+  /** One raw slice of a file (base64) — the hub streams previews from these. */
+  fsReadBytes: 'fs.readBytes',
   fsWriteFile: 'fs.writeFile',
   fsCreateFile: 'fs.createFile',
   fsCreateDir: 'fs.createDir',
@@ -762,6 +764,7 @@ export const HubToComputerMethods = {
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
+  projectRelocate: 'project.relocate',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
@@ -1396,6 +1399,12 @@ export const projectSetPathParamsSchema = z.object({
 })
 export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
 
+export const projectRelocateParamsSchema = projectSetPathParamsSchema.extend({
+  sourcePath: z.string(),
+  mode: z.enum(['move', 'update']).default('move')
+})
+export type ProjectRelocateParams = z.infer<typeof projectRelocateParamsSchema>
+
 export const projectSetPathResultSchema = z.object({
   /** The realpath-resolved path actually recorded. */
   path: z.string()
@@ -1907,6 +1916,46 @@ export const fsReadFileResultSchema = z.object({
   sizeBytes: z.number().optional()
 })
 export type FsReadFileResult = z.infer<typeof fsReadFileResultSchema>
+
+/**
+ * Largest slice one `fs.readBytes` returns: 256 KiB raw, ~342 KiB base64 per frame.
+ * Mirrors file-editor's `WORKSPACE_READ_BYTES_MAX_CHUNK` (this package cannot import
+ * it); `exec-proxies.test.ts` pins the two equal.
+ */
+export const FS_READ_BYTES_MAX_CHUNK = 256 * 1024
+
+/**
+ * `fs.readBytes`: `length` bytes at `offset` of `filePath` (RELATIVE to `rootPath`),
+ * read through one fd — never the whole file. Same jail as `fs.readFile`. A computer
+ * older than this frame answers "method not found", which the gateway turns into
+ * `ComputerUpdatePendingError` (hub-gateway.ts).
+ */
+export const fsReadBytesParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1),
+  offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  length: z.number().int().min(1).max(FS_READ_BYTES_MAX_CHUNK)
+})
+export type FsReadBytesParams = z.infer<typeof fsReadBytesParamsSchema>
+
+export const fsReadBytesResultSchema = z.object({
+  /** The slice, base64. Empty at/after the end of the file. */
+  data: z.string(),
+  /** Size of the WHOLE file — a caller detects a file that changed between slices. */
+  size: z.number().int().nonnegative(),
+  mtimeMs: z.number(),
+  /** The slice reaches the end of the file. */
+  eof: z.boolean()
+})
+export type FsReadBytesResult = z.infer<typeof fsReadBytesResultSchema>
+
+/**
+ * `data` of an `fs.*` error that is the filesystem's own answer (`ENOENT`, `EISDIR`,
+ * …) rather than a refusal, so the hub can tell "no such file" from a fault without
+ * parsing the message. Set by `fs.readBytes`.
+ */
+export const fsErrnoErrorDataSchema = z.object({ errno: z.string().min(1).max(32) })
+export type FsErrnoErrorData = z.infer<typeof fsErrnoErrorDataSchema>
 
 export const fsWriteFileParamsSchema = z.object({
   rootPath: z.string().min(1),

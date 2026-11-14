@@ -45,7 +45,13 @@ import {
 import { type Task } from '@slayzone/task-contracts'
 import { useTabStore } from '@slayzone/tabs-state'
 import { useDialogStore } from '@slayzone/dialogs'
-import { groupTreeRows, orderTreeRows, PINNED_GROUP_KEY, type TreeGroup } from './treeGrouping'
+import {
+  groupTreeRows,
+  orderTreeRows,
+  BLOCKED_GROUP_KEY,
+  PINNED_GROUP_KEY,
+  type TreeGroup
+} from './treeGrouping'
 import { useStaleSkillCounts } from '@slayzone/ai-config/client/hooks'
 import { TreeDisplaySettings } from '../TreeDisplaySettings'
 import { buildTopLevelEntries, entriesToRefs } from './projectGrouping'
@@ -218,6 +224,7 @@ export function TreeView({
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
   const treeGroupTemporary = useTabStore((s) => s.treeGroupTemporary)
+  const treeGroupBlocked = useTabStore((s) => s.treeGroupBlocked)
   const treeGroupPinned = useTabStore((s) => s.treeGroupPinned)
   const treeShowEmptyGroups = useTabStore((s) => s.treeShowEmptyGroups)
 
@@ -456,6 +463,8 @@ export function TreeView({
         statusFilter,
         groupTemporary: treeGroupTemporary,
         groupPinned: treeGroupPinned,
+        groupBlocked: treeGroupBlocked,
+        blockedIds: blockedTaskIds,
         pinnedIds: pinnedSet
       })
       // The pinned group's manual order is task-intrinsic (`pin_order`), not the
@@ -475,6 +484,8 @@ export function TreeView({
     statusFilter,
     treeGroupTemporary,
     treeGroupPinned,
+    treeGroupBlocked,
+    blockedTaskIds,
     pinnedSet,
     treeOrderBy,
     treeOrderDir
@@ -866,7 +877,7 @@ export function TreeView({
         if (!newGroupKey) newGroupKey = overData.groupValue
 
         const newGroup = groupByKey.get(newGroupKey)
-        if (!newGroup || newGroup.isTemp) return
+        if (!newGroup || newGroup.isTemp || newGroup.isBlocked) return
 
         // Drop into the pinned bucket → pin the moved task(s). Status /
         // priority unchanged (pinning is independent). For sources already
@@ -958,9 +969,24 @@ export function TreeView({
       let siblings: Task[]
       let targetGroupKey: string | null = null
       if (targetParent === null) {
-        targetGroupKey = rowGroupValue(target, treeGroupBy, treeGroupPinned, pinnedSet)
+        targetGroupKey = rowGroupValue(
+          target,
+          treeGroupBy,
+          treeGroupPinned,
+          pinnedSet,
+          treeGroupBlocked,
+          blockedTaskIds
+        )
         const g = groupByKey.get(targetGroupKey)
         if (!g || g.isTemp) return
+        if (
+          g.isBlocked &&
+          movedIds.some((id) => {
+            const task = tasksById.get(id)
+            return !task?.is_blocked && !blockedTaskIds?.has(id)
+          })
+        )
+          return
         // Drop on a row in the pinned bucket:
         //   - If any moved task isn't pinned yet → pin them (no reorder).
         //     Status/priority preserved (pinning is independent).
@@ -1063,6 +1089,7 @@ export function TreeView({
           if (
             targetParent === null &&
             targetGroupKey !== null &&
+            targetGroupKey !== BLOCKED_GROUP_KEY &&
             activeData.groupValue !== targetGroupKey
           ) {
             // `moveTask`'s targetIndex is in the STATUS-filtered task list
@@ -1097,7 +1124,11 @@ export function TreeView({
           return
         }
         onTaskReparent?.(sourceId, targetParent, newSiblingIds)
-        if (targetParent === null && targetGroupKey !== null) {
+        if (
+          targetParent === null &&
+          targetGroupKey !== null &&
+          targetGroupKey !== BLOCKED_GROUP_KEY
+        ) {
           const fieldUpdate: Partial<Task> =
             treeGroupBy === 'status'
               ? { status: targetGroupKey as Task['status'] }
@@ -1117,7 +1148,11 @@ export function TreeView({
       }
       // Inherit groupBy field if becoming root in a group different from any
       // moved task's current value. Apply uniformly to all moved.
-      if (targetParent === null && targetGroupKey !== null) {
+      if (
+        targetParent === null &&
+        targetGroupKey !== null &&
+        targetGroupKey !== BLOCKED_GROUP_KEY
+      ) {
         const fieldUpdate: Partial<Task> =
           treeGroupBy === 'status'
             ? { status: targetGroupKey as Task['status'] }
@@ -1150,6 +1185,8 @@ export function TreeView({
       onTaskBulkFieldUpdate,
       treeGroupBy,
       treeGroupPinned,
+      treeGroupBlocked,
+      blockedTaskIds,
       treeOrderBy,
       pinnedSet,
       selectedTaskIds,
@@ -1256,6 +1293,8 @@ export function TreeView({
       treeCrossOutDone,
       treeGroupBy,
       treeGroupPinned,
+      treeGroupBlocked,
+      blockedTaskIds,
       onTaskClick,
       onRowSelectClick: handleRowSelectClick,
       onCloseTab,
@@ -1463,13 +1502,13 @@ export function TreeView({
   const searchShortcut = useShortcutDisplay('search')
 
   return (
-    <div className="@container flex flex-col gap-3 px-1">
+    <div className="@container flex h-full min-h-0 flex-col gap-3 px-1">
       {/* Top icon row — sits in same horizontal hierarchy as project rows so
           rightmost button aligns with project Settings icon by construction.
           pl clears macOS traffic lights (80px total - SidebarGroup p-2 (8) -
           this wrapper's px-1 (4) = 68px). */}
       <div
-        className="relative flex items-center h-11 window-drag-region"
+        className="relative flex shrink-0 items-center h-11 window-drag-region"
         style={{ paddingLeft: 68, marginTop: 6 }}
       >
         <div
@@ -1514,139 +1553,148 @@ export function TreeView({
           </Tooltip>
         </div>
       </div>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={treeCollisionDetection}
-        onDragStart={handleDragStart}
-        onDragMove={handleDragMove}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
+      <div
+        data-testid="tree-projects-scroll"
+        className="min-h-0 flex-1 overflow-y-auto scrollbar-hide pb-4"
       >
-        <SortableContext
-          items={treeEntries.flatMap((e) =>
-            e.kind === 'project'
-              ? [`project:${e.id}`]
-              : [`group:${e.id}`, ...e.projects.map((p) => `project:${p.id}`)]
-          )}
-          strategy={noShiftStrategy}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={treeCollisionDetection}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
-          <div className="flex flex-col gap-3">
-            {treeEntries.map((entry) => {
-              if (entry.kind === 'project') {
-                const line = projectDrop?.overId === `project:${entry.id}` ? projectDrop.mode : null
-                return (
-                  <div key={`project:${entry.id}`} className="relative">
-                    {/* Centered in the gap-3 (0.75rem) between top-level rows:
+          <SortableContext
+            items={treeEntries.flatMap((e) =>
+              e.kind === 'project'
+                ? [`project:${e.id}`]
+                : [`group:${e.id}`, ...e.projects.map((p) => `project:${p.id}`)]
+            )}
+            strategy={noShiftStrategy}
+          >
+            <div className="flex flex-col gap-3">
+              {treeEntries.map((entry) => {
+                if (entry.kind === 'project') {
+                  const line =
+                    projectDrop?.overId === `project:${entry.id}` ? projectDrop.mode : null
+                  return (
+                    <div key={`project:${entry.id}`} className="relative">
+                      {/* Centered in the gap-3 (0.75rem) between top-level rows:
                       -top-1.5 (0.75rem) = half-gap; -translate-y-1/2 puts the
                       line CENTER at that offset. rem-based → exact at any zoom. */}
-                    {line === 'before' && (
-                      <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
-                    )}
-                    {line === 'after' && (
-                      <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
-                    )}
-                    <div className="relative">
-                      {renderProject(entry.project)}
-                      {/* Overlay ON TOP of the opaque project block (matches its
+                      {line === 'before' && (
+                        <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
+                      )}
+                      {line === 'after' && (
+                        <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                      )}
+                      <div className="relative">
+                        {renderProject(entry.project)}
+                        {/* Overlay ON TOP of the opaque project block (matches its
                         rounded-lg) — a fill behind it is hidden, leaving only
                         the ring's corners. */}
-                      {line === 'merge' && (
-                        <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-end rounded-lg bg-primary/30 pr-2 text-primary ring-2 ring-inset ring-primary">
-                          <FolderPlus className="size-4" />
-                        </span>
-                      )}
+                        {line === 'merge' && (
+                          <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-end rounded-lg bg-primary/30 pr-2 text-primary ring-2 ring-inset ring-primary">
+                            <FolderPlus className="size-4" />
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              }
-              return (
-                <Collapsible.Root
-                  key={`group:${entry.id}`}
-                  className="relative"
-                  open={entry.group.collapsed === 0}
-                  onOpenChange={(open) => onSetGroupCollapsed?.(entry.id, !open)}
-                >
-                  {projectDrop?.overId === `group:${entry.id}` && projectDrop.mode === 'after' && (
-                    <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
-                  )}
-                  <TreeGroupHeader
-                    group={entry.group}
-                    line={projectDrop?.overId === `group:${entry.id}` ? projectDrop.mode : null}
-                    onSettings={() => useDialogStore.getState().openGroupSettings(entry.group)}
-                    onDelete={() => onDeleteProjectGroup?.(entry.id)}
-                  />
-                  <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-                    {/* Reference `projectDrop` DIRECTLY in JSX (no IIFE) so the
+                  )
+                }
+                return (
+                  <Collapsible.Root
+                    key={`group:${entry.id}`}
+                    className="relative"
+                    open={entry.group.collapsed === 0}
+                    onOpenChange={(open) => onSetGroupCollapsed?.(entry.id, !open)}
+                  >
+                    {projectDrop?.overId === `group:${entry.id}` &&
+                      projectDrop.mode === 'after' && (
+                        <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                      )}
+                    <TreeGroupHeader
+                      group={entry.group}
+                      line={projectDrop?.overId === `group:${entry.id}` ? projectDrop.mode : null}
+                      onSettings={() => useDialogStore.getState().openGroupSettings(entry.group)}
+                      onDelete={() => onDeleteProjectGroup?.(entry.id)}
+                    />
+                    <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+                      {/* Reference `projectDrop` DIRECTLY in JSX (no IIFE) so the
                       React Compiler tracks it as a dep and re-renders mid-drag.
                       Separator = ABSOLUTE overlay centered in the gap-3 (0.75rem)
                       gap → -top-1.5 (0.75rem) = half-gap, rem-based (zoom-safe). */}
-                    {/* py-3 (12px) ≥ the ±1.5 edge-line offset so the first/last
+                      {/* py-3 (12px) ≥ the ±1.5 edge-line offset so the first/last
                       member's insertion line isn't clipped by Collapsible.Content's
                       overflow-hidden. */}
-                    <div className="ml-5 flex flex-col gap-3 py-3">
-                      {entry.projects.map((p) => (
-                        <div key={`project:${p.id}`} className="relative">
-                          {projectDrop?.overId === `project:${p.id}` &&
-                            projectDrop.mode === 'before' && (
-                              <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
-                            )}
-                          {projectDrop?.overId === `project:${p.id}` &&
-                            projectDrop.mode === 'after' && (
-                              <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
-                            )}
-                          <div className="relative">{renderProject(p, { groupId: entry.id })}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </Collapsible.Content>
-                </Collapsible.Root>
-              )
-            })}
-          </div>
-        </SortableContext>
-        <DragOverlay dropAnimation={null}>
-          {activeDragGroupId
-            ? (() => {
-                const g = projectGroups.find((pg) => pg.id === activeDragGroupId)
-                return (
-                  <div className="flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-foreground shadow-lg">
-                    <ChevronDown className="size-3 shrink-0" />
-                    <span className="truncate">{g?.name.trim() || 'Folder'}</span>
-                  </div>
+                      <div className="ml-5 flex flex-col gap-3 py-3">
+                        {entry.projects.map((p) => (
+                          <div key={`project:${p.id}`} className="relative">
+                            {projectDrop?.overId === `project:${p.id}` &&
+                              projectDrop.mode === 'before' && (
+                                <span className="pointer-events-none absolute -top-1.5 left-2 right-2 z-20 h-1 -translate-y-1/2 rounded-full bg-foreground" />
+                              )}
+                            {projectDrop?.overId === `project:${p.id}` &&
+                              projectDrop.mode === 'after' && (
+                                <span className="pointer-events-none absolute -bottom-1.5 left-2 right-2 z-20 h-1 translate-y-1/2 rounded-full bg-foreground" />
+                              )}
+                            <div className="relative">
+                              {renderProject(p, { groupId: entry.id })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Collapsible.Content>
+                  </Collapsible.Root>
                 )
-              })()
-            : activeDragProjectId
+              })}
+            </div>
+          </SortableContext>
+          <DragOverlay dropAnimation={null}>
+            {activeDragGroupId
               ? (() => {
-                  const proj = sortedProjects.find((p) => p.id === activeDragProjectId)
-                  return proj ? <ProjectDragPreview project={proj} /> : null
+                  const g = projectGroups.find((pg) => pg.id === activeDragGroupId)
+                  return (
+                    <div className="flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-foreground shadow-lg">
+                      <ChevronDown className="size-3 shrink-0" />
+                      <span className="truncate">{g?.name.trim() || 'Folder'}</span>
+                    </div>
+                  )
                 })()
-              : activeDragTaskId
+              : activeDragProjectId
                 ? (() => {
-                    const active = tasksById.get(activeDragTaskId)
-                    if (!active) return null
-                    const isMulti =
-                      selectedTaskIds.has(activeDragTaskId) && selectedTaskIds.size > 1
-                    const ids = isMulti
-                      ? getMovedIdsInRenderOrder(active.project_id, selectedTaskIds)
-                      : [activeDragTaskId]
-                    const movedTasks = ids
-                      .map((id) => tasksById.get(id))
-                      .filter((t): t is Task => Boolean(t))
-                    return <TaskDragPreview tasks={movedTasks} />
+                    const proj = sortedProjects.find((p) => p.id === activeDragProjectId)
+                    return proj ? <ProjectDragPreview project={proj} /> : null
                   })()
-                : null}
-        </DragOverlay>
-      </DndContext>
-      {hiddenProjects.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className="flex items-center justify-center gap-1 px-2 py-2 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-        >
-          <span>{showAll ? 'Hide inactive' : 'Show all projects'}</span>
-          <ChevronDown className={cn('size-3 transition-transform', showAll && 'rotate-180')} />
-        </button>
-      )}
+                : activeDragTaskId
+                  ? (() => {
+                      const active = tasksById.get(activeDragTaskId)
+                      if (!active) return null
+                      const isMulti =
+                        selectedTaskIds.has(activeDragTaskId) && selectedTaskIds.size > 1
+                      const ids = isMulti
+                        ? getMovedIdsInRenderOrder(active.project_id, selectedTaskIds)
+                        : [activeDragTaskId]
+                      const movedTasks = ids
+                        .map((id) => tasksById.get(id))
+                        .filter((t): t is Task => Boolean(t))
+                      return <TaskDragPreview tasks={movedTasks} />
+                    })()
+                  : null}
+          </DragOverlay>
+        </DndContext>
+        {hiddenProjects.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="flex items-center justify-center gap-1 px-2 py-2 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          >
+            <span>{showAll ? 'Hide inactive' : 'Show all projects'}</span>
+            <ChevronDown className={cn('size-3 transition-transform', showAll && 'rotate-180')} />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

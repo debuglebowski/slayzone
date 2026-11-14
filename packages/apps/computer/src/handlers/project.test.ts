@@ -4,10 +4,12 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -49,6 +51,198 @@ async function handlersFor(roots: string[], baseDir = dir) {
 }
 
 describe('project path mapping', () => {
+  it('repairs nested Git worktrees after the folder was moved manually', async () => {
+    const source = join(dir, 'repo')
+    const target = join(dir, 'renamed')
+    mkdirSync(source)
+    const git = (path: string, args: string[]) =>
+      execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' })
+    git(source, ['init'])
+    git(source, [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'initial'
+    ])
+    git(source, ['worktree', 'add', '-b', 'nested', join(source, '.worktrees', 'feature')])
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    renameSync(source, target)
+    await handlers['project.relocate']({
+      projectId: 'p1',
+      sourcePath: source,
+      path: target,
+      mode: 'update'
+    })
+    expect(git(join(target, '.worktrees', 'feature'), ['status', '--porcelain'])).toBe('')
+  })
+
+  it('rejects a move while project work is running, before touching files', async () => {
+    const source = join(dir, 'before')
+    mkdirSync(source)
+    const store = await createProjectPathStore(HUB, { baseDir: dir })
+    await store.set('p1', source)
+    const handlers = createProjectHandlers(ctxWith([dir]), () => store, {
+      assertIdle: () => {
+        throw new Error('Stop running terminals')
+      },
+      remap: () => {}
+    })
+    await expect(
+      handlers['project.relocate']({
+        projectId: 'p1',
+        sourcePath: source,
+        path: join(dir, 'after')
+      })
+    ).rejects.toThrow('Stop running terminals')
+    expect(existsSync(source)).toBe(true)
+  })
+
+  it('refuses moving a folder used by a project on another hub', async () => {
+    const source = join(dir, 'shared')
+    mkdirSync(source)
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    const other = await createProjectPathStore('other-hub', { baseDir: dir })
+    await other.set('another-project', source)
+    await expect(
+      handlers['project.relocate']({
+        projectId: 'p1',
+        sourcePath: source,
+        path: join(dir, 'after')
+      })
+    ).rejects.toThrow(/Another project uses/)
+    expect(existsSync(source)).toBe(true)
+  })
+  it('repairs Git links for sibling and nested worktrees after moving the main checkout', async () => {
+    const source = join(dir, 'repo')
+    const target = join(dir, 'renamed')
+    const sibling = join(dir, 'sibling')
+    const nested = join(source, '.worktrees', 'feature')
+    mkdirSync(source)
+    const git = (path: string, args: string[]) =>
+      execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: 'pipe' })
+    git(source, ['init'])
+    git(source, [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'initial'
+    ])
+    git(source, ['worktree', 'add', '-b', 'sibling', sibling])
+    git(source, ['worktree', 'add', '-b', 'nested', nested])
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    await handlers['project.relocate']({ projectId: 'p1', sourcePath: source, path: target })
+    expect(git(sibling, ['status', '--porcelain'])).toBe('')
+    expect(git(join(target, '.worktrees', 'feature'), ['status', '--porcelain'])).toBe('')
+    expect(git(target, ['worktree', 'list'])).not.toContain(source)
+  })
+
+  it('updates a path after a manual move without moving files', async () => {
+    const source = join(dir, 'before')
+    const target = join(dir, 'after')
+    mkdirSync(source)
+    writeFileSync(join(source, 'keep.txt'), 'keep')
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    renameSync(source, target)
+    await handlers['project.relocate']({
+      projectId: 'p1',
+      sourcePath: source,
+      path: target,
+      mode: 'update'
+    })
+    expect(store.get('p1')?.path).toBe(target)
+    expect(
+      await handlers['project.relocate']({
+        projectId: 'p1',
+        sourcePath: source,
+        path: target,
+        mode: 'update'
+      })
+    ).toEqual({ path: target })
+    expect(readFileSync(join(target, 'keep.txt'), 'utf8')).toBe('keep')
+  })
+
+  it('replays an interrupted mapping write after restarting', async () => {
+    const source = join(dir, 'before')
+    const target = join(dir, 'after')
+    mkdirSync(source)
+    const store = await createProjectPathStore(HUB, { baseDir: dir })
+    await store.set('p1', source)
+    const failingStore = {
+      ...store,
+      set: async () => {
+        throw new Error('disk write failed')
+      }
+    }
+    const first = createProjectHandlers(ctxWith([dir]), () => failingStore)
+    await expect(
+      first['project.relocate']({ projectId: 'p1', sourcePath: source, path: target })
+    ).rejects.toThrow('disk write failed')
+    expect(existsSync(target)).toBe(true)
+    const restarted = await handlersFor([dir])
+    await restarted.handlers.recoverRelocation()
+    expect(restarted.store.get('p1')?.path).toBe(target)
+    expect(existsSync(store.relocationFilePath!)).toBe(false)
+  })
+  it('moves a folder and preserves its project mapping', async () => {
+    const source = join(dir, 'before')
+    const target = join(dir, 'after')
+    mkdirSync(source)
+    writeFileSync(join(source, 'uncommitted.txt'), 'keep me')
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    await handlers['project.relocate']({ projectId: 'p1', sourcePath: source, path: target })
+    expect(existsSync(source)).toBe(false)
+    expect(readFileSync(join(target, 'uncommitted.txt'), 'utf8')).toBe('keep me')
+    expect(store.get('p1')?.path).toBe(target)
+  })
+
+  it('refuses an occupied destination without changing either folder', async () => {
+    const source = join(dir, 'before')
+    const target = join(dir, 'after')
+    mkdirSync(source)
+    mkdirSync(target)
+    const { handlers, store } = await handlersFor([dir])
+    await store.set('p1', source)
+    await expect(
+      handlers['project.relocate']({ projectId: 'p1', sourcePath: source, path: target })
+    ).rejects.toThrow(/already exists/)
+    expect(store.get('p1')?.path).toBe(source)
+    expect(existsSync(source)).toBe(true)
+  })
+
+  it('refuses a stale source and a destination outside allowed roots', async () => {
+    const source = join(dir, 'before')
+    mkdirSync(source)
+    const { handlers, store } = await handlersFor([source])
+    await store.set('p1', source)
+    await expect(
+      handlers['project.relocate']({
+        projectId: 'p1',
+        sourcePath: join(dir, 'stale'),
+        path: join(source, 'new')
+      })
+    ).rejects.toThrow(/changed/)
+    await expect(
+      handlers['project.relocate']({
+        projectId: 'p1',
+        sourcePath: source,
+        path: join(dir, 'outside')
+      })
+    ).rejects.toThrow(/allowedRoots/)
+    expect(existsSync(source)).toBe(true)
+  })
   // The state the hub's single `projects.path` column could never express: it
   // always had *a* path, even for a machine that had never seen the project.
   it('answers null for a project this computer has never held', async () => {

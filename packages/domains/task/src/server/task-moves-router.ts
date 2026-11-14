@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '@slayzone/trpc-server'
 import {
@@ -34,6 +35,10 @@ import {
   sessionsRegisterInputSchema
 } from '@slayzone/task-contracts'
 import {
+  completeLocalTaskMove,
+  resolveTaskMoveTarget,
+  clearTaskMoveAction,
+  copyOnHub,
   abortTaskMoveIn,
   addRemoteBlockers,
   listRemoteBlockers,
@@ -62,7 +67,7 @@ import {
   TaskMoveRefusedError,
   TaskMoveStateError
 } from './ops/task-moves'
-import { getTaskOnMutation } from './task-router-deps'
+import { getTaskOnMutation, getTaskOps, getTaskBus } from './task-router-deps'
 import { registerMovedChats, taskMoveSessions } from './ops/task-move-sessions'
 import { getTaskMove as moveOf } from './ops/task-moves'
 
@@ -101,22 +106,91 @@ async function mapped<T>(run: () => Promise<T>): Promise<T> {
  * (ops/task-moves.ts). The app runs the steps and records each one here.
  */
 export const taskMovesRouter = router({
-  begin: publicProcedure
+  finishLocal: publicProcedure
+    .input(z.object({ id: z.string().min(1), projectId: z.string().min(1) }))
+    .mutation(({ ctx, input }) =>
+      boardChanged(() =>
+        mapped(async () => {
+          const move = await getTaskMove(ctx.db, input.id)
+          if (move.status === 'done' && move.targetProjectId === input.projectId) return move
+          if (
+            move.mode === 'copy' ||
+            move.scope !== 'task' ||
+            move.direction !== 'out' ||
+            !move.runnerRequested ||
+            move.step !== 'export' ||
+            move.status !== 'running'
+          )
+            throw new TaskMoveStateError('This transfer cannot finish as a local move')
+          const options = {
+            taskIds: move.rootTaskIds,
+            targetProjectId: input.projectId,
+            includeSubtasks: move.includeSubtasks
+          }
+          const ops = getTaskOps()
+          const preview = await ops.previewMoveToProjectOp(ctx.db, options)
+          await ops.moveTasksToProjectRequestOp(
+            ctx.db,
+            {
+              ...options,
+              keepSessionTabIds: move.includeSessions
+                ? preview.sessions.filter((tab) => tab.canKeep).map((tab) => tab.tabId)
+                : []
+            },
+            { onMutation: getTaskOnMutation(), ipcMain: getTaskBus() }
+          )
+          return completeLocalTaskMove(ctx.db, move.id, input.projectId)
+        })
+      )
+    ),
+  resolveTarget: publicProcedure
+    .input(
+      z.object({ id: z.string().min(1), hubId: z.string().min(1), projectId: z.string().min(1) })
+    )
+    .mutation(({ ctx, input }) => mapped(() => resolveTaskMoveTarget(ctx.db, input))),
+  clearAction: publicProcedure
+    .input(taskMoveIdInputSchema)
+    .mutation(({ ctx, input }) => clearTaskMoveAction(ctx.db, input.id)),
+  copy: publicProcedure
     .input(beginTaskMoveInputSchema)
     .mutation(({ ctx, input }) =>
       boardChanged(() =>
-        mapped(() => beginTaskMove(ctx.db, input, { createdBy: ctx.principal?.userId ?? null }))
+        mapped(() =>
+          copyOnHub(ctx.db, input, { createdBy: ctx.principal?.userId, dataRoot: ctx.dataRoot })
+        )
       )
     ),
-
-  /** Move a whole project to another hub: every task in it and its own rows (ids kept). */
-  beginProject: publicProcedure
+  copyProject: publicProcedure
     .input(beginProjectMoveInputSchema)
     .mutation(({ ctx, input }) =>
       boardChanged(() =>
-        mapped(() => beginProjectMove(ctx.db, input, { createdBy: ctx.principal?.userId ?? null }))
+        mapped(() =>
+          copyOnHub(ctx.db, input, { createdBy: ctx.principal?.userId, dataRoot: ctx.dataRoot })
+        )
       )
     ),
+  begin: publicProcedure.input(beginTaskMoveInputSchema).mutation(({ ctx, input }) =>
+    boardChanged(() =>
+      mapped(() =>
+        beginTaskMove(ctx.db, input, {
+          createdBy: ctx.principal?.userId ?? null,
+          dataRoot: ctx.dataRoot
+        })
+      )
+    )
+  ),
+
+  /** Move a whole project to another hub: every task in it and its own rows (ids kept). */
+  beginProject: publicProcedure.input(beginProjectMoveInputSchema).mutation(({ ctx, input }) =>
+    boardChanged(() =>
+      mapped(() =>
+        beginProjectMove(ctx.db, input, {
+          createdBy: ctx.principal?.userId ?? null,
+          dataRoot: ctx.dataRoot
+        })
+      )
+    )
+  ),
 
   /** What moving this project to another hub would carry, and what stops it (the dialog). */
   projectPreview: publicProcedure
@@ -174,7 +248,7 @@ export const taskMovesRouter = router({
   cancel: publicProcedure
     .input(taskMoveIdInputSchema)
     .mutation(({ ctx, input }) =>
-      boardChanged(() => mapped(() => cancelTaskMove(ctx.db, input.id)))
+      boardChanged(() => mapped(() => cancelTaskMove(ctx.db, input.id, ctx.dataRoot)))
     ),
 
   release: publicProcedure
@@ -189,11 +263,14 @@ export const taskMovesRouter = router({
 
   // ── the rows (slice 3b) ──
   /** Source: the bundle of the move's tasks (a read; safe to repeat). */
-  export: publicProcedure
-    .input(exportTaskMoveInputSchema)
-    .query(({ ctx, input }) =>
-      mapped(() => exportTaskMove(ctx.db, input.id, { userId: ctx.principal?.userId ?? null }))
-    ),
+  export: publicProcedure.input(exportTaskMoveInputSchema).query(({ ctx, input }) =>
+    mapped(() =>
+      exportTaskMove(ctx.db, input.id, {
+        userId: ctx.principal?.userId ?? null,
+        dataRoot: ctx.dataRoot
+      })
+    )
+  ),
 
   /** Target: take the bundle, hidden and locked until `commit`. Idempotent. */
   import: publicProcedure.input(importTaskMoveInputSchema).mutation(({ ctx, input }) =>

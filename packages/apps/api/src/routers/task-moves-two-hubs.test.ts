@@ -180,7 +180,12 @@ async function move(
   from: { hub: typeof hubA; id: string },
   to: { hub: typeof hubA; id: string; projectId: string },
   taskIds: string[],
-  opts: { pauseAfter?: TaskMove['step']; includeSessions?: boolean; resumeId?: string } = {}
+  opts: {
+    pauseAfter?: TaskMove['step']
+    includeSessions?: boolean
+    resumeId?: string
+    mode?: 'move' | 'copy'
+  } = {}
 ): Promise<TaskMove> {
   const begun = opts.resumeId
     ? await from.hub.taskMoves.resume({ id: opts.resumeId })
@@ -188,7 +193,8 @@ async function move(
         taskIds,
         targetHubId: to.id,
         targetProjectId: to.projectId,
-        includeSessions: opts.includeSessions ?? true
+        includeSessions: opts.includeSessions ?? true,
+        mode: opts.mode
       })
   let lastStep: TaskMove['step'] = begun.step
   return runTaskMove(begun.id, {
@@ -838,4 +844,166 @@ describe('a move from hub A to hub B', () => {
     ).toBe(1)
     expect(count(B, 'SELECT COUNT(*) AS n FROM chat_ownership WHERE id = ?', conversation)).toBe(0)
   })
+})
+
+describe('copy transfers', () => {
+  test.each([false, true])(
+    'copies a subtree, preserving writable originals (same hub: %s)',
+    async (sameHub) => {
+      const parent = await createOn(hubA, projectA, `Copy root ${sameHub}`)
+      const child = await createOn(hubA, projectA, 'Copy child', { parentId: parent.id })
+      const artifact = await hubA.artifacts.create({
+        taskId: parent.id,
+        title: 'copy.md',
+        content: 'copied bytes'
+      })
+      const outside = await createOn(hubA, projectA, 'Outside copy')
+      A.db
+        .prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)')
+        .run(child.id, parent.id)
+      A.db
+        .prepare('INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)')
+        .run(outside.id, parent.id)
+      const target = sameHub
+        ? { hub: hubA, id: 'a', projectId: projectA }
+        : { hub: hubB, id: 'b', projectId: projectB }
+      const result = await move({ hub: hubA, id: 'a' }, target, [parent.id], {
+        mode: 'copy',
+        includeSessions: false
+      })
+      expect(result.status, result.error ?? '').toBe('done')
+      expect(row(A, parent.id)).toBeDefined()
+      expect(row(A, child.id)).toBeDefined()
+      expect(await hubA.taskMoves.redirects({ taskIds: [parent.id, child.id] })).toEqual({})
+      const dest = sameHub ? A : B
+      const copied = dest.db
+        .prepare('SELECT * FROM tasks WHERE title = ? AND id != ?')
+        .get(`Copy root ${sameHub}`, parent.id) as Record<string, unknown>
+      expect(copied).toBeDefined()
+      expect(
+        (await target.hub.taskMoves.list({})).find(
+          (transfer) =>
+            transfer.direction === 'in' && transfer.taskIds.includes(copied.id as string)
+        )?.mode
+      ).toBe('copy')
+      const copiedChild = dest.db
+        .prepare('SELECT * FROM tasks WHERE parent_id = ?')
+        .get(copied.id) as Record<string, unknown>
+      expect(copiedChild.title).toBe('Copy child')
+      const copyArtifact = dest.db
+        .prepare('SELECT id FROM task_artifacts WHERE task_id = ?')
+        .get(copied.id) as { id: string }
+      expect(copyArtifact.id).not.toBe(artifact!.id)
+      expect(
+        existsSync(
+          join(sameHub ? rootA : rootB, 'artifacts', copied.id as string, `${copyArtifact.id}.md`)
+        )
+      ).toBe(true)
+      expect(await target.hub.artifacts.readContent({ id: copyArtifact.id })).toBe('copied bytes')
+      expect(
+        dest.db
+          .prepare('SELECT task_id FROM task_dependencies WHERE blocks_task_id = ?')
+          .all(copied.id)
+      ).toEqual([{ task_id: copiedChild.id }])
+      await hubA.task.update({ id: parent.id, title: 'Original still editable' } as UpdateTaskInput)
+    }
+  )
+})
+
+test('a paused copy resumes from frozen rows and bytes after originals change', async () => {
+  const parent = await createOn(hubA, projectA, 'Snapshot before edits')
+  const artifact = await hubA.artifacts.create({
+    taskId: parent.id,
+    title: 'frozen.md',
+    content: 'snapshot bytes'
+  })
+  const paused = await move(
+    { hub: hubA, id: 'a' },
+    { hub: hubB, id: 'b', projectId: projectB },
+    [parent.id],
+    { mode: 'copy', includeSessions: false, pauseAfter: 'copy-files' }
+  )
+  expect(paused.status).toBe('paused')
+  await hubA.task.update({ id: parent.id, title: 'Original edited during copy' } as UpdateTaskInput)
+  await hubA.artifacts.delete({ id: artifact!.id })
+  const done = await move(
+    { hub: hubA, id: 'a' },
+    { hub: hubB, id: 'b', projectId: projectB },
+    [parent.id],
+    { resumeId: paused.id }
+  )
+  expect(done.status, done.error ?? '').toBe('done')
+  expect(row(B, done.copyIds![parent.id])?.title).toBe('Snapshot before edits')
+  expect(await hubB.artifacts.readContent({ id: done.copyIds![artifact!.id] })).toBe(
+    'snapshot bytes'
+  )
+  expect(row(A, parent.id)?.title).toBe('Original edited during copy')
+  expect(existsSync(join(rootA, '.task-copy-snapshots', done.id))).toBe(false)
+})
+
+test('canceling a copy removes imported files and snapshots while preserving originals', async () => {
+  const parent = await createOn(hubA, projectA, 'Canceled copy original')
+  const artifact = await hubA.artifacts.create({
+    taskId: parent.id,
+    title: 'cancel.md',
+    content: 'keep original'
+  })
+  const paused = await move(
+    { hub: hubA, id: 'a' },
+    { hub: hubB, id: 'b', projectId: projectB },
+    [parent.id],
+    { mode: 'copy', includeSessions: false, pauseAfter: 'commit' }
+  )
+  const copiedId = paused.copyIds![parent.id]
+  const incoming = (await hubB.taskMoves.list({})).find(
+    (transfer) => transfer.direction === 'in' && transfer.taskIds.includes(copiedId)
+  )!
+  await hubB.taskMoves.abort({ id: incoming.id })
+  await hubA.taskMoves.cancel({ id: paused.id })
+  expect(row(A, parent.id)).toBeDefined()
+  expect(await hubA.artifacts.readContent({ id: artifact!.id })).toBe('keep original')
+  expect(row(B, copiedId)).toBeUndefined()
+  expect(existsSync(join(rootB, 'artifacts', copiedId))).toBe(false)
+  expect(existsSync(join(rootA, '.task-copy-snapshots', paused.id))).toBe(false)
+})
+
+test('incoming journals cannot advance or release source content', async () => {
+  const task = await createOn(hubA, projectA, 'Incoming journal guard')
+  const source = await hubA.taskMoves.begin({
+    taskIds: [task.id],
+    targetHubId: 'b',
+    targetProjectId: projectB,
+    includeSessions: false
+  })
+  const bundle = await hubA.taskMoves.export({ id: source.id })
+  await hubB.taskMoves.import({
+    sourceHubId: 'a',
+    targetProjectId: projectB,
+    includeSessions: false,
+    bundle
+  })
+  await expect(hubB.taskMoves.advance({ id: source.id, completed: 'commit' })).rejects.toThrow()
+  await B.slayDb.run("UPDATE task_moves SET step = 'release' WHERE id = ?", [source.id])
+  await expect(hubB.taskMoves.release({ id: source.id })).rejects.toThrow()
+  expect(row(B, task.id)).toBeDefined()
+})
+
+test('imports reject filesystem-unsafe journal IDs', async () => {
+  const task = await createOn(hubA, projectA, 'Unsafe journal guard')
+  const source = await hubA.taskMoves.begin({
+    taskIds: [task.id],
+    targetHubId: 'b',
+    targetProjectId: projectB,
+    includeSessions: false
+  })
+  const bundle = await hubA.taskMoves.export({ id: source.id })
+  await expect(
+    hubB.taskMoves.import({
+      sourceHubId: 'a',
+      targetProjectId: projectB,
+      includeSessions: false,
+      bundle: { ...bundle, moveId: '../blobs' }
+    })
+  ).rejects.toThrow()
+  expect(row(B, task.id)).toBeUndefined()
 })

@@ -344,6 +344,7 @@ run_harness packages/domains/terminal/src/client/focus-loss-diag.test.ts
 run_harness packages/domains/terminal/src/client/catch-up-merge.test.ts
 run_harness packages/domains/terminal/src/client/catch-up-controller.test.ts
 run_harness packages/domains/sidebar/src/views/projectGrouping.test.ts
+run_harness packages/domains/sidebar/src/views/treeGrouping.test.ts
 run_harness packages/domains/sidebar/src/views/projectDrop.test.ts
 run_harness packages/domains/tasks/src/client/sidebar-order.test.ts
 run_harness packages/domains/tasks/src/client/insert-created-row.test.ts
@@ -369,6 +370,8 @@ run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/file-editor/src/server/watcher.test.ts
 run_harness packages/domains/file-editor/src/server/workspace-fs-none.test.ts
+# Raw byte slices of a workspace file (GET /api/files/raw streams previews from them).
+run_harness packages/domains/file-editor/src/server/read-bytes.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -490,6 +493,8 @@ run_harness packages/apps/app/src/main/client-settings-migration.test.ts
 # bad line from repeating the storage-migration incident.
 run_harness packages/apps/app/src/main/client-settings-migration.realstore.test.ts
 run_harness packages/apps/app/src/main/document-link-bridge.test.ts
+# slz-file:// previews: local paths off disk, hub/computer files fetched from their hub.
+run_harness packages/apps/app/src/main/slz-file-handler.test.ts
 # The desktop app's one Convex deployment (renderer + its hub): the build's URL, or the
 # PLAYWRIGHT-only SLAYZONE_E2E_CONVEX_ADDRESS override (a bad value throws, never falls back).
 run_harness packages/apps/app/src/main/convex-deployment.test.ts
@@ -716,6 +721,7 @@ run_harness packages/apps/api/src/routers/task-move-to-project.test.ts
 run_harness packages/apps/api/src/routers/task-duplicate.test.ts
 # Moving tasks to another hub (source side): journal steps, pause/resume/fail/cancel, the write lock, redirects.
 run_harness packages/apps/api/src/routers/task-moves.test.ts
+run_harness packages/domains/task/src/server/copy-snapshot-files.test.ts
 # Moving tasks between two hubs end to end: rows with ids, hidden until commit, release, and back.
 run_harness packages/apps/api/src/routers/task-moves-two-hubs.test.ts
 # Moving a whole project between two hubs: its own rows, settings and icon with ids,
@@ -1115,6 +1121,8 @@ run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
 run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
+# Workspace file raw bytes routed to the owning computer (slz-file:// previews on a remote hub).
+run_harness packages/apps/api/src/http/rest-api/files/raw.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of
 # the streamed write/append bodies and the blob-streamed version read, plus the
 # `Error [CODE]: …` 400 contract the CLI prints verbatim.
@@ -1151,6 +1159,8 @@ run_harness packages/apps/cli/test/cli-read-rest.test.ts
 run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
 run_harness packages/apps/cli/src/commands/completions.test.ts
+run_harness packages/apps/cli/src/commands/transfers.test.ts
+run_harness packages/apps/api/src/http/rest-api/transfers.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
 run_harness packages/apps/cli/test/cli-artifacts-rest.test.ts
@@ -1598,6 +1608,7 @@ run_vitest_files "vitest (swept-in suites)" \
   packages/domains/task-contracts/src/create-task-draft.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.test.ts \
   packages/domains/worktrees/src/client/git-diff-store.scope.test.tsx \
+  packages/domains/worktrees/src/client/git-diff-store.hub.test.tsx \
   packages/shared/diff-view/src/highlight.test.ts \
   packages/shared/diff-view/src/parse-diff.cache.test.ts \
   packages/domains/worktrees/src/shared/worktree-color.test.ts \

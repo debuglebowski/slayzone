@@ -36,7 +36,7 @@ import {
 import { usePdfViewerLinks, type LinkOpenTarget } from '@slayzone/editor'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
-import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { useWorkspaceFileUrl } from './workspace-file-url'
 import type {
   EditorOpenFilesState,
   MarkdownViewMode,
@@ -105,6 +105,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
     ref
   ) {
     const trpc = useTRPC()
+    const workspaceFileUrl = useWorkspaceFileUrl(projectPath)
     // mutateAsync is identity-stable across renders (the mutation object is not).
     const { mutateAsync: showInFinder } = useMutation(
       trpc.fileEditor.showInFinder.mutationOptions()
@@ -517,10 +518,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
           {activeFile && isImage ? (
             <div className="flex-1 min-h-0 flex items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(hsl(var(--muted))_0%_25%,transparent_0%_50%)_50%/16px_16px]">
               <img
-                src={toSlzFileUrl(
-                  `${projectPath}/${activeFile.path}`,
-                  fileVersions.get(activeFile.path)
-                )}
+                src={workspaceFileUrl(activeFile.path, fileVersions.get(activeFile.path))}
                 className="max-w-full max-h-full object-contain"
                 draggable={false}
               />
@@ -528,10 +526,7 @@ const FileEditorViewBody = forwardRef<FileEditorViewHandle, FileEditorViewProps>
           ) : activeFile && isPdf ? (
             <iframe
               ref={pdfFrameRef}
-              src={toSlzFileUrl(
-                `${projectPath}/${activeFile.path}`,
-                fileVersions.get(activeFile.path)
-              )}
+              src={workspaceFileUrl(activeFile.path, fileVersions.get(activeFile.path))}
               className="flex-1 w-full min-h-0"
               title="PDF preview"
             />

@@ -67,11 +67,13 @@ import { createProcHandlers, type ProcHandlerOptions } from './proc'
 import { createClaudeSessionHandlers } from './claude-session'
 import {
   createSessionMoveFiles,
+  relocateClaudeTranscript,
   sessionMoveFileRefSchema,
   type SessionMoveFiles
 } from './session-move-files'
 import { createWorkspaceChangesHandlers } from './workspace-changes'
 import type { HandlerContext } from './types'
+import { relocatedPath } from '../project-relocation'
 import { createDirectChatFanout, type DirectChatEvent } from '../direct/chat-fanout'
 import { createChatRelayFilter } from '../direct/chat-relay-filter'
 
@@ -1187,6 +1189,48 @@ export function createChatRuntimeHandlers(opts: {
 
   return {
     request,
+    hasFolderWork: (contains: (cwd: string) => boolean) =>
+      localProcs?.hasFolderWork(contains) ?? false,
+    hasTaskWork: (taskId: string) => localProcs?.hasTaskWork(taskId) ?? false,
+    assertProjectIdle: (projectId: string) => {
+      const r = runtime()
+      for (const record of r.storage.findRecords('settings', undefined, { id: 'bootstrap' })) {
+        const value = record.value as { projectId?: string; identity: { tabId: string } }
+        if (value.projectId !== projectId) continue
+        if (r.storage.conversation(record.conversationId)?.state !== 'active')
+          throw new Error('Wait for chat transfers to finish before relocating the project.')
+        const info = r.transport.getSessionInfo(value.identity.tabId)
+        if (info?.pid && !info.ended)
+          throw new Error('Stop running chat agents before relocating the project.')
+      }
+    },
+    relocateProjectPaths: async (projectId: string, source: string, target: string) => {
+      const r = runtime()
+      const remap = (path: string) => relocatedPath(path, source, target)
+      const taskIds = [
+        ...new Set([
+          ...r.taskPaths.store.projectTaskIds(projectId),
+          ...r.storage
+            .findRecords('settings', undefined, { id: 'bootstrap' })
+            .map((record) => record.value as { projectId?: string; identity: { taskId: string } })
+            .filter((value) => value.projectId === projectId)
+            .map((value) => value.identity.taskId)
+        ])
+      ]
+      const sessions = r.storage.compose((db) =>
+        taskIds.flatMap((id) =>
+          db
+            .prepare(
+              'SELECT cwd, conversation_id FROM agent_sessions WHERE task_id=? AND cwd IS NOT NULL AND conversation_id IS NOT NULL'
+            )
+            .all(id)
+        )
+      ) as Array<{ cwd: string; conversation_id: string }>
+      for (const session of sessions)
+        await relocateClaudeTranscript(session.conversation_id, session.cwd, remap(session.cwd))
+      await r.relocateProject(projectId, source, target, remap)
+    },
+    projectTaskIds: (projectId: string) => runtime().taskPaths.store.projectTaskIds(projectId),
     direct,
     directTaskData,
     assertTaskActive(taskId: string) {

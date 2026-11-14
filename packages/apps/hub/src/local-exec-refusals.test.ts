@@ -241,6 +241,7 @@ describe('processes off, zero computers: every hub-local call refuses (exec laye
     await expectRefused('listRoots', () => local.listRoots())
     await expectRefused('listDir', () => local.listDir(OUTSIDE))
     await expectRefused('readFile', () => local.readFile(OUTSIDE, 'secret.txt'))
+    await expectRefused('readBytes', () => local.readBytes(OUTSIDE, 'secret.txt', 0, 1))
     await expectRefused('readDir', () => local.readDir(OUTSIDE, ''))
     await expectRefused('gitStatus', () => local.gitStatus(OUTSIDE))
     await expectRefused('discoverRepos', () => local.discoverRepos(OUTSIDE))

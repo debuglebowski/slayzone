@@ -39,6 +39,10 @@ beforeEach(() => {
       if (refuse === path) throw new Error(`'${path}' is outside the folders this computer allows`)
       return { path, status: 'ready' }
     },
+    relocateFolder: async (computerId, projectId, sourcePath, path) => {
+      calls.push(['relocate', computerId, projectId, sourcePath, path])
+      return { path, status: 'ready' }
+    },
     forgetFolder: async (computerId, projectId) => {
       calls.push(['forget', computerId, projectId])
     }
@@ -51,6 +55,27 @@ afterEach(() => setProjectFolderHost(null))
 const legacyPath = async (id: string) =>
   (await h.slayDb.get<{ path: string | null }>('SELECT path FROM projects WHERE id = ?', [id]))!
     .path
+
+test('relocate routes disk work to the existing computer and keeps project identity', async () => {
+  const p = await caller.create({ name: 'Move me', color: '#000000', computerId: 'c-3' })
+  const result = await caller.relocate({
+    id: p.id,
+    computerId: 'c-3',
+    sourcePath: '/old',
+    path: '/new'
+  })
+  expect(result.id).toBe(p.id)
+  expect(result.name).toBe('Move me')
+  expect(calls).toEqual([['relocate', 'c-3', p.id, '/old', '/new']])
+})
+
+test('relocate refuses a changed computer before touching disk', async () => {
+  const p = await caller.create({ name: 'Stay', color: '#000000', computerId: 'c-3' })
+  await expect(
+    caller.relocate({ id: p.id, computerId: 'other', sourcePath: '/old', path: '/new' })
+  ).rejects.toThrow(/computer changed/i)
+  expect(calls).toEqual([])
+})
 
 test('create with no computer named: the caller’s default becomes the project’s default', async () => {
   const p = await caller.create({ name: 'A', color: '#000000' })

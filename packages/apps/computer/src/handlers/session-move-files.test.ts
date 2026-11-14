@@ -7,6 +7,7 @@ import { claudeTranscriptPath } from '@slayzone/terminal/claude-transcripts'
 import { ptyHistoryDir } from '../pty-history'
 import {
   createSessionMoveFiles,
+  relocateClaudeTranscript,
   sessionMoveFileRefSchema,
   type SessionMoveFileEntry,
   type SessionMoveFiles
@@ -104,6 +105,28 @@ function putRollout(s: Side, date: string, name: string, text: string) {
 }
 
 describe('a moved task’s session files', () => {
+  test('relocation keeps Claude resume transcripts available at the new cwd', async () => {
+    const source = join(root, 'before')
+    const target = join(root, 'after')
+    const transcript = '{"type":"user"}\n'
+    putTranscript(source, 'sess-1', transcript)
+    await relocateClaudeTranscript('sess-1', source, target)
+    await relocateClaudeTranscript('sess-1', source, target)
+    expect(readFileSync(claudeTranscriptPath(target, 'sess-1'), 'utf8')).toBe(transcript)
+    expect(readFileSync(claudeTranscriptPath(source, 'sess-1'), 'utf8')).toBe(transcript)
+  })
+
+  test('relocation preserves a longer destination transcript and refuses divergence', async () => {
+    const source = join(root, 'before')
+    const target = join(root, 'after')
+    putTranscript(source, 'sess-1', 'first\n')
+    putTranscript(target, 'sess-1', 'first\nsecond\n')
+    await relocateClaudeTranscript('sess-1', source, target)
+    expect(readFileSync(claudeTranscriptPath(target, 'sess-1'), 'utf8')).toBe('first\nsecond\n')
+    putTranscript(target, 'sess-1', 'different\n')
+    await expect(relocateClaudeTranscript('sess-1', source, target)).rejects.toThrow(/diverged/)
+    expect(readFileSync(claudeTranscriptPath(target, 'sess-1'), 'utf8')).toBe('different\n')
+  })
   test('a transcript goes under the target’s project folder, the scrollback keeps its name', async () => {
     const A = side('a', { sessions: ['sess-1'] })
     const B = side('b')

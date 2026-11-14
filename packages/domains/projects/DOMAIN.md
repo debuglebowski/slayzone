@@ -42,6 +42,13 @@ Read a folder with the helpers, never a column: `defaultProjectRoot(project)`
 
 - `CreateProjectDialog` / `ProjectSettingsDialog` / `DeleteProjectDialog`
 - `ProjectSelect` - Dropdown selector
+- `RelocateProjectDialog` — same-computer folder rename/move, or update the path
+  after a manual move. Both actions keep project/task IDs and history. The
+  computer repairs Git worktree links and task/chat folders, with a durable
+  per-hub recovery journal. Running project work and shared/nested project
+  folders block physical moves; moves across filesystems require moving files
+  manually and choosing Update path. The existing Repository Path field only
+  changes the folder reference.
 
 ## Dependencies
 

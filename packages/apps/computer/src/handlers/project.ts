@@ -24,6 +24,7 @@ import {
   projectListParamsSchema,
   projectResolvePathParamsSchema,
   projectSetPathParamsSchema,
+  projectRelocateParamsSchema,
   type ProjectListResult,
   type ProjectResolvePathResult,
   type ProjectSetPathResult
@@ -31,6 +32,7 @@ import {
 import { judgePath } from '../path-jail'
 import type { ProjectPathStore } from '../project-paths'
 import type { HandlerContext, HubMethodTable } from './types'
+import { createProjectRelocation } from '../project-relocation'
 
 /**
  * `getStore` rather than a store, because the map is read from disk and the
@@ -41,14 +43,24 @@ import type { HandlerContext, HubMethodTable } from './types'
  */
 export function createProjectHandlers(
   ctx: HandlerContext,
-  getStore: () => ProjectPathStore | null
-): HubMethodTable {
+  getStore: () => ProjectPathStore | null,
+  relocation?: {
+    assertIdle(projectId: string): void
+    remap(projectId: string, source: string, target: string): void | Promise<void>
+  }
+): HubMethodTable & { recoverRelocation(): Promise<void>; assertRelocationAvailable(): void } {
   const allow = (candidate: string): string => judgePath(candidate, ctx.config.allowedRoots)
   const store = (): ProjectPathStore => {
     const s = getStore()
     if (!s) throw new Error('project path store is still loading')
     return s
   }
+  const mover = createProjectRelocation({
+    store,
+    roots: () => [...ctx.config.allowedRoots],
+    assertIdle: (projectId) => relocation?.assertIdle(projectId),
+    remap: (projectId, source, target) => relocation?.remap(projectId, source, target)
+  })
 
   /**
    * `exists` is reported separately from `path` on purpose. A recorded path whose
@@ -65,6 +77,8 @@ export function createProjectHandlers(
   }
 
   async function setPath(rawParams: unknown): Promise<ProjectSetPathResult> {
+    await mover.recover()
+    mover.assertAvailable()
     const { projectId, path } = projectSetPathParamsSchema.parse(rawParams)
     // Jail first: a mapping that points outside allowedRoots would be recorded
     // as fact and then refused by every op that used it.
@@ -75,6 +89,8 @@ export function createProjectHandlers(
   }
 
   async function forgetPath(rawParams: unknown): Promise<{ ok: true }> {
+    await mover.recover()
+    mover.assertAvailable()
     const { projectId } = projectForgetPathParamsSchema.parse(rawParams)
     // Forgets the MAPPING only. The checkout stays on disk — deleting a user's
     // code on a machine they are not sitting at is unrecoverable, and nothing
@@ -98,8 +114,15 @@ export function createProjectHandlers(
   }
 
   return {
+    recoverRelocation: mover.recover,
+    assertRelocationAvailable: mover.assertAvailable,
     [HubToComputerMethods.projectResolvePath]: resolvePath,
     [HubToComputerMethods.projectSetPath]: setPath,
+    [HubToComputerMethods.projectRelocate]: async (raw: unknown) => {
+      await mover.recover()
+      const { projectId, sourcePath, path, mode } = projectRelocateParamsSchema.parse(raw)
+      return mover.move(projectId, sourcePath, path, mode)
+    },
     [HubToComputerMethods.projectForgetPath]: forgetPath,
     [HubToComputerMethods.projectList]: list
   }

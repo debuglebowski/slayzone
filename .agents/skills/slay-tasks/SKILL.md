@@ -21,7 +21,7 @@ Task commands are the core of the slay CLI. Most commands accept an optional `[i
 
 - `slay tasks view [id]` — show task details including status, priority, description, tags, and subtasks.
 
-- `slay tasks update [id] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]` — update a task. `--agent` switches the task's agent (e.g. `claude-code`, `codex`, `claude-chat`): stops the running one and starts a fresh conversation.
+- `slay tasks update [id] [--project <name|id>] [--title <title>] [--description <text>] [--append-description <text>] [--status <status>] [--priority <1-5>] [--due <date>] [--no-due] [--parent <id>] [--no-parent] [--permanent] [--agent <mode>]` — update a task. `--agent` switches the task's agent (e.g. `claude-code`, `codex`, `claude-chat`): stops the running one and starts a fresh conversation.
   - `--append-description` adds text after a newline separator (mutually exclusive with `--description`)
   - `--no-due` clears the due date
   - `--parent <id>` reparents under another task in the same project; `--no-parent` makes it top-level
@@ -111,3 +111,16 @@ Templates define defaults for new tasks: agent, status, priority, provider confi
   - `--no-default` unsets only this template's default flag
 
 - `slay templates delete <id>` — delete a template.
+
+## Move and copy
+
+- `slay tasks move [id] --project <name|id> [--hub <hub>] [--no-subtasks] [--no-sessions] [--no-wait] [--json]`
+- `slay tasks copy [id] --project <name|id> [--hub <hub>] [--title <title>] [--no-subtasks] [--no-wait] [--json]`
+- `slay projects move <project> --hub <hub> [--no-sessions] [--no-wait] [--json]`
+- `slay projects copy <project> [--hub <hub>] [--name <name>] [--no-wait] [--json]`
+- `slay tasks moves [list] [--json]` — task and project transfer journals.
+- `slay tasks moves pause|resume|cancel <id>` — ask the app to control a transfer.
+
+Destination `--hub` is an app-connected hub's ID or exact label. To choose a source hub, put the root option first: `slay --hub <source> tasks copy … --hub <destination>`.
+Same-hub operations execute through REST. Cross-hub operations queue durably on the source; a running app connected to both hubs resolves the destination and drives the existing transfer engine. Commands wait for completion by default; `--no-wait` returns the journal ID. A queued command waits for an app to connect.
+Copies assign new project/task/tab/artifact IDs, carry subtasks and files, remap internal blockers, and drop blockers outside the copied set. Chats start fresh; originals keep their sessions and remain writable. Integration-linked projects/tasks must be unlinked first. Existing Duplicate task behavior stays available in the UI.

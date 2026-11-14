@@ -45,6 +45,12 @@ export type TaskMoveScope = (typeof TASK_MOVE_SCOPES)[number]
 export interface TaskMove {
   id: string
   direction: 'out' | 'in'
+  /** Copy preserves the source and starts fresh agent sessions. */
+  runnerRequested?: boolean
+  runnerAction?: 'pause' | 'resume' | 'cancel' | null
+  mode?: 'move' | 'copy'
+  /** Durable source id to copied id mapping. */
+  copyIds?: Record<string, string>
   scope: TaskMoveScope
   /** A project move: the project (the same id on both hubs, so also `targetProjectId`). */
   projectId: string | null
@@ -71,6 +77,10 @@ export interface TaskMove {
 export const beginTaskMoveInputSchema = z.object({
   /** Client-chosen, so a retried begin is the same move. */
   id: z.string().uuid().optional(),
+  mode: z.enum(['move', 'copy']).default('move'),
+  /** Hand off target resolution and execution to a connected app. */
+  requestRunner: z.boolean().default(false),
+  title: z.string().min(1).optional(),
   taskIds: z.array(z.string().min(1)).min(1),
   targetHubId: z.string().min(1),
   targetProjectId: z.string().min(1),
@@ -86,6 +96,10 @@ export type BeginTaskMoveInput = z.input<typeof beginTaskMoveInputSchema>
 export const beginProjectMoveInputSchema = z.object({
   /** Client-chosen, so a retried begin is the same move. */
   id: z.string().uuid().optional(),
+  mode: z.enum(['move', 'copy']).default('move'),
+  /** Hand off target resolution and execution to a connected app. */
+  requestRunner: z.boolean().default(false),
+  name: z.string().min(1).optional(),
   projectId: z.string().min(1),
   targetHubId: z.string().min(1),
   includeSessions: z.boolean().default(true)
@@ -242,6 +256,7 @@ export interface ProjectMoveBundle {
 
 export interface TaskMoveBundle {
   moveId: string
+  copy?: { ids: Record<string, string>; title?: string; name?: string }
   /** A project move: the project's own rows. */
   project?: ProjectMoveBundle
   rootTaskIds: string[]
@@ -257,6 +272,7 @@ export interface TaskMoveBundle {
 export const exportTaskMoveInputSchema = z.object({ id: z.string().min(1) })
 
 export const importTaskMoveInputSchema = z.object({
+  mode: z.enum(['move', 'copy']).optional(),
   /** The hub the tasks come from (the app's registry id). */
   sourceHubId: z.string().min(1),
   targetProjectId: z.string().min(1),

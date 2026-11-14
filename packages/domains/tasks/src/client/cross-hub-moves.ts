@@ -53,7 +53,10 @@ export function useIsTaskMoving(taskId: string | null | undefined): boolean {
   return useTaskMovesStore((s) =>
     taskId
       ? Object.values(s.moves).some(
-          (m) => UNFINISHED.has(m.move.status) && m.move.taskIds.includes(taskId)
+          (m) =>
+            m.move.mode !== 'copy' &&
+            UNFINISHED.has(m.move.status) &&
+            m.move.taskIds.includes(taskId)
         )
       : false
   )
@@ -71,13 +74,31 @@ function journalOf(client: TasksTrpcClient): TaskMoveJournal {
   }
 }
 
-/** Run move `id` (journal on `sourceHubId`) to its end, pause or failure. */
+const activeDrivers = new Set<string>()
+
+/** Only one local driver may enter a journal, including concurrent reloads. */
 async function drive(id: string, sourceHubId: string): Promise<void> {
+  if (activeDrivers.has(id)) return
+  activeDrivers.add(id)
+  try {
+    await driveTransfer(id, sourceHubId)
+  } catch (error) {
+    console.warn('[task-moves] runner unavailable:', error)
+    setMove(id, { running: false })
+  } finally {
+    activeDrivers.delete(id)
+  }
+}
+
+/** Run move `id` (journal on `sourceHubId`) to its end, pause or failure. */
+async function driveTransfer(id: string, sourceHubId: string): Promise<void> {
   const tracked = useTaskMovesStore.getState().moves[id]
   if (tracked?.running) return
   const source = getClientForHub(sourceHubId) as unknown as TasksTrpcClient
   const first = await source.taskMoves.get.query({ id })
-  const target = getClientForHub(first.peerHubId) as unknown as TasksTrpcClient
+  const target = getClientForHub(
+    first.peerHubId === 'same-hub' ? sourceHubId : first.peerHubId
+  ) as unknown as TasksTrpcClient
   setMove(id, { move: first, sourceHubId, running: true, pauseRequested: false })
   const done = await runTaskMove(id, {
     journal: journalOf(source),
@@ -144,6 +165,10 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
   })
   setMove(id, { move: done, running: false })
   if (done.status === 'done') {
+    if (done.mode === 'copy') {
+      forget(id)
+      return
+    }
     // The tasks are the target hub's: every open tab and link resolves there now.
     const { noteProjectHub, noteTaskHub } = useHubOwnershipStore.getState()
     for (const taskId of done.taskIds) noteTaskHub(taskId, done.peerHubId)
@@ -155,6 +180,7 @@ async function drive(id: string, sourceHubId: string): Promise<void> {
 /** Begin moving `taskIds` to `targetProjectId` on `targetHubId`, and run it. */
 export async function startCrossHubMove(input: {
   sourceHubId: string
+  mode?: 'move' | 'copy'
   targetHubId: string
   targetProjectId: string
   taskIds: string[]
@@ -164,6 +190,7 @@ export async function startCrossHubMove(input: {
   const source = getClientForHub(input.sourceHubId) as unknown as TasksTrpcClient
   const move = await source.taskMoves.begin.mutate({
     id: crypto.randomUUID(),
+    mode: input.mode,
     taskIds: input.taskIds,
     targetHubId: input.targetHubId,
     targetProjectId: input.targetProjectId,
@@ -181,6 +208,7 @@ export async function startCrossHubMove(input: {
  */
 export async function startProjectMove(input: {
   sourceHubId: string
+  mode?: 'move' | 'copy'
   targetHubId: string
   projectId: string
   includeSessions?: boolean
@@ -188,6 +216,7 @@ export async function startProjectMove(input: {
   const source = getClientForHub(input.sourceHubId) as unknown as TasksTrpcClient
   const move = await source.taskMoves.beginProject.mutate({
     id: crypto.randomUUID(),
+    mode: input.mode,
     projectId: input.projectId,
     targetHubId: input.targetHubId,
     includeSessions: input.includeSessions ?? true
@@ -214,7 +243,9 @@ export async function resumeCrossHubMove(id: string): Promise<void> {
   const tracked = useTaskMovesStore.getState().moves[id]
   if (!tracked || tracked.running) return
   const client = getClientForHub(tracked.sourceHubId) as unknown as TasksTrpcClient
-  setMove(id, { move: await client.taskMoves.resume.mutate({ id }) })
+  const resumed = await client.taskMoves.resume.mutate({ id })
+  setMove(id, { move: resumed })
+  if (resumed.runnerRequested) return
   await drive(id, tracked.sourceHubId)
 }
 
@@ -235,9 +266,20 @@ export async function cancelCrossHubMove(id: string): Promise<void> {
   const tracked = useTaskMovesStore.getState().moves[id]
   if (!tracked || tracked.running) return
   const source = getClientForHub(tracked.sourceHubId) as unknown as TasksTrpcClient
-  const target = getClientForHub(tracked.move.peerHubId) as unknown as TasksTrpcClient
+  if (tracked.move.runnerRequested) {
+    await source.taskMoves.cancel.mutate({ id })
+    forget(id)
+    return
+  }
+  const target = getClientForHub(
+    tracked.move.peerHubId === 'same-hub' ? tracked.sourceHubId : tracked.move.peerHubId
+  ) as unknown as TasksTrpcClient
   // The target's copy first: an abort of a move it never imported is refused (NOT_FOUND).
-  await target.taskMoves.abort.mutate({ id }).catch(() => undefined)
+  await target.taskMoves.abort
+    .mutate({ id: tracked.move.mode === 'copy' ? `${id}-copy` : id })
+    .catch((error: unknown) => {
+      if ((error as { data?: { code?: string } }).data?.code !== 'NOT_FOUND') throw error
+    })
   await source.taskMoves.cancel.mutate({ id })
   forget(id)
 }
@@ -247,7 +289,10 @@ export async function cancelCrossHubMove(id: string): Promise<void> {
  * journal says are running but nobody here runs (the app quit or crashed mid-move).
  * Called at start and whenever a board reloads.
  */
-export async function syncCrossHubMoves(hubIds: readonly string[]): Promise<void> {
+export async function syncCrossHubMoves(
+  hubIds: readonly string[],
+  hubName?: (id: string) => string
+): Promise<void> {
   const seen = new Set<string>()
   for (const hubId of hubIds) {
     const client = getClientForHub(hubId) as unknown as TasksTrpcClient
@@ -258,6 +303,83 @@ export async function syncCrossHubMoves(hubIds: readonly string[]): Promise<void
       if (move.direction !== 'out') continue
       seen.add(move.id)
       const tracked = useTaskMovesStore.getState().moves[move.id]
+      if (move.runnerRequested && move.runnerAction) {
+        await client.taskMoves.clearAction.mutate({ id: move.id })
+        if (move.runnerAction === 'cancel') {
+          await client.taskMoves.cancel.mutate({ id: move.id })
+          forget(move.id)
+          continue
+        }
+        if (move.runnerAction === 'pause') {
+          await client.taskMoves.pause.mutate({ id: move.id })
+          continue
+        }
+        if (move.runnerAction === 'resume')
+          Object.assign(move, await client.taskMoves.resume.mutate({ id: move.id }))
+      }
+      if (move.runnerRequested && move.status === 'running') {
+        try {
+          const matches = hubIds.filter(
+            (id) =>
+              id === move.peerHubId || hubName?.(id).toLowerCase() === move.peerHubId.toLowerCase()
+          )
+          if (matches.length !== 1)
+            throw new Error(`Target hub not connected or ambiguous: ${move.peerHubId}`)
+          const targetId = matches[0]
+          let projectId = move.targetProjectId
+          if (move.scope === 'task') {
+            const target = getClientForHub(targetId) as unknown as TasksTrpcClient
+            const projects = await target.projects.list.query()
+            const exact = projects.filter((p) => p.id === projectId)
+            const found = exact.length
+              ? exact
+              : projects.filter(
+                  (p) =>
+                    p.name.toLowerCase().includes(projectId.toLowerCase()) ||
+                    p.id.startsWith(projectId)
+                )
+            if (found.length !== 1)
+              throw new Error(`Target project not found or ambiguous: ${projectId}`)
+            projectId = found[0].id
+          }
+          if (targetId === hubId && move.mode !== 'copy') {
+            if (move.scope === 'project') throw new Error('The project already belongs to this hub')
+            await client.taskMoves.finishLocal.mutate({ id: move.id, projectId })
+            forget(move.id)
+            continue
+          }
+          Object.assign(
+            move,
+            await client.taskMoves.resolveTarget.mutate({ id: move.id, hubId: targetId, projectId })
+          )
+          setMove(move.id, { move, sourceHubId: hubId, running: false, pauseRequested: false })
+          void drive(move.id, hubId)
+        } catch (error) {
+          if (move.status === 'running')
+            await client.taskMoves.fail.mutate({
+              id: move.id,
+              error: error instanceof Error ? error.message : String(error)
+            })
+        }
+        continue
+      }
+      if (move.runnerAction) {
+        setMove(move.id, {
+          move,
+          sourceHubId: hubId,
+          running: tracked?.running ?? false,
+          pauseRequested: tracked?.pauseRequested ?? false
+        })
+        if (move.runnerAction === 'cancel' && tracked?.running) {
+          await pauseCrossHubMove(move.id)
+          continue
+        }
+        await client.taskMoves.clearAction.mutate({ id: move.id })
+        if (move.runnerAction === 'pause') await pauseCrossHubMove(move.id)
+        if (move.runnerAction === 'resume') void resumeCrossHubMove(move.id)
+        if (move.runnerAction === 'cancel') await cancelCrossHubMove(move.id)
+        continue
+      }
       if (tracked?.running) continue
       setMove(move.id, {
         move,

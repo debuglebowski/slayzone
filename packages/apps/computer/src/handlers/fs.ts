@@ -39,6 +39,7 @@ import {
   listAllFiles as feListAllFiles,
   readDir as feReadDir,
   readFile as feReadFile,
+  readBytesAt as feReadBytesAt,
   searchFiles as feSearchFiles,
   subscribeFileWatcher
 } from '@slayzone/file-editor/server'
@@ -60,6 +61,7 @@ import {
   fsPathExistsParamsSchema,
   fsReadDirParamsSchema,
   fsReadFileParamsSchema,
+  fsReadBytesParamsSchema,
   fsRemoveDirParamsSchema,
   fsRenameParamsSchema,
   fsSearchFilesParamsSchema,
@@ -76,6 +78,10 @@ import {
   type FsListRootsResult,
   type FsReadDirResult,
   type FsReadFileResult,
+  type FsReadBytesResult,
+  type FsErrnoErrorData,
+  JSON_RPC_INTERNAL_ERROR,
+  RpcError,
   type FsSearchFilesResult
 } from '@slayzone/computer-transport/shared'
 import { isProtectedPath, jailedFs, judgePath, judgePathIn, type JailOptions } from '../path-jail'
@@ -252,6 +258,32 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
     return feReadFile(root, filePath, force)
   }
 
+  /**
+   * One slice of a file, judged like `fs.readFile`. Read from the JUDGED path (links
+   * resolved by the jail), never re-resolved from `root + rel`. The fs's own answer
+   * (`ENOENT`, `EISDIR`) rides as `data.errno` so the hub can say 404 rather than 500.
+   */
+  async function readBytesHandler(rawParams: unknown): Promise<FsReadBytesResult> {
+    const { rootPath, filePath, offset, length } = fsReadBytesParamsSchema.parse(rawParams)
+    const { path } = allowIn(rootPath, filePath)
+    try {
+      const r = await feReadBytesAt(path, offset, length)
+      return {
+        data: Buffer.from(r.bytes.buffer, r.bytes.byteOffset, r.bytes.byteLength).toString(
+          'base64'
+        ),
+        size: r.size,
+        mtimeMs: r.mtimeMs,
+        eof: r.eof
+      }
+    } catch (err) {
+      const errno = (err as NodeJS.ErrnoException | null)?.code
+      if (typeof errno !== 'string') throw err
+      const data: FsErrnoErrorData = { errno }
+      throw new RpcError(JSON_RPC_INTERNAL_ERROR, (err as Error).message, data)
+    }
+  }
+
   function writeFileHandler(rawParams: unknown): { ok: true } {
     const { rootPath, filePath, content } = fsWriteFileParamsSchema.parse(rawParams)
     jailedFs.writeFile(allowIn(rootPath, filePath, { access: 'write' }).path, content)
@@ -418,6 +450,7 @@ export function createFsHandlers(ctx: HandlerContext): FsHandlers {
 
     [HubToComputerMethods.fsReadDir]: readDirHandler,
     [HubToComputerMethods.fsReadFile]: readFileHandler,
+    [HubToComputerMethods.fsReadBytes]: readBytesHandler,
     [HubToComputerMethods.fsWriteFile]: writeFileHandler,
     [HubToComputerMethods.fsCreateFile]: createFileHandler,
     [HubToComputerMethods.fsCreateDir]: createDirHandler,

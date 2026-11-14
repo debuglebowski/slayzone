@@ -144,12 +144,17 @@ export function socketPeer(
         })
         .then(
           (result) => rpc.respond(id, result),
+          // Relayed whole: `data` carries the structured part of an answer (an fs
+          // errno, a refusal's detail) that the hub maps on — dropping it here made
+          // a missing file on a remote computer read as a server error.
           (err) =>
-            rpc.respondError(
-              id,
-              err instanceof RpcError ? err.code : -32000,
-              err instanceof Error ? err.message : 'local request failed'
-            )
+            err instanceof RpcError
+              ? rpc.respondError(id, err.code, err.message, err.data)
+              : rpc.respondError(
+                  id,
+                  -32000,
+                  err instanceof Error ? err.message : 'local request failed'
+                )
         )
         .catch(() => {
           rpc.dispose('local response could not be delivered')
