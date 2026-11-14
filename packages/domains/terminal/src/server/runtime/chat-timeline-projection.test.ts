@@ -106,19 +106,19 @@ async function clientView(p: TimelineProjection): Promise<ChatTimelineState> {
   const open = await p.openSnapshot()
   let state = decodeTimelineState(open.state)
   const sealed = open.summaries.length
-  const got = await p.pagesAsOf(
-    Array.from({ length: sealed }, (_, i) => i),
-    open.seq,
-    open.epoch
-  )
-  if (got.expired) throw new Error('expired')
-  for (const page of got.pages) {
-    state = reducer(state, {
-      type: 'rows-loaded',
-      from: page.from,
-      rows: page.rows,
-      epoch: open.epoch
-    })
+  // An answer carries a page budget of rows; what did not fit is asked again.
+  for (let wanted = Array.from({ length: sealed }, (_, i) => i); wanted.length > 0; ) {
+    const got = await p.pagesAsOf(wanted, open.seq, open.epoch)
+    if (got.expired) throw new Error('expired')
+    for (const page of got.pages) {
+      state = reducer(state, {
+        type: 'rows-loaded',
+        from: page.from,
+        rows: page.rows,
+        epoch: open.epoch
+      })
+    }
+    wanted = got.omitted ?? []
   }
   return state
 }
@@ -393,4 +393,75 @@ test('search: pages that may hold the text, a changed page always among them', a
   const pages = await p.searchPages('NEEDLE-xyz')
   expect(pages).toContain(0)
   expect(await p.searchPages('no such text anywhere 123')).toEqual([])
+})
+
+describe('pages answered within a byte budget (rows carry screenshots: 32 pages could pass 100 MiB)', () => {
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 5,
+    provider: 'claude',
+    askEveryTool: true
+  })
+
+  test('an answer stops at the budget (the first page always fits) and names what it left out; asking again completes the view', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const budget = 64 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    const open = await p.openSnapshot()
+    let state = decodeTimelineState(open.state)
+    let wanted = Array.from({ length: open.summaries.length }, (_, i) => i)
+    expect(wanted.length).toBeGreaterThan(4)
+    let answers = 0
+    while (wanted.length > 0) {
+      const got = await p.pagesAsOf(wanted, open.seq, open.epoch)
+      if (got.expired) throw new Error('expired')
+      answers++
+      const size = got.pages.reduce((n, page) => n + JSON.stringify(page.rows).length, 0)
+      if (got.pages.length > 1) expect(size).toBeLessThanOrEqual(budget)
+      expect(got.pages.length).toBeGreaterThan(0)
+      expect([...got.pages.map((x) => x.page), ...(got.omitted ?? [])]).toEqual(wanted)
+      for (const page of got.pages)
+        state = reducer(state, {
+          type: 'rows-loaded',
+          from: page.from,
+          rows: page.rows,
+          epoch: open.epoch
+        })
+      wanted = got.omitted ?? []
+    }
+    expect(answers).toBeGreaterThan(1)
+    expect(meaning(state)).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('opened from a paged history source: the same projection as from the array', async () => {
+    const history = buffered(events)
+    const fromArray = await TimelineProjection.open({
+      store: memoryStore().store,
+      history,
+      agentStartedTurns: true
+    })
+    const pagesRead: number[] = []
+    const fromPages = await TimelineProjection.open({
+      store: memoryStore().store,
+      history: {
+        lastSeq: history.at(-1)!.seq,
+        async *pages(after) {
+          const rest = history.filter((b) => b.seq > after)
+          for (let i = 0; i < rest.length; i += 500) {
+            pagesRead.push(i)
+            yield rest.slice(i, i + 500)
+          }
+        }
+      },
+      agentStartedTurns: true
+    })
+    expect(pagesRead.length).toBeGreaterThan(1)
+    expect(meaning(await clientView(fromPages))).toEqual(meaning(await clientView(fromArray)))
+  })
 })

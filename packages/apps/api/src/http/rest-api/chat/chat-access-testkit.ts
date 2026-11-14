@@ -9,12 +9,51 @@
 import { TypedEmitter } from '@slayzone/platform/events'
 import {
   chatSavedSummary,
+  clampChatHistoryPageBudget,
+  cutChatHistoryPage,
+  jsonByteLength,
   type AgentEvent,
+  type ChatHistoryPageBudget,
   type ChatSavedSummary,
   type ChatTurnStatus,
   type TerminalState
 } from '@slayzone/terminal-contracts'
+import {
+  TimelineProjection,
+  type TimelineProjectionStore
+} from '@slayzone/terminal/timeline-projection'
 import type { ChatAccess } from '../types'
+
+/** A projection store in memory (what the computer keeps in its chat SQLite). */
+function memoryTimelineStore(): TimelineProjectionStore {
+  const pages = new Map<number, { rows: string; summary: string; searchText: string }>()
+  let checkpoint: { version: string; seq: number; data: string } | null = null
+  return {
+    loadCheckpoint: async () => checkpoint,
+    loadPages: async (wanted) =>
+      wanted.flatMap((page) => {
+        const p = pages.get(page)
+        return p ? [{ page, rows: p.rows }] : []
+      }),
+    loadSummaries: async () =>
+      [...pages.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([page, p]) => ({ page, summary: p.summary })),
+    save: async (write) => {
+      if (write.dropPagesFrom !== null)
+        for (const page of [...pages.keys()]) if (page >= write.dropPagesFrom) pages.delete(page)
+      for (const p of write.pages)
+        pages.set(p.page, { rows: p.rows, summary: p.summary, searchText: p.searchText })
+      checkpoint = write.checkpoint
+    },
+    searchPages: async (needle) =>
+      [...pages.entries()].filter(([, p]) => p.searchText.includes(needle)).map(([page]) => page),
+    discard: async () => {
+      pages.clear()
+      checkpoint = null
+    }
+  }
+}
 
 export interface FakeChat {
   chat: ChatAccess
@@ -22,8 +61,24 @@ export interface FakeChat {
   calls: unknown[][]
   /** What `getTurnStatus` answers (null = no session on the computer). */
   status: ChatTurnStatus | null
-  /** The saved history `getBufferSince` returns. */
+  /** The saved history (what the computer's history reads serve, page by page). */
   buffer: Array<{ seq: number; event: AgentEvent; at?: number }>
+  /**
+   * Serve `openTimeline` from a real timeline projection of `buffer` (true), or
+   * answer `full` (false: an unusable projection / another reducer version).
+   */
+  projection: boolean
+  /** Byte budget of one history answer (page reads, timeline pages). */
+  pageBytes: number
+  /** `timelinePages` answers `expired` this many times next (the projection moved on). */
+  expirePages: number
+  /** `timelinePages` answers after this long (a slow computer). */
+  pagesDelayMs: number
+  /**
+   * Every history answer the "computer" sent: the op, its JSON size, and how many
+   * units (events, timeline pages) it carried — one unit may exceed a page budget.
+   */
+  historyAnswers: Array<{ op: string; bytes: number; units: number }>
   queue: Array<{ id: string; send: string; position: number; createdAt: string }>
   /** The live session's permission mode (`getInfo().chatMode`); undefined = not reported. */
   chatMode: string | undefined
@@ -62,6 +117,11 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
     calls: [],
     status: null,
     buffer: [],
+    projection: false,
+    pageBytes: 4 * 1024 * 1024,
+    expirePages: 0,
+    pagesDelayMs: 0,
+    historyAnswers: [],
     queue: [],
     chatMode: undefined,
     autoOptedIn: false,
@@ -81,6 +141,11 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
       fake.calls = []
       fake.status = { state: 'idle', turnOpen: false, pendingRequestIds: [], outboxInFlight: 0 }
       fake.buffer = []
+      fake.projection = false
+      fake.pageBytes = 4 * 1024 * 1024
+      fake.expirePages = 0
+      fake.pagesDelayMs = 0
+      fake.historyAnswers = []
       fake.queue = []
       fake.chatMode = undefined
       fake.autoOptedIn = false
@@ -96,6 +161,53 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
       return Promise.resolve(result)
     }
 
+  const answer = <T>(op: string, value: T, units = 0): T => {
+    fake.historyAnswers.push({ op, bytes: jsonByteLength(value), units })
+    return value
+  }
+  const sorted = () => [...fake.buffer].sort((a, b) => a.seq - b.seq)
+  /** The buffer sorted, with each event's size: computed once per buffer version (array + length). */
+  let index: {
+    buffer: FakeChat['buffer']
+    length: number
+    rows: FakeChat['buffer']
+    sizes: number[]
+  } | null = null
+  const indexed = () => {
+    if (index?.buffer !== fake.buffer || index.length !== fake.buffer.length) {
+      const rows = sorted()
+      index = {
+        buffer: fake.buffer,
+        length: fake.buffer.length,
+        rows,
+        sizes: rows.map((e) => jsonByteLength(e.event))
+      }
+    }
+    return index
+  }
+  /** The projection the computer keeps of `buffer` (rebuilt when the buffer changed). */
+  let projected: {
+    buffer: FakeChat['buffer']
+    key: string
+    projection: Promise<TimelineProjection>
+  } | null = null
+  const projectionOf = () => {
+    const history = sorted()
+    const key = `${history.length}:${fake.pageBytes}`
+    if (projected?.buffer !== fake.buffer || projected.key !== key)
+      projected = {
+        buffer: fake.buffer,
+        key,
+        projection: TimelineProjection.open({
+          store: memoryTimelineStore(),
+          history,
+          agentStartedTurns: true,
+          pageBudgetBytes: fake.pageBytes
+        })
+      }
+    return projected.projection
+  }
+
   const ops = {
     getInfo: (tabId: string) =>
       fake.status
@@ -110,7 +222,51 @@ export function createFakeChat(opts: { ptyTasks?: readonly string[] } = {}): Fak
           }
         : null,
     getTurnStatus: () => fake.status,
-    getBufferSince: () => fake.buffer,
+    // Whole-history reads: recorded, so a test can assert nobody makes them.
+    getBufferSince: (_tabId: string, afterSeq: number) =>
+      answer(
+        'getBufferSince',
+        sorted().filter((e) => e.seq > afterSeq)
+      ),
+    getEventPage: (_tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) => {
+      // Like the store: sizes known up front, only `maxEvents + 1` rows looked at.
+      const { rows, sizes } = indexed()
+      let from = 0
+      for (let hi = rows.length; from < hi; ) {
+        const mid = (from + hi) >> 1
+        if (rows[mid].seq <= afterSeq) from = mid + 1
+        else hi = mid
+      }
+      const limits = clampChatHistoryPageBudget({ maxBytes: fake.pageBytes, ...budget })
+      const window = rows.slice(from, from + limits.maxEvents + 1)
+      const cut = cutChatHistoryPage(
+        window.map((e, i) => ({ seq: e.seq, bytes: sizes[from + i] })),
+        { ...limits, maxBytes: Math.min(limits.maxBytes, fake.pageBytes) }
+      )
+      const events = cut.through === null ? [] : window.filter((e) => e.seq <= cut.through!)
+      return answer('getEventPage', { events, hasMore: cut.more }, events.length)
+    },
+    openTimeline: async (_tabId: string, version: string) => {
+      if (!fake.projection) return answer('openTimeline', { kind: 'full' as const })
+      const projection = await projectionOf()
+      const snapshot = await projection.openSnapshot()
+      if (snapshot.version !== version) return answer('openTimeline', { kind: 'full' as const })
+      return answer('openTimeline', {
+        kind: 'paged' as const,
+        snapshot,
+        events: [],
+        live: { afterSeq: snapshot.seq, liveSeq: 0, events: [] }
+      })
+    },
+    timelinePages: async (_tabId: string, pages: number[], asOfSeq: number, epoch: number) => {
+      if (fake.pagesDelayMs) await new Promise((r) => setTimeout(r, fake.pagesDelayMs))
+      if (fake.expirePages > 0) {
+        fake.expirePages--
+        return answer('timelinePages', { expired: true as const })
+      }
+      const got = await (await projectionOf()).pagesAsOf(pages, asOfSeq, epoch)
+      return answer('timelinePages', got, got.expired ? 0 : got.pages.length)
+    },
     getAutoEligibility: () => ({ eligible: fake.autoOptedIn, optedIn: fake.autoOptedIn }),
     respondPermission: record('respondPermission', true),
     interrupt: record('interrupt', {}),

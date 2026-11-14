@@ -79,3 +79,4 @@ export {
 } from './computer-chat'
 export * from './chat-command-schemas'
 export * from './chat-saved-summary'
+export * from './chat-history-pages'

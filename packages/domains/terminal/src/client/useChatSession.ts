@@ -9,7 +9,12 @@ import {
   type RefObject
 } from 'react'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
-import { chatViaDirect, noteDirectChatEvent, noteDirectChatLink } from './chat-direct'
+import {
+  chatViaDirect,
+  noteDirectChatEvent,
+  noteDirectChatLink,
+  readReplayPages
+} from './chat-direct'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
@@ -308,12 +313,10 @@ async function hydrateAndReplay({
       onError(null)
       return
     }
-    // Saved history + what is streaming right now, in one snapshot.
-    const replay = await reads.getReplay({
-      tabId: target.tabId,
-      afterSeq: -1
-    })
-    if (gen !== genRef.current) return
+    // Saved history + what is streaming right now, read in bounded pages (the last
+    // carries what streams), applied below in one piece.
+    const replay = await readReplayPages(reads, target.tabId, -1, () => gen !== genRef.current)
+    if (!replay || gen !== genRef.current) return
     openFull()
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
     // The whole history in ONE reducer batch (one render, linear time), with the
@@ -344,6 +347,37 @@ async function hydrateAndReplay({
       onHydrated()
     }
   }
+}
+
+type PagesAnswer =
+  | { expired: true }
+  | {
+      expired: false
+      pages: Array<{ page: number; from: number; rows: unknown[] }>
+      omitted?: number[]
+    }
+
+/**
+ * `timelinePages` for every page asked: an answer carries at most a byte budget of
+ * rows and names the pages it left out (`omitted`), which are asked for again at
+ * once. `expired` as soon as one answer is.
+ */
+async function timelinePagesAll(
+  io: Pick<ChatIo, 'timelinePages'>,
+  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number }
+): Promise<PagesAnswer> {
+  const pages: Array<{ page: number; from: number; rows: unknown[] }> = []
+  for (let wanted = input.pages; wanted.length > 0; ) {
+    const res = (await io.timelinePages({ ...input, pages: wanted })) as PagesAnswer
+    if (res.expired) return res
+    pages.push(...res.pages)
+    const asked = wanted
+    const again = (res.omitted ?? []).filter((page) => asked.includes(page))
+    // An answer with no page and nothing left out has nothing more to give.
+    if (res.pages.length === 0) break
+    wanted = again
+  }
+  return { expired: false, pages }
 }
 
 /** Pages asked for in one `timelinePages` request, at most. */
@@ -595,7 +629,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      chatIo.timelinePages({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
+      timelinePagesAll(chatIo, { tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
         (res) => {
           for (const page of wanted) loadingPagesRef.current.delete(page)
           if (gen !== genRef.current) return

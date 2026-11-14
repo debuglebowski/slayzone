@@ -1151,6 +1151,9 @@ export function composeServer(opts: {
     chatRuntimeReady: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatRuntimeReady !==
       false,
+    chatHistoryPages: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatHistoryPages ===
+      true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),

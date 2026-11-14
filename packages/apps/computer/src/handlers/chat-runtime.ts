@@ -78,6 +78,7 @@ import { createChatRelayFilter } from '../direct/chat-relay-filter'
 /** History reads a direct-link client may make (docs/direct-link.md). */
 export const DIRECT_CHAT_READS = new Set([
   'getReplay',
+  'getReplayPage',
   'openTimeline',
   'timelinePages',
   'searchTimeline'

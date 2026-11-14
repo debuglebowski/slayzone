@@ -11,6 +11,7 @@
  *
  * @module terminal/client/chat-direct
  */
+import { isChatReplayPage, type ChatHistoryPageEvent } from '@slayzone/terminal-contracts'
 import { noteDirectUse, type DirectLease } from '@slayzone/transport/direct-client'
 
 type Query<I, O> = { query(input: I): Promise<O> }
@@ -20,7 +21,11 @@ type Mutation<I, O> = { mutate(input: I): Promise<O> }
 export interface ChatHubSlice {
   chat: {
     openTimeline: Query<{ tabId: string; version: string }, unknown>
-    getReplay: Query<{ tabId: string; afterSeq: number }, unknown>
+    /** With `page`: one bounded page (an older peer answers the whole replay instead). */
+    getReplay: Query<
+      { tabId: string; afterSeq: number; page?: { maxBytes?: number; maxEvents?: number } },
+      unknown
+    >
     timelinePages: Query<
       { tabId: string; pages: number[]; asOfSeq: number; epoch: number },
       unknown
@@ -114,5 +119,45 @@ export function chatViaDirect<H extends ChatHubSlice>(
           Out<C['sendToolResult']>
         >
       ).mutate(input)
+  }
+}
+
+/** A whole replay: saved events after a seq, and what streams right now. */
+export interface WholeChatReplay {
+  events: ChatHistoryPageEvent[]
+  live: { afterSeq: number; liveSeq: number; events: unknown[] }
+}
+
+/**
+ * A tab's replay after `afterSeq`, one bounded page per read (2026-11-14: one
+ * whole-history answer closed the computer's socket). An older hub or computer
+ * answers the whole replay at once (no `hasMore`): that is the last page. Null:
+ * `stale` went true between reads.
+ */
+export async function readReplayPages(
+  io: {
+    getReplay(input: {
+      tabId: string
+      afterSeq: number
+      page: { maxBytes?: number; maxEvents?: number }
+    }): Promise<unknown>
+  },
+  tabId: string,
+  afterSeq: number,
+  stale: () => boolean = () => false
+): Promise<WholeChatReplay | null> {
+  const events: ChatHistoryPageEvent[] = []
+  for (let from = afterSeq; ; ) {
+    const answer = await io.getReplay({ tabId, afterSeq: from, page: {} })
+    if (stale()) return null
+    if (!isChatReplayPage(answer)) {
+      const whole = answer as WholeChatReplay
+      return { events: [...events, ...whole.events], live: whole.live }
+    }
+    events.push(...answer.events)
+    if (!answer.hasMore) return { events, live: answer.live }
+    const last = answer.events.at(-1)
+    if (!last) throw new Error('Chat history page was empty but not the last one')
+    from = last.seq
   }
 }

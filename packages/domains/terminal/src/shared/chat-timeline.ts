@@ -614,6 +614,12 @@ export interface ChatTimelineState {
    * scan of the timeline from the end finds, without the scan (`findUserItem`).
    */
   userIndex: PersistentIndex<readonly number[]>
+  /**
+   * Messages Stop took back (`user-message-popped`: their row is gone) → their last
+   * delivery: the outbox cancels them after the pop, and a waiter (`slay chat wait
+   * --until answered`) must still learn it. Only taken-back messages; small.
+   */
+  takenBack: PersistentIndex<{ delivery: UserDeliveryState; error?: string }>
   /** Rows of `conversation-branch` items, ascending (what the branch lookbacks read). */
   branchRows: readonly number[]
   /** Rows still streaming (text / thinking with a `stream`, a tool whose input streams). */
@@ -740,6 +746,7 @@ export function initialState(opts: { agentStartedTurns?: boolean } = {}): ChatTi
     usage: { contextTokens: null, contextWindow: null, sessionCostUsd: null, lastTotalCostUsd: 0 },
     ...initialPromptState(),
     userIndex: PersistentIndex.empty(),
+    takenBack: PersistentIndex.empty(),
     branchRows: [],
     streamingRows: [],
     turnStart: 0,
@@ -1254,7 +1261,14 @@ function setDelivery(
   error?: string
 ): ChatTimelineState {
   const at = findUserItem(state, id)
-  if (at < 0) return state
+  if (at < 0) {
+    // Taken back by Stop: no row, but its delivery is still asked for.
+    if (!state.takenBack.has(id)) return state
+    return {
+      ...state,
+      takenBack: state.takenBack.with(id, { delivery, ...(error ? { error } : {}) })
+    }
+  }
   const it = rowAt(state.timeline, at) as UserTextItem
   if (it.delivery === delivery && it.deliveryError === error) return state
   const wasFailed = it.delivery === 'failed'
@@ -1500,6 +1514,12 @@ function applyEvent(state: ChatTimelineState, event: AgentEvent, ts: number): Ch
                     )
                   : state.userIndex.without(it.id)
                 : state.userIndex,
+            takenBack: it.id
+              ? state.takenBack.with(it.id, {
+                  delivery: it.delivery ?? 'queued',
+                  ...(it.deliveryError ? { error: it.deliveryError } : {})
+                })
+              : state.takenBack,
             idlessOptimistic:
               it.optimistic && !it.id ? state.idlessOptimistic - 1 : state.idlessOptimistic,
             userMessagesSent: Math.max(0, state.userMessagesSent - 1)

@@ -39,7 +39,7 @@ permanent fallback.
 |---|---|---|
 | Terminal | attach, backfill (`getBufferSince`), live output, keystrokes | create, kill, resize, touch, interrupt, submit, state, exit, prompts |
 | Task data | reads of a task's computer-only data (`task.read`, robustness plan §9: sessions, prompt history, settings as they move off the hub) | the same reads through the relay (`taskData`); the hub keeps no copy, so an offline computer answers `computer-offline` |
-| Chat | history reads (`getReplay`, `openTimeline`, `timelinePages`, `searchTimeline`), the event stream, `saveDraft` without attachments, `saveScroll` | hydrate, `send`, queue, rewind / fork, `takeOver`, `interrupt`, `abortAndPop`, `respondPermission` and `sendToolResult` (the hub refuses them while the conversation runs in the terminal), drafts with attachments (the hub seals their bytes), exit, availability |
+| Chat | history reads (`getReplay` — one bounded page with `page`, `openTimeline`, `timelinePages`, `searchTimeline`), the event stream, `saveDraft` without attachments, `saveScroll` | hydrate, `send`, queue, rewind / fork, `takeOver`, `interrupt`, `abortAndPop`, `respondPermission` and `sendToolResult` (the hub refuses them while the conversation runs in the terminal), drafts with attachments (the hub seals their bytes), exit, availability |
 
 Clients today use only the direct reads and event stream; drafts and scroll stay on
 their hub calls (see *Follow-ups*). Permission and tool answers are hub calls by

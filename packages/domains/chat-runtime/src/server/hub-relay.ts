@@ -7,6 +7,9 @@ import {
   type ChatTabStateScope,
   chatAgentIdForTerminal,
   type AgentEvent,
+  type ChatEventPage,
+  type ChatReplayLive,
+  type ChatReplayPage,
   type ChatSavedSummary,
   type ChatSessionStateEntry
 } from '@slayzone/terminal-contracts'
@@ -81,9 +84,19 @@ const catalogMethods = new Set([
 const historyReadMethods = new Set([
   'getBufferSince',
   'getReplay',
+  'getEventPage',
+  'getReplayPage',
   'openTimeline',
   'timelinePages',
   'searchTimeline'
+])
+
+/** History reads served as bounded pages (`historyRead`). */
+const PAGED_HISTORY_METHODS = new Set([
+  'getEventPage',
+  'getReplayPage',
+  'getBufferSince',
+  'getReplay'
 ])
 
 /** Calls that open a tab's session on the computer: a send behind one waits for it. */
@@ -106,6 +119,12 @@ export function createHubChatRelay(opts: {
   /** Pure stop controls skip lifecycle/recovery frames unsupported by an old host. */
   stopRequest?: ChatComputerRequest
   chatRuntimeReady?(computerId: string): boolean
+  /**
+   * Whether this computer answers bounded history pages (`getEventPage`,
+   * `getReplayPage`; it advertised `chatHistoryPages`). False/absent: an older
+   * computer, asked for the whole reads it knows.
+   */
+  chatHistoryPages?(computerId: string): boolean
   hasLegacyTaskContent?(taskId: string): Promise<boolean>
   resolveMigrationComputer?(owner: HubChatOwnership): Promise<string | null>
   resolveComputer(taskId: string): Promise<string | null>
@@ -1392,6 +1411,8 @@ export function createHubChatRelay(opts: {
         entry?.release()
       }
       await opts.beforeInvoke?.(owner, method, args)
+      if (target === 'ops' && PAGED_HISTORY_METHODS.has(method))
+        return await historyRead(owner, method, args)
       const read =
         target === 'queue' ? method === 'list' : CHAT_READ_OPERATIONS.has(method as ChatOperation)
       const result = await opts.request(owner.computerId!, {
@@ -1433,6 +1454,54 @@ export function createHubChatRelay(opts: {
       entry?.release()
     }
   }
+  /**
+   * A history read, one bounded page per computer answer whenever the computer
+   * pages: a page read is forwarded; a whole read (an older client, or REST) is
+   * assembled here from pages, so no computer frame carries a whole history. An
+   * older computer gets the whole read it knows, answered as the last page.
+   */
+  async function historyRead(
+    owner: HubChatOwnership,
+    method: string,
+    args: unknown[]
+  ): Promise<unknown> {
+    const send = (name: string, values: unknown[]) =>
+      opts.request(owner.computerId!, {
+        kind: 'invoke',
+        value: {
+          route: { id: owner.id, epoch: owner.epoch },
+          target: 'ops',
+          method: name,
+          args: values
+        }
+      })
+    const paged = opts.chatHistoryPages?.(owner.computerId!) === true
+    const [tabId, afterSeq] = args as [string, number]
+    if (method === 'getEventPage' || method === 'getReplayPage') {
+      if (paged) return send(method, args)
+      if (method === 'getEventPage') {
+        const events = (await send('getBufferSince', [tabId, afterSeq])) as ChatEventPage['events']
+        return { events, hasMore: false } satisfies ChatEventPage
+      }
+      const replay = (await send('getReplay', [tabId, afterSeq])) as {
+        events: ChatEventPage['events']
+        live: ChatReplayLive
+      }
+      return { events: replay.events, hasMore: false, live: replay.live } satisfies ChatReplayPage
+    }
+    if (!paged) return send(method, args)
+    const pageMethod = method === 'getReplay' ? 'getReplayPage' : 'getEventPage'
+    const events: ChatEventPage['events'] = []
+    for (let from = afterSeq; ; ) {
+      const page = (await send(pageMethod, [tabId, from])) as ChatReplayPage
+      events.push(...page.events)
+      if (!page.hasMore) return method === 'getReplay' ? { events, live: page.live } : events
+      const last = page.events.at(-1)
+      if (!last) throw new Error('Chat history page was empty but not the last one')
+      from = last.seq
+    }
+  }
+
   async function catalogCall(
     method: ChatCatalogOperation,
     context: ChatCatalogContext,

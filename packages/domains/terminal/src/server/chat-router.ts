@@ -134,6 +134,20 @@ function testing() {
   if (!port) throw new Error('Test computer storage unavailable')
   return port
 }
+
+/**
+ * Read one bounded page of history (a byte / event budget; the server clamps it to
+ * its maxima). Absent: an older client asking for the whole read.
+ */
+type ChatOpsOf = ReturnType<typeof getChatDeps>['ops']
+
+const historyPageInput = z
+  .object({
+    maxBytes: z.number().int().positive().optional(),
+    maxEvents: z.number().int().positive().optional()
+  })
+  .optional()
+
 export const chatRouter = router({
   testSeedEvents: publicProcedure
     .input(
@@ -455,13 +469,36 @@ export const chatRouter = router({
     .input(z.object({ tabId: z.string() }))
     .mutation(({ input }) => ops().remove(input.tabId)),
   reset: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().reset(input)),
+  // Saved events after `afterSeq`. With `page`: ONE bounded page (`ChatEventPage`,
+  // `hasMore`: read on); without (older clients): all of them, assembled from pages.
   getBufferSince: publicProcedure
-    .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
-    .query(({ input }) => ops().getBufferSince(input.tabId, input.afterSeq)),
+    .input(z.object({ tabId: z.string(), afterSeq: z.number(), page: historyPageInput }))
+    .query(
+      async ({
+        input
+      }): Promise<
+        | Awaited<ReturnType<ChatOpsOf['getBufferSince']>>
+        | Awaited<ReturnType<ChatOpsOf['getEventPage']>>
+      > =>
+        input.page
+          ? ops().getEventPage(input.tabId, input.afterSeq, input.page)
+          : ops().getBufferSince(input.tabId, input.afterSeq)
+    ),
   // Saved events + what is streaming right now, in one snapshot (reload mid-reply).
+  // With `page`: ONE bounded page (`ChatReplayPage`; the last carries the live part).
   getReplay: publicProcedure
-    .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
-    .query(({ input }) => ops().getReplay(input.tabId, input.afterSeq)),
+    .input(z.object({ tabId: z.string(), afterSeq: z.number(), page: historyPageInput }))
+    .query(
+      async ({
+        input
+      }): Promise<
+        | Awaited<ReturnType<ChatOpsOf['getReplay']>>
+        | Awaited<ReturnType<ChatOpsOf['getReplayPage']>>
+      > =>
+        input.page
+          ? ops().getReplayPage(input.tabId, input.afterSeq, input.page)
+          : ops().getReplay(input.tabId, input.afterSeq)
+    ),
   // Paged history: open from the hub's timeline projection (`full`: use getReplay),
   // rows of older pages as of the client's newest event, pages that may hold a query.
   openTimeline: publicProcedure

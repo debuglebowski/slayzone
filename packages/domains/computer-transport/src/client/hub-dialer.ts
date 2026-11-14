@@ -347,7 +347,9 @@ export class HubDialer {
       directAddress: this.opts.identity.directAddress?.() ?? null,
       directRtc: this.opts.identity.directRtc?.() ?? false,
       // The grant registry of this release enforces `notAfter` (apps/computer grants.ts).
-      directNotAfter: true
+      directNotAfter: true,
+      // This release's chat runtime answers history in bounded pages.
+      chatHistoryPages: true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -391,7 +393,8 @@ export class HubDialer {
             ...(this.opts.identity.hostId ? { hostId: this.opts.identity.hostId } : {}),
             directAddress: this.opts.identity.directAddress?.() ?? null,
             directRtc: this.opts.identity.directRtc?.() ?? false,
-            directNotAfter: true
+            directNotAfter: true,
+            chatHistoryPages: true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

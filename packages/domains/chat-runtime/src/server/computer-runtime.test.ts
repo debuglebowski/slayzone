@@ -307,7 +307,14 @@ test('queue handoff survives a crash until its user-message event commits', asyn
     1
   )
   expect(await next.local.queue.list('tab-a')).toEqual([])
-  expect((await next.local.data.loadChatEvents('tab-a'))[0].event).toMatchObject({
+  expect(
+    (
+      await next.local.data.loadChatEventsPage('tab-a', -1, Number.MAX_SAFE_INTEGER, {
+        maxBytes: 1024 * 1024,
+        maxEvents: 100
+      })
+    ).events[0].event
+  ).toMatchObject({
     id: 'queued-message',
     text: 'hello'
   })
@@ -557,4 +564,58 @@ test('side questions and live-setting guards use the injected transport', async 
   await expect(ops.setModel({ ...createOpts, chatModel: 'sonnet' })).rejects.toThrow(
     /during this turn/
   )
+})
+
+test('user message lookup (Codex history import) reads only the wanted messages, a window at a time', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  const save = r.local.data.persistChatEventSync!
+  // ~24 MB of screenshot-sized output around two messages.
+  let seq = 0
+  save(
+    'tab-a',
+    seq++,
+    {
+      kind: 'user-message',
+      id: 'm-old',
+      text: 'first',
+      content: [{ type: 'text', text: 'first' }]
+    },
+    1
+  )
+  for (let i = 0; i < 24; i++)
+    save('tab-a', seq++, { kind: 'stderr', text: `${i}:${'x'.repeat(1_000_000)}` }, 1)
+  save(
+    'tab-a',
+    seq++,
+    {
+      kind: 'user-message',
+      id: 'm-new',
+      text: 'second',
+      content: [{ type: 'text', text: 'second' }]
+    },
+    1
+  )
+  // Another task on the loop: it runs whenever the lookup gives the loop back.
+  let ticks = 0
+  let stop = false
+  const spin = () => {
+    ticks++
+    if (!stop) setImmediate(spin)
+  }
+  setImmediate(spin)
+  const parse = vi.spyOn(JSON, 'parse')
+  try {
+    const found = await r.local.data.loadUserMessageContent!('task-a', ['m-old', 'm-new', 'm-none'])
+    expect([...found.keys()].sort()).toEqual(['m-new', 'm-old'])
+    expect(found.get('m-new')).toEqual([{ type: 'text', text: 'second' }])
+    // Only rows holding a wanted id were parsed: never the screenshots.
+    const parsed = parse.mock.calls.map(([text]) => String(text).length)
+    expect(Math.max(0, ...parsed)).toBeLessThan(100_000)
+  } finally {
+    parse.mockRestore()
+    stop = true
+  }
+  // The loop ran between the windows (24 MB is several 4 MiB windows).
+  expect(ticks).toBeGreaterThan(3)
 })

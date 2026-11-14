@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { createChatTransport } from './chat-transport-manager'
+import { createChatTransport, memoryChatEventReads } from './chat-transport-manager'
 
 const runtimes: Array<ReturnType<typeof createChatTransport>> = []
 afterEach(async () => {
@@ -9,11 +9,10 @@ test('independent runtime instances do not share tabs, event logs or emitters', 
   function runtime(text: string) {
     const value = createChatTransport({
       eventStore: {
-        load: async () => [
-          { seq: 0, at: 1, event: { kind: 'assistant-text', messageId: 'm', text } }
-        ],
         insert: async () => 'inserted',
-        readRange: async () => []
+        ...memoryChatEventReads(() => [
+          { seq: 0, at: 1, event: { kind: 'assistant-text', messageId: 'm', text } }
+        ])
       }
     })
     runtimes.push(value)
@@ -54,8 +53,7 @@ test('a failed durable event save stops the process and reports a live storage e
     whichBinary: async () => '/fake/claude',
     broadcastEvent: (_tab, event, _seq, live) => broadcast.push({ event, live }),
     eventStore: {
-      load: async () => [],
-      readRange: async () => [],
+      ...memoryChatEventReads(() => []),
       insert: async () => 'inserted',
       insertSync: (_tab, _seq, event) => {
         if (event.kind === 'assistant-text') throw new Error('disk full')

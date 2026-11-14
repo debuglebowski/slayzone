@@ -279,15 +279,13 @@ export function transportHarness(
     broadcastExit: () => undefined,
     broadcastStateChange: (_id, state) => h.states.push(state),
     eventStore: {
-      load: async () => opts.history ?? [],
       insert: async (_tab, seq, event, at) => {
         h.rows.push({ seq, event, at })
         return 'inserted'
       },
-      readRange: async (_tab, after, before) =>
-        [...(opts.history ?? []), ...h.rows]
-          .filter((r) => r.seq > after && r.seq < before)
-          .sort((a, b) => a.seq - b.seq)
+      ...mgr.memoryChatEventReads(() =>
+        [...(opts.history ?? []), ...h.rows].sort((a, b) => a.seq - b.seq)
+      )
     },
     ...(opts.timings ? { watchdogTimings: opts.timings } : {}),
     ...opts.deps

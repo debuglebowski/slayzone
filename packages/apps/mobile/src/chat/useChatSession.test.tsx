@@ -68,6 +68,31 @@ describe('useChatSession', () => {
     expect(result.current.state.timeline.map((i) => i?.kind)).toEqual(['user-text'])
   })
 
+  it('reads the history in bounded pages, carrying on after the last event of each', async () => {
+    const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
+    const history = Array.from({ length: 9 }, (_, seq) => ({
+      seq,
+      event: { kind: 'user-message', id: `u${seq}`, text: `m${seq}` }
+    }))
+    const asked: Array<{ afterSeq: number; page?: unknown }> = []
+    hub.on('chat.getReplay', (input) => {
+      asked.push(input)
+      const rest = history.filter((e) => e.seq > input.afterSeq)
+      const events = rest.slice(0, 4)
+      return rest.length > 4
+        ? { events, hasMore: true }
+        : { events, hasMore: false, live: { afterSeq: 8, liveSeq: 0, events: [] } }
+    })
+    const { wrapper } = trpcTest(hub.backend)
+    const { result } = await renderHook(() => useChatSession(target), { wrapper })
+    await waitFor(() => expect(result.current.hydrating).toBe(false))
+    expect(asked.map((a) => a.afterSeq)).toEqual([-1, 3, 7])
+    for (const a of asked) expect(a.page).toBeDefined()
+    expect(
+      result.current.state.timeline.flatMap((i) => (i?.kind === 'user-text' ? [i.text] : []))
+    ).toEqual(history.map((e) => e.event.text))
+  })
+
   it("reads a turn Claude Code starts by itself (a background task's answer) as working", async () => {
     const hub = fakeHub({ tabId: target.tabId, taskId: target.taskId })
     hub.on('chat.getReplay', () => ({

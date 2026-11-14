@@ -4,12 +4,29 @@
  */
 import { expect, test, vi } from 'vitest'
 import type { AgentEvent } from '@slayzone/terminal-contracts'
-import { ChatEventLog, type ChatEventPersistence } from './chat-events-store'
+import { CHAT_HISTORY_PAGE_MAX_BYTES, jsonByteLength } from '@slayzone/terminal-contracts'
+import {
+  ChatEventLog,
+  pageOfRows,
+  tailStartOfRows,
+  type BufferedEvent,
+  type ChatEventPersistence
+} from './chat-events-store'
+
+const noReads = {
+  readPage: async () => ({ events: [], bytes: [], more: false }),
+  tailStart: async () => null
+} satisfies Pick<ChatEventPersistence, 'readPage' | 'tailStart'>
 
 function memoryStore(opts: { delayMs?: number; readDelayMs?: number } = {}) {
   const rows = new Map<string, { seq: number; event: AgentEvent; at?: number }>()
   const order: number[] = []
   const reads: Array<[number, number]> = []
+  const sorted = (tabId: string): BufferedEvent[] =>
+    [...rows.entries()]
+      .filter(([k]) => k.startsWith(`${tabId}:`))
+      .map(([, r]) => r)
+      .sort((a, b) => a.seq - b.seq)
   const persistence: ChatEventPersistence = {
     insert: async (tabId, seq, event, at) => {
       if (opts.delayMs) await new Promise((r) => setTimeout(r, Math.random() * opts.delayMs!))
@@ -19,14 +36,12 @@ function memoryStore(opts: { delayMs?: number; readDelayMs?: number } = {}) {
       order.push(seq)
       return 'inserted'
     },
-    readRange: async (tabId, afterSeq, beforeSeq) => {
+    readPage: async (tabId, afterSeq, beforeSeq, budget) => {
       reads.push([afterSeq, beforeSeq])
       if (opts.readDelayMs) await new Promise((r) => setTimeout(r, opts.readDelayMs))
-      return [...rows.entries()]
-        .filter(([k, r]) => k.startsWith(`${tabId}:`) && r.seq > afterSeq && r.seq < beforeSeq)
-        .map(([, r]) => r)
-        .sort((a, b) => a.seq - b.seq)
-    }
+      return pageOfRows(sorted(tabId), afterSeq, beforeSeq, budget)
+    },
+    tailStart: async (tabId, count) => tailStartOfRows(sorted(tabId), count)
   }
   return { rows, order, reads, persistence }
 }
@@ -89,7 +104,7 @@ test('a failed write is reported and does not stop later writes', async () => {
         written.push(seq)
         return 'inserted'
       },
-      readRange: async () => []
+      ...noReads
     },
     { events: [], nextSeq: 0 },
     { onWriteError: (seq) => errors.push(seq) }
@@ -206,7 +221,7 @@ test('synchronous persistence finishes before an event enters the visible log', 
         writes.push(seq)
         return 'inserted'
       },
-      readRange: async () => []
+      ...noReads
     },
     { events: [], nextSeq: 0 }
   )
@@ -225,7 +240,7 @@ test('a failed synchronous save does not publish or consume an event sequence', 
         if (full) throw new Error('disk full')
         return 'inserted'
       },
-      readRange: async () => []
+      ...noReads
     },
     { events: [], nextSeq: 0 }
   )
@@ -236,4 +251,113 @@ test('a failed synchronous save does not publish or consume an event sequence', 
   expect(log.lastSeq).toBe(-1)
   full = false
   expect(log.append({ kind: 'assistant-text', messageId: 'm', text: 'saved' }).seq).toBe(0)
+})
+
+// --- Bounded pages (crash 2026-11-14: one whole-history read = a 202 MB frame) ----
+
+const blob = (seq: number, kb: number): BufferedEvent => ({
+  seq,
+  event: { kind: 'stderr', text: `${seq}:${'x'.repeat(kb * 1024)}` }
+})
+
+test('readPage stops at the byte budget, never splits or drops an event, and pages add up to the history', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 5 })
+  for (let i = 0; i < 40; i++) log.append(blob(i, 100).event)
+  await log.flush()
+  const budget = { maxBytes: 350 * 1024 }
+  const all: BufferedEvent[] = []
+  let from = -1
+  for (;;) {
+    const page = await log.readPage(from, budget)
+    const bytes = page.events.reduce((n, e) => n + jsonByteLength(e.event), 0)
+    expect(page.events.length).toBeGreaterThan(0)
+    expect(bytes).toBeLessThanOrEqual(budget.maxBytes)
+    all.push(...page.events)
+    from = page.events.at(-1)!.seq
+    if (!page.hasMore) break
+  }
+  expect(seqs(all)).toEqual(range(0, 39))
+  expect(all).toEqual(await log.readSince(-1))
+})
+
+test('one event larger than the budget is a page of its own', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 1 })
+  log.append(blob(0, 64).event)
+  log.append(blob(1, 64).event)
+  await log.flush()
+  const first = await log.readPage(-1, { maxBytes: 1024 })
+  expect(seqs(first.events)).toEqual([0])
+  expect(first.hasMore).toBe(true)
+  const second = await log.readPage(0, { maxBytes: 1024 })
+  expect(seqs(second.events)).toEqual([1])
+  expect(second.hasMore).toBe(false)
+})
+
+test('a page never asks for more than the caller budget allows, nor above the maximum', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
+  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  await log.flush()
+  expect(seqs((await log.readPage(-1, { maxEvents: 3 })).events)).toEqual([0, 1, 2])
+  const huge = await log.readPage(-1, { maxBytes: CHAT_HISTORY_PAGE_MAX_BYTES * 100 })
+  expect(huge.events.length).toBeGreaterThan(0)
+})
+
+test('open() seeds the cache from the store tail only: older rows are never read', async () => {
+  const store = memoryStore()
+  for (let seq = 0; seq < 50; seq++) store.rows.set(`tab:${seq}`, { seq, event: text(String(seq)) })
+  const log = await ChatEventLog.open('tab', store.persistence, 50, { cap: 10 })
+  expect(seqs(log.events)).toEqual(range(40, 49))
+  expect(store.reads.every(([after]) => after >= 39)).toBe(true)
+  expect(log.append(text('next')).seq).toBe(50)
+  // The rest is still reachable, page by page.
+  expect(seqs(await log.readSince(-1))).toEqual(range(0, 50))
+})
+
+test('open() of a short or empty history keeps all of it, and honours the sequence floor', async () => {
+  const store = memoryStore()
+  expect((await ChatEventLog.open('tab', store.persistence, 7)).lastSeq).toBe(6)
+  for (let seq = 0; seq < 3; seq++) store.rows.set(`tab:${seq}`, { seq, event: text(String(seq)) })
+  const log = await ChatEventLog.open('tab', store.persistence, 0, { cap: 10 })
+  expect(seqs(log.events)).toEqual([0, 1, 2])
+  expect(log.lastSeq).toBe(2)
+})
+
+test('pages() lets the event loop run between pages', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 2 })
+  for (let i = 0; i < 6; i++) log.append(text(String(i)))
+  await log.flush()
+  // Another task on the loop: it runs whenever the read gives the loop back.
+  let ticks = 0
+  let stop = false
+  const spin = () => {
+    ticks++
+    if (!stop) setImmediate(spin)
+  }
+  setImmediate(spin)
+  const seen: number[] = []
+  try {
+    for await (const page of log.pages(-1, { budget: { maxEvents: 1 } })) {
+      seen.push(ticks)
+      expect(page).toHaveLength(1)
+    }
+  } finally {
+    stop = true
+  }
+  for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1])
+  expect(seen).toHaveLength(6)
+})
+
+test('pages() stops before `beforeSeq`', async () => {
+  const store = memoryStore()
+  const log = new ChatEventLog('tab', store.persistence, { events: [], nextSeq: 0 }, { cap: 3 })
+  for (let i = 0; i < 10; i++) log.append(text(String(i)))
+  await log.flush()
+  const got: number[] = []
+  for await (const page of log.pages(-1, { beforeSeq: 6, budget: { maxEvents: 2 } }))
+    got.push(...seqs(page))
+  expect(got).toEqual(range(0, 5))
 })

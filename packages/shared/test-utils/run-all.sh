@@ -882,6 +882,9 @@ run_harness packages/domains/chat-runtime/src/server/hub-availability.test.ts
 run_harness packages/domains/chat-runtime/src/server/migration.test.ts
 run_harness packages/domains/chat-runtime/src/server/legacy-source.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-relay.test.ts
+# Hub ↔ computer history reads are bounded pages (whole reads assembled from them); an
+# older computer without `chatHistoryPages` gets the whole read it knows, as one last page.
+run_harness packages/domains/chat-runtime/src/server/hub-relay-history-pages.test.ts
 # Chat robustness 2026-11-09: retirements, provider-switch supersession, consistency rules.
 run_harness packages/domains/chat-runtime/src/server/hub-retirements.test.ts
 run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
@@ -1090,6 +1093,9 @@ run_harness packages/apps/api/src/http/rest-api/tasks/progress.test.ts
 run_harness packages/apps/api/src/http/rest-api/tasks/reset-conversation.test.ts
 # /api/chat/* (slay chat) against a stub chat runtime: addressing, prompts, send, wait outcomes.
 run_harness packages/apps/api/src/http/rest-api/chat/chat.test.ts
+# Chat REST routes read history in bounded pages (projection snapshot / event pages), never
+# one whole-history answer; each route equals its whole-history result.
+run_harness packages/apps/api/src/http/rest-api/chat/chat-history-bounded.test.ts
 # /api/agent/* (slay agent): one surface dispatching to the chat core or the pty runtime.
 run_harness packages/apps/api/src/http/rest-api/agent/agent.test.ts
 run_harness packages/apps/api/src/http/rest-api/tags/crud.test.ts

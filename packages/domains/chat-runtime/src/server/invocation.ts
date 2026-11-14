@@ -19,6 +19,8 @@ const tabOperations = new Set([
   'remove',
   'getReplay',
   'getBufferSince',
+  'getReplayPage',
+  'getEventPage',
   'getInfo',
   'getTurnStatus',
   'openTimeline',

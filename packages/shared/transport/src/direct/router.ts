@@ -155,7 +155,7 @@ export interface DirectChatService {
   read(
     tabId: string,
     epoch: number,
-    method: 'getReplay' | 'openTimeline' | 'timelinePages' | 'searchTimeline',
+    method: 'getReplay' | 'getReplayPage' | 'openTimeline' | 'timelinePages' | 'searchTimeline',
     args: unknown[]
   ): Promise<unknown>
   command(
@@ -350,11 +350,30 @@ export function createDirectRouter(services: DirectRouterServices) {
      * hub calls.
      */
     chat: t.router({
+      // With `page`: one bounded page (the hub's paged `getReplay`); without: the whole
+      // replay (older clients).
       getReplay: t.procedure
-        .input(z.object({ tabId, afterSeq: z.number() }))
+        .input(
+          z.object({
+            tabId,
+            afterSeq: z.number(),
+            page: z
+              .object({
+                maxBytes: z.number().int().positive().optional(),
+                maxEvents: z.number().int().positive().optional()
+              })
+              .optional()
+          })
+        )
         .query(({ ctx, input }) => {
           const { service, epoch } = chatFor(ctx, input.tabId)
-          return service.read(input.tabId, epoch, 'getReplay', [input.tabId, input.afterSeq])
+          return input.page
+            ? service.read(input.tabId, epoch, 'getReplayPage', [
+                input.tabId,
+                input.afterSeq,
+                input.page
+              ])
+            : service.read(input.tabId, epoch, 'getReplay', [input.tabId, input.afterSeq])
         }),
       openTimeline: t.procedure
         .input(z.object({ tabId, version: z.string().max(200) }))

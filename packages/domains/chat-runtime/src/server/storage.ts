@@ -9,7 +9,12 @@ import {
   type ItemFaultRow
 } from '@slayzone/platform/isolation'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
-import type { AgentEvent, ChatAttachment } from '@slayzone/terminal-contracts'
+import {
+  cutChatHistoryPage,
+  type AgentEvent,
+  type ChatAttachment,
+  type ChatHistoryPageBudget
+} from '@slayzone/terminal-contracts'
 import type {
   ChatMigrationSnapshot,
   ChatTransferManifest,
@@ -364,6 +369,80 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         )
         .all(id, afterSeq, beforeSeq) as Array<{ seq: number; saved_at: number; event: string }>
     ).map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
+  }
+  /**
+   * Where ONE page of `read(id, afterSeq, beforeSeq)` ends, from the rows' sizes in
+   * their record headers (`octet_length`, no body loaded): the first row always
+   * fits. `more`: rows follow the page in the range.
+   */
+  function pageBounds(
+    id: string,
+    afterSeq: number,
+    beforeSeq: number,
+    budget: Required<ChatHistoryPageBudget>
+  ): { through: number | null; more: boolean; sizes: Map<number, number> } {
+    const sizes = db
+      .prepare(
+        'SELECT seq, octet_length(event) AS bytes FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq LIMIT ?'
+      )
+      .all(id, afterSeq, beforeSeq, budget.maxEvents + 1) as Array<{ seq: number; bytes: number }>
+    return {
+      ...cutChatHistoryPage(sizes, budget),
+      sizes: new Map(sizes.map((r) => [r.seq, r.bytes]))
+    }
+  }
+  /**
+   * ONE page of `read(id, afterSeq, beforeSeq)`: cut at the budget from the rows'
+   * stored sizes (`pageBounds`), then only its rows are loaded and parsed.
+   */
+  function readPage(
+    id: string,
+    afterSeq: number,
+    beforeSeq: number,
+    budget: Required<ChatHistoryPageBudget>
+  ): { events: StoredChatEvent[]; bytes: number[]; more: boolean } {
+    const bounds = pageBounds(id, afterSeq, beforeSeq, budget)
+    if (bounds.through === null) return { events: [], bytes: [], more: false }
+    const events = read(id, afterSeq, bounds.through + 1)
+    return {
+      events,
+      bytes: events.map((e) => bounds.sizes.get(e.seq) ?? 0),
+      more: bounds.more
+    }
+  }
+  /**
+   * Events with `afterSeq < seq < beforeSeq` whose stored JSON contains one of
+   * `needles` — SQLite filters, only the matching rows are parsed (a caller still
+   * checks what it parsed: a needle can occur anywhere in an event).
+   */
+  function readMatching(
+    id: string,
+    afterSeq: number,
+    beforeSeq: number,
+    needles: readonly string[]
+  ): StoredChatEvent[] {
+    if (needles.length === 0) return []
+    return (
+      db
+        .prepare(
+          `SELECT seq,saved_at,event FROM events WHERE conversation_id=? AND seq>? AND seq<? AND (${needles
+            .map(() => 'instr(event, ?) > 0')
+            .join(' OR ')}) ORDER BY seq`
+        )
+        .all(id, afterSeq, beforeSeq, ...needles) as Array<{
+        seq: number
+        saved_at: number
+        event: string
+      }>
+    ).map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
+  }
+  /** Seq of the `count`-th newest event (index only); null when there are fewer. */
+  function tailStart(id: string, count: number): number | null {
+    if (count < 1) return null
+    const r = db
+      .prepare('SELECT seq FROM events WHERE conversation_id=? ORDER BY seq DESC LIMIT 1 OFFSET ?')
+      .get(id, count - 1) as { seq: number } | undefined
+    return r?.seq ?? null
   }
   function records(id: string, kind?: ChatRecord['kind']): ChatRecord[] {
     return (
@@ -876,6 +955,10 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       })()
     },
     read,
+    readPage,
+    pageBounds,
+    readMatching,
+    tailStart,
     records,
     /** See `store_identity`. */
     storeId: () => storeId,

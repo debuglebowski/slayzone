@@ -102,6 +102,8 @@ export interface ComputerDescriptor {
   /** Whether it enforces a direct grant's absolute `notAfter`, from this connection's
    *  frame. Absent = no. */
   directNotAfter?: boolean
+  /** Whether it answers chat history in bounded pages, from this connection's frame. Absent = no. */
+  chatHistoryPages?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -797,6 +799,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
       directNotAfter: parsed.data.directNotAfter === true,
+      chatHistoryPages: parsed.data.chatHistoryPages === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -961,6 +964,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       peerLoopback: isLoopbackPeer(conn.ip),
       directRtc: parsed.data.directRtc === true,
       directNotAfter: parsed.data.directNotAfter === true,
+      chatHistoryPages: parsed.data.chatHistoryPages === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

@@ -8,8 +8,8 @@ import {
   ChatRouteError,
   pendingPrompts,
   promptContext,
-  reducedHistory,
   turnStatus,
+  withChatTabHistory,
   type ChatTarget
 } from './_chat'
 
@@ -93,12 +93,12 @@ export function registerChatActRoutes(app: Express, deps: RestApiDeps): void {
           400,
           'answers must map question keys to strings (or string arrays)'
         )
-      const [status, history, ctx] = await Promise.all([
+      const [status, state, ctx] = await Promise.all([
         turnStatus(chat, target),
-        reducedHistory(chat, target),
+        withChatTabHistory(chat, target, async (history) => history.state),
         promptContext(chat, target)
       ])
-      const pending = pendingPrompts(history.state, status)
+      const pending = pendingPrompts(state, status)
       const ref = String(req.params.requestId)
       const matches = pending.filter((p) => p.requestId.startsWith(ref))
       if (matches.length === 0)

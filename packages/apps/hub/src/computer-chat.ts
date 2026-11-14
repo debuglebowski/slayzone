@@ -134,6 +134,8 @@ export function createComputerChatServices(opts: {
   connected?(computerId: string): boolean
   recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
+  /** Whether the computer answers chat history in bounded pages (its `chatHistoryPages`). */
+  chatHistoryPages?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**
@@ -937,6 +939,7 @@ export function createComputerChatServices(opts: {
               'continueInTerminal',
               'getInfo',
               'getReplay',
+              'getReplayPage',
               'openTimeline',
               'timelinePages',
               'searchTimeline',

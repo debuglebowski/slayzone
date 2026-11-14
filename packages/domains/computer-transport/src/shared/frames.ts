@@ -225,6 +225,12 @@ const hostIdField = z.string().min(1).optional()
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -263,6 +269,12 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

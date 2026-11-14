@@ -26,6 +26,8 @@ import {
 import {
   TIMELINE_PROJECTION_VERSION,
   TimelineProjection,
+  historyOfEvents,
+  type TimelineHistorySource,
   type TimelineOpen,
   type TimelinePagesResult,
   type TimelineProjectionStore
@@ -38,6 +40,11 @@ import type {
   UserContentBlock
 } from '@slayzone/terminal-contracts'
 import type { ChatSessionStateEntry } from '@slayzone/terminal-contracts'
+import type {
+  ChatEventPage,
+  ChatHistoryPageBudget,
+  ChatReplayPage
+} from '@slayzone/terminal-contracts'
 import type { AgentBackend, ChatSessionDriver, PermissionDecision } from '../agents/types'
 import { getBackend } from '../agents/registry'
 import { getPtyHostBridge } from '../pty-host'
@@ -54,7 +61,13 @@ import {
   defaultConversationRegistry,
   type ConversationRegistry
 } from './live-conversations'
-import { ChatEventLog, type BufferedEvent } from '../chat-events-store'
+import {
+  ChatEventLog,
+  pageOfRows,
+  tailStartOfRows,
+  type BufferedEvent,
+  type ChatEventPersistence
+} from '../chat-events-store'
 import { ChatBackgroundWork } from './chat-background-work'
 // `chatMode` is an opaque, provider-specific runtime/permission mode id
 // (Claude `ChatMode` for claude-chat, Codex runtime mode for codex-chat) —
@@ -81,7 +94,7 @@ import {
 } from './chat-proc-handle'
 import { ChatProcess } from './chat-process'
 import { ChatEventSplitter, isStreamFragment } from './chat-event-splitter'
-import { ChatOutbox, type OutboxState } from './chat-outbox'
+import { ChatOutbox, OutboxRestoreScan, type OutboxState } from './chat-outbox'
 import { classifyResumeEvent } from './chat-resume-guard'
 import { runningDeadline, toolBoundMs } from './chat-watchdog'
 import { processSuspendClock, type SuspendClock } from '@slayzone/platform/suspend-clock'
@@ -108,16 +121,125 @@ export type { ChatTurnState }
  */
 export type ChatTerminalState = ChatTurnState | 'background'
 
-/** Where a tab's saved events live. Default: nowhere (tests, standalone). */
-export interface ChatEventStore {
+/**
+ * Where a tab's saved events live (insert-only; read back one bounded page at a
+ * time — never a whole history at once). Default: nowhere (tests, standalone).
+ */
+export interface ChatEventStore extends ChatEventPersistence {
   /** Durable sequence floor, including events already removed by retention. */
   nextSeq?(tabId: string): Promise<number>
-  load(tabId: string): Promise<BufferedEvent[]>
-  /** Insert-only: `'clash'` when a row already exists at that seq. `at`: when it was saved (ms). */
-  insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
-  insertSync?(tabId: string, seq: number, event: AgentEvent, at: number): 'inserted' | 'clash'
-  /** Saved events with `afterSeq < seq < beforeSeq` — history older than the log's cache. */
-  readRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
+}
+
+/**
+ * A {@link ChatEventStore} over rows kept in memory (tests, standalone hosts):
+ * `rows(tabId)` returns them sorted by seq.
+ */
+export function memoryChatEventReads(
+  rows: (tabId: string) => readonly BufferedEvent[]
+): Pick<ChatEventStore, 'readPage' | 'tailStart'> {
+  return {
+    readPage: async (tabId, afterSeq, beforeSeq, budget) =>
+      pageOfRows(rows(tabId), afterSeq, beforeSeq, budget),
+    tailStart: async (tabId, count) => tailStartOfRows(rows(tabId), count)
+  }
+}
+
+/**
+ * A tab's saved history as of its hydrate, read a page at a time with the event
+ * loop running between pages (`ChatEventLog.pages`): through its newest event at
+ * that moment — later events reach the projection as they are saved. `initial`:
+ * a test's in-memory history instead.
+ */
+function historySource(
+  log: ChatEventLog,
+  initial?: readonly BufferedEvent[]
+): TimelineHistorySource {
+  if (initial) return historyOfEvents(initial)
+  const lastSeq = log.newestSeq
+  return { lastSeq, pages: (afterSeq) => log.pages(afterSeq, { beforeSeq: lastSeq + 1 }) }
+}
+
+/**
+ * Where a fork from `messageId` ends, folded in event by event: the last
+ * main-chain answer (assistant text / thinking / tool call; with a uuid unless
+ * `anyAnswer`) of that message's turn — its latest occurrence. Null: no answer.
+ */
+class ForkPointScan {
+  at: string | null = null
+  private inTurn = false
+
+  constructor(
+    private readonly messageId: string,
+    private readonly anyAnswer: boolean
+  ) {}
+
+  add(e: AgentEvent): void {
+    if (e.kind === 'user-message' && e.id === this.messageId) {
+      this.inTurn = true
+      this.at = null
+      return
+    }
+    if (!this.inTurn) return
+    if (e.kind === 'user-message' || e.kind === 'conversation-branch') {
+      this.inTurn = false
+      return
+    }
+    if (
+      (e.kind === 'assistant-text' || e.kind === 'assistant-thinking' || e.kind === 'tool-call') &&
+      (e.uuid || this.anyAnswer) &&
+      e.parentToolUseId == null
+    )
+      this.at = e.uuid ?? this.messageId
+  }
+}
+
+/**
+ * What hydrate needs from a tab's WHOLE saved history, folded in event by event
+ * (fed a page at a time): the outbox's unconfirmed messages, the newest
+ * conversation branch (an unconfirmed fork re-arms), and whether the history ends
+ * in an unfinished turn (a tool call after the last turn end, not imported).
+ */
+class HydrateScan {
+  readonly outbox = new OutboxRestoreScan()
+  newestBranch: AgentEvent | null = null
+  /** The newest event that decides whether the turn is unfinished. */
+  private decided: 'none' | 'ended' | 'branch' | 'user' | 'imported' = 'none'
+  /** A tool call after it. */
+  private toolCall = false
+
+  add(event: AgentEvent): void {
+    this.outbox.add(event)
+    switch (event.kind) {
+      case 'result':
+      case 'process-exit':
+      case 'interrupted':
+      case 'user-message-popped':
+        this.decide('ended')
+        break
+      case 'conversation-branch':
+        this.newestBranch = event
+        this.decide('branch')
+        break
+      case 'user-message':
+        this.decide(event.history ? 'imported' : 'user')
+        break
+      case 'tool-call':
+        this.toolCall = true
+        break
+    }
+  }
+
+  /** Restored history with an unfinished turn gets a synthetic `interrupted`. */
+  get unfinishedTurn(): boolean {
+    if (this.decided === 'branch' || this.decided === 'imported') return false
+    if (this.decided === 'user') return true
+    return this.toolCall
+  }
+
+  private decide(kind: HydrateScan['decided']): void {
+    this.decided = kind
+    this.toolCall = false
+  }
 }
 
 /** Dependency-injection seam for tests AND for production wiring (event persistence). */
@@ -627,9 +749,8 @@ export function createChatTransport(
   }
 
   const noEventStore: ChatEventStore = {
-    load: async () => [],
     insert: async () => 'inserted',
-    readRange: async () => []
+    ...memoryChatEventReads(() => [])
   }
 
   const defaultDeps: TransportDeps = {
@@ -2027,24 +2148,22 @@ export function createChatTransport(
    * the task still names the original) is still the tab's conversation — the
    * saved `forked` marker says so. The next spawn forks again.
    */
-  function rearmPendingFork(tab: ChatTab, history: readonly BufferedEvent[]): void {
-    for (let i = history.length - 1; i >= 0; i--) {
-      const e = history[i].event
-      if (e.kind !== 'conversation-branch') continue
-      if (
-        e.reason === 'forked' &&
-        e.conversationId &&
-        e.fromConversationId &&
-        e.atMessageUuid &&
-        tab.sessionId === e.fromConversationId
-      ) {
-        tab.pendingFork = { fromSessionId: e.fromConversationId, atMessageUuid: e.atMessageUuid }
-        tab.sessionId = e.conversationId
-        tab.sessionConfirmed = false
-        tab.usedResume = false
-        tab.respawnOpts = { ...tab.respawnOpts, conversationId: null }
-      }
-      return
+  /** The newest `conversation-branch` of the saved history (`HydrateScan`) re-arms an unconfirmed fork. */
+  function rearmPendingFork(tab: ChatTab, newestBranch: AgentEvent | null): void {
+    const e = newestBranch
+    if (e?.kind !== 'conversation-branch') return
+    if (
+      e.reason === 'forked' &&
+      e.conversationId &&
+      e.fromConversationId &&
+      e.atMessageUuid &&
+      tab.sessionId === e.fromConversationId
+    ) {
+      tab.pendingFork = { fromSessionId: e.fromConversationId, atMessageUuid: e.atMessageUuid }
+      tab.sessionId = e.conversationId
+      tab.sessionConfirmed = false
+      tab.usedResume = false
+      tab.respawnOpts = { ...tab.respawnOpts, conversationId: null }
     }
   }
 
@@ -2055,13 +2174,8 @@ export function createChatTransport(
     }
     // A previous instance of this tab may still be writing its last events.
     await closing.get(opts.tabId)
-    const history = opts.initialBuffer ?? (await deps.eventStore.load(opts.tabId))
-    const nextSeq =
-      opts.initialNextSeq ??
-      Math.max(
-        history.length > 0 ? history[history.length - 1].seq + 1 : 0,
-        (await deps.eventStore.nextSeq?.(opts.tabId)) ?? 0
-      )
+    // Durable sequence floor (the log never numbers below it, nor below its newest event).
+    const nextSeq = opts.initialNextSeq ?? (await deps.eventStore.nextSeq?.(opts.tabId)) ?? 0
 
     // Skeleton sessionId placeholder. When the resume id is set in providerCfg we
     // honor it (so `--resume <id>` fires on first spawn); otherwise a fresh id.
@@ -2114,38 +2228,56 @@ export function createChatTransport(
       pendingFork: opts.initialFork ?? null,
       closed: false
     } as Omit<ChatTab, 'log' | 'outbox'> as ChatTab
-    rearmPendingFork(tab, history)
-    tab.log = new ChatEventLog(
-      opts.tabId,
-      deps.eventStore,
-      { events: history, nextSeq },
-      {
-        onClash: (seq, event) =>
-          diagnostic(
-            tab,
-            'error',
-            'chat.event_seq_clash',
-            `seq ${seq} already saved; kept the existing row`,
-            {
-              seq,
-              kind: event.kind
-            }
-          ),
-        onWriteError: (seq, err) => {
-          console.error(`[chat-transport] saving event ${seq} of ${opts.tabId} failed:`, err)
-          if (deps.eventStore.insertSync && !tab.storageFailed) {
-            tab.storageFailed = true
-            broadcastLive(tab, {
-              kind: 'error',
-              message: 'Chat storage is unavailable. Fix storage and restart chat.',
-              detail: { code: 'storage-unavailable' }
-            })
-            transitionState(tab, 'error')
-            kill(tab.tabId)
+    const logOptions: ConstructorParameters<typeof ChatEventLog>[3] = {
+      onClash: (seq, event) =>
+        diagnostic(
+          tab,
+          'error',
+          'chat.event_seq_clash',
+          `seq ${seq} already saved; kept the existing row`,
+          {
+            seq,
+            kind: event.kind
           }
+        ),
+      onWriteError: (seq, err) => {
+        console.error(`[chat-transport] saving event ${seq} of ${opts.tabId} failed:`, err)
+        if (deps.eventStore.insertSync && !tab.storageFailed) {
+          tab.storageFailed = true
+          broadcastLive(tab, {
+            kind: 'error',
+            message: 'Chat storage is unavailable. Fix storage and restart chat.',
+            detail: { code: 'storage-unavailable' }
+          })
+          transitionState(tab, 'error')
+          kill(tab.tabId)
         }
       }
-    )
+    }
+    // The cache holds the newest events only: seeded from the store's tail, a page
+    // at a time — the history before it is never loaded here.
+    tab.log = opts.initialBuffer
+      ? new ChatEventLog(
+          opts.tabId,
+          deps.eventStore,
+          { events: opts.initialBuffer, nextSeq },
+          logOptions
+        )
+      : await ChatEventLog.open(opts.tabId, deps.eventStore, nextSeq, logOptions)
+    // What hydrate needs from the WHOLE history (unconfirmed messages, a fork to
+    // re-arm, an unfinished turn), in one pass a page at a time: the event loop
+    // runs between pages, however long the conversation.
+    // The same pass feeds the timeline projection: the events after its checkpoint,
+    // or all of them when it must rebuild — the history is never read twice.
+    const history = historySource(tab.log, opts.initialBuffer)
+    const scan = new HydrateScan()
+    let projection = await beginProjection(opts.tabId, opts.mode, history.lastSeq)
+    for await (const page of history.pages(-1)) {
+      for (const entry of page) scan.add(entry.event)
+      if (projection) projection = await feedProjection(opts.tabId, projection, page)
+    }
+    if (projection) projection = await finishProjection(opts.tabId, projection)
+    rearmPendingFork(tab, scan.newestBranch)
     if (deps.workspaceCapture && deps.workspaceStore) {
       tab.workspaceTracker = new ChatWorkspaceTracker({
         backend: deps.workspaceCapture,
@@ -2156,11 +2288,11 @@ export function createChatTransport(
       })
     }
     tab.outbox = createOutbox(tab)
-    tab.projection = openProjection(opts.tabId, opts.mode, history)
+    tab.projection = Promise.resolve(projection)
     tabs.set(opts.tabId, tab)
 
     // Messages the previous run never got confirmed are failed (Retry), not lost.
-    tab.outbox.restore(history.map((b) => b.event))
+    tab.outbox.restore(scan.outbox)
 
     // Restored history with an unfinished turn → emit synthetic `interrupted` so
     // the renderer reducer rebalances userMessagesSent/resultCount. Otherwise the
@@ -2169,7 +2301,7 @@ export function createChatTransport(
     // time (was: at spawn time) so the marker shows even before the user
     // triggers a spawn — critical for lazy mode where a buffer with an
     // unfinished turn may sit unspawned indefinitely.
-    if (tailIsUnfinishedTurn(history)) routeHostEvent(tab, { kind: 'interrupted' })
+    if (scan.unfinishedTurn) routeHostEvent(tab, { kind: 'interrupted' })
     for (const event of (await deps.workspaceStore?.recover?.(tab.tabId)) ?? [])
       routeHostEvent(tab, event)
 
@@ -3374,19 +3506,29 @@ export function createChatTransport(
   ): Promise<{ fromSessionId: string; atMessageUuid: string }> {
     const tab = requireTab(tabId)
     const conversationId = tab.sessionId
-    const events = await tab.log.readSince(-1)
+    // Including history outside the cache, read a page at a time: kept are only the
+    // events that decide which messages the conversation holds, and the answer.
+    const decisive: BufferedEvent[] = []
+    const answerScan = new ForkPointScan(messageId, tab.backend.forkAt === 'message')
+    for await (const page of tab.log.pages(-1)) {
+      for (const entry of page) {
+        const kind = entry.event.kind
+        if (
+          kind === 'user-message' ||
+          kind === 'user-message-popped' ||
+          kind === 'conversation-branch'
+        )
+          decisive.push(entry)
+        answerScan.add(entry.event)
+      }
+    }
     if (requireTab(tabId) !== tab || tab.sessionId !== conversationId)
       throw new ChatTransportError('The source conversation changed. Select the answer again.')
     if (!tab.sessionConfirmed || tab.pendingFork)
       throw new ChatTransportError('The source conversation is not ready to fork.')
-    if (!activeUserMessages(tab, events).some((message) => message.id === messageId))
+    if (!activeUserMessages(tab, decisive).some((message) => message.id === messageId))
       throw new ChatTransportError('That message is not in the current conversation.')
-    const answer = forkPoint(
-      tab,
-      messageId,
-      { anyAnswer: tab.backend.forkAt === 'message' },
-      events
-    )
+    const answer = answerScan.at
     if (!answer) throw new ChatTransportError('Wait for the answer before starting a thread.')
     return {
       fromSessionId: tab.sessionId,
@@ -3397,33 +3539,11 @@ export function createChatTransport(
   function forkPoint(
     tab: ChatTab,
     messageId: string,
-    opts: { anyAnswer?: boolean } = {},
-    history?: readonly BufferedEvent[]
+    opts: { anyAnswer?: boolean } = {}
   ): string | null {
-    const events = history ?? tab.log.events
-    let start = -1
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i].event
-      if (e.kind === 'user-message' && e.id === messageId) {
-        start = i
-        break
-      }
-    }
-    let at: string | null = null
-    for (let i = start + 1; start >= 0 && i < events.length; i++) {
-      const e = events[i].event
-      if (e.kind === 'user-message' || e.kind === 'conversation-branch') break
-      if (
-        (e.kind === 'assistant-text' ||
-          e.kind === 'assistant-thinking' ||
-          e.kind === 'tool-call') &&
-        (e.uuid || opts.anyAnswer) &&
-        e.parentToolUseId == null
-      ) {
-        at = e.uuid ?? messageId
-      }
-    }
-    return at
+    const scan = new ForkPointScan(messageId, opts.anyAnswer === true)
+    for (const entry of tab.log.events) scan.add(entry.event)
+    return scan.at
   }
 
   /**
@@ -3640,28 +3760,6 @@ export function createChatTransport(
    * no message ever sent) is idle, not mid-turn. A real unfinished turn still
    * tails with `user-message`/`tool-call`, which always precede `turn-init`.
    */
-  function tailIsUnfinishedTurn(buffer: BufferedEvent[]): boolean {
-    // A tool call after the last turn end is an unfinished turn — unless it is
-    // imported history (its message is marked `history`, or it follows a switch).
-    let sawToolCall = false
-    for (let i = buffer.length - 1; i >= 0; i--) {
-      const e = buffer[i].event
-      const k = e.kind
-      if (
-        k === 'result' ||
-        k === 'process-exit' ||
-        k === 'interrupted' ||
-        k === 'user-message-popped'
-      ) {
-        return sawToolCall
-      }
-      if (k === 'conversation-branch') return false
-      if (k === 'user-message') return !e.history
-      if (k === 'tool-call') sawToolCall = true
-    }
-    return sawToolCall
-  }
-
   /** The CLI's end of a turn the user interrupted (Stop, or the TUI's plain "No"). */
   function isAbortedResult(event: ResultEvent): boolean {
     return typeof event.terminalReason === 'string' && event.terminalReason.startsWith('aborted')
@@ -3771,22 +3869,48 @@ export function createChatTransport(
     await removeSession(tabId)
   }
 
-  /** A tab's projection, from its checkpoint or rebuilt from `history` (null: none). */
-  function openProjection(
+  /**
+   * A tab's projection being opened by its hydrate: from its checkpoint when one
+   * fits, else to rebuild (null: none, or it failed — clients open from the events).
+   */
+  function projectionFailed(tabId: string, err: unknown): null {
+    console.error(`[chat-transport] timeline projection of ${tabId} failed to open:`, err)
+    return null
+  }
+  async function beginProjection(
     tabId: string,
     mode: string,
-    history: readonly BufferedEvent[]
+    lastSeq: number
   ): Promise<TimelineProjection | null> {
     const store = deps.timelineStore?.(tabId)
-    if (!store) return Promise.resolve(null)
-    return TimelineProjection.open({
+    if (!store) return null
+    return TimelineProjection.begin({
       store,
-      history,
+      lastSeq,
       agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns
-    }).catch((err: unknown) => {
-      console.error(`[chat-transport] timeline projection of ${tabId} failed to open:`, err)
-      return null
-    })
+    }).then(
+      ({ projection }) => projection,
+      (err: unknown) => projectionFailed(tabId, err)
+    )
+  }
+  function feedProjection(
+    tabId: string,
+    projection: TimelineProjection,
+    page: readonly BufferedEvent[]
+  ): Promise<TimelineProjection | null> {
+    return projection.feed(page).then(
+      () => projection,
+      (err: unknown) => projectionFailed(tabId, err)
+    )
+  }
+  function finishProjection(
+    tabId: string,
+    projection: TimelineProjection
+  ): Promise<TimelineProjection | null> {
+    return projection.finish().then(
+      () => projection,
+      (err: unknown) => projectionFailed(tabId, err)
+    )
   }
 
   async function openTimeline(
@@ -3838,11 +3962,46 @@ export function createChatTransport(
     return tab.log.since(afterSeq)
   }
 
-  /** EVERY saved event after `afterSeq`: what left the cache is read back from the store. */
+  /**
+   * EVERY saved event after `afterSeq` (read back page by page). Whole-history
+   * callers only (older hubs / clients): new reads take {@link readEventPage}.
+   */
   async function readEventsSince(tabId: string, afterSeq: number): Promise<BufferedEvent[]> {
     const tab = tabs.get(tabId)
     if (!tab) return []
     return tab.log.readSince(afterSeq)
+  }
+
+  /** ONE page of the saved events after `afterSeq` (`hasMore`: read on after its last). */
+  async function readEventPage(
+    tabId: string,
+    afterSeq: number,
+    budget?: ChatHistoryPageBudget
+  ): Promise<ChatEventPage> {
+    const tab = tabs.get(tabId)
+    if (!tab) return { events: [], hasMore: false }
+    return tab.log.readPage(afterSeq, budget)
+  }
+
+  /**
+   * ONE page of a replay: saved events after `afterSeq`; the last page (no more)
+   * also carries what streams right now, taken in the same tick its saved events
+   * end — a client reading every page gets exactly what {@link getReplay} answers.
+   */
+  async function getReplayPage(
+    tabId: string,
+    afterSeq: number,
+    budget?: ChatHistoryPageBudget
+  ): Promise<ChatReplayPage> {
+    const tab = tabs.get(tabId)
+    if (!tab) return { events: [], hasMore: false, live: { afterSeq: -1, liveSeq: 0, events: [] } }
+    const page = await tab.log.readPage(afterSeq, budget)
+    if (page.hasMore) return { events: page.events, hasMore: true }
+    return {
+      events: page.events,
+      hasMore: false,
+      live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
+    }
   }
 
   /**
@@ -4141,7 +4300,9 @@ export function createChatTransport(
     searchTimeline,
     getEventBufferSince,
     readEventsSince,
+    readEventPage,
     getReplay,
+    getReplayPage,
     getSessionInfo,
     killAll,
     shutdownAll,
@@ -4215,7 +4376,9 @@ export const {
   searchTimeline,
   getEventBufferSince,
   readEventsSince,
+  readEventPage,
   getReplay,
+  getReplayPage,
   getSessionInfo,
   killAll,
   shutdownAll,

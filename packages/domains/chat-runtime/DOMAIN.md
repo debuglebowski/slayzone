@@ -33,3 +33,8 @@ as unavailable; recovery never fabricates empty replacement history.
   schema import; local storage failures surface instead of creating hub copies.
 - 2026-11-02: Keep existing terminal runtime exports while adding independent
   transport, conversation-registry, and queue instances for computer composition.
+- 2026-11-14: History reads are bounded pages (`getEventPage`, `getReplayPage`;
+  `readPage` cuts at a byte budget from `octet_length` before loading rows). The
+  computer advertises `chatHistoryPages`; the hub relay forwards page reads and
+  assembles an older caller's whole read from pages, and asks an older computer
+  for the whole read it knows.

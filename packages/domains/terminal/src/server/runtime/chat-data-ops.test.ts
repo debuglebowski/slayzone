@@ -270,7 +270,10 @@ test('clearChatConversationId leaves corrupt provider_config untouched (no throw
   expect(row.v).toBe('{not json')
 })
 
-test('loadChatEvents drops corrupt event rows instead of throwing', async () => {
+const ALL = { maxBytes: 64 * 1024 * 1024, maxEvents: 100_000 }
+const MAX = Number.MAX_SAFE_INTEGER
+
+test('loadChatEventsPage drops corrupt event rows instead of throwing', async () => {
   const { raw, db } = makeDb()
   const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   await ops.persistChatEvent('tab-1', 0, {
@@ -281,7 +284,7 @@ test('loadChatEvents drops corrupt event rows instead of throwing', async () => 
   raw
     .prepare('INSERT INTO chat_events (tab_id, seq, event) VALUES (?, ?, ?)')
     .run('tab-1', 1, '{corrupt')
-  const events = await ops.loadChatEvents('tab-1')
+  const { events } = await ops.loadChatEventsPage('tab-1', -1, MAX, ALL)
   expect(events.length).toBe(1)
   expect(events[0].seq).toBe(0)
   expect(await ops.getNextSeqForTab('tab-1')).toBe(2)
@@ -336,21 +339,45 @@ test('chat history is never trimmed: every saved event of a tab stays (no per-ta
   for (let seq = 0; seq < 2_100; seq++) {
     await ops.persistChatEvent('tab-1', seq, { kind: 'stderr', text: `e${seq}` } as never)
   }
-  const events = await ops.loadChatEvents('tab-1')
+  const { events } = await ops.loadChatEventsPage('tab-1', -1, MAX, ALL)
   expect(events.length).toBe(2_100)
   expect(events[0]).toMatchObject({ seq: 0, event: { kind: 'stderr', text: 'e0' } })
 })
 
-test('loadChatEventsRange reads the rows strictly between two seqs, in order', async () => {
+test('loadChatEventsPage reads the rows strictly between two seqs, in order', async () => {
   const { db } = makeDb()
   const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
   for (let seq = 0; seq < 10; seq++) {
     await ops.persistChatEvent('tab-1', seq, { kind: 'stderr', text: `e${seq}` } as never)
     await ops.persistChatEvent('tab-2', seq, { kind: 'stderr', text: `x${seq}` } as never)
   }
-  const got = await ops.loadChatEventsRange('tab-1', 2, 6)
-  expect(got.map((e) => e.seq)).toEqual([3, 4, 5])
-  expect(got[0].event).toEqual({ kind: 'stderr', text: 'e3' })
+  const got = await ops.loadChatEventsPage('tab-1', 2, 6, ALL)
+  expect(got.events.map((e) => e.seq)).toEqual([3, 4, 5])
+  expect(got.events[0].event).toEqual({ kind: 'stderr', text: 'e3' })
+  expect(got.more).toBe(false)
+})
+
+test('loadChatEventsPage cuts at the byte budget from stored sizes; tail start is the n-th newest', async () => {
+  const { db } = makeDb()
+  const ops = createDbChatDataOps(db, createFakeTaskSessionStore())
+  const event = (seq: number) => ({ kind: 'stderr', text: `${seq}:${'x'.repeat(1000)}` }) as never
+  for (let seq = 0; seq < 10; seq++) await ops.persistChatEvent('tab-1', seq, event(seq))
+  const size = JSON.stringify(event(0)).length
+  const page = await ops.loadChatEventsPage('tab-1', -1, MAX, {
+    maxBytes: size * 3 + 10,
+    maxEvents: 100
+  })
+  expect(page.events.map((e) => e.seq)).toEqual([0, 1, 2])
+  expect(page.bytes).toEqual([size, size, size])
+  expect(page.more).toBe(true)
+  // One event over the budget still comes, alone.
+  const tiny = await ops.loadChatEventsPage('tab-1', 4, MAX, { maxBytes: 1, maxEvents: 100 })
+  expect(tiny.events.map((e) => e.seq)).toEqual([5])
+  expect((await ops.loadChatEventsPage('tab-1', 7, MAX, { maxBytes: 1, maxEvents: 2 })).more).toBe(
+    true
+  )
+  expect(await ops.chatEventsTailStart('tab-1', 4)).toBe(6)
+  expect(await ops.chatEventsTailStart('tab-1', 11)).toBeNull()
 })
 
 test('persistChatEvent inserts only: a second write at the same seq is a clash, not an overwrite', async () => {
@@ -445,10 +472,10 @@ test('a saved event keeps the time it was saved (ms); rows saved before fall bac
     .prepare('INSERT INTO chat_events (tab_id, seq, event, created_at) VALUES (?, ?, ?, ?)')
     .run('tab-1', 0, JSON.stringify({ kind: 'stderr', text: 'old' }), '2026-10-30 12:00:05')
   await ops.persistChatEvent('tab-1', 1, { kind: 'stderr', text: 'new' } as never, 1793376000123)
-  const all = await ops.loadChatEvents('tab-1')
-  expect(all.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
-  const range = await ops.loadChatEventsRange('tab-1', -1, 9)
-  expect(range.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
+  const all = await ops.loadChatEventsPage('tab-1', -1, MAX, ALL)
+  expect(all.events.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
+  const range = await ops.loadChatEventsPage('tab-1', -1, 9, ALL)
+  expect(range.events.map((e) => e.at)).toEqual([Date.UTC(2026, 9, 30, 12, 0, 5), 1793376000123])
 })
 
 test('timeline projection: pages + checkpoint saved together, read back, searched, dropped, cleared with the events', async () => {

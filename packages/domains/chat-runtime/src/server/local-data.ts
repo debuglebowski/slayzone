@@ -25,6 +25,7 @@ import type {
 } from '@slayzone/terminal-contracts'
 import {
   assertChatTabStateScope,
+  clampChatHistoryPageBudget,
   userMessageAttachments,
   isSyntheticChatPrompt,
   chatCapabilitiesForMode,
@@ -1114,8 +1115,9 @@ export function createLocalChatData(
       }),
     persistChatEvent: async (tabId, seq, event, at) =>
       data.persistChatEventSync!(tabId, seq, event, at ?? Date.now()),
-    loadChatEvents: async (tabId) => store.read(owner(tabId).id, -1),
-    loadChatEventsRange: async (tabId, after, before) => store.read(owner(tabId).id, after, before),
+    loadChatEventsPage: async (tabId, after, before, budget) =>
+      store.readPage(owner(tabId).id, after, before, budget),
+    chatEventsTailStart: async (tabId, count) => store.tailStart(owner(tabId).id, count),
     getNextSeqForTab: async (tabId) => store.nextSeq(owner(tabId).id),
     clearChatEventsForTab: async (tabId) => {
       const i = owner(tabId)
@@ -1123,10 +1125,22 @@ export function createLocalChatData(
     },
     loadUserMessageContent: async (taskId, ids) => {
       const found = new Map<string, UserContentBlock[]>()
+      // Never a whole conversation at once: a page-sized window of rows at a time
+      // (sizes from record headers), SQLite keeps only rows naming a wanted id, and
+      // the event loop runs between windows.
+      const needles = ids.map((id) => JSON.stringify(id))
+      const budget = clampChatHistoryPageBudget()
       for (const o of store.listForTask(taskId))
-        for (const e of store.read(o.identity.id, -1))
-          if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
-            found.set(e.event.id, e.event.content ?? [])
+        for (let after = -1; ; ) {
+          const window = store.pageBounds(o.identity.id, after, Number.MAX_SAFE_INTEGER, budget)
+          if (window.through === null) break
+          for (const e of store.readMatching(o.identity.id, after, window.through + 1, needles))
+            if (e.event.kind === 'user-message' && e.event.id && ids.includes(e.event.id))
+              found.set(e.event.id, e.event.content ?? [])
+          if (!window.more) break
+          after = window.through
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
       for (const r of store.findRecords('settings', taskId, { idPrefix: 'attachment-message:' }))
         if (r.id.startsWith('attachment-message:') && ids.includes(r.id.slice(19)))
           found.set(
