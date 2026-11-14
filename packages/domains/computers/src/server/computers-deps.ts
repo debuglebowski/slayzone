@@ -37,6 +37,7 @@ export type ComputerGateway = {
     computerId: string
     connectedAt: number
     lastSeenAt: number
+    recovering?: boolean
   }>
   /** Computers that can actually take work now (open + inside the heartbeat window).
    *  This is what a dispatch decision should read; `listComputers` is for display. */
@@ -59,7 +60,12 @@ export type ComputersDeps = {
    * which is the fork sidecar's honest state.
    */
   subscribeComputerStatus?: (
-    listener: (change: { computerId: string; connected: boolean }) => void
+    listener: (change: {
+      computerId: string
+      connected: boolean
+      usable?: boolean
+      recovering?: boolean
+    }) => void
   ) => () => void
   /**
    * Needs-attention faults (hub `item-faults.ts`): the hub's own and each computer's.

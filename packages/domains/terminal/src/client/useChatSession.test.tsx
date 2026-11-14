@@ -285,6 +285,7 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
   r.current.timeline.flatMap((it) => (it?.kind === 'user-text' ? [it.text] : []))
 
 afterEach(() => {
+  vi.restoreAllMocks()
   cleanup()
   queryClient.clear()
   hub = null
@@ -297,6 +298,31 @@ afterEach(() => {
   sendFails = null
   directLease = null
   directSub = null
+})
+
+describe('paged-history failures', () => {
+  it('shows a transient paging failure without requesting a full replay', async () => {
+    vi.spyOn(client.chat.openTimeline, 'query').mockRejectedValue(new Error('computer unavailable'))
+    const replay = vi.spyOn(client.chat.getReplay, 'query')
+    const { result } = setup()
+    await act(async () => {
+      loads[0].hydrate.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(replay).not.toHaveBeenCalled()
+    expect(result.current.loadError).toBe('computer unavailable')
+    expect(result.current.hydrating).toBe(false)
+  })
+
+  it('retains full replay for an older hub without the paging procedure', async () => {
+    vi.spyOn(client.chat.openTimeline, 'query').mockRejectedValue(
+      Object.assign(new Error('No procedure found'), { data: { code: 'NOT_FOUND' } })
+    )
+    const { result } = setup()
+    await finishLoad(0, HISTORY)
+    expect(result.current.loadError).toBeNull()
+    expect(texts(result)).toEqual(['one', 'two'])
+  })
 })
 
 // M1: switching to the direct link is make-before-break. The hub stream stays on until

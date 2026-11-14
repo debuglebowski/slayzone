@@ -1553,6 +1553,7 @@ export type ExecRunResult = z.infer<typeof execRunResultSchema>
  */
 const agentConfigPath = z.string().min(1)
 export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('hashFiles'), paths: z.array(agentConfigPath).min(1).max(128) }),
   z.object({ op: z.literal('homedir') }),
   z.object({ op: z.literal('exists'), path: agentConfigPath }),
   z.object({ op: z.literal('readFile'), path: agentConfigPath }),

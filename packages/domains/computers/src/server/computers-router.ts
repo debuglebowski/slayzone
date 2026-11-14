@@ -225,6 +225,7 @@ export const computersRouter = router({
             createdAt: row.created_at,
             connected: conn !== undefined,
             usable: usableIds.has(row.id),
+            ...(conn?.recovering ? { recovering: true } : {}),
             connectedAt: conn?.connectedAt ?? null,
             revokedAt: row.revoked_at,
             // Enrolled and connected, but given no new work (`setDisabled`).
@@ -727,24 +728,26 @@ export const computersRouter = router({
    * `list` (its own; every one for an admin), decided per event in arrival order.
    */
   onStatusChange: publicProcedure.subscription(({ ctx }) =>
-    observable<{ computerId: string; connected: boolean }>((emit) => {
-      const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
-      if (!subscribe) return () => undefined
-      const access = managerAccessOf(ctx)
-      if (!access.enforcing) return subscribe((change) => emit.next(change))
-      let closed = false
-      let tail: Promise<void> = Promise.resolve()
-      const unsubscribe = subscribe((change) => {
-        tail = tail.then(async () => {
-          const allowed = await access.mayManage(change.computerId).catch(() => false)
-          if (allowed && !closed) emit.next(change)
+    observable<{ computerId: string; connected: boolean; usable?: boolean; recovering?: boolean }>(
+      (emit) => {
+        const subscribe = getComputersDepsOrNull()?.subscribeComputerStatus
+        if (!subscribe) return () => undefined
+        const access = managerAccessOf(ctx)
+        if (!access.enforcing) return subscribe((change) => emit.next(change))
+        let closed = false
+        let tail: Promise<void> = Promise.resolve()
+        const unsubscribe = subscribe((change) => {
+          tail = tail.then(async () => {
+            const allowed = await access.mayManage(change.computerId).catch(() => false)
+            if (allowed && !closed) emit.next(change)
+          })
         })
-      })
-      return () => {
-        closed = true
-        unsubscribe()
+        return () => {
+          closed = true
+          unsubscribe()
+        }
       }
-    })
+    )
   ),
 
   /** Revoke a computer (idempotent — first revocation time wins). */

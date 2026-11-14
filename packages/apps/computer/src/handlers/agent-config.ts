@@ -53,6 +53,12 @@ export function createAgentConfigHandlers(
     const p = agentConfigFsParamsSchema.parse(raw)
     const fs = localAiConfigFs
     switch (p.op) {
+      case 'hashFiles': {
+        // Authorize every entry before any hash can be reused or read.
+        const paths = p.paths.map((path) => allow(path))
+        const hashes = await fs.hashFiles!(paths)
+        return { result: hashes.map((row, i) => ({ path: p.paths[i], hash: row.hash })) }
+      }
       case 'homedir':
         return { result: homedir() }
       case 'exists':

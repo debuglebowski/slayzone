@@ -11,6 +11,7 @@ export type ComputerStatusTone = 'ok' | 'idle' | 'bad'
 export interface ComputerStatusRow {
   connected: boolean
   usable?: boolean
+  recovering?: boolean
   lastSeenAt: number | null
   revokedAt?: number | null
   /** Enrolled and connected, but given no new work (`computers.setDisabled`). */
@@ -35,6 +36,7 @@ export function computerStatus(row: ComputerStatusRow): {
   if (row.revokedAt != null) return { label: 'Revoked', tone: 'bad' }
   if (row.disabledAt != null) return { label: 'Disabled', tone: 'idle' }
   if (row.usable) return { label: 'Connected', tone: 'ok' }
+  if (row.connected && row.recovering) return { label: 'Reconnecting', tone: 'idle' }
   // Socket open but silent — it will be reaped, and until then it cannot take work.
   if (row.connected) return { label: 'Not responding', tone: 'bad' }
   if (row.lastSeenAt == null) return { label: 'Never connected', tone: 'idle' }
@@ -144,7 +146,11 @@ export function capabilityNote(capabilities: readonly string[]): string | null {
   const have = new Set(capabilities)
   // `desktop` marks a desktop app's own computer joined to another hub — not a thing
   // it can or cannot do; the row says "this computer" where it matters.
-  const standard = new Set<string>([...STANDARD_COMPUTER_CAPABILITIES, 'desktop'])
+  const standard = new Set<string>([
+    ...STANDARD_COMPUTER_CAPABILITIES,
+    'desktop',
+    'agentConfig.hashFiles' // Transport optimization, not a user-facing capability.
+  ])
   const missing = STANDARD_COMPUTER_CAPABILITIES.filter((c) => !have.has(c))
   const extra = capabilities.filter((c) => !standard.has(c))
   const parts: string[] = []

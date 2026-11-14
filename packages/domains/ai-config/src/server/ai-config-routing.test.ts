@@ -52,6 +52,8 @@ async function serve(computerId: string, call: AiConfigFsCall): Promise<unknown>
       return f.stat(call.path)
     case 'readdir':
       return f.readdir(call.path)
+    case 'hashFiles':
+      return f.hashFiles!(call.paths)
   }
 }
 
@@ -59,7 +61,7 @@ beforeAll(async () => {
   await initAiConfigOps(h.slayDb)
 })
 
-function route(): void {
+function route(supportsHashFiles = false): void {
   setAiConfigFsRouting({
     computerForProject: async (t) => {
       targets.push(t)
@@ -69,7 +71,8 @@ function route(): void {
       targets.push({ caller: id ?? null })
       return computer
     },
-    request: serve
+    request: serve,
+    supportsHashFiles: () => supportsHashFiles
   })
 }
 
@@ -84,6 +87,28 @@ afterEach(() => {
 const caller = aiConfigRouter.createCaller({ db: h.slayDb, dataRoot: '' } as never)
 
 describe('AI config on the computer', () => {
+  test('stale counts use one hash batch and preserve the legacy computer path', async () => {
+    const item = await caller.createItem({
+      type: 'skill',
+      scope: 'library',
+      slug: 'batch-count-probe',
+      content: '# Batch count'
+    })
+    await caller.setProjectSelection({
+      projectId: 'p-test',
+      itemId: item!.id,
+      targetPath: '.claude/skills/batch-count-probe/SKILL.md'
+    })
+    route(true)
+    expect(await caller.getProjectStaleSkillCount({ projectId: 'p-test', projectPath })).toBe(1)
+    expect(calls.filter((c) => c.call.op === 'hashFiles')).toHaveLength(1)
+    expect(calls.some((c) => c.call.op === 'readFile' || c.call.op === 'exists')).toBe(false)
+    calls.length = 0
+    route(false)
+    expect(await caller.getProjectStaleSkillCount({ projectId: 'p-test', projectPath })).toBe(1)
+    expect(calls.some((c) => c.call.op === 'hashFiles')).toBe(false)
+    expect(calls.some((c) => c.call.op === 'exists')).toBe(true)
+  })
   test("a project file is read on the project's computer — on a processes-off hub too", async () => {
     route()
     process.env.SLAYZONE_HUB_ENABLE_PROCESSES = '0'

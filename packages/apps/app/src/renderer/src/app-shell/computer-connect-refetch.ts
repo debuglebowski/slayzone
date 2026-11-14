@@ -55,7 +55,7 @@ export function computerConnectRefetcher(
   keyOf: (query: ComputerBackedQuery) => readonly unknown[]
 ): {
   onStarted(): void
-  onData(change: { computerId: string; connected: boolean }): void
+  onData(change: { computerId: string; connected: boolean; usable?: boolean }): void
 } {
   const refetchAll = (): void => {
     for (const q of COMPUTER_BACKED_QUERIES) void client.invalidateQueries({ queryKey: keyOf(q) })
@@ -64,7 +64,7 @@ export function computerConnectRefetcher(
   return {
     onStarted: refetchAll,
     onData: (change) => {
-      if (change.connected) refetchAll()
+      if (change.connected && change.usable !== false) refetchAll()
     }
   }
 }
@@ -91,7 +91,7 @@ export function useComputerConnectRefetch(): void {
       },
       onData: (change) => {
         refetch.onData(change)
-        if (!change.connected) return
+        if (!change.connected || change.usable === false) return
         noteComputerConnected()
         // The git panel's watches refused before then (they poll meanwhile).
         retryFailedGitWatches()

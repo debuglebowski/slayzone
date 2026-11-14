@@ -9,6 +9,12 @@ import {
   useRef,
   useState
 } from 'react'
+import {
+  ChatRestorationBoundary,
+  useChatRestorationQueries,
+  useChatRestorationPending,
+  useChatRestorationTracker
+} from './chat-restoration'
 import { CornerDownLeft } from 'lucide-react'
 import { useChatAvailability } from '@slayzone/terminal/client/chat-availability'
 import { ChatStorageNotice } from './ChatStorageNotice'
@@ -147,8 +153,25 @@ export interface ChatPanelProps {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
+  function ScheduledChatPanel(props, ref) {
+    const client = useTRPCClient()
+    return (
+      <ChatRestorationBoundary
+        client={client}
+        taskId={props.taskId}
+        tabId={props.tabId}
+        active={props.isActive ?? true}
+      >
+        <ChatPanelBody {...props} ref={ref} />
+      </ChatRestorationBoundary>
+    )
+  }
+)
+
+const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanelView(props, ref) {
     const trpcClient = useTRPCClient()
+    const trackRestore = useChatRestorationTracker()
     const {
       tabId,
       taskId,
@@ -198,8 +221,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       taskId,
       mode,
       cwd,
-      providerFlagsOverride
+      providerFlagsOverride,
+      trackRestore
     })
+    useChatRestorationPending(hydrating)
+    useChatRestorationQueries({ taskId, tabId, mode })
     // The whole history's summary: rows here, and for pages not loaded (paged
     // history) what the hub sent — the outline, rewind, files count and budget.
     const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])

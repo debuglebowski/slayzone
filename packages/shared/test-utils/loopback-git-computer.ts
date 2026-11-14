@@ -242,6 +242,8 @@ export function installLoopbackAiConfigComputer(): void {
           return fs.writeFile(call.path, call.content)
         case 'rename':
           return fs.rename(call.path, call.to)
+        case 'hashFiles':
+          return fs.hashFiles!(call.paths)
         default:
           return fs[call.op](call.path)
       }

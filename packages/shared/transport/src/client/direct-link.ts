@@ -626,7 +626,9 @@ export interface DirectLinkHubClient {
     onStatusChange: {
       subscribe(
         input: undefined,
-        opts: { onData: (change: { computerId: string; connected: boolean }) => void }
+        opts: {
+          onData: (change: { computerId: string; connected: boolean; usable?: boolean }) => void
+        }
       ): { unsubscribe(): void }
     }
   }
@@ -700,7 +702,8 @@ export function directLinkManagerFor(
   try {
     sub = client.computers.onStatusChange.subscribe(undefined, {
       onData: (change) => {
-        if (change.connected) manager.computerConnected(change.computerId)
+        if (change.connected && change.usable !== false)
+          manager.computerConnected(change.computerId)
       }
     })
   } catch {

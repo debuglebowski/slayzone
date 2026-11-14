@@ -530,7 +530,7 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
 
     const selections = await queryProjectSkillSelections(db, projectId)
 
-    let stale = 0
+    const checks: Array<{ path: string; expected: string }> = []
     for (const sel of selections) {
       if (!isConfigurableCliProvider(sel.provider)) continue
       if (!enabledSet.has(sel.provider as CliProvider)) continue
@@ -552,8 +552,23 @@ export function createAiConfigOps(db: SlayzoneDb, fs: AiConfigFs = localAiConfig
       const filePath = path.isAbsolute(effectiveTargetPath)
         ? effectiveTargetPath
         : path.join(resolvedProject, effectiveTargetPath)
-      const state = await computeLinkedSyncState(fs, filePath, expectedContent)
-      if (state.syncHealth === 'stale') stale += 1
+      checks.push({ path: filePath, expected: expectedContent })
+    }
+    let stale = 0
+    if (fs.hashFiles) {
+      const paths = [...new Set(checks.map((c) => c.path))]
+      const hashes = new Map<string, string | null>()
+      // Same bounded batch as agentConfig.fs; keep each project's authorized scope.
+      for (let i = 0; i < paths.length; i += 128)
+        for (const row of await fs.hashFiles(paths.slice(i, i + 128)))
+          hashes.set(row.path, row.hash)
+      for (const check of checks)
+        if (hashes.get(check.path) !== contentHash(check.expected)) stale++
+    } else {
+      // Older computers: preserve existing reads, never fall back to hub disk.
+      for (const check of checks)
+        if ((await computeLinkedSyncState(fs, check.path, check.expected)).syncHealth === 'stale')
+          stale++
     }
     return stale
   }

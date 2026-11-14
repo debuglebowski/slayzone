@@ -6,6 +6,16 @@ import {
   chatUnavailableMessage
 } from './computer-chat'
 
+test('a surviving connection being confirmed is reconnecting rather than known offline', () => {
+  expect(
+    chatAvailabilityMessage({
+      state: 'offline',
+      recovering: true,
+      computer: { id: 'pc', name: 'local-computer' }
+    })?.title
+  ).toBe('Reconnecting to local-computer')
+})
+
 test('unavailable explains its reason code; the title is never repeated', () => {
   expect(
     chatAvailabilityMessage({

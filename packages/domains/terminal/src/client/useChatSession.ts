@@ -176,6 +176,8 @@ export interface UseChatSessionResult {
 }
 
 export interface UseChatSessionOpts {
+  /** Renderer restoration admission holds its slot until these reads really settle. */
+  trackRestore?: <T>(work: Promise<T>) => Promise<T>
   tabId: string
   taskId: string
   mode: string
@@ -279,8 +281,19 @@ async function hydrateAndReplay({
         tabId: target.tabId,
         version: TIMELINE_PROJECTION_VERSION
       })
-    } catch {
-      // A hub without paged history (or none answering): the full replay.
+    } catch (error) {
+      const code = (error as { data?: { code?: string } } | null)?.data?.code
+      const message = error instanceof Error ? error.message : ''
+      // Only an older hub lacking the procedure needs a full replay. A timeout,
+      // denied read or unavailable computer must not amplify into loading all history.
+      if (
+        code !== 'NOT_IMPLEMENTED' &&
+        !(
+          code === 'NOT_FOUND' &&
+          /no procedure found|no ["']?query["']?-procedure|procedure.*not found/i.test(message)
+        )
+      )
+        throw error
     }
     if (gen !== genRef.current) return
     if (opened.kind === 'paged') {
@@ -368,6 +381,7 @@ function cancelFrame(id: number): void {
  * 5. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
+  const trackRestore = opts.trackRestore
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
@@ -375,7 +389,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // reads, the event stream and simple commands go there; the hub otherwise.
   const { lease: directChat, lost: directChatLost } = useDirectLease(
     trpcClient,
-    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null,
+    undefined,
+    trackRestore
   )
   const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
   // Fixed identities for the hydrate effect: they read the CURRENT path when called,
@@ -839,7 +855,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       trpcClient
     }
 
-    void hydrateAndReplay({
+    const work = hydrateAndReplay({
       trpcClient,
       reads: { openTimeline: openTimelineRead, getReplay: getReplayRead },
       target: {
@@ -867,6 +883,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       onHydrateError: setHydrateError,
       onHydrated: () => setLoadedInputs(inputs)
     })
+    void (trackRestore ? trackRestore(work) : work)
 
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for
@@ -874,6 +891,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       genRef.current = gen + 1
     }
   }, [
+    trackRestore,
     opts.tabId,
     opts.taskId,
     opts.mode,

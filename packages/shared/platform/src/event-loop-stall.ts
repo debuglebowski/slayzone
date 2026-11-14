@@ -43,6 +43,11 @@ import { PerformanceObserver, performance } from 'node:perf_hooks'
 import { Worker } from 'node:worker_threads'
 
 export interface EventLoopStall {
+  /** Highest-CPU processes sampled during the stall; executable names only, no arguments. */
+  topCpu?: Array<{
+    atMs: number
+    processes: Array<{ pid: number; cpuPct: number; command: string }>
+  }>
   /** Epoch ms of the last on-time heartbeat — when the freeze began, within one tick. */
   startedAt: number
   /** How long the main thread produced no heartbeat. */
@@ -104,7 +109,31 @@ type WatcherMessage =
       id: number
       /** `null` when `ps` failed or timed out. */
       processes: Array<{ pid: number; elapsed: string; command: string }> | null
+      topCpu?: Array<{ pid: number; cpuPct: number; command: string }>
     }
+
+/** Shared with the watcher worker; bounded and independent of module state. */
+export function parseStallProcesses(stdout: string, parentPid: number, ownPid: number) {
+  const processes: Array<{ pid: number; elapsed: string; command: string }> = []
+  const topCpu: Array<{ pid: number; cpuPct: number; command: string }> = []
+  for (const line of stdout.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+([\d.,]+)\s+(.*)$/)
+    if (!m) continue
+    const pid = Number(m[1])
+    if (pid === ownPid) continue
+    if (Number(m[2]) === parentPid)
+      processes.push({ pid, elapsed: m[3]!, command: m[5]!.slice(0, 300) })
+    const cpuPct = Number(m[4]!.replace(',', '.'))
+    if (cpuPct > 0)
+      topCpu.push({
+        pid,
+        cpuPct,
+        command: (m[5]!.split(/\s+/)[0]!.split('/').pop() ?? '?').slice(0, 64)
+      })
+  }
+  topCpu.sort((a, b) => b.cpuPct - a.cpuPct)
+  return { processes, topCpu: topCpu.slice(0, 5) }
+}
 
 /**
  * The watcher thread, as source: an `eval` worker needs no file of its own, so a
@@ -116,6 +145,7 @@ const WATCHER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads')
 const { execFile } = require('node:child_process')
 const { beat, thresholdMs, tickMs, sampleEveryMs, maxSamples, maxFrames, parentPid, psTimeoutMs } = workerData
+const parseStallProcesses = ${parseStallProcesses.toString()}
 
 let session = null
 try {
@@ -148,21 +178,14 @@ function snapshotChildren() {
   const id = ++snapshotId
   const takenAt = Date.now()
   parentPort.postMessage({ kind: 'children-pending', at: takenAt, id })
-  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,command='], { timeout: psTimeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+  const ps = execFile('ps', ['-A', '-o', 'pid=,ppid=,etime=,pcpu=,command='], { timeout: psTimeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
     psPending = false
     if (err) {
       parentPort.postMessage({ kind: 'children', at: takenAt, id, processes: null })
       return
     }
-    const processes = []
-    for (const line of String(stdout).split('\\n')) {
-      const m = line.trim().match(/^(\\d+)\\s+(\\d+)\\s+(\\S+)\\s+(.*)$/)
-      if (!m || Number(m[2]) !== parentPid) continue
-      const pid = Number(m[1])
-      if (pid === ps.pid) continue // this snapshot's own ps
-      processes.push({ pid, elapsed: m[3], command: m[4].slice(0, 300) })
-    }
-    parentPort.postMessage({ kind: 'children', at: takenAt, id, processes })
+    parentPort.postMessage({ kind: 'children', at: takenAt, id,
+      ...parseStallProcesses(String(stdout), parentPid, ps.pid) })
   })
 }
 
@@ -320,6 +343,9 @@ export function startEventLoopStallDetector(
         m.kind === 'children' && m.processes
           ? [{ atMs: m.at - from.wall, processes: m.processes }]
           : []
+      ),
+      topCpu: during.flatMap((m) =>
+        m.kind === 'children' && m.topCpu ? [{ atMs: m.at - from.wall, processes: m.topCpu }] : []
       )
     }
     try {

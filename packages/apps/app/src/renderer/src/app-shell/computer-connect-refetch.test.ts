@@ -69,6 +69,15 @@ describe('refetch on computer connect', () => {
     expect(invalidated).toEqual([])
   })
 
+  it('waits for confirmed usability, then refetches without requiring reconnect', () => {
+    const { client, invalidated } = fakeClient()
+    const refetch = computerConnectRefetcher(client, (q) => [q])
+    refetch.onData({ computerId: 'c1', connected: true, usable: false })
+    expect(invalidated).toEqual([])
+    refetch.onData({ computerId: 'c1', connected: true, usable: true })
+    expect(invalidated).toHaveLength(COMPUTER_BACKED_QUERIES.length + COMPUTER_BACKED_KEYS.length)
+  })
+
   it('the subscription starting refetches them too (a connect before it is never sent)', () => {
     const { client, invalidated } = fakeClient()
     computerConnectRefetcher(client, (q) => [q]).onStarted()

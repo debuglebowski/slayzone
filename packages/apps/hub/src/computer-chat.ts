@@ -132,6 +132,7 @@ export function createComputerChatServices(opts: {
   resolveComputer(taskId: string): Promise<string | null>
   resolveAvailabilityComputer?(taskId: string): Promise<string | null>
   connected?(computerId: string): boolean
+  recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
@@ -1381,6 +1382,7 @@ export function createComputerChatServices(opts: {
       ownership,
       resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,
       connected: opts.connected ?? (() => false),
+      recovering: opts.recovering,
       chatRuntimeReady: opts.chatRuntimeReady,
       hasLiveTask: opts.hasLiveTask,
       gate: opts.gate,

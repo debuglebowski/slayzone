@@ -47,6 +47,7 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
 import {
@@ -639,7 +640,7 @@ export function startComputer(
     name: config.name,
     platform: `${process.platform}-${process.arch}`,
     version: COMPUTER_VERSION,
-    capabilities: config.capabilities
+    capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own
   // identity object — the same machine otherwise, host id included. One made before

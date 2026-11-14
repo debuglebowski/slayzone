@@ -1,3 +1,4 @@
+import { useChatRestorationTracker } from './chat-restoration'
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
 import { readChatInfo } from './chat-info-read'
@@ -68,6 +69,7 @@ async function applyChatModel(
  */
 export function useChatModel({ taskId, mode, tabId, cwd, settingsGeneration }: UseChatModelOpts) {
   const trpcClient = useTRPCClient()
+  const trackRestoration = useChatRestorationTracker()
   const [chatModel, setChatModelState] = useState<AgentModel | null>(null)
   const [modelChanging, setModelChanging] = useState(false)
 
@@ -78,7 +80,9 @@ export function useChatModel({ taskId, mode, tabId, cwd, settingsGeneration }: U
       generation: number,
       isCancelled: () => boolean
     ) => {
-      void hydrateChatModel(trpcClient, ids, generation, isCancelled, setChatModelState)
+      void trackRestoration(
+        hydrateChatModel(trpcClient, ids, generation, isCancelled, setChatModelState)
+      )
     }
   )
 

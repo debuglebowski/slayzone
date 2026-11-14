@@ -1,4 +1,5 @@
 import { createChatRelayWatch } from './chat-relay-watch'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { createChatDirectWriteHandler } from './chat-direct-write'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import {
@@ -1142,6 +1143,9 @@ export function composeServer(opts: {
       }
     },
     connected: (id) => (execGateway?.listUsableComputers() ?? []).some((c) => c.computerId === id),
+    recovering: (id) =>
+      execGateway?.listComputers().some((c) => c.computerId === id && c.recovering === true) ??
+      false,
     chatRuntimeReady: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatRuntimeReady !==
       false,
@@ -2214,15 +2218,19 @@ export function composeServer(opts: {
         listener({ computerId: p.computer.computerId, connected: true })
       const down = (p: { computerId: string }): void =>
         listener({ computerId: p.computerId, connected: false })
+      const liveness = (p: { computerId: string; usable: boolean; recovering: boolean }): void =>
+        listener({ ...p, connected: true })
       gateway.events.on('computer-connected', up)
       gateway.events.on('computer-disconnected', down)
       // The watchdog's own event — this is what covers a socket that is open but
       // silent, which no client-side timer could observe.
       gateway.events.on('computer-lost', down)
+      gateway.events.on('computer-liveness', liveness)
       return () => {
         gateway.events.off('computer-connected', up)
         gateway.events.off('computer-disconnected', down)
         gateway.events.off('computer-lost', down)
+        gateway.events.off('computer-liveness', liveness)
       }
     }
   })
@@ -2321,6 +2329,13 @@ export function composeServer(opts: {
         computerDataHandoff.flushTask(taskId, computerId, [TASK_PATH_KIND])
     })
     const computerGateway = createHubComputerGateway({
+      diagnostic: (event, payload) =>
+        recordDiagnosticEvent({
+          level: event === 'computer.request_slow' ? 'warn' : 'info',
+          source: 'server',
+          event,
+          payload
+        }),
       // THE owner check (G2): every hub→computer request, whatever routed it, is
       // refused on a computer its caller does not own. The hub's own work passes.
       authorizeRequest: createComputerRequestAuthorizer(placement.gate),
@@ -2644,6 +2659,10 @@ export function composeServer(opts: {
     // ones on an explicit computer or the caller's own — each fs call one
     // agentConfig.fs.
     setAiConfigFsRouting({
+      supportsHashFiles: (id) =>
+        computerGateway
+          .listComputers()
+          .some((c) => c.computerId === id && c.capabilities?.includes(AI_CONFIG_HASH_CAPABILITY)),
       computerForProject: ({ taskId, projectId }) =>
         placement.forTarget(taskId ? { taskId } : projectId ? { projectId } : {}),
       computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),

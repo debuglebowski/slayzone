@@ -88,6 +88,8 @@ export interface DuplexRpcOptions {
   onPeerRequest?: (method: string, params: unknown, id: JsonRpcId, actor: unknown) => void
   /** Peer→local notification (method, no id). */
   onNotification?: (method: string, params: unknown) => void
+  /** A correlated reply (including a refusal) proves this peer is still answering. */
+  onPeerResponse?: () => void
   /** Diagnostic hook for unparseable / malformed inbound frames. */
   onParseError?: (line: string, err: unknown) => void
   /**
@@ -282,6 +284,7 @@ export class DuplexRpc {
   private resolvePending(id: JsonRpcId, msg: Record<string, unknown>): void {
     const pending = this.pending.get(id)
     if (!pending) return // late reply after timeout/disposal — expected, not an error
+    this.opts.onPeerResponse?.()
     this.pending.delete(id)
     pending.cancelTimeout?.()
     if ('error' in msg && msg.error) {

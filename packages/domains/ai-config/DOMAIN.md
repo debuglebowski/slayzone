@@ -30,3 +30,8 @@ checks and setup execute there, never falling back to hub files after a remote
 failure. Standalone hosts retain the local ops. Computer handlers enforce allowed
 roots, run `slay init --path` with a temporary CLI relay capability, and share the
 instruction-file check through `@slayzone/ai-config/slay-setup`.
+
+Stale-skill counts use bounded computer-local hash batches when the running computer
+advertises `agentConfig.hashFiles`. Every file retains its project/provider path
+checks. Only concurrent hash reads are coalesced; completed scans are not cached,
+so later edits are visible immediately. Older computers keep individual file reads.

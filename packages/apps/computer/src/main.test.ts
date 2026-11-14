@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { join } from 'node:path'
 import {
   HubDialer,
@@ -587,8 +588,15 @@ describe('startComputer runtime secondary hubs', () => {
       expect(b.options.identity.platform).toBe(of(PRIMARY)[0].options.identity.platform)
       // Marked as a desktop's own computer joined there, so that hub never prefers it
       // over a computer its user already had; the primary reports exactly its own.
-      expect(b.options.identity.capabilities).toEqual([...testConfig.capabilities, 'desktop'])
-      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual(testConfig.capabilities)
+      expect(b.options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY,
+        'desktop'
+      ])
+      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY
+      ])
       // A spent token is recovered by asking the parent for a fresh one, per hub.
       expect(await b.options.refreshJoinToken!()).toBe(`fresh-for-${B}`)
       // The primary is wired exactly as before: no refresh hook, its own token.
