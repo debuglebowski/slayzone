@@ -41,6 +41,7 @@ import {
 } from '@slayzone/platform/security-log'
 import { TypedEventEmitter } from '../shared/events'
 import {
+  isFrameTooLargeError,
   type FsChangeParams,
   type EnrollParams,
   enrollParamsSchema,
@@ -60,7 +61,8 @@ import {
   type RequestActor
 } from '../shared/frames'
 import { DuplexRpc, JSON_RPC_METHOD_NOT_FOUND, type JsonRpcId, RpcError } from '../shared/rpc'
-import { wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import { isWsMessageTooLargeError, wsDataByteLength, wsDataToText } from '../shared/ws-data'
+import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { isBareAuthority, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import { auditedHubCall } from './hub-audit'
 
@@ -180,6 +182,13 @@ export interface HubComputerGatewayOptions {
   log?: (message: string, meta?: Record<string, unknown>) => void
   /** Content-free liveness and slow-request telemetry. Must never affect delivery. */
   diagnostic?: (event: string, payload: Record<string, unknown>) => void
+  /**
+   * Largest frame either way, in UTF-8 bytes. Default {@link COMPUTER_FRAME_MAX_BYTES}.
+   * Holds outbound frames (`DuplexRpc`); the host must give its `/computers` ws server
+   * the same `maxPayload` — read it back from {@link HubComputerGateway.maxFrameBytes}.
+   * Tests lower it.
+   */
+  maxFrameBytes?: number
 }
 
 /**
@@ -305,6 +314,11 @@ export interface HubComputerGateway {
   disconnect(computerId: string, reason: string): boolean
   /** Terminate every connection and reject all in-flight requests. */
   close(): void
+  /**
+   * The frame limit this gateway holds computers to. The `/computers` ws server MUST
+   * be created with `maxPayload` = this, so receive and send sides agree.
+   */
+  readonly maxFrameBytes: number
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000
@@ -324,8 +338,9 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
  * failing array element (GHSA-mrhx-c7xc-m3w5), measured at ~180 bytes of heap per byte
  * of `capabilities: [0, 0, …]`, so a 100 MiB enroll is many GiB: an out-of-memory hub
  * with no credential. 64 KiB bounds that to ~12 MiB per frame. Authenticated computers
- * are not capped (pty output, file reads and command output ride their frames). Keep it
- * after the zod bump: an unauthenticated peer has no reason to send more.
+ * get the protocol's frame limit (`COMPUTER_FRAME_MAX_BYTES`): pty output, file reads and
+ * command output ride their frames. Keep it after the zod bump: an unauthenticated peer
+ * has no reason to send more.
  */
 export const PRE_AUTH_FRAME_MAX_BYTES = 64 * 1024
 
@@ -347,6 +362,8 @@ interface ComputerConnection {
   liveness: 'usable' | 'recovering' | 'stale'
   probe: Promise<unknown> | null
   slowRequests: Map<string, number>
+  /** Why the socket is closing, when the gateway knows better than "it closed". */
+  closeReason: string | null
 }
 
 /**
@@ -398,6 +415,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
   const authTimeoutMs = options.authTimeoutMs ?? DEFAULT_AUTH_TIMEOUT_MS
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  const maxFrameBytes = options.maxFrameBytes ?? COMPUTER_FRAME_MAX_BYTES
   const clock = createSuspendClock()
   const diagnostic = (event: string, payload: Record<string, unknown>): void => {
     try {
@@ -1122,11 +1140,20 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       observedResumeAt: 0,
       liveness: 'usable',
       probe: null,
-      slowRequests: new Map()
+      slowRequests: new Map(),
+      closeReason: null
     }
     conn.rpc = new DuplexRpc({
       label: 'computer-hub',
       defaultRequestTimeoutMs: requestTimeoutMs,
+      maxFrameBytes,
+      // Refused before sending; the connection stays up (see ../shared/frame-limit).
+      onFrameTooLarge: (info) =>
+        diagnostic('computer.frame_too_large', {
+          computerId: conn.descriptor?.computerId ?? null,
+          direction: 'outbound',
+          ...info
+        }),
       write: (line) => {
         ws.send(line)
       },
@@ -1165,8 +1192,26 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
         if (line.trim().length > 0) conn.rpc.handleLine(line)
       }
     })
-    ws.on('close', () => teardown(conn, 'socket-closed'))
+    ws.on('close', () => teardown(conn, conn.closeReason ?? 'socket-closed'))
     ws.on('error', (err) => {
+      if (isWsMessageTooLargeError(err)) {
+        // The computer sent a frame over the limit (it should have refused it itself).
+        // ws must close the socket (1009) and exposes no size: say what we do know —
+        // the limit, and which requests it was answering — instead of a bare close.
+        conn.closeReason = 'frame-too-large'
+        const pendingMethods = conn.rpc.pendingMethods()
+        diagnostic('computer.frame_too_large', {
+          computerId: conn.descriptor?.computerId ?? null,
+          direction: 'inbound',
+          limitBytes: maxFrameBytes,
+          pendingMethods
+        })
+        protocolError(
+          conn,
+          `frame over the ${maxFrameBytes}-byte limit (in flight: ${pendingMethods.join(', ') || 'none'}); connection closed`
+        )
+        return
+      }
       log('computer computer socket error', {
         computerId: conn.descriptor?.computerId,
         error: String(err)
@@ -1186,6 +1231,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       cliRelayHandler = handler
     },
     events,
+    maxFrameBytes,
     admitUpgrade,
     handleConnection,
     request<T = unknown>(
@@ -1251,6 +1297,15 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
           : conn.rpc.request<T>(method, params, timeoutMs, actor)
       )
         .catch((err: unknown) => {
+          if (isFrameTooLargeError(err) && (err.data as { frame?: unknown })?.frame === 'reply') {
+            const data = err.data as { bytes?: unknown; limitBytes?: unknown }
+            diagnostic('computer.reply_too_large', {
+              computerId,
+              method,
+              bytes: data.bytes ?? null,
+              limitBytes: data.limitBytes ?? null
+            })
+          }
           if (isUnknownMethodAnswer(err, method))
             throw new ComputerUpdatePendingError(method, err.code, conn.descriptor?.version)
           throw err

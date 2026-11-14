@@ -622,9 +622,13 @@ export async function startServer(cfg: StartServerConfig = {}): Promise<ServerHa
   //
   //   /trpc      — clients (renderer / federated hubs), origin-guarded.
   //   /computers — computers (non-browser), NO origin allowlist (authenticated by the
-  //                computer protocol: enroll/hello frames + join token).
+  //                computer protocol: enroll/hello frames + join token). Its receive
+  //                limit IS the gateway's frame limit, which the computer's sender
+  //                honours — so an oversized reply fails one request, not the socket.
   const wss = new WebSocketServer({ noServer: true })
-  const computerWss = computerGateway ? new WebSocketServer({ noServer: true }) : null
+  const computerWss = computerGateway
+    ? new WebSocketServer({ noServer: true, maxPayload: computerGateway.maxFrameBytes })
+    : null
   httpServer.on('upgrade', (req, socket, head) => {
     adoptClientAddress(req, trustedProxies)
     const pathname = (req.url ?? '').split('?')[0]

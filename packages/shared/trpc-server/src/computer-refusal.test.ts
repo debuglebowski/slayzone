@@ -8,6 +8,7 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import { describe, expect, it } from 'vitest'
 import { COMPUTER_REFUSED_RPC_CODE } from '@slayzone/platform/path-scope'
+import { COMPUTER_FRAME_TOO_LARGE_RPC_CODE } from '@slayzone/platform/computer-frame-limit'
 import { publicProcedure, router } from './trpc'
 
 /** An `RpcError` as computer-transport builds it (structural: no domain import here). */
@@ -20,6 +21,12 @@ const appRouter = router({
     throw rpcError(
       COMPUTER_REFUSED_RPC_CODE,
       "path '/etc' is outside the folders of task t1; refused"
+    )
+  }),
+  tooLarge: publicProcedure.mutation(() => {
+    throw rpcError(
+      COMPUTER_FRAME_TOO_LARGE_RPC_CODE,
+      "reply to 'chat.request' is 211812345 bytes (202.0 MiB); the frame limit is 104857600 bytes (100.0 MiB)"
     )
   }),
   otherRpc: publicProcedure.mutation(() => {
@@ -52,6 +59,16 @@ describe('a computer refusal over tRPC', () => {
     expect(status).toBe(409)
     expect(body.error.data).toMatchObject({ code: 'CONFLICT', appCode: 'COMPUTER_REFUSED' })
     expect(body.error.message).toMatch(/outside the folders of task t1/)
+  })
+
+  it('a frame over the computer link limit is PAYLOAD_TOO_LARGE (413) with COMPUTER_FRAME_TOO_LARGE', async () => {
+    const { status, body } = await call('tooLarge')
+    expect(status).toBe(413)
+    expect(body.error.data).toMatchObject({
+      code: 'PAYLOAD_TOO_LARGE',
+      appCode: 'COMPUTER_FRAME_TOO_LARGE'
+    })
+    expect(body.error.message).toMatch(/reply to 'chat\.request' is 211812345 bytes/)
   })
 
   it('leaves every other error as it was', async () => {

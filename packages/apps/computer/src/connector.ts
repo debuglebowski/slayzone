@@ -95,6 +95,10 @@ export async function startConnector(
       const params = raw as { method: string; params?: unknown; timeoutMs?: number }
       return dialer.request(params.method, params.params, params.timeoutMs)
     },
+    onFrameTooLarge: (info) =>
+      process.stdout.write(
+        `[connector] local frame over the frame limit refused ${JSON.stringify(info)}\n`
+      ),
     notify: (method, raw) => {
       if (method !== 'event') return
       const event = raw as { method: string; params?: unknown }

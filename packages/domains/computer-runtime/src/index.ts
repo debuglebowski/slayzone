@@ -1,6 +1,12 @@
 /** Local, same-user control plane. Hub protocol versions never govern this link. */
 import { connect, type Socket } from 'node:net'
-import { DuplexRpc, LineDecoder, RpcError } from '@slayzone/computer-transport/shared'
+import {
+  COMPUTER_FRAME_MAX_BYTES,
+  DuplexRpc,
+  LineDecoder,
+  RpcError,
+  type FrameTooLargeInfo
+} from '@slayzone/computer-transport/shared'
 
 // v3 adds provider transitions and scoped draft/queue ownership preconditions.
 // The hub protocol belongs to the replaceable connector and cannot prove that a
@@ -77,6 +83,20 @@ export class RetryPolicy {
   }
 }
 
+/**
+ * The local link relays hub traffic in envelopes: the connector sends the host
+ * `dispatch { method, params, actor }` (hub → computer) and the host sends the
+ * connector `upstream { method, params }` (computer → hub). For frame-limit errors
+ * and diagnostics such a request is named by the hub method it carries, so the hub
+ * caller reads `reply to 'chat.request'`, not `reply to 'dispatch'`.
+ */
+export function describeLocalRequest(method: string, params: unknown): string {
+  if (method !== 'dispatch' && method !== 'upstream') return method
+  const inner =
+    params && typeof params === 'object' ? (params as { method?: unknown }).method : undefined
+  return typeof inner === 'string' && inner.length > 0 ? inner : method
+}
+
 export interface LocalPeer {
   socket: Socket
   rpc: DuplexRpc
@@ -85,15 +105,32 @@ export interface LocalPeer {
 export function socketPeer(
   socket: Socket,
   handlers: {
+    /**
+     * Receive limit right now, in bytes (the host lowers it before authentication).
+     * Default: `frameLimitBytes`.
+     */
     maxFrameBytes?: () => number
+    /**
+     * The link's frame limit: outbound frames over it are refused (a reply becomes a
+     * `frameTooLarge` error, a request is rejected locally) instead of the peer
+     * destroying the socket. Default {@link COMPUTER_FRAME_MAX_BYTES} — this link
+     * carries hub frames, so it shares their limit. Tests lower it.
+     */
+    frameLimitBytes?: number
+    onFrameTooLarge?: (info: FrameTooLargeInfo) => void
     request?: (method: string, params: unknown, actor: unknown) => unknown | Promise<unknown>
     notify?: (method: string, params: unknown) => void
   } = {}
 ): LocalPeer {
   const decoder = new LineDecoder()
+  const frameLimit = handlers.frameLimitBytes ?? COMPUTER_FRAME_MAX_BYTES
+  /** UTF-8 bytes of the frame being received (the decoder's unterminated tail). */
   let bytes = 0
   const rpc = new DuplexRpc({
     label: 'computer-local',
+    maxFrameBytes: frameLimit,
+    describeRequest: describeLocalRequest,
+    ...(handlers.onFrameTooLarge ? { onFrameTooLarge: handlers.onFrameTooLarge } : {}),
     write: (line) => {
       if (socket.destroyed || socket.writableLength > 8 * 1024 * 1024)
         throw new Error('local connector unavailable or backpressured')
@@ -124,13 +161,22 @@ export function socketPeer(
   })
   socket.setEncoding('utf8')
   socket.on('data', (chunk: string) => {
-    bytes += Buffer.byteLength(chunk)
-    if (bytes > (handlers.maxFrameBytes?.() ?? 100 * 1024 * 1024)) {
+    const limit = handlers.maxFrameBytes?.() ?? frameLimit
+    const lines = decoder.feed(chunk)
+    // A frame is one line WITHOUT its '\n' framing. Completed lines are measured
+    // whole (a UTF-16 unit is at most 3 UTF-8 bytes, so short ones skip the scan);
+    // the unterminated tail is tracked incrementally.
+    for (const line of lines) {
+      if (line.length * 3 > limit && Buffer.byteLength(line) > limit) {
+        socket.destroy()
+        return
+      }
+    }
+    bytes = lines.length ? Buffer.byteLength(decoder.partial) : bytes + Buffer.byteLength(chunk)
+    if (bytes > limit) {
       socket.destroy()
       return
     }
-    const lines = decoder.feed(chunk)
-    if (lines.length) bytes = 0
     for (const line of lines) rpc.handleLine(line)
   })
   socket.on('close', () => rpc.dispose('local connection closed'))

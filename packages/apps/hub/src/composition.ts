@@ -2332,7 +2332,13 @@ export function composeServer(opts: {
     const computerGateway = createHubComputerGateway({
       diagnostic: (event, payload) =>
         recordDiagnosticEvent({
-          level: event === 'computer.request_slow' ? 'warn' : 'info',
+          // A refused oversized frame is a request that failed for the user.
+          level:
+            event === 'computer.request_slow' ||
+            event === 'computer.frame_too_large' ||
+            event === 'computer.reply_too_large'
+              ? 'warn'
+              : 'info',
           source: 'server',
           event,
           payload

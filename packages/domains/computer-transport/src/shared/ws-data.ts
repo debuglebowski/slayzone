@@ -12,6 +12,16 @@ export function wsDataToText(data: unknown): string {
   return (data as Buffer).toString('utf8')
 }
 
+/**
+ * The `ws` receive-side refusal of a message over `maxPayload` (it then closes 1009).
+ * Structural on ws's error code, so shared code carries no ws types.
+ */
+export function isWsMessageTooLargeError(err: unknown): boolean {
+  return (
+    err instanceof Error && (err as { code?: unknown }).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
+  )
+}
+
 /** Byte length of a `ws` message payload, without decoding it. */
 export function wsDataByteLength(data: unknown): number {
   if (typeof data === 'string') return Buffer.byteLength(data, 'utf8')

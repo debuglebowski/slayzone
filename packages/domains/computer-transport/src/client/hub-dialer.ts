@@ -27,8 +27,9 @@ import {
   HubToComputerMethods,
   ComputerToHubMethods
 } from '../shared/frames'
+import { COMPUTER_FRAME_MAX_BYTES } from '../shared/frame-limit'
 import { DuplexRpc, JSON_RPC_INTERNAL_ERROR, RpcError } from '../shared/rpc'
-import { wsDataToText } from '../shared/ws-data'
+import { isWsMessageTooLargeError, wsDataToText } from '../shared/ws-data'
 import { computeBackoffDelayMs, type BackoffOptions } from './backoff'
 import type { ComputerCredentialStore } from './credential-store'
 
@@ -129,6 +130,11 @@ export interface HubDialerOptions {
   epoch?: string
   /** Injectable randomness for backoff jitter (tests). */
   random?: () => number
+  /**
+   * Largest frame either way, in UTF-8 bytes (the socket's `maxPayload` and the
+   * send-side cap). Default {@link COMPUTER_FRAME_MAX_BYTES}; tests lower it.
+   */
+  maxFrameBytes?: number
   log?: (message: string, meta?: Record<string, unknown>) => void
 }
 
@@ -266,7 +272,8 @@ export class HubDialer {
     this.setState('connecting')
     // No TLS options: a wss:// hub is verified with Node's defaults (CA chain +
     // hostname). There is deliberately no pin and no way to skip verification.
-    const ws = new WebSocket(this.opts.url)
+    const maxFrameBytes = this.opts.maxFrameBytes ?? COMPUTER_FRAME_MAX_BYTES
+    const ws = new WebSocket(this.opts.url, { maxPayload: maxFrameBytes })
     const conn: Connection = {
       ws,
       rpc: null as unknown as DuplexRpc,
@@ -277,6 +284,10 @@ export class HubDialer {
     conn.rpc = new DuplexRpc({
       label: 'computer-computer',
       defaultRequestTimeoutMs: this.opts.requestTimeoutMs,
+      maxFrameBytes,
+      // Refused before sending, so the hub never closes the socket over it.
+      onFrameTooLarge: (info) =>
+        this.log('computer dialer refused a frame over the frame limit', { ...info }),
       write: (line) => {
         ws.send(line)
       },
@@ -299,6 +310,14 @@ export class HubDialer {
     })
     ws.on('error', (err) => {
       if (this.current !== conn) return
+      if (isWsMessageTooLargeError(err)) {
+        // ws closes 1009 and exposes no size; the limit and in-flight requests are
+        // what we know (the hub should have refused the frame itself).
+        this.log('hub frame exceeded the frame limit; connection closed', {
+          limitBytes: maxFrameBytes,
+          pendingMethods: conn.rpc.pendingMethods()
+        })
+      }
       this.log('computer dialer socket error', { error: String(err) })
       this.events.emit('error', {
         error: err instanceof Error ? err : new Error(String(err)),

@@ -38,6 +38,7 @@
 
 import { z } from 'zod'
 import { directAddressSchema } from './direct'
+import { FRAME_TOO_LARGE_CODE } from './frame-limit'
 import { RpcError } from './rpc'
 
 /**
@@ -111,8 +112,20 @@ export const ComputerTransportErrorCodes = {
    * not a policy refusal: the user picks the project's folder on this computer
    * (or the hub delivers it), then the same spawn works.
    */
-  projectNotPlaced: -32007
+  projectNotPlaced: -32007,
+  /**
+   * A frame would exceed the receiver's limit (`COMPUTER_FRAME_MAX_BYTES`, ./frame-limit),
+   * so it was never sent: the caller's request (refused locally) or the peer's reply
+   * (answered with this error instead). Not transient. `data`: `{ method, bytes, limitBytes }`
+   * (`bytes: null` = too large to serialize at all).
+   */
+  frameTooLarge: FRAME_TOO_LARGE_CODE
 } as const
+
+/** Is `err` a frame-limit refusal (an `RpcError` with `frameTooLarge`)? */
+export function isFrameTooLargeError(err: unknown): err is RpcError {
+  return err instanceof RpcError && err.code === ComputerTransportErrorCodes.frameTooLarge
+}
 
 /** The error a computer raises when asked to start a project's agent with no folder for it. */
 export function projectNotPlacedError(projectId: string): RpcError {

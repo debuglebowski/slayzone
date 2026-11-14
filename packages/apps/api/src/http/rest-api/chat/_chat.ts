@@ -25,6 +25,7 @@ import {
 import type { ChatAccess, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 export interface ChatTarget {
   taskId: string
@@ -218,6 +219,8 @@ export function describePrompts(
 /** Answer a failure with its status: route refusals, unknown tasks, bad answers, then 500. */
 export function sendChatError(res: Response, err: unknown): void {
   if (res.headersSent) return
+  // A whole-history read over the computer link limit: 413 with the reason, not a 500.
+  if (respondFrameTooLarge(res, err)) return
   if (err instanceof ChatRouteError) {
     res.status(err.status).json({ ok: false, error: err.message })
     return
