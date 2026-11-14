@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./ipc": "./src/ipc-dedup.ts",
     "./slz-file-url": "./src/slz-file-url.ts",
+    "./mime-types": "./src/mime-types.ts",
     "./pdf-viewer-links": "./src/pdf-viewer-links.ts",
     "./html-preview-links": "./src/html-preview-links.ts",
     "./forced-html-theme": "./src/forced-html-theme.ts",

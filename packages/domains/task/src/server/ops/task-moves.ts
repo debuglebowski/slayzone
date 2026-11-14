@@ -1,3 +1,12 @@
+import { assertPathSafeId } from '@slayzone/platform/safe-path'
+import {
+  snapshotCopyFiles,
+  copySnapshotRoot,
+  dropCopySnapshot,
+  copyArtifactDirectory
+} from '../copy-snapshot-files'
+import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { copiedTaskBundle, copyImportId } from '../../shared/task-copy-bundle'
 import { randomUUID } from 'node:crypto'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RecordActivityEventInput } from '@slayzone/history/server'
@@ -17,6 +26,7 @@ import {
   TASK_MOVE_LOCKING_STATUSES,
   TASK_MOVE_STEPS,
   TASK_MOVE_TABLES,
+  PROJECT_MOVE_TABLES,
   type BeginProjectMoveInput,
   type ProjectMoveBundle,
   type BeginTaskMoveInput,
@@ -69,6 +79,11 @@ export class TaskMoveRefusedError extends Error {
 interface MoveRow {
   id: string
   direction: 'out' | 'in'
+  mode: 'move' | 'copy'
+  runner_requested: number
+  runner_action: TaskMove['runnerAction']
+  copy_bundle: string | null
+  copy_ids: string | null
   scope: TaskMoveScope
   project_id: string | null
   peer_hub_id: string
@@ -95,6 +110,10 @@ async function toMove(db: SlayzoneDb, row: MoveRow): Promise<TaskMove> {
   return {
     id: row.id,
     direction: row.direction,
+    mode: row.mode,
+    runnerRequested: row.runner_requested === 1,
+    runnerAction: row.runner_action,
+    ...(row.copy_ids ? { copyIds: JSON.parse(row.copy_ids) as Record<string, string> } : {}),
     scope: row.scope,
     projectId: row.project_id,
     peerHubId: row.peer_hub_id,
@@ -142,7 +161,7 @@ export async function listTaskMoves(
 export async function beginTaskMove(
   db: SlayzoneDb,
   input: BeginTaskMoveInput,
-  opts: { createdBy?: string | null } = {}
+  opts: { createdBy?: string | null; dataRoot?: string } = {}
 ): Promise<TaskMove> {
   const id = input.id ?? randomUUID()
   const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [id])
@@ -190,7 +209,9 @@ export async function beginTaskMove(
     rootTaskIds: rootIds,
     taskIds,
     includeSubtasks,
-    includeSessions: input.includeSessions ?? true,
+    mode: input.mode,
+    requestRunner: input.requestRunner,
+    includeSessions: input.mode === 'copy' ? false : (input.includeSessions ?? true),
     scope: 'task',
     projectId: null,
     createdBy: opts.createdBy ?? null,
@@ -200,8 +221,11 @@ export async function beginTaskMove(
     throw new TaskAlreadyMovingError(
       `Already being moved to another hub: ${result.taskIds.join(', ')}`
     )
-  await stopMovingTasks(taskIds)
-  return advanceTaskMove(db, { id, completed: 'lock' })
+  if (input.mode !== 'copy') await stopMovingTasks(taskIds)
+  await advanceTaskMove(db, { id, completed: 'lock' })
+  if (input.mode === 'copy')
+    await snapshotCopy(db, id, { title: input.title }, opts.dataRoot, opts.createdBy ?? null)
+  return getTaskMove(db, id)
 }
 
 /** The lock step: nothing of these tasks may keep running here while they move. */
@@ -259,7 +283,7 @@ async function projectMoveRefusal(
 export async function beginProjectMove(
   db: SlayzoneDb,
   input: BeginProjectMoveInput,
-  opts: { createdBy?: string | null } = {}
+  opts: { createdBy?: string | null; dataRoot?: string } = {}
 ): Promise<TaskMove> {
   const id = input.id ?? randomUUID()
   const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [id])
@@ -281,11 +305,13 @@ export async function beginProjectMove(
   const result = await db.namedTxn('task:begin-move', {
     id,
     peerHubId: input.targetHubId,
-    targetProjectId: input.projectId,
+    targetProjectId: input.mode === 'copy' ? randomUUID() : input.projectId,
     rootTaskIds,
     taskIds,
     includeSubtasks: true,
-    includeSessions: input.includeSessions ?? true,
+    mode: input.mode,
+    requestRunner: input.requestRunner,
+    includeSessions: input.mode === 'copy' ? false : (input.includeSessions ?? true),
     scope: 'project',
     projectId: input.projectId,
     createdBy: opts.createdBy ?? null,
@@ -297,8 +323,11 @@ export async function beginProjectMove(
         ? `Already being moved to another hub: ${result.taskIds.join(', ')}`
         : 'The project is already being moved'
     )
-  await stopMovingTasks(taskIds)
-  return advanceTaskMove(db, { id, completed: 'lock' })
+  if (input.mode !== 'copy') await stopMovingTasks(taskIds)
+  await advanceTaskMove(db, { id, completed: 'lock' })
+  if (input.mode === 'copy')
+    await snapshotCopy(db, id, { name: input.name }, opts.dataRoot, opts.createdBy ?? null)
+  return getTaskMove(db, id)
 }
 
 async function setMove(
@@ -336,6 +365,8 @@ export async function advanceTaskMove(
   input: { id: string; completed: TaskMoveStep }
 ): Promise<TaskMove> {
   const move = await getTaskMove(db, input.id)
+  if (move.direction !== 'out')
+    throw new TaskMoveStateError('Only outgoing transfers advance their journal')
   const at = TASK_MOVE_STEPS.indexOf(move.step)
   const done = TASK_MOVE_STEPS.indexOf(input.completed)
   if (done < at) return move
@@ -434,13 +465,23 @@ export async function failTaskMove(
  * lock is lifted and the tasks stay here. Whatever an `import` wrote on the target
  * is the app's to remove there (the target's own journal row says so).
  */
-export async function cancelTaskMove(db: SlayzoneDb, id: string): Promise<TaskMove> {
+export async function cancelTaskMove(
+  db: SlayzoneDb,
+  id: string,
+  dataRoot?: string
+): Promise<TaskMove> {
   const move = await getTaskMove(db, id)
   if (move.status === 'canceled') return move
   if (move.status === 'done') throw new TaskMoveStateError('The move is done')
   if (TASK_MOVE_STEPS.indexOf(move.step) > TASK_MOVE_STEPS.indexOf('commit'))
     throw new TaskMoveStateError('The target hub took the tasks: the move can only finish now')
-  await setMove(db, id, { status: 'canceled' }, { status: TASK_MOVE_LOCKING_STATUSES })
+  await setMove(
+    db,
+    id,
+    { status: 'canceled', ...(move.mode === 'copy' ? { copy_bundle: null } : {}) },
+    { status: TASK_MOVE_LOCKING_STATUSES }
+  )
+  if (move.mode === 'copy') dropCopySnapshot(dataRoot ?? getRuntimeAdapters().getDataRoot(), id)
   // The exports made for the copy are of no use now.
   await taskMoveSessionsOrNull()
     ?.discard(id, move.taskIds)
@@ -461,11 +502,23 @@ export async function releaseTaskMove(
   dataRoot?: string
 ): Promise<TaskMove> {
   const move = await getTaskMove(db, id)
+  if (move.direction !== 'out')
+    throw new TaskMoveStateError('Only outgoing transfers release source content')
   if (move.status === 'done') return move
   if (move.step !== 'release' || move.status !== 'running')
     throw new TaskMoveStateError(
       `The move is ${move.status} at "${move.step}": it releases only when running at "release"`
     )
+  if (move.mode === 'copy') {
+    dropCopySnapshot(dataRoot ?? getRuntimeAdapters().getDataRoot(), id)
+    await setMove(
+      db,
+      id,
+      { status: 'done', copy_bundle: null },
+      { status: ['running'], step: 'release' }
+    )
+    return getTaskMove(db, id)
+  }
   // The sessions went with the tasks: their computers let go of them (best effort — a
   // computer that is away keeps a copy nobody reads; the hub forgets them either way).
   if (move.includeSessions)
@@ -532,7 +585,7 @@ export async function lockedProjectIds(
   if (projectIds.length === 0) return []
   const rows = await db.all<{ project_id: string }>(
     `SELECT DISTINCT project_id FROM task_moves
-      WHERE scope = 'project' AND status IN ${LOCKING_SQL}
+      WHERE (direction = 'in' OR mode = 'move') AND scope = 'project' AND status IN ${LOCKING_SQL}
         AND project_id IN (${placeholders(projectIds.length)})`,
     [...projectIds]
   )
@@ -554,7 +607,7 @@ export async function previewProjectMove(
     alreadyMoving:
       (await count(
         `SELECT COUNT(*) AS n FROM task_moves m
-          WHERE m.status IN ${LOCKING_SQL}
+          WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ${LOCKING_SQL}
             AND ((m.scope = 'project' AND m.project_id = ?)
                  OR EXISTS (SELECT 1 FROM task_move_tasks mt JOIN tasks t ON t.id = mt.task_id
                              WHERE mt.move_id = m.id AND t.project_id = ?))`,
@@ -571,7 +624,9 @@ export async function previewProjectMove(
 
 /** Whether any move holds a lock now — the write gate's cheap first question. */
 export async function anyTaskMoveLocking(db: SlayzoneDb): Promise<boolean> {
-  return !!(await db.get(`SELECT 1 FROM task_moves WHERE status IN ${LOCKING_SQL} LIMIT 1`))
+  return !!(await db.get(
+    `SELECT 1 FROM task_moves WHERE (direction = 'in' OR mode = 'move') AND status IN ${LOCKING_SQL} LIMIT 1`
+  ))
 }
 
 /** Which of `taskIds` an unfinished move locks. */
@@ -579,7 +634,7 @@ export async function lockedTaskIds(db: SlayzoneDb, taskIds: readonly string[]):
   if (taskIds.length === 0) return []
   const rows = await db.all<{ task_id: string }>(
     `SELECT DISTINCT mt.task_id FROM task_move_tasks mt JOIN task_moves m ON m.id = mt.move_id
-      WHERE m.status IN ${LOCKING_SQL} AND mt.task_id IN (${placeholders(taskIds.length)})`,
+      WHERE (m.direction = 'in' OR m.mode = 'move') AND m.status IN ${LOCKING_SQL} AND mt.task_id IN (${placeholders(taskIds.length)})`,
     [...taskIds]
   )
   return rows.map((r) => r.task_id)
@@ -598,9 +653,23 @@ export async function exportTaskMove(
   db: SlayzoneDb,
   id: string,
   /** Who runs the move: a project move carries their own per-user settings of it. */
-  opts: { userId?: string | null } = {}
+  opts: { userId?: string | null; rawCopy?: boolean; dataRoot?: string } = {}
 ): Promise<TaskMoveBundle> {
   const move = await getTaskMove(db, id)
+  const frozen = await db.get<{ copy_bundle: string | null }>(
+    'SELECT copy_bundle FROM task_moves WHERE id = ?',
+    [id]
+  )
+  if (frozen?.copy_bundle) {
+    const bundle = JSON.parse(frozen.copy_bundle) as TaskMoveBundle
+    if (!opts.rawCopy && TASK_MOVE_LOCKING_STATUSES.includes(move.status))
+      snapshotCopyFiles(opts.dataRoot ?? getRuntimeAdapters().getDataRoot(), bundle)
+    return bundle
+  }
+  if (move.mode === 'copy' && !opts.rawCopy) {
+    await snapshotCopy(db, id, {}, opts.dataRoot, opts.userId ?? null)
+    return exportTaskMove(db, id, opts)
+  }
   if (move.direction !== 'out' || !TASK_MOVE_LOCKING_STATUSES.includes(move.status))
     throw new TaskMoveStateError(`The move is ${move.status}: nothing to export`)
   if (TASK_MOVE_STEPS.indexOf(move.step) < TASK_MOVE_STEPS.indexOf('export'))
@@ -778,6 +847,7 @@ export async function importTaskMove(
   } = {}
 ): Promise<TaskMove> {
   const { bundle } = input
+  assertPathSafeId(bundle.moveId, 'moveId')
   const existing = await db.get<MoveRow>('SELECT * FROM task_moves WHERE id = ?', [bundle.moveId])
   if (existing) return toMove(db, existing)
   const incoming = bundle.project
@@ -829,6 +899,7 @@ export async function importTaskMove(
   })
   await db.namedTxn('task:import-move', {
     moveId: bundle.moveId,
+    mode: input.mode,
     sourceHubId: input.sourceHubId,
     targetProjectId: target.id,
     includeSessions: input.includeSessions ?? true,
@@ -949,6 +1020,12 @@ export async function abortTaskMoveIn(
       })
   const placements = await projectPlacementsOf(db, move)
   await db.namedTxn('task:abort-import', { id, now: Date.now() })
+  const runtime = getRuntimeAdapters()
+  for (const taskId of move.taskIds) {
+    await runtime.worktrees.removeArtifactDir(
+      artifactTaskDir(artifactsDirOf(dataRoot ?? runtime.getDataRoot()), taskId)
+    )
+  }
   if (move.scope === 'project' && move.projectId)
     await letGoOfProject(move.projectId, placements, dataRoot ?? getRuntimeAdapters().getDataRoot())
   return getTaskMove(db, id)
@@ -1102,4 +1179,197 @@ export async function previewCrossHubMove(
     externalBlockerCount: external?.n ?? 0,
     alreadyMoving: (await lockedTaskIds(db, all)).length > 0
   }
+}
+
+/** Freeze content and IDs once. Retries and recovery import the exact same copy. */
+async function snapshotCopy(
+  db: SlayzoneDb,
+  id: string,
+  names: { title?: string; name?: string },
+  dataRoot = getRuntimeAdapters().getDataRoot(),
+  userId: string | null = null
+): Promise<void> {
+  const bundle = await exportTaskMove(db, id, { rawCopy: true, dataRoot, userId })
+  if (bundle.copy) {
+    snapshotCopyFiles(dataRoot, bundle)
+    return
+  }
+  const move = await getTaskMove(db, id)
+  // Originals are writable: gather the complete relational snapshot in one read
+  // transaction so a concurrent edit cannot leave child rows without their parents.
+  const ph = placeholders(move.taskIds.length)
+  const reads = TASK_MOVE_TABLES.map((table) => {
+    const where =
+      table === 'tasks'
+        ? `id IN (${ph})`
+        : table === 'artifact_versions'
+          ? `artifact_id IN (SELECT id FROM task_artifacts WHERE task_id IN (${ph}))`
+          : table === 'task_dependencies'
+            ? `task_id IN (${ph}) AND blocks_task_id IN (${ph})`
+            : `task_id IN (${ph})`
+    return {
+      type: 'all' as const,
+      sql: `SELECT * FROM ${table} WHERE ${move.taskIds.length ? where : '0'}`,
+      params: move.taskIds.length
+        ? table === 'task_dependencies'
+          ? [...move.taskIds, ...move.taskIds]
+          : move.taskIds
+        : []
+    }
+  })
+  const projectReads = bundle.project
+    ? PROJECT_MOVE_TABLES.map((table) => ({
+        type: 'all' as const,
+        sql: `SELECT * FROM ${table} WHERE ${table === 'projects' ? 'id' : 'project_id'} = ?${table === 'activity_events' ? ' AND task_id IS NULL' : ''}`,
+        params: [bundle.project!.projectId]
+      }))
+    : []
+  const snapshots = (await db.batchTxn([
+    ...reads,
+    ...projectReads,
+    {
+      type: 'all',
+      sql: `SELECT DISTINCT tg.id, tg.name, tg.color, tg.text_color FROM tags tg JOIN task_tags tt ON tt.tag_id = tg.id WHERE ${move.taskIds.length ? `tt.task_id IN (${ph})` : '0'}`,
+      params: move.taskIds
+    }
+  ])) as Array<Row[]>
+  bundle.rows = Object.fromEntries(
+    TASK_MOVE_TABLES.map((table, index) => [table, snapshots[index]])
+  ) as TaskMoveBundle['rows']
+  if (bundle.rows.tasks.length !== move.taskIds.length)
+    throw new TaskMoveRefusedError('A source task was removed before the copy snapshot was ready')
+  if (bundle.project)
+    bundle.project.rows = Object.fromEntries(
+      PROJECT_MOVE_TABLES.map((table, index) => [table, snapshots[reads.length + index]])
+    ) as ProjectMoveBundle['rows']
+  bundle.tags = snapshots[snapshots.length - 1] as TaskMoveBundle['tags']
+  bundle.externalDependencies = []
+  const ids: Record<string, string> = {}
+  for (const rows of [
+    ...Object.values(bundle.rows),
+    ...Object.values(bundle.project?.rows ?? {})
+  ]) {
+    for (const row of rows) if (typeof row.id === 'string') ids[row.id] ??= randomUUID()
+  }
+  if (bundle.project) ids[bundle.project.projectId] = move.targetProjectId
+  bundle.copy = { ids, ...names }
+  await db.run(
+    'UPDATE task_moves SET copy_bundle = ?, copy_ids = ? WHERE id = ? AND copy_bundle IS NULL',
+    [JSON.stringify(bundle), JSON.stringify(ids), id]
+  )
+  const frozen = await db.get<{ copy_bundle: string }>(
+    'SELECT copy_bundle FROM task_moves WHERE id = ?',
+    [id]
+  )
+  snapshotCopyFiles(dataRoot, JSON.parse(frozen!.copy_bundle) as TaskMoveBundle)
+}
+
+/** Same-hub copy uses the same snapshot, import, commit and recovery journal. */
+export async function copyOnHub(
+  db: SlayzoneDb,
+  input: BeginTaskMoveInput | BeginProjectMoveInput,
+  opts: { createdBy?: string | null; dataRoot?: string } = {}
+): Promise<TaskMove> {
+  let move =
+    'projectId' in input
+      ? await beginProjectMove(db, { ...input, mode: 'copy' }, opts)
+      : await beginTaskMove(db, { ...input, mode: 'copy' }, opts)
+  if (move.mode !== 'copy')
+    throw new TaskMoveStateError('This journal belongs to a move, not a copy')
+  if (move.status === 'done') return move
+  if (move.status === 'canceled') throw new TaskMoveStateError('The copy was canceled')
+  if (move.status === 'failed' || move.status === 'paused') move = await resumeTaskMove(db, move.id)
+  const dataRoot = opts.dataRoot ?? getRuntimeAdapters().getDataRoot()
+  try {
+    const bundle = await exportTaskMove(db, move.id, { dataRoot })
+    await importTaskMove(
+      db,
+      {
+        mode: 'copy',
+        sourceHubId: input.targetHubId,
+        targetProjectId: move.targetProjectId,
+        includeSessions: false,
+        bundle: copiedTaskBundle(bundle)
+      },
+      { ownerUserId: opts.createdBy, dataRoot }
+    )
+    for (const taskId of move.taskIds) {
+      const source = artifactTaskDir(artifactsDirOf(copySnapshotRoot(dataRoot, move.id)), taskId)
+      const target = artifactTaskDir(artifactsDirOf(dataRoot), bundle.copy!.ids[taskId])
+      copyArtifactDirectory(source, target, bundle.copy!.ids)
+    }
+    if (bundle.project) {
+      const icon = bundle.project.rows.projects[0].icon_image_path
+      const sourceIcon =
+        typeof icon === 'string'
+          ? path.join(copySnapshotRoot(dataRoot, move.id), 'project-icons', path.basename(icon))
+          : null
+      if (sourceIcon && existsSync(sourceIcon)) {
+        const targetId = bundle.copy!.ids[bundle.project.projectId]
+        const target = path.join(
+          projectIconsDirOf(dataRoot),
+          path.basename(sourceIcon).replace(bundle.project.projectId, targetId)
+        )
+        mkdirSync(path.dirname(target), { recursive: true })
+        cpSync(sourceIcon, target)
+      }
+    }
+    await commitTaskMoveIn(db, copyImportId(move.id))
+    while (move.step !== 'release')
+      move = await advanceTaskMove(db, { id: move.id, completed: move.step })
+    return releaseTaskMove(db, move.id, dataRoot)
+  } catch (error) {
+    await failTaskMove(db, {
+      id: move.id,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    throw error
+  }
+}
+
+/** Durable handoff: the connected app resolves target references and runs the journal. */
+export async function requestTaskMoveRunner(
+  db: SlayzoneDb,
+  id: string,
+  action?: 'pause' | 'resume' | 'cancel'
+): Promise<TaskMove> {
+  const move = await getTaskMove(db, id)
+  if (move.direction !== 'out' || move.status === 'done' || move.status === 'canceled')
+    throw new TaskMoveStateError('This transfer cannot be controlled')
+  await setMove(db, id, action ? { runner_action: action } : { runner_requested: 1 })
+  return getTaskMove(db, id)
+}
+
+export async function resolveTaskMoveTarget(
+  db: SlayzoneDb,
+  input: { id: string; hubId: string; projectId: string }
+): Promise<TaskMove> {
+  const move = await getTaskMove(db, input.id)
+  if (move.direction !== 'out' || !move.runnerRequested || move.step !== 'export')
+    throw new TaskMoveStateError('This transfer is not awaiting a target')
+  await setMove(db, input.id, {
+    peer_hub_id: input.hubId,
+    target_project_id: input.projectId,
+    runner_requested: 0
+  })
+  return getTaskMove(db, input.id)
+}
+
+export async function clearTaskMoveAction(db: SlayzoneDb, id: string): Promise<void> {
+  await setMove(db, id, { runner_action: null })
+}
+
+/** Same-hub relocation completed; preserve source rows and leave no redirects. */
+export async function completeLocalTaskMove(
+  db: SlayzoneDb,
+  id: string,
+  projectId: string
+): Promise<TaskMove> {
+  await setMove(db, id, {
+    status: 'done',
+    step: 'release',
+    runner_requested: 0,
+    target_project_id: projectId
+  })
+  return getTaskMove(db, id)
 }

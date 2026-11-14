@@ -5777,6 +5777,22 @@ export const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    version: 218,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE task_moves ADD COLUMN mode TEXT NOT NULL DEFAULT 'move' CHECK (mode IN ('move', 'copy'));
+        ALTER TABLE task_moves ADD COLUMN copy_bundle TEXT;
+        ALTER TABLE task_moves ADD COLUMN copy_ids TEXT;
+        ALTER TABLE task_moves ADD COLUMN runner_requested INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE task_moves ADD COLUMN runner_action TEXT;
+        DROP INDEX idx_task_moves_project_unfinished;
+        CREATE UNIQUE INDEX idx_task_moves_project_unfinished ON task_moves(project_id)
+          WHERE scope = 'project' AND status IN ('running', 'paused', 'failed')
+            AND (direction = 'in' OR mode = 'move');
+      `)
+    }
   }
 ]
 

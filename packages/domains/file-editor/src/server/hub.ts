@@ -18,3 +18,9 @@ export {
 } from './file-editor-router-deps'
 export { noComputerWorkspaceFs, noComputerWorkspaceFsAdapters } from './workspace-fs-none'
 export type { LocalWorkspaceFs, WorkspaceFsAdapters } from './workspace-fs'
+export {
+  isPathTraversalError,
+  PathTraversalError,
+  WORKSPACE_READ_BYTES_MAX_CHUNK,
+  type ReadBytesResult
+} from './workspace-bytes'

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ChevronDown, Clock, FolderPlus, Pin, Plus, Settings } from 'lucide-react'
+import { Ban, ChevronDown, Clock, FolderPlus, Pin, Plus, Settings } from 'lucide-react'
 import * as Collapsible from '@radix-ui/react-collapsible'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -145,7 +145,7 @@ function HeaderRowView({
   // Status/priority headers are drop targets — a drop routes through the
   // `kind: 'group'` branch in `handleDragEnd`, landing the dragged set at
   // index 0 of the group. Pinned/none/temp headers reject drops.
-  const isDroppable = !group.isTemp && !group.isPinned && !group.isNone
+  const isDroppable = !group.isTemp && !group.isPinned && !group.isBlocked && !group.isNone
 
   let label: string
   let Icon: typeof Clock | null = null
@@ -157,6 +157,10 @@ function HeaderRowView({
   } else if (group.isTemp) {
     label = 'Temporary'
     Icon = Clock
+    iconClass = 'text-muted-foreground/60'
+  } else if (group.isBlocked) {
+    label = 'Blocked'
+    Icon = Ban
     iconClass = 'text-muted-foreground/60'
   } else if (group.isNone) {
     label = 'Other'
@@ -170,7 +174,11 @@ function HeaderRowView({
     iconClass = style?.iconClass
   }
 
-  const showAdd = !group.isPinned && !group.isNone && !(group.isTemp && !onCreateTemporaryTask)
+  const showAdd =
+    !group.isBlocked &&
+    !group.isPinned &&
+    !group.isNone &&
+    !(group.isTemp && !onCreateTemporaryTask)
 
   return (
     <div
@@ -230,7 +238,7 @@ function HeaderRowView({
  */
 function SortableHeaderRow(props: HeaderRowProps): ReactNode {
   const { rowId, projectId, group } = props
-  const isDroppable = !group.isTemp && !group.isPinned && !group.isNone
+  const isDroppable = !group.isTemp && !group.isPinned && !group.isBlocked && !group.isNone
   const { setNodeRef, transform, transition, isOver } = useSortable({
     id: rowId,
     data: { kind: 'group', projectId, groupValue: group.key } satisfies GroupDropData,

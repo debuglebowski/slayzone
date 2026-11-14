@@ -48,7 +48,12 @@ vi.mock('@slayzone/transport/client', () => {
     settings: { get: q('settings.get', async () => null), set: { mutationOptions: () => ({}) } }
   }
   const trpcClient = {}
-  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
+  return {
+    useHubId: () => null,
+    useTRPC: () => trpc,
+    useTRPCClient: () => trpcClient,
+    useSubscription: () => undefined
+  }
 })
 vi.mock('./BranchesTab', () => ({
   useBranchGraph: () => ({ refresh: async () => {} }),

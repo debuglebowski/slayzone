@@ -274,9 +274,11 @@ export function AppSidebar({
         autoHideActive && 'shadow-[0_0_60px_-10px_rgba(0,0,0,0.6)]'
       )}
     >
-      <SidebarContent className={cn('pb-4 scrollbar-hide', sidebarView === 'tree' ? '' : 'pt-11')}>
-        <SidebarGroup className={sidebarView === 'tree' ? 'pt-0' : undefined}>
-          <SidebarGroupContent>
+      <SidebarContent
+        className={cn('scrollbar-hide', sidebarView === 'tree' ? 'overflow-hidden' : 'pt-11 pb-4')}
+      >
+        <SidebarGroup className={sidebarView === 'tree' ? 'pt-0 pb-0 min-h-0 flex-1' : undefined}>
+          <SidebarGroupContent className={sidebarView === 'tree' ? 'h-full min-h-0' : undefined}>
             {view.render({
               projects,
               projectGroups,

@@ -6,7 +6,7 @@
  * `RoutingGateway` slice of `HubComputerGateway`.
  */
 import type { ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
-import type { LocalWorkspaceFs } from '@slayzone/file-editor/server'
+import { WORKSPACE_READ_BYTES_MAX_CHUNK, type LocalWorkspaceFs } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
 import type { PtyHandle, PtySpawnSpec } from '@slayzone/terminal/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,10 +14,11 @@ import { currentPathScope, runInPathScope, type WirePathScope } from '@slayzone/
 import { TypedEventEmitter } from '../shared/events'
 import {
   ComputerTransportErrorCodes,
+  FS_READ_BYTES_MAX_CHUNK,
   PTY_SIGNAL_EVENT_NAME,
   projectNotPlacedError
 } from '../shared/frames'
-import { RpcDisposedError, RpcError } from '../shared/rpc'
+import { JSON_RPC_INTERNAL_ERROR, RpcDisposedError, RpcError } from '../shared/rpc'
 import {
   createRemoteFsAdapters,
   createRemoteWorktreeAdapters,
@@ -2981,6 +2982,10 @@ function makeLocalFs(): LocalWorkspaceFs & { calls: string[] } {
     forgetProjectPath: note('forgetProjectPath', undefined),
     readDir: note('readDir', []),
     readFile: note('readFile', { content: 'local' }),
+    readBytes: async () => {
+      calls.push('readBytes')
+      return { bytes: new Uint8Array([1]), size: 1, mtimeMs: 1, eof: true }
+    },
     writeFile: note('writeFile', undefined),
     createFile: note('createFile', undefined),
     createDir: note('createDir', undefined),
@@ -3157,6 +3162,72 @@ describe('createRemoteFsAdapters — editor ops', () => {
       files: ['a.ts'],
       truncated: true
     })
+  })
+})
+
+describe('createRemoteFsAdapters — readBytes', () => {
+  // The two packages cannot share the constant (frames does not import file-editor),
+  // so they are pinned here: routed and in-process reads must chunk identically.
+  it("pins the wire chunk cap to file-editor's", () => {
+    expect(FS_READ_BYTES_MAX_CHUNK).toBe(WORKSPACE_READ_BYTES_MAX_CHUNK)
+  })
+
+  it('forwards to fs.readBytes and decodes the base64 slice', async () => {
+    const gateway = new FakeGateway()
+    const bytes = Buffer.from([0x00, 0xff, 0xfe, 0x0d, 0x0a])
+    gateway.onMethod('fs.readBytes', () => ({
+      data: bytes.toString('base64'),
+      size: 99,
+      mtimeMs: 1234.5,
+      eof: false
+    }))
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+
+    const r = await fs.readBytes('computer-1', '/srv/app', 'img/a.png', 10, 5)
+    expect(Buffer.from(r.bytes)).toEqual(bytes)
+    expect(r).toMatchObject({ size: 99, mtimeMs: 1234.5, eof: false })
+    expect(requireCall(gateway, 'fs.readBytes')).toMatchObject({
+      computerId: 'computer-1',
+      params: { rootPath: '/srv/app', filePath: 'img/a.png', offset: 10, length: 5 }
+    })
+    expect(local.calls).toEqual([])
+  })
+
+  it("turns the computer's errno answer into an fs-style error code", async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('fs.readBytes', () => {
+      throw new RpcError(JSON_RPC_INTERNAL_ERROR, 'ENOENT: no such file', {
+        errno: 'ENOENT'
+      })
+    })
+    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs() })
+    await expect(fs.readBytes('computer-1', '/srv/app', 'gone.png', 0, 1)).rejects.toMatchObject({
+      code: 'ENOENT',
+      message: 'ENOENT: no such file'
+    })
+  })
+
+  it('passes a jail refusal through untouched', async () => {
+    const gateway = new FakeGateway()
+    const refusal = new RpcError(
+      ComputerTransportErrorCodes.refusedByComputer,
+      'outside allowedRoots'
+    )
+    gateway.onMethod('fs.readBytes', () => {
+      throw refusal
+    })
+    const fs = createRemoteFsAdapters({ gateway, local: makeLocalFs() })
+    await expect(fs.readBytes('computer-1', '/etc', 'hosts', 0, 1)).rejects.toBe(refusal)
+  })
+
+  it('reads in-process only when there is no computer', async () => {
+    const gateway = new FakeGateway()
+    const local = makeLocalFs()
+    const fs = createRemoteFsAdapters({ gateway, local })
+    await fs.readBytes(null, '/tmp', 'a', 0, 1)
+    expect(local.calls).toEqual(['readBytes'])
+    expect(gateway.calls).toEqual([])
   })
 })
 

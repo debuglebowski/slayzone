@@ -12,7 +12,7 @@ import {
 import { isTerminalStatus, parseColumnsConfig, resolveStatusId } from '@slayzone/projects-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
-import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { isResolveFailure, resolveByIdPrefix, resolveProjectRef } from '../resolve'
 import { resolveAgentIdAlias } from '../../agent-id-alias'
 import { respondComputerRefusal } from '../computer-refusal'
 import { refuseCompletionWhileMidReply } from './_agent-guard'
@@ -83,6 +83,15 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       const task = resolved.row
       body.id = task.id
+      if (typeof body.project === 'string') {
+        const project = await resolveProjectRef(deps.db, body.project)
+        if (isResolveFailure(project)) {
+          res.status(project.status).json({ ok: false, error: project.error })
+          return
+        }
+        body.projectId = project.row.id
+        delete body.project
+      }
 
       if (typeof body.status === 'string') {
         // With a project change the status belongs to the project the task moves to.

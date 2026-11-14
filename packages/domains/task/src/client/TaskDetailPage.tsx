@@ -549,6 +549,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // Delete/archive dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   /** The project picked in the palette's "Move to project…": the move dialog confirms it. */
+  const [moveMode, setMoveMode] = useState<'move' | 'copy'>('move')
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
@@ -1848,7 +1849,10 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     canRenameInline: !compact && !zenMode,
     onTaskUpdated: handleTaskUpdate,
     onTagsChange: handleTagsChange,
-    onMoveToProject: setMoveTargetId,
+    onMoveToProject: (id, mode = 'move') => {
+      setMoveMode(mode)
+      setMoveTargetId(id)
+    },
     onDuplicate: () => setDuplicateDialogOpen(true),
     onRenameInline: () => {
       setEditingTitle(true)
@@ -3879,6 +3883,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
       {task && moveTargetId !== null && (
         <MoveTaskDialog
+          initialMode={moveMode}
           open
           onOpenChange={(open) => {
             if (!open) setMoveTargetId(null)

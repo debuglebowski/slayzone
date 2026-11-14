@@ -1,3 +1,4 @@
+import { registerTaskTransfers } from './transfers'
 import { Command } from 'commander'
 import { browserCommand } from './browser'
 import { listAction } from './tasks/list'
@@ -92,6 +93,7 @@ export function tasksCommand(): Command {
   cmd
     .command('update [id]')
     .description('Update a task (id prefix supported; defaults to $SLAYZONE_TASK_ID)')
+    .option('--project <name|id>', 'Move to a project on this hub')
     .option('--title <title>', 'New title')
     .option(
       '--description <text>',
@@ -223,5 +225,6 @@ export function tasksCommand(): Command {
   cmd.addCommand(browserCommand())
   cmd.addCommand(artifactsSubcommand())
 
+  registerTaskTransfers(cmd)
   return cmd
 }

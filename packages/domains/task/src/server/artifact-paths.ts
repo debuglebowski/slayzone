@@ -33,3 +33,8 @@ export function artifactFilePathIn(
     `${assertPathSafeId(artifactId, 'artifactId')}${ext}`
   )
 }
+
+/** Shared content-addressed blob layout for artifacts and transfer snapshots. */
+export function artifactBlobPath(dataRoot: string, hash: string): string {
+  return containedPath(path.join(dataRoot, 'blobs'), hash.slice(0, 2), hash.slice(2))
+}

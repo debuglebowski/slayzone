@@ -7,7 +7,7 @@ import {
   useInsertionEffect,
   type CSSProperties
 } from 'react'
-import { useSubscription } from '@slayzone/transport/client'
+import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from './trpc'
 import { Button, useStableCallback, useVisibleInterval } from '@slayzone/ui'
 import {
@@ -17,7 +17,7 @@ import {
   useHtmlPreviewLinks,
   type LinkOpenTarget
 } from '@slayzone/editor'
-import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { toArtifactFileUrl } from '@slayzone/platform/slz-file-url'
 import type { EditorView as CMEditorView } from '@codemirror/view'
 import type { RenderMode, TaskArtifact } from '@slayzone/task-contracts'
 import {
@@ -47,13 +47,14 @@ function ImageViewer({
   contentVersion: number
   getFilePath: (id: string) => Promise<string | null>
 }) {
+  const hubId = useHubId()
   const [src, setSrc] = useState<string | null>(null)
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toSlzFileUrl(p, contentVersion))
+      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
     })
-  }, [artifactId, contentVersion, getFilePath])
+  }, [hubId, artifactId, contentVersion, getFilePath])
 
   if (!src)
     return (
@@ -82,15 +83,16 @@ function PdfViewer({
   getFilePath: (id: string) => Promise<string | null>
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
+  const hubId = useHubId()
   const [src, setSrc] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   usePdfViewerLinks(iframeRef, onOpenLink)
 
   useEffect(() => {
     getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toSlzFileUrl(p, contentVersion))
+      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
     })
-  }, [artifactId, contentVersion, getFilePath])
+  }, [hubId, artifactId, contentVersion, getFilePath])
 
   if (!src)
     return (
@@ -784,6 +786,7 @@ function HtmlPreviewFrame({
   htmlTheme: HtmlArtifactTheme
   onOpenLink: (href: string, target: LinkOpenTarget) => void
 }) {
+  const hubId = useHubId()
   const [src, setSrc] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Links: the sandbox drops popups and a bare click would navigate the preview
@@ -808,7 +811,15 @@ function HtmlPreviewFrame({
       .then((p) => {
         if (cancelled) return
         if (p)
-          setSrc(toSlzFileUrl(p, contentVersion, htmlTheme === 'system' ? undefined : htmlTheme))
+          setSrc(
+            toArtifactFileUrl(
+              hubId,
+              artifactId,
+              p,
+              contentVersion,
+              htmlTheme === 'system' ? undefined : htmlTheme
+            )
+          )
         else setError('This artifact has no file on disk yet.')
       })
       .catch((e: unknown) => {
@@ -818,7 +829,7 @@ function HtmlPreviewFrame({
     return () => {
       cancelled = true
     }
-  }, [artifactId, contentVersion, getFilePath, htmlTheme, attempt])
+  }, [hubId, artifactId, contentVersion, getFilePath, htmlTheme, attempt])
 
   if (error)
     return (

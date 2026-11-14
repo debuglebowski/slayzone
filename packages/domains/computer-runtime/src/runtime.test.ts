@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:net'
+import { connect, createServer, type AddressInfo, type Server, type Socket } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -146,3 +146,42 @@ describe('local link frame limit (connector ↔ session host)', () => {
     expect(seen).toEqual(['next'])
   })
 })
+
+describe('socketPeer', () => {
+  it("relays a handler's structured error whole: code, message and data", async () => {
+    const [a, b] = await socketPair()
+    const host = socketPeer(a, {
+      request: () => {
+        throw new RpcError(-32603, "ENOENT: no such file, stat '/x'", { errno: 'ENOENT' })
+      }
+    })
+    const connector = socketPeer(b)
+    const err = await connector.rpc.request('fs.readBytes', {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(RpcError)
+    expect(err).toMatchObject({
+      code: -32603,
+      message: "ENOENT: no such file, stat '/x'",
+      data: { errno: 'ENOENT' }
+    })
+    host.close()
+    connector.close()
+  })
+})
+
+function socketPair(): Promise<[Socket, Socket]> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((serverSide) => {
+      server.close()
+      resolve([serverSide, client])
+    })
+    server.on('error', reject)
+    let client: Socket
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as AddressInfo
+      client = connect(addr.port, '127.0.0.1')
+    })
+  })
+}

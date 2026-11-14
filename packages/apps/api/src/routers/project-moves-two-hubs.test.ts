@@ -72,12 +72,18 @@ async function moveProject(
   from: { hub: Hub; id: string },
   to: { hub: Hub; id: string },
   projectId: string,
-  opts: { pauseBefore?: TaskMove['step']; includeSessions?: boolean; resumeId?: string } = {}
+  opts: {
+    pauseBefore?: TaskMove['step']
+    includeSessions?: boolean
+    resumeId?: string
+    mode?: 'move' | 'copy'
+  } = {}
 ): Promise<TaskMove> {
   const begun = opts.resumeId
     ? await from.hub.taskMoves.resume({ id: opts.resumeId })
     : await from.hub.taskMoves.beginProject({
         projectId,
+        mode: opts.mode,
         targetHubId: to.id,
         includeSessions: opts.includeSessions ?? false
       })
@@ -569,4 +575,54 @@ describe('moving a project to another hub', () => {
     await hubA.taskMoves.cancel({ id: failed.id })
     expect(await listed(hubA, clash)).toBe(true)
   })
+})
+
+describe('copying a project', () => {
+  test.each([false, true])(
+    'copies project tables and artifacts with new references (same hub: %s)',
+    async (sameHub) => {
+      const original = await seedProject(A, hubA, rootA, 'Copy project')
+      const target = sameHub ? hubA : hubB
+      const dest = sameHub ? A : B
+      const result = sameHub
+        ? await hubA.taskMoves.copyProject({
+            projectId: original.projectId,
+            targetHubId: 'a',
+            name: 'Copied project'
+          })
+        : await moveProject({ hub: hubA, id: 'a' }, { hub: target, id: 'b' }, original.projectId, {
+            mode: 'copy'
+          })
+      expect(result.status, result.error ?? '').toBe('done')
+      const projectId = result.targetProjectId
+      expect(projectId).not.toBe(original.projectId)
+      expect(await listed(hubA, original.projectId)).toBe(true)
+      expect(await listed(target, projectId)).toBe(true)
+      const tasks = dest.db
+        .prepare('SELECT id, parent_id FROM tasks WHERE project_id = ?')
+        .all(projectId) as Array<{ id: string; parent_id: string | null }>
+      expect(tasks).toHaveLength(3)
+      expect(
+        tasks.some((task) => task.parent_id && tasks.some((parent) => parent.id === task.parent_id))
+      ).toBe(true)
+      const artifact = dest.db
+        .prepare(
+          'SELECT id FROM task_artifacts WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)'
+        )
+        .get(projectId) as { id: string }
+      expect(artifact.id).not.toBe(original.artifactId)
+      expect(await target.artifacts.readContent({ id: artifact.id })).toBe('project notes')
+      expect(
+        count(
+          dest,
+          'SELECT COUNT(*) AS n FROM ai_config_project_selections s JOIN ai_config_items i ON i.id = s.item_id WHERE s.project_id = ? AND i.project_id = ?',
+          projectId,
+          projectId
+        )
+      ).toBe(1)
+      expect(await hubA.taskMoves.projectRedirects({ projectIds: [original.projectId] })).toEqual(
+        {}
+      )
+    }
+  )
 })

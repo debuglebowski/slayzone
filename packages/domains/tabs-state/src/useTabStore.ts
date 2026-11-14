@@ -165,6 +165,8 @@ interface TabState {
   // When true, pinned tasks render in their own "Pinned" group at the top.
   // When false, they mix into their natural status/priority bucket.
   treeGroupPinned: boolean
+  // Split visible blocked tasks into their own group, including dependency blockers.
+  treeGroupBlocked: boolean
   // Show group headers for groups with zero tasks (respecting treeStatusFilter).
   treeShowEmptyGroups: boolean
   // projectId → whether that project's row is expanded in the tree view. Lives
@@ -222,6 +224,7 @@ interface TabState {
   setTreeOrderBy: (orderBy: TreeOrderBy) => void
   setTreeOrderDir: (dir: TreeOrderDir) => void
   setTreeGroupTemporary: (group: boolean) => void
+  setTreeGroupBlocked: (group: boolean) => void
   setTreeGroupPinned: (group: boolean) => void
   setTreeShowEmptyGroups: (show: boolean) => void
   setTreeProjectOpen: (projectId: string, open: boolean) => void
@@ -279,6 +282,7 @@ interface TabState {
     treeOrderBy?: TreeOrderBy
     treeOrderDir?: TreeOrderDir
     treeGroupTemporary?: boolean
+    treeGroupBlocked?: boolean
     treeGroupPinned?: boolean
     treeShowEmptyGroups?: boolean
     treeOpenProjects?: Record<string, boolean>
@@ -361,6 +365,7 @@ export const useTabStore = create<TabState>()(
     treeOrderBy: 'manual',
     treeOrderDir: 'asc',
     treeGroupTemporary: true,
+    treeGroupBlocked: false,
     treeGroupPinned: true,
     treeShowEmptyGroups: false,
     treeOpenProjects: {},
@@ -435,6 +440,7 @@ export const useTabStore = create<TabState>()(
     setTreeOrderBy: (orderBy) => set({ treeOrderBy: orderBy }),
     setTreeOrderDir: (dir) => set({ treeOrderDir: dir }),
     setTreeGroupTemporary: (group) => set({ treeGroupTemporary: group }),
+    setTreeGroupBlocked: (group) => set({ treeGroupBlocked: group }),
     setTreeGroupPinned: (group) => set({ treeGroupPinned: group }),
     setTreeShowEmptyGroups: (show) => set({ treeShowEmptyGroups: show }),
 
@@ -663,6 +669,8 @@ export const useTabStore = create<TabState>()(
         treeOrderDir: state.treeOrderDir === 'desc' ? 'desc' : 'asc',
         treeGroupTemporary:
           typeof state.treeGroupTemporary === 'boolean' ? state.treeGroupTemporary : true,
+        treeGroupBlocked:
+          typeof state.treeGroupBlocked === 'boolean' ? state.treeGroupBlocked : false,
         treeGroupPinned: typeof state.treeGroupPinned === 'boolean' ? state.treeGroupPinned : true,
         treeShowEmptyGroups:
           typeof state.treeShowEmptyGroups === 'boolean' ? state.treeShowEmptyGroups : false,
@@ -842,6 +850,7 @@ useTabStore.subscribe(
     treeOrderBy: state.treeOrderBy,
     treeOrderDir: state.treeOrderDir,
     treeGroupTemporary: state.treeGroupTemporary,
+    treeGroupBlocked: state.treeGroupBlocked,
     treeGroupPinned: state.treeGroupPinned,
     treeShowEmptyGroups: state.treeShowEmptyGroups,
     treeOpenProjects: state.treeOpenProjects,

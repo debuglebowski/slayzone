@@ -21,6 +21,7 @@ export const noComputerWorkspaceFs: LocalWorkspaceFs = {
   forgetProjectPath: none('forgetProjectPath'),
   readDir: none('readDir'),
   readFile: none('readFile'),
+  readBytes: none('readBytes'),
   writeFile: none('writeFile'),
   createFile: none('createFile'),
   createDir: none('createDir'),

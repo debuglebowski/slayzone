@@ -211,3 +211,27 @@ describe('fs.* hub⇄computer round trip — watch', () => {
     stop()
   })
 })
+
+describe('fs.* hub⇄computer round trip — readBytes', () => {
+  it('reassembles a binary file byte-exact from routed slices', async () => {
+    const bytes = Buffer.from(Array.from({ length: 1000 }, (_, i) => (i * 37) % 256))
+    writeFileSync(join(dir, 'blob.bin'), bytes)
+    const fs = adaptersFor([dir])
+    const parts: Buffer[] = []
+    for (let offset = 0; ; ) {
+      const r = await fs.readBytes(COMPUTER_ID, dir, 'blob.bin', offset, 300)
+      expect(r.size).toBe(bytes.length)
+      parts.push(Buffer.from(r.bytes))
+      offset += r.bytes.length
+      if (r.eof) break
+    }
+    expect(Buffer.concat(parts)).toEqual(bytes)
+  })
+
+  it('surfaces a missing file as ENOENT on the hub side', async () => {
+    const fs = adaptersFor([dir])
+    await expect(fs.readBytes(COMPUTER_ID, dir, 'gone.bin', 0, 1)).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+  })
+})

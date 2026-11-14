@@ -12,6 +12,18 @@ import type {
   GitStatusMap,
   GitFileStatus
 } from '../shared'
+import {
+  PathTraversalError,
+  WORKSPACE_READ_BYTES_MAX_CHUNK,
+  type ReadBytesResult
+} from './workspace-bytes'
+
+export {
+  PathTraversalError,
+  isPathTraversalError,
+  WORKSPACE_READ_BYTES_MAX_CHUNK,
+  type ReadBytesResult
+} from './workspace-bytes'
 
 export const ALWAYS_IGNORED = new Set(['.git', '.DS_Store'])
 export const MAX_FILE_SIZE = 1 * 1024 * 1024 // 1 MB
@@ -20,7 +32,7 @@ export const FORCE_MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 export function assertWithinRoot(root: string, target: string): string {
   const resolved = path.resolve(root, target)
   if (!resolved.startsWith(path.resolve(root) + path.sep) && resolved !== path.resolve(root)) {
-    throw new Error('Path traversal denied')
+    throw new PathTraversalError()
   }
   return resolved
 }
@@ -62,6 +74,63 @@ export function isIgnored(rootPath: string, relativePath: string, isDir: boolean
   if (ALWAYS_IGNORED.has(path.basename(relativePath))) return true
   const ig = getIgnoreFilter(rootPath)
   return ig.ignores(isDir ? relativePath + '/' : relativePath)
+}
+
+const errnoError = (code: string, message: string): NodeJS.ErrnoException =>
+  Object.assign(new Error(`${code}: ${message}`), { code })
+
+/**
+ * Read `length` bytes at `offset` of the file at `absPath` — through one fd, never
+ * the whole file. A directory (or any non-regular file: a FIFO would block the read)
+ * is refused `EISDIR`; a missing one is the fs's own `ENOENT`. Containment is the
+ * caller's: `absPath` must already be judged.
+ */
+export async function readBytesAt(
+  absPath: string,
+  offset: number,
+  length: number
+): Promise<ReadBytesResult> {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError(`bad offset ${offset}`)
+  if (!Number.isSafeInteger(length) || length < 1 || length > WORKSPACE_READ_BYTES_MAX_CHUNK)
+    throw new RangeError(`bad length ${length} (1..${WORKSPACE_READ_BYTES_MAX_CHUNK})`)
+  // Stat before open: opening a FIFO for reading blocks until a writer appears.
+  if (!(await fs.promises.stat(absPath)).isFile())
+    throw errnoError('EISDIR', `not a regular file, read '${absPath}'`)
+  const fh = await fs.promises.open(absPath, 'r')
+  try {
+    const st = await fh.stat()
+    if (!st.isFile()) throw errnoError('EISDIR', `not a regular file, read '${absPath}'`)
+    const want = Math.max(0, Math.min(length, st.size - offset))
+    const buf = Buffer.alloc(want)
+    let got = 0
+    while (got < want) {
+      const { bytesRead } = await fh.read(buf, got, want - got, offset + got)
+      if (bytesRead === 0) break
+      got += bytesRead
+    }
+    return {
+      bytes: buf.subarray(0, got),
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      eof: offset + got >= st.size
+    }
+  } finally {
+    await fh.close()
+  }
+}
+
+/** {@link readBytesAt} for a path relative to `rootPath`, contained to it. */
+export function readBytes(
+  rootPath: string,
+  filePath: string,
+  offset: number,
+  length: number
+): Promise<ReadBytesResult> {
+  try {
+    return readBytesAt(assertWithinRoot(rootPath, filePath), offset, length)
+  } catch (err) {
+    return Promise.reject(err)
+  }
 }
 
 function escapeRegExp(s: string): string {

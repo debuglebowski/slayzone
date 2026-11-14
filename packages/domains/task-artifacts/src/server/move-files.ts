@@ -14,7 +14,9 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { containedPath } from '@slayzone/platform/safe-path'
+import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
+import { copySnapshotRoot } from '@slayzone/task/server'
+import type { TaskMoveBundle } from '@slayzone/task-contracts'
 import { artifactsDirOf, artifactTaskDir } from '@slayzone/task/server/artifact-paths'
 import { BlobStore } from './blob-store'
 
@@ -119,6 +121,12 @@ export async function moveFilesManifest(
   moveId: string
 ): Promise<MoveFileEntry[]> {
   const { taskIds, projectId } = await moveScope(db, moveId, 'out')
+  const copy = await db.get<{ copy_bundle: string | null }>(
+    'SELECT copy_bundle FROM task_moves WHERE id = ?',
+    [moveId]
+  )
+  const frozen = copy?.copy_bundle ? (JSON.parse(copy.copy_bundle) as TaskMoveBundle) : null
+  if (frozen) dataRoot = copySnapshotRoot(dataRoot, moveId)
   const icons: MoveFileEntry[] = []
   if (projectId) {
     const dir = iconsDirOf(dataRoot)
@@ -137,11 +145,13 @@ export async function moveFilesManifest(
   if (taskIds.length === 0) return icons
   const blobs = new BlobStore(dataRoot)
   const ph = taskIds.map(() => '?').join(', ')
-  const hashes = await db.all<{ content_hash: string }>(
-    `SELECT DISTINCT v.content_hash FROM artifact_versions v
+  const hashes = frozen
+    ? (frozen.rows.artifact_versions as Array<{ content_hash: string }>)
+    : await db.all<{ content_hash: string }>(
+        `SELECT DISTINCT v.content_hash FROM artifact_versions v
        JOIN task_artifacts a ON a.id = v.artifact_id WHERE a.task_id IN (${ph})`,
-    taskIds
-  )
+        taskIds
+      )
   const out: MoveFileEntry[] = [...icons]
   for (const { content_hash: hash } of hashes) {
     if (!blobs.has(hash)) continue
@@ -177,16 +187,25 @@ export async function readMoveFile(
   const scope = await moveScope(db, input.moveId, 'out')
   const { taskIds } = scope
   assertOwnRef(scope, input.ref)
+  const copy = await db.get<{ mode: string; copy_bundle: string | null }>(
+    'SELECT mode, copy_bundle FROM task_moves WHERE id = ?',
+    [input.moveId]
+  )
+  const frozen = copy?.copy_bundle ? (JSON.parse(copy.copy_bundle) as TaskMoveBundle) : null
   if (input.ref.kind === 'blob') {
     if (taskIds.length === 0) throw new MoveFilesRefusedError('Not a blob of this move')
     const ph = taskIds.map(() => '?').join(', ')
-    const owned = await db.get(
-      `SELECT 1 FROM artifact_versions v JOIN task_artifacts a ON a.id = v.artifact_id
+    const hash = input.ref.hash
+    const owned = frozen
+      ? frozen.rows.artifact_versions.some((v) => v.content_hash === hash)
+      : await db.get(
+          `SELECT 1 FROM artifact_versions v JOIN task_artifacts a ON a.id = v.artifact_id
         WHERE v.content_hash = ? AND a.task_id IN (${ph}) LIMIT 1`,
-      [input.ref.hash, ...taskIds]
-    )
+          [input.ref.hash, ...taskIds]
+        )
     if (!owned) throw new MoveFilesRefusedError('Not a blob of this move')
   }
+  if (copy?.mode === 'copy') dataRoot = copySnapshotRoot(dataRoot, input.moveId)
   const file = sourcePath(dataRoot, input.ref)
   const length = Math.min(input.length, MOVE_FILE_CHUNK_BYTES)
   const fd = openSync(file, 'r')
@@ -203,7 +222,7 @@ export async function readMoveFile(
 }
 
 const stagingDir = (dataRoot: string, moveId: string): string =>
-  containedPath(dataRoot, '.task-move-staging', moveId)
+  containedPath(path.join(dataRoot, '.task-move-staging'), assertPathSafeId(moveId, 'moveId'))
 const stagingName = (ref: MoveFileRef): string =>
   createHash('sha256')
     .update(
