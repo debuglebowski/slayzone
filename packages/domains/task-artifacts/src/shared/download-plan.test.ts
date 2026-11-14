@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { planFolderDownload, planTaskDownload, safeFileName } from './download-plan'
+import {
+  NAME_MAX_BYTES,
+  numberedName,
+  planFolderDownload,
+  planTaskDownload,
+  safeFileName
+} from './download-plan'
 
 const folders = [
   { id: 'f1', name: 'docs', parent_id: null },
@@ -124,5 +130,34 @@ describe('duplicate names', () => {
       'f'
     )
     expect(plan?.entries.map((e) => e.path)).toEqual(['docs/x.txt', 'docs/x (2).txt'])
+  })
+})
+
+// Review 4, D2: a numbered copy of a name at the 255-byte limit still fits.
+describe('numberedName', () => {
+  it('numbers like a file manager', () => {
+    expect(numberedName('a.md', 2)).toBe('a (2).md')
+    expect(numberedName('.env', 2)).toBe('.env (2)')
+    expect(numberedName('README', 3)).toBe('README (3)')
+  })
+  it('shortens the stem (never mid-character) so the result fits', () => {
+    const at = `${'é'.repeat(124)}x.md`
+    expect(Buffer.byteLength(at)).toBe(252)
+    const copy = numberedName(at, 12)
+    expect(Buffer.byteLength(copy)).toBeLessThanOrEqual(NAME_MAX_BYTES)
+    expect(copy.endsWith(' (12).md')).toBe(true)
+    expect(copy).not.toContain('\uFFFD')
+  })
+  it('the planner uses it for duplicates at the limit', () => {
+    const title = `${'n'.repeat(250)}.md`
+    const [, second] = planTaskDownload(
+      [],
+      [
+        { id: '1', title, folder_id: null },
+        { id: '2', title, folder_id: null }
+      ]
+    ).map((e) => e.path)
+    expect(Buffer.byteLength(second)).toBeLessThanOrEqual(NAME_MAX_BYTES)
+    expect(second.endsWith(' (2).md')).toBe(true)
   })
 })

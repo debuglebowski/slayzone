@@ -189,6 +189,12 @@ class Crc32Check extends Transform {
   _transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback): void {
     this.crc = zlib.crc32(chunk, this.crc)
     this.bytes += chunk.length
+    // Stop the moment an entry inflates past what it declared (a zip bomb), before
+    // the excess reaches the disk.
+    if (this.bytes > this.entry.size) {
+      cb(new ZipError(`Size mismatch for ${this.entry.name}: larger than its declared size`))
+      return
+    }
     cb(null, chunk)
   }
   _flush(cb: TransformCallback): void {
@@ -291,12 +297,22 @@ function assertLinkInside(
 }
 
 /** Unpack every entry of `zipPath` under `destDir` (created if missing). */
-export async function extractZip(zipPath: string, destDir: string): Promise<void> {
+/** The most an archive may declare in total (chrome-headless-shell unpacks to ~250 MB). */
+export const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+
+export async function extractZip(
+  zipPath: string,
+  destDir: string,
+  opts: { maxTotalBytes?: number } = {}
+): Promise<void> {
   const dest = path.resolve(destDir)
   fs.mkdirSync(dest, { recursive: true })
   const fd = fs.openSync(zipPath, 'r')
   try {
     const entries = readCentralDirectory(fd, fs.fstatSync(fd).size)
+    const declared = entries.reduce((n, e) => n + e.size, 0)
+    if (declared > (opts.maxTotalBytes ?? MAX_TOTAL_BYTES))
+      throw new ZipError(`Archive is too large to unpack (${declared} bytes declared)`)
     // Validate every name — and every symlink — before writing anything.
     const targets = entries.map((e) => safeTarget(dest, e.name))
     const links = new Set(targets.filter((_, i) => isLinkEntry(entries[i])).map(fold))

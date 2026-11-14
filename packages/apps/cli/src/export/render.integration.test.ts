@@ -5,7 +5,9 @@
  */
 import { describe, expect, test } from 'vitest'
 import { defaultBrowserEnv, findBrowser } from './browser'
+import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
+import { renderPdf } from './render'
 
 const BROWSER = findBrowser(defaultBrowserEnv())
 if (!BROWSER) console.error('SKIP render.integration: no Chrome/Chromium/Edge/Brave found')
@@ -24,6 +26,26 @@ function pngSize(buf: Buffer): { w: number; h: number } {
 }
 
 describe.skipIf(!BROWSER)('render in a local browser', () => {
+  // Review 4, C1: a large document prints although printing takes far longer than
+  // the per-command deadline (cut to 1 s here), and its PDF streams back in pieces.
+  test('a 15,000-line code artifact → PDF (no fixed print deadline)', {
+    timeout: 180_000
+  }, async () => {
+    const code = Array.from(
+      { length: 15_000 },
+      (_, i) => `const line${i} = ${i} // ${'x'.repeat(40)}`
+    ).join('\n')
+    const started = Date.now()
+    const pdf = await renderPdf(BROWSER as string, buildDocumentHtml(code, 'code', 'big.ts'), {
+      waitReady: false,
+      browser: { commandTimeoutMs: 1_000 }
+    })
+    expect(Date.now() - started).toBeGreaterThan(1_000)
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    // Hundreds of A4 pages.
+    expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(200)
+  })
+
   test('markdown → PDF', { timeout: 60_000 }, async () => {
     const pdf = await exportArtifact(
       {

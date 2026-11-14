@@ -41,3 +41,20 @@ describe('export files', () => {
     expect(exportFileName('.env', 'html')).toBe('_env.html')
   })
 })
+
+// Review 4, M5: the format's extension always survives, and the name fits the
+// filesystem's 255-byte limit whatever the title.
+describe('export file names from awkward titles', () => {
+  it('a title of only dots, or one that climbs, still gets a name and its extension', () => {
+    expect(exportFileName('...', 'pdf')).toMatch(/\.pdf$/)
+    expect(exportFileName('...', 'pdf')).not.toBe('_pdf')
+    expect(exportFileName('../x', 'pdf')).toBe('x.pdf')
+    expect(exportFileName('..', 'html')).toMatch(/^[^.].*\.html$/)
+  })
+  it('a title over 255 bytes is cut (never mid-character) to fit, extension kept', () => {
+    const name = exportFileName(`${'é'.repeat(200)}.md`, 'pdf')
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(255)
+    expect(name.endsWith('.pdf')).toBe(true)
+    expect(name).not.toContain('\uFFFD')
+  })
+})

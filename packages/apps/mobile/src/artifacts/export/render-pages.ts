@@ -159,9 +159,11 @@ const CAPTURE_SCRIPT = `(function () {${REPLY_HELPERS}
 })();`
 
 export function pngCapturePage(svg: string, title: string): string {
-  const html = buildPngHtml(svg, 'svg-preview', title)
-  if (html === null) throw new Error('pngCapturePage: no PNG document for an SVG')
+  // The shared document's own policy allows only scripts carrying this nonce: the
+  // capture script below carries it.
   const nonce = newNonce()
+  const html = buildPngHtml(svg, 'svg-preview', title, null, { nonce })
+  if (html === null) throw new Error('pngCapturePage: no PNG document for an SVG')
   const policy = contentPolicy(nonce).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
   const meta = `<meta http-equiv="Content-Security-Policy" content="${policy}">`
   // The document's own head and its last `</body>`: the SVG inside can hold anything.

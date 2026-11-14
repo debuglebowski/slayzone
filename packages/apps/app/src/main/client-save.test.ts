@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   shell: { showItemInFolder: (p: string) => revealed.push(p) }
 }))
 
-const { SaveTargets, watchSaveTargetOwner } = await import('./client-save')
+const { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner } = await import('./client-save')
 const { EventEmitter } = await import('node:events')
 
 let root: string
@@ -409,4 +409,157 @@ describe('a folder download into a folder that already has these files', () => {
     expect(fs.readdirSync(picked.dir).sort()).toEqual(['keep'])
     expect(fs.readdirSync(path.join(picked.dir, 'keep'))).toEqual([])
   })
+})
+
+// ── Review 4 ────────────────────────────────────────────────────────────────────
+const leftovers = (dir: string): string[] =>
+  fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map(String).sort() : []
+const ticks = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r))
+}
+const enospc = () => Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+
+// D1: a file whose commit is in flight or failed stays tracked until it settles; a
+// failed commit or a quit mid-commit leaves neither its partial nor the folder.
+describe('a folder download whose file commit fails or is cut short', () => {
+  test('commit fails (no hard links, copy hits a full disk): nothing remains', async () => {
+    const t = new SaveTargets({
+      commitFs: {
+        link: async () => {
+          throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' })
+        },
+        copyFile: async (src, dest, mode) => {
+          await fs.promises.copyFile(src, dest, mode)
+          throw enospc()
+        }
+      }
+    })
+    const opened = await t.open(SENDER, null, { kind: 'directory', folderName: 'docs', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    await t.write(SENDER, opened.targetId, 'docs/a.md', bytes('A'))
+    await expect(t.write(SENDER, opened.targetId, 'docs/b.md', bytes('B'))).rejects.toThrow(
+      'ENOSPC'
+    )
+    await t.abort(SENDER, opened.targetId)
+    expect(leftovers(picked.dir)).toEqual([])
+  })
+
+  for (const n of [0, 1, 3, 6, 12])
+    test(`quit ${n} ticks into the next file (previous one committing): nothing remains`, async () => {
+      const t = new SaveTargets({
+        commitFs: {
+          link: async (a, b) => {
+            await new Promise((r) => setTimeout(r, 20))
+            await fs.promises.link(a, b)
+          },
+          copyFile: fs.promises.copyFile
+        }
+      })
+      const opened = await t.open(SENDER, null, {
+        kind: 'directory',
+        folderName: 'docs',
+        title: 't'
+      })
+      if (!opened.ok) throw new Error('not opened')
+      await t.write(SENDER, opened.targetId, 'docs/a.md', bytes('A'))
+      const next = t.write(SENDER, opened.targetId, 'docs/b.md', bytes('B'))
+      await ticks(n)
+      t.abortAllNow()
+      await expect(next).rejects.toThrow()
+      await new Promise((r) => setTimeout(r, 60))
+      expect(leftovers(picked.dir)).toEqual([])
+    })
+})
+
+// D2: the partial's name never makes a valid file name too long (main wrote names up
+// to the 255-byte limit straight to their destination).
+describe('names at the filesystem limit', () => {
+  const long = (ext: string) => `${'n'.repeat(250 - ext.length)}${ext}`
+  test('file target: a 250-byte name saves', async () => {
+    picked.file = path.join(root, long('.md'))
+    const id = await openOk({ kind: 'file', fileName: long('.md'), title: 't' })
+    await targets.write(SENDER, id, '', bytes('x'))
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    expect(fs.readFileSync(picked.file, 'utf8')).toBe('x')
+  })
+
+  test('folder target: a 250-byte name saves, and a second copy beside it still fits', async () => {
+    const name = long('.md')
+    fs.mkdirSync(path.join(picked.dir, 'docs'))
+    fs.writeFileSync(path.join(picked.dir, 'docs', name), 'MINE')
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, `docs/${name}`, bytes('NEW'))
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    const names = fs.readdirSync(path.join(picked.dir, 'docs'))
+    expect(names).toHaveLength(2)
+    for (const n of names) expect(Buffer.byteLength(n)).toBeLessThanOrEqual(255)
+    const copy = names.find((n) => n !== name)!
+    expect(copy.endsWith(' (2).md')).toBe(true)
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', copy), 'utf8')).toBe('NEW')
+  })
+
+  test('zip target: a 250-byte archive name saves', async () => {
+    picked.file = path.join(root, long('.zip'))
+    const id = await openOk({ kind: 'zip', fileName: long('.zip'), title: 't' })
+    await targets.write(SENDER, id, 'a.md', bytes('A'))
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    expect(fs.existsSync(picked.file)).toBe(true)
+  })
+})
+
+// D3: an output that fails only while the archive is finalized fails the close
+// cleanly — and leaves no unhandled rejection behind.
+test('a zip that fails during finalize: close reports it, no unhandled rejection', async () => {
+  const unhandled: unknown[] = []
+  const onUnhandled = (e: unknown) => unhandled.push(e)
+  process.on('unhandledRejection', onUnhandled)
+  let finalizing = false
+  try {
+    const t = new SaveTargets({
+      openZipOutput: (file) => {
+        const disk = fs.createWriteStream(file)
+        disk.on('error', ignoreErr)
+        return new Writable({
+          // The disk fills while the archive is being finalized (its last bytes and
+          // central directory): every write after close starts fails.
+          write(chunk, _enc, cb) {
+            if (finalizing) cb(enospc())
+            else disk.write(chunk, cb)
+          },
+          destroy(err, cb) {
+            if (disk.closed) cb(err)
+            else {
+              disk.once('close', () => cb(err))
+              disk.destroy()
+            }
+          }
+        })
+      }
+    })
+    picked.file = path.join(root, 'final.zip')
+    const opened = await t.open(SENDER, null, { kind: 'zip', fileName: 'final.zip', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    await t.write(SENDER, opened.targetId, 'a.md', noise(512 * 1024))
+    finalizing = true
+    expect(await t.close(SENDER, opened.targetId)).toMatchObject({ ok: false })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(unhandled).toEqual([])
+    expect(partials(root)).toEqual([])
+    expect(fs.existsSync(picked.file)).toBe(false)
+  } finally {
+    process.off('unhandledRejection', onUnhandled)
+  }
+})
+
+// Review 4 (quit watchdog note): a forced exit (`app.exit`: the quit watchdog, a
+// relaunch) skips will-quit, so it removes every open download's partial itself.
+test('abortAllSaveTargetsNow reaches every SaveTargets, as a forced exit needs', async () => {
+  const other = new SaveTargets()
+  picked.file = path.join(root, 'forced.bin')
+  const opened = await other.open(SENDER, null, { kind: 'file', fileName: 'f.bin', title: 't' })
+  if (!opened.ok) throw new Error('not opened')
+  await other.write(SENDER, opened.targetId, '', bytes('x'))
+  expect(partials(root).length).toBe(1)
+  abortAllSaveTargetsNow()
+  expect(partials(root)).toEqual([])
 })

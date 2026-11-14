@@ -159,8 +159,14 @@ export async function installHeadlessShell({
       throw new BrowserInstallError(`Downloaded archive has no ${rel.split(path.sep).join('/')}`)
     }
     if (ctx.platform !== 'win32') fs.chmodSync(bin, 0o755)
-    fs.rmSync(finalDir, { recursive: true, force: true })
-    fs.renameSync(staging, finalDir)
+    // Another install (a parallel agent) may have finished this version meanwhile:
+    // keep it — never delete a working install another `slay` may be using.
+    if (ctx.isExecutable(path.join(finalDir, rel))) {
+      log(`Already installed by another run: ${path.join(finalDir, rel)}`)
+    } else {
+      fs.rmSync(finalDir, { recursive: true, force: true })
+      fs.renameSync(staging, finalDir)
+    }
   } catch (err) {
     throw err instanceof BrowserInstallError
       ? err

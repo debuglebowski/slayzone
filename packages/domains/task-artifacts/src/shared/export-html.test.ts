@@ -96,3 +96,61 @@ describe('helpers', () => {
     expect(exportBaseName('plain')).toBe('plain')
   })
 })
+
+// Review 4, M1: an exported document runs no script of the artifact's own. Every
+// document carries a CSP: scripts only by nonce (the mermaid build and its run call),
+// so markdown/code/SVG content — `<img onerror>`, `<script>` — is inert in every
+// renderer (desktop, CLI headless Chrome, web frame, the phone's print WebView).
+describe('content security policy', () => {
+  const policyOf = (html: string) =>
+    /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)?.[1] ?? null
+
+  it('markdown/code/svg: no script at all, the policy is first in <head>', () => {
+    for (const [mode, content] of [
+      ['markdown', '<img src=x onerror="alert(1)"><script>alert(2)</script>'],
+      ['code', 'x'],
+      ['svg-preview', '<svg onload="alert(1)"></svg>']
+    ]) {
+      const html = buildDocumentHtml(content, mode, 't')
+      const policy = policyOf(html)
+      expect(policy, mode).toContain("script-src 'none'")
+      expect(policy).toContain("default-src 'none'")
+      expect(html.indexOf('Content-Security-Policy')).toBeLessThan(html.indexOf('<title>'))
+    }
+  })
+
+  it('mermaid: only nonce-carrying scripts run, and both of ours carry it', () => {
+    const html = buildDocumentHtml('graph TD', 'mermaid-preview', 'd', MERMAID_JS)
+    const nonce = /'nonce-([A-Za-z0-9_-]+)'/.exec(policyOf(html) ?? '')?.[1]
+    expect(nonce).toBeTruthy()
+    expect(html.match(new RegExp(`<script nonce="${nonce}">`, 'g'))).toHaveLength(2)
+    expect(html.match(/<script(?![^>]*nonce=)/g)).toBeNull()
+    // A fresh nonce per document: an artifact cannot know it in advance.
+    const other = buildDocumentHtml('graph TD', 'mermaid-preview', 'd', MERMAID_JS)
+    expect(policyOf(other)).not.toBe(policyOf(html))
+  })
+
+  it("a caller's own nonce is honoured (it adds a script of its own)", () => {
+    const html = buildPngHtml('<svg></svg>', 'svg-preview', 't', null, { nonce: 'abc123' })
+    expect(policyOf(html!)).toContain("script-src 'nonce-abc123'")
+  })
+
+  it('html-preview: strict by default; the artifact scripts only where a host opts in', () => {
+    expect(policyOf(buildDocumentHtml('<p>x</p>', 'html-preview', 't'))).toContain(
+      "script-src 'none'"
+    )
+    expect(
+      policyOf(buildDocumentHtml('<p>x</p>', 'html-preview', 't', null, { artifactScripts: true }))
+    ).toBeNull()
+  })
+
+  it('a drawn mermaid document runs nothing', () => {
+    expect(policyOf(buildDrawnMermaidDocumentHtml('<svg></svg>', 'd'))).toContain(
+      "script-src 'none'"
+    )
+  })
+
+  it('backgrounds print (code blocks, table headers) on every renderer', () => {
+    expect(buildDocumentHtml('x', 'markdown', 't')).toContain('print-color-adjust: exact')
+  })
+})

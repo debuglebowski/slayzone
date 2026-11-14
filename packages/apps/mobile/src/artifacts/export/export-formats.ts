@@ -3,6 +3,7 @@
  * (`canExportAsPdf` / `Png` / `Html` of the render mode) and, per format, the type the
  * iOS share sheet files it under.
  */
+import { NAME_MAX_BYTES, safeFileName, truncateUtf8 } from '@slayzone/task-artifacts/download-plan'
 import { type ArtifactExportFormat, exportBaseName } from '@slayzone/task-artifacts/export-html'
 import {
   canExportAsHtml,
@@ -50,7 +51,13 @@ export const EXPORT_FILE_TYPES: Record<
   html: { extension: 'html', mimeType: 'text/html', UTI: 'public.html' }
 }
 
-/** `plan.md` → `plan.pdf`: the title without its extension, legal as a file name. */
+/**
+ * `plan.md` → `plan.pdf`: the title without its extension, legal as a file name, cut
+ * to fit the 255-byte limit, and always ending in the format's extension — a title
+ * of only dots or one that climbs (`../x`) included.
+ */
 export function exportFileName(title: string, format: ArtifactExportFormat): string {
-  return fileName(`${exportBaseName(title)}.${EXPORT_FILE_TYPES[format].extension}`)
+  const ext = `.${EXPORT_FILE_TYPES[format].extension}`
+  const base = fileName(exportBaseName(safeFileName(title, 'export')))
+  return `${truncateUtf8(base, NAME_MAX_BYTES - ext.length)}${ext}`
 }

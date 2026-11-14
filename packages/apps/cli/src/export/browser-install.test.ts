@@ -364,3 +364,33 @@ await installHeadlessShell({ ctx, fetchImpl, log: () => {} })
     30_000
   )
 })
+
+// Review 4, C4: two installs at once (parallel agents) never delete each other's
+// finished version: the one that finds it already in place keeps it.
+test('a concurrent install that finished first is kept, not replaced', async () => {
+  const home = path.join(tmp, 'home-race')
+  const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+  const theirs = path.join(
+    root,
+    '157.0.8103.38/chrome-headless-shell-linux64/chrome-headless-shell'
+  )
+  const zip = makeZip([
+    {
+      name: 'chrome-headless-shell-linux64/chrome-headless-shell',
+      data: Buffer.from('#!/bin/sh\n# ours\n'),
+      mode: 0o755
+    }
+  ])
+  const racing = (async (input: string | URL | Request) => {
+    const url = String(input)
+    if (url.endsWith('.json')) return new Response(JSON.stringify(SAMPLE))
+    // While this download runs, the other install finishes the same version.
+    fs.mkdirSync(path.dirname(theirs), { recursive: true })
+    fs.writeFileSync(theirs, '#!/bin/sh\n# theirs\n', { mode: 0o755 })
+    return new Response(new Uint8Array(zip))
+  }) as typeof fetch
+  const bin = await installHeadlessShell({ ctx: realCtx(home), fetchImpl: racing, log: () => {} })
+  expect(bin).toBe(theirs)
+  expect(fs.readFileSync(theirs, 'utf8')).toContain('# theirs')
+  expect(fs.readdirSync(root)).toEqual(['157.0.8103.38'])
+})

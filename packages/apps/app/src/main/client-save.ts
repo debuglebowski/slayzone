@@ -20,6 +20,7 @@ import { once } from 'events'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 import { ZipArchive } from 'archiver'
 import { containedPath } from '@slayzone/platform/safe-path'
+import { numberedName } from '@slayzone/task-artifacts/download-plan'
 import type {
   HostSaveResult,
   SaveTargetOpenResult,
@@ -110,7 +111,9 @@ const STORED = new Set([
  * aborted leaves nothing at the destination.
  */
 function partialPath(dest: string): string {
-  return join(dirname(dest), `.${basename(dest)}.slayzone-partial-${randomUUID().slice(0, 8)}`)
+  // Short and fixed-length, whatever the final name: a name at the 255-byte limit
+  // must not fail because its partial's name would be longer.
+  return join(dirname(dest), `.slz-${randomUUID().slice(0, 13)}.partial`)
 }
 
 /** One file, appended piece by piece, then moved into place. */
@@ -150,20 +153,25 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
  * `name (n).ext` is used instead. A filesystem without hard links (FAT, some network
  * shares) gets an exclusive copy, equally unable to clobber. Returns the path used.
  */
-async function commitNoClobber(partial: string, dest: string): Promise<string> {
+async function commitNoClobber(
+  partial: string,
+  dest: string,
+  fsOps: CommitFs,
+  onCandidate: (candidate: string) => void
+): Promise<string> {
   const dir = dirname(dest)
-  const ext = extname(dest)
-  const stem = basename(dest, ext)
+  const name = basename(dest)
   for (let n = 1; ; n++) {
-    const candidate = n === 1 ? dest : join(dir, `${stem} (${n})${ext}`)
+    const candidate = n === 1 ? dest : join(dir, numberedName(name, n))
     try {
-      await link(partial, candidate)
+      onCandidate(candidate)
+      await fsOps.link(partial, candidate)
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
       if (code === 'EEXIST') continue
       if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV' && code !== 'ENOSYS') throw err
       try {
-        await copyFile(partial, candidate, fsConstants.COPYFILE_EXCL)
+        await fsOps.copyFile(partial, candidate, fsConstants.COPYFILE_EXCL)
       } catch (copyErr) {
         if ((copyErr as NodeJS.ErrnoException).code === 'EEXIST') continue
         throw copyErr
@@ -193,17 +201,47 @@ function mkdirTracked(dir: string): string[] {
  * file that is already there (see `commitNoClobber`). Abort removes exactly what this
  * download created: its files and the folders it made, never anything that existed.
  */
-function directoryTarget(root: string): Target {
+function directoryTarget(root: string, fsOps: CommitFs): Target {
   const placed: string[] = []
   const madeDirs: string[] = []
   const startPath = newPathGuard()
   let current: { path: string; dest: string; partial: string; handle: FileHandle } | null = null
+  /**
+   * The file being committed: tracked until its commit has settled, so a failed commit
+   * or an abort/quit mid-commit removes its partial and whatever name it took.
+   */
+  let committing: { partial: string; candidate: string | null } | null = null
+  /** Aborted: an operation still in flight undoes what it creates and fails. */
+  let dead = false
+  const cancelled = (): Error => new Error('The download was cancelled')
+
   const finishCurrent = async (): Promise<void> => {
     const c = current
-    current = null
     if (!c) return
-    await c.handle.close()
-    placed.push(await commitNoClobber(c.partial, c.dest))
+    const commit = { partial: c.partial, candidate: null as string | null }
+    committing = commit
+    current = null
+    const committed = await c.handle
+      .close()
+      .then(() =>
+        commitNoClobber(c.partial, c.dest, fsOps, (candidate) => {
+          commit.candidate = candidate
+        })
+      )
+      .catch(async (err: unknown) => {
+        // A failed commit leaves nothing: not the partial, not a half-copied name.
+        await unlink(commit.partial).catch(ignore)
+        if (commit.candidate) await unlink(commit.candidate).catch(ignore)
+        if (committing === commit) committing = null
+        throw err
+      })
+    if (committing === commit) committing = null
+    if (dead) {
+      // Aborted while committing: this file is not part of a download that failed.
+      await unlink(committed).catch(ignore)
+      throw cancelled()
+    }
+    placed.push(committed)
   }
   const removeCreated = (): void => {
     for (const f of placed) rmSync(f, { force: true })
@@ -218,34 +256,54 @@ function directoryTarget(root: string): Target {
     }
     madeDirs.length = 0
   }
+  const dropCommitting = (): void => {
+    const c = committing
+    committing = null
+    if (!c) return
+    unlinkNow(c.partial)
+    if (c.candidate) unlinkNow(c.candidate)
+  }
   return {
     async write(path, data) {
+      if (dead) throw cancelled()
       if (current?.path !== path) {
         startPath(path)
         await finishCurrent()
+        if (dead) throw cancelled()
         const dest = containedPath(root, ...path.split('/'))
         madeDirs.push(...mkdirTracked(dirname(dest)))
         const partial = partialPath(dest)
-        current = { path, dest, partial, handle: await open(partial, 'wx') }
+        const handle = await open(partial, 'wx')
+        if (dead) {
+          await handle.close().catch(ignore)
+          await unlink(partial).catch(ignore)
+          throw cancelled()
+        }
+        current = { path, dest, partial, handle }
       }
       await current.handle.write(data)
     },
     async mkdir(path) {
+      if (dead) throw cancelled()
       madeDirs.push(...mkdirTracked(containedPath(root, ...path.split('/'))))
     },
     close: finishCurrent,
     async abort() {
+      dead = true
       const c = current
       current = null
       if (c) {
         await c.handle.close().catch(ignore)
         await unlink(c.partial).catch(ignore)
       }
+      dropCommitting()
       removeCreated()
     },
     abortNow() {
+      dead = true
       if (current) unlinkNow(current.partial)
       current = null
+      dropCommitting()
       removeCreated()
     },
     interrupt() {
@@ -314,6 +372,8 @@ async function zipTarget(
       check()
       finishCurrent()
       const written = once(output, 'close')
+      // A failure while finalizing rejects both; the caller learns it through `failed`.
+      written.catch(ignore)
       await settle(archive.finalize())
       await settle(written)
       check()
@@ -359,9 +419,27 @@ interface Entry {
 /** How long an abort waits for an interrupted operation before cleaning up anyway. */
 const ABORT_WAIT_MS = 5_000
 
+/** How a folder download commits its files; a test injects failing ones. */
+export interface CommitFs {
+  link: (existing: string, path: string) => Promise<void>
+  copyFile: (src: string, dest: string, mode?: number) => Promise<void>
+}
+
 export interface SaveTargetsOptions {
   /** Where a zip's bytes go; a test injects a failing disk here. */
   openZipOutput?: (path: string) => Writable
+  commitFs?: CommitFs
+}
+
+/** Every SaveTargets of this process, for a forced exit (see abortAllSaveTargetsNow). */
+const everyTargets = new Set<SaveTargets>()
+
+/**
+ * Remove every open download's partial now, synchronously. For an exit that skips
+ * `will-quit` (`app.exit`: the quit watchdog, a relaunch).
+ */
+export function abortAllSaveTargetsNow(): void {
+  for (const t of everyTargets) t.abortAllNow()
 }
 
 export class SaveTargets {
@@ -371,9 +449,12 @@ export class SaveTargets {
    */
   private readonly targets = new Map<string, Entry>()
   private readonly openZipOutput: (path: string) => Writable
+  private readonly commitFs: CommitFs
 
   constructor(options: SaveTargetsOptions = {}) {
+    everyTargets.add(this)
     this.openZipOutput = options.openZipOutput ?? ((p) => createWriteStream(p))
+    this.commitFs = options.commitFs ?? { link, copyFile }
   }
 
   private entry(owner: number, id: unknown): Entry {
@@ -434,7 +515,7 @@ export class SaveTargets {
         ? await dialog.showOpenDialog(parent, options)
         : await dialog.showOpenDialog(options)
       if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true }
-      target = directoryTarget(picked.filePaths[0])
+      target = directoryTarget(picked.filePaths[0], this.commitFs)
     } else {
       const ext = extname(req.fileName).slice(1)
       const options: Electron.SaveDialogOptions = {

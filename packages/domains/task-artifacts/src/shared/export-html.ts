@@ -18,7 +18,7 @@ import type { RenderMode } from '@slayzone/task-contracts'
 export type ArtifactExportFormat = 'pdf' | 'png' | 'html'
 
 export const PDF_CSS = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a1a; background: white; line-height: 1.6; padding: 2rem; font-size: 14px; }
     h1 { font-size: 1.8em; margin: 1em 0 0.5em; font-weight: 700; }
     h2 { font-size: 1.4em; margin: 1em 0 0.4em; font-weight: 600; }
@@ -77,11 +77,11 @@ export function escapeHtml(str: string): string {
 // `layout: 'dagre'` keeps mermaid 12's ELK default out, matching the in-app
 // MermaidBlock. A failed render still flags ready: the page shows mermaid's error
 // rather than hanging the export.
-function mermaidRunScript(mermaidJs: string): string {
+function mermaidRunScript(mermaidJs: string, nonce: string): string {
   // `</script` inside the bundle would end the tag early.
   const safe = mermaidJs.replace(/<\/script/gi, '<\\/script')
-  return `<script>${safe}</script>
-<script>
+  return `<script nonce="${nonce}">${safe}</script>
+<script nonce="${nonce}">
   mermaid.initialize({ startOnLoad: false, theme: 'default', layout: 'dagre' });
   mermaid.run().catch(function () {}).then(function () {
     document.documentElement.dataset.exportReady = '1';
@@ -100,6 +100,57 @@ function codeTableHtml(content: string): string {
   return `<pre style="background:none;padding:0"><table class="code-table">${rows}</table></pre>`
 }
 
+/** How a document is built for one renderer. */
+export interface DocumentOptions {
+  /**
+   * The nonce scripts must carry to run (a caller that adds a script of its own
+   * passes it). Generated when the document inlines mermaid and none is given.
+   */
+  nonce?: string
+  /**
+   * html-preview only: run the artifact's own scripts (no policy at all). For a host
+   * that already renders html artifacts with scripts on (desktop, the CLI's headless
+   * Chrome); everywhere else an html artifact is rendered inert.
+   */
+  artifactScripts?: boolean
+}
+
+/** An unguessable nonce: an artifact cannot carry one that matches. */
+function newNonce(): string {
+  const bytes = new Uint8Array(16)
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto
+  if (c?.getRandomValues) c.getRandomValues(bytes)
+  // Hermes has no crypto: as the phone's own viewer pages do.
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * The Content-Security-Policy every exported document carries, first in its head: no
+ * script runs but those carrying `nonce` (none when null), nothing is fetched but
+ * images, fonts and media. An artifact's markup — `<img onerror>`, `<script>`, SVG
+ * handlers — is inert in every renderer.
+ */
+export function exportDocumentPolicy(nonce: string | null): string {
+  return [
+    "default-src 'none'",
+    nonce ? `script-src 'nonce-${nonce}'` : "script-src 'none'",
+    "style-src 'unsafe-inline'",
+    'img-src data: blob: http: https:',
+    'font-src data: http: https:',
+    'media-src data: blob: http: https:',
+    "base-uri 'none'",
+    "form-action 'none'"
+  ].join('; ')
+}
+
+function documentHead(title: string, nonce: string | null, policy = true): string {
+  const csp = policy
+    ? `<meta http-equiv="Content-Security-Policy" content="${exportDocumentPolicy(nonce)}">`
+    : ''
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">${csp}<title>${escapeHtml(title)}</title>`
+}
+
 /**
  * The paged document for `mode`: what PDF export prints and HTML export saves.
  * A mermaid artifact without `mermaidJs` degrades to its source as code.
@@ -108,19 +159,24 @@ export function buildDocumentHtml(
   content: string,
   mode: RenderMode | string,
   title: string,
-  mermaidJs?: string | null
+  mermaidJs?: string | null,
+  opts: DocumentOptions = {}
 ): string {
-  const head = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>`
-
   if (mode === 'mermaid-preview') {
-    if (!mermaidJs) return buildDocumentHtml(content, 'code', title)
-    return `${head}
+    if (!mermaidJs) return buildDocumentHtml(content, 'code', title, null, opts)
+    const nonce = opts.nonce ?? newNonce()
+    return `${documentHead(title, nonce)}
 <style>${PDF_CSS} .mermaid svg { max-width: 100%; }</style>
 </head><body>
 <pre class="mermaid">${escapeHtml(content)}</pre>
-${mermaidRunScript(mermaidJs)}
+${mermaidRunScript(mermaidJs, nonce)}
 </body></html>`
   }
+  const head = documentHead(
+    title,
+    opts.nonce ?? null,
+    !(mode === 'html-preview' && opts.artifactScripts === true)
+  )
 
   let body: string
   switch (mode) {
@@ -148,7 +204,7 @@ ${mermaidRunScript(mermaidJs)}
  * to wait for. For a client that renders the export where scripts cannot run.
  */
 export function buildDrawnMermaidDocumentHtml(svg: string, title: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+  return `${documentHead(title, null)}
 <style>${PDF_CSS} .mermaid svg { max-width: 100%; }</style>
 </head><body>
 <pre class="mermaid">${svg}</pre>
@@ -164,17 +220,19 @@ export function buildPngHtml(
   content: string,
   mode: RenderMode | string,
   title: string,
-  mermaidJs?: string | null
+  mermaidJs?: string | null,
+  opts: Pick<DocumentOptions, 'nonce'> = {}
 ): string | null {
   const isMermaid = mode === 'mermaid-preview'
   if (!isMermaid && mode !== 'svg-preview') return null
   if (isMermaid && !mermaidJs) return null
 
+  const nonce = opts.nonce ?? (isMermaid ? newNonce() : null)
   const body = isMermaid
-    ? `<pre class="mermaid">${escapeHtml(content)}</pre>${mermaidRunScript(mermaidJs as string)}`
+    ? `<pre class="mermaid">${escapeHtml(content)}</pre>${mermaidRunScript(mermaidJs as string, nonce as string)}`
     : `<div style="display:inline-block">${content}</div>`
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+  return `${documentHead(title, nonce)}
 <style>* { margin: 0; padding: 0; } body { background: white; display: inline-block; } svg { display: block; }</style>
 </head><body>${body}</body></html>`
 }

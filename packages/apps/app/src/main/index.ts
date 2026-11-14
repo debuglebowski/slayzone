@@ -192,6 +192,8 @@ const isViteDev = !app.isPackaged && !isPlaywright && !!process.env['ELECTRON_RE
 /** Must match DEV_RELAUNCH_EXIT_CODE in packages/apps/app/dev.mjs. */
 const DEV_RELAUNCH_EXIT_CODE = 75
 function relaunchApp(exitCode?: number): void {
+  // app.exit skips will-quit: remove open downloads' partials here.
+  abortAllSaveTargetsNow()
   if (isViteDev) {
     app.exit(DEV_RELAUNCH_EXIT_CODE)
     return
@@ -464,7 +466,7 @@ import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
 import { exportArtifactOnDesktop } from './artifact-export'
-import { SaveTargets, watchSaveTargetOwner } from './client-save'
+import { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner } from './client-save'
 import {
   configureTaskRuntimeAdapters,
   closeArtifactWatcher,
@@ -4999,7 +5001,10 @@ app.on('before-quit', (event) => {
       } catch {
         /* diagnostics unavailable — the console error above still records it */
       }
-      // app.exit skips will-quit, so reap the children here. Reap the hub and the
+      // app.exit skips will-quit, so remove open downloads' partials, and reap the
+      // children here.
+      abortAllSaveTargetsNow()
+      // Reap the hub and the
       // computer (bounded), THEN flush (bounded) — as will-quit does — so a missed
       // reap's *.quit_reap_failed event is still in the queue the flush writes,
       // along with the watchdog event above.

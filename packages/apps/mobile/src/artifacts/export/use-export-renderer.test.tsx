@@ -91,3 +91,22 @@ describe('useExportRenderer: a hidden web view per render', () => {
     jest.useRealTimers()
   })
 })
+
+// Review 4, M4: a render whose viewer goes away is ended, not left pending forever
+// (holding the multi-MB page it was given).
+it('rejects a pending render when the viewer unmounts', async () => {
+  let run: Render | null = null
+  function Host(): ReactNode {
+    const renderer = useExportRenderer()
+    run = renderer.render
+    return renderer.view
+  }
+  const view = await render(<Host />)
+  let result: Promise<ExportRenderReply> | null = null
+  await act(async () => {
+    result = (run as unknown as Render)('<html>page</html>')
+  })
+  const settled = (result as unknown as Promise<ExportRenderReply>).catch((e: Error) => e)
+  await act(async () => view.unmount())
+  expect(String(await settled)).toMatch(/closed/)
+})

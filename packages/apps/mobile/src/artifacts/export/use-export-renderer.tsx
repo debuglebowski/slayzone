@@ -7,7 +7,7 @@
  * WKWebView runs a page's script only inside the window, so the view is mounted, not
  * offscreen: laid over the screen at zero opacity.
  */
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { StyleSheet } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { type ExportRenderReply, parseExportRenderReply } from './render-pages'
@@ -41,6 +41,18 @@ export function useExportRenderer(): ExportRenderer {
     }, EXPORT_RENDER_TIMEOUT_MS)
     return () => clearTimeout(timer)
   }, [pending])
+
+  // A viewer that goes away ends its render: nothing is left pending forever.
+  const live = useRef<PendingRender | null>(null)
+  useEffect(() => {
+    live.current = pending
+  }, [pending])
+  useEffect(
+    () => () => {
+      live.current?.reject(new Error('The export was cancelled: the viewer was closed.'))
+    },
+    []
+  )
 
   const render = (html: string) =>
     new Promise<ExportRenderReply>((resolve, reject) => {

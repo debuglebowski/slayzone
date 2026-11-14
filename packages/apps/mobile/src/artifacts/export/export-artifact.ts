@@ -48,7 +48,16 @@ export interface ExportArtifactDeps {
   render: (html: string) => Promise<ExportRenderReply>
   /** mermaid's browser build (`page-assets.ts`). */
   mermaidScript: () => Promise<string>
+  /** How long printing may take (default {@link EXPORT_PRINT_TIMEOUT_MS}). */
+  printTimeoutMs?: number
 }
+
+/** A print waiting on an unreachable image gives up long before this. */
+export const EXPORT_PRINT_TIMEOUT_MS = 60_000
+
+/** The export folders of exports still running in this app: never swept. */
+const liveExportDirs = new Set<string>()
+let exportSeq = 0
 
 /** Exports, opens the share sheet, and resolves with the file once the sheet is closed. */
 export async function exportArtifact(
@@ -62,7 +71,16 @@ export async function exportArtifact(
   }
   if (!content.trim()) throw new Error('This artifact is empty: there is nothing to export.')
 
-  const target = freshExportFile(exportFileName(title, format))
+  const { dir, file: target } = freshExportFile(exportFileName(title, format))
+  return exportInto(target, request, deps).finally(() => liveExportDirs.delete(dir))
+}
+
+async function exportInto(
+  target: File,
+  request: ExportRequest,
+  deps: ExportArtifactDeps
+): Promise<string> {
+  const { content, mode, title, format } = request
   switch (format) {
     case 'html': {
       const mermaid = needsMermaidScript(mode) ? await deps.mermaidScript() : null
@@ -75,12 +93,16 @@ export async function exportArtifact(
         mode === 'mermaid-preview'
           ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
           : buildDocumentHtml(content, mode, title)
-      const printed = await printToFileAsync({
-        html,
-        width: A4.width,
-        height: A4.height,
-        margins: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN }
-      })
+      const printed = await withTimeout(
+        printToFileAsync({
+          html,
+          width: A4.width,
+          height: A4.height,
+          margins: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN }
+        }),
+        deps.printTimeoutMs ?? EXPORT_PRINT_TIMEOUT_MS,
+        'Printing the PDF took too long.'
+      )
       await new File(printed.uri).move(target)
       break
     }
@@ -101,12 +123,36 @@ export async function exportArtifact(
   return target.uri
 }
 
-/** `<caches>/slayzone-exports/<name>`, the folder emptied of earlier exports. */
-function freshExportFile(name: string): File {
-  const dir = new Directory(Paths.cache, EXPORT_DIR)
-  if (dir.exists) dir.delete()
+/**
+ * `<caches>/slayzone-exports/<this export>/<name>`: a folder per export, so a second
+ * export (another viewer screen) never touches the first one's file. Earlier exports'
+ * folders are swept — the share sheet is done with them — but never a live one.
+ */
+function freshExportFile(name: string): { dir: string; file: File } {
+  const root = new Directory(Paths.cache, EXPORT_DIR)
+  if (root.exists)
+    for (const entry of root.list()) {
+      // Each on its own: one that cannot be removed must not stop the export.
+      try {
+        if (!liveExportDirs.has(entry.uri)) entry.delete()
+      } catch {
+        // Left for the next sweep.
+      }
+    }
+  const dir = new Directory(root, `${Date.now().toString(36)}-${++exportSeq}`)
   dir.create({ intermediates: true, idempotent: true })
-  return new File(dir, name)
+  liveExportDirs.add(dir.uri)
+  return { dir: dir.uri, file: new File(dir, name) }
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    })
+  ]).finally(() => clearTimeout(timer))
 }
 
 /** The mermaid source as static SVG, drawn in the hidden web view. */

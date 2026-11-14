@@ -32,7 +32,18 @@ interface Pending {
 }
 
 export interface Browser {
+  /** A command answered within the per-command deadline. */
   send<T = Record<string, unknown>>(
+    method: string,
+    params?: Record<string, unknown>,
+    sessionId?: string
+  ): Promise<T>
+  /**
+   * A command whose work grows with the document (printing, capturing): no fixed
+   * deadline. Instead the browser is checked for liveness while it works; one that
+   * stops answering fails the command.
+   */
+  sendLong<T = Record<string, unknown>>(
     method: string,
     params?: Record<string, unknown>,
     sessionId?: string
@@ -40,8 +51,19 @@ export interface Browser {
   close(): Promise<void>
 }
 
+export interface LaunchOptions {
+  /** Deadline for an ordinary command (default 60 s). */
+  commandTimeoutMs?: number
+  /** How often a long command checks the browser still answers (default 30 s). */
+  livenessIntervalMs?: number
+  /** After the browser exits, how long its pipes may stay open (default 2 s). */
+  exitGraceMs?: number
+}
+
 const LAUNCH_TIMEOUT_MS = 30_000
 const COMMAND_TIMEOUT_MS = 60_000
+const LIVENESS_INTERVAL_MS = 30_000
+const EXIT_GRACE_MS = 2_000
 const STDERR_KEEP = 16 * 1024
 
 /** Flags for a throwaway, quiet, headless profile. */
@@ -77,13 +99,44 @@ function launchFailure(executable: string, stderr: string, cause: string): Brows
   )
 }
 
+/**
+ * Splits the browser's NUL-terminated messages. Linear in the bytes received: each
+ * chunk is scanned once and a message is joined only when its terminator arrives,
+ * so a multi-MB reply never costs a rescan of everything buffered so far.
+ */
+export class CdpFrameReader {
+  private parts: string[] = []
+  constructor(private readonly onMessage: (raw: string) => void) {}
+  push(chunk: string): void {
+    let start = 0
+    for (let end = chunk.indexOf('\0'); end !== -1; end = chunk.indexOf('\0', start)) {
+      this.parts.push(chunk.slice(start, end))
+      const raw = this.parts.join('')
+      this.parts = []
+      this.onMessage(raw)
+      start = end + 1
+    }
+    if (start < chunk.length) this.parts.push(chunk.slice(start))
+  }
+}
+
 /** Start `executable` headless and complete a CDP round trip with it. */
-export async function launchBrowser(executable: string): Promise<Browser> {
+export async function launchBrowser(
+  executable: string,
+  opts: LaunchOptions = {}
+): Promise<Browser> {
+  const commandTimeoutMs = opts.commandTimeoutMs ?? COMMAND_TIMEOUT_MS
+  const livenessIntervalMs = opts.livenessIntervalMs ?? LIVENESS_INTERVAL_MS
+  const exitGraceMs = opts.exitGraceMs ?? EXIT_GRACE_MS
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-export-profile-'))
+  // Its own process group (not on Windows): killing the group also ends whatever a
+  // wrapper script (`--browser`) started, so nothing outlives `slay`.
+  const ownGroup = process.platform !== 'win32'
   let child: ChildProcess
   try {
     child = spawn(executable, browserArgs(userDataDir), {
-      stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe']
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
+      detached: ownGroup
     })
   } catch (err) {
     fs.rmSync(userDataDir, { recursive: true, force: true })
@@ -109,41 +162,43 @@ export async function launchBrowser(executable: string): Promise<Browser> {
     pending.clear()
   }
 
-  let buffered = ''
-  fromBrowser.setEncoding('utf8')
-  fromBrowser.on('data', (chunk: string) => {
-    buffered += chunk
-    let end = buffered.indexOf('\0')
-    while (end !== -1) {
-      const raw = buffered.slice(0, end)
-      buffered = buffered.slice(end + 1)
-      end = buffered.indexOf('\0')
-      let msg: { id?: number; result?: unknown; error?: { message?: string } }
-      try {
-        msg = JSON.parse(raw)
-      } catch {
-        continue
-      }
-      if (msg.id === undefined) continue // an event; this client polls instead
-      const p = pending.get(msg.id)
-      if (!p) continue
-      pending.delete(msg.id)
-      clearTimeout(p.timer)
-      if (msg.error) p.reject(new Error(msg.error.message ?? 'CDP error'))
-      else p.resolve(msg.result ?? {})
+  const reader = new CdpFrameReader((raw) => {
+    let msg: { id?: number; result?: unknown; error?: { message?: string } }
+    try {
+      msg = JSON.parse(raw)
+    } catch {
+      return
     }
+    if (msg.id === undefined) return // an event; this client polls instead
+    const p = pending.get(msg.id)
+    if (!p) return
+    pending.delete(msg.id)
+    clearTimeout(p.timer)
+    if (msg.error) p.reject(new Error(msg.error.message ?? 'CDP error'))
+    else p.resolve(msg.result ?? {})
   })
+  fromBrowser.setEncoding('utf8')
+  fromBrowser.on('data', (chunk: string) => reader.push(chunk))
   // EPIPE on a browser that died mid-write surfaces through the exit handler.
   const ignore = (): void => undefined
   toBrowser.on('error', ignore)
   fromBrowser.on('error', ignore)
 
   const exitPromise = new Promise<void>((resolve) => {
-    // 'close', not 'exit': it fires after stderr is drained, so the loader's
-    // missing-library line is in `stderr` by then.
-    child.once('close', (code, signal) => {
+    const ended = (code: number | null, signal: NodeJS.Signals | null): void => {
       failAll(launchFailure(executable, stderr, signal ? `signal ${signal}` : `exit code ${code}`))
       resolve()
+    }
+    // 'close' (after stderr is drained, so the loader's missing-library line is in
+    // `stderr` by then) — but a child whose pipes outlive it (a wrapper's grandchild)
+    // never closes them: after 'exit' plus a grace period, stop waiting and let go
+    // of the pipes.
+    child.once('close', ended)
+    child.once('exit', (code, signal) => {
+      setTimeout(() => {
+        for (const s of [child.stderr, toBrowser, fromBrowser]) s?.destroy()
+        ended(code, signal)
+      }, exitGraceMs).unref()
     })
     child.once('error', (err) => {
       failAll(launchFailure(executable, stderr, err.message))
@@ -155,8 +210,16 @@ export async function launchBrowser(executable: string): Promise<Browser> {
   // temp profile behind. Node emits no 'exit' for a signal it has no handler for, so
   // the signals are handled too: clean up, then re-raise so the process still ends
   // the way it was told to.
+  const kill = (): void => {
+    try {
+      if (ownGroup && child.pid) process.kill(-child.pid, 'SIGKILL')
+      else child.kill('SIGKILL')
+    } catch {
+      child.kill('SIGKILL')
+    }
+  }
   const cleanUpNow = (): void => {
-    child.kill('SIGKILL')
+    kill()
     fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
   const removeHooks = onExitOrSignal(cleanUpNow)
@@ -165,18 +228,43 @@ export async function launchBrowser(executable: string): Promise<Browser> {
     method: string,
     params: Record<string, unknown> = {},
     sessionId?: string,
-    timeoutMs = COMMAND_TIMEOUT_MS
+    timeoutMs: number | null = commandTimeoutMs
   ): Promise<T> {
     if (exited) return Promise.reject(exited)
     const id = nextId++
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id)
-        reject(new BrowserLaunchError(`Browser did not answer ${method} within ${timeoutMs} ms`))
-      }, timeoutMs)
+      const timer = setTimeout(
+        () => {
+          pending.delete(id)
+          reject(new BrowserLaunchError(`Browser did not answer ${method} within ${timeoutMs} ms`))
+        },
+        // No deadline: the timer never fires (a long command's liveness check stands in).
+        timeoutMs ?? 2_147_483_647
+      )
       pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
       toBrowser.write(`${JSON.stringify({ id, method, params, sessionId })}\0`)
     })
+  }
+
+  async function sendLong<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string
+  ): Promise<T> {
+    let watchdog: NodeJS.Timeout | undefined
+    const stalled = new Promise<never>((_, reject) => {
+      const check = (): void => {
+        watchdog = setTimeout(() => {
+          send('Browser.getVersion', {}, undefined, livenessIntervalMs).then(check, () =>
+            reject(new BrowserLaunchError(`The browser stopped responding while running ${method}`))
+          )
+        }, livenessIntervalMs)
+      }
+      check()
+    })
+    return Promise.race([send<T>(method, params, sessionId, null), stalled]).finally(() =>
+      clearTimeout(watchdog)
+    )
   }
 
   let closed = false
@@ -186,10 +274,12 @@ export async function launchBrowser(executable: string): Promise<Browser> {
     if (!exited) {
       // A browser that ignores Browser.close is killed below.
       send('Browser.close', {}, undefined, 2_000).catch(ignore)
-      const timer = setTimeout(() => child.kill('SIGKILL'), 5_000)
+      const timer = setTimeout(kill, 5_000)
       await exitPromise
       clearTimeout(timer)
     }
+    // Whatever the browser started (a wrapper's children) goes with it.
+    if (ownGroup) kill()
     removeHooks()
     // Windows may hold profile files for a moment after exit.
     fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
@@ -203,5 +293,5 @@ export async function launchBrowser(executable: string): Promise<Browser> {
       ? err
       : launchFailure(executable, stderr, (err as Error).message)
   }
-  return { send, close }
+  return { send: (m, p, sid) => send(m, p, sid), sendLong, close }
 }

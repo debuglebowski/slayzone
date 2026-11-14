@@ -32,6 +32,12 @@ jest.mock('expo-file-system', () => {
       mockFs.log.push(['rmdir', this.uri])
       mockFs.dirs.delete(this.uri)
     }
+    list() {
+      const prefix = `${this.uri.replace(/\/$/, '')}/`
+      return [...mockFs.dirs]
+        .filter((d) => d.startsWith(prefix) && !d.slice(prefix.length).includes('/'))
+        .map((d) => new FakeDirectory(d))
+    }
   }
   class FakeFile {
     uri: string
@@ -65,6 +71,9 @@ const mockFs = {
   log: [] as unknown[][]
 }
 const OUT = `file:///cache/${EXPORT_DIR}`
+/** `<OUT>/<this export's own folder>/<name>`. */
+const inExportDir = (name: string) =>
+  new RegExp(`^${OUT.replace(/[/.]/g, '\\$&')}/[^/]+/${name.replace('.', '\\.')}$`)
 
 const print = jest.mocked(printToFileAsync)
 const share = jest.mocked(shareAsync)
@@ -101,7 +110,7 @@ describe('exportArtifact: HTML', () => {
       { content: '# Plan', mode: 'markdown', title: 'plan.md', format: 'html' },
       deps
     )
-    expect(uri).toBe(`${OUT}/plan.html`)
+    expect(uri).toMatch(inExportDir('plan.html'))
     expect(mockFs.files.get(uri)).toEqual({
       content: buildDocumentHtml('# Plan', 'markdown', 'plan.md'),
       encoding: 'utf8'
@@ -128,13 +137,51 @@ describe('exportArtifact: HTML', () => {
     expect(deps.render).not.toHaveBeenCalled()
   })
 
-  it('replaces the previous export, never piling files up', async () => {
+  // Review 4, M3: each export has a folder of its own. Earlier exports' folders are
+  // swept, never one whose export is still running (a second viewer screen).
+  it('sweeps earlier exports, never piling files up', async () => {
     mockFs.dirs.add(OUT)
-    await exportArtifact({ content: 'x', mode: 'code', title: 'a.ts', format: 'html' }, renderer())
-    expect(mockFs.log.slice(0, 2)).toEqual([
-      ['rmdir', OUT],
-      ['mkdir', OUT]
-    ])
+    mockFs.dirs.add(`${OUT}/old-1`)
+    const uri = await exportArtifact(
+      { content: 'x', mode: 'code', title: 'a.ts', format: 'html' },
+      renderer()
+    )
+    expect(mockFs.log).toContainEqual(['rmdir', `${OUT}/old-1`])
+    expect(uri.startsWith(`${OUT}/`)).toBe(true)
+    expect(uri.endsWith('/a.html')).toBe(true)
+  })
+
+  it('a second export started meanwhile does not wipe the first one', async () => {
+    let release: () => void = () => undefined
+    share.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+    const first = exportArtifact(
+      { content: 'one', mode: 'code', title: 'one.ts', format: 'html' },
+      renderer()
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    const firstUri = share.mock.calls[0][0]
+    const firstDir = firstUri.slice(0, firstUri.lastIndexOf('/'))
+    await exportArtifact(
+      { content: 'two', mode: 'code', title: 'two.ts', format: 'html' },
+      renderer()
+    )
+    expect(mockFs.log).not.toContainEqual(['rmdir', firstDir])
+    expect(mockFs.dirs.has(firstDir)).toBe(true)
+    release()
+    await first
+  })
+
+  // Review 4, M4: printing that never finishes (an image on an unreachable host) ends
+  // with an error instead of "Exporting…" forever.
+  it('a print that never finishes times out with an error', async () => {
+    print.mockImplementationOnce(() => new Promise(() => undefined))
+    await expect(
+      exportArtifact(
+        { content: '# x', mode: 'markdown', title: 'p.md', format: 'pdf' },
+        { ...renderer(), printTimeoutMs: 50 }
+      )
+    ).rejects.toThrow(/took too long/)
+    expect(share).not.toHaveBeenCalled()
   })
 })
 
@@ -151,8 +198,8 @@ describe('exportArtifact: PDF', () => {
       height: 842,
       margins: { left: 28, right: 28, top: 28, bottom: 28 }
     })
-    expect(mockFs.log).toContainEqual(['move', 'file:///cache/Print/0F.pdf', `${OUT}/plan.pdf`])
-    expect(uri).toBe(`${OUT}/plan.pdf`)
+    expect(uri).toMatch(inExportDir('plan.pdf'))
+    expect(mockFs.log).toContainEqual(['move', 'file:///cache/Print/0F.pdf', uri])
     expect(share).toHaveBeenCalledWith(uri, {
       mimeType: 'application/pdf',
       UTI: 'com.adobe.pdf',
@@ -203,7 +250,7 @@ describe('exportArtifact: PNG', () => {
       deps
     )
     expect(deps.pages[0]).toContain('<svg width="20" height="10"/>')
-    expect(uri).toBe(`${OUT}/logo.png`)
+    expect(uri).toMatch(inExportDir('logo.png'))
     expect(mockFs.files.get(uri)).toEqual({ content: 'UE5H', encoding: 'base64' })
     expect(share).toHaveBeenCalledWith(uri, {
       mimeType: 'image/png',

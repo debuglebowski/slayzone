@@ -13,7 +13,7 @@ import {
   EXPORT_READY_EXPRESSION,
   PNG_MEASURE_EXPRESSION
 } from '@slayzone/task-artifacts/export-html'
-import { type Browser, launchBrowser } from './cdp'
+import { type Browser, type LaunchOptions, launchBrowser } from './cdp'
 
 export interface RenderOptions {
   /** The document flags itself ready asynchronously (mermaid): wait for it. */
@@ -22,11 +22,15 @@ export interface RenderOptions {
   readyTimeoutMs?: number
   /** Called when the ready flag never came. */
   warn?: (line: string) => void
+  /** Browser timing; tests shorten it. */
+  browser?: LaunchOptions
 }
 
 const MM_PER_INCH = 25.4
 const A4 = { width: 210 / MM_PER_INCH, height: 297 / MM_PER_INCH }
 const MARGIN_IN = 10 / MM_PER_INCH
+/** One `IO.read` of a streamed PDF. */
+const PDF_READ_BYTES = 4 * 1024 * 1024
 export const PNG_SCALE = 2
 const PNG_VIEWPORT = 2000
 
@@ -70,7 +74,7 @@ async function withPage<T>(
   viewport: { width: number; height: number; deviceScaleFactor: number } | null,
   fn: (b: Browser, sessionId: string) => Promise<T>
 ): Promise<T> {
-  const b = await launchBrowser(executable)
+  const b = await launchBrowser(executable, opts.browser)
   try {
     const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
       url: 'about:blank'
@@ -107,7 +111,9 @@ export async function renderPdf(
   opts: RenderOptions
 ): Promise<Buffer> {
   return withPage(executable, html, opts, null, async (b, sessionId) => {
-    const { data } = await b.send<{ data: string }>(
+    // Streamed back in pieces (`IO.read`): a large PDF is never one huge message, and
+    // printing has no fixed deadline — only the browser's liveness is checked.
+    const { stream } = await b.sendLong<{ stream: string }>(
       'Page.printToPDF',
       {
         printBackground: true,
@@ -116,11 +122,24 @@ export async function renderPdf(
         marginTop: MARGIN_IN,
         marginBottom: MARGIN_IN,
         marginLeft: MARGIN_IN,
-        marginRight: MARGIN_IN
+        marginRight: MARGIN_IN,
+        transferMode: 'ReturnAsStream'
       },
       sessionId
     )
-    return Buffer.from(data, 'base64')
+    const parts: Buffer[] = []
+    for (;;) {
+      const piece = await b.send<{ data: string; base64Encoded?: boolean; eof: boolean }>(
+        'IO.read',
+        { handle: stream, size: PDF_READ_BYTES },
+        // A stream handle belongs to the session that opened it.
+        sessionId
+      )
+      if (piece.data) parts.push(Buffer.from(piece.data, piece.base64Encoded ? 'base64' : 'utf8'))
+      if (piece.eof) break
+    }
+    await b.send('IO.close', { handle: stream }, sessionId).catch(() => undefined)
+    return Buffer.concat(parts)
   })
 }
 
@@ -151,7 +170,7 @@ export async function renderPng(
       'new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(() => r(true))); setTimeout(() => r(true), 200) })',
       true
     )
-    const { data } = await b.send<{ data: string }>(
+    const { data } = await b.sendLong<{ data: string }>(
       'Page.captureScreenshot',
       {
         format: 'png',

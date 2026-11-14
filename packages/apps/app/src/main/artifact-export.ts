@@ -182,7 +182,11 @@ export async function exportArtifactOnDesktop(
     if (!html) return { ok: false, error: 'Failed to build PNG HTML (mermaid not available)' }
     bytes = await renderToPng(html, waitReady)
   } else {
-    const html = buildDocumentHtml(content, mode, title, mermaidJs)
+    // An html artifact's PDF keeps its scripts, as desktop always rendered it (the
+    // exported HTML file never does — the policy goes with it).
+    const html = buildDocumentHtml(content, mode, title, mermaidJs, {
+      artifactScripts: format === 'pdf'
+    })
     bytes = format === 'pdf' ? await renderToPdf(html, waitReady) : html
   }
 

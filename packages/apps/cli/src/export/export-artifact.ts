@@ -111,7 +111,8 @@ export async function exportArtifact(
 
   const html =
     type === 'pdf'
-      ? buildDocumentHtml(content, mode, title, mermaidJs)
+      ? // html artifacts keep their scripts, as the desktop app always rendered them.
+        buildDocumentHtml(content, mode, title, mermaidJs, { artifactScripts: true })
       : buildPngHtml(content, mode, title, mermaidJs)
   if (html === null) throw new ExportError(`Cannot export "${title}" (${mode}) as ${type}.`)
 

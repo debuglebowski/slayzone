@@ -477,6 +477,8 @@ run_harness packages/apps/cli/src/commands/tasks/cli-author.test.ts
 # renders in a locally installed Chrome (skipped when the machine has none).
 run_harness packages/apps/cli/src/export/browser.test.ts
 run_harness packages/apps/cli/src/export/cdp.test.ts
+run_harness packages/apps/cli/src/export/export-csp.integration.test.ts
+run_harness packages/apps/cli/src/export/cdp-protocol.test.ts
 run_harness packages/apps/cli/src/export/browser-install.test.ts
 run_harness packages/apps/cli/src/export/zip-extract.test.ts
 run_harness packages/apps/cli/src/export/missing-libs.test.ts

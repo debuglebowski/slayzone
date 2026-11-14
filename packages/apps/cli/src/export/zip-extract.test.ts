@@ -242,3 +242,58 @@ describe('extractZip', () => {
     await expect(extractZip(p, fresh('out'))).rejects.toBeInstanceOf(ZipError)
   })
 })
+
+// Review 4, C4: an entry is cut off the moment it inflates past its declared size —
+// not after writing everything first — and an archive declaring more than the cap is
+// refused before anything is written.
+describe('size limits', () => {
+  /** One deflated entry whose header declares `declared` bytes. */
+  function bombZip(name: string, real: Buffer, declared: number): Buffer {
+    const deflated = zlib.deflateRawSync(real)
+    const nameB = Buffer.from(name)
+    const crc = zlib.crc32(real)
+    const lh = Buffer.alloc(30)
+    lh.writeUInt32LE(0x04034b50, 0)
+    lh.writeUInt16LE(20, 4)
+    lh.writeUInt16LE(8, 8)
+    lh.writeUInt32LE(crc, 14)
+    lh.writeUInt32LE(deflated.length, 18)
+    lh.writeUInt32LE(declared, 22)
+    lh.writeUInt16LE(nameB.length, 26)
+    const ch = Buffer.alloc(46)
+    ch.writeUInt32LE(0x02014b50, 0)
+    ch.writeUInt16LE(20, 4)
+    ch.writeUInt16LE(20, 6)
+    ch.writeUInt16LE(8, 10)
+    ch.writeUInt32LE(crc, 16)
+    ch.writeUInt32LE(deflated.length, 20)
+    ch.writeUInt32LE(declared, 24)
+    ch.writeUInt16LE(nameB.length, 28)
+    const cd = Buffer.concat([ch, nameB])
+    const eocd = Buffer.alloc(22)
+    eocd.writeUInt32LE(0x06054b50, 0)
+    eocd.writeUInt16LE(1, 8)
+    eocd.writeUInt16LE(1, 10)
+    eocd.writeUInt32LE(cd.length, 12)
+    eocd.writeUInt32LE(30 + nameB.length + deflated.length, 16)
+    return Buffer.concat([lh, nameB, deflated, cd, eocd])
+  }
+
+  test('an entry inflating past its declared size stops at once', async () => {
+    const dest = fresh('bomb')
+    const zip = writeTmp(bombZip('b.bin', Buffer.alloc(64 * 1024 * 1024), 10))
+    await expect(extractZip(zip, dest)).rejects.toThrow(/Size mismatch|larger than/)
+    const written = fs.existsSync(path.join(dest, 'b.bin'))
+      ? fs.statSync(path.join(dest, 'b.bin')).size
+      : 0
+    // At most one inflate chunk past the declared size reaches the disk.
+    expect(written).toBeLessThan(1024 * 1024)
+  })
+
+  test('an archive declaring more than the cap is refused before anything is written', async () => {
+    const dest = fresh('cap')
+    const zip = writeTmp(bombZip('big.bin', Buffer.alloc(1000), 1000))
+    await expect(extractZip(zip, dest, { maxTotalBytes: 999 })).rejects.toThrow(/too large/)
+    expect(fs.readdirSync(dest)).toEqual([])
+  })
+})

@@ -77,6 +77,37 @@ export function safeFileName(title: string, fallback: string): string {
   return segs.length ? segs.join('_') : fallback
 }
 
+/** The longest file name the filesystems people save to accept, in UTF-8 bytes. */
+export const NAME_MAX_BYTES = 255
+
+const utf8Length = (s: string): number => new TextEncoder().encode(s).byteLength
+
+/** `s` cut to at most `max` UTF-8 bytes, never inside a character. */
+export function truncateUtf8(s: string, max: number): string {
+  if (utf8Length(s) <= max) return s
+  let out = ''
+  let used = 0
+  for (const ch of s) {
+    const len = utf8Length(ch)
+    if (used + len > max) break
+    out += ch
+    used += len
+  }
+  return out
+}
+
+/**
+ * Copy `n` of a file name, as file managers number them: `a.md` → `a (2).md`. The
+ * stem is shortened when needed, so the result never exceeds {@link NAME_MAX_BYTES}
+ * even for a name already at the limit; the extension is kept.
+ */
+export function numberedName(name: string, n: number): string {
+  const dot = name.lastIndexOf('.')
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+  const suffix = ` (${n})${ext}`
+  return `${truncateUtf8(stem, Math.max(1, NAME_MAX_BYTES - utf8Length(suffix)))}${suffix}`
+}
+
 /** How two paths compare on the filesystems people save to (APFS, NTFS: case-blind). */
 const pathKey = (p: string): string => p.normalize('NFC').toLowerCase()
 
@@ -102,10 +133,10 @@ function uniquePaths(entries: DownloadEntry[], dirs: string[] = []): DownloadEnt
     let path = e.path
     if (taken.has(pathKey(path)) || folders.has(pathKey(path))) {
       const slash = path.lastIndexOf('/')
-      const dot = path.lastIndexOf('.')
-      const [stem, ext] = dot > slash + 1 ? [path.slice(0, dot), path.slice(dot)] : [path, '']
+      const dir = path.slice(0, slash + 1)
+      const name = path.slice(slash + 1)
       for (let n = 2; ; n++) {
-        path = `${stem} (${n})${ext}`
+        path = dir + numberedName(name, n)
         if (!taken.has(pathKey(path)) && !folders.has(pathKey(path))) break
       }
     }
