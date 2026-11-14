@@ -15,6 +15,7 @@ import {
   type TimelineRows,
   type ToolInvocation
 } from '@slayzone/terminal/reducer'
+import { chatBlobJsonReplacer } from '@slayzone/terminal-contracts'
 
 /** Marker texts older builds sent as chat messages (approve / cancel a plan): never shown. */
 const PLAN_MARKERS = new Set(['__slay_plan_approved__', '__slay_plan_cancelled__'])
@@ -314,7 +315,9 @@ export function toolBody(inv: ToolInvocation): ToolBody {
     default: {
       const out = resultText(inv)
       if (out) return { type: 'text', text: truncate(out, MAX_BODY) }
-      const args = Object.keys(input).length > 0 ? JSON.stringify(inv.input, null, 2) : ''
+      // Stored images / files (`chat-blobs`) print as `[image/png · 120 KB]`.
+      const args =
+        Object.keys(input).length > 0 ? JSON.stringify(inv.input, chatBlobJsonReplacer, 2) : ''
       return args ? { type: 'text', text: truncate(args, MAX_BODY) } : null
     }
   }

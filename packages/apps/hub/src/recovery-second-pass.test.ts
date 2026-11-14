@@ -488,7 +488,7 @@ if (point === 'stage-event-before-commit') store.compose((raw) => {
   const prepare = raw.prepare.bind(raw);
   raw.prepare = (sql) => {
     const statement = prepare(sql);
-    if (sql === 'INSERT INTO events VALUES(?,?,?,?)') {
+    if (sql.startsWith('INSERT INTO events(')) {
       const run = statement.run.bind(statement);
       statement.run = (...args) => { const result = run(...args); die(); return result; };
     }

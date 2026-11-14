@@ -1,7 +1,11 @@
 import { defaultChatTransport, type ChatTransport } from './chat-transport-manager'
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ChatCreateOpts, ChatHistoryPageBudget } from '@slayzone/terminal-contracts'
+import type {
+  ChatBlobChunk,
+  ChatCreateOpts,
+  ChatHistoryPageBudget
+} from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
@@ -811,6 +815,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     eventStore: {
       nextSeq: data.getNextSeqForTab?.bind(data),
       insertSync: data.persistChatEventSync?.bind(data),
+      prepare: data.prepareChatEvent?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
       readPage: (tabId, afterSeq, beforeSeq, budget) =>
         data.loadChatEventsPage(tabId, afterSeq, beforeSeq, budget),
@@ -953,6 +958,16 @@ export function createChatOps(opts: ChatHandlerOpts) {
      */
     getReplayPage: (tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) =>
       getReplayPage(tabId, afterSeq, budget),
+
+    /**
+     * One chunk of an image / file a saved event references (`chat-blobs`): saved
+     * history carries references, clients load the bytes as they show them.
+     */
+    readBlob: async (tabId: string, sha256: string, offset: number): Promise<ChatBlobChunk> => {
+      if (!data.readChatEventBlob)
+        throw new Error('Chat attachments of saved events are unavailable here')
+      return data.readChatEventBlob(tabId, sha256, offset)
+    },
 
     /**
      * Open a tab paged (its projection's snapshot: state + newest rows + page

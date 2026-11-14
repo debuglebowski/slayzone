@@ -1447,10 +1447,11 @@ export function createChatTransport(
     for (const saved of split.saved) commitEvent(tab, saved)
   }
 
-  function commitEvent(tab: ChatTab, event: AgentEvent): void {
+  function commitEvent(tab: ChatTab, raw: AgentEvent): void {
     if (tab.closed) return
-    const entry = tab.log.append(event)
-    const { seq, at } = entry
+    const entry = tab.log.append(raw)
+    // As saved (binary payloads out-of-line): what memory, clients and replays all see.
+    const { seq, at, event } = entry
     // Folded into the projection before any client can ask for rows after it.
     void tab.projection.then((p) => p?.apply(entry))
     tab.lastOutputTime = Date.now()
@@ -3318,10 +3319,11 @@ export function createChatTransport(
    * saved and shown like any other, but it is history — it drives no state, no
    * watchdog, no outbox, and claims no conversation id.
    */
-  function commitHistory(tab: ChatTab, event: AgentEvent): void {
+  function commitHistory(tab: ChatTab, raw: AgentEvent): void {
     if (tab.closed) return
-    const entry = tab.log.append(event)
-    const { seq, at } = entry
+    const entry = tab.log.append(raw)
+    // As saved (binary payloads out-of-line), the same as `commitEvent`.
+    const { seq, at, event } = entry
     void tab.projection.then((p) => p?.apply(entry))
     deps.broadcastEvent(tab.tabId, event, seq, undefined, at)
     try {

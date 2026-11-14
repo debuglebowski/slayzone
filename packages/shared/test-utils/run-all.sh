@@ -935,6 +935,10 @@ run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
+# Event blobs: tool-result base64 moved to the blob store, pinned, GC/retention/erasure/backups.
+run_harness packages/domains/chat-runtime/src/server/event-blobs.test.ts
+# Backfill of pre-v13 inline rows: verified in-place rewrite, slices, resume, backup/erasure/retention exclusion.
+run_harness packages/domains/chat-runtime/src/server/chat-blob-backfill.test.ts
 # Migration, recovery and failure-atomicity regressions from the storage audits.
 run_harness packages/apps/hub/src/computer-chat-stability-audit.test.ts
 run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
@@ -1303,6 +1307,10 @@ run_harness packages/domains/terminal/src/server/skills.test.ts
 run_harness packages/domains/terminal/src/server/commands.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-event-handler.test.ts
 run_harness packages/domains/terminal-contracts/src/auto-start.test.ts
+# Chat blob refs: base64 payloads stored out-of-line; lossless, forged refs escaped.
+run_harness packages/domains/terminal-contracts/src/chat-blobs.test.ts
+# Archived conversation export resolves stored images back inline (v13 export = v12 export).
+run_harness packages/domains/settings/src/client/tabs/archive-export.test.ts
 run_harness packages/domains/terminal-contracts/src/api-retry.test.ts
 # The conversation ids a fresh agent spawn passes (desktop terminal + hub startMainAgent).
 run_harness packages/domains/terminal-contracts/src/spawn-conversation-ids.test.ts

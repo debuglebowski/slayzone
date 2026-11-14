@@ -18,6 +18,7 @@ const tabOperations = new Set([
   'kill',
   'remove',
   'getReplay',
+  'readBlob',
   'getBufferSince',
   'getReplayPage',
   'getEventPage',

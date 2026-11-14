@@ -9,10 +9,16 @@ import {
   type ItemFaultRow
 } from '@slayzone/platform/isolation'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
+import { createBlobStore } from './blob-store'
 import {
+  chatBlobRefs,
   cutChatHistoryPage,
+  escapeChatBlobLiterals,
+  extractChatBlobs,
+  resolveChatBlobs,
   type AgentEvent,
   type ChatAttachment,
+  type ChatBlobRefBody,
   type ChatHistoryPageBudget
 } from '@slayzone/terminal-contracts'
 import type {
@@ -58,7 +64,41 @@ interface OwnerRow {
   migration_hash: string | null
 }
 
-export const CHAT_STORAGE_SCHEMA_VERSION = 12
+/**
+ * v13: out-of-line event payloads (crash fix 4) — `events.blob_form`, `event-blob`
+ * pins, `maintenance_cursors`. An older build must never open a v13 store: its blob
+ * GC knows only attachment pins and would delete every event blob.
+ */
+export const CHAT_STORAGE_SCHEMA_VERSION = 13
+
+/**
+ * Bytes one `readEventBlob` call returns at most (raw; ≈683 KiB base64): below the
+ * direct link's 1 MiB message and any hub↔computer frame limit. Clients page.
+ */
+export const CHAT_BLOB_CHUNK_BYTES = 512 * 1024
+
+/** A referenced event blob cannot be read back (export / transfer refuses: no lossy copy). */
+export class EventBlobUnavailableError extends Error {
+  constructor(
+    readonly sha256: string,
+    why: string,
+    options?: { cause?: unknown }
+  ) {
+    super(`Event blob ${sha256} is ${why}`, options)
+    this.name = 'EventBlobUnavailableError'
+  }
+}
+
+/**
+ * `events.blob_form`: the representation a row holds. 0 = LEGACY raw content, saved
+ * before v13 (base64 inline; the backfill extracts it); 1 = STORED form (binary
+ * payloads are `ChatBlobRef`s, foreign reference-shaped objects escaped). Every
+ * insert in this file writes 1, through `insertEvent`.
+ */
+export const EVENT_BLOB_FORM = 1
+
+/** The event-blob backfill's maintenance key (`storage_maintenance` / `maintenance_cursors`). */
+export const EVENT_BLOBS_MAINTENANCE = 'event-blobs-v1'
 
 /** One database per authenticated hub namespace. Never accepts a caller-supplied disk path. */
 
@@ -69,7 +109,8 @@ const LOCAL_ONLY_RECORD_KINDS = [
   'workspace',
   'attachment',
   'timeline',
-  'pinned-message'
+  'pinned-message',
+  'event-blob'
 ] as const satisfies readonly ChatRecordKind[]
 /** Trigger body: bump `task_state_versions` for the task named by SQL expression `task`. */
 export function bumpTaskStateVersion(task: string): string {
@@ -164,6 +205,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   chmodSync(dir, 0o700)
   const path = join(dir, 'chat.sqlite')
+  const blobs = createBlobStore(join(dir, 'blobs'))
   const db = new Database(path)
   chmodSync(path, 0o600)
   db.pragma('journal_mode = WAL')
@@ -188,7 +230,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       CREATE INDEX IF NOT EXISTS conversations_tab ON conversations(tab_id);
       CREATE TABLE IF NOT EXISTS events (
         conversation_id TEXT NOT NULL REFERENCES conversations(id), seq INTEGER NOT NULL,
-        saved_at INTEGER NOT NULL, event TEXT NOT NULL, PRIMARY KEY(conversation_id, seq)
+        saved_at INTEGER NOT NULL, event TEXT NOT NULL, blob_form INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(conversation_id, seq)
       );
       CREATE TABLE IF NOT EXISTS records (
         conversation_id TEXT NOT NULL REFERENCES conversations(id), kind TEXT NOT NULL,
@@ -220,6 +263,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         PRIMARY KEY(task_id,mode)
       );
       CREATE TABLE IF NOT EXISTS storage_maintenance (id TEXT PRIMARY KEY);
+      -- v13: where a resumable background maintenance pass (event-blob backfill) is.
+      CREATE TABLE IF NOT EXISTS maintenance_cursors (id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS task_cleanup_pending (task_id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS queue_message_identities (
         task_id TEXT NOT NULL,id TEXT NOT NULL,
@@ -291,6 +336,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       )
     )
       db.exec('ALTER TABLE receipts ADD COLUMN method TEXT')
+    // v13: rows already saved hold raw content (form 0) — metadata-only, no row is read.
+    if (
+      !(db.pragma('table_info(events)') as Array<{ name: string }>).some(
+        (column) => column.name === 'blob_form'
+      )
+    )
+      db.exec('ALTER TABLE events ADD COLUMN blob_form INTEGER NOT NULL DEFAULT 0')
     if (schema <= 3) {
       // Across the complete v2/v3 mutation result union, only SideAnswer had
       // exactly {text: string|null}. Preserve hashes/states to fence provider
@@ -365,10 +417,23 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     return (
       db
         .prepare(
-          'SELECT seq,saved_at,event FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq'
+          'SELECT seq,saved_at,event,blob_form FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq'
         )
-        .all(id, afterSeq, beforeSeq) as Array<{ seq: number; saved_at: number; event: string }>
-    ).map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
+        .all(id, afterSeq, beforeSeq) as Array<{
+        seq: number
+        saved_at: number
+        event: string
+        blob_form: number
+      }>
+    ).map((r) => {
+      const event = JSON.parse(r.event) as AgentEvent
+      // Every reader gets STORED form: a legacy row's look-alikes escaped (no bytes move).
+      return {
+        seq: r.seq,
+        at: r.saved_at,
+        event: r.blob_form === EVENT_BLOB_FORM ? event : escapeChatBlobLiterals(event)
+      }
+    })
   }
   /**
    * Where ONE page of `read(id, afterSeq, beforeSeq)` ends, from the rows' sizes in
@@ -425,7 +490,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     return (
       db
         .prepare(
-          `SELECT seq,saved_at,event FROM events WHERE conversation_id=? AND seq>? AND seq<? AND (${needles
+          `SELECT seq,saved_at,event,blob_form FROM events WHERE conversation_id=? AND seq>? AND seq<? AND (${needles
             .map(() => 'instr(event, ?) > 0')
             .join(' OR ')}) ORDER BY seq`
         )
@@ -433,8 +498,17 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         seq: number
         saved_at: number
         event: string
+        blob_form: number
       }>
-    ).map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
+    ).map((r) => {
+      const event = JSON.parse(r.event) as AgentEvent
+      // STORED form, as `read` serves it.
+      return {
+        seq: r.seq,
+        at: r.saved_at,
+        event: r.blob_form === EVENT_BLOB_FORM ? event : escapeChatBlobLiterals(event)
+      }
+    })
   }
   /** Seq of the `count`-th newest event (index only); null when there are fewer. */
   function tailStart(id: string, count: number): number | null {
@@ -580,6 +654,63 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       for (const child of Object.values(item))
         if (child && typeof child === 'object') pending.push(child)
     }
+  }
+  /** `put` of {@link extractChatBlobs}: the bytes go to the blob store (canonical base64 only). */
+  function putEventBlob(base64: string, mediaType: string): ChatBlobRefBody | null {
+    const stored = blobs.putBase64(base64)
+    return stored ? { v: 1, sha256: stored.sha256, mediaType, size: stored.size } : null
+  }
+  /** RAW content → stored form: binary payloads written to the blob store, references in place. */
+  function extractEventBlobs<T>(value: T): T {
+    return extractChatBlobs(value, putEventBlob).value
+  }
+  /** STORED form → raw content: every reference replaced by its (hash-verified) bytes. */
+  function resolveEventBlobs<T>(value: T): T {
+    return resolveChatBlobs(value, (ref) => {
+      let bytes: Uint8Array
+      try {
+        bytes = blobs.readBlob(ref.sha256)
+      } catch (cause) {
+        throw new EventBlobUnavailableError(ref.sha256, 'missing or corrupt', { cause })
+      }
+      if (bytes.length !== ref.size)
+        throw new EventBlobUnavailableError(ref.sha256, 'size does not match its reference')
+      return Buffer.from(bytes).toString('base64')
+    })
+  }
+  /**
+   * Pin every reference of STORED `value` to conversation `id`: the bytes must be in
+   * the store. A pin's `saved_at` is its newest reference's time, so retention can
+   * drop exactly the pins whose every referencing event expired.
+   */
+  function pinEventBlobs(id: string, value: unknown, at: number): void {
+    const seen = new Set<string>()
+    for (const ref of chatBlobRefs(value)) {
+      if (seen.has(ref.sha256)) continue
+      seen.add(ref.sha256)
+      if (blobs.sizeOf(ref.sha256) !== ref.size)
+        throw new Error('Event blob is missing from the blob store')
+      db.prepare(
+        `INSERT INTO records VALUES(?,'event-blob',?,?,?) ON CONFLICT(conversation_id,kind,id)
+          DO UPDATE SET saved_at=MAX(saved_at,excluded.saved_at)`
+      ).run(id, ref.sha256, JSON.stringify({ mediaType: ref.mediaType, size: ref.size }), at)
+    }
+  }
+  /** The ONE insert of an event row: STORED form, pins first (same transaction as the caller's). */
+  function insertEvent(
+    id: string,
+    seq: number,
+    at: number,
+    event: AgentEvent,
+    onConflictKeep = false
+  ) {
+    pinEventBlobs(id, event, at)
+    return db
+      .prepare(
+        `INSERT INTO events(conversation_id,seq,saved_at,event,blob_form) VALUES(?,?,?,?,${EVENT_BLOB_FORM})` +
+          (onConflictKeep ? ' ON CONFLICT(conversation_id,seq) DO NOTHING' : '')
+      )
+      .run(id, seq, at, JSON.stringify(event))
   }
   function verify(snapshot: ChatMigrationSnapshot): void {
     const { hash, ...body } = snapshot
@@ -927,11 +1058,138 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         if (db.prepare('SELECT 1 FROM events WHERE conversation_id=? AND seq=?').get(id, seq))
           return 'clash'
         pinAttachments(id, eventAttachmentReferences(event), at)
-        const result = db
-          .prepare('INSERT INTO events VALUES(?,?,?,?) ON CONFLICT(conversation_id,seq) DO NOTHING')
-          .run(id, seq, at, JSON.stringify(event))
+        const result = insertEvent(id, seq, at, event, true)
         return result.changes ? 'inserted' : 'clash'
       })()
+    },
+    /** Blob dir of this store (shared by attachments and event blobs). */
+    blobs,
+    /**
+     * RAW event → the form it is stored in: binary payloads (≥ 1 KiB base64) moved
+     * to the blob store, references in place. Feed the result to {@link appendAt};
+     * apply once (stored form is never extracted again).
+     */
+    extractEventBlobs: (event: AgentEvent): AgentEvent => extractEventBlobs(event),
+    /** Hashes pinned by event blobs of conversations not deleted (kept by GC). */
+    eventBlobHashes(): string[] {
+      return (
+        db
+          .prepare(`SELECT DISTINCT r.id FROM records r JOIN conversations c ON c.id=r.conversation_id
+          WHERE r.kind='event-blob' AND c.state<>'deleted'`)
+          .all() as Array<{ id: string }>
+      ).map((r) => r.id)
+    },
+    /**
+     * One bounded chunk of an event blob, ONLY if conversation `id` (not deleted)
+     * pins it: a hash of another chat is refused, whoever asks.
+     */
+    readEventBlob(
+      id: string,
+      sha256: string,
+      offset: number
+    ): { mediaType: string; size: number; offset: number; data: string } {
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid blob offset')
+      const owner = row(id)
+      if (!owner || owner.state === 'deleted') throw new Error('Conversation is unavailable')
+      const pin =
+        /^[a-f0-9]{64}$/.test(sha256) &&
+        (db
+          .prepare(
+            "SELECT value FROM records WHERE conversation_id=? AND kind='event-blob' AND id=?"
+          )
+          .get(id, sha256) as { value: string } | undefined)
+      if (!pin) throw new Error('Blob is not part of this conversation')
+      const { mediaType, size } = JSON.parse(pin.value) as { mediaType: string; size: number }
+      if (offset > size) throw new Error('Invalid blob offset')
+      const bytes = blobs.readRange(sha256, offset, CHAT_BLOB_CHUNK_BYTES)
+      if (offset + bytes.length > size || (bytes.length === 0 && offset < size))
+        throw new Error('Event blob size integrity failure')
+      return { mediaType, size, offset, data: Buffer.from(bytes).toString('base64') }
+    },
+    /**
+     * Backfill (chat-blob-backfill.ts): up to `limit` LEGACY rows (form 0, saved
+     * before v13) of `id` after `afterSeq`, in seq order, as saved.
+     */
+    legacyEvents(
+      id: string,
+      afterSeq: number,
+      limit: number
+    ): Array<{ seq: number; at: number; event: string }> {
+      return db
+        .prepare(
+          'SELECT seq,saved_at AS at,event FROM events WHERE conversation_id=? AND seq>? AND blob_form=0 ORDER BY seq LIMIT ?'
+        )
+        .all(id, afterSeq, limit) as Array<{ seq: number; at: number; event: string }>
+    },
+    /**
+     * Backfill: legacy row `seq` — only if it is still exactly `original` and still
+     * legacy — becomes `stored` (its stored form, whose blobs the caller wrote and
+     * verified), with its pins, atomically. The ONE in-place rewrite of an event:
+     * representation only, never meaning (the caller proved resolve(stored) =
+     * original). False when the row changed, left, or the conversation is not
+     * active under `epoch`.
+     */
+    rewriteLegacyEvent(
+      id: string,
+      epoch: number,
+      seq: number,
+      original: string,
+      stored: AgentEvent
+    ): boolean {
+      return api.transaction(() => {
+        const owner = row(id)
+        if (!owner || owner.state !== 'active' || owner.epoch !== epoch) return false
+        const at = (
+          db
+            .prepare(
+              'SELECT saved_at AS at FROM events WHERE conversation_id=? AND seq=? AND blob_form=0 AND event=?'
+            )
+            .get(id, seq, original) as { at: number } | undefined
+        )?.at
+        if (at === undefined) return false
+        pinEventBlobs(id, stored, at)
+        return (
+          db
+            .prepare(
+              `UPDATE events SET event=?,blob_form=${EVENT_BLOB_FORM} WHERE conversation_id=? AND seq=? AND blob_form=0`
+            )
+            .run(JSON.stringify(stored), id, seq).changes === 1
+        )
+      })
+    },
+    /** Drop a conversation's timeline projection (derived; rebuilt from its events on next open). */
+    resetTimeline(id: string, epoch: number): number {
+      return api.transaction(() => {
+        requireOwner(id, epoch)
+        return db.prepare("DELETE FROM records WHERE conversation_id=? AND kind='timeline'").run(id)
+          .changes
+      })
+    },
+    hasTimeline(id: string): boolean {
+      return !!db
+        .prepare("SELECT 1 FROM records WHERE conversation_id=? AND kind='timeline' LIMIT 1")
+        .get(id)
+    },
+    /** A resumable maintenance pass's checkpoint (`maintenance_cursors`). */
+    maintenanceCursor<T>(key: string): T | null {
+      const found = db.prepare('SELECT value FROM maintenance_cursors WHERE id=?').get(key) as
+        | { value: string }
+        | undefined
+      return found ? (JSON.parse(found.value) as T) : null
+    },
+    setMaintenanceCursor(key: string, value: unknown): void {
+      db.prepare(
+        'INSERT INTO maintenance_cursors VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value'
+      ).run(key, JSON.stringify(value))
+    },
+    maintenanceDone(key: string): boolean {
+      return !!db.prepare('SELECT 1 FROM storage_maintenance WHERE id=?').get(key)
+    },
+    completeMaintenance(key: string): void {
+      api.transaction(() => {
+        db.prepare('INSERT OR IGNORE INTO storage_maintenance VALUES(?)').run(key)
+        db.prepare('DELETE FROM maintenance_cursors WHERE id=? OR id GLOB ?').run(key, `${key}:*`)
+      })
     },
     clearHistory(id: string, epoch: number): void {
       db.transaction(() => {
@@ -941,16 +1199,18 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           "DELETE FROM records WHERE conversation_id=? AND kind='settings' AND id='event-sequence-floor'"
         ).run(id)
         db.prepare(
-          "DELETE FROM records WHERE conversation_id=? AND kind IN ('timeline','workspace')"
+          "DELETE FROM records WHERE conversation_id=? AND kind IN ('timeline','workspace','event-blob')"
         ).run(id)
       })()
     },
-    append(id: string, epoch: number, event: AgentEvent, at = Date.now()): StoredChatEvent {
+    /** Append a RAW event (extracted here); returns it as stored. */
+    append(id: string, epoch: number, raw: AgentEvent, at = Date.now()): StoredChatEvent {
       return db.transaction(() => {
         requireOwner(id, epoch)
         const seq = nextSeq(id)
+        const event = extractEventBlobs(raw)
         pinAttachments(id, eventAttachmentReferences(event), at)
-        db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(id, seq, at, JSON.stringify(event))
+        insertEvent(id, seq, at, event)
         return { seq, at, event }
       })()
     },
@@ -1127,20 +1387,42 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       })()
     },
     exportConversation(id: string, epoch: number, migrationId: string): ChatMigrationSnapshot {
-      return db.transaction(() => {
-        const r = requireOwner(id, epoch, true)
-        if (r.state !== 'frozen' || r.migration_id !== migrationId)
-          throw new Error('Migration must freeze source first')
-        const body = {
-          version: 1 as const,
-          migrationId,
-          identity: identity(r),
-          events: read(id, -1),
-          records: records(id),
-          receipts: receipts(id)
-        }
-        return { ...body, hash: digest(body) }
-      })()
+      try {
+        return db.transaction(() => {
+          const r = requireOwner(id, epoch, true)
+          if (r.state !== 'frozen' || r.migration_id !== migrationId)
+            throw new Error('Migration must freeze source first')
+          const body = {
+            version: 1 as const,
+            migrationId,
+            identity: identity(r),
+            // On the wire: RAW content (base64 inline), as every version reads it; the
+            // destination stores it out-of-line again. Event-blob pins are derived, and
+            // the timeline projection (pages embed rows as strings) is rebuilt from the
+            // events where it lands.
+            events: read(id, -1).map((e) => ({ ...e, event: resolveEventBlobs(e.event) })),
+            records: records(id).filter((r) => r.kind !== 'event-blob' && r.kind !== 'timeline'),
+            receipts: receipts(id)
+          }
+          return { ...body, hash: digest(body) }
+        })()
+      } catch (error) {
+        // The move fails (never a silently degraded copy). The fault — recorded after
+        // the read transaction, so it is kept — names the chat and the blob, no content.
+        if (error instanceof EventBlobUnavailableError)
+          api.faults.record(
+            {
+              pass: 'computer.chat-event-blob',
+              itemKey: `${id}:${error.sha256}`,
+              taskId: row(id)?.task_id ?? null,
+              kind: 'structural',
+              fingerprint: error.sha256,
+              error
+            },
+            Date.now()
+          )
+        throw error
+      }
     },
     stageTransfer(manifest: ChatTransferManifest, lines: Iterable<string>): void {
       const h = manifest.header
@@ -1214,12 +1496,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
               !e.event?.kind
             )
               throw new Error('Transfer event integrity mismatch')
-            db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(
-              i.id,
-              e.seq,
-              e.at,
-              JSON.stringify(e.event)
-            )
+            insertEvent(i.id, e.seq, e.at, extractEventBlobs(e.event))
             lastSeq = e.seq
             events++
           } else if (entry.kind === 'record') {
@@ -1230,6 +1507,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
               !Number.isSafeInteger(r.at)
             )
               throw new Error('Transfer record integrity mismatch')
+            // Pins are this store's own (made by the event inserts above); never imported.
+            // Timeline pages are derived (rows embedded as strings, possibly raw from an
+            // older source): rebuilt from the events on open, like after retention.
+            if (r.kind === 'event-blob' || r.kind === 'timeline') {
+              records++
+              continue
+            }
             db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').run(
               i.id,
               r.kind,
@@ -1297,14 +1581,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           snapshot.migrationId,
           snapshot.hash
         )
-        for (const e of snapshot.events)
-          db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(
-            i.id,
-            e.seq,
-            e.at,
-            JSON.stringify(e.event)
-          )
+        for (const e of snapshot.events) insertEvent(i.id, e.seq, e.at, extractEventBlobs(e.event))
         for (const r of snapshot.records) {
+          if (r.kind === 'event-blob' || r.kind === 'timeline') continue
           db.prepare('INSERT INTO records VALUES(?,?,?,?,?)').run(
             i.id,
             r.kind,

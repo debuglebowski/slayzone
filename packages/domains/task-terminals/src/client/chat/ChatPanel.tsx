@@ -88,7 +88,7 @@ import { ChatTimeline } from './ChatTimeline'
 import { ChatComposer } from './ChatComposer'
 import { PromptDock, type PromptKeyHandler } from './prompts/PromptDock'
 import { CodexPlanPrompt } from './CodexPlanPrompt'
-import { CommandTaskContext } from './tool-cards'
+import { ChatBlobReaderContext, CommandTaskContext } from './tool-cards'
 import { useCommandTaskActions, useStopSubAgent } from './tool-cards/command-task-hooks'
 import { useConversationActions } from './useConversationActions'
 import { RewindDialog } from './RewindDialog'
@@ -215,6 +215,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       rewind,
       fork,
       takeOver,
+      readBlob,
       reset: resetTimeline
     } = useChatSession({
       tabId,
@@ -857,426 +858,430 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
           <RowUiStateContext.Provider value={rowUiState}>
             <LiveBlockStoreContext.Provider value={liveStore}>
               <CommandTaskContext.Provider value={commandTaskScope}>
-                <ToolFocusContext.Provider value={toolFocus}>
-                  {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
-                  <div className="@container relative flex h-full min-w-0 flex-1">
-                    <div
-                      ref={panelRef}
-                      data-chat-panel
-                      // Names whose chat this is: a thread's chat panel sits beside its main one.
-                      data-chat-tab-id={tabId}
-                      className={cn(
-                        'relative flex flex-col h-full min-w-0 flex-1 bg-background',
-                        CHAT_PANEL_GUTTER_CLASS
-                      )}
-                      style={{ fontSize: `${appearance.terminalFontSize}px` }}
-                      onFocus={palette.claim}
-                      onDragEnter={attachmentsApi.onDragEnter}
-                      onDragOver={attachmentsApi.onDragOver}
-                      onDragLeave={attachmentsApi.onDragLeave}
-                      onDrop={attachmentsApi.onDrop}
-                      onMouseUp={(e) => {
-                        // Click on panel background → focus composer. Skip if user clicked an
-                        // interactive element (button/link/input) or completed a text selection.
-                        const target = e.target as HTMLElement | null
-                        if (!target) return
-                        if (
-                          target.closest(
-                            'button, a, input, textarea, select, summary, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                <ChatBlobReaderContext.Provider value={readBlob}>
+                  <ToolFocusContext.Provider value={toolFocus}>
+                    {/* The files-changed panel sits beside the chat; in a narrow pane it covers it. */}
+                    <div className="@container relative flex h-full min-w-0 flex-1">
+                      <div
+                        ref={panelRef}
+                        data-chat-panel
+                        // Names whose chat this is: a thread's chat panel sits beside its main one.
+                        data-chat-tab-id={tabId}
+                        className={cn(
+                          'relative flex flex-col h-full min-w-0 flex-1 bg-background',
+                          CHAT_PANEL_GUTTER_CLASS
+                        )}
+                        style={{ fontSize: `${appearance.terminalFontSize}px` }}
+                        onFocus={palette.claim}
+                        onDragEnter={attachmentsApi.onDragEnter}
+                        onDragOver={attachmentsApi.onDragOver}
+                        onDragLeave={attachmentsApi.onDragLeave}
+                        onDrop={attachmentsApi.onDrop}
+                        onMouseUp={(e) => {
+                          // Click on panel background → focus composer. Skip if user clicked an
+                          // interactive element (button/link/input) or completed a text selection.
+                          const target = e.target as HTMLElement | null
+                          if (!target) return
+                          if (
+                            target.closest(
+                              'button, a, input, textarea, select, summary, [role="button"], [role="menuitem"], [contenteditable="true"]'
+                            )
                           )
-                        )
-                          return
-                        const sel = window.getSelection()
-                        if (sel && !sel.isCollapsed) return
-                        composer.textareaRef.current?.focus()
-                      }}
-                      onClickCapture={(e) => {
-                        // Event-delegated link interception for markdown-rendered anchors only.
-                        // Skip LinkifiedText anchors — they own their click semantics via
-                        // `data-linkified` and would otherwise double-fire (capture-phase parent
-                        // before child onClick).
-                        // Mirrors terminal modifier semantics:
-                        //   ⌘+Click       → in-app slay browser (onOpenUrl)
-                        //   ⌘+Shift+Click → external
-                        //   bare click    → external (markdown anchors are click affordances;
-                        //                  doing nothing on bare click would feel broken).
-                        const target = e.target as HTMLElement | null
-                        const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
-                        if (!anchor) return
-                        if (anchor.dataset.linkified === 'true') return
-                        const href = anchor.getAttribute('href') ?? ''
-                        if (href.startsWith('#chat-thread:')) {
+                            return
+                          const sel = window.getSelection()
+                          if (sel && !sel.isCollapsed) return
+                          composer.textareaRef.current?.focus()
+                        }}
+                        onClickCapture={(e) => {
+                          // Event-delegated link interception for markdown-rendered anchors only.
+                          // Skip LinkifiedText anchors — they own their click semantics via
+                          // `data-linkified` and would otherwise double-fire (capture-phase parent
+                          // before child onClick).
+                          // Mirrors terminal modifier semantics:
+                          //   ⌘+Click       → in-app slay browser (onOpenUrl)
+                          //   ⌘+Shift+Click → external
+                          //   bare click    → external (markdown anchors are click affordances;
+                          //                  doing nothing on bare click would feel broken).
+                          const target = e.target as HTMLElement | null
+                          const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
+                          if (!anchor) return
+                          if (anchor.dataset.linkified === 'true') return
+                          const href = anchor.getAttribute('href') ?? ''
+                          if (href.startsWith('#chat-thread:')) {
+                            e.preventDefault()
+                            const id = href.slice('#chat-thread:'.length)
+                            const thread = threadApi.threads.find((thread) => thread.id === id)
+                            if (thread) void threadApi.view?.open(thread)
+                            return
+                          }
+                          // Codex file-citation chip pointing at a local file → editor.
+                          const citedPath = anchor.dataset.fileCitationPath
+                          if (citedPath && !/^https?:\/\//i.test(citedPath)) {
+                            e.preventDefault()
+                            const absPath = resolveCitedPath(citedPath, cwd)
+                            if (handleOpenFile) handleOpenFile(absPath)
+                            else navigate.openFile(absPath)
+                            return
+                          }
+                          if (!/^https?:\/\//i.test(href)) return
                           e.preventDefault()
-                          const id = href.slice('#chat-thread:'.length)
-                          const thread = threadApi.threads.find((thread) => thread.id === id)
-                          if (thread) void threadApi.view?.open(thread)
-                          return
-                        }
-                        // Codex file-citation chip pointing at a local file → editor.
-                        const citedPath = anchor.dataset.fileCitationPath
-                        if (citedPath && !/^https?:\/\//i.test(citedPath)) {
-                          e.preventDefault()
-                          const absPath = resolveCitedPath(citedPath, cwd)
-                          if (handleOpenFile) handleOpenFile(absPath)
-                          else navigate.openFile(absPath)
-                          return
-                        }
-                        if (!/^https?:\/\//i.test(href)) return
-                        e.preventDefault()
-                        const mod = e.metaKey || e.ctrlKey
-                        if (mod && e.shiftKey) navigate.openExternal(href)
-                        else if (mod && onOpenUrl) onOpenUrl(href)
-                        else navigate.openExternal(href)
-                      }}
-                    >
-                      {/* Panel-wide drop overlay */}
-                      {attachmentsApi.isDragging && (
-                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
-                          {takesAnyFile
-                            ? 'Drop files to attach (images, PDFs, text)'
-                            : 'Drop image…'}
-                        </div>
-                      )}
+                          const mod = e.metaKey || e.ctrlKey
+                          if (mod && e.shiftKey) navigate.openExternal(href)
+                          else if (mod && onOpenUrl) onOpenUrl(href)
+                          else navigate.openExternal(href)
+                        }}
+                      >
+                        {/* Panel-wide drop overlay */}
+                        {attachmentsApi.isDragging && (
+                          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 ring-2 ring-inset ring-primary/60 text-sm text-primary/80">
+                            {takesAnyFile
+                              ? 'Drop files to attach (images, PDFs, text)'
+                              : 'Drop image…'}
+                          </div>
+                        )}
 
-                      {openError ? (
-                        isEmpty && (
+                        {openError ? (
+                          isEmpty && (
+                            <ChatOpenFailure
+                              status={storage.status}
+                              error={openError}
+                              placement="center"
+                              onRetry={storage.retry}
+                            />
+                          )
+                        ) : (
+                          <ChatStorageNotice status={storage.status} onRetry={storage.retry} />
+                        )}
+                        <ChatTimeline
+                          overrideNotice={overrideNotice}
+                          search={search}
+                          state={state}
+                          hydrating={hydrating}
+                          isEmpty={isEmpty}
+                          inFlight={inFlight}
+                          stopping={composer.stopping}
+                          awaitingUser={
+                            promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
+                          }
+                          appearance={appearance}
+                          items={display.displayedTimeline}
+                          activityTurns={display.activityTurns}
+                          folded={display.folded}
+                          virtual={display.virtual}
+                          scrollRef={display.virtual.bindScroller}
+                          itemKey={display.itemKey}
+                          rowOf={display.rowOf}
+                          contentRef={contentRef}
+                          isAtBottom={isAtBottom}
+                          scrollToBottom={scrollToBottom}
+                          sendMessage={sendMessage}
+                          copyLastResponse={display.copyLastResponse}
+                          copyAllMessages={display.copyAllMessages}
+                          copySessionId={copySessionId}
+                          setCollapseSignal={setCollapseSignal}
+                          handleReset={handleReset}
+                          resetting={resetting}
+                          {...(onHandoff && state.sessionId ? { onHandoff } : {})}
+                        />
+
+                        {codexPlanReview && (
+                          <CodexPlanPrompt
+                            key={codexPlanReview.planId}
+                            review={codexPlanReview}
+                            target={{ tabId, taskId, mode, cwd }}
+                            onResolved={syncCollaboration}
+                          />
+                        )}
+                        <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
+                        {sideQuestions.open && (
+                          <SideQuestionCard
+                            exchanges={sideQuestions.exchanges}
+                            onDismiss={sideQuestions.dismiss}
+                          />
+                        )}
+                        <RewindDialog dialog={conversation.dialog} />
+                        <AlertDialog
+                          open={resetConfirmOpen}
+                          onOpenChange={(open) => {
+                            if (!open && !resetting) setResetConfirmOpen(false)
+                          }}
+                        >
+                          <AlertDialogContent data-testid="chat-reset-dialog">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Reset chat?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Clear this chat’s message history and start a new conversation?
+                                Files changed by the agent stay on disk.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                disabled={resetting}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  void resetImmediately().finally(() => setResetConfirmOpen(false))
+                                }}
+                              >
+                                {resetting ? 'Resetting…' : 'Reset chat'}
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <RewindPicker
+                          kind={pickerKind}
+                          activeUsers={activeUsers}
+                          view={conversation.view}
+                          onClose={() => setPickerKind(null)}
+                        />
+
+                        {props.onReturnAnswer && !inFlight && (
+                          <div className="px-4 pt-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                for (let i = timeline.length - 1; i >= 0; i--) {
+                                  const item = timeline[i]
+                                  if (item?.kind === 'text' && item.parentToolUseId == null) {
+                                    props.onReturnAnswer?.(item.text)
+                                    return
+                                  }
+                                }
+                              }}
+                            >
+                              <CornerDownLeft className="size-3" />
+                              Send to main
+                            </button>
+                          </div>
+                        )}
+                        {openError && !isEmpty && (
                           <ChatOpenFailure
                             status={storage.status}
                             error={openError}
-                            placement="center"
+                            placement="bottom"
                             onRetry={storage.retry}
                           />
-                        )
-                      ) : (
-                        <ChatStorageNotice status={storage.status} onRetry={storage.retry} />
-                      )}
-                      <ChatTimeline
-                        overrideNotice={overrideNotice}
-                        search={search}
-                        state={state}
-                        hydrating={hydrating}
-                        isEmpty={isEmpty}
-                        inFlight={inFlight}
-                        stopping={composer.stopping}
-                        awaitingUser={
-                          promptCards ? hasPendingPrompt(state) : isAwaitingUserQuestion(state)
-                        }
-                        appearance={appearance}
-                        items={display.displayedTimeline}
-                        activityTurns={display.activityTurns}
-                        folded={display.folded}
-                        virtual={display.virtual}
-                        scrollRef={display.virtual.bindScroller}
-                        itemKey={display.itemKey}
-                        rowOf={display.rowOf}
-                        contentRef={contentRef}
-                        isAtBottom={isAtBottom}
-                        scrollToBottom={scrollToBottom}
-                        sendMessage={sendMessage}
-                        copyLastResponse={display.copyLastResponse}
-                        copyAllMessages={display.copyAllMessages}
-                        copySessionId={copySessionId}
-                        setCollapseSignal={setCollapseSignal}
-                        handleReset={handleReset}
-                        resetting={resetting}
-                        {...(onHandoff && state.sessionId ? { onHandoff } : {})}
-                      />
-
-                      {codexPlanReview && (
-                        <CodexPlanPrompt
-                          key={codexPlanReview.planId}
-                          review={codexPlanReview}
-                          target={{ tabId, taskId, mode, cwd }}
-                          onResolved={syncCollaboration}
+                        )}
+                        <div
+                          data-testid="chat-composer-slot"
+                          className={openError ? 'hidden' : 'contents'}
+                        >
+                          <ChatComposer
+                            notices={
+                              <>
+                                {composer.draftConflictAvailable && (
+                                  <div
+                                    role="status"
+                                    className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                                  >
+                                    <p className="text-muted-foreground">
+                                      Saved and local drafts differ. Keep both before saving.
+                                    </p>
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                        onClick={composer.recoverDraftConflict}
+                                      >
+                                        Keep both
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title="Keep only the current draft"
+                                        className="rounded-full px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                        onClick={composer.dismissDraftConflict}
+                                      >
+                                        Dismiss
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                {composer.legacyDraftAvailable && (
+                                  <div
+                                    role="status"
+                                    className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
+                                  >
+                                    <p className="text-muted-foreground">
+                                      Older unsaved draft on this device. Recover adds it to this
+                                      chat.
+                                    </p>
+                                    <button
+                                      type="button"
+                                      className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
+                                      onClick={composer.recoverLegacyDraft}
+                                    >
+                                      Recover draft
+                                    </button>
+                                  </div>
+                                )}
+                              </>
+                            }
+                            footerTools={
+                              <PinnedMessagesPopover
+                                pins={pinned.pins}
+                                go={pinned.go}
+                                unpin={pinned.unpin}
+                                inBranchOf={pinned.inBranchOf}
+                              />
+                            }
+                            backgroundJobs={
+                              backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (
+                                // Collapsed, side by side; an opened one takes the row.
+                                <div className="flex flex-wrap items-start gap-x-2">
+                                  <ComposerBackgroundSubAgents
+                                    agents={backgroundSubAgents}
+                                    canStop={chatCapabilitiesForMode(mode).stopSubAgent}
+                                  />
+                                  <ComposerBackgroundJobs jobs={backgroundJobs} />
+                                </div>
+                              ) : null
+                            }
+                            compact={props.isThread}
+                            hasPlanReview={!!codexPlanReview}
+                            appearance={appearance}
+                            finalOnly={finalOnly}
+                            inFlight={inFlight}
+                            mode={mode}
+                            queuedMessages={composer.queuedMessages}
+                            removeQueue={composer.removeQueue}
+                            queueApi={composer.queueApi}
+                            attachments={composer.attachments}
+                            setAttachments={composer.setAttachments}
+                            attachmentsApi={attachmentsApi}
+                            autocomplete={composer.autocomplete}
+                            textareaRef={composer.textareaRef}
+                            draft={composer.draft}
+                            setDraft={composer.setDraft}
+                            argumentHint={composer.argumentHint}
+                            setCursorPos={composer.setCursorPos}
+                            onKeyDown={composer.onKeyDown}
+                            handleSend={composer.handleSend}
+                            handleStop={composer.handleStop}
+                            stopping={composer.stopping}
+                            historySearch={composer.historySearch}
+                            usage={selectUsageSummary(state)}
+                            displaySessionEnded={displaySessionEnded}
+                            handleRestart={handleRestart}
+                            restarting={restarting}
+                            handleReset={handleReset}
+                            resetting={resetting}
+                            chatMode={chatMode}
+                            handleModeChange={handleModeChange}
+                            autoCapability={autoCapability}
+                            chatDefaults={chatDefaults}
+                            chatModel={chatModel}
+                            models={models}
+                            handleModelChange={handleModelChange}
+                            modelChanging={modelChanging}
+                            chatEffort={chatEffort}
+                            handleEffortChange={handleEffortChange}
+                            effortChanging={effortChanging}
+                            chatCollaboration={chatCollaboration}
+                            handleCollaborationChange={handleCollaborationChange}
+                            collaborationChanging={collaborationChanging}
+                            chatFastMode={chatFastMode}
+                            handleFastModeChange={handleFastModeChange}
+                            fastModeChanging={fastModeChanging}
+                          />
+                        </div>
+                      </div>
+                      {filesPanel && (
+                        <FilesChangedPanel
+                          timeline={timeline}
+                          cwd={cwd}
+                          {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
+                          focusSeq={filesPanel.seq}
+                          captureId={filesPanel.captureId}
+                          onClose={() => {
+                            setFilesPanel(null)
+                            composer.textareaRef.current?.focus()
+                          }}
+                          className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
                         />
                       )}
-                      <PromptDock keysRef={promptKeysRef} autoFocus={isActive} />
-                      {sideQuestions.open && (
-                        <SideQuestionCard
-                          exchanges={sideQuestions.exchanges}
-                          onDismiss={sideQuestions.dismiss}
+                      {threadApi.panel && (
+                        <ChatThreadsPanel
+                          key={`${threadApi.panel.conversationId}:${threadApi.panel.sourceMessageId}:${threadApi.panel.answerId}`}
+                          threads={threadApi.threads.filter(
+                            (thread) =>
+                              thread.answerId === threadApi.panel?.answerId &&
+                              thread.sourceMessageId === threadApi.panel?.sourceMessageId
+                          )}
+                          activeId={threadApi.panel.activeId}
+                          creating={threadApi.creating}
+                          onSelect={threadApi.select}
+                          onCreate={threadApi.create}
+                          onClose={threadApi.close}
+                          onCloseThread={(thread) => void threadApi.closeThread(thread)}
+                          onReopenThread={(thread) => void threadApi.reopen(thread)}
+                          renderThread={(thread, active) => (
+                            <ChatPanel
+                              tabId={thread.id}
+                              taskId={taskId}
+                              mode={mode}
+                              cwd={cwd}
+                              providerFlagsOverride={providerFlagsOverride}
+                              isThread
+                              isActive={isActive && active}
+                              onOpenUrl={onOpenUrl}
+                              onOpenFile={onOpenFile}
+                              onOpenArtifact={onOpenArtifact}
+                              onQuoteReply={quoteReply}
+                              onReturnAnswer={(text) =>
+                                setReturnDraft({ threadId: thread.id, text })
+                              }
+                            />
+                          )}
                         />
                       )}
-                      <RewindDialog dialog={conversation.dialog} />
                       <AlertDialog
-                        open={resetConfirmOpen}
+                        open={returnDraft !== null}
                         onOpenChange={(open) => {
-                          if (!open && !resetting) setResetConfirmOpen(false)
+                          if (!open && !returnSending) setReturnDraft(null)
                         }}
                       >
-                        <AlertDialogContent data-testid="chat-reset-dialog">
+                        <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Reset chat?</AlertDialogTitle>
+                            <AlertDialogTitle>Send answer to main</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Clear this chat’s message history and start a new conversation? Files
-                              changed by the agent stay on disk.
+                              Review the conclusion. A link to the thread is included.{' '}
+                              {inFlight
+                                ? 'Main is working; the answer will be queued.'
+                                : 'The answer will be sent as the next message.'}
                             </AlertDialogDescription>
                           </AlertDialogHeader>
+                          <textarea
+                            aria-label="Thread conclusion"
+                            value={returnDraft?.text ?? ''}
+                            onChange={(e) =>
+                              setReturnDraft((prev) =>
+                                prev ? { ...prev, text: e.target.value } : null
+                              )
+                            }
+                            className="min-h-36 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                          />
                           <AlertDialogFooter>
-                            <AlertDialogCancel disabled={resetting}>Cancel</AlertDialogCancel>
+                            <AlertDialogCancel disabled={returnSending}>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                              disabled={resetting}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                void resetImmediately().finally(() => setResetConfirmOpen(false))
+                              disabled={returnSending || !returnDraft?.text.trim()}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                void sendThreadAnswer()
                               }}
                             >
-                              {resetting ? 'Resetting…' : 'Reset chat'}
+                              {returnSending
+                                ? 'Sending…'
+                                : inFlight
+                                  ? 'Queue for main'
+                                  : 'Send to main'}
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
-                      <RewindPicker
-                        kind={pickerKind}
-                        activeUsers={activeUsers}
-                        view={conversation.view}
-                        onClose={() => setPickerKind(null)}
-                      />
-
-                      {props.onReturnAnswer && !inFlight && (
-                        <div className="px-4 pt-2">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                            onClick={() => {
-                              for (let i = timeline.length - 1; i >= 0; i--) {
-                                const item = timeline[i]
-                                if (item?.kind === 'text' && item.parentToolUseId == null) {
-                                  props.onReturnAnswer?.(item.text)
-                                  return
-                                }
-                              }
-                            }}
-                          >
-                            <CornerDownLeft className="size-3" />
-                            Send to main
-                          </button>
-                        </div>
-                      )}
-                      {openError && !isEmpty && (
-                        <ChatOpenFailure
-                          status={storage.status}
-                          error={openError}
-                          placement="bottom"
-                          onRetry={storage.retry}
-                        />
-                      )}
-                      <div
-                        data-testid="chat-composer-slot"
-                        className={openError ? 'hidden' : 'contents'}
-                      >
-                        <ChatComposer
-                          notices={
-                            <>
-                              {composer.draftConflictAvailable && (
-                                <div
-                                  role="status"
-                                  className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
-                                >
-                                  <p className="text-muted-foreground">
-                                    Saved and local drafts differ. Keep both before saving.
-                                  </p>
-                                  <div className="flex shrink-0 items-center gap-1">
-                                    <button
-                                      type="button"
-                                      className="rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
-                                      onClick={composer.recoverDraftConflict}
-                                    >
-                                      Keep both
-                                    </button>
-                                    <button
-                                      type="button"
-                                      title="Keep only the current draft"
-                                      className="rounded-full px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                      onClick={composer.dismissDraftConflict}
-                                    >
-                                      Dismiss
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                              {composer.legacyDraftAvailable && (
-                                <div
-                                  role="status"
-                                  className="mb-1.5 flex items-center justify-between gap-3 rounded-2xl border border-border/40 py-1.5 pl-4 pr-1.5 text-xs"
-                                >
-                                  <p className="text-muted-foreground">
-                                    Older unsaved draft on this device. Recover adds it to this
-                                    chat.
-                                  </p>
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded-full border border-border/60 px-3 py-1 hover:bg-accent"
-                                    onClick={composer.recoverLegacyDraft}
-                                  >
-                                    Recover draft
-                                  </button>
-                                </div>
-                              )}
-                            </>
-                          }
-                          footerTools={
-                            <PinnedMessagesPopover
-                              pins={pinned.pins}
-                              go={pinned.go}
-                              unpin={pinned.unpin}
-                              inBranchOf={pinned.inBranchOf}
-                            />
-                          }
-                          backgroundJobs={
-                            backgroundJobs.length > 0 || backgroundSubAgents.length > 0 ? (
-                              // Collapsed, side by side; an opened one takes the row.
-                              <div className="flex flex-wrap items-start gap-x-2">
-                                <ComposerBackgroundSubAgents
-                                  agents={backgroundSubAgents}
-                                  canStop={chatCapabilitiesForMode(mode).stopSubAgent}
-                                />
-                                <ComposerBackgroundJobs jobs={backgroundJobs} />
-                              </div>
-                            ) : null
-                          }
-                          compact={props.isThread}
-                          hasPlanReview={!!codexPlanReview}
-                          appearance={appearance}
-                          finalOnly={finalOnly}
-                          inFlight={inFlight}
-                          mode={mode}
-                          queuedMessages={composer.queuedMessages}
-                          removeQueue={composer.removeQueue}
-                          queueApi={composer.queueApi}
-                          attachments={composer.attachments}
-                          setAttachments={composer.setAttachments}
-                          attachmentsApi={attachmentsApi}
-                          autocomplete={composer.autocomplete}
-                          textareaRef={composer.textareaRef}
-                          draft={composer.draft}
-                          setDraft={composer.setDraft}
-                          argumentHint={composer.argumentHint}
-                          setCursorPos={composer.setCursorPos}
-                          onKeyDown={composer.onKeyDown}
-                          handleSend={composer.handleSend}
-                          handleStop={composer.handleStop}
-                          stopping={composer.stopping}
-                          historySearch={composer.historySearch}
-                          usage={selectUsageSummary(state)}
-                          displaySessionEnded={displaySessionEnded}
-                          handleRestart={handleRestart}
-                          restarting={restarting}
-                          handleReset={handleReset}
-                          resetting={resetting}
-                          chatMode={chatMode}
-                          handleModeChange={handleModeChange}
-                          autoCapability={autoCapability}
-                          chatDefaults={chatDefaults}
-                          chatModel={chatModel}
-                          models={models}
-                          handleModelChange={handleModelChange}
-                          modelChanging={modelChanging}
-                          chatEffort={chatEffort}
-                          handleEffortChange={handleEffortChange}
-                          effortChanging={effortChanging}
-                          chatCollaboration={chatCollaboration}
-                          handleCollaborationChange={handleCollaborationChange}
-                          collaborationChanging={collaborationChanging}
-                          chatFastMode={chatFastMode}
-                          handleFastModeChange={handleFastModeChange}
-                          fastModeChanging={fastModeChanging}
-                        />
-                      </div>
                     </div>
-                    {filesPanel && (
-                      <FilesChangedPanel
-                        timeline={timeline}
-                        cwd={cwd}
-                        {...(filesPanel.path ? { focusPath: filesPanel.path } : {})}
-                        focusSeq={filesPanel.seq}
-                        captureId={filesPanel.captureId}
-                        onClose={() => {
-                          setFilesPanel(null)
-                          composer.textareaRef.current?.focus()
-                        }}
-                        className="absolute inset-0 z-30 @min-[56rem]:static @min-[56rem]:w-[45%] @min-[56rem]:max-w-[720px] @min-[56rem]:shrink-0 @min-[56rem]:border-l @min-[56rem]:border-border"
-                      />
-                    )}
-                    {threadApi.panel && (
-                      <ChatThreadsPanel
-                        key={`${threadApi.panel.conversationId}:${threadApi.panel.sourceMessageId}:${threadApi.panel.answerId}`}
-                        threads={threadApi.threads.filter(
-                          (thread) =>
-                            thread.answerId === threadApi.panel?.answerId &&
-                            thread.sourceMessageId === threadApi.panel?.sourceMessageId
-                        )}
-                        activeId={threadApi.panel.activeId}
-                        creating={threadApi.creating}
-                        onSelect={threadApi.select}
-                        onCreate={threadApi.create}
-                        onClose={threadApi.close}
-                        onCloseThread={(thread) => void threadApi.closeThread(thread)}
-                        onReopenThread={(thread) => void threadApi.reopen(thread)}
-                        renderThread={(thread, active) => (
-                          <ChatPanel
-                            tabId={thread.id}
-                            taskId={taskId}
-                            mode={mode}
-                            cwd={cwd}
-                            providerFlagsOverride={providerFlagsOverride}
-                            isThread
-                            isActive={isActive && active}
-                            onOpenUrl={onOpenUrl}
-                            onOpenFile={onOpenFile}
-                            onOpenArtifact={onOpenArtifact}
-                            onQuoteReply={quoteReply}
-                            onReturnAnswer={(text) => setReturnDraft({ threadId: thread.id, text })}
-                          />
-                        )}
-                      />
-                    )}
-                    <AlertDialog
-                      open={returnDraft !== null}
-                      onOpenChange={(open) => {
-                        if (!open && !returnSending) setReturnDraft(null)
-                      }}
-                    >
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Send answer to main</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Review the conclusion. A link to the thread is included.{' '}
-                            {inFlight
-                              ? 'Main is working; the answer will be queued.'
-                              : 'The answer will be sent as the next message.'}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <textarea
-                          aria-label="Thread conclusion"
-                          value={returnDraft?.text ?? ''}
-                          onChange={(e) =>
-                            setReturnDraft((prev) =>
-                              prev ? { ...prev, text: e.target.value } : null
-                            )
-                          }
-                          className="min-h-36 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                        />
-                        <AlertDialogFooter>
-                          <AlertDialogCancel disabled={returnSending}>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            disabled={returnSending || !returnDraft?.text.trim()}
-                            onClick={(e) => {
-                              e.preventDefault()
-                              void sendThreadAnswer()
-                            }}
-                          >
-                            {returnSending
-                              ? 'Sending…'
-                              : inFlight
-                                ? 'Queue for main'
-                                : 'Send to main'}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </ToolFocusContext.Provider>
+                  </ToolFocusContext.Provider>
+                </ChatBlobReaderContext.Provider>
               </CommandTaskContext.Provider>
             </LiveBlockStoreContext.Provider>
           </RowUiStateContext.Provider>

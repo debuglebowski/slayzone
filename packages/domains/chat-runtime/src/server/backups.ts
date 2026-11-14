@@ -33,14 +33,21 @@ import {
 import { basename, join, resolve, sep } from 'node:path'
 import { createReadStream, promises as fsAsync } from 'node:fs'
 import { z } from 'zod'
-import type {
-  ComputerChatBackup,
-  ComputerChatArchive,
-  ComputerChatBackupPolicy,
-  AgentEvent,
-  ChatAttachment
+import {
+  escapeChatBlobLiterals,
+  type ComputerChatBackup,
+  type ComputerChatArchive,
+  type ComputerChatBackupPolicy,
+  type AgentEvent,
+  type ChatAttachment
 } from '@slayzone/terminal-contracts'
-import { CHAT_STORAGE_SCHEMA_VERSION, type ChatStorage } from './storage'
+import {
+  CHAT_BLOB_CHUNK_BYTES,
+  CHAT_STORAGE_SCHEMA_VERSION,
+  EVENT_BLOB_FORM,
+  type ChatStorage
+} from './storage'
+import { readBlobRange } from './blob-store'
 import { captureArtifactWorkingFiles } from './artifact-backup'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
 import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
@@ -265,6 +272,10 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
         const ref = JSON.parse(row.value) as ChatAttachment
         requireBlob(`blobs/${ref.contentHash}`, ref.contentHash ?? '', ref.size)
       }
+      for (const row of db
+        .prepare("SELECT id,value FROM records WHERE kind='event-blob'")
+        .iterate() as Iterable<{ id: string; value: string }>)
+        requireBlob(`blobs/${row.id}`, row.id, (JSON.parse(row.value) as { size: number }).size)
       const pins =
         db.prepare(`SELECT value FROM records WHERE conversation_id=? AND kind='attachment'
         AND json_extract(value,'$.artifactId')=? AND (? IS NULL OR json_extract(value,'$.contentHash')=?)`)
@@ -505,6 +516,13 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
             if (!ref.contentHash || !/^[a-f0-9]{64}$/.test(ref.contentHash))
               throw new Error('Backup attachment hash is missing')
             refs.add(`blobs/${ref.contentHash}`)
+          }
+          // Out-of-line payloads of saved events (v13+).
+          for (const row of db
+            .prepare("SELECT DISTINCT id FROM records WHERE kind='event-blob'")
+            .iterate() as Iterable<{ id: string }>) {
+            if (!/^[a-f0-9]{64}$/.test(row.id)) throw new Error('Backup event blob hash is invalid')
+            refs.add(`blobs/${row.id}`)
           }
           if (
             db
@@ -751,18 +769,29 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
       )
         throw new Error('Invalid archive page')
       return withArchive(id, (db) => {
+        // Pre-v13 archives have no `blob_form`: all their rows are raw (legacy).
+        const hasForm = (db.pragma('table_info(events)') as Array<{ name: string }>).some(
+          (c) => c.name === 'blob_form'
+        )
         const rows = db
           .prepare(
-            'SELECT seq,saved_at,event FROM events WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT ?'
+            `SELECT seq,saved_at,event${hasForm ? ',blob_form' : ',0 AS blob_form'} FROM events WHERE conversation_id=? AND seq>? ORDER BY seq LIMIT ?`
           )
           .all(conversationId, afterSeq, limit + 1) as Array<{
           seq: number
           saved_at: number
           event: string
+          blob_form: number
         }>
-        const events = rows
-          .slice(0, limit)
-          .map((r) => ({ seq: r.seq, at: r.saved_at, event: JSON.parse(r.event) as AgentEvent }))
+        // Served in stored form, as the live store serves it (see `storage.read`).
+        const events = rows.slice(0, limit).map((r) => {
+          const event = JSON.parse(r.event) as AgentEvent
+          return {
+            seq: r.seq,
+            at: r.saved_at,
+            event: r.blob_form === EVENT_BLOB_FORM ? event : escapeChatBlobLiterals(event)
+          }
+        })
         return { events, hasMore: rows.length > limit, nextSeq: events.at(-1)?.seq ?? afterSeq }
       })
     },
@@ -852,6 +881,34 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
         if (hashFile(file) !== record.contentHash)
           throw new Error('Archive attachment integrity failure')
         return readFileSync(file)
+      })
+    },
+    /**
+     * One bounded chunk of an event blob of an archived conversation — only one that
+     * conversation pins (the live store's `readEventBlob`, for a read-only archive).
+     */
+    blob(id: string, conversationId: string, sha256: string, offset: number) {
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid blob offset')
+      return withArchive(id, (db) => {
+        const pin =
+          /^[a-f0-9]{64}$/.test(sha256) &&
+          (db
+            .prepare(
+              "SELECT value FROM records WHERE conversation_id=? AND kind='event-blob' AND id=?"
+            )
+            .get(conversationId, sha256) as { value: string } | undefined)
+        if (!pin) throw new Error('Blob is not part of this archive conversation')
+        const { mediaType, size } = JSON.parse(pin.value) as { mediaType: string; size: number }
+        if (offset > size) throw new Error('Invalid blob offset')
+        const bytes = readBlobRange(
+          fileWithin(folder(archiveDir, id), `blobs/${sha256}`),
+          sha256,
+          offset,
+          CHAT_BLOB_CHUNK_BYTES
+        )
+        if (offset + bytes.length > size || (bytes.length === 0 && offset < size))
+          throw new Error('Archive blob size integrity failure')
+        return { mediaType, size, offset, data: Buffer.from(bytes).toString('base64') }
       })
     },
     file(id: string, conversationId: string, artifactId: string, contentHash: string) {

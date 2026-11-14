@@ -8,6 +8,7 @@ import { createSessionMoves, sessionLedgerMoveImport } from './session-moves'
 import { createLocalWorkspaceStore } from './workspace-store'
 import { createChatInvoker } from './invocation'
 import { createLocalAttachments } from './attachments'
+import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
 import {
   createChatTransport,
   createConversationRegistry,
@@ -57,6 +58,12 @@ export function createComputerChatRuntime(opts: {
   healIo?: ConversationHealIo
   /** Turn git on this computer, jailed (agent-turn snapshots); none = turns refused. */
   turnGit?: TurnGit
+  /** Event-blob backfill of pre-v13 rows; default: automatic unless `maintenance`. */
+  blobBackfill?: Partial<
+    Pick<ChatBlobBackfillOptions, 'automatic' | 'sliceBytes' | 'idleMs' | 'freeBytes'>
+  >
+  /** The computer's log (`computer.log`): maintenance progress, never chat content. */
+  log?: (line: string) => void
 }) {
   const storage = openChatStorage(opts)
   // Register before artifact purge listeners: every deletion delivery captures
@@ -260,6 +267,20 @@ export function createComputerChatRuntime(opts: {
     }
   })
   const retentionService = retention
+  // Moves the screenshots saved inline before v13 out-of-line (crash fix 4).
+  const blobBackfill = createChatBlobBackfill({
+    ...opts.blobBackfill,
+    storage,
+    automatic: opts.blobBackfill?.automatic ?? !opts.maintenance,
+    ...(opts.log ? { log: opts.log } : {}),
+    // Its timeline reset closes a chat's session only through retention's own lock.
+    withQuiesced: (owner, work, o) => retentionService.withQuiesced(owner, work, o),
+    pruning: (id) => retentionService.isPruning(id),
+    changed: (id) => {
+      transport.chatEvents.emit('threads-changed', id)
+      transport.chatEvents.emit('pinned-messages-changed', id)
+    }
+  })
   return {
     diagnosticsConfig,
     async relocateProject(
@@ -332,6 +353,7 @@ export function createComputerChatRuntime(opts: {
     invoke: async (input: unknown) =>
       retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
     retention: retentionService,
+    blobBackfill,
     captureHook: prompts.capture,
     prompts: prompts.list,
     promptSummaries: prompts.summaries,
@@ -439,6 +461,7 @@ export function createComputerChatRuntime(opts: {
     async close() {
       if (closed) return
       closed = true
+      await blobBackfill.close()
       await retentionService.close()
       await backups.close()
       await queueRuntime.close()

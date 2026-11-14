@@ -86,6 +86,7 @@ const historyReadMethods = new Set([
   'getReplay',
   'getEventPage',
   'getReplayPage',
+  'readBlob',
   'openTimeline',
   'timelinePages',
   'searchTimeline'

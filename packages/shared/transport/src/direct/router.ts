@@ -155,7 +155,13 @@ export interface DirectChatService {
   read(
     tabId: string,
     epoch: number,
-    method: 'getReplay' | 'getReplayPage' | 'openTimeline' | 'timelinePages' | 'searchTimeline',
+    method:
+      | 'getReplay'
+      | 'getReplayPage'
+      | 'readBlob'
+      | 'openTimeline'
+      | 'timelinePages'
+      | 'searchTimeline',
     args: unknown[]
   ): Promise<unknown>
   command(
@@ -374,6 +380,22 @@ export function createDirectRouter(services: DirectRouterServices) {
                 input.page
               ])
             : service.read(input.tabId, epoch, 'getReplay', [input.tabId, input.afterSeq])
+        }),
+      readBlob: t.procedure
+        .input(
+          z.object({
+            tabId,
+            sha256: z.string().regex(/^[a-f0-9]{64}$/),
+            offset: z.number().int().nonnegative()
+          })
+        )
+        .query(({ ctx, input }) => {
+          const { service, epoch } = chatFor(ctx, input.tabId)
+          return service.read(input.tabId, epoch, 'readBlob', [
+            input.tabId,
+            input.sha256,
+            input.offset
+          ])
         }),
       openTimeline: t.procedure
         .input(z.object({ tabId, version: z.string().max(200) }))

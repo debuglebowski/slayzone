@@ -20,6 +20,7 @@ import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type {
   AgentEvent,
+  ChatBlobChunk,
   PermissionDecision,
   RewindFilesPreview,
   RewindResult,
@@ -72,6 +73,11 @@ interface OpenedPaged {
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
+  /**
+   * One chunk of an image / file a saved event references (`chat-blobs`), read over
+   * the tab's direct link or the hub. Stable identity.
+   */
+  readBlob: (sha256: string, offset: number) => Promise<ChatBlobChunk>
   /** The rows; `undefined` = not loaded here (paged history). */
   timeline: TimelineRows
   inFlight: boolean
@@ -435,6 +441,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   )
   const getReplayRead = useStableCallback((input: Parameters<typeof chatIo.getReplay>[0]) =>
     chatIo.getReplay(input)
+  )
+  const readBlob = useStableCallback(
+    (sha256: string, offset: number) =>
+      chatIo.readBlob({ tabId: opts.tabId, sha256, offset }) as Promise<ChatBlobChunk>
   )
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
@@ -1111,6 +1121,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
   return {
     state,
+    readBlob,
     timeline: state.timeline,
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),

@@ -26,7 +26,9 @@ function store() {
     return exec(sql)
   }) as typeof db.exec
   const event = (conversation: string, seq: number, text: string) =>
-    db.prepare('INSERT INTO events VALUES(?,?,1,?)').run(conversation, seq, text)
+    db
+      .prepare('INSERT INTO events(conversation_id,seq,saved_at,event) VALUES(?,?,1,?)')
+      .run(conversation, seq, text)
   return { root, path, db, vacuums: () => vacuums, event }
 }
 

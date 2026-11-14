@@ -81,6 +81,7 @@ import { createChatRelayFilter } from '../direct/chat-relay-filter'
 export const DIRECT_CHAT_READS = new Set([
   'getReplay',
   'getReplayPage',
+  'readBlob',
   'openTimeline',
   'timelinePages',
   'searchTimeline'
@@ -245,6 +246,13 @@ const requestSchema = z.discriminatedUnion('kind', [
     archiveId: z.string().uuid(),
     conversationId: z.string(),
     ref: chatAttachmentSchema
+  }),
+  z.object({
+    kind: z.literal('archive.blob'),
+    archiveId: z.string().uuid(),
+    conversationId: z.string(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    offset: z.number().int().nonnegative()
   }),
 
   z.object({
@@ -564,6 +572,7 @@ export function createChatRuntimeHandlers(opts: {
       hubScope: opts.hubScope,
       computerId,
       hasExternalTaskWork: opts.hasTaskWork,
+      log: (line) => opts.ctx.log(line),
       ...(opts.dataImports ? { dataImports: opts.dataImports } : {}),
       healIo: createConversationHealIo(opts.ctx, opts.getProjectPaths),
       turnGit: createTurnGitIo(opts.ctx),
@@ -880,6 +889,8 @@ export function createChatRuntimeHandlers(opts: {
         return {
           data: r.backups.attachment(req.archiveId, req.conversationId, req.ref).toString('base64')
         }
+      case 'archive.blob':
+        return r.backups.blob(req.archiveId, req.conversationId, req.sha256, req.offset)
 
       case 'task.lifecycles':
         return r.storage.taskLifecycles()

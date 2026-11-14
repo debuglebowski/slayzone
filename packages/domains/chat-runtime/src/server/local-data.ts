@@ -1048,6 +1048,11 @@ export function createLocalChatData(
       metadata(taskTab(taskId), 'activity', { at: now })
       return true
     },
+    // Binary payloads leave the event before it is cached, broadcast or saved: the
+    // bytes land in the blob store here, `appendAt` pins them with the row.
+    prepareChatEvent: (_tabId, event) => store.extractEventBlobs(event),
+    readChatEventBlob: (tabId, sha256, offset) =>
+      store.readEventBlob(owner(tabId).id, sha256, offset),
     persistChatEventSync: (tabId, seq, event, at) =>
       store.transaction(() => {
         const i = owner(tabId)

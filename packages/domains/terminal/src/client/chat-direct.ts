@@ -26,6 +26,7 @@ export interface ChatHubSlice {
       { tabId: string; afterSeq: number; page?: { maxBytes?: number; maxEvents?: number } },
       unknown
     >
+    readBlob: Query<{ tabId: string; sha256: string; offset: number }, unknown>
     timelinePages: Query<
       { tabId: string; pages: number[]; asOfSeq: number; epoch: number },
       unknown
@@ -83,10 +84,9 @@ export function chatViaDirect<H extends ChatHubSlice>(
   lost: () => void
 ) {
   type C = H['chat']
-  async function read<K extends 'openTimeline' | 'getReplay' | 'timelinePages' | 'searchTimeline'>(
-    name: K,
-    input: In<C[K]>
-  ): Promise<Out<C[K]>> {
+  async function read<
+    K extends 'openTimeline' | 'getReplay' | 'readBlob' | 'timelinePages' | 'searchTimeline'
+  >(name: K, input: In<C[K]>): Promise<Out<C[K]>> {
     const viaHub = () => (hub.chat[name] as unknown as Query<In<C[K]>, Out<C[K]>>).query(input)
     if (!direct) return viaHub()
     try {
@@ -103,6 +103,7 @@ export function chatViaDirect<H extends ChatHubSlice>(
   return {
     openTimeline: (input: In<C['openTimeline']>) => read('openTimeline', input),
     getReplay: (input: In<C['getReplay']>) => read('getReplay', input),
+    readBlob: (input: In<C['readBlob']>) => read('readBlob', input),
     timelinePages: (input: In<C['timelinePages']>) => read('timelinePages', input),
     searchTimeline: (input: In<C['searchTimeline']>) => read('searchTimeline', input),
     respondPermission: (input: In<C['respondPermission']>) =>

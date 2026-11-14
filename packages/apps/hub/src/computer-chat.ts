@@ -940,6 +940,7 @@ export function createComputerChatServices(opts: {
               'getInfo',
               'getReplay',
               'getReplayPage',
+              'readBlob',
               'openTimeline',
               'timelinePages',
               'searchTimeline',
@@ -1043,6 +1044,14 @@ export function createComputerChatServices(opts: {
         conversationId,
         ref
       }) as ReturnType<ChatComputerOps['archiveAttachment']>,
+    archiveBlob: (pc, archiveId, conversationId, sha256, offset) =>
+      computerRequest(pc, {
+        kind: 'archive.blob',
+        archiveId,
+        conversationId,
+        sha256,
+        offset
+      }) as ReturnType<ChatComputerOps['archiveBlob']>,
     archiveFile: (pc, archiveId, conversationId, artifactId, contentHash) =>
       computerRequest(pc, {
         kind: 'archive.file',

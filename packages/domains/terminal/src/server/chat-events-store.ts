@@ -70,6 +70,12 @@ export interface StoredEventPage {
 
 /** Where a {@link ChatEventLog} writes its rows, and reads back what left its cache. */
 export interface ChatEventPersistence {
+  /**
+   * The event as this store saves it (e.g. binary payloads moved out-of-line, see
+   * `chat-blobs`). Called once per append, before the write: the log caches,
+   * returns and writes what it returns, so memory, broadcasts and disk agree.
+   */
+  prepare?(tabId: string, event: AgentEvent): AgentEvent
   insert(tabId: string, seq: number, event: AgentEvent, at: number): Promise<'inserted' | 'clash'>
   /** Local SQLite can commit before an event becomes visible. */
   insertSync?(tabId: string, seq: number, event: AgentEvent, at: number): 'inserted' | 'clash'
@@ -260,8 +266,20 @@ export class ChatEventLog {
     return this.ring
   }
 
-  /** Assign the next seq and the time it is saved, keep it in memory, and queue its write. */
-  append(event: AgentEvent): BufferedEvent & { at: number } {
+  /**
+   * Assign the next seq and the time it is saved, keep it in memory, and queue its
+   * write. The entry holds the event as stored (`persistence.prepare`).
+   */
+  append(raw: AgentEvent): BufferedEvent & { at: number } {
+    let event = raw
+    if (this.persistence.prepare) {
+      try {
+        event = this.persistence.prepare(this.tabId, raw)
+      } catch (err) {
+        this.opts.onWriteError?.(this.nextSeq, err)
+        throw err
+      }
+    }
     const entry = { seq: this.nextSeq, event, at: Date.now() }
     if (this.persistence.insertSync) {
       try {

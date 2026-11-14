@@ -321,7 +321,9 @@ test('a large sweep yields to foreground work and disabling stops further batche
   const { r } = setup()
   r.storage.compose((db) =>
     db.transaction(() => {
-      const insert = db.prepare('INSERT INTO events VALUES(?,?,?,?)')
+      const insert = db.prepare(
+        'INSERT INTO events(conversation_id,seq,saved_at,event) VALUES(?,?,?,?)'
+      )
       for (let seq = 0; seq < 1800; seq++)
         insert.run(
           'c',

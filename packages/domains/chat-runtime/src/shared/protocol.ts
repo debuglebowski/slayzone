@@ -202,6 +202,8 @@ export const chatOperationSchemas = {
   kill: tab,
   remove: tab,
   getReplay: z.tuple([id, z.number().int()]),
+  /** One chunk of an out-of-line event payload the tab's conversation pins (`chat-blobs`). */
+  readBlob: z.tuple([id, z.string().regex(/^[a-f0-9]{64}$/), z.number().int().nonnegative()]),
   getBufferSince: z.tuple([id, z.number().int()]),
   /**
    * One bounded page of `getReplay` / `getBufferSince` (`ChatReplayPage` /
@@ -303,6 +305,7 @@ export type ChatQueueOperation = keyof typeof chatQueueOperationSchemas
 export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'supports',
   'getReplay',
+  'readBlob',
   'getBufferSince',
   'getReplayPage',
   'getEventPage',

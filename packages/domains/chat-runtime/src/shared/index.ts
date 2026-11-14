@@ -29,7 +29,13 @@ export const CHAT_RECORD_KINDS = [
   'attachment',
   'settings',
   'timeline',
-  'pinned-message'
+  'pinned-message',
+  /**
+   * A pin keeping an out-of-line payload of this conversation's saved events alive
+   * (`id` = sha256 of the bytes in the blob store; `saved_at` = newest referencing
+   * event). Storage-internal: derived from the events, never transferred.
+   */
+  'event-blob'
 ] as const
 export type ChatRecordKind = (typeof CHAT_RECORD_KINDS)[number]
 export interface ChatRecord {

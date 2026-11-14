@@ -361,3 +361,36 @@ test('pages() stops before `beforeSeq`', async () => {
     got.push(...seqs(page))
   expect(got).toEqual(range(0, 5))
 })
+
+test('prepare: the log keeps, returns and writes the event as the store will save it', async () => {
+  const store = memoryStore()
+  const stored = text('stored form')
+  const prepare = vi.fn((_tabId: string, _event: AgentEvent) => stored)
+  const log = new ChatEventLog('tab', { ...store.persistence, prepare }, { events: [], nextSeq: 0 })
+  const entry = log.append(text('raw form'))
+  expect(prepare).toHaveBeenCalledWith('tab', text('raw form'))
+  expect(entry.event).toBe(stored)
+  expect(log.since(-1).map((b) => b.event)).toEqual([stored])
+  await log.flush()
+  expect(store.rows.get('tab:0')?.event).toBe(stored)
+})
+
+test('prepare: a failure is a write error, and the seq is not used', () => {
+  const store = memoryStore()
+  const onWriteError = vi.fn()
+  const log = new ChatEventLog(
+    'tab',
+    {
+      ...store.persistence,
+      prepare: () => {
+        throw new Error('blob store full')
+      }
+    },
+    { events: [], nextSeq: 0 },
+    { onWriteError }
+  )
+  expect(() => log.append(text('a'))).toThrow(/blob store full/)
+  expect(onWriteError).toHaveBeenCalledWith(0, expect.any(Error))
+  expect(log.lastSeq).toBe(-1)
+  expect(log.events).toEqual([])
+})

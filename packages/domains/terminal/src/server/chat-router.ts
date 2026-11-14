@@ -289,6 +289,23 @@ export const chatRouter = router({
           input.conversationId,
           input.ref
         )
+      ),
+    // One chunk of an image / file the archived events reference (export, viewer).
+    blob: publicProcedure
+      .input(
+        archiveConversation.extend({
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          offset: z.number().int().nonnegative()
+        })
+      )
+      .query(({ input }) =>
+        computer().archiveBlob(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.sha256,
+          input.offset
+        )
       )
   }),
   workspaceChanges: router({
@@ -499,6 +516,16 @@ export const chatRouter = router({
           ? ops().getReplayPage(input.tabId, input.afterSeq, input.page)
           : ops().getReplay(input.tabId, input.afterSeq)
     ),
+  // One chunk of an image / file a saved event references (loaded as it is shown).
+  readBlob: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        offset: z.number().int().nonnegative()
+      })
+    )
+    .query(({ input }) => ops().readBlob(input.tabId, input.sha256, input.offset)),
   // Paged history: open from the hub's timeline projection (`full`: use getReplay),
   // rows of older pages as of the client's newest event, pages that may hold a query.
   openTimeline: publicProcedure
