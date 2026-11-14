@@ -41,6 +41,7 @@ import {
   Signal,
   Tag as TagIcon,
   FolderInput,
+  FolderPlus,
   Copy,
   CopyPlus,
   Archive,
@@ -416,6 +417,7 @@ export function TaskContextMenu({
               setMoveTargetId(task.project_id)
             }}
           >
+            <FolderPlus className="mr-2 size-3.5" />
             Copy to project…
           </ContextMenuItem>
           {/* Move to project */}

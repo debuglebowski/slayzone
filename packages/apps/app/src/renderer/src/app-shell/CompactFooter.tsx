@@ -12,7 +12,8 @@ import {
   Megaphone,
   ListTree,
   Kanban,
-  PanelLeftClose
+  PanelLeftClose,
+  RotateCw
 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { useTRPC } from '../trpc'
@@ -213,6 +214,7 @@ export function CompactFooter({
                   onSelect={() => restartForUpdate.mutate()}
                   className="cursor-pointer text-green-500"
                 >
+                  <RotateCw className="size-4 text-current" />
                   <span>Restart to install v{updateVersion}</span>
                 </DropdownMenuItem>
               </>

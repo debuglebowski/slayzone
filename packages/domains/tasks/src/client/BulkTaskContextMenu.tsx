@@ -36,6 +36,7 @@ import {
   Signal,
   Tag as TagIcon,
   FolderInput,
+  FolderPlus,
   Archive,
   Trash2,
   ShieldAlert
@@ -332,6 +333,7 @@ export function BulkTaskContextMenu({
               setMoveTargetId(projects[0]?.id ?? '')
             }}
           >
+            <FolderPlus className="mr-2 size-3.5" />
             Copy to project…
           </ContextMenuItem>
           {/* Move to project */}
