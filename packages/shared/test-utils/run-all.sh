@@ -1347,6 +1347,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/web-shell/src/artifact-export.test.ts \
   packages/apps/web-shell/src/client-save.test.ts \
   packages/apps/web-shell/src/zip-stream.test.ts \
+  packages/apps/web-shell/src/mermaid-export-source.test.ts \
   packages/apps/web-shell/src/hub-health.test.ts \
   packages/shared/transport/src/client/electron-bootstrap.test.ts \
   packages/shared/editor/src/use-artifact-upload.test.tsx \

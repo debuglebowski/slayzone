@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest'
 import { defaultBrowserEnv, findBrowser } from './browser'
 import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
+import { launchBrowser } from './cdp'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
 import { renderPdf } from './render'
 
@@ -107,5 +108,41 @@ describe.skipIf(!BROWSER)('render in a local browser', () => {
       deps
     )
     expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+  })
+})
+
+describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () => {
+  // The renderer dies while a long command runs; the browser process keeps answering
+  // its liveness check. The command must fail at once, not wait forever.
+  test('a long command on a crashed page rejects within seconds', { timeout: 60_000 }, async () => {
+    // A liveness interval far beyond the test: only the crash itself can end it.
+    const b = await launchBrowser(BROWSER as string, { livenessIntervalMs: 120_000 })
+    try {
+      await b.send('Target.setDiscoverTargets', { discover: true })
+      const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
+        url: 'about:blank'
+      })
+      const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
+        targetId,
+        flatten: true
+      })
+      await b.send('Inspector.enable', {}, sessionId)
+      const long = b.sendLong(
+        'Runtime.evaluate',
+        { expression: 'new Promise(() => {})', awaitPromise: true },
+        sessionId
+      )
+      const outcome = long.then(
+        () => 'resolved',
+        (err: Error) => err.message
+      )
+      const started = Date.now()
+      // Page.crash itself is never answered: the renderer is gone.
+      b.send('Page.crash', {}, sessionId).catch(() => undefined)
+      expect(await outcome).toMatch(/page (crashed|closed) while rendering/)
+      expect(Date.now() - started).toBeLessThan(10_000)
+    } finally {
+      await b.close()
+    }
   })
 })

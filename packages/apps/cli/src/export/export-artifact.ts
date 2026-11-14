@@ -106,13 +106,15 @@ export async function exportArtifact(
   const mermaidJs = needsMermaidScript(mode) ? deps.loadMermaidJs() : null
 
   if (type === 'html') {
-    return Buffer.from(buildDocumentHtml(content, mode, title, mermaidJs), 'utf8')
+    return Buffer.from(
+      buildDocumentHtml(content, mode, title, mermaidJs, { standalone: true }),
+      'utf8'
+    )
   }
 
   const html =
     type === 'pdf'
-      ? // html artifacts keep their scripts, as the desktop app always rendered them.
-        buildDocumentHtml(content, mode, title, mermaidJs, { artifactScripts: true })
+      ? buildDocumentHtml(content, mode, title, mermaidJs)
       : buildPngHtml(content, mode, title, mermaidJs)
   if (html === null) throw new ExportError(`Cannot export "${title}" (${mode}) as ${type}.`)
 

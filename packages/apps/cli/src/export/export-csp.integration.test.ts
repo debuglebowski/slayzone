@@ -106,16 +106,10 @@ describe.skipIf(!BROWSER)('export document policy in a real browser', () => {
     ).toBe('yes|')
   })
 
-  test('html-preview: inert by default, scripts only where the host opts in', {
+  test('html-preview renders as written: its scripts run (isolated by the host)', {
     timeout: 30_000
   }, async () => {
     const page = '<p>x</p><script>window.__pwned = "ran"</script>'
-    expect(await load<string>(buildDocumentHtml(page, 'html-preview', 'p.html'), PWNED)).toBe('')
-    expect(
-      await load<string>(
-        buildDocumentHtml(page, 'html-preview', 'p.html', null, { artifactScripts: true }),
-        PWNED
-      )
-    ).toBe('ran')
+    expect(await load<string>(buildDocumentHtml(page, 'html-preview', 'p.html'), PWNED)).toBe('ran')
   })
 })

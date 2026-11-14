@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -118,4 +119,181 @@ describe('createZipEncoder', () => {
       }
     }
   )
+
+  // Review 5, #10 asked for a zip64 extra field in EVERY file's local header (and so an
+  // 8-byte-size data descriptor on every file), so that a streaming reader expects the
+  // wide descriptor an entry past 4 GB gets. Measured instead (2026-11-14, a real
+  // 4 GiB + 123 B entry): Java 11's ZipInputStream and libarchive (bsdtar on a pipe)
+  // both read this layout correctly — Java sizes the descriptor by the bytes it
+  // inflated, libarchive by what follows it — and the proposed layout breaks Java < 21
+  // on EVERY archive ("invalid entry size (expected 0 but got 5 bytes)"). So a small
+  // entry keeps the classic layout; these pin it and the readers that depend on it.
+  const files: Record<string, Uint8Array> = {
+    'd/a.txt': enc.encode('hello streaming reader'),
+    'b.bin': new Uint8Array(70_000).map((_, i) => (i * 13) & 255),
+    'p.png': new Uint8Array([137, 80, 78, 71, 1, 2, 3]),
+    'none.txt': new Uint8Array(0)
+  }
+  const names = ['b.bin', 'd/', 'd/a.txt', 'none.txt', 'p.png']
+  const build = (opts: { forceZip64?: boolean } = {}) =>
+    encode((z) => {
+      z.mkdir('d')
+      for (const [path, data] of Object.entries(files)) z.write(path, data)
+    }, opts)
+
+  it('a file under 4 GB: no zip64 extra in its local header, a 4-byte-size descriptor', () => {
+    const zip = build()
+    const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength)
+    let at = 0
+    const seen: string[] = []
+    while (view.getUint32(at, true) === 0x04034b50) {
+      const flags = view.getUint16(at + 6, true)
+      const nameLen = view.getUint16(at + 26, true)
+      const extraLen = view.getUint16(at + 28, true)
+      const name = new TextDecoder().decode(zip.subarray(at + 30, at + 30 + nameLen))
+      seen.push(name)
+      expect(view.getUint16(at + 4, true), `${name}: version needed`).toBe(20)
+      expect(extraLen, `${name}: no extra field`).toBe(0)
+      const dataAt = at + 30 + nameLen
+      if (name.endsWith('/')) {
+        expect(flags & 8, `${name}: no descriptor`).toBe(0)
+        at = dataAt
+        continue
+      }
+      expect(flags & 8, `${name}: descriptor`).toBe(8)
+      const comp = centralCompressed(zip, name)
+      const desc = dataAt + comp
+      expect(view.getUint32(desc, true), `${name}: descriptor signature`).toBe(0x08074b50)
+      expect(view.getUint32(desc + 8, true), `${name}: descriptor compressed`).toBe(comp)
+      expect(view.getUint32(desc + 12, true), `${name}: descriptor size`).toBe(
+        files[name].byteLength
+      )
+      at = desc + 16
+    }
+    expect(seen.sort()).toEqual(names)
+  })
+
+  /** Run `reader` on `zip` written to a temp file; the file is removed after. */
+  const withFile = <T>(zip: Uint8Array, reader: (file: string, dir: string) => T): T => {
+    const dir = mkdtempSync(join(tmpdir(), 'zip-stream-'))
+    try {
+      const file = join(dir, 'x.zip')
+      writeFileSync(file, zip)
+      return reader(file, dir)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  const sha = (data: Uint8Array) => createHash('sha256').update(data).digest('hex').slice(0, 12)
+
+  it.each([
+    ['default', {}],
+    ['zip64', { forceZip64: true }]
+  ] as const)(
+    'a streaming reader (libarchive: bsdtar on a pipe) reads every entry of the %s archive',
+    (_label, opts) => {
+      if (!hasTool('bsdtar', ['--version'])) return
+      withFile(build(opts), (file) => {
+        // The archive on stdin: libarchive cannot seek, so it reads front to back
+        // from the local headers alone, never the central directory.
+        const list = execFileSync('/bin/sh', ['-c', 'bsdtar -tf - < "$1"', 'sh', file])
+          .toString()
+          .trim()
+          .split('\n')
+          .sort()
+        expect(list).toEqual(names)
+        for (const [name, data] of Object.entries(files)) {
+          const out = execFileSync('/bin/sh', ['-c', 'bsdtar -xOf - "$2" < "$1"', 'sh', file, name])
+          expect(sha(out), `${name} content`).toBe(sha(data))
+        }
+      })
+    }
+  )
+
+  // Not on the forced-zip64 archive: Java sizes a descriptor by the bytes it inflated,
+  // and forceZip64 gives small entries the wide descriptor only a 4 GB entry gets.
+  // Deflated entries only: ZipInputStream refuses any STORED entry with a descriptor
+  // ("only DEFLATED entries can have EXT descriptor"), which p.png is.
+  it.skipIf(!hasTool('java', ['-version']))(
+    "a streaming reader (Java's ZipInputStream) reads every deflated entry",
+    () => {
+      const deflated = names.filter((n) => n !== 'p.png')
+      const zip = encode((z) => {
+        z.mkdir('d')
+        for (const n of deflated) if (!n.endsWith('/')) z.write(n, files[n])
+      })
+      const report = withFile(zip, (file, dir) => {
+        const src = join(dir, 'Read.java')
+        writeFileSync(
+          src,
+          [
+            'import java.util.zip.*; import java.io.*; import java.security.*;',
+            'public class Read { public static void main(String[] a) throws Exception {',
+            '  ZipInputStream z = new ZipInputStream(new BufferedInputStream(System.in)); ZipEntry e;',
+            '  while ((e = z.getNextEntry()) != null) {',
+            '    MessageDigest md = MessageDigest.getInstance("SHA-256"); byte[] b = new byte[65536]; int n;',
+            '    while ((n = z.read(b)) > 0) md.update(b, 0, n);',
+            '    StringBuilder h = new StringBuilder(); for (byte x : md.digest()) h.append(String.format("%02x", x));',
+            '    System.out.println(e.getName() + ":" + h.substring(0, 12)); } } }'
+          ].join('\n')
+        )
+        return execFileSync('/bin/sh', ['-c', 'java "$1" < "$2"', 'sh', src, file]).toString()
+      })
+      const expected = deflated.map((n) => `${n}:${sha(files[n] ?? new Uint8Array(0))}`)
+      expect(report.trim().split('\n').sort()).toEqual(expected)
+    }
+  )
+
+  it.each([
+    ['default', {}],
+    ['zip64', { forceZip64: true }]
+  ] as const)(
+    'central-directory readers (Python zipfile, unzip -t) read every entry of the %s archive',
+    (_label, opts) => {
+      if (!hasTool('python3', ['--version'])) return
+      const report = withFile(build(opts), (file) => {
+        if (hasTool('unzip', ['-v'])) execFileSync('unzip', ['-tq', file], { stdio: 'ignore' })
+        return execFileSync('python3', [
+          '-I',
+          '-c',
+          [
+            'import sys, zipfile, hashlib',
+            'z = zipfile.ZipFile(sys.argv[1])',
+            'assert z.testzip() is None',
+            'print(" ".join(f"{n}:{hashlib.sha256(z.read(n)).hexdigest()[:12]}" for n in sorted(z.namelist())))'
+          ].join('\n'),
+          file
+        ]).toString()
+      })
+      expect(report.trim()).toBe(
+        names.map((n) => `${n}:${sha(files[n] ?? new Uint8Array(0))}`).join(' ')
+      )
+    }
+  )
 })
+
+/** The compressed size the central directory records for `name`. */
+function centralCompressed(zip: Uint8Array, name: string): number {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength)
+  for (let at = 0; at + 46 <= zip.byteLength; at++) {
+    if (view.getUint32(at, true) !== 0x02014b50) continue
+    const nameLen = view.getUint16(at + 28, true)
+    const extraLen = view.getUint16(at + 30, true)
+    if (new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLen)) !== name) continue
+    const small = view.getUint32(at + 20, true)
+    if (small !== 0xffffffff) return small
+    // zip64 extra: size (if 0xFFFFFFFF) then compressed.
+    let x = at + 46 + nameLen
+    const end = x + extraLen
+    while (x < end) {
+      const tag = view.getUint16(x, true)
+      const len = view.getUint16(x + 2, true)
+      if (tag === 1) {
+        const sizeWide = view.getUint32(at + 24, true) === 0xffffffff
+        return Number(view.getBigUint64(x + 4 + (sizeWide ? 8 : 0), true))
+      }
+      x += 4 + len
+    }
+  }
+  throw new Error(`${name} not in the central directory`)
+}

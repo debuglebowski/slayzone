@@ -465,7 +465,7 @@ import {
 import { migrateV127DiskDir } from './db/v127-disk-migration'
 import { startProactiveGc } from './proactive-gc'
 import { filesPathExists, filesSaveTempImage } from '@slayzone/task/electron'
-import { exportArtifactOnDesktop } from './artifact-export'
+import { exportArtifactOnDesktop, type ExportTimings } from './artifact-export'
 import { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner } from './client-save'
 import {
   configureTaskRuntimeAdapters,
@@ -3900,7 +3900,11 @@ div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:1
     // hub, so it works the same against a local or a remote hub.
     ipcMain.handle('app:export-artifact', (event, request: unknown) =>
       exportArtifactOnDesktop(BrowserWindow.fromWebContents(event.sender), request, {
-        mermaidScriptPath
+        mermaidScriptPath,
+        // e2e shortens the export window's waits (a hung document fails in seconds).
+        timings: isPlaywright
+          ? (globalThis as { __e2eExportTimings?: ExportTimings }).__e2eExportTimings
+          : undefined
       })
     )
     // Downloads land on THIS machine too: the renderer streams the pieces it reads

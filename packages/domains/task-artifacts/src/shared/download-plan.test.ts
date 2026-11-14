@@ -161,3 +161,35 @@ describe('numberedName', () => {
     expect(second.endsWith(' (2).md')).toBe(true)
   })
 })
+
+// Review 5, #12: names are legal everywhere a download can land (Windows included):
+// no drive prefix, stream (`:`) or reserved character, no reserved device name, no
+// trailing dot or space, and at most 255 bytes with the extension kept.
+describe('names safe on Windows too', () => {
+  it('replaces characters Windows reserves, and control characters', () => {
+    expect(safeFileName('C:evil.md', 'x')).toBe('C_evil.md')
+    expect(safeFileName('a:b.md', 'x')).toBe('a_b.md')
+    expect(safeFileName('q?*"<>|.txt', 'x')).toBe('q______.txt')
+    expect(safeFileName('tab\there\u0001.md', 'x')).toBe('tab_here_.md')
+  })
+  it('never a reserved device name, nor a trailing dot or space', () => {
+    expect(safeFileName('CON', 'x')).toBe('_CON')
+    expect(safeFileName('nul.txt', 'x')).toBe('_nul.txt')
+    expect(safeFileName('com1.md', 'x')).toBe('_com1.md')
+    expect(safeFileName('report. ', 'x')).toBe('report')
+    expect(safeFileName('console.md', 'x')).toBe('console.md')
+  })
+  it('cut to 255 bytes, the extension kept', () => {
+    const n = safeFileName(`${'é'.repeat(200)}.md`, 'x')
+    expect(Buffer.byteLength(n)).toBeLessThanOrEqual(NAME_MAX_BYTES)
+    expect(n.endsWith('.md')).toBe(true)
+  })
+  it('folder names in a plan follow the same rules', () => {
+    expect(
+      planTaskDownload(
+        [{ id: 'f', name: 'AUX', parent_id: null }],
+        [{ id: '1', title: 'a?.md', folder_id: 'f' }]
+      )[0].path
+    ).toBe('_AUX/a_.md')
+  })
+})

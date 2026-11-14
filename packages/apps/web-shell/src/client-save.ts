@@ -36,11 +36,26 @@ export interface ZipSink {
   dispose(): void
 }
 
-/** The zip worker (zip-worker.ts), one request in flight at a time. */
+/**
+ * The zip worker (zip-worker.ts), one request in flight at a time.
+ *
+ * A worker that fails is dead for good, and the sink with it: the failure is latched,
+ * so the request in flight and every later one reject rather than wait on a worker
+ * that will never answer. It can fail before any request — a tab left open across a
+ * hub upgrade asks for a hashed worker chunk the new build no longer has (404).
+ */
 export function workerZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
   const worker = new Worker(new URL('./zip-worker.ts', import.meta.url), { type: 'module' })
   let seq = 0
   let pending: { seq: number; resolve: () => void; reject: (e: Error) => void } | null = null
+  let dead: Error | null = null
+  const die = (err: Error): void => {
+    dead ??= err
+    const p = pending
+    pending = null
+    p?.reject(dead)
+    worker.terminate()
+  }
   worker.onmessage = (event: MessageEvent<ZipWorkerReply>) => {
     const reply = event.data
     const p = pending
@@ -51,14 +66,26 @@ export function workerZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
     else p.resolve()
   }
   worker.onerror = (event) => {
-    const p = pending
-    pending = null
-    p?.reject(new Error(event.message || 'The zip worker failed'))
+    die(new Error((event as Partial<ErrorEvent>).message || 'The zip worker failed'))
+  }
+  // A reply that cannot be deserialised: its archive bytes are lost, so is the zip.
+  worker.onmessageerror = () => {
+    die(new Error('The zip worker sent a reply that could not be read'))
   }
   const send = (req: ZipWorkerRequest, transfer: Transferable[] = []): Promise<void> =>
     new Promise((resolve, reject) => {
+      if (dead) return reject(dead)
       pending = { seq: req.seq, resolve, reject }
-      worker.postMessage(req, transfer)
+      try {
+        worker.postMessage(req, transfer)
+      } catch (err) {
+        // A DOMException (DataCloneError) is not an Error in every engine.
+        die(
+          err instanceof Error
+            ? err
+            : new Error((err as { message?: string } | null)?.message ?? String(err))
+        )
+      }
     })
   return {
     write: (path, data) => {

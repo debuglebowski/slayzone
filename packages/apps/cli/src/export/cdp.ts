@@ -9,6 +9,13 @@
  *
  * Sessions are flattened (`Target.attachToTarget({ flatten: true })`): page commands
  * carry a `sessionId` on the same pipe.
+ *
+ * Events are read only to learn that a page died: a renderer that crashes (out of
+ * memory on a huge document) never answers the command it was running, while the
+ * browser process keeps answering. `Inspector.targetCrashed` (page session, after
+ * `Inspector.enable`), `Target.targetCrashed` / `Target.targetDestroyed` (browser
+ * level, with discovery on) and `Target.detachedFromTarget` fail every pending command
+ * of that page's session at once.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -29,7 +36,32 @@ interface Pending {
   resolve: (v: unknown) => void
   reject: (e: Error) => void
   timer: NodeJS.Timeout
+  /** The page session the command runs in (none: the browser itself). */
+  sessionId?: string
 }
+
+/** A browser-to-client message: a reply (`id`) or an event (`method`). */
+interface CdpMessage {
+  id?: number
+  result?: unknown
+  error?: { message?: string }
+  method?: string
+  params?: Record<string, unknown>
+  sessionId?: string
+}
+
+export class PageGoneError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PageGoneError'
+  }
+}
+
+const pageCrashed = (): PageGoneError =>
+  new PageGoneError(
+    'The page crashed while rendering (a very large document can run the browser out of memory).'
+  )
+const pageClosed = (): PageGoneError => new PageGoneError('The page closed while rendering.')
 
 export interface Browser {
   /** A command answered within the per-command deadline. */
@@ -152,6 +184,10 @@ export async function launchBrowser(
 
   let nextId = 1
   const pending = new Map<number, Pending>()
+  /** Page session → its target, from `Target.attachToTarget`. */
+  const sessionTargets = new Map<string, string>()
+  /** Sessions whose page died, and why: later commands there fail at once. */
+  const deadSessions = new Map<string, Error>()
   let exited: Error | null = null
   const failAll = (err: Error) => {
     exited ??= err
@@ -162,14 +198,53 @@ export async function launchBrowser(
     pending.clear()
   }
 
+  /** The page behind `sessionId` is gone: fail everything still waiting on it. */
+  const failSession = (sessionId: string, err: Error): void => {
+    if (!deadSessions.has(sessionId)) deadSessions.set(sessionId, err)
+    sessionTargets.delete(sessionId)
+    for (const [id, p] of pending) {
+      if (p.sessionId !== sessionId) continue
+      pending.delete(id)
+      clearTimeout(p.timer)
+      p.reject(err)
+    }
+  }
+  const failTarget = (targetId: unknown, err: Error): void => {
+    for (const [sid, tid] of [...sessionTargets]) if (tid === targetId) failSession(sid, err)
+  }
+
+  const onEvent = (msg: CdpMessage): void => {
+    const params = msg.params ?? {}
+    switch (msg.method) {
+      case 'Inspector.targetCrashed':
+        if (msg.sessionId) failSession(msg.sessionId, pageCrashed())
+        break
+      case 'Inspector.detached':
+        if (msg.sessionId) failSession(msg.sessionId, pageClosed())
+        break
+      case 'Target.targetCrashed':
+        failTarget(params.targetId, pageCrashed())
+        break
+      case 'Target.targetDestroyed':
+        failTarget(params.targetId, pageClosed())
+        break
+      case 'Target.detachedFromTarget':
+        if (typeof params.sessionId === 'string') failSession(params.sessionId, pageClosed())
+        break
+    }
+  }
+
   const reader = new CdpFrameReader((raw) => {
-    let msg: { id?: number; result?: unknown; error?: { message?: string } }
+    let msg: CdpMessage
     try {
       msg = JSON.parse(raw)
     } catch {
       return
     }
-    if (msg.id === undefined) return // an event; this client polls instead
+    if (msg.id === undefined) {
+      onEvent(msg)
+      return
+    }
     const p = pending.get(msg.id)
     if (!p) return
     pending.delete(msg.id)
@@ -231,8 +306,10 @@ export async function launchBrowser(
     timeoutMs: number | null = commandTimeoutMs
   ): Promise<T> {
     if (exited) return Promise.reject(exited)
+    const dead = sessionId ? deadSessions.get(sessionId) : undefined
+    if (dead) return Promise.reject(dead)
     const id = nextId++
-    return new Promise<T>((resolve, reject) => {
+    const reply = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(
         () => {
           pending.delete(id)
@@ -241,9 +318,39 @@ export async function launchBrowser(
         // No deadline: the timer never fires (a long command's liveness check stands in).
         timeoutMs ?? 2_147_483_647
       )
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, sessionId })
       toBrowser.write(`${JSON.stringify({ id, method, params, sessionId })}\0`)
     })
+    // Which page a session drives: a crash or detach event names the target.
+    if (method === 'Target.attachToTarget' && typeof params.targetId === 'string') {
+      const targetId = params.targetId
+      reply.then((r) => {
+        const sid = (r as { sessionId?: unknown }).sessionId
+        if (typeof sid === 'string') sessionTargets.set(sid, targetId)
+      }, ignore)
+    }
+    return reply
+  }
+
+  /**
+   * One liveness check for a long command: the browser process answers, and (for a
+   * page command) the page's target still exists. Both are answered by the browser
+   * process, never by the page — a renderer busy printing must not fail the check.
+   * Resolves false when the page is gone; rejects when the browser does not answer.
+   */
+  async function alive(sessionId: string | undefined): Promise<boolean> {
+    const targetId = sessionId ? sessionTargets.get(sessionId) : undefined
+    if (!targetId) {
+      await send('Browser.getVersion', {}, undefined, livenessIntervalMs)
+      return true
+    }
+    const { targetInfos } = await send<{ targetInfos?: Array<{ targetId?: unknown }> }>(
+      'Target.getTargets',
+      {},
+      undefined,
+      livenessIntervalMs
+    )
+    return Array.isArray(targetInfos) && targetInfos.some((t) => t?.targetId === targetId)
   }
 
   async function sendLong<T>(
@@ -251,20 +358,37 @@ export async function launchBrowser(
     params: Record<string, unknown> = {},
     sessionId?: string
   ): Promise<T> {
+    // Once the command settles no check may re-arm: a probe still in flight then
+    // would otherwise keep polling (and keep `slay` running) after the work is done.
+    let settled = false
     let watchdog: NodeJS.Timeout | undefined
     const stalled = new Promise<never>((_, reject) => {
       const check = (): void => {
+        if (settled) return
         watchdog = setTimeout(() => {
-          send('Browser.getVersion', {}, undefined, livenessIntervalMs).then(check, () =>
-            reject(new BrowserLaunchError(`The browser stopped responding while running ${method}`))
+          alive(sessionId).then(
+            (ok) => {
+              // The page vanished without an event: fail its commands (this one too).
+              if (!ok && sessionId) failSession(sessionId, pageClosed())
+              else check()
+            },
+            () =>
+              reject(
+                new BrowserLaunchError(`The browser stopped responding while running ${method}`)
+              )
           )
         }, livenessIntervalMs)
+        // The pending command and the browser pipes keep the process alive meanwhile.
+        watchdog.unref()
       }
       check()
     })
-    return Promise.race([send<T>(method, params, sessionId, null), stalled]).finally(() =>
+    try {
+      return await Promise.race([send<T>(method, params, sessionId, null), stalled])
+    } finally {
+      settled = true
       clearTimeout(watchdog)
-    )
+    }
   }
 
   let closed = false

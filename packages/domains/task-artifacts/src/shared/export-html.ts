@@ -108,11 +108,11 @@ export interface DocumentOptions {
    */
   nonce?: string
   /**
-   * html-preview only: run the artifact's own scripts (no policy at all). For a host
-   * that already renders html artifacts with scripts on (desktop, the CLI's headless
-   * Chrome); everywhere else an html artifact is rendered inert.
+   * The exported HTML FILE (not a render): no policy, exactly as main exported it. A
+   * file opened later from disk carries no app privilege, so a policy would only
+   * break it (an artifact's own scripts, external styles).
    */
-  artifactScripts?: boolean
+  standalone?: boolean
 }
 
 /** An unguessable nonce: an artifact cannot carry one that matches. */
@@ -165,18 +165,18 @@ export function buildDocumentHtml(
   if (mode === 'mermaid-preview') {
     if (!mermaidJs) return buildDocumentHtml(content, 'code', title, null, opts)
     const nonce = opts.nonce ?? newNonce()
-    return `${documentHead(title, nonce)}
+    return `${documentHead(title, nonce, !opts.standalone)}
 <style>${PDF_CSS} .mermaid svg { max-width: 100%; }</style>
 </head><body>
 <pre class="mermaid">${escapeHtml(content)}</pre>
 ${mermaidRunScript(mermaidJs, nonce)}
 </body></html>`
   }
-  const head = documentHead(
-    title,
-    opts.nonce ?? null,
-    !(mode === 'html-preview' && opts.artifactScripts === true)
-  )
+  // An html artifact is a page of its own: rendered as written — its scripts and
+  // external styles included, as main rendered it. Each host isolates that render
+  // (desktop: a throwaway session on an opaque origin; CLI: a throwaway profile; web:
+  // the hub's sandboxed export frame; phone: the print web view, no app bridge).
+  const head = documentHead(title, opts.nonce ?? null, !opts.standalone && mode !== 'html-preview')
 
   let body: string
   switch (mode) {

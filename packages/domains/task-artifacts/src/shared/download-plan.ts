@@ -29,11 +29,44 @@ export interface DownloadEntry {
 }
 
 /** A name as one safe path segment ('' when nothing usable is left). */
+/** Device names Windows reserves, whatever the extension (`nul.txt` too). */
+const RESERVED = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])$/i
+
+/**
+ * One path segment legal on every filesystem a download can land on: characters
+ * Windows reserves (`:` would name a drive or a stream) and control characters become
+ * `_`, trailing dots and spaces go, and a reserved device name gets a `_` prefix.
+ */
+const WINDOWS_RESERVED_CHARS = ':*?"<>|'
+
+function legalSegment(segment: string): string {
+  const s = Array.from(segment, (ch) =>
+    ch.charCodeAt(0) < 0x20 || WINDOWS_RESERVED_CHARS.includes(ch) ? '_' : ch
+  )
+    .join('')
+    .replace(/[. ]+$/, '')
+  const stem = s.split('.')[0]
+  return RESERVED.test(stem) ? `_${s}` : s
+}
+
 function safeSegments(name: string): string[] {
   return name
     .split(/[/\\]/)
     .map((s) => s.trim())
     .filter((s) => s !== '' && s !== '.' && s !== '..')
+    .map(legalSegment)
+    .filter((s) => s !== '')
+    .map((s) => fitName(s))
+}
+
+/** `name` cut to {@link NAME_MAX_BYTES}, its extension kept. */
+function fitName(name: string): string {
+  if (utf8Length(name) <= NAME_MAX_BYTES) return name
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 && utf8Length(name.slice(dot)) < 32 ? name.slice(dot) : ''
+  return (
+    truncateUtf8(name.slice(0, name.length - ext.length), NAME_MAX_BYTES - utf8Length(ext)) + ext
+  )
 }
 
 /** folderId → its segments from the task root (unknown id or a cycle → []). */
@@ -74,7 +107,7 @@ export function folderAndDescendants(folders: FolderRow[], rootId: string): Set<
  */
 export function safeFileName(title: string, fallback: string): string {
   const segs = safeSegments(title)
-  return segs.length ? segs.join('_') : fallback
+  return segs.length ? fitName(segs.join('_')) : fallback
 }
 
 /** The longest file name the filesystems people save to accept, in UTF-8 bytes. */

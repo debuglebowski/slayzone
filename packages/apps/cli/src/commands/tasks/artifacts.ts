@@ -27,7 +27,7 @@ import {
 } from '../../api'
 import { cliAuthor, resolveId } from './_shared'
 import type { ArtifactExportFormat } from '@slayzone/task-artifacts/export-html'
-import { safeFileName } from '@slayzone/task-artifacts/download-plan'
+import { planTaskDownload, safeFileName } from '@slayzone/task-artifacts/download-plan'
 
 /*
  * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
@@ -897,30 +897,27 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
         const outputPath = opts.output ? path.resolve(opts.output) : path.resolve('artifacts.zip')
         fs.mkdirSync(path.dirname(outputPath), { recursive: true })
 
-        const byId = new Map(folders.map((f) => [f.id, f]))
-        function folderPath(id: string): string {
-          const f = byId.get(id)
-          if (!f) return ''
-          return f.parent_id ? path.join(folderPath(f.parent_id), f.name) : f.name
-        }
+        // Entry names from the shared planner (desktop and web use it too): titles
+        // and folder names are free text, so every entry is `/`-separated plain
+        // segments legal on every OS (no `..`, drive, backslash or reserved name — nothing
+        // that could escape wherever the zip is extracted), and duplicates are
+        // numbered `name (2).ext` instead of becoming two entries with one name.
+        const plan = planTaskDownload(folders, artifacts)
 
         const output = fs.createWriteStream(outputPath)
         const archive = new ZipArchive({ zlib: { level: 9 } })
         archive.pipe(output)
 
-        for (const artifact of artifacts) {
+        for (const entry of plan) {
           // A row whose working copy is absent was SKIPPED before (`if
           // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
           // rather than failing the whole archive.
           const { body } = await apiGetStream(
-            `/api/artifacts/${encodeURIComponent(artifact.id)}/content`,
+            `/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`,
             [ARTIFACT_FILE_MISSING]
           )
           if (!body) continue
-          const rel = artifact.folder_id
-            ? path.join(folderPath(artifact.folder_id), artifact.title)
-            : artifact.title
-          archive.append(Readable.fromWeb(body as StreamWebReadable), { name: rel })
+          archive.append(Readable.fromWeb(body as StreamWebReadable), { name: entry.path })
         }
 
         await archive.finalize()
@@ -1016,9 +1013,13 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
       }
 
       const ext = opts.type
+      // No --output: the title's name with the export's extension, made safe as ONE
+      // name (extension included, so the result stays within the 255-byte limit).
       const outputPath = opts.output
         ? path.resolve(opts.output)
-        : path.resolve(`${exportBaseName(safeFileName(artifact.title, artifact.id))}.${ext}`)
+        : path.resolve(
+            safeFileName(`${exportBaseName(artifact.title)}.${ext}`, `${artifact.id}.${ext}`)
+          )
       fs.mkdirSync(path.dirname(outputPath), { recursive: true })
       fs.writeFileSync(outputPath, bytes)
 

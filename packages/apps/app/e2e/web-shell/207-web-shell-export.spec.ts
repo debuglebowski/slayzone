@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
+import http from 'http'
 import net from 'net'
 import os from 'os'
 import path from 'path'
@@ -16,7 +17,11 @@ import { unzipSync } from 'fflate'
  * What only a real browser + the real hub can prove: the shell's exporter works under
  * the hub's Content-Security-Policy (a `srcdoc` frame inherits `script-src 'self'`, so
  * nothing may depend on inline script), the mermaid chunk loads from the real bundle,
- * and an artifact's own script never runs with the shell's origin.
+ * and an artifact's own script never runs with the shell's origin. A PDF prints in the
+ * hub's export frame (`/export-frame`, its own sandboxing policy): there an artifact
+ * renders as written — its scripts run, remote images load — on an opaque origin that
+ * reaches nothing of the shell's. The frame reports to the shell by postMessage; the
+ * tests read those reports.
  *
  * The page is the login screen: `window.api` (and so the exporter) is installed before
  * sign-in, and the exporter needs nothing from a session — the client has already read
@@ -111,6 +116,40 @@ async function spawnHub(): Promise<Hub> {
   }
 }
 
+/** A plain http server on its own port: another origin than the hub's. */
+async function serveImage(): Promise<{
+  url: string
+  hits: () => number
+  close: () => Promise<void>
+}> {
+  // 1x1 PNG.
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+  )
+  let hits = 0
+  const srv = http.createServer((_req, res) => {
+    hits++
+    res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
+    res.end(png)
+  })
+  const port = await freePort()
+  await new Promise<void>((resolve) => srv.listen(port, '127.0.0.1', () => resolve()))
+  return {
+    url: `http://127.0.0.1:${port}/chart.png`,
+    hits: () => hits,
+    close: () => new Promise((resolve) => srv.close(() => resolve()))
+  }
+}
+
+/** Every message the shell's window received (the export frame's reports, a probe's). */
+type Received = { origin: string; data: Record<string, unknown> }
+const received = (page: Page): Promise<Received[]> =>
+  page.evaluate(() => (window as unknown as { __received: Received[] }).__received)
+/** The export frame's last `ready` report. */
+const lastReady = async (page: Page) =>
+  (await received(page)).filter((m) => m.data?.state === 'ready').at(-1)?.data
+
 type ExportRequest = {
   format: 'pdf' | 'png' | 'html'
   content: string
@@ -146,6 +185,15 @@ test.describe('web shell — artifact export renders in the browser', () => {
     })
     await page.goto(`http://127.0.0.1:${hub.port}/`)
     await expect(page.getByTestId('web-login-screen')).toBeVisible({ timeout: 15_000 })
+    await page.evaluate(() => {
+      const w = window as unknown as { __received: unknown[] }
+      w.__received = []
+      window.addEventListener('message', (e) =>
+        w.__received.push({ origin: e.origin, data: e.data })
+      )
+      // Something of the shell's an artifact must never read.
+      localStorage.setItem('slz-e2e-secret', 'shell-only')
+    })
   })
 
   test.afterAll(async () => {
@@ -298,5 +346,119 @@ test.describe('web shell — artifact export renders in the browser', () => {
       content: '# Heading'
     })
     expect(res).toEqual({ ok: true })
+  })
+
+  // Review 5, #3: mermaid takes frontmatter only at the very start of the source.
+  test('mermaid with frontmatter → PNG', async () => {
+    const download = page.waitForEvent('download')
+    const res = await exportInPage(page, {
+      format: 'png',
+      mode: 'mermaid-preview',
+      title: 'titled.mmd',
+      content: '---\ntitle: Flow\nconfig:\n  theme: forest\n---\ngraph TD\n  A[Start] --> B[End]\n'
+    })
+    expect(res).toEqual({ ok: true })
+    const bytes = fs.readFileSync(await (await download).path())
+    expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG')
+    expect(bytes.readUInt32BE(16)).toBeGreaterThan(100)
+  })
+
+  // Review 5, #4: an html report's own scripts run when it is printed (as on desktop),
+  // in the export frame, on an opaque origin that holds nothing of the shell's.
+  test("html → PDF: the artifact's script runs in the export frame, not with the shell's origin", async () => {
+    const probe = `<!doctype html><html><body><p id="out">pending</p><script>
+      function attempt(f) { try { return String(f()) } catch (e) { return e.name } }
+      document.getElementById('out').textContent = 'drawn by script'
+      parent.postMessage({
+        probe: 'html-artifact',
+        selfOrigin: self.origin,
+        storage: attempt(function () { return localStorage.getItem('slz-e2e-secret') }),
+        parentStorage: attempt(function () { return parent.localStorage.getItem('slz-e2e-secret') }),
+        parentDocument: attempt(function () { return parent.document.title }),
+        cookie: attempt(function () { return document.cookie }),
+        text: document.getElementById('out').textContent
+      }, '*')
+      try { parent.__pwned = 1 } catch (e) {}
+    </script></body></html>`
+    const res = await exportInPage(page, {
+      format: 'pdf',
+      mode: 'html-preview',
+      title: 'report.html',
+      content: probe
+    })
+    expect(res).toEqual({ ok: true })
+    const report = (await received(page)).find((m) => m.data?.probe === 'html-artifact')
+    expect(report, 'the artifact script ran').toBeTruthy()
+    expect(report?.origin, 'posted from an opaque origin').toBe('null')
+    expect(report?.data).toEqual({
+      probe: 'html-artifact',
+      selfOrigin: 'null',
+      storage: 'SecurityError',
+      parentStorage: 'SecurityError',
+      parentDocument: 'SecurityError',
+      cookie: 'SecurityError',
+      text: 'drawn by script'
+    })
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+      undefined
+    )
+    expect(await lastReady(page)).toMatchObject({ settled: true })
+  })
+
+  // Review 5, #8: markdown's remote images print (another origin than the hub's).
+  test('markdown → PDF with a remote image: the image loads in the export frame', async () => {
+    const image = await serveImage()
+    try {
+      const res = await exportInPage(page, {
+        format: 'pdf',
+        mode: 'markdown',
+        title: 'chart.md',
+        content: `# Chart\n\n![chart](${image.url})\n`
+      })
+      expect(res).toEqual({ ok: true })
+      expect(await lastReady(page)).toMatchObject({
+        settled: true,
+        images: { total: 1, loaded: 1 }
+      })
+      expect(image.hits(), 'fetched from its own origin').toBeGreaterThan(0)
+    } finally {
+      await image.close()
+    }
+  })
+
+  test('mermaid → PDF: drawn in the export frame by the inlined build', async () => {
+    const res = await exportInPage(page, {
+      format: 'pdf',
+      mode: 'mermaid-preview',
+      title: 'titled.mmd',
+      content: '---\ntitle: Flow\n---\ngraph TD\n  A[Start] --> B[End]\n'
+    })
+    expect(res).toEqual({ ok: true })
+    expect(await lastReady(page)).toMatchObject({ settled: true, drawn: true })
+  })
+
+  // Review 5, #15: the HTML file, opened later on its own, draws its diagram.
+  test('mermaid → HTML file draws itself when opened', async () => {
+    const download = page.waitForEvent('download')
+    const res = await exportInPage(page, {
+      format: 'html',
+      mode: 'mermaid-preview',
+      title: 'diagram.mmd',
+      content: '---\ntitle: Flow\n---\ngraph TD\n  A[Start] --> B[End]\n'
+    })
+    expect(res).toEqual({ ok: true })
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slz-web-export-html-'))
+    const opened = await page.context().newPage()
+    try {
+      const file = path.join(dir, 'diagram.html')
+      await (await download).saveAs(file)
+      await opened.goto(`file://${file}`)
+      await expect(opened.locator('pre.mermaid svg')).toBeVisible({ timeout: 15_000 })
+      await expect(opened.locator('pre.mermaid svg')).toContainText('Start')
+      expect(await opened.evaluate(() => document.documentElement.dataset.exportReady)).toBe('1')
+    } finally {
+      await opened.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

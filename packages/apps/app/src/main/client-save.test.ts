@@ -417,6 +417,9 @@ const leftovers = (dir: string): string[] =>
 const ticks = async (n: number) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r))
 }
+const realCopyTo = async (src: string, dest: import('node:fs/promises').FileHandle) => {
+  await dest.write(await fs.promises.readFile(src))
+}
 const enospc = () => Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
 
 // D1: a file whose commit is in flight or failed stays tracked until it settles; a
@@ -428,8 +431,8 @@ describe('a folder download whose file commit fails or is cut short', () => {
         link: async () => {
           throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' })
         },
-        copyFile: async (src, dest, mode) => {
-          await fs.promises.copyFile(src, dest, mode)
+        copyTo: async (src, dest) => {
+          await dest.write(await fs.promises.readFile(src))
           throw enospc()
         }
       }
@@ -452,7 +455,7 @@ describe('a folder download whose file commit fails or is cut short', () => {
             await new Promise((r) => setTimeout(r, 20))
             await fs.promises.link(a, b)
           },
-          copyFile: fs.promises.copyFile
+          copyTo: realCopyTo
         }
       })
       const opened = await t.open(SENDER, null, {
@@ -562,4 +565,143 @@ test('abortAllSaveTargetsNow reaches every SaveTargets, as a forced exit needs',
   expect(partials(root).length).toBe(1)
   abortAllSaveTargetsNow()
   expect(partials(root)).toEqual([])
+})
+
+// ── Review 5 ────────────────────────────────────────────────────────────────────
+// #1: cleanup only ever removes a path this download provably created. A commit beside
+// the person's own same-name file, cut short at any step, leaves that file as it was.
+describe('commits beside a file the person already has', () => {
+  const seedMine = () => {
+    fs.mkdirSync(path.join(picked.dir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(picked.dir, 'docs', 'a.md'), 'MINE')
+  }
+  const mine = () => fs.readFileSync(path.join(picked.dir, 'docs', 'a.md'), 'utf8')
+  const eisdir = () => Object.assign(new Error('EISDIR: illegal operation'), { code: 'EISDIR' })
+
+  async function startDownload(t: InstanceType<typeof SaveTargets>) {
+    const opened = await t.open(SENDER, null, { kind: 'directory', folderName: 'docs', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    await t.write(SENDER, opened.targetId, 'docs/a.md', bytes('NEW'))
+    return opened.targetId
+  }
+
+  for (const ms of [0, 5, 25, 45, 80])
+    test(`slow hard link, quit ${ms} ms into the commit: the original is byte-identical`, async () => {
+      seedMine()
+      const t = new SaveTargets({
+        commitFs: {
+          link: async (a, b) => {
+            await new Promise((r) => setTimeout(r, 30))
+            await fs.promises.link(a, b)
+          },
+          copyTo: realCopyTo
+        }
+      })
+      const id = await startDownload(t)
+      const closing = t.close(SENDER, id)
+      await new Promise((r) => setTimeout(r, ms))
+      t.abortAllNow()
+      await closing
+      await new Promise((r) => setTimeout(r, 120))
+      expect(mine()).toBe('MINE')
+      expect(leftovers(picked.dir).filter((n) => n.includes('partial'))).toEqual([])
+    })
+
+  test('a link error other than EEXIST (FAT: EISDIR) falls back to an exclusive copy', async () => {
+    seedMine()
+    const t = new SaveTargets({
+      commitFs: {
+        link: async () => {
+          throw eisdir()
+        },
+        copyTo: realCopyTo
+      }
+    })
+    const id = await startDownload(t)
+    expect(await t.close(SENDER, id)).toEqual({ ok: true })
+    expect(mine()).toBe('MINE')
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'a (2).md'), 'utf8')).toBe('NEW')
+  })
+
+  for (const when of ['abort', 'quit'] as const)
+    test(`${when} during the copy fallback: the original stays, the copy and partial go`, async () => {
+      seedMine()
+      let copying: () => void = () => undefined
+      const inCopy = new Promise<void>((r) => (copying = r))
+      const t = new SaveTargets({
+        commitFs: {
+          link: async () => {
+            throw eisdir()
+          },
+          copyTo: async (src, dest) => {
+            copying()
+            await new Promise((r) => setTimeout(r, 60))
+            await dest.write(await fs.promises.readFile(src))
+          }
+        }
+      })
+      const id = await startDownload(t)
+      const closing = t.close(SENDER, id)
+      await inCopy
+      if (when === 'abort') await t.abort(SENDER, id)
+      else t.abortAllNow()
+      const result = await closing
+      await new Promise((r) => setTimeout(r, 120))
+      expect(mine()).toBe('MINE')
+      // An abort waits for the operation in flight: if the copy finished first the
+      // download is complete and stays; otherwise nothing of it remains.
+      expect(leftovers(path.join(picked.dir, 'docs'))).toEqual(
+        result.ok ? ['a (2).md', 'a.md'] : ['a.md']
+      )
+      if (when === 'quit') expect(result.ok).toBe(false)
+    })
+
+  test('a placed file the person replaced meanwhile is never removed by abort', async () => {
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('NEW'))
+    await targets.write(SENDER, id, 'docs/b.md', bytes('B'))
+    const placedA = path.join(picked.dir, 'docs', 'a.md')
+    fs.unlinkSync(placedA)
+    fs.writeFileSync(placedA, 'THEIRS NOW')
+    await targets.abort(SENDER, id)
+    expect(fs.readFileSync(placedA, 'utf8')).toBe('THEIRS NOW')
+  })
+})
+
+// #6: a finished download is never removed — not by a window that reloads, closes or
+// quits exactly as it finishes.
+describe('a download that has just finished', () => {
+  for (const how of ['dropOwner', 'abortAllNow'] as const)
+    test(`${how} right after close: every file stays`, async () => {
+      const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+      await targets.write(SENDER, id, 'docs/a.md', bytes('A'))
+      await targets.write(SENDER, id, 'docs/b.md', bytes('B'))
+      const closing = targets.close(SENDER, id)
+      const result = await closing
+      if (how === 'dropOwner') await targets.dropOwner(SENDER)
+      else targets.abortAllNow()
+      expect(result).toEqual({ ok: true })
+      expect(leftovers(path.join(picked.dir, 'docs'))).toEqual(['a.md', 'b.md'])
+    })
+
+  test('a reload while the final commit runs: the download completes and stays', async () => {
+    const t = new SaveTargets({
+      commitFs: {
+        link: async (a, b) => {
+          await new Promise((r) => setTimeout(r, 30))
+          await fs.promises.link(a, b)
+        },
+        copyTo: realCopyTo
+      }
+    })
+    const opened = await t.open(SENDER, null, { kind: 'directory', folderName: 'docs', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    await t.write(SENDER, opened.targetId, 'docs/a.md', bytes('A'))
+    const closing = t.close(SENDER, opened.targetId)
+    const dropping = t.dropOwner(SENDER)
+    const result = await closing
+    await dropping
+    if (result.ok) expect(leftovers(path.join(picked.dir, 'docs'))).toEqual(['a.md'])
+    else expect(leftovers(picked.dir)).toEqual([])
+  })
 })

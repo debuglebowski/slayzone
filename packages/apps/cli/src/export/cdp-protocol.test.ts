@@ -20,6 +20,12 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
  * A fake browser speaking CDP over fds 3/4. `PRINT_DELAY_MS`: how long printToPDF takes;
  * `HANG_AFTER_PRINT`: stop answering anything once a print started (a wedged browser).
  * The PDF comes back as a stream of `PDF_CHUNKS` reads.
+ * `ON_PRINT` makes the page die mid-print while the browser keeps answering:
+ * `inspector-crash` (Inspector.targetCrashed on the page session), `target-crash`
+ * (browser-level Target.targetCrashed), `detach` (Target.detachedFromTarget) or
+ * `vanish` (no event; the target is simply gone from Target.getTargets).
+ * `VERSION_DELAY_MS` delays every Browser.getVersion answer; `LOG_FILE` records each
+ * method received, one per line.
  */
 const FAKE = `#!/usr/bin/env node
 const fs = require('fs')
@@ -27,9 +33,14 @@ const out = fs.createWriteStream(null, { fd: 4 })
 const delay = Number(process.env.PRINT_DELAY_MS || 0)
 const hang = process.env.HANG_AFTER_PRINT === '1'
 const chunks = Number(process.env.PDF_CHUNKS || 3)
+const onPrint = process.env.ON_PRINT || ''
+const versionDelay = Number(process.env.VERSION_DELAY_MS || 0)
+const log = process.env.LOG_FILE
+let targetGone = false
 let hung = false
 let reads = 0
 const reply = (id, result) => out.write(JSON.stringify({ id, result }) + '\\0')
+const emit = (method, params, sessionId) => out.write(JSON.stringify({ method, params, sessionId }) + '\\0')
 const pdfPiece = (i) => Buffer.from(i === 0 ? '%PDF-1.7 ' : 'x'.repeat(1000)).toString('base64')
 let buf = ''
 fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
@@ -38,14 +49,23 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
   while ((end = buf.indexOf('\\0')) !== -1) {
     const m = JSON.parse(buf.slice(0, end))
     buf = buf.slice(end + 1)
+    if (log) fs.appendFileSync(log, m.method + '\\n')
     if (hung) continue
     switch (m.method) {
+      case 'Browser.getVersion': setTimeout(() => reply(m.id, { product: 'Fake/1' }), versionDelay); break
+      case 'Target.getTargets':
+        reply(m.id, { targetInfos: targetGone ? [] : [{ targetId: 't1', type: 'page' }] })
+        break
       case 'Target.createTarget': reply(m.id, { targetId: 't1' }); break
       case 'Target.attachToTarget': reply(m.id, { sessionId: 's1' }); break
       case 'Page.getFrameTree': reply(m.id, { frameTree: { frame: { id: 'f1' } } }); break
       case 'Runtime.evaluate': reply(m.id, { result: { value: true } }); break
       case 'Page.printToPDF':
         if (hang) { hung = true; break }
+        if (onPrint === 'inspector-crash') { emit('Inspector.targetCrashed', {}, m.sessionId); break }
+        if (onPrint === 'target-crash') { emit('Target.targetCrashed', { targetId: 't1', status: 'crashed', errorCode: 9 }); break }
+        if (onPrint === 'detach') { emit('Target.detachedFromTarget', { sessionId: m.sessionId, targetId: 't1' }); break }
+        if (onPrint === 'vanish') { targetGone = true; break }
         setTimeout(() => {
           if (m.params.transferMode === 'ReturnAsStream') reply(m.id, { stream: 'h1' })
           else reply(m.id, { data: Buffer.from('%PDF-inline').toString('base64') })
@@ -141,3 +161,55 @@ describe.skipIf(process.platform === 'win32')('C3: a browser whose pipes outlive
     expect(Date.now() - started).toBeLessThan(10_000)
   }, 30_000)
 })
+
+/** Review 5, #2: a page that crashes mid-print while the browser keeps answering. */
+describe.skipIf(process.platform === 'win32')('#2: a page crash fails a long render', () => {
+  for (const how of ['inspector-crash', 'target-crash', 'detach', 'vanish']) {
+    test(`${how} → the print fails promptly with a clear error`, async () => {
+      const exe = fake(`crash-${how}`)
+      const started = Date.now()
+      await expect(
+        withEnv({ ON_PRINT: how }, () =>
+          renderPdf(exe, '<p>x</p>', {
+            waitReady: false,
+            browser: { commandTimeoutMs: 300, livenessIntervalMs: 200 }
+          })
+        )
+      ).rejects.toThrow(/page (crashed|closed) while rendering/)
+      expect(Date.now() - started).toBeLessThan(10_000)
+    }, 30_000)
+  }
+})
+
+/** Review 5, #7: a liveness probe answered after the long command settled. */
+describe.skipIf(process.platform === 'win32')(
+  '#7: the liveness watchdog stops with the command',
+  () => {
+    test('no probe is sent after the long command settles', async () => {
+      const exe = fake('watchdog')
+      const log = path.join(tmp, 'watchdog.log')
+      // Timeline: probe sent at 200 ms, print answered at 250 ms (probe in flight),
+      // probe answered at 300 ms. Nothing may poll after that.
+      const b = await withEnv(
+        { PRINT_DELAY_MS: '250', VERSION_DELAY_MS: '100', LOG_FILE: log },
+        () => launchBrowser(exe, { livenessIntervalMs: 200 })
+      )
+      try {
+        await b.sendLong('Page.printToPDF', {}, 's1')
+        const probes = (): number =>
+          fs
+            .readFileSync(log, 'utf8')
+            .split('\n')
+            .filter((l) => l === 'Browser.getVersion').length
+        // The in-flight probe (and the launch handshake) is answered by now.
+        await new Promise((r) => setTimeout(r, 500))
+        const settled = probes()
+        expect(settled).toBeGreaterThanOrEqual(2)
+        await new Promise((r) => setTimeout(r, 1_000))
+        expect(probes()).toBe(settled)
+      } finally {
+        await b.close()
+      }
+    }, 30_000)
+  }
+)

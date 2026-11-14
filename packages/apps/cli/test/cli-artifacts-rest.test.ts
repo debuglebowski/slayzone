@@ -155,6 +155,22 @@ function runCli(
 
 const short = (id: string) => id.slice(0, 8)
 
+/** The entry names of a zip, from its central directory. */
+function zipEntryNames(zip: Buffer): string[] {
+  const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  let at = zip.readUInt32LE(eocd + 16)
+  const names: string[] = []
+  for (let i = 0; i < zip.readUInt16LE(eocd + 10); i++) {
+    expect(zip.readUInt32LE(at)).toBe(0x02014b50)
+    const nameLen = zip.readUInt16LE(at + 28)
+    const extraLen = zip.readUInt16LE(at + 30)
+    const commentLen = zip.readUInt16LE(at + 32)
+    names.push(zip.subarray(at + 46, at + 46 + nameLen).toString('utf8'))
+    at += 46 + nameLen + extraLen + commentLen
+  }
+  return names
+}
+
 // Shared across the suites below: `notes.md` (markdown) is the fixture the
 // download-capability + no-server assertions address by prefix.
 let artifactId = ''
@@ -518,6 +534,82 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.readFileSync(out).subarray(0, 4).toString('hex')).toBe('504b0304')
   })
 
+  // Review 5, #11: the zip's entry names come from the shared download planner, as on
+  // desktop and web — titles are free text an agent picks.
+  test('download --type zip: duplicate, climbing and backslash titles → unique, safe entries', async () => {
+    const zipTask = crypto.randomUUID()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(zipTask, projectId, 'Zip names task', 'todo', 3, 1)
+    const f = await runCli([
+      'tasks',
+      'artifacts',
+      'mkdir',
+      'docs',
+      '--task',
+      short(zipTask),
+      '--json'
+    ])
+    expect(f.exitCode, f.stderr).toBe(0)
+    const folder = (JSON.parse(f.stdout) as { id: string }).id
+    for (const [title, inFolder] of [
+      ['dup.md', false],
+      ['dup.md', false],
+      ['DUP.md', false],
+      ['a/../../x.md', false],
+      ['win\\name.md', false],
+      ['C:evil.md', false],
+      ['dup.md', true],
+      ['../../../up.md', true]
+    ] as const) {
+      const c = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'create',
+          title,
+          '--task',
+          short(zipTask),
+          ...(inFolder ? ['--folder', folder] : []),
+          '--json'
+        ],
+        { input: `# ${title}\n` }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+    }
+    const out = path.join(tmpDir, 'names.zip')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      '--type',
+      'zip',
+      '--task',
+      short(zipTask),
+      '--output',
+      out
+    ])
+    expect(r.exitCode, r.stderr).toBe(0)
+    const names = zipEntryNames(fs.readFileSync(out))
+    expect(names.sort()).toEqual(
+      [
+        'dup.md',
+        'dup (2).md',
+        'DUP (3).md',
+        'a_x.md',
+        'win_name.md',
+        'C_evil.md',
+        'docs/dup.md',
+        'docs/up.md'
+      ].sort()
+    )
+    for (const n of names) {
+      expect(n.split('/')).not.toContain('..')
+      expect(n).not.toMatch(/[\\:]/)
+      expect(n.startsWith('/')).toBe(false)
+    }
+  })
+
   // pdf/png/html are rendered BY THE CLI from the content route — this harness's hub
   // has no exporter at all (the standalone-hub shape), and the exports still work.
   test('download --type html renders locally, no browser involved', async () => {
@@ -549,10 +641,18 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
   test('download without --output: a title that climbs or is absolute stays in the cwd', async () => {
     const cwd = path.join(tmpDir, 'l2', 'a', 'b')
     fs.mkdirSync(cwd, { recursive: true })
+    // Review 5, #12: a 300-byte title and a Windows drive-relative one also get a
+    // name every filesystem accepts (≤255 bytes, extension kept; no `:`).
+    const long = `${'x'.repeat(297)}.md`
     for (const [title, type, expected] of [
       ['../../escape-l2.md', 'html', 'escape-l2.html'],
       ['../../escape-raw.md', 'raw', 'escape-raw.md'],
-      ['/abs/dir/abs-l2.md', 'html', 'abs_dir_abs-l2.html']
+      ['/abs/dir/abs-l2.md', 'html', 'abs_dir_abs-l2.html'],
+      ['C:evil.md', 'raw', 'C_evil.md'],
+      ['C:evil-h.md', 'html', 'C_evil-h.html'],
+      [long, 'raw', `${'x'.repeat(252)}.md`],
+      [long, 'html', `${'x'.repeat(250)}.html`],
+      ['y'.repeat(300), 'html', `${'y'.repeat(250)}.html`]
     ] as const) {
       const c = await runCli(
         ['tasks', 'artifacts', 'create', title, '--task', short(taskId), '--json'],

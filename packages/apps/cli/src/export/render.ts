@@ -76,6 +76,9 @@ async function withPage<T>(
 ): Promise<T> {
   const b = await launchBrowser(executable, opts.browser)
   try {
+    // Crash/destroy events for every target: a page that dies mid-print fails the
+    // print at once instead of leaving it waiting (see cdp.ts).
+    await b.send('Target.setDiscoverTargets', { discover: true })
     const { targetId } = await b.send<{ targetId: string }>('Target.createTarget', {
       url: 'about:blank'
     })
@@ -83,6 +86,8 @@ async function withPage<T>(
       targetId,
       flatten: true
     })
+    // Inspector.targetCrashed / Inspector.detached on the page's own session.
+    await b.send('Inspector.enable', {}, sessionId)
     if (viewport) {
       await b.send('Emulation.setDeviceMetricsOverride', { ...viewport, mobile: false }, sessionId)
     }

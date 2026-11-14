@@ -2,10 +2,11 @@
 // builder made (`@slayzone/task-artifacts/export-html`) and saves it where they pick.
 // Reached from the renderer over the `app:export-artifact` IPC — the hub is not
 // involved, so export behaves the same against a local or a remote hub.
-import { readFileSync, writeFileSync, unlinkSync } from 'fs'
+import { randomUUID } from 'crypto'
+import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
-import { BrowserWindow, app, dialog, screen, shell } from 'electron'
+import { BrowserWindow, app, dialog, screen, session, shell } from 'electron'
+import type { Session, WebPreferences } from 'electron'
 import {
   EXPORT_READY_EXPRESSION,
   PNG_MEASURE_EXPRESSION,
@@ -22,98 +23,217 @@ import type {
   ArtifactExportResult
 } from '@slayzone/platform/electron-bootstrap-contract'
 
-const READY_TIMEOUT_MS = 10_000
+// --- The export window ---
+//
+// An artifact is arbitrary HTML (html-preview runs its own scripts, as on main). It is
+// rendered where it can reach nothing of the app's:
+//   - its own session, in memory and unique to this export: no cookie, storage or cache
+//     of the app's, and nothing it stores outlives the export;
+//   - served from memory under a scheme of its own, so its origin is opaque — not
+//     file:// (which would share the app's storage) and no file on disk to plant or race;
+//   - sandboxed, no preload, no node; it can't open windows, navigate away, or get any
+//     permission.
+// No fixed deadline caps a big document. The window is given up only when it can no
+// longer finish: its renderer died, or stopped answering for `unresponsiveMs` (a
+// script that never yields — a printing renderer runs no script).
 
-// --- BrowserWindow rendering ---
+const EXPORT_SCHEME = 'slz-export'
+const EXPORT_DOCUMENT_URL = `${EXPORT_SCHEME}://document/`
 
-/** Waits until a mermaid document has drawn; renders anyway after the timeout. */
-async function waitForReady(offscreen: BrowserWindow, timeoutMs = READY_TIMEOUT_MS): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (await offscreen.webContents.executeJavaScript(EXPORT_READY_EXPRESSION)) return
-    await new Promise((r) => setTimeout(r, 100))
-  }
+/** How long an export window may take at each step. Overridable for tests. */
+export interface ExportTimings {
+  /** Longest wait for the page's subresources (a hung stylesheet); then it renders anyway. */
+  loadWaitMs: number
+  /** A renderer silent this long (a script that never yields) fails the export. */
+  unresponsiveMs: number
+  /** Longest wait for a mermaid diagram to flag itself drawn; then it renders anyway. */
+  readyWaitMs: number
 }
 
-/** Render HTML to PDF via offscreen BrowserWindow. Returns the PDF buffer. */
-export async function renderToPdf(html: string, waitReady: boolean): Promise<Buffer> {
-  const tempPath = join(tmpdir(), `slayzone-pdf-${Date.now()}.html`)
-  writeFileSync(tempPath, html, 'utf-8')
+export const DEFAULT_EXPORT_TIMINGS: ExportTimings = {
+  loadWaitMs: 60_000,
+  unresponsiveMs: 60_000,
+  readyWaitMs: 10_000
+}
 
-  let offscreen: BrowserWindow | null = null
+const ignore = (): void => undefined
+
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+class ExportWindowError extends Error {}
+
+/** A throwaway session for one export: in memory, no permission, serves `html` only. */
+function exportSession(html: string): Session {
+  // No `persist:` prefix: the partition lives in memory only.
+  const ses = session.fromPartition(`slz-export-${randomUUID()}`)
+  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+  ses.setPermissionCheckHandler(() => false)
+  ses.protocol.handle(EXPORT_SCHEME, (request) =>
+    request.url === EXPORT_DOCUMENT_URL
+      ? new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      : new Response(null, { status: 404 })
+  )
+  return ses
+}
+
+function disposeSession(ses: Session): void {
+  ses.protocol.unhandle(EXPORT_SCHEME)
+  ses.clearStorageData().catch(ignore)
+  ses.clearCache().catch(ignore)
+}
+
+/**
+ * Open `html` in an isolated hidden window, hand it to `render`, always destroy it.
+ * `render` gets a `step` wrapper that fails fast when the renderer dies or hangs.
+ */
+async function withExportWindow<T>(
+  html: string,
+  size: { width: number; height: number },
+  offscreen: WebPreferences['offscreen'],
+  timings: ExportTimings,
+  render: (
+    win: BrowserWindow,
+    step: <R>(p: Promise<R>) => Promise<R>,
+    probe: <R>(code: string) => Promise<R>
+  ) => Promise<T>
+): Promise<T> {
+  const ses = exportSession(html)
+  const win = new BrowserWindow({
+    show: false,
+    ...size,
+    webPreferences: {
+      offscreen,
+      session: ses,
+      sandbox: true,
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: false,
+      spellcheck: false
+    }
+  })
+  const wc = win.webContents
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+  wc.on('will-navigate', (e) => e.preventDefault())
+  wc.on('will-redirect', (e) => e.preventDefault())
+
+  let broken = false
+  let fail: (err: Error) => void = ignore
+  const failed = new Promise<never>((_, reject) => {
+    fail = (err) => {
+      broken = true
+      reject(err)
+    }
+  })
+  failed.catch(ignore)
+  const hung = (): void => fail(new ExportWindowError('The document stopped responding'))
+  wc.on('render-process-gone', (_e, details) =>
+    fail(new ExportWindowError(`The export renderer stopped (${details.reason})`))
+  )
+  wc.on('unresponsive', hung)
+
+  const step = <R>(p: Promise<R>): Promise<R> => Promise.race([p, failed])
+  // Ask the page something; no answer within `unresponsiveMs` means it is hung.
+  const probe = <R>(code: string): Promise<R> => {
+    const timer = setTimeout(hung, timings.unresponsiveMs)
+    return step(wc.executeJavaScript(code) as Promise<R>).finally(() => clearTimeout(timer))
+  }
+
   try {
-    offscreen = new BrowserWindow({
-      show: false,
-      width: 800,
-      height: 600,
-      webPreferences: { offscreen: true, nodeIntegration: false, contextIsolation: true }
-    })
-    await offscreen.loadFile(tempPath)
-
-    if (waitReady) await waitForReady(offscreen)
-
-    return Buffer.from(
-      await offscreen.webContents.printToPDF({
-        printBackground: true,
-        // Margins left at printToPDF's default (1cm each side), which is what the
-        // old `marginType: 'default'` selected; Electron 44's types dropped it.
-        pageSize: 'A4'
+    // Our own load events, not loadURL's promise: that one rejects when the artifact
+    // tries to navigate away (refused above), though the document itself loads fine.
+    const loading = new Promise<void>((resolve, reject) => {
+      wc.once('did-finish-load', () => resolve())
+      wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
+        if (isMainFrame && url === EXPORT_DOCUMENT_URL && code !== -3)
+          reject(new ExportWindowError(`The export document failed to load (${description})`))
       })
-    )
+    })
+    loading.catch(ignore)
+    wc.loadURL(EXPORT_DOCUMENT_URL).catch(ignore)
+    // A stylesheet that never arrives doesn't block the export: render what loaded.
+    let loadWait: NodeJS.Timeout | undefined
+    await step(
+      Promise.race([
+        loading,
+        new Promise<void>((r) => {
+          loadWait = setTimeout(r, timings.loadWaitMs)
+        })
+      ])
+    ).finally(() => clearTimeout(loadWait))
+    await probe('1')
+    return await render(win, step, probe)
   } finally {
-    offscreen?.destroy()
-    try {
-      unlinkSync(tempPath)
-    } catch {
-      // Scratch file in the OS temp dir — if the unlink loses (already gone, or
-      // the window still holds it on Windows) the OS reclaims it. Never worth
-      // masking the export's own error with a cleanup failure.
+    if (!win.isDestroyed()) {
+      // A hung renderer is stopped, not left spinning.
+      if (broken && !wc.isDestroyed()) wc.forcefullyCrashRenderer()
+      win.destroy()
     }
+    disposeSession(ses)
   }
 }
 
-/** Render HTML to PNG via offscreen BrowserWindow. Returns the PNG buffer. */
-export async function renderToPng(html: string, waitReady: boolean): Promise<Buffer> {
-  const tempPath = join(tmpdir(), `slayzone-png-${Date.now()}.html`)
-  writeFileSync(tempPath, html, 'utf-8')
-
-  let offscreen: BrowserWindow | null = null
-  try {
-    offscreen = new BrowserWindow({
-      show: false,
-      width: 2000,
-      height: 2000,
-      webPreferences: {
-        // Render at the screen's pixel density (2x on Retina) so the PNG is as sharp
-        // as the diagram on screen. Offscreen rendering used the primary display's
-        // scale by default until Electron 42 made it 1.0.
-        offscreen: { deviceScaleFactor: screen.getPrimaryDisplay().scaleFactor },
-        nodeIntegration: false,
-        contextIsolation: true
-      }
-    })
-    await offscreen.loadFile(tempPath)
-
-    if (waitReady) await waitForReady(offscreen)
-
-    const { w, h } = (await offscreen.webContents.executeJavaScript(PNG_MEASURE_EXPRESSION)) as {
-      w: number
-      h: number
-    }
-    offscreen.setContentSize(w, h)
-    await new Promise((r) => setTimeout(r, 100))
-
-    const image = await offscreen.webContents.capturePage({ x: 0, y: 0, width: w, height: h })
-    return image.toPNG()
-  } finally {
-    offscreen?.destroy()
-    try {
-      unlinkSync(tempPath)
-    } catch {
-      // Same as renderToPdf: the scratch file is disposable and the OS reclaims
-      // it, so a cleanup failure must not replace the export's own error.
-    }
+/** Waits until a mermaid document has drawn; renders anyway after `readyWaitMs`. */
+async function waitForReady(
+  probe: <R>(code: string) => Promise<R>,
+  timings: ExportTimings
+): Promise<void> {
+  const deadline = Date.now() + timings.readyWaitMs
+  while (Date.now() < deadline) {
+    if (await probe<boolean>(EXPORT_READY_EXPRESSION)) return
+    await delay(100)
   }
+}
+
+/** Render HTML to PDF in an isolated hidden window. Returns the PDF buffer. */
+export function renderToPdf(
+  html: string,
+  waitReady: boolean,
+  timings: ExportTimings = DEFAULT_EXPORT_TIMINGS
+): Promise<Buffer> {
+  return withExportWindow(
+    html,
+    { width: 800, height: 600 },
+    true,
+    timings,
+    async (win, step, probe) => {
+      if (waitReady) await waitForReady(probe, timings)
+      return Buffer.from(
+        await step(
+          win.webContents.printToPDF({
+            printBackground: true,
+            // Margins left at printToPDF's default (1cm each side), which is what the
+            // old `marginType: 'default'` selected; Electron 44's types dropped it.
+            pageSize: 'A4'
+          })
+        )
+      )
+    }
+  )
+}
+
+/** Render HTML to PNG in an isolated hidden window. Returns the PNG buffer. */
+export function renderToPng(
+  html: string,
+  waitReady: boolean,
+  timings: ExportTimings = DEFAULT_EXPORT_TIMINGS
+): Promise<Buffer> {
+  return withExportWindow(
+    html,
+    { width: 2000, height: 2000 },
+    // Render at the screen's pixel density (2x on Retina) so the PNG is as sharp as
+    // the diagram on screen. Offscreen rendering used the primary display's scale by
+    // default until Electron 42 made it 1.0.
+    { deviceScaleFactor: screen.getPrimaryDisplay().scaleFactor },
+    timings,
+    async (win, step, probe) => {
+      if (waitReady) await waitForReady(probe, timings)
+      const { w, h } = await probe<{ w: number; h: number }>(PNG_MEASURE_EXPRESSION)
+      win.setContentSize(w, h)
+      await delay(100)
+      const image = await step(win.webContents.capturePage({ x: 0, y: 0, width: w, height: h }))
+      return image.toPNG()
+    }
+  )
 }
 
 // --- The export a person asked for ---
@@ -137,6 +257,8 @@ export function parseArtifactExportRequest(raw: unknown): ArtifactExportRequest 
 export interface DesktopArtifactExportDeps {
   /** mermaid's standalone browser build, copied next to the app's own output. */
   mermaidScriptPath: string
+  /** Export window timings (tests shorten them). */
+  timings?: ExportTimings
 }
 
 /**
@@ -177,17 +299,23 @@ export async function exportArtifactOnDesktop(
 
   const waitReady = needsReadyWait(mode)
   let bytes: Buffer | string
-  if (format === 'png') {
-    const html = buildPngHtml(content, mode, title, mermaidJs)
-    if (!html) return { ok: false, error: 'Failed to build PNG HTML (mermaid not available)' }
-    bytes = await renderToPng(html, waitReady)
-  } else {
-    // An html artifact's PDF keeps its scripts, as desktop always rendered it (the
-    // exported HTML file never does — the policy goes with it).
-    const html = buildDocumentHtml(content, mode, title, mermaidJs, {
-      artifactScripts: format === 'pdf'
-    })
-    bytes = format === 'pdf' ? await renderToPdf(html, waitReady) : html
+  try {
+    if (format === 'png') {
+      const html = buildPngHtml(content, mode, title, mermaidJs)
+      if (!html) return { ok: false, error: 'Failed to build PNG HTML (mermaid not available)' }
+      bytes = await renderToPng(html, waitReady, deps.timings)
+    } else {
+      // The HTML file is the document as main exported it (no policy); a PDF render
+      // keeps the policy for markdown/code/mermaid (html artifacts render as written).
+      const html = buildDocumentHtml(content, mode, title, mermaidJs, {
+        standalone: format === 'html'
+      })
+      bytes = format === 'pdf' ? await renderToPdf(html, waitReady, deps.timings) : html
+    }
+  } catch (err) {
+    // A document that hung or crashed its renderer is an export failure, reported.
+    if (err instanceof ExportWindowError) return { ok: false, error: err.message }
+    throw err
   }
 
   writeFileSync(picked.filePath, bytes)

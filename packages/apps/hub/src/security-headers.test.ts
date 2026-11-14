@@ -17,9 +17,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, assert, expect, test } from 'vitest'
 import { ENTRA_AUTHORITY, sendHubPage } from '@slayzone/hub-auth/server'
+import { EXPORT_FRAME_PATH, EXPORT_FRAME_VERSION } from './export-frame.js'
 import {
   API_CSP,
   ENTRA_SIGN_IN_ORIGIN,
+  EXPORT_FRAME_CSP,
   POSTHOG_ORIGINS,
   strictTransportSecurity,
   webShellCsp,
@@ -350,4 +352,54 @@ test('telemetry on: the shell response allows PostHog', async () => {
   const r = await fetch(`${pub.base}/`)
   const connect = directive(r.headers.get('content-security-policy') ?? '', 'connect-src')
   for (const origin of POSTHOG_ORIGINS) expect(connect, origin).toContain(origin)
+})
+
+// Review 5, #4/#8: the page the web shell prints an artifact in. An artifact renders
+// as written there (its scripts, remote styles and images), so it must never hold the
+// hub's origin: the policy sandboxes it to an opaque origin even when the URL is opened
+// directly, and only the hub's own pages may frame it.
+test('export frame: its own sandboxed policy, framable by the hub only', async () => {
+  for (const hub of [loop, pub]) {
+    for (const path of [EXPORT_FRAME_PATH, `${EXPORT_FRAME_PATH}?x=1`, '/%65xport-frame']) {
+      const r = await fetch(`${hub.base}${path}`)
+      expect(r.status, `${path} status`).toBe(200)
+      expect(r.headers.get('content-type'), `${path} type`).toBe('text/html; charset=utf-8')
+      expect(await r.text(), `${path} is the bootstrap`).toContain(
+        `slayzoneExportFrame: ${EXPORT_FRAME_VERSION}`
+      )
+      const csp = r.headers.get('content-security-policy') ?? ''
+      expect(csp, `${path} csp`).toEqual(EXPORT_FRAME_CSP)
+      expect(directive(csp, 'sandbox'), `${path} opaque origin, scripts + print only`).toEqual([
+        'allow-scripts',
+        'allow-modals'
+      ])
+      expect(directive(csp, 'frame-ancestors'), `${path} framed by the hub only`).toEqual([
+        "'self'"
+      ])
+      expect(r.headers.get('x-frame-options'), `${path} xfo`).toBe('SAMEORIGIN')
+      expect(r.headers.get('x-content-type-options'), `${path} nosniff`).toBe('nosniff')
+      expect(r.headers.get('referrer-policy'), `${path} referrer`).toBe('same-origin')
+      expect(r.headers.get('cache-control'), `${path} revalidated`).toBe('no-cache')
+      expect(r.headers.get('strict-transport-security'), `${path} hsts`).toBe(
+        strictTransportSecurity(hub === pub ? 'hub.example.com' : undefined)
+      )
+    }
+  }
+  const head = await fetch(`${loop.base}${EXPORT_FRAME_PATH}`, { method: 'HEAD' })
+  expect(head.headers.get('content-security-policy'), 'HEAD').toEqual(EXPORT_FRAME_CSP)
+})
+
+test("export frame: every other shell path keeps the shell's policy, unchanged", async () => {
+  for (const path of ['/', `${EXPORT_FRAME_PATH}/`, '/export-frame-x', '/assets/index-abc123.js']) {
+    const r = await fetch(`${pub.base}${path}`)
+    expect(r.headers.get('content-security-policy'), `${path} csp`).toEqual(
+      webShellCsp('hub.example.com', true)
+    )
+    expect(r.headers.get('x-frame-options'), `${path} xfo`).toBe('DENY')
+  }
+  // The shell's own policy frames nothing but its own origin, and holds no sandbox.
+  const shell = webShellCsp('hub.example.com', true)
+  expect(directive(shell, 'sandbox'), 'shell not sandboxed').toBe(null)
+  expect(directive(shell, 'frame-ancestors'), 'shell framed by nobody').toEqual(["'none'"])
+  expect(directive(shell, 'script-src'), 'shell scripts: self only').toEqual(["'self'"])
 })

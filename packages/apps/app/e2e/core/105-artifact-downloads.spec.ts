@@ -9,6 +9,8 @@ import {
 } from '../fixtures/electron'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import fs from 'fs'
+import http from 'http'
+import type { AddressInfo } from 'net'
 import os from 'os'
 import path from 'path'
 
@@ -349,5 +351,135 @@ test.describe('Artifact downloads', () => {
     expect(bytes.subarray(1, 4).toString('latin1')).toBe('PNG')
     // IHDR width: a drawn diagram, not the 10px floor of an empty page.
     expect(bytes.readUInt32BE(16)).toBeGreaterThan(50)
+  })
+
+  // Review 5, #5 / #14: an artifact renders where it reaches nothing of the app's, and a
+  // document that never yields fails the export instead of hanging it.
+  test.describe('the export window', () => {
+    /** Export `content` the way the renderer does, without the hub round trip. */
+    const exportContent = (
+      page: Page,
+      req: { content: string; mode: string; title: string; format: 'pdf' | 'png' | 'html' }
+    ) =>
+      page.evaluate(
+        (r) =>
+          (
+            window as unknown as {
+              api: { app: { exportArtifact: (req: unknown) => Promise<unknown> } }
+            }
+          ).api.app.exportArtifact(r),
+        req
+      )
+
+    const windowCount = (electronApp: ElectronApplication) =>
+      electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+
+    test('an html artifact cannot read app storage, navigate or open windows', async ({
+      mainWindow,
+      electronApp
+    }) => {
+      test.setTimeout(60_000)
+      const hits: string[] = []
+      const server = http.createServer((req, res) => {
+        hits.push(req.url ?? '')
+        res.end('<p>reached</p>')
+      })
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      try {
+        await mainWindow.evaluate(() => localStorage.setItem('slz-e2e-secret', 'APP-SECRET'))
+        // Every page the export opens reports its console and what it committed to.
+        await electronApp.evaluate(({ app }) => {
+          const g = globalThis as unknown as { __e2eExportLog?: string[] }
+          g.__e2eExportLog = []
+          app.on('web-contents-created', (_e, wc) => {
+            wc.on('console-message', (...args: unknown[]) => {
+              const first = args[0] as { message?: string }
+              const msg = typeof first?.message === 'string' ? first.message : String(args[2])
+              g.__e2eExportLog?.push(`console:${msg}`)
+            })
+            wc.on('did-navigate', (_ev, url) => g.__e2eExportLog?.push(`navigated:${url}`))
+          })
+        })
+        const before = await windowCount(electronApp)
+        const dest = path.join(DEST_DIR, 'isolated.pdf')
+        await nextSavePath(electronApp, dest)
+        const probe = `<p>isolated</p><script>
+          var r = { origin: location.origin, node: typeof require + '/' + typeof process };
+          try { r.secret = String(localStorage.getItem('slz-e2e-secret')) } catch (e) { r.secret = 'threw:' + e.name }
+          try { r.cookie = document.cookie } catch (e) { r.cookie = 'threw:' + e.name }
+          console.log('slz-export-probe ' + JSON.stringify(r));
+          try { window.open('${base}/opened') } catch (e) {}
+          location.href = '${base}/navigated';
+        </script>`
+        const res = await exportContent(mainWindow, {
+          content: probe,
+          mode: 'html-preview',
+          title: 'isolated.html',
+          format: 'pdf'
+        })
+        expect(res).toEqual({ ok: true })
+        expect(fs.readFileSync(dest).subarray(0, 5).toString('latin1')).toBe('%PDF-')
+
+        const log = () =>
+          electronApp.evaluate(
+            () => (globalThis as unknown as { __e2eExportLog?: string[] }).__e2eExportLog ?? []
+          )
+        await expect
+          .poll(async () => (await log()).some((l) => l.includes('slz-export-probe')), {
+            timeout: 10_000
+          })
+          .toBe(true)
+        const line = (await log()).find((l) => l.includes('slz-export-probe')) ?? ''
+        const report = JSON.parse(line.slice(line.indexOf('{'))) as Record<string, string>
+        // The artifact ran (scripts work, as on main) — but in a page of its own.
+        expect(report.secret).not.toBe('APP-SECRET')
+        expect(report.origin).not.toMatch(/^file:/)
+        expect(report.node).toBe('undefined/undefined')
+        // Nothing left the document: no window, no navigation, no request for either.
+        await new Promise((r) => setTimeout(r, 1_000))
+        expect(hits).toEqual([])
+        expect((await log()).filter((l) => l.startsWith('navigated:http'))).toEqual([])
+        expect(await windowCount(electronApp)).toBe(before)
+      } finally {
+        server.close()
+        await mainWindow.evaluate(() => localStorage.removeItem('slz-e2e-secret'))
+      }
+    })
+
+    test('a document that never yields fails the export and leaves no window', async ({
+      mainWindow,
+      electronApp
+    }) => {
+      test.setTimeout(60_000)
+      await electronApp.evaluate(() => {
+        ;(globalThis as unknown as { __e2eExportTimings?: unknown }).__e2eExportTimings = {
+          loadWaitMs: 2_000,
+          unresponsiveMs: 2_000,
+          readyWaitMs: 10_000
+        }
+      })
+      try {
+        const before = await windowCount(electronApp)
+        const dest = path.join(DEST_DIR, 'hung.pdf')
+        await nextSavePath(electronApp, dest)
+        const started = Date.now()
+        const res = (await exportContent(mainWindow, {
+          content: '<p>x</p><script>while (true) {}</script>',
+          mode: 'html-preview',
+          title: 'hung.html',
+          format: 'pdf'
+        })) as { ok: boolean; error?: string }
+        expect(res.ok).toBe(false)
+        expect(res.error).toMatch(/stopped responding/)
+        expect(Date.now() - started).toBeLessThan(30_000)
+        expect(fs.existsSync(dest)).toBe(false)
+        await expect.poll(() => windowCount(electronApp), { timeout: 10_000 }).toBe(before)
+      } finally {
+        await electronApp.evaluate(() => {
+          delete (globalThis as unknown as { __e2eExportTimings?: unknown }).__e2eExportTimings
+        })
+      }
+    })
   })
 })

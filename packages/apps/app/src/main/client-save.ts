@@ -4,15 +4,8 @@
 // person's own disk whether the hub is local or remote, and no size has to fit in
 // memory. A zip is compressed by archiver on zlib's thread pool: off the UI and off
 // main's event loop. Reached over `app:save-target-*`.
-import {
-  constants as fsConstants,
-  createWriteStream,
-  mkdirSync,
-  rmdirSync,
-  rmSync,
-  unlinkSync
-} from 'fs'
-import { copyFile, link, open, rename, unlink, type FileHandle } from 'fs/promises'
+import { createWriteStream, lstatSync, mkdirSync, rmdirSync, unlinkSync } from 'fs'
+import { link, open, rename, unlink, type FileHandle } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, extname, join } from 'path'
 import { PassThrough, type Writable } from 'stream'
@@ -153,33 +146,92 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
  * `name (n).ext` is used instead. A filesystem without hard links (FAT, some network
  * shares) gets an exclusive copy, equally unable to clobber. Returns the path used.
  */
+/**
+ * A path this download created, with the identity it had: cleanup removes a path only
+ * while it is still that same file. A name that was the person's own (or that they
+ * replaced since) has another identity and is never touched.
+ */
+interface Created {
+  path: string
+  dev: bigint
+  ino: bigint
+}
+
+/** Remove `c` only if the path still holds the file this download made. */
+function removeIfOursNow(c: Created): void {
+  try {
+    const st = lstatSync(c.path, { bigint: true })
+    if (st.dev === c.dev && st.ino === c.ino) unlinkSync(c.path)
+  } catch {
+    // Gone already.
+  }
+}
+
+/**
+ * Commit a finished partial (created by this download) at `dest` without replacing
+ * anything there, taking `name (n).ext` when the name is taken.
+ *  - A hard link shares the partial's identity, so the candidate is recorded with that
+ *    identity BEFORE the link: whenever the commit is cut short, cleanup removes the
+ *    name only if the link did create it — never the person's own file there.
+ *  - Any link error but EEXIST (no hard links: FAT/exFAT gives EPERM/EISDIR/ENOTSUP,
+ *    SMB, another volume) falls back to an exclusive create (`wx`: an existing name is
+ *    never opened) and a copy into it, recorded once the file exists.
+ * `track` receives each candidate while it is in play; the committed one is returned.
+ */
 async function commitNoClobber(
-  partial: string,
+  partial: Created,
   dest: string,
   fsOps: CommitFs,
-  onCandidate: (candidate: string) => void
-): Promise<string> {
+  track: (candidate: Created | null) => void
+): Promise<Created> {
   const dir = dirname(dest)
   const name = basename(dest)
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? dest : join(dir, numberedName(name, n))
-    try {
-      onCandidate(candidate)
-      await fsOps.link(partial, candidate)
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === 'EEXIST') continue
-      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV' && code !== 'ENOSYS') throw err
-      try {
-        await fsOps.copyFile(partial, candidate, fsConstants.COPYFILE_EXCL)
-      } catch (copyErr) {
-        if ((copyErr as NodeJS.ErrnoException).code === 'EEXIST') continue
-        throw copyErr
-      }
+    const linked: Created = { path: candidate, dev: partial.dev, ino: partial.ino }
+    track(linked)
+    const linkErr = await fsOps.link(partial.path, candidate).then(
+      () => null,
+      (err: unknown) => err as NodeJS.ErrnoException
+    )
+    if (!linkErr) {
+      await unlink(partial.path).catch(ignore)
+      return linked
     }
-    await unlink(partial).catch(ignore)
-    return candidate
+    track(null)
+    if (linkErr.code === 'EEXIST') continue
+    const handle = await open(candidate, 'wx').catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null
+      throw err
+    })
+    if (!handle) continue
+    const st = await handle.stat({ bigint: true })
+    const copy: Created = { path: candidate, dev: st.dev, ino: st.ino }
+    track(copy)
+    await fsOps
+      .copyTo(partial.path, handle)
+      .finally(() => handle.close())
+      .catch((err: unknown) => {
+        removeIfOursNow(copy)
+        throw err
+      })
+    await unlink(partial.path).catch(ignore)
+    return copy
   }
+}
+
+/** Copy `src` into an open file, in pieces. */
+async function copyInto(src: string, dest: FileHandle): Promise<void> {
+  const from = await open(src, 'r')
+  const buf = Buffer.alloc(4 * 1024 * 1024)
+  const pump = async (): Promise<void> => {
+    for (;;) {
+      const { bytesRead } = await from.read(buf, 0, buf.length, null)
+      if (bytesRead === 0) return
+      await dest.write(buf, 0, bytesRead)
+    }
+  }
+  await pump().finally(() => from.close())
 }
 
 /** Create `dir` (and parents); returns the folders this call created, outermost first. */
@@ -202,23 +254,28 @@ function mkdirTracked(dir: string): string[] {
  * download created: its files and the folders it made, never anything that existed.
  */
 function directoryTarget(root: string, fsOps: CommitFs): Target {
-  const placed: string[] = []
+  /** Committed files of this download, by identity. Cleared once it finished. */
+  const placed: Created[] = []
   const madeDirs: string[] = []
   const startPath = newPathGuard()
-  let current: { path: string; dest: string; partial: string; handle: FileHandle } | null = null
+  let current: { path: string; dest: string; partial: Created; handle: FileHandle } | null = null
   /**
-   * The file being committed: tracked until its commit has settled, so a failed commit
-   * or an abort/quit mid-commit removes its partial and whatever name it took.
+   * The file being committed: its partial and the candidate name in play, tracked until
+   * the commit has settled, so a failed commit or an abort/quit mid-commit removes
+   * exactly what this download made — by identity, never a pre-existing file.
    */
-  let committing: { partial: string; candidate: string | null } | null = null
+  let committing: { partial: Created; candidate: Created | null } | null = null
   /** Aborted: an operation still in flight undoes what it creates and fails. */
   let dead = false
+  /** Closed successfully: nothing of it is ever removed again. */
+  let finished = false
+  let aborting: Promise<void> | null = null
   const cancelled = (): Error => new Error('The download was cancelled')
 
-  const finishCurrent = async (): Promise<void> => {
+  const commitCurrent = async (): Promise<void> => {
     const c = current
     if (!c) return
-    const commit = { partial: c.partial, candidate: null as string | null }
+    const commit = { partial: c.partial, candidate: null as Created | null }
     committing = commit
     current = null
     const committed = await c.handle
@@ -228,23 +285,25 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
           commit.candidate = candidate
         })
       )
-      .catch(async (err: unknown) => {
-        // A failed commit leaves nothing: not the partial, not a half-copied name.
-        await unlink(commit.partial).catch(ignore)
-        if (commit.candidate) await unlink(commit.candidate).catch(ignore)
+      .catch((err: unknown) => {
+        // A failed commit leaves nothing of this download (each removed only if it is
+        // still ours): not the partial, not a half-copied name.
+        removeIfOursNow(commit.partial)
+        if (commit.candidate) removeIfOursNow(commit.candidate)
         if (committing === commit) committing = null
         throw err
       })
     if (committing === commit) committing = null
     if (dead) {
-      // Aborted while committing: this file is not part of a download that failed.
-      await unlink(committed).catch(ignore)
+      // Aborted while committing: this file belongs to a download that failed.
+      removeIfOursNow(committed)
       throw cancelled()
     }
     placed.push(committed)
   }
   const removeCreated = (): void => {
-    for (const f of placed) rmSync(f, { force: true })
+    if (finished) return
+    for (const f of placed) removeIfOursNow(f)
     placed.length = 0
     // Deepest first; only folders this download made, and only while empty.
     for (const d of [...madeDirs].reverse()) {
@@ -260,23 +319,25 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
     const c = committing
     committing = null
     if (!c) return
-    unlinkNow(c.partial)
-    if (c.candidate) unlinkNow(c.candidate)
+    removeIfOursNow(c.partial)
+    if (c.candidate) removeIfOursNow(c.candidate)
   }
   return {
     async write(path, data) {
       if (dead) throw cancelled()
       if (current?.path !== path) {
         startPath(path)
-        await finishCurrent()
+        await commitCurrent()
         if (dead) throw cancelled()
         const dest = containedPath(root, ...path.split('/'))
         madeDirs.push(...mkdirTracked(dirname(dest)))
-        const partial = partialPath(dest)
-        const handle = await open(partial, 'wx')
+        const partialName = partialPath(dest)
+        const handle = await open(partialName, 'wx')
+        const st = await handle.stat({ bigint: true })
+        const partial: Created = { path: partialName, dev: st.dev, ino: st.ino }
         if (dead) {
           await handle.close().catch(ignore)
-          await unlink(partial).catch(ignore)
+          removeIfOursNow(partial)
           throw cancelled()
         }
         current = { path, dest, partial, handle }
@@ -287,21 +348,32 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
       if (dead) throw cancelled()
       madeDirs.push(...mkdirTracked(containedPath(root, ...path.split('/'))))
     },
-    close: finishCurrent,
-    async abort() {
-      dead = true
-      const c = current
-      current = null
-      if (c) {
-        await c.handle.close().catch(ignore)
-        await unlink(c.partial).catch(ignore)
-      }
-      dropCommitting()
-      removeCreated()
+    async close() {
+      await commitCurrent()
+      // Finished: every file is the person's now.
+      finished = true
+      placed.length = 0
+      madeDirs.length = 0
+    },
+    // Single-flight: two aborts at once (a failed close and a window going away) must
+    // not interleave, or one clears the folder list while the other still holds a file.
+    abort() {
+      aborting ??= (async () => {
+        dead = true
+        const c = current
+        current = null
+        if (c) {
+          await c.handle.close().catch(ignore)
+          removeIfOursNow(c.partial)
+        }
+        dropCommitting()
+        removeCreated()
+      })()
+      return aborting
     },
     abortNow() {
       dead = true
-      if (current) unlinkNow(current.partial)
+      if (current) removeIfOursNow(current.partial)
       current = null
       dropCommitting()
       removeCreated()
@@ -422,7 +494,8 @@ const ABORT_WAIT_MS = 5_000
 /** How a folder download commits its files; a test injects failing ones. */
 export interface CommitFs {
   link: (existing: string, path: string) => Promise<void>
-  copyFile: (src: string, dest: string, mode?: number) => Promise<void>
+  /** Copy a file's bytes into a file this download just created exclusively. */
+  copyTo: (src: string, dest: FileHandle) => Promise<void>
 }
 
 export interface SaveTargetsOptions {
@@ -454,7 +527,7 @@ export class SaveTargets {
   constructor(options: SaveTargetsOptions = {}) {
     everyTargets.add(this)
     this.openZipOutput = options.openZipOutput ?? ((p) => createWriteStream(p))
-    this.commitFs = options.commitFs ?? { link, copyFile }
+    this.commitFs = options.commitFs ?? { link, copyTo: copyInto }
   }
 
   private entry(owner: number, id: unknown): Entry {

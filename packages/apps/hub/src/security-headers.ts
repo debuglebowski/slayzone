@@ -13,9 +13,12 @@
  * written straight to the socket by the `upgrade` handler, never through a
  * ServerResponse, and is not a document.
  *
- * Two profiles, split on the same paths `web-assets.ts` leaves to other handlers:
+ * Three profiles, split on the same paths `web-assets.ts` leaves to other handlers:
  *   - API (`/api`, `/mcp`, `/trpc`, `/computers`, `/health`): JSON, tokens, user
  *     data. `Cache-Control: no-store` and a CSP under which nothing loads.
+ *   - Export frame (`/export-frame`, export-frame.ts): the page the shell prints an
+ *     artifact in. Sandboxed to an opaque origin, framable by the hub's own pages
+ *     only ({@link EXPORT_FRAME_CSP}).
  *   - Web shell (every other path): the SPA document, its hashed assets and its
  *     worker. A worker's CSP comes from its own script's response, so assets get
  *     the shell policy too. Caching stays as `web-assets.ts` sets it.
@@ -41,6 +44,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isHubPageResponse } from '@slayzone/hub-auth/server'
 import { hubUrlFromAddr, isLoopbackAuthority } from '@slayzone/platform/hub-addr'
+import { isExportFrameUrl } from './export-frame.js'
 import { isReservedUrl } from './web-assets.js'
 
 /**
@@ -106,6 +110,36 @@ export function webShellCsp(publicAddress: string | undefined, telemetry: boolea
 }
 
 /**
+ * The export frame's policy (export-frame.ts: the page the web shell prints an
+ * artifact in). Isolation first, then rendering:
+ *   - `sandbox allow-scripts allow-modals`: an opaque origin wherever the page is
+ *     opened, framed or top-level, so nothing in it reaches the hub's cookies, storage
+ *     or pages (and the shell's frame leaves out `allow-same-origin` too). Scripts run
+ *     (the bootstrap, an html artifact's own, mermaid's); `allow-modals` lets it print.
+ *     No forms, popups, top navigation or downloads.
+ *   - Content: a document renders as written, as desktop renders it — inline and
+ *     remote scripts and styles, remote images, fonts and media, network calls. All of
+ *     it from an origin that holds nothing.
+ *   - `frame-ancestors 'self'`: only the hub's own pages frame it (`X-Frame-Options:
+ *     SAMEORIGIN` with it). A frame inside it cannot frame it again: its origin is
+ *     opaque, not the hub's.
+ */
+export const EXPORT_FRAME_CSP = [
+  'sandbox allow-scripts allow-modals',
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' http: https: data: blob:",
+  "style-src 'unsafe-inline' http: https: data: blob:",
+  'img-src http: https: data: blob:',
+  'font-src http: https: data:',
+  'media-src http: https: data: blob:',
+  'connect-src http: https: ws: wss: data: blob:',
+  'frame-src http: https: data: blob:',
+  'worker-src http: https: data: blob:',
+  "object-src 'none'",
+  "frame-ancestors 'self'"
+].join('; ')
+
+/**
  * Every API response: nothing loads. The one HTML page the API serves is
  * better-auth's `/api/auth/error` (outside NODE_ENV=production), which is styled
  * only by inline styles, hence `style-src 'unsafe-inline'`.
@@ -144,18 +178,22 @@ interface Profile {
 /** Express adds it; it names the stack and serves nothing. */
 const REMOVED = ['x-powered-by']
 
-function buildProfiles(opts: SecurityHeadersOptions): { api: Profile; shell: Profile } {
-  const common: Array<[string, string]> = [
+function buildProfiles(opts: SecurityHeadersOptions): {
+  api: Profile
+  shell: Profile
+  exportFrame: Profile
+} {
+  const base: Array<[string, string]> = [
     ['x-content-type-options', 'nosniff'],
-    // Legacy twin of `frame-ancestors 'none'`.
-    ['x-frame-options', 'DENY'],
     // Full referrer within the hub, none to PostHog/GitHub/Entra. Not `no-referrer`:
     // under it a same-origin `fetch` POST carries `Origin: null`, which fails
     // better-auth's origin check.
     ['referrer-policy', 'same-origin']
   ]
   const hsts = strictTransportSecurity(opts.publicAddress)
-  if (hsts) common.push(['strict-transport-security', hsts])
+  if (hsts) base.push(['strict-transport-security', hsts])
+  // Legacy twin of `frame-ancestors 'none'`.
+  const common: Array<[string, string]> = [...base, ['x-frame-options', 'DENY']]
   const profile = (forced: Array<[string, string]>, defaults: Array<[string, string]>): Profile => {
     const strip = new Set([...forced.map(([name]) => name), ...REMOVED])
     return {
@@ -174,6 +212,15 @@ function buildProfiles(opts: SecurityHeadersOptions): { api: Profile; shell: Pro
       [...common, ['content-security-policy', webShellCsp(opts.publicAddress, opts.telemetry)]],
       // `web-assets.ts` sets its own (index `no-cache`, hashed assets immutable);
       // this covers what falls through to express (a 404, a POST to `/`).
+      [['cache-control', 'no-store']]
+    ),
+    exportFrame: profile(
+      [
+        ...base,
+        // Legacy twin of `frame-ancestors 'self'`.
+        ['x-frame-options', 'SAMEORIGIN'],
+        ['content-security-policy', EXPORT_FRAME_CSP]
+      ],
       [['cache-control', 'no-store']]
     )
   }
@@ -240,7 +287,11 @@ export function withSecurityHeaders(
 ): (req: IncomingMessage, res: ServerResponse) => void {
   const profiles = buildProfiles(opts)
   return (req, res) => {
-    const profile = isReservedUrl(req.url) ? profiles.api : profiles.shell
+    const profile = isReservedUrl(req.url)
+      ? profiles.api
+      : isExportFrameUrl(req.url)
+        ? profiles.exportFrame
+        : profiles.shell
     const writeHead = res.writeHead
     res.writeHead = function (this: ServerResponse, ...args: unknown[]) {
       if (!this.headersSent) applyProfile(this, profile, args)

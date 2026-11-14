@@ -18,6 +18,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { handleExportFrame } from './export-frame.js'
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -92,6 +93,8 @@ export function handleWebAssets(
 
   const indexPath = join(webRoot, 'index.html')
   if (!existsSync(indexPath)) return false
+  // The page the shell prints an artifact in (export-frame.ts); its policy is its own.
+  if (handleExportFrame(req, res)) return true
 
   // Normalize the UNTRUSTED pathname ALONE, before it ever touches webRoot.
   // `path.normalize` on an absolute ("/"-leading) string resolves every `..`

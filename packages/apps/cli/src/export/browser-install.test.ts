@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { afterAll, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
 import {
   BrowserInstallError,
   cftPlatformFor,
@@ -328,6 +328,9 @@ const fetchImpl = async (input) => {
     start(c) { c.enqueue(new Uint8Array(64 * 1024)); console.log('downloading') }
   }))
 }
+// A real stalled download holds a socket open; without a handle the process would
+// exit by itself (unsettled top-level await) before the signal arrives.
+setInterval(() => {}, 1 << 30)
 const ctx = {
   platform: 'linux', arch: 'x64', env: { PATH: '' }, homedir: ${JSON.stringify(home)},
   isExecutable: () => false,
@@ -393,4 +396,123 @@ test('a concurrent install that finished first is kept, not replaced', async () 
   expect(bin).toBe(theirs)
   expect(fs.readFileSync(theirs, 'utf8')).toContain('# theirs')
   expect(fs.readdirSync(root)).toEqual(['157.0.8103.38'])
+})
+
+// Review 5, #13: concurrent `--install-browser` runs (parallel agents, separate
+// processes). The commit must be atomic: a working install already in place — or one
+// landing between our check and our rename — is kept, never deleted.
+describe('concurrent installs (review 5, #13)', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const VERSION_DIR = '157.0.8103.38'
+  const BIN_REL = 'chrome-headless-shell-linux64/chrome-headless-shell'
+  const zipWithShell = (tag: string) =>
+    makeZip([{ name: BIN_REL, data: Buffer.from(`#!/bin/sh\n# ${tag}\n`), mode: 0o755 }])
+  const plainFetch = (zip: Buffer): typeof fetch =>
+    (async (input: string | URL | Request) =>
+      String(input).endsWith('.json')
+        ? new Response(JSON.stringify(SAMPLE))
+        : new Response(new Uint8Array(zip))) as typeof fetch
+
+  test('another install landing after the download is kept (never deleted, no ENOTEMPTY)', async () => {
+    const home = path.join(tmp, 'home-race2')
+    const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+    const finalDir = path.join(root, VERSION_DIR)
+    const theirs = path.join(finalDir, BIN_REL)
+    let downloaded = false
+    let landed = false
+    // The other process finishes the moment ours is about to commit: right after any
+    // existence check we make, or right before our rename — whichever comes first.
+    const land = (): void => {
+      if (!downloaded || landed) return
+      landed = true
+      fs.mkdirSync(path.dirname(theirs), { recursive: true })
+      fs.writeFileSync(theirs, '#!/bin/sh\n# theirs\n', { mode: 0o755 })
+    }
+    const base = realCtx(home)
+    const ctx: BrowserEnv = {
+      ...base,
+      isExecutable: (p) => {
+        const answer = base.isExecutable(p)
+        if (p === theirs) land()
+        return answer
+      }
+    }
+    const realRename = fs.renameSync
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to) === finalDir) land()
+      return realRename(from, to)
+    })
+    const zip = zipWithShell('ours')
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return new Response(JSON.stringify(SAMPLE))
+      downloaded = true
+      return new Response(new Uint8Array(zip))
+    }) as typeof fetch
+    const bin = await installHeadlessShell({ ctx, fetchImpl, log: () => {} })
+    expect(landed).toBe(true)
+    expect(bin).toBe(theirs)
+    expect(fs.readFileSync(theirs, 'utf8')).toContain('# theirs')
+    expect(fs.readdirSync(root)).toEqual([VERSION_DIR])
+  })
+
+  test('a leftover version dir with no working executable is replaced', async () => {
+    const home = path.join(tmp, 'home-broken')
+    const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+    fs.mkdirSync(path.join(root, VERSION_DIR, 'junk'), { recursive: true })
+    fs.writeFileSync(path.join(root, VERSION_DIR, 'junk', 'x'), 'x')
+    const bin = await installHeadlessShell({
+      ctx: realCtx(home),
+      fetchImpl: plainFetch(zipWithShell('ours')),
+      log: () => {}
+    })
+    expect(fs.readFileSync(bin, 'utf8')).toContain('# ours')
+    expect(fs.existsSync(path.join(root, VERSION_DIR, 'junk'))).toBe(false)
+    expect(fs.readdirSync(root)).toEqual([VERSION_DIR])
+  })
+
+  test('a redirect to plain http is refused', async () => {
+    const home = path.join(tmp, 'home-redirect')
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return new Response(JSON.stringify(SAMPLE))
+      const res = new Response(new Uint8Array(zipWithShell('mitm')))
+      // What fetch reports after following a redirect: the final URL.
+      Object.defineProperty(res, 'url', { value: 'http://mirror.example/shell.zip' })
+      return res
+    }) as typeof fetch
+    const err = await installHeadlessShell({ ctx: realCtx(home), fetchImpl, log: () => {} }).catch(
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(BrowserInstallError)
+    expect(String((err as Error).message)).toMatch(/https/)
+    const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+    expect(fs.existsSync(root) ? fs.readdirSync(root) : []).toEqual([])
+  })
+
+  test('a download larger than the cap is refused while streaming', async () => {
+    const home = path.join(tmp, 'home-big')
+    let sent = 0
+    const fetchImpl = (async (input: string | URL | Request) => {
+      if (String(input).endsWith('.json')) return new Response(JSON.stringify(SAMPLE))
+      // Endless body, no Content-Length: only counting while streaming can stop it.
+      return new Response(
+        new ReadableStream({
+          pull(c) {
+            sent += 64 * 1024
+            c.enqueue(new Uint8Array(64 * 1024))
+          }
+        })
+      )
+    }) as typeof fetch
+    const err = await installHeadlessShell({
+      ctx: realCtx(home),
+      fetchImpl,
+      log: () => {},
+      maxDownloadBytes: 1024 * 1024
+    }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BrowserInstallError)
+    expect(String((err as Error).message)).toMatch(/larger than/)
+    expect(sent).toBeLessThan(8 * 1024 * 1024)
+    const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+    expect(fs.existsSync(root) ? fs.readdirSync(root) : []).toEqual([])
+  }, 30_000)
 })

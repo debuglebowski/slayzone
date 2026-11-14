@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('mermaid/dist/mermaid.min.js?url', () => ({ default: '/assets/mermaid.min.js' }))
 const render = vi.fn(async (_id: string, _code: string) => ({ svg: '<svg id="drawn"></svg>' }))
-vi.mock('mermaid', () => ({ default: { render } }))
+const parse = vi.fn(async (_code: string) => ({ diagramType: 'flowchart-v2', config: {} }))
+vi.mock('mermaid', () => ({ default: { render, parse } }))
 
 import { TaintedCanvasError, exportArtifactInBrowser } from './artifact-export'
 
@@ -74,41 +75,138 @@ describe('exportArtifactInBrowser', () => {
     expect(clicked).toHaveLength(0)
   })
 
-  it('prints PDF from a script-free sandboxed frame', async () => {
-    const frames = captureFrames()
-    void exportArtifactInBrowser({ format: 'pdf', mode: 'markdown', title: 'n.md', content: '# x' })
-    await vi.waitFor(() => expect(frames).toHaveLength(1))
-    const frame = frames[0]
-    // Same origin so this page can print it; NO allow-scripts, so the artifact's own
-    // scripts never run with this page's origin.
-    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin allow-modals')
-    expect(frame.srcdoc).toContain('<h1>x</h1>')
-    expect(frame.srcdoc).not.toContain('<script')
-    frame.remove()
-  })
-
-  it('draws mermaid in the page (light theme, dagre) and prints the static SVG', async () => {
-    const frames = captureFrames()
-    void exportArtifactInBrowser({
-      format: 'pdf',
-      mode: 'mermaid-preview',
-      title: 'd.mmd',
-      content: 'graph TD; A-->B'
-    })
-    await vi.waitFor(() => expect(frames).toHaveLength(1))
-    expect(render.mock.calls[0][1]).toBe(
-      '%%{init: {"theme": "default", "layout": "dagre"}}%%\ngraph TD; A-->B'
-    )
-    expect(frames[0].srcdoc).toContain('<pre class="mermaid"><svg id="drawn"></svg></pre>')
-    expect(frames[0].srcdoc).not.toContain('<script')
-    frames[0].remove()
-  })
-
   it('reports a diagram that does not parse', async () => {
     render.mockRejectedValueOnce(new Error('Parse error on line 1'))
     await expect(
       exportArtifactInBrowser({ format: 'png', mode: 'mermaid-preview', title: 'd', content: '?' })
     ).resolves.toEqual({ ok: false, error: 'Parse error on line 1' })
+  })
+})
+
+// Review 5, #4/#8: a PDF is printed in the hub's export frame (hub export-frame.ts), on an
+// opaque origin, where the document renders as written: an html artifact's own scripts
+// and remote styles, markdown's remote images, mermaid drawn by its inlined build. The
+// frame's real behaviour is proved in a browser (e2e 207); this is the shell's side.
+describe('PDF through the export frame', () => {
+  /** Start a PDF export; resolves with its frame once the shell has created it. */
+  async function startPdf(req: { mode: string; content: string; title?: string }) {
+    const frames = captureFrames()
+    const result = exportArtifactInBrowser({ format: 'pdf', title: 'n.md', ...req })
+    await vi.waitFor(() => expect(frames).toHaveLength(1))
+    const frame = frames[0]
+    const win = frame.contentWindow as Window
+    const posted: { message: Record<string, unknown>; target: string }[] = []
+    win.postMessage = ((message: Record<string, unknown>, target: string) => {
+      posted.push({ message, target })
+    }) as typeof win.postMessage
+    const say = (data: unknown, source: Window | null = win) =>
+      window.dispatchEvent(new MessageEvent('message', { data, source }))
+    return { frame, result, posted, say }
+  }
+
+  it('loads the hub page in a frame with scripts but no origin, and prints the document', async () => {
+    const { frame, result, posted, say } = await startPdf({ mode: 'markdown', content: '# x' })
+    // Scripts run in it; WITHOUT allow-same-origin, so never with this page's origin.
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-modals')
+    expect(new URL(frame.src).pathname).toBe('/export-frame')
+    expect(frame.hasAttribute('srcdoc')).toBe(false)
+    expect(posted).toEqual([])
+
+    say({ slayzoneExportFrame: 1 })
+    expect(posted).toHaveLength(1)
+    const { message, target } = posted[0]
+    // An opaque origin has no name to address it by.
+    expect(target).toBe('*')
+    expect(message.waitForReady).toBe(false)
+    expect(message.html).toContain('<h1>x</h1>')
+    // The markdown document keeps its own policy: its markup runs no script.
+    expect(message.html).toContain("script-src 'none'")
+
+    const id = message.slayzoneExport
+    say({ slayzoneExport: id, state: 'ready', images: { total: 0, loaded: 0 } })
+    expect(frame.isConnected).toBe(true)
+    say({ slayzoneExport: id, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+    expect(frame.isConnected).toBe(false)
+  })
+
+  it('an html artifact goes to the frame as written: its scripts and styles included', async () => {
+    const page =
+      '<html><head><link rel="stylesheet" href="https://cdn.example/x.css"></head>' +
+      '<body><canvas id="c"></canvas><script src="https://cdn.example/chart.js"></script>' +
+      '<script>draw()</script></body></html>'
+    const { posted, say, result } = await startPdf({ mode: 'html-preview', content: page })
+    say({ slayzoneExportFrame: 1 })
+    const html = posted[0].message.html as string
+    expect(html).toContain('<script src="https://cdn.example/chart.js"></script>')
+    expect(html).toContain('<script>draw()</script>')
+    expect(html).not.toContain('Content-Security-Policy')
+    say({ slayzoneExport: posted[0].message.slayzoneExport, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+  })
+
+  it('mermaid is drawn in the frame by the inlined build; the shell waits for it', async () => {
+    render.mockClear()
+    const { posted, say, result } = await startPdf({
+      mode: 'mermaid-preview',
+      content: '---\ntitle: T\n---\ngraph TD; A-->B'
+    })
+    say({ slayzoneExportFrame: 1 })
+    const { message } = posted[0]
+    expect(message.waitForReady).toBe(true)
+    expect(message.html).toContain('/*mermaid build*/')
+    expect(message.html).toContain(
+      '<pre class="mermaid">---\ntitle: T\n---\ngraph TD; A--&gt;B</pre>'
+    )
+    expect(render).not.toHaveBeenCalled()
+    say({ slayzoneExport: message.slayzoneExport, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+  })
+
+  it('a frame speaking another protocol version (a stale tab) asks for a reload', async () => {
+    const { posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
+    say({ slayzoneExportFrame: 2 })
+    expect(posted).toEqual([])
+    await expect(result).resolves.toEqual({
+      ok: false,
+      error: 'This page is out of date. Reload it, then export again.'
+    })
+  })
+
+  it('a failure the frame reports fails the export and removes the frame', async () => {
+    const { frame, posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
+    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExport: posted[0].message.slayzoneExport, state: 'error', message: 'boom' })
+    await expect(result).resolves.toEqual({ ok: false, error: 'boom' })
+    expect(frame.isConnected).toBe(false)
+  })
+
+  it('messages from anywhere but the frame, or for another export, are ignored', async () => {
+    const { posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
+    say({ slayzoneExportFrame: 1 }, null)
+    say({ slayzoneExportFrame: 1 }, window)
+    expect(posted).toEqual([])
+    say({ slayzoneExportFrame: 1 })
+    const id = posted[0].message.slayzoneExport
+    say({ slayzoneExport: 'other', state: 'error', message: 'not mine' })
+    say({ slayzoneExport: id, state: 'done' }, null)
+    say({ slayzoneExport: id, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+  })
+
+  it('a frame that never answers fails the export instead of waiting forever', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { frame, result } = await startPdf({ mode: 'markdown', content: '# x' })
+      await vi.advanceTimersByTimeAsync(20_000)
+      await expect(result).resolves.toEqual({
+        ok: false,
+        error: 'The print frame did not load'
+      })
+      expect(frame.isConnected).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -166,12 +264,22 @@ describe('PNG on a tainting browser (WebKit)', () => {
     })
   })
 
+  // Review 5, #3: mermaid takes frontmatter only at the very start.
+  it('a diagram with frontmatter keeps it first, the directive after it', async () => {
+    render.mockClear()
+    const { drawMermaidSvg } = await import('./artifact-export')
+    await drawMermaidSvg('---\ntitle: Flow\n---\ngraph TD; A-->B', { htmlLabels: true })
+    expect(render.mock.calls[0][1]).toBe(
+      '---\ntitle: Flow\n---\n%%{init: {"theme":"default","layout":"dagre"}}%%\ngraph TD; A-->B'
+    )
+  })
+
   it('the light theme with plain-text labels is what the fallback asks mermaid for', async () => {
     render.mockClear()
     const { drawMermaidSvg } = await import('./artifact-export')
     await drawMermaidSvg('graph TD', { htmlLabels: false })
     const code = render.mock.calls[0][1]
-    expect(code).toContain('"htmlLabels": false')
-    expect(code).toContain('"flowchart": {"htmlLabels": false}')
+    expect(code).toContain('"htmlLabels":false')
+    expect(code).toContain('"flowchart":{"htmlLabels":false}')
   })
 })

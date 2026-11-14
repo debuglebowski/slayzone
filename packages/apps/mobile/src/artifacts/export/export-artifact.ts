@@ -14,7 +14,9 @@
  *   view; if WebKit won't read back mermaid's HTML labels, drawn again with text labels.
  *
  * Files go to `<caches>/slayzone-exports/`, emptied at each export (the share sheet is
- * done with the previous one by then).
+ * done with the previous one by then). expo-print's own scratch PDFs (`<caches>/Print/`)
+ * never pile up either: one that lands after its export gave up is removed when it
+ * lands, and any left over (the app was killed mid-print) are swept when no print runs.
  */
 import {
   type ArtifactExportFormat,
@@ -55,6 +57,11 @@ export interface ExportArtifactDeps {
 /** A print waiting on an unreachable image gives up long before this. */
 export const EXPORT_PRINT_TIMEOUT_MS = 60_000
 
+/** expo-print writes each PDF here before we move it. */
+const PRINT_DIR = 'Print'
+/** Prints an export still waits for: while any is, expo-print's folder is not swept. */
+let printsInFlight = 0
+
 /** The export folders of exports still running in this app: never swept. */
 const liveExportDirs = new Set<string>()
 let exportSeq = 0
@@ -85,7 +92,7 @@ async function exportInto(
     case 'html': {
       const mermaid = needsMermaidScript(mode) ? await deps.mermaidScript() : null
       target.create({ overwrite: true })
-      await target.write(buildDocumentHtml(content, mode, title, mermaid))
+      await target.write(buildDocumentHtml(content, mode, title, mermaid, { standalone: true }))
       break
     }
     case 'pdf': {
@@ -93,16 +100,26 @@ async function exportInto(
         mode === 'mermaid-preview'
           ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
           : buildDocumentHtml(content, mode, title)
+      if (printsInFlight === 0) sweepLeftoverPrints()
+      printsInFlight++
+      const job = printToFileAsync({
+        html,
+        width: A4.width,
+        height: A4.height,
+        margins: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN }
+      })
       const printed = await withTimeout(
-        printToFileAsync({
-          html,
-          width: A4.width,
-          height: A4.height,
-          margins: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: MARGIN }
-        }),
+        job,
         deps.printTimeoutMs ?? EXPORT_PRINT_TIMEOUT_MS,
         'Printing the PDF took too long.'
       )
+        // Done or given up: either way its file is no longer one to protect.
+        .finally(() => printsInFlight--)
+        .catch((err: unknown) => {
+          // Given up: the PDF, if it ever lands, is nobody's — removed when it does.
+          job.then((late) => removeQuietly(new File(late.uri))).catch(() => undefined)
+          throw err
+        })
       await new File(printed.uri).move(target)
       break
     }
@@ -143,6 +160,22 @@ function freshExportFile(name: string): { dir: string; file: File } {
   dir.create({ intermediates: true, idempotent: true })
   liveExportDirs.add(dir.uri)
   return { dir: dir.uri, file: new File(dir, name) }
+}
+
+/** expo-print's scratch PDFs left by an earlier run (no print is running now). */
+function sweepLeftoverPrints(): void {
+  const dir = new Directory(Paths.cache, PRINT_DIR)
+  if (!dir.exists) return
+  for (const entry of dir.list()) if (entry instanceof File) removeQuietly(entry)
+}
+
+function removeQuietly(entry: File): void {
+  // One that cannot be removed must not fail the export; the next sweep retries.
+  try {
+    entry.delete()
+  } catch {
+    // Left for the next sweep.
+  }
 }
 
 function withTimeout<T>(work: Promise<T>, ms: number, message: string): Promise<T> {

@@ -6,11 +6,11 @@
  * encoder, and the web-shell e2e group covers the real worker under the hub's CSP.
  */
 import { unzipSync } from 'fflate'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('mermaid/dist/mermaid.min.js?url', () => ({ default: '/assets/mermaid.min.js' }))
 
-import { createBrowserSaveTargets, inlineZipSink } from './client-save'
+import { createBrowserSaveTargets, inlineZipSink, workerZipSink } from './client-save'
 
 const clicked: { name: string; blob: Blob }[] = []
 
@@ -145,5 +145,92 @@ describe('memory shape', () => {
     await targets.close(id)
     const final = made[made.length - 1]
     for (const p of final.parts) expect(p).toBeInstanceOf(Blob)
+  })
+})
+
+// Review 5, #9. The zip worker can die with nothing in flight: a tab left open across a
+// hub upgrade asks for a hashed worker chunk that no longer exists (404), and the error
+// arrives before the first request. Every request after that must fail, never hang.
+describe('workerZipSink when the worker dies', () => {
+  class FakeWorker {
+    static last: FakeWorker | null = null
+    onmessage: ((e: MessageEvent) => void) | null = null
+    onerror: ((e: Event) => void) | null = null
+    onmessageerror: ((e: MessageEvent) => void) | null = null
+    posted: unknown[] = []
+    terminated = false
+    constructor() {
+      FakeWorker.last = this
+    }
+    postMessage(msg: unknown) {
+      this.posted.push(msg)
+    }
+    terminate() {
+      this.terminated = true
+    }
+  }
+  const realWorker = globalThis.Worker
+  beforeEach(() => {
+    globalThis.Worker = FakeWorker as unknown as typeof Worker
+  })
+  afterEach(() => {
+    globalThis.Worker = realWorker
+  })
+  const settled = (p: Promise<unknown>) =>
+    Promise.race([
+      p.then(
+        () => 'resolved',
+        (e: Error) => `rejected: ${e.message}`
+      ),
+      new Promise((r) => setTimeout(() => r('pending'), 50))
+    ])
+
+  it('an error with nothing in flight fails every later request', async () => {
+    const sink = workerZipSink(() => undefined)
+    const worker = FakeWorker.last as FakeWorker
+    worker.onerror?.(new Event('error'))
+    expect(await settled(sink.write('a.md', bytes('A')))).toBe('rejected: The zip worker failed')
+    expect(await settled(sink.mkdir('d'))).toBe('rejected: The zip worker failed')
+    expect(await settled(sink.finish())).toBe('rejected: The zip worker failed')
+    expect(worker.posted, 'nothing sent to a dead worker').toEqual([])
+  })
+
+  it('an error mid-request fails that request and every later one', async () => {
+    const sink = workerZipSink(() => undefined)
+    const worker = FakeWorker.last as FakeWorker
+    const first = sink.write('a.md', bytes('A'))
+    worker.onerror?.(Object.assign(new Event('error'), { message: 'boom' }))
+    expect(await settled(first)).toBe('rejected: boom')
+    expect(await settled(sink.write('b.md', bytes('B')))).toBe('rejected: boom')
+  })
+
+  it('a reply that cannot be deserialised fails the request and the sink', async () => {
+    const sink = workerZipSink(() => undefined)
+    const worker = FakeWorker.last as FakeWorker
+    const first = sink.write('a.md', bytes('A'))
+    worker.onmessageerror?.(new MessageEvent('messageerror'))
+    expect(await settled(first)).toMatch(/^rejected: /)
+    expect(await settled(sink.finish())).toMatch(/^rejected: /)
+  })
+
+  it('a request the worker cannot be sent fails, and so does every later one', async () => {
+    const sink = workerZipSink(() => undefined)
+    const worker = FakeWorker.last as FakeWorker
+    worker.postMessage = () => {
+      throw new DOMException('could not be cloned', 'DataCloneError')
+    }
+    expect(await settled(sink.write('a.md', bytes('A')))).toBe('rejected: could not be cloned')
+    expect(await settled(sink.finish())).toBe('rejected: could not be cloned')
+  })
+
+  it('a healthy worker still answers in order', async () => {
+    const out: Uint8Array[] = []
+    const sink = workerZipSink((c) => out.push(c))
+    const worker = FakeWorker.last as FakeWorker
+    const p = sink.write('a.md', bytes('A'))
+    const seq = (worker.posted[0] as { seq: number }).seq
+    worker.onmessage?.(new MessageEvent('message', { data: { seq, out: [bytes('PK')] } }))
+    expect(await settled(p)).toBe('resolved')
+    expect(out).toHaveLength(1)
   })
 })

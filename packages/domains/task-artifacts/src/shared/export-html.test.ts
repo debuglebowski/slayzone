@@ -135,13 +135,21 @@ describe('content security policy', () => {
     expect(policyOf(html!)).toContain("script-src 'nonce-abc123'")
   })
 
-  it('html-preview: strict by default; the artifact scripts only where a host opts in', () => {
-    expect(policyOf(buildDocumentHtml('<p>x</p>', 'html-preview', 't'))).toContain(
-      "script-src 'none'"
-    )
-    expect(
-      policyOf(buildDocumentHtml('<p>x</p>', 'html-preview', 't', null, { artifactScripts: true }))
-    ).toBeNull()
+  // Review 5, #4: as main — an html artifact renders as written (each host isolates
+  // it), and an exported HTML file carries no policy.
+  it('html-preview renders as written: no policy', () => {
+    const html = buildDocumentHtml('<p>x</p><script>go()</script>', 'html-preview', 't')
+    expect(policyOf(html)).toBeNull()
+    expect(html).toContain('<script>go()</script>')
+  })
+
+  it('an exported HTML file (standalone) carries no policy, in every mode', () => {
+    for (const [mode, js] of [
+      ['markdown', null],
+      ['code', null],
+      ['mermaid-preview', MERMAID_JS]
+    ] as const)
+      expect(policyOf(buildDocumentHtml('x', mode, 't', js, { standalone: true })), mode).toBeNull()
   })
 
   it('a drawn mermaid document runs nothing', () => {

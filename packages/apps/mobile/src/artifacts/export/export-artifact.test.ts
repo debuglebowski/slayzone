@@ -34,9 +34,11 @@ jest.mock('expo-file-system', () => {
     }
     list() {
       const prefix = `${this.uri.replace(/\/$/, '')}/`
-      return [...mockFs.dirs]
-        .filter((d) => d.startsWith(prefix) && !d.slice(prefix.length).includes('/'))
-        .map((d) => new FakeDirectory(d))
+      const child = (p: string) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/')
+      return [
+        ...[...mockFs.dirs].filter(child).map((d) => new FakeDirectory(d)),
+        ...[...mockFs.files.keys()].filter(child).map((f) => new FakeFile(f))
+      ]
     }
   }
   class FakeFile {
@@ -52,6 +54,10 @@ jest.mock('expo-file-system', () => {
     }
     async write(content: string, options?: { encoding?: string }) {
       mockFs.files.set(this.uri, { content, encoding: options?.encoding ?? 'utf8' })
+    }
+    delete() {
+      mockFs.log.push(['rm', this.uri])
+      mockFs.files.delete(this.uri)
     }
     async move(to: { uri: string }) {
       mockFs.log.push(['move', this.uri, to.uri])
@@ -112,7 +118,8 @@ describe('exportArtifact: HTML', () => {
     )
     expect(uri).toMatch(inExportDir('plan.html'))
     expect(mockFs.files.get(uri)).toEqual({
-      content: buildDocumentHtml('# Plan', 'markdown', 'plan.md'),
+      // The file a person keeps: no policy, as main exported it (review 5, #4).
+      content: buildDocumentHtml('# Plan', 'markdown', 'plan.md', null, { standalone: true }),
       encoding: 'utf8'
     })
     expect(share).toHaveBeenCalledWith(uri, {
@@ -182,6 +189,46 @@ describe('exportArtifact: HTML', () => {
       )
     ).rejects.toThrow(/took too long/)
     expect(share).not.toHaveBeenCalled()
+  })
+})
+
+// Review 5, #14: expo-print's scratch PDFs (`<caches>/Print/`) never pile up.
+describe("exportArtifact: expo-print's scratch files", () => {
+  const PRINTS = 'file:///cache/Print'
+  const md = { content: '# x', mode: 'markdown' as const, title: 'p.md', format: 'pdf' as const }
+
+  it('a PDF that lands after its export gave up is removed when it lands', async () => {
+    let land: (r: { uri: string; numberOfPages: number }) => void = () => undefined
+    print.mockImplementationOnce(() => new Promise((r) => (land = r)))
+    await expect(exportArtifact(md, { ...renderer(), printTimeoutMs: 20 })).rejects.toThrow(
+      /took too long/
+    )
+    mockFs.files.set(`${PRINTS}/late.pdf`, { content: '%PDF', encoding: 'utf8' })
+    land({ uri: `${PRINTS}/late.pdf`, numberOfPages: 1 })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockFs.log).toContainEqual(['rm', `${PRINTS}/late.pdf`])
+  })
+
+  it('leftovers of an earlier run are swept when no print is running', async () => {
+    mockFs.dirs.add(PRINTS)
+    mockFs.files.set(`${PRINTS}/killed.pdf`, { content: '%PDF', encoding: 'utf8' })
+    await exportArtifact(md, renderer())
+    expect(mockFs.log).toContainEqual(['rm', `${PRINTS}/killed.pdf`])
+  })
+
+  it('a print still running is never swept from under it', async () => {
+    let land: (r: { uri: string; numberOfPages: number }) => void = () => undefined
+    print.mockImplementationOnce(() => new Promise((r) => (land = r)))
+    const first = exportArtifact(md, renderer())
+    await new Promise((r) => setTimeout(r, 0))
+    // The running print's file, as expo-print writes it.
+    mockFs.dirs.add(PRINTS)
+    mockFs.files.set(`${PRINTS}/running.pdf`, { content: '%PDF', encoding: 'utf8' })
+    await exportArtifact(md, renderer())
+    expect(mockFs.log).not.toContainEqual(['rm', `${PRINTS}/running.pdf`])
+    land({ uri: `${PRINTS}/running.pdf`, numberOfPages: 1 })
+    await first
+    expect(mockFs.log).toContainEqual(['move', `${PRINTS}/running.pdf`, expect.anything()])
   })
 })
 

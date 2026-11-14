@@ -1,18 +1,25 @@
 // The web shell's artifact export: the person's own browser renders the document the
 // shared builder made (`@slayzone/task-artifacts/export-html`).
-//   - PDF: the browser's print dialog (the person picks "Save as PDF").
+//   - PDF: the browser's print dialog (the person picks "Save as PDF"), opened by the
+//     hub's export frame.
 //   - PNG: the drawing rasterised onto a 2x canvas, then downloaded.
 //   - HTML: the document itself, downloaded (mermaid's build inlined, like desktop's).
 //
-// NO SCRIPT RUNS IN THE RENDER FRAME. Two reasons, either sufficient:
-//   - An artifact is arbitrary HTML (html-preview). Run with this page's origin it
-//     could call the hub as the signed-in person; the frame is sandboxed without
-//     `allow-scripts`, so its own scripts are inert.
-//   - A `srcdoc` frame inherits this page's CSP (`script-src 'self'`, hub
-//     security-headers.ts), which refuses inline scripts anyway.
-// So mermaid diagrams are drawn HERE, by the app's own mermaid, and dropped into the
-// document as SVG; the frame keeps `allow-same-origin` only so this page can lay it
-// out, measure it and print it.
+// An artifact is a document of its own and renders as written: an html report runs
+// its scripts and loads its remote styles, markdown shows its remote images, a mermaid
+// document draws itself with its inlined build. None of it may run with this page's
+// origin, where the signed-in session lives. So a PDF is printed in the hub's EXPORT
+// FRAME (hub export-frame.ts): a page with a policy of its own that sandboxes it to an
+// opaque origin, framed here with `allow-scripts allow-modals` and no
+// `allow-same-origin`. (This page's own policy could not host it anyway: a `srcdoc`
+// frame inherits `script-src 'self'` and its `img-src`; `data:`/`blob:` frames are
+// refused.) The documents that carry a policy of their own (markdown, code, mermaid's
+// nonce'd one) keep it there.
+//
+// A PNG must be read back off a canvas, which needs the drawing in this origin: it is
+// rasterised from a frame that runs NO script (sandboxed without `allow-scripts`; a
+// `srcdoc` frame under this page's policy besides), and a mermaid diagram is drawn
+// HERE first, by the app's own mermaid, as SVG.
 import mermaidScriptUrl from 'mermaid/dist/mermaid.min.js?url'
 import type {
   ArtifactExportRequest,
@@ -20,22 +27,30 @@ import type {
 } from '@slayzone/platform/electron-bootstrap-contract'
 import {
   buildDocumentHtml,
-  buildDrawnMermaidDocumentHtml,
   buildPngHtml,
   exportBaseName
 } from '@slayzone/task-artifacts/export-html'
 import { canExportAsHtml, canExportAsPdf, canExportAsPng } from '@slayzone/task-contracts'
 import type { RenderMode } from '@slayzone/task-contracts'
+import { withExportDirective } from './mermaid-export-source'
 
 /** Leftover print frame removed even if the browser never reports `afterprint`. */
 const PRINT_FRAME_MAX_MS = 30 * 60_000
 const FRAME_LOAD_TIMEOUT_MS = 15_000
 
+/** The hub's export frame (hub export-frame.ts) and the protocol version it speaks. */
+const EXPORT_FRAME_PATH = '/export-frame'
+const EXPORT_FRAME_VERSION = 1
+/** How long the frame waits for a document to load (remote images, fonts, a drawing). */
+const EXPORT_FRAME_SETTLE_MS = 30_000
+/** The shell's backstop on top of the frame's own wait. */
+const EXPORT_FRAME_READY_MS = EXPORT_FRAME_SETTLE_MS + 15_000
+
 const CAN_EXPORT = { pdf: canExportAsPdf, png: canExportAsPng, html: canExportAsHtml } as const
 
 let mermaidScript: Promise<string> | null = null
 
-/** mermaid's browser build, served by this shell as a static asset (HTML export only). */
+/** mermaid's browser build, served by this shell as a static asset (HTML and PDF export). */
 function loadMermaidScript(): Promise<string> {
   mermaidScript ??= fetch(mermaidScriptUrl)
     .then((res) => {
@@ -54,19 +69,18 @@ let drawCount = 0
 
 /**
  * Draw a mermaid diagram to SVG with the app's own mermaid, the way desktop's export
- * does (light theme, dagre). A directive rather than `initialize`: the in-app
- * MermaidBlock owns the global config (its dark/light theme), and a directive applies
- * to this one render only. `htmlLabels: false` draws labels as SVG text instead of
- * HTML (`<foreignObject>`), which a tainting browser can rasterise.
+ * does (light theme, dagre; see mermaid-export-source.ts). `htmlLabels: false` draws
+ * labels as SVG text instead of HTML (`<foreignObject>`), which a tainting browser can
+ * rasterise. A diagram that does not parse rejects with mermaid's error.
  */
 export async function drawMermaidSvg(
   code: string,
   opts: { htmlLabels: boolean } = { htmlLabels: true }
 ): Promise<string> {
   const { default: mermaid } = await import('mermaid')
-  const labels = opts.htmlLabels ? '' : ', "htmlLabels": false, "flowchart": {"htmlLabels": false}'
-  const directive = `%%{init: {"theme": "default", "layout": "dagre"${labels}}}%%\n`
-  const { svg } = await mermaid.render(`slz-export-mermaid-${++drawCount}`, directive + code)
+  const parsed = await mermaid.parse(code)
+  const source = withExportDirective(code, parsed ? parsed.config : {}, opts)
+  const { svg } = await mermaid.render(`slz-export-mermaid-${++drawCount}`, source)
   return svg
 }
 
@@ -96,19 +110,24 @@ export function saveBlob(blob: Blob, fileName: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
+/** An invisible frame, laid out (measuring and printing need real layout), out of sight. */
+function hiddenFrame(sandbox: string): HTMLIFrameElement {
+  const frame = document.createElement('iframe')
+  frame.setAttribute('sandbox', sandbox)
+  frame.setAttribute('aria-hidden', 'true')
+  frame.tabIndex = -1
+  frame.style.cssText =
+    'position:fixed;left:-10000px;top:0;width:1200px;height:1200px;border:0;opacity:0;pointer-events:none'
+  return frame
+}
+
 /**
- * Lay `html` out in a sandboxed, invisible, script-free frame and resolve with it once
- * loaded. The caller removes it.
+ * Lay `html` out in a sandboxed, invisible frame and resolve with it once loaded. The
+ * caller removes it.
  */
 export function loadFrame(html: string, sandbox: string): Promise<HTMLIFrameElement> {
   return new Promise((resolve, reject) => {
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', sandbox)
-    frame.setAttribute('aria-hidden', 'true')
-    frame.tabIndex = -1
-    // Laid out (measuring and printing need real layout) but out of sight.
-    frame.style.cssText =
-      'position:fixed;left:-10000px;top:0;width:1200px;height:1200px;border:0;opacity:0;pointer-events:none'
+    const frame = hiddenFrame(sandbox)
     const timer = setTimeout(() => {
       frame.remove()
       reject(new Error('Timed out laying out the export'))
@@ -126,28 +145,75 @@ export function loadFrame(html: string, sandbox: string): Promise<HTMLIFrameElem
   })
 }
 
-/** Print the document through the browser's dialog; resolves once it closes. */
-async function printDocument(html: string): Promise<void> {
-  const frame = await loadFrame(html, 'allow-same-origin allow-modals')
-  const win = frame.contentWindow
-  if (!win) {
-    frame.remove()
-    throw new Error('The print frame has no window')
-  }
-  // Fonts settle before the dialog snapshots the page.
-  await frame.contentDocument?.fonts?.ready
-  await new Promise<void>((resolve) => {
-    const done = (): void => {
+/** An id an artifact cannot guess (no `randomUUID`: it needs a secure context). */
+function exportId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Print `html` through the browser's dialog from the hub's export frame (see the
+ * module comment; the protocol is hub export-frame.ts's). Resolves once the dialog
+ * closes. `waitForReady`: the document flags itself ready when it has drawn (mermaid).
+ */
+function printDocument(html: string, waitForReady: boolean): Promise<void> {
+  const frame = hiddenFrame('allow-scripts allow-modals')
+  const id = exportId()
+  return new Promise<void>((resolve, reject) => {
+    let stage: 'hello' | 'rendering' | 'printing' = 'hello'
+    let timer = setTimeout(
+      () => finish(new Error('The print frame did not load')),
+      FRAME_LOAD_TIMEOUT_MS
+    )
+    const wait = (ms: number, onTimeout: () => void): void => {
       clearTimeout(timer)
-      resolve()
+      timer = setTimeout(onTimeout, ms)
     }
-    // print() blocks until the dialog closes in Chromium; others report afterprint.
-    const timer = setTimeout(done, PRINT_FRAME_MAX_MS)
-    win.addEventListener('afterprint', done, { once: true })
-    win.focus()
-    win.print()
+    function finish(err?: Error): void {
+      clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      frame.remove()
+      if (err) reject(err)
+      else resolve()
+    }
+    function onMessage(event: MessageEvent): void {
+      // Only the frame speaks this protocol; anything else (another frame, a script
+      // in this page) is not it. Its origin is opaque ("null"), so the source decides.
+      if (event.source === null || event.source !== frame.contentWindow) return
+      const data = event.data as Record<string, unknown> | null
+      if (!data || typeof data !== 'object') return
+      if (stage === 'hello') {
+        if (!('slayzoneExportFrame' in data)) return
+        if (data.slayzoneExportFrame !== EXPORT_FRAME_VERSION) {
+          finish(new Error('This page is out of date. Reload it, then export again.'))
+          return
+        }
+        stage = 'rendering'
+        wait(EXPORT_FRAME_READY_MS, () => finish(new Error('The export did not finish loading')))
+        // An opaque origin has no name to address: '*'. The frame is ours (its URL and
+        // sandbox set here) and holds nothing but what this page sends it.
+        frame.contentWindow?.postMessage(
+          { slayzoneExport: id, html, waitForReady, deadlineMs: EXPORT_FRAME_SETTLE_MS },
+          '*'
+        )
+        return
+      }
+      if (data.slayzoneExport !== id) return
+      if (data.state === 'error') {
+        finish(new Error(typeof data.message === 'string' ? data.message : 'Printing failed'))
+      } else if (data.state === 'ready' && stage === 'rendering') {
+        // The dialog is open now. Its Cancel is indistinguishable from Save; both end
+        // the export. A browser that never reports afterprint still gets the frame back.
+        stage = 'printing'
+        wait(PRINT_FRAME_MAX_MS, () => finish())
+      } else if (data.state === 'done') {
+        finish()
+      }
+    }
+    window.addEventListener('message', onMessage)
+    frame.src = EXPORT_FRAME_PATH
+    document.body.appendChild(frame)
   })
-  frame.remove()
 }
 
 /** Rasterise the PNG document's drawing at 2x, on white. */
@@ -225,24 +291,23 @@ async function exportOrThrow(
   if (format === 'html') {
     const mermaidJs = isMermaid ? await loadMermaidScript().catch(() => null) : null
     saveBlob(
-      new Blob([buildDocumentHtml(content, mode, title, mermaidJs)], { type: 'text/html' }),
+      new Blob([buildDocumentHtml(content, mode, title, mermaidJs, { standalone: true })], {
+        type: 'text/html'
+      }),
       fileName
     )
     return { ok: true }
   }
 
-  const svg = isMermaid ? await deps.drawMermaid(content, { htmlLabels: true }) : null
-
   if (format === 'pdf') {
-    // The dialog's own Cancel is indistinguishable from Save here; both end the export.
-    await printDocument(
-      svg !== null
-        ? buildDrawnMermaidDocumentHtml(svg, title)
-        : buildDocumentHtml(content, mode, title)
-    )
+    // Mermaid draws in the frame from its inlined build: the document every other
+    // client renders, and the artifact's source never drawn in this origin.
+    const mermaidJs = isMermaid ? await loadMermaidScript() : null
+    await printDocument(buildDocumentHtml(content, mode, title, mermaidJs), isMermaid)
     return { ok: true }
   }
 
+  const svg = isMermaid ? await deps.drawMermaid(content, { htmlLabels: true }) : null
   // A drawn mermaid diagram is just an SVG now.
   const png = (drawing: string): Promise<Blob> => {
     const html = buildPngHtml(drawing, 'svg-preview', title)
