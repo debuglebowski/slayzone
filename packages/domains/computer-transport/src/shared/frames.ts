@@ -415,13 +415,63 @@ export const chatDirectWritePayloadSchema = z.object({
 })
 export type ChatDirectWritePayload = z.infer<typeof chatDirectWritePayloadSchema>
 
+/**
+ * `ComputerEventParams.name` for a stall of the computer's own main thread
+ * (`@slayzone/platform/event-loop-stall`), reported once it runs again. A frozen
+ * computer misses hub heartbeats and is dropped; on 2026-11-14 such stalls were
+ * only inferable from gaps in its request log. Diagnostic only: the hub records it
+ * (`computer.event_loop_stall`). A generic `event`, so an older hub ignores it.
+ */
+export const COMPUTER_EVENT_LOOP_STALL_EVENT_NAME = 'event-loop-stall'
+
+/** Cut, not rejected: an oversized sample must not drop the measurement. */
+const cutArray = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  z.array(item).transform((items) => items.slice(0, max))
+const stallProcessSchema = z.object({
+  pid: z.number().int(),
+  elapsed: bounded(32),
+  /** Executable name only — never arguments (a shell's `-c` carries an agent's prompt). */
+  command: bounded(64)
+})
+const stallTopCpuProcessSchema = z.object({
+  pid: z.number().int(),
+  cpuPct: z.number(),
+  command: bounded(64)
+})
+
+/** Payload of {@link COMPUTER_EVENT_LOOP_STALL_EVENT_NAME}: the sampler's `EventLoopStall`,
+ *  bounded, with process commands reduced to executable names. */
+export const computerEventLoopStallPayloadSchema = z.object({
+  startedAt: z.number(),
+  durationMs: z.number().nonnegative(),
+  mainThreadCpuMs: z.number().nullable(),
+  processCpuMs: z.number(),
+  gcMs: z.number(),
+  machineCpuBusyPct: z.number().nullable(),
+  stacks: cutArray(z.object({ atMs: z.number(), frames: cutArray(bounded(512), 20) }), 5),
+  children: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallProcessSchema, 64) }),
+    5
+  ),
+  topCpu: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallTopCpuProcessSchema, 5) }),
+    5
+  ).optional(),
+  /** Earlier reports the computer could not deliver (hub away, outbox full). */
+  dropped: z.number().int().nonnegative().optional()
+})
+export type ComputerEventLoopStallPayload = z.infer<typeof computerEventLoopStallPayloadSchema>
+
 export const ptyInputPayloadSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   /** The submitted line (Enter bytes included), or null when nothing was submitted. */
   submitted: z.string().max(70_000).nullable(),
   esc: z.boolean(),
-  statusCommand: z.boolean()
+  statusCommand: z.boolean(),
+  /** The write carried ^C / ^D (the user may be ending the agent). Absent = no, or an
+   *  older computer. */
+  interrupt: z.boolean().optional()
 })
 export type PtyInputPayload = z.infer<typeof ptyInputPayloadSchema>
 

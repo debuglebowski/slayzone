@@ -23,6 +23,22 @@ export function isInterruptKey(data: string): boolean {
   return /^\x1b\[27(?::\d+)*(?:;\d+(?::\d+)*)*u$/.test(data)
 }
 
+/**
+ * True when this write carries the user's ^C or ^D — the keys that END an agent
+ * (claude-code, codex), as opposed to Esc, which only interrupts its turn.
+ *
+ * Raw ETX / EOT bytes (no terminal report contains them: mouse payload bytes are
+ * offset by 32), or the kitty CSI-u form `CSI 99|100 [:alt] ; mods [:event] u`
+ * with the ctrl bit set in `mods - 1`.
+ */
+export function isQuitKey(data: string): boolean {
+  if (data.includes('\x03') || data.includes('\x04')) return true
+  for (const m of data.matchAll(/\x1b\[(?:99|100)(?::\d+)*;(\d+)(?::\d+)*u/g)) {
+    if (((Number(m[1]) - 1) & 4) !== 0) return true
+  }
+  return false
+}
+
 // SGR (1006) and SGR-Pixels (1016): CSI < Cb ; Cx ; Cy M|m. The dominant
 // encoding — 94.3% of observed ESC-bearing writes had exactly this shape.
 const SGR_MOUSE = /\x1b\[<\d{1,5};\d{1,5};\d{1,5}[Mm]/g

@@ -14,6 +14,25 @@ is mid-reply (state `running`), its own included, unless `--force`. Messages sen
 during a turn queue until it ends; only explicit steering adds them to the running
 turn.
 
+### Agent exits: resume, recovery shell, or end
+
+When a terminal agent's process exits, `decideUnexpectedExit`
+(`pty-exit-strategy.ts`) decides. An agent that died MID-SESSION without anyone
+asking — non-zero code or a signal, ≥10 s after its first output, no `killPty` /
+hibernation / quit on record, no transport reason (`exited-while-detached`, …), no
+exit 130 or ^C/^D typed ≤10 s before — is resumed on its current conversation, in
+place: the same session continues (`createPty` continuation: scrollback and seq
+carry over, an info line marks the restart, the terminal sees no exit), and
+`pty.auto_resumed` is recorded. At that moment the tab shows `starting` and the
+info line, the dead process's agent tree is dropped (`replacing`), and input typed
+before the new process exists is held for it (never typed into a recovery shell).
+A resume its computer refuses to start falls back to the recovery shell. Only providers with a `resumeCommand` that resumes
+faithfully (the hibernation set) and a known conversation id. At most once per
+session per 5 min; a second death in that window gets the recovery shell plus
+`pty.auto_resume_rate_limited`. Everything else is unchanged: a start failure gets
+the interactive recovery shell, a stale resume its overlay, a requested kill ends.
+Regression: 2026-11-14, the hub's stray sweep SIGHUP'd 31 live agents (exit 129).
+
 ### Codex silence and cancellation provenance
 
 The running watchdog checks Codex with a bounded `thread/read` before treating

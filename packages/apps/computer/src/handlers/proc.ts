@@ -137,6 +137,8 @@ interface QueuedProcSpawn {
 export interface ProcHandlers {
   stopTask(taskId: string): Promise<void>
   hasWork(): boolean
+  /** Pids of this hub's live processes (stall reports name only a hub's own). */
+  ownedPids(): number[]
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
@@ -670,6 +672,10 @@ export function createProcHandlers(
       tombstones.forgetTask(taskId)
     },
     hasWork: () => procs.size > 0 || queued.size > 0,
+    ownedPids: () =>
+      [...procs.values()]
+        .map((session) => session.child.pid)
+        .filter((pid): pid is number => typeof pid === 'number'),
     handlers,
     disposeAll,
     orphansReaped,

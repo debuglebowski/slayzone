@@ -161,6 +161,35 @@ describe('direct pty input', () => {
     pty.disposeAll()
   })
 
+  it('reports ^C / ^D to the hub: the user may be ending the agent', async () => {
+    const { notifies, ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'd-quit'
+    await pty.handlers['pty.spawn']({ sessionId, command: 'cat', cwd: process.cwd(), relay: false })
+    pty.direct.write(sessionId, '\x1b[99;5u')
+    expect(inputEvents(notifies)).toEqual([
+      { sessionId, submitted: null, esc: false, statusCommand: false, interrupt: true }
+    ])
+    await pty.handlers['pty.kill']({ sessionId })
+    pty.disposeAll()
+  })
+
+  it('names the pids of its live ptys (what a stall report may show this hub)', async () => {
+    const { ctx } = makeCtx()
+    const pty = createPtyHandlers(ctx)
+    const sessionId = 'd-pids'
+    expect(pty.ownedPids()).toEqual([])
+    const { pid } = (await pty.handlers['pty.spawn']({
+      sessionId,
+      command: 'cat',
+      cwd: process.cwd(),
+      relay: false
+    })) as { pid: number }
+    expect(pty.ownedPids()).toEqual([pid])
+    await pty.handlers['pty.kill']({ sessionId })
+    pty.disposeAll()
+  })
+
   it('watches for the conversation id itself when /status is submitted directly', async () => {
     const { notifies, ctx } = makeCtx()
     const pty = createPtyHandlers(ctx)

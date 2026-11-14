@@ -1,4 +1,5 @@
 import {
+  resetAutoResumeForTests,
   setPtyCreateCapture,
   setShuttingDown as setPtyShuttingDown,
   shutdownAllPtys
@@ -36,4 +37,6 @@ export async function resetTerminalRuntimeForTest(): Promise<void> {
   chats?.resetForTests()
   setPtyShuttingDown(false)
   clearAllSessionUserInputMarks()
+  // A spec's auto-resume must not rate-limit the next spec's session.
+  resetAutoResumeForTests()
 }

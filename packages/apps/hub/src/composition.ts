@@ -374,6 +374,7 @@ import {
   webSessionCookieSecure
 } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
+import { attachComputerStallConsumer } from './computer-stall-consumer.js'
 import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
@@ -2419,6 +2420,10 @@ export function composeServer(opts: {
     // the local loopback HTTP route uses. Extracted + unit-tested in
     // agent-hook-relay-consumer.ts.
     attachAgentHookRelayConsumer(computerGateway, restDeps, terminalStateBridge)
+
+    // A computer's own main-thread stalls (computer/stall-report.ts) → the hub
+    // diagnostic `computer.event_loop_stall`, beside this hub's own.
+    attachComputerStallConsumer(computerGateway)
 
     // Route ALL OS-level exec (pty / chat agents / processes) to a computer. There
     // is no in-process fallback: an unresolved computer raises

@@ -84,6 +84,12 @@ import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handle
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import {
+  startEventLoopStallDetector,
+  type EventLoopStallDetector,
+  type EventLoopStallDetectorOptions
+} from '@slayzone/platform/event-loop-stall'
+import { createStallReporter } from './stall-report'
 
 /** Running package release, advertised on enrollment and reconnect. */
 declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
@@ -125,6 +131,11 @@ export interface ComputerRuntimeDeps {
    * listener attached here misses none of its events.
    */
   onConnection?: (connection: HubConnectionInfo) => void
+  /**
+   * Start the main-thread stall sampler (tests inject a fake). Default: the hub's own
+   * `startEventLoopStallDetector`. Each stall is logged and reported to every hub.
+   */
+  startStallDetector?: (options: EventLoopStallDetectorOptions) => EventLoopStallDetector
 }
 
 /** A hub the computer serves IN ADDITION to its primary, added while it runs. */
@@ -299,6 +310,8 @@ export interface HubRequestDispatch {
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
+  /** Pids of the processes this hub's work runs (ptys, processes, chat agents). */
+  ownedPids(): number[]
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
@@ -614,7 +627,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     setAgentHookUrl,
     hubDisconnected,
     captureAgentHook: chat.captureHook,
-    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork()
+    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork(),
+    ownedPids: () => [...pty.ownedPids(), ...proc.ownedPids(), ...chat.ownedPids()]
   }
 }
 
@@ -627,6 +641,13 @@ export function startComputer(
     (() => {
       // Logging is opt-in — with no sink, computer lifecycle diagnostics are discarded.
     })
+
+  // This process's own freezes (a frozen computer misses heartbeats and is dropped
+  // by its hubs): logged and reported to every hub — see stall-report.ts.
+  const stallReporter = createStallReporter({ log })
+  const stallDetector = (deps.startStallDetector ?? startEventLoopStallDetector)({
+    onStall: (stall) => stallReporter.report(stall)
+  })
 
   // `startComputer` is synchronous, and resolving the host id is file I/O. Rather
   // than make the whole entrypoint async, the identity object is MUTABLE and the
@@ -914,6 +935,11 @@ export function startComputer(
     dialer.events.on('connected', ({ computerId, mode }) =>
       log('connected to hub', { hubUrl, computerId, mode })
     )
+    // This hub sees its own processes; the primary also machine-wide CPU.
+    const detachStallReports = stallReporter.attach(dialer, {
+      primary: isPrimary,
+      ownedPids: () => dispatch.ownedPids()
+    })
     dialer.events.on('disconnected', ({ reason }) => {
       void cliRelayReady.then(
         (relay) => relay.disconnect(),
@@ -989,6 +1015,7 @@ export function startComputer(
         )
         const agentHookServer = await agentHookReady
         if (agentHookServer) await agentHookServer.close()
+        detachStallReports()
         await dialer.stop()
         secondaryIdentities.delete(hubIdentity)
       }
@@ -1160,6 +1187,7 @@ export function startComputer(
       await directListener?.close()
       rtcAnswerer?.close()
       directGrants.close()
+      stallDetector.stop()
     }
   }
   return handle

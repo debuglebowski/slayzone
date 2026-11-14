@@ -272,6 +272,8 @@ export interface PtyHandlers {
   /** What direct-link clients reach (docs/direct-link.md). */
   direct: DirectPtyService
   hasWork(): boolean
+  /** Pids of this hub's live pty processes (stall reports name only a hub's own). */
+  ownedPids(): number[]
   hasTaskWork(taskId: string): boolean
   /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
   stopTask(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
@@ -1358,13 +1360,14 @@ export function createPtyHandlers(
     session.proc.write(data)
     // What a relayed write tells this computer with `watchConversationId`.
     if (facts.statusCommand) session.signals?.watchConversationId()
-    if (facts.esc || facts.submitted !== null) {
+    if (facts.esc || facts.submitted !== null || facts.interrupt) {
       const payload: PtyInputPayload = {
         sessionId: session.id,
         ...(session.spawnId ? { spawnId: session.spawnId } : {}),
         submitted: facts.submitted,
         esc: facts.esc,
-        statusCommand: facts.statusCommand
+        statusCommand: facts.statusCommand,
+        ...(facts.interrupt ? { interrupt: true } : {})
       }
       ctx.dialer.notify(ComputerNotificationMethods.event, {
         name: PTY_INPUT_EVENT_NAME,
@@ -1626,6 +1629,10 @@ export function createPtyHandlers(
   return {
     direct,
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
+    ownedPids: () =>
+      [...sessions.values()]
+        .map((session) => session.proc.pid)
+        .filter((pid): pid is number => typeof pid === 'number'),
     hasTaskWork: (taskId: string) =>
       [...sessions.values(), ...queued.values()].some((s) =>
         belongsToTask(s.id, taskId, s.taskId)

@@ -650,6 +650,8 @@ run_harness packages/shared/platform/src/startup-deadline.test.ts
 # Event-loop stall detector: a frozen main thread is reported after it thaws,
 # with the stacks / child processes / CPU split that name the cause.
 run_harness packages/shared/platform/src/event-loop-stall.test.ts
+# A computer's own main-thread stall, reported over its socket, becomes the hub diagnostic computer.event_loop_stall.
+run_harness packages/apps/hub/src/computer-stall-consumer.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_harness packages/shared/platform/src/device-status-queries.test.ts
@@ -1024,6 +1026,8 @@ run_harness packages/domains/terminal/src/server/runtime/createpty-resolver.test
 # createPty resumes a moved Claude transcript from its folder; never fresh over an existing one.
 run_harness packages/domains/terminal/src/server/runtime/createpty-resume-location.test.ts
 run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
+# An agent that dies mid-session unasked is resumed in place, not buried under a recovery shell.
+run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 

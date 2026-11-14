@@ -1218,6 +1218,8 @@ export function createChatRuntimeHandlers(opts: {
       instance = null
       localProcs = null
     },
+    /** Pids of this hub's chat agent processes (stall reports name only a hub's own). */
+    ownedPids: (): number[] => localProcs?.ownedPids() ?? [],
     hasWork: () =>
       Boolean(
         instance?.transport
