@@ -1,6 +1,8 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { Writable } from 'node:stream'
 import { unzipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -35,6 +37,7 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 const bytes = (s: string) => new TextEncoder().encode(s)
+const ignoreErr = (): void => undefined
 
 async function openOk(req: unknown): Promise<string> {
   const r = await targets.open(SENDER, null, req)
@@ -107,7 +110,8 @@ describe('directory target', () => {
     await targets.write(SENDER, id, 'docs/a.md', bytes('A'))
     await targets.write(SENDER, id, 'docs/b.md', bytes('B'))
     await targets.abort(SENDER, id)
-    expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+    // The download made `docs`, so abort removes it too.
+    expect(fs.existsSync(path.join(picked.dir, 'docs'))).toBe(false)
   })
 })
 
@@ -194,7 +198,8 @@ describe('abort racing a write', () => {
     const writing = targets.write(SENDER, id, 'docs/b.md', bytes('B'))
     const aborting = targets.abort(SENDER, id)
     await Promise.allSettled([writing, aborting])
-    expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+    // The download made `docs`, so abort removes it too.
+    expect(fs.existsSync(path.join(picked.dir, 'docs'))).toBe(false)
     expect(partials(picked.dir)).toEqual([])
   })
 
@@ -234,7 +239,8 @@ describe('targets of a window that goes away', () => {
       sender.emit(event, ...args)
       await new Promise((r) => setTimeout(r, 50))
       if (aborted) {
-        expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+        // The download made `docs`, so abort removes it too.
+        expect(fs.existsSync(path.join(picked.dir, 'docs'))).toBe(false)
         expect(partials(picked.dir)).toEqual([])
         await expect(targets.write(SENDER, id, 'docs/c.md', bytes('C'))).rejects.toThrow()
       } else {
@@ -256,6 +262,151 @@ describe('targets of a window that goes away', () => {
     expect(partials(root).length).toBeGreaterThan(0)
     targets.abortAllNow()
     expect(partials(root)).toEqual([])
-    expect(fs.readdirSync(path.join(picked.dir, 'docs'))).toEqual([])
+    // The download made `docs`, so abort removes it too.
+    expect(fs.existsSync(path.join(picked.dir, 'docs'))).toBe(false)
+  })
+})
+
+// ── Review 3 ────────────────────────────────────────────────────────────────────
+/** A zip output on disk whose `failAt`-th write fails like a full disk. */
+function failingOutput(failAt: number) {
+  return (file: string) => {
+    let writes = 0
+    const disk = fs.createWriteStream(file)
+    disk.on('error', ignoreErr)
+    return new Writable({
+      write(chunk, _enc, cb) {
+        if (++writes >= failAt) {
+          const err = Object.assign(new Error('ENOSPC: no space left on device'), {
+            code: 'ENOSPC'
+          })
+          cb(err)
+          return
+        }
+        disk.write(chunk, cb)
+      },
+      destroy(err, cb) {
+        // Closed only once the file is: a late open must not outlive the wrapper.
+        if (disk.closed) cb(err)
+        else {
+          disk.once('close', () => cb(err))
+          disk.destroy()
+        }
+      },
+      final(cb) {
+        disk.end(cb)
+      }
+    })
+  }
+}
+
+/**
+ * Random bytes in the client's 4 MiB pieces: the shape that, with the output failing on
+ * its third write, left the entry waiting for a drain that never came (reproduced).
+ */
+const noise = (n: number) => crypto.randomBytes(n)
+
+const within = <T>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+  Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what}: still pending`)), ms))
+  ])
+
+// M1: a zip whose output fails (disk full, drive gone) rejects the write in flight
+// instead of hanging on a drain that never comes, and leaves no partial behind.
+describe('a zip whose output fails', () => {
+  test('the pending write rejects, abort settles, no partial remains', async () => {
+    const t = new SaveTargets({ openZipOutput: failingOutput(3) })
+    picked.file = path.join(root, 'full.zip')
+    const opened = await t.open(SENDER, null, { kind: 'zip', fileName: 'full.zip', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    const id = opened.targetId
+    let failed: unknown = null
+    for (let i = 0; i < 64 && !failed; i++)
+      await within(t.write(SENDER, id, 'notes.md', noise(4 * 1024 * 1024)), 5_000, 'write').catch(
+        (e: unknown) => {
+          failed = e
+        }
+      )
+    expect(String(failed)).toMatch(/ENOSPC/)
+    await within(t.dropOwner(SENDER), 5_000, 'dropOwner')
+    expect(partials(root)).toEqual([])
+    expect(fs.existsSync(picked.file)).toBe(false)
+  })
+
+  test('quitting while a write is stuck on the failed output leaves no partial', async () => {
+    const t = new SaveTargets({ openZipOutput: failingOutput(3) })
+    picked.file = path.join(root, 'quit-full.zip')
+    const opened = await t.open(SENDER, null, { kind: 'zip', fileName: 'q.zip', title: 't' })
+    if (!opened.ok) throw new Error('not opened')
+    const writes = Array.from({ length: 8 }, () =>
+      t.write(SENDER, opened.targetId, 'notes.md', noise(4 * 1024 * 1024)).catch(ignoreErr)
+    )
+    void t.dropOwner(SENDER)
+    t.abortAllNow()
+    await within(Promise.all(writes), 5_000, 'writes')
+    expect(partials(root)).toEqual([])
+  })
+})
+
+// L1: a target that is closing (a long zip finalize) is still removed on quit.
+test('quitting during a zip close leaves no partial', async () => {
+  picked.file = path.join(root, 'closing.zip')
+  const id = await openOk({ kind: 'zip', fileName: 'closing.zip', title: 't' })
+  await targets.write(SENDER, id, 'big.md', noise(8 * 1024 * 1024))
+  const closing = targets.close(SENDER, id)
+  targets.abortAllNow()
+  await within(closing, 10_000, 'close')
+  expect(partials(root)).toEqual([])
+  expect(fs.existsSync(picked.file)).toBe(false)
+})
+
+// M2: a folder download never overwrites or deletes a file the person already had.
+describe('a folder download into a folder that already has these files', () => {
+  const seed = () => {
+    fs.mkdirSync(path.join(picked.dir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(picked.dir, 'docs', 'a.md'), 'MINE a')
+    fs.writeFileSync(path.join(picked.dir, 'docs', 'b.md'), 'MINE b')
+  }
+  const listing = () => fs.readdirSync(path.join(picked.dir, 'docs')).sort()
+
+  test('completed: the originals stay, the downloads arrive beside them', async () => {
+    seed()
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.md', bytes('NEW a'))
+    await targets.write(SENDER, id, 'docs/b.md', bytes('NEW b'))
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'a.md'), 'utf8')).toBe('MINE a')
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'b.md'), 'utf8')).toBe('MINE b')
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'a (2).md'), 'utf8')).toBe('NEW a')
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'b (2).md'), 'utf8')).toBe('NEW b')
+  })
+
+  for (const point of ['before any file is placed', 'after one is placed', 'during close'] as const)
+    test(`aborted ${point}: the originals are intact, nothing of the download remains`, async () => {
+      seed()
+      const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+      await targets.write(SENDER, id, 'docs/a.md', bytes('NEW a'))
+      if (point !== 'before any file is placed')
+        await targets.write(SENDER, id, 'docs/b.md', bytes('NEW b'))
+      if (point === 'during close') {
+        const closing = targets.close(SENDER, id)
+        targets.abortAllNow()
+        await closing
+      } else await targets.abort(SENDER, id)
+      expect(fs.readFileSync(path.join(picked.dir, 'docs', 'a.md'), 'utf8')).toBe('MINE a')
+      expect(fs.readFileSync(path.join(picked.dir, 'docs', 'b.md'), 'utf8')).toBe('MINE b')
+      expect(listing()).toEqual(['a.md', 'b.md'])
+    })
+
+  test('aborted: folders the download created are removed, folders that existed stay', async () => {
+    fs.mkdirSync(path.join(picked.dir, 'keep'), { recursive: true })
+    const id = await openOk({ kind: 'directory', folderName: 'x', title: 't' })
+    await targets.mkdir(SENDER, id, 'keep/new-empty')
+    await targets.write(SENDER, id, 'fresh/sub/a.md', bytes('A'))
+    await targets.write(SENDER, id, 'fresh/sub/b.md', bytes('B'))
+    await targets.abort(SENDER, id)
+    expect(fs.readdirSync(picked.dir).sort()).toEqual(['keep'])
+    expect(fs.readdirSync(path.join(picked.dir, 'keep'))).toEqual([])
   })
 })

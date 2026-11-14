@@ -4,11 +4,18 @@
 // person's own disk whether the hub is local or remote, and no size has to fit in
 // memory. A zip is compressed by archiver on zlib's thread pool: off the UI and off
 // main's event loop. Reached over `app:save-target-*`.
-import { createWriteStream, mkdirSync, rmSync, unlinkSync, type WriteStream } from 'fs'
-import { open, rename, unlink, type FileHandle } from 'fs/promises'
+import {
+  constants as fsConstants,
+  createWriteStream,
+  mkdirSync,
+  rmdirSync,
+  rmSync,
+  unlinkSync
+} from 'fs'
+import { copyFile, link, open, rename, unlink, type FileHandle } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, extname, join } from 'path'
-import { PassThrough } from 'stream'
+import { PassThrough, type Writable } from 'stream'
 import { once } from 'events'
 import { BrowserWindow, app, dialog, shell } from 'electron'
 import { ZipArchive } from 'archiver'
@@ -42,6 +49,11 @@ interface Target {
   abort(): Promise<void>
   /** The app is quitting: remove what is on disk now, synchronously, best effort. */
   abortNow(): void
+  /**
+   * Make whatever operation is in flight settle at once (destroy streams it waits on),
+   * so an abort is never held up by an operation that would otherwise never finish.
+   */
+  interrupt(): void
 }
 
 const unlinkNow = (p: string): void => {
@@ -125,17 +137,65 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
     },
     abortNow() {
       unlinkNow(partial)
+    },
+    interrupt() {
+      // Plain fs operations: they settle by themselves.
     }
   }
 }
 
 /**
+ * Commit a finished partial at `dest` WITHOUT replacing anything there: a hard link
+ * fails if the name exists, so an existing file is never overwritten — the next free
+ * `name (n).ext` is used instead. A filesystem without hard links (FAT, some network
+ * shares) gets an exclusive copy, equally unable to clobber. Returns the path used.
+ */
+async function commitNoClobber(partial: string, dest: string): Promise<string> {
+  const dir = dirname(dest)
+  const ext = extname(dest)
+  const stem = basename(dest, ext)
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? dest : join(dir, `${stem} (${n})${ext}`)
+    try {
+      await link(partial, candidate)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'EEXIST') continue
+      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV' && code !== 'ENOSYS') throw err
+      try {
+        await copyFile(partial, candidate, fsConstants.COPYFILE_EXCL)
+      } catch (copyErr) {
+        if ((copyErr as NodeJS.ErrnoException).code === 'EEXIST') continue
+        throw copyErr
+      }
+    }
+    await unlink(partial).catch(ignore)
+    return candidate
+  }
+}
+
+/** Create `dir` (and parents); returns the folders this call created, outermost first. */
+function mkdirTracked(dir: string): string[] {
+  const first = mkdirSync(dir, { recursive: true })
+  if (!first) return []
+  const created: string[] = []
+  for (let d = dir; d.length >= first.length; d = dirname(d)) {
+    created.unshift(d)
+    if (d === first) break
+  }
+  return created
+}
+
+/**
  * A tree of files inside `root`. Every path is resolved with `containedPath`, so one
  * that would leave `root` is refused (titles and folder names are free text). Each
- * file is moved into place once the next one starts, or the target closes.
+ * file is committed once the next one starts, or the target closes — never over a
+ * file that is already there (see `commitNoClobber`). Abort removes exactly what this
+ * download created: its files and the folders it made, never anything that existed.
  */
 function directoryTarget(root: string): Target {
   const placed: string[] = []
+  const madeDirs: string[] = []
   const startPath = newPathGuard()
   let current: { path: string; dest: string; partial: string; handle: FileHandle } | null = null
   const finishCurrent = async (): Promise<void> => {
@@ -143,8 +203,20 @@ function directoryTarget(root: string): Target {
     current = null
     if (!c) return
     await c.handle.close()
-    await rename(c.partial, c.dest)
-    placed.push(c.dest)
+    placed.push(await commitNoClobber(c.partial, c.dest))
+  }
+  const removeCreated = (): void => {
+    for (const f of placed) rmSync(f, { force: true })
+    placed.length = 0
+    // Deepest first; only folders this download made, and only while empty.
+    for (const d of [...madeDirs].reverse()) {
+      try {
+        rmdirSync(d)
+      } catch {
+        // Not empty (something else is in it) or already gone: leave it.
+      }
+    }
+    madeDirs.length = 0
   }
   return {
     async write(path, data) {
@@ -152,14 +224,14 @@ function directoryTarget(root: string): Target {
         startPath(path)
         await finishCurrent()
         const dest = containedPath(root, ...path.split('/'))
-        mkdirSync(dirname(dest), { recursive: true })
+        madeDirs.push(...mkdirTracked(dirname(dest)))
         const partial = partialPath(dest)
-        current = { path, dest, partial, handle: await open(partial, 'w') }
+        current = { path, dest, partial, handle: await open(partial, 'wx') }
       }
       await current.handle.write(data)
     },
     async mkdir(path) {
-      mkdirSync(containedPath(root, ...path.split('/')), { recursive: true })
+      madeDirs.push(...mkdirTracked(containedPath(root, ...path.split('/'))))
     },
     close: finishCurrent,
     async abort() {
@@ -169,30 +241,49 @@ function directoryTarget(root: string): Target {
         await c.handle.close().catch(ignore)
         await unlink(c.partial).catch(ignore)
       }
-      for (const f of placed) rmSync(f, { force: true })
+      removeCreated()
     },
     abortNow() {
       if (current) unlinkNow(current.partial)
       current = null
-      for (const f of placed) rmSync(f, { force: true })
+      removeCreated()
+    },
+    interrupt() {
+      // Plain fs operations: they settle by themselves.
     }
   }
 }
 
 /** One zip archive, each entry streamed in; zip64 is used when a size needs it. */
-async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
+async function zipTarget(
+  filePath: string,
+  reveal: boolean,
+  openOutput: (path: string) => Writable
+): Promise<Target> {
   const partial = partialPath(filePath)
-  const output: WriteStream = createWriteStream(partial)
+  const output = openOutput(partial)
   const archive = new ZipArchive({ zlib: { level: 9 } })
   let failure: Error | null = null
+  let rejectFailed: (err: Error) => void = ignore
+  /** Rejects once the zip has failed: every wait races it, so none hangs. */
+  const failed = new Promise<never>((_, reject) => {
+    rejectFailed = reject
+  })
+  failed.catch(ignore)
+  let current: { path: string; stream: PassThrough } | null = null
+  // A failed output unpipes the archive, so a deflating entry would never drain
+  // again: the failure ends the entry stream and every wait at once.
   const fail = (err: Error): void => {
-    failure ??= err
+    if (failure) return
+    failure = err
+    rejectFailed(err)
+    current?.stream.destroy()
   }
+  const settle = <T>(p: Promise<T>): Promise<T> => Promise.race([p, failed])
   archive.on('error', fail)
   archive.on('warning', fail)
   output.on('error', fail)
   archive.pipe(output)
-  let current: { path: string; stream: PassThrough } | null = null
   const startPath = newPathGuard()
   const check = (): void => {
     if (failure) throw failure
@@ -211,7 +302,7 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
         archive.append(stream, { name: path, store: STORED.has(extname(path).toLowerCase()) })
         current = { path, stream }
       }
-      if (!current.stream.write(data)) await once(current.stream, 'drain')
+      if (!current.stream.write(data)) await settle(once(current.stream, 'drain'))
       check()
     },
     async mkdir(path) {
@@ -223,14 +314,14 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
       check()
       finishCurrent()
       const written = once(output, 'close')
-      await archive.finalize()
-      await written
+      await settle(archive.finalize())
+      await settle(written)
       check()
       await rename(partial, filePath)
       if (reveal) shell.showItemInFolder(filePath)
     },
     async abort() {
-      current?.stream.destroy()
+      fail(new Error('The download was cancelled'))
       archive.abort()
       // The stream may still be opening the file: unlink only once it is closed, or
       // the late open would bring the file back.
@@ -240,10 +331,16 @@ async function zipTarget(filePath: string, reveal: boolean): Promise<Target> {
       await unlink(partial).catch(ignore)
     },
     abortNow() {
-      current?.stream.destroy()
+      fail(new Error('The download was cancelled'))
       archive.abort()
+      // A file still being opened would reappear after the unlink: unlink again once
+      // the output has closed (in case the process lives that long).
+      if (!output.closed) output.once('close', () => unlinkNow(partial))
       output.destroy()
       unlinkNow(partial)
+    },
+    interrupt() {
+      fail(new Error('The download was cancelled'))
     }
   }
 }
@@ -254,15 +351,34 @@ interface Entry {
   target: Target
   /** The operation in flight: each runs after the previous one settles. */
   chain: Promise<unknown>
+  /** Closing or aborting: no new operations; still tracked until it has settled. */
+  ending: boolean
   aborted: boolean
 }
 
+/** How long an abort waits for an interrupted operation before cleaning up anyway. */
+const ABORT_WAIT_MS = 5_000
+
+export interface SaveTargetsOptions {
+  /** Where a zip's bytes go; a test injects a failing disk here. */
+  openZipOutput?: (path: string) => Writable
+}
+
 export class SaveTargets {
+  /**
+   * Every target until it has fully settled — open, closing or aborting — so a quit
+   * (`abortAllNow`) still reaches one whose close or abort is still running.
+   */
   private readonly targets = new Map<string, Entry>()
+  private readonly openZipOutput: (path: string) => Writable
+
+  constructor(options: SaveTargetsOptions = {}) {
+    this.openZipOutput = options.openZipOutput ?? ((p) => createWriteStream(p))
+  }
 
   private entry(owner: number, id: unknown): Entry {
     const entry = typeof id === 'string' ? this.targets.get(id) : undefined
-    if (!entry || entry.owner !== owner || entry.aborted) throw new Error('Unknown save target')
+    if (!entry || entry.owner !== owner || entry.ending) throw new Error('Unknown save target')
     return entry
   }
 
@@ -279,13 +395,26 @@ export class SaveTargets {
     return result
   }
 
-  /** Abort after whatever is in flight; nothing queued after this runs. */
+  /**
+   * Abort after whatever is in flight — interrupted first, so it settles instead of
+   * hanging, and waited on for a bounded time; nothing queued after this runs. The
+   * entry stays tracked until its cleanup is done.
+   */
   private async abortEntry(id: string, entry: Entry): Promise<void> {
     if (entry.aborted) return
     entry.aborted = true
-    this.targets.delete(id)
-    await entry.chain
+    entry.ending = true
+    entry.target.interrupt()
+    let timer: NodeJS.Timeout | undefined
+    await Promise.race([
+      entry.chain,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, ABORT_WAIT_MS)
+      })
+    ])
+    clearTimeout(timer)
     await entry.target.abort().catch(ignore)
+    this.targets.delete(id)
   }
 
   async open(
@@ -319,11 +448,17 @@ export class SaveTargets {
       if (picked.canceled || !picked.filePath) return { ok: false, canceled: true }
       target =
         req.kind === 'zip'
-          ? await zipTarget(picked.filePath, req.reveal === true)
+          ? await zipTarget(picked.filePath, req.reveal === true, this.openZipOutput)
           : await fileTarget(picked.filePath, req.reveal === true)
     }
     const targetId = randomUUID()
-    this.targets.set(targetId, { owner, target, chain: Promise.resolve(), aborted: false })
+    this.targets.set(targetId, {
+      owner,
+      target,
+      chain: Promise.resolve(),
+      ending: false,
+      aborted: false
+    })
     return { ok: true, targetId }
   }
 
@@ -341,15 +476,17 @@ export class SaveTargets {
   async close(owner: number, id: unknown): Promise<HostSaveResult> {
     const entry = this.entry(owner, id)
     const closed = this.run(entry, (t) => t.close())
-    this.targets.delete(id as string)
-    return closed.then(
-      () => ({ ok: true }) as const,
-      async (err: unknown) => {
-        entry.aborted = true
-        await entry.target.abort().catch(ignore)
-        return { ok: false, error: err instanceof Error ? err.message : String(err) } as const
-      }
-    )
+    entry.ending = true
+    return closed
+      .then(
+        () => ({ ok: true }) as const,
+        async (err: unknown) => {
+          entry.aborted = true
+          await entry.target.abort().catch(ignore)
+          return { ok: false, error: err instanceof Error ? err.message : String(err) } as const
+        }
+      )
+      .finally(() => this.targets.delete(id as string))
   }
 
   async abort(owner: number, id: unknown): Promise<void> {
@@ -364,10 +501,14 @@ export class SaveTargets {
     await Promise.all(mine.map(([id, e]) => this.abortEntry(id, e)))
   }
 
-  /** The app is quitting: remove every partial now, synchronously. */
+  /**
+   * The app is quitting: remove every partial now, synchronously — open targets and
+   * those still closing or aborting alike.
+   */
   abortAllNow(): void {
     for (const [id, entry] of this.targets) {
       entry.aborted = true
+      entry.ending = true
       this.targets.delete(id)
       entry.target.abortNow()
     }
