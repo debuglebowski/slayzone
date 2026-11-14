@@ -288,6 +288,14 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/browser/type': checked(task('body.taskId')),
   'GET /api/browser/url': checked(task('query.taskId')),
 
+  // ── workspace files (fileEditor.readFile's marks: the scope task / project and the
+  // computer it may name) ──
+  'GET /api/files/raw': checked(
+    task('query.taskId'),
+    projectExact('query.projectId'),
+    computer('query.computerId')
+  ),
+
   // ── app ──
   'POST /api/close-task/:id': checked(task('params.id')),
   'POST /api/tasks/:id/move': {

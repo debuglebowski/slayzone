@@ -999,6 +999,7 @@ export const REST_ADMIN_POLICY: Record<string, AccessClass> = {
   'GET /api/automations/:id/runs': 'admin',
   'POST /api/browser/click': 'user',
   'GET /api/browser/content': 'user',
+  'GET /api/files/raw': 'user',
   'POST /api/browser/eval': 'user',
   'POST /api/browser/navigate': 'user',
   'POST /api/browser/screenshot': 'user',

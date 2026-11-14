@@ -3,7 +3,8 @@ import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { formatAttachmentSize, type ChatAttachment } from '@slayzone/terminal-contracts'
 import { useChatView } from './ChatViewContext'
 import { HighlightedText } from './HighlightedText'
-import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { toArtifactFileUrl, toSlzFileUrl } from '@slayzone/platform/slz-file-url'
+import { useHubId } from '@slayzone/transport/client'
 import { AttachmentHoverPreview } from './attachments/AttachmentHoverPreview'
 import { AttachmentKindIcon } from './attachments/AttachmentChip'
 
@@ -55,14 +56,18 @@ export function UserMessageContent({
 
 function PathImageAttachment({ name, path }: { name: string; path: string }): React.JSX.Element {
   const { onOpenFile, onOpenArtifact } = useChatView()
+  const hubId = useHubId()
+  const artifactId = /\/artifacts\/[^/]+\/([a-f0-9-]{36})(?:\.[^/]*)?$/i.exec(
+    path.replaceAll('\\', '/')
+  )?.[1]
+  // An artifact lives on the hub, so its bytes come from there; any other path
+  // can only be one on this machine.
+  const url = artifactId ? toArtifactFileUrl(hubId, artifactId, path) : toSlzFileUrl(path)
   return (
-    <AttachmentHoverPreview name={name} source={{ url: toSlzFileUrl(path) }}>
+    <AttachmentHoverPreview name={name} source={{ url }}>
       <button
         type="button"
         onClick={() => {
-          const artifactId = /\/artifacts\/[^/]+\/([a-f0-9-]{36})(?:\.[^/]*)?$/i.exec(
-            path.replaceAll('\\', '/')
-          )?.[1]
           if (artifactId && onOpenArtifact) onOpenArtifact(artifactId)
           else onOpenFile?.(path)
         }}

@@ -168,6 +168,7 @@ export const HUB_CALL_AUDIT: Record<HubMethod, AuditRule | null> = {
   'fs.listDir': null,
   'fs.readDir': null,
   'fs.readFile': null,
+  'fs.readBytes': null,
   'fs.gitStatus': null,
   'fs.searchFiles': null,
   'fs.listAllFiles': null,

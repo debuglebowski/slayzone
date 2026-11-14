@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ConnectorLease, RetryPolicy } from './index'
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
+import { RpcError } from '@slayzone/computer-transport/shared'
+import { ConnectorLease, RetryPolicy, socketPeer } from './index'
 
 describe('persistent runtime fencing', () => {
   it('fences old connector without disposing its sessions, including rollback', () => {
@@ -28,3 +30,42 @@ it('retains release cooldown after supervisor restart', () => {
   expect(resumed.ready('3.0.0', 2000)).toBe(true)
   expect(resumed.ready('2.0.0', 901000)).toBe(true)
 })
+
+describe('socketPeer', () => {
+  it("relays a handler's structured error whole: code, message and data", async () => {
+    const [a, b] = await socketPair()
+    const host = socketPeer(a, {
+      request: () => {
+        throw new RpcError(-32603, "ENOENT: no such file, stat '/x'", { errno: 'ENOENT' })
+      }
+    })
+    const connector = socketPeer(b)
+    const err = await connector.rpc.request('fs.readBytes', {}).then(
+      () => null,
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(RpcError)
+    expect(err).toMatchObject({
+      code: -32603,
+      message: "ENOENT: no such file, stat '/x'",
+      data: { errno: 'ENOENT' }
+    })
+    host.close()
+    connector.close()
+  })
+})
+
+function socketPair(): Promise<[Socket, Socket]> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((serverSide) => {
+      server.close()
+      resolve([serverSide, client])
+    })
+    server.on('error', reject)
+    let client: Socket
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address() as AddressInfo
+      client = connect(addr.port, '127.0.0.1')
+    })
+  })
+}

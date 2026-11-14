@@ -44,6 +44,7 @@ import { registerPanelsCrudRoutes } from './panels/crud'
 import { registerAutomationsCrudRoutes } from './automations/crud'
 import { registerArtifactsListRoute } from './artifacts/list'
 import { registerArtifactsContentRoutes } from './artifacts/content'
+import { registerFilesRawRoute } from './files/raw'
 import { registerArtifactsCrudRoutes } from './artifacts/crud'
 import { registerArtifactsSearchRoute } from './artifacts/search'
 import { registerArtifactsVersionsRoutes } from './artifacts/versions'
@@ -169,6 +170,10 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerArtifactsExportPdfRoute(app, deps)
   registerArtifactsExportPngRoute(app, deps)
   registerArtifactsExportHtmlRoute(app, deps)
+
+  // Workspace files: raw bytes from the computer that owns the workspace (previews
+  // the desktop's slz-file:// handler cannot read from its own disk).
+  registerFilesRawRoute(app, deps)
 
   // Automations
   registerAutomationsRunRoute(app, deps)

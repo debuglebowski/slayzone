@@ -368,6 +368,8 @@ run_harness packages/domains/ai-config/src/server/ai-config-routing.test.ts
 run_harness packages/domains/file-editor/src/server/file-editor-router.test.ts
 run_harness packages/domains/file-editor/src/server/watcher.test.ts
 run_harness packages/domains/file-editor/src/server/workspace-fs-none.test.ts
+# Raw byte slices of a workspace file (GET /api/files/raw streams previews from them).
+run_harness packages/domains/file-editor/src/server/read-bytes.test.ts
 run_harness packages/domains/diagnostics/src/electron/service.test.ts
 # Write-queue batching: deferred flush, error/batch-size triggers, queue-cap drop event.
 run_harness packages/domains/diagnostics/src/electron/batching.test.ts
@@ -489,6 +491,8 @@ run_harness packages/apps/app/src/main/client-settings-migration.test.ts
 # bad line from repeating the storage-migration incident.
 run_harness packages/apps/app/src/main/client-settings-migration.realstore.test.ts
 run_harness packages/apps/app/src/main/document-link-bridge.test.ts
+# slz-file:// previews: local paths off disk, hub/computer files fetched from their hub.
+run_harness packages/apps/app/src/main/slz-file-handler.test.ts
 # The desktop app's one Convex deployment (renderer + its hub): the build's URL, or the
 # PLAYWRIGHT-only SLAYZONE_E2E_CONVEX_ADDRESS override (a bad value throws, never falls back).
 run_harness packages/apps/app/src/main/convex-deployment.test.ts
@@ -1103,6 +1107,8 @@ run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
 run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
+# Workspace file raw bytes routed to the owning computer (slz-file:// previews on a remote hub).
+run_harness packages/apps/api/src/http/rest-api/files/raw.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of
 # the streamed write/append bodies and the blob-streamed version read, plus the
 # `Error [CODE]: …` 400 contract the CLI prints verbatim.

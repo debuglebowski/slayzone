@@ -88,6 +88,8 @@ import {
   fsPathExistsResultSchema,
   fsReadDirResultSchema,
   fsReadFileResultSchema,
+  fsReadBytesResultSchema,
+  fsErrnoErrorDataSchema,
   fsSearchFilesResultSchema,
   gitGetCurrentBranchResultSchema,
   gitIsGitRepoResultSchema,
@@ -2895,6 +2897,24 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       )
     },
 
+    async readBytes(computerId, rootPath, filePath, offset, length) {
+      if (computerId == null) return local.readBytes(rootPath, filePath, offset, length)
+      const res = await req(
+        computerId,
+        HubToComputerMethods.fsReadBytes,
+        { rootPath, filePath, offset, length },
+        fsReadBytesResultSchema
+      ).catch((err: unknown) => {
+        throw asFsErrnoError(err)
+      })
+      return {
+        bytes: Buffer.from(res.data, 'base64'),
+        size: res.size,
+        mtimeMs: res.mtimeMs,
+        eof: res.eof
+      }
+    },
+
     async writeFile(computerId, rootPath, filePath, content) {
       if (computerId == null) return local.writeFile(rootPath, filePath, content)
       await req(
@@ -3078,6 +3098,18 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       return stop
     }
   }
+}
+
+/**
+ * The computer's own fs answer (`data.errno`, see `fsErrnoErrorDataSchema`) as the
+ * error an in-process read throws — `code: 'ENOENT'` etc. — so callers handle routed
+ * and local reads alike. Anything else (a refusal, a lost connection) passes as is.
+ */
+function asFsErrnoError(err: unknown): unknown {
+  if (!(err instanceof RpcError)) return err
+  const data = fsErrnoErrorDataSchema.safeParse(err.data)
+  if (!data.success) return err
+  return Object.assign(new Error(err.message), { code: data.data.errno })
 }
 
 /** A computer's answer that it has no `pty.relay` (see {@link ComputerUpdatePendingError}). */
