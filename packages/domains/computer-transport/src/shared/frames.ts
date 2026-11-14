@@ -689,6 +689,7 @@ export const HubToComputerMethods = {
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
+  projectRelocate: 'project.relocate',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
@@ -1322,6 +1323,12 @@ export const projectSetPathParamsSchema = z.object({
   path: z.string().min(1)
 })
 export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
+
+export const projectRelocateParamsSchema = projectSetPathParamsSchema.extend({
+  sourcePath: z.string(),
+  mode: z.enum(['move', 'update']).default('move')
+})
+export type ProjectRelocateParams = z.infer<typeof projectRelocateParamsSchema>
 
 export const projectSetPathResultSchema = z.object({
   /** The realpath-resolved path actually recorded. */

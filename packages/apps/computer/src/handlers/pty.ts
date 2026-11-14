@@ -273,6 +273,7 @@ export interface PtyHandlers {
   direct: DirectPtyService
   hasWork(): boolean
   hasTaskWork(taskId: string): boolean
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
   /** End the task's terminals; `deleted` (purged) also forgets their saved output. */
   stopTask(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
   handlers: HubMethodTable
@@ -528,6 +529,7 @@ export function createPtyHandlers(
       buffer?: RingBuffer
     }
   ): PtySession {
+    ctx.assertWorkAllowed?.()
     if (opts.taskId) options.assertTaskActive?.(opts.taskId)
     if (opts.taskId && !opts.warm) taskOfSession.set(id, opts.taskId)
     const cwd = resolveCwd(opts)
@@ -1626,6 +1628,7 @@ export function createPtyHandlers(
   return {
     direct,
     hasWork: () => [...sessions.values()].some((session) => !session.warm) || queued.size > 0,
+    hasFolderWork: (contains) => [...sessions.values()].some((session) => contains(session.cwd)),
     hasTaskWork: (taskId: string) =>
       [...sessions.values(), ...queued.values()].some((s) =>
         belongsToTask(s.id, taskId, s.taskId)

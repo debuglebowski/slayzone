@@ -66,6 +66,9 @@ const CreateProjectDialog = lazy(() =>
 const ProjectSettingsDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.ProjectSettingsDialog }))
 )
+const RelocateProjectDialog = lazy(() =>
+  import('@slayzone/projects/client').then((m) => ({ default: m.ScopedRelocateProjectDialog }))
+)
 const DeleteProjectDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.DeleteProjectDialog }))
 )
@@ -188,6 +191,7 @@ export function AppDialogs({
   const deletingProject = useDialogStore((s) => s.deletingProject)
   const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
+  const relocatingProject = useDialogStore((s) => s.relocatingProject)
   const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
 
   // ── Search palette (Cmd+K) ────────────────────────────────────────────────
@@ -475,6 +479,16 @@ export function AppDialogs({
               if (!open) useDialogStore.getState().closeDeleteProject()
             }}
             onDeleted={handleProjectDeleted}
+          />
+        </Suspense>
+      )}
+
+      {relocatingProject && (
+        <Suspense fallback={null}>
+          <RelocateProjectDialog
+            project={relocatingProject}
+            onClose={() => useDialogStore.getState().closeRelocateProject()}
+            onUpdated={handleProjectUpdated}
           />
         </Suspense>
       )}

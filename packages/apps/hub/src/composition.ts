@@ -2837,6 +2837,15 @@ export function composeServer(opts: {
       db,
       localComputerId: deterministicLocalComputerId(localComputerName),
       ops: {
+        relocateProject: async (computerId, projectId, sourcePath, path, mode) => {
+          const result = await computerGateway.request(
+            computerId,
+            HubToComputerMethods.projectRelocate,
+            { projectId, sourcePath, path, mode },
+            120_000
+          )
+          return projectListResultSchema.shape.projects.element.pick({ path: true }).parse(result)
+        },
         listRoots: (computerId) => workspaceFs.listRoots(computerId),
         setAllowedRoots: (computerId, roots) => workspaceFs.setAllowedRoots(computerId, roots),
         pathExists: (computerId, path) => workspaceFs.pathExists(computerId, path),
@@ -2918,6 +2927,8 @@ export function composeServer(opts: {
       return placement.forTarget({ computerId: localComputerId }).catch(() => null)
     }
     setProjectFolderHost({
+      relocateFolder: (computerId, projectId, sourcePath, path, mode) =>
+        projectSync.relocateFolder(computerId, projectId, sourcePath, path, mode),
       computerForNewProject: async () =>
         (await placement.forCaller()) ?? (await registeredLocalComputer()),
       computerForProject: async (projectId) =>

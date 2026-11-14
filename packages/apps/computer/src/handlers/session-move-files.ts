@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import {
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -137,6 +138,28 @@ function isPrefixOf(prefix: string, whole: string): boolean {
     closeSync(a)
     closeSync(b)
   }
+}
+
+/** Keep Claude --resume working when the cwd-encoded transcript folder changes. */
+export async function relocateClaudeTranscript(
+  sessionId: string,
+  sourceCwd: string,
+  targetCwd: string
+): Promise<void> {
+  if (!SAFE_SESSION_ID.test(sessionId) || sourceCwd === targetCwd) return
+  const source = (await locateClaudeTranscript(sessionId, sourceCwd))?.path
+  if (!source) return
+  const target = claudeTranscriptPath(targetCwd, sessionId)
+  if (source === target) return
+  if (existsSync(target)) {
+    if (isPrefixOf(source, target)) return
+    if (!isPrefixOf(target, source))
+      throw new Error('Claude session copies diverged. Resolve them before relocating the project.')
+  }
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
+  const staging = `${target}.relocation-tmp`
+  copyFileSync(source, staging)
+  renameSync(staging, target)
 }
 
 export function createSessionMoveFiles(opts: {

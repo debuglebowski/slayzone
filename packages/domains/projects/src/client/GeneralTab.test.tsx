@@ -13,6 +13,7 @@ vi.mock('./trpc', () => ({
   useTRPC: () => ({
     app: { dialog: { showOpenDialog: { mutationOptions: () => ({ __key: 'showOpenDialog' }) } } },
     projects: {
+      relocate: { mutationOptions: () => ({ __key: 'projects.relocate' }) },
       uploadIcon: { mutationOptions: () => ({ __key: 'uploadIcon' }) },
       update: { mutationOptions: () => ({ __key: 'projects.update' }) }
     },
@@ -50,6 +51,12 @@ type Kids = { children?: React.ReactNode }
 vi.mock('@slayzone/ui', () => {
   const Passthrough = ({ children }: Kids) => <>{children}</>
   return {
+    Dialog: Passthrough,
+    DialogContent: Passthrough,
+    DialogDescription: Passthrough,
+    DialogFooter: Passthrough,
+    DialogHeader: Passthrough,
+    DialogTitle: Passthrough,
     Button: ({ children, ...props }: React.ComponentProps<'button'>) => (
       <button {...props}>{children}</button>
     ),
@@ -146,6 +153,50 @@ function renderTab(project = makeProject()) {
 }
 
 describe('GeneralTab default computer', () => {
+  it('preserves unsaved identity edits when relocation returns an updated project', async () => {
+    const project = makeProject({
+      resolved_computer_id: 'computer-a',
+      placements: [{ computer_id: 'computer-a', path: '/tmp/before', status: 'ready' }]
+    })
+    const relocated = {
+      ...project,
+      placements: [{ computer_id: 'computer-a', path: '/tmp/after', status: 'ready' as const }]
+    }
+    genericMutateAsync.mockResolvedValue(relocated)
+    function Settings() {
+      const [current, setCurrent] = React.useState(project)
+      return (
+        <GeneralTab
+          project={current}
+          onChanged={setCurrent}
+          onUpdated={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+    }
+    const { container } = render(<Settings />)
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved label' } })
+    fireEvent.change(container.querySelector('#edit-icon-letters')!, { target: { value: 'XY' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Relocate…' }))
+    fireEvent.change(screen.getByLabelText('New folder path'), { target: { value: '/tmp/after' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Move folder' }))
+    await waitFor(() => expect(screen.queryByLabelText('New folder path')).toBeNull())
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Unsaved label')
+    expect((container.querySelector('#edit-icon-letters') as HTMLInputElement).value).toBe('XY')
+    expect((screen.getByLabelText('Repository Path') as HTMLInputElement).value).toBe('/tmp/after')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(genericMutateAsync).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: 'Unsaved label', iconLetters: 'XY' })
+      )
+    )
+  })
+  it('explains moving files versus updating the path in Relocate', () => {
+    renderTab()
+    fireEvent.click(screen.getByRole('button', { name: 'Relocate…' }))
+    expect(screen.getByText(/SlayZone moves the folder and its files/)).toBeDefined()
+    expect(screen.getByText(/No files are moved/)).toBeDefined()
+  })
   it('shows a "runs locally" note when no computers are enrolled', () => {
     computersData = []
     renderTab()

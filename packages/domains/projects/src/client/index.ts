@@ -1,6 +1,7 @@
 export { CreateProjectDialog } from './CreateProjectDialog'
 export type { ProjectCreationContext, ProjectStartMode } from './CreateProjectDialog'
 export { ProjectSettingsDialog } from './ProjectSettingsDialog'
+export { ScopedRelocateProjectDialog } from './RelocateProjectDialog'
 export { DeleteProjectDialog } from './DeleteProjectDialog'
 export { GroupSettingsDialog } from './GroupSettingsDialog'
 export { ProjectSelect } from './ProjectSelect'

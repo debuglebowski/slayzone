@@ -16,6 +16,13 @@
 import type { PlacementStatus } from '@slayzone/computers/shared'
 
 export interface ProjectFolderHost {
+  relocateFolder?(
+    computerId: string,
+    projectId: string,
+    sourcePath: string,
+    path: string,
+    mode?: 'move' | 'update'
+  ): Promise<{ path: string; status: PlacementStatus }>
   /** The computer for a new project when the request names none (the caller's
    *  default). Null = no computer at all. */
   computerForNewProject(): Promise<string | null>

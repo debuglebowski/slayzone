@@ -1074,6 +1074,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   // never someone else's computer.
   'projects.create': checked(path('path'), computer('computerId')),
   'projects.update': checked(project('id'), path('path')),
+  'projects.relocate': checked(
+    project('id'),
+    computer('computerId'),
+    path('path'),
+    path('sourcePath')
+  ),
   'projects.delete': checked(project('id')),
   'projects.uploadIcon': checked(project('projectId'), owned('sourcePath')),
   'projects.reorder': checked(project('projectIds[]')),

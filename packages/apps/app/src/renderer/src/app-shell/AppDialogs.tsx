@@ -32,6 +32,7 @@ import {
   DeleteTaskDialog,
   CreateProjectDialog,
   ProjectSettingsDialog,
+  RelocateProjectDialog,
   DeleteProjectDialog,
   MoveProjectToHubDialog,
   GroupSettingsDialog,
@@ -211,6 +212,7 @@ export function AppDialogs({
   // "Move to hub…" on a project's menu (store-driven, like the sidebar's other menus).
   const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
+  const relocatingProject = useDialogStore((s) => s.relocatingProject)
   // Dialogs about one project or task talk to the hub that owns it; the rest
   // stay on the default hub.
   const ownerHubIds = {
@@ -312,6 +314,15 @@ export function AppDialogs({
               onDeleted={handleProjectDeleted}
             />
           </OwnerHubScope>
+        </Suspense>
+      )}
+      {relocatingProject && (
+        <Suspense fallback={null}>
+          <RelocateProjectDialog
+            project={relocatingProject}
+            onClose={() => useDialogStore.getState().closeRelocateProject()}
+            onUpdated={handleProjectUpdated}
+          />
         </Suspense>
       )}
       {shouldMount('moveProjectToHub', !!movingProjectToHub) && (

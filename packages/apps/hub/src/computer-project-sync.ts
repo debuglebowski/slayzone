@@ -58,6 +58,13 @@ const WORK_ROOTS_KEY = LOCAL_COMPUTER_WORK_ROOTS_KEY
 
 /** The computer calls this module makes. */
 export interface ComputerFolderOps {
+  relocateProject?(
+    computerId: string,
+    projectId: string,
+    sourcePath: string,
+    path: string,
+    mode?: 'move' | 'update'
+  ): Promise<{ path: string }>
   listRoots(computerId: string): Promise<{ roots: readonly string[] }>
   setAllowedRoots(computerId: string, roots: string[]): Promise<unknown>
   pathExists(computerId: string, path: string): Promise<boolean>
@@ -95,6 +102,13 @@ export interface SetFolderResult {
 }
 
 export interface ComputerProjectSync {
+  relocateFolder(
+    computerId: string,
+    projectId: string,
+    sourcePath: string,
+    path: string,
+    mode?: 'move' | 'update'
+  ): Promise<SetFolderResult>
   onConnect(computerId: string): Promise<void>
   /**
    * The worktree base setting, an automation's folder or a background process's
@@ -477,6 +491,21 @@ export function createComputerProjectSync(deps: ComputerProjectSyncDeps): Comput
 
         const after = snapshot(await listPlacements(db), computerId)
         if (before !== after || defaultsChanged > 0) deps.onChanged()
+      })
+    },
+
+    relocateFolder(computerId, projectId, sourcePath, path, mode) {
+      return withLock(computerId, async () => {
+        if (!ops.relocateProject)
+          throw new Error(
+            'This computer does not support project relocation. Update it and try again.'
+          )
+        await widenRoots(computerId, [path])
+        const answer = await ops.relocateProject(computerId, projectId, sourcePath, path, mode)
+        const recorded = { path: answer.path, status: 'ready' as const }
+        await setPlacement(db, { computerId, projectId, ...recorded })
+        deps.onChanged()
+        return recorded
       })
     },
 

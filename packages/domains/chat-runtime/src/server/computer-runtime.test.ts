@@ -27,6 +27,26 @@ const bootstrap = {
 }
 const createOpts = { taskId: 'task-a', tabId: 'tab-a', mode: 'claude-chat', cwd: '/tmp' }
 
+test('project relocation updates cached chat folders and preserves drafts', async () => {
+  const { r } = runtime()
+  r.bootstrap(bootstrap)
+  await r.ops.hydrate(createOpts)
+  r.taskPaths.handle({
+    op: 'set',
+    taskId: 'task-a',
+    projectId: 'project-a',
+    baseDir: '/tmp/subdir',
+    at: 1
+  })
+  await r.ops.saveTabDraft('tab-a', { text: 'keep this draft', attachments: [] })
+  await r.relocateProject('project-a', '/tmp', '/new', (p) =>
+    p === '/tmp' ? '/new' : p.replace('/tmp/', '/new/')
+  )
+  expect(r.transport.getSessionInfo('tab-a')?.cwd).toBe('/new')
+  expect(r.taskPaths.get('task-a')?.baseDir).toBe('/new/subdir')
+  expect((await r.ops.getTabState('tab-a'))?.draft.text).toBe('keep this draft')
+})
+
 test('drafts persist on computer and restore without a hub database', async () => {
   const { r, stateDir } = runtime()
   r.bootstrap(bootstrap)

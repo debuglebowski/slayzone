@@ -18,7 +18,7 @@ import {
 } from '@slayzone/terminal/runtime'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { openChatStorage } from './storage'
-import { createLocalChatData, type ChatMetadataUpdate } from './local-data'
+import { createLocalChatData, type ChatBootstrap, type ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
 import { createComputerTaskData, type DataImportKinds } from './task-data'
 import { createSessionLedgerService } from './session-ledger-service'
@@ -262,6 +262,68 @@ export function createComputerChatRuntime(opts: {
   const retentionService = retention
   return {
     diagnosticsConfig,
+    async relocateProject(
+      projectId: string,
+      source: string,
+      target: string,
+      remap: (path: string) => string
+    ) {
+      const records = storage
+        .findRecords('settings', undefined, { id: 'bootstrap' })
+        .filter((record) => (record.value as ChatBootstrap).projectId === projectId)
+      const sessions = records
+        .map((record) => transport.getSessionInfo((record.value as ChatBootstrap).identity.tabId))
+        .filter((info): info is NonNullable<typeof info> => info !== null)
+      if (sessions.some((info) => info.pid !== null && !info.ended))
+        throw new Error('Stop running chat agents before relocating the project.')
+      if (records.some((record) => storage.conversation(record.conversationId)?.state !== 'active'))
+        throw new Error('Wait for chat transfers to finish before relocating the project.')
+      await Promise.all(sessions.map((info) => transport.removeSession(info.tabId)))
+      storage.transaction(() => {
+        for (const record of records) {
+          const value = record.value as ChatBootstrap
+          const owner = storage.conversation(record.conversationId)!
+          storage.putRecord(record.conversationId, owner.identity.epoch, {
+            kind: 'settings',
+            id: 'bootstrap',
+            value: { ...value, cwd: remap(value.cwd) },
+            at: Date.now()
+          })
+        }
+        const taskIds = new Set([
+          ...taskPaths.store.projectTaskIds(projectId),
+          ...records.map((r) => (r.value as ChatBootstrap).identity.taskId)
+        ])
+        storage.compose((db) => {
+          for (const taskId of taskIds) {
+            const sessions = db
+              .prepare('SELECT id, cwd FROM agent_sessions WHERE task_id=? AND cwd IS NOT NULL')
+              .all(taskId) as Array<{ id: string; cwd: string }>
+            for (const session of sessions)
+              db.prepare('UPDATE agent_sessions SET cwd=? WHERE id=?').run(
+                remap(session.cwd),
+                session.id
+              )
+            const turns = db
+              .prepare('SELECT id, worktree_path FROM agent_turns WHERE task_id=?')
+              .all(taskId) as Array<{ id: string; worktree_path: string }>
+            for (const turn of turns)
+              db.prepare('UPDATE agent_turns SET worktree_path=? WHERE id=?').run(
+                remap(turn.worktree_path),
+                turn.id
+              )
+          }
+        })
+        taskPaths.store.relocateProject(projectId, source, target)
+      })
+      for (const info of sessions)
+        await ops.hydrate({
+          taskId: info.taskId,
+          tabId: info.tabId,
+          mode: info.mode,
+          cwd: remap(info.cwd)
+        })
+    },
     taskData,
     ledger,
     turns,
