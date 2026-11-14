@@ -132,37 +132,41 @@ describe('protocol v8: direct-link address', () => {
   })
 })
 
-describe('chat history pages capability (additive, no protocol bump)', () => {
-  it('keeps whether the computer answers chat history in pages, from enroll and from each hello (absent = no)', async () => {
-    for (const [advertised, kept] of [
-      [true, true],
-      [false, false],
-      [undefined, false]
-    ] as const) {
-      const { gateway, connect } = setup('203.0.113.9')
-      const first = connect()
-      const enroll = enrollFrame(null)
-      first.frame({
-        ...enroll,
-        params: {
-          ...enroll.params,
-          ...(advertised !== undefined ? { chatHistoryPages: advertised } : {})
-        }
-      })
-      await flush()
-      expect(gateway.listComputers()[0]?.chatHistoryPages).toBe(kept)
-      const { apiKey } = first.response(1)!.result as { apiKey: string }
-      first.close()
-      // An older build reconnecting under the same identity advertises nothing.
-      const second = connect()
-      second.frame({
-        id: 2,
-        method: 'hello',
-        params: { apiKey, protocolVersion: COMPUTER_PROTOCOL_VERSION }
-      })
-      await flush()
-      expect(gateway.listComputers()[0]?.chatHistoryPages).toBe(false)
-      gateway.close()
+describe('runtime feature flags (additive, no protocol bump)', () => {
+  it.each(['chatHistoryPages', 'aiConfigHashFiles'] as const)(
+    'keeps %s from each live handshake, never from stored enrollment tags',
+    async (feature) => {
+      for (const [advertised, kept] of [
+        [true, true],
+        [false, false],
+        [undefined, false]
+      ] as const) {
+        const { gateway, connect } = setup('203.0.113.9')
+        const first = connect()
+        const enroll = enrollFrame(null)
+        first.frame({
+          ...enroll,
+          params: {
+            ...enroll.params,
+            capabilities: [...enroll.params.capabilities, 'agentConfig.hashFiles'],
+            ...(advertised !== undefined ? { [feature]: advertised } : {})
+          }
+        })
+        await flush()
+        expect(gateway.listComputers()[0]?.[feature]).toBe(kept)
+        const { apiKey } = first.response(1)!.result as { apiKey: string }
+        first.close()
+        // An older build reconnecting under the same identity advertises nothing.
+        const second = connect()
+        second.frame({
+          id: 2,
+          method: 'hello',
+          params: { apiKey, protocolVersion: COMPUTER_PROTOCOL_VERSION }
+        })
+        await flush()
+        expect(gateway.listComputers()[0]?.[feature]).toBe(false)
+        gateway.close()
+      }
     }
-  })
+  )
 })

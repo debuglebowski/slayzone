@@ -134,6 +134,29 @@ describe('enrollment', () => {
 })
 
 describe('reconnect auth (hello)', () => {
+  it('learns file-hash support on upgrade without re-enrolling the computer', async () => {
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    const first = makeDialer(hub.url, { credentialStore: store })
+    first.start()
+    await first.events.once('connected')
+    await first.stop()
+
+    const upgraded = makeDialer(hub.url, {
+      credentialStore: store,
+      identity: { ...IDENTITY, aiConfigHashFiles: true }
+    })
+    upgraded.start()
+    expect((await upgraded.events.once('connected')).mode).toBe('hello')
+    expect(hub.gateway.listComputers()[0]).toMatchObject({
+      computerId: 'computer-1',
+      aiConfigHashFiles: true
+    })
+    expect(hub.auth.enrollCalls).toHaveLength(1)
+    // The enrollment predates this feature. Its stored tags are not a live claim.
+    expect(hub.auth.enrollCalls[0]!.capabilities).not.toContain('agentConfig.hashFiles')
+  })
+
   it('a dialer with stored credentials reconnects via hello', async () => {
     const hub = await startHub()
     const store = createMemoryCredentialStore()

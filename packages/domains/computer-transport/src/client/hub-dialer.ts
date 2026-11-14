@@ -43,6 +43,8 @@ export type HubDialerState =
 export interface ComputerIdentity {
   /** false: authenticated maintenance bridge, with no chat/new-work admission. */
   chatRuntimeReady?: boolean
+  /** Supplied by the host that actually implements the filesystem handler. */
+  aiConfigHashFiles?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -337,6 +339,7 @@ export class HubDialer {
       platform: this.opts.identity.platform,
       version: this.opts.identity.version,
       capabilities: this.opts.identity.capabilities,
+      aiConfigHashFiles: this.opts.identity.aiConfigHashFiles === true,
       protocolVersion: COMPUTER_PROTOCOL_VERSION,
       ...(this.opts.identity.chatRuntimeReady !== undefined
         ? { chatRuntimeReady: this.opts.identity.chatRuntimeReady }
@@ -382,6 +385,7 @@ export class HubDialer {
           const raw = await conn.rpc.request(ComputerToHubMethods.hello, {
             apiKey: stored.apiKey,
             version: this.opts.identity.version,
+            aiConfigHashFiles: this.opts.identity.aiConfigHashFiles === true,
             epoch: this.epoch,
             protocolVersion: COMPUTER_PROTOCOL_VERSION,
             ...(this.opts.identity.chatRuntimeReady !== undefined

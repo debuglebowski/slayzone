@@ -598,6 +598,8 @@ describe('startComputer runtime secondary hubs', () => {
         ...testConfig.capabilities,
         AI_CONFIG_HASH_CAPABILITY
       ])
+      expect(b.options.identity.aiConfigHashFiles).toBe(true)
+      expect(of(PRIMARY)[0].options.identity.aiConfigHashFiles).toBe(true)
       // A spent token is recovered by asking the parent for a fresh one, per hub.
       expect(await b.options.refreshJoinToken!()).toBe(`fresh-for-${B}`)
       // The primary is wired exactly as before: no refresh hook, its own token.

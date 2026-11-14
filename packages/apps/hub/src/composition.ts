@@ -1,5 +1,4 @@
 import { createChatRelayWatch } from './chat-relay-watch'
-import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { createChatDirectWriteHandler } from './chat-direct-write'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import {
@@ -2683,7 +2682,7 @@ export function composeServer(opts: {
       supportsHashFiles: (id) =>
         computerGateway
           .listComputers()
-          .some((c) => c.computerId === id && c.capabilities?.includes(AI_CONFIG_HASH_CAPABILITY)),
+          .some((c) => c.computerId === id && c.aiConfigHashFiles === true),
       computerForProject: ({ taskId, projectId }) =>
         placement.forTarget(taskId ? { taskId } : projectId ? { projectId } : {}),
       computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),

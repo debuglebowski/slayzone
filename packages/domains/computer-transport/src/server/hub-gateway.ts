@@ -69,6 +69,8 @@ import { auditedHubCall } from './hub-audit'
 export interface ComputerDescriptor {
   /** Explicitly false while an older host is connected only for maintenance. */
   chatRuntimeReady?: boolean
+  /** Live handler's hash-batch support, from this handshake; never persisted tags. */
+  aiConfigHashFiles?: boolean
   computerId: string
   name?: string
   platform?: string
@@ -792,6 +794,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       platform: parsed.data.platform,
       version: parsed.data.version,
       capabilities: parsed.data.capabilities,
+      aiConfigHashFiles: parsed.data.aiConfigHashFiles === true,
       protocolVersion: parsed.data.protocolVersion,
       authMode: 'enroll',
       ...(parsed.data.epoch ? { epoch: parsed.data.epoch } : {}),
@@ -955,6 +958,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       platform: identity.platform,
       version: parsed.data.version ?? identity.version,
       capabilities: identity.capabilities,
+      aiConfigHashFiles: parsed.data.aiConfigHashFiles === true,
       authMode: 'hello',
       // From the hello FRAME, not from persistence: the epoch is a property of
       // the live process, and a stored one would survive the restart it exists

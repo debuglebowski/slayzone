@@ -225,6 +225,8 @@ const hostIdField = z.string().min(1).optional()
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports `agentConfig.fs` hash batches. Absent = legacy reads. */
+  aiConfigHashFiles: z.boolean().optional(),
   /**
    * Whether this computer answers chat history in bounded pages (chat-runtime
    * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
@@ -269,6 +271,8 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports hash batches; enrollment tags never prove live support. */
+  aiConfigHashFiles: z.boolean().optional(),
   /**
    * Whether this computer answers chat history in bounded pages (chat-runtime
    * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
