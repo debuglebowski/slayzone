@@ -24,6 +24,7 @@ export type {
   AgentFlagsRow
 } from './shared.js'
 
+export { whyTaskAgentsEnded, type TaskAgentsEndedReason } from './agents-ended.js'
 export { getAllTasksOp } from './get-all.js'
 export { getByProjectOp, getDeletedTasksOp } from './get-by-project.js'
 export { getSiblingBrowserUrlOp } from './get-sibling-browser-url.js'

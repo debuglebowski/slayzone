@@ -111,6 +111,7 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { createComputerSessionOwners } from './computer-session-owners'
 import {
   checkCliInstalled,
   checkCliInstalledAtTarget,
@@ -2422,11 +2423,16 @@ export function composeServer(opts: {
     // spawn-time lookups and these exec backends resolve IDENTICALLY. Any spec
     // arriving with a null computerId still gets the connected default here.
     execGateway = computerGateway
+    // What the hub's database proves about a computer session nothing in this run
+    // tracks (a previous run's): a reconnect ends one only on that proof — its
+    // task or tab gone, its process row deleted — never for being unknown.
+    const sessionOwners = createComputerSessionOwners(db)
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
         resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
-        gate: placement.gate
+        gate: placement.gate,
+        ownerGone: sessionOwners.terminal
       })
     )
     // Warm agents are the COMPUTER's processes, so they outlive a hub or sidecar
@@ -2505,7 +2511,8 @@ export function composeServer(opts: {
         gateway: computerGateway,
         resolveComputerId: (spec) => spec.computerId,
         // Runs adopted after a hub restart are the manager's: a reconnect keeps them.
-        keepUntracked: isAdoptedOnComputer
+        keepUntracked: isAdoptedOnComputer,
+        ownerGone: sessionOwners.process
       })
     )
     setProcessComputerResolver(async ({ taskId, projectId }) => {

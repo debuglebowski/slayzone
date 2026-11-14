@@ -179,6 +179,7 @@ run_harness packages/apps/hub/src/computer-project-sync.test.ts
 run_harness packages/apps/hub/src/erasure-fanout.test.ts
 run_harness packages/apps/hub/src/computer-data-handoff.test.ts
 run_harness packages/apps/hub/src/computer-task-paths.test.ts
+run_harness packages/apps/hub/src/computer-session-owners.test.ts
 # A task-scoped request (spawn, exec, file/git read) waits for the task's staged paths.
 run_harness packages/apps/hub/src/task-path-request-gate.test.ts
 # A restored chat's invoke delivers its staged settings first; open chats re-read them.

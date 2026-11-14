@@ -106,7 +106,9 @@ export {
   deleteSession,
   relinquishSession,
   resetConversation,
-  switchConversation
+  switchConversation,
+  whyTaskAgentsEnded,
+  type TaskAgentsEndedReason
 } from './ops'
 export type {
   CreateImportedTaskInput,
