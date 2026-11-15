@@ -26,6 +26,8 @@ import { ARTIFACT_CHUNK_MAX_BYTES } from '@slayzone/task-artifacts/download-plan
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
 import { bumpTaskStateVersion, type ChatStorage } from './storage'
+import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
+import { EMPTY_RANGE_PAGE, readFileRangePage } from './blob-store'
 import type { createLocalChatData } from './local-data'
 import type { createLocalAttachments } from './attachments'
 
@@ -138,6 +140,19 @@ export const artifactMethodSchemas = {
     z.number().int().min(0),
     z.number().int().min(1).max(ARTIFACT_CHUNK_MAX_BYTES)
   ]),
+  /** One range (≤ 256 KiB) of an artifact's bytes, chosen as the whole read it pages
+   *  chooses (`ArtifactReadSpec`); a version's row rides on its first range. */
+  readRange: z.tuple([
+    id,
+    z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('bytes') }),
+      z.object({ kind: z.literal('content') }),
+      z.object({ kind: z.literal('version'), ref }),
+      z.object({ kind: z.literal('currentVersion') })
+    ]),
+    z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    z.number().int().min(1).max(BYTE_RANGE_MAX_CHUNK)
+  ]),
   seal: z.tuple([chatAttachmentSchema]),
   searchArtifacts: z.tuple([
     z.object({
@@ -167,6 +182,7 @@ const reads = new Set([
   'listFoldersByTask',
   'readBytes',
   'readBytesRange',
+  'readRange',
   'searchArtifacts'
 ])
 export const computerArtifactRequestSchema = z.object({
@@ -568,6 +584,18 @@ export function createLocalArtifacts(
         else {
           const { version } = await store.resolveArtifactVersion(db, { artifactId, versionRef })
           result = { version, data: blobs.read(version.content_hash).toString('base64') }
+        }
+      } else if (req.method === 'readRange') {
+        const [, spec, offset, length] = args
+        const source = await store.resolveArtifactReadSource(db, first, spec)
+        if (source.kind === 'missing' || source.kind === 'empty') {
+          if (offset !== 0) throw new Error('Range offset past the end')
+          result = { ...EMPTY_RANGE_PAGE, ...(source.kind === 'missing' ? { missing: true } : {}) }
+        } else {
+          const hash = source.kind === 'blob' ? source.version.content_hash : undefined
+          const page = readFileRangePage(source.path, offset, length, hash)
+          result =
+            source.kind === 'blob' && offset === 0 ? { ...page, version: source.version } : page
         }
       } else if (req.method === 'seal') result = await seal(tabId, first)
       else if (req.method === 'moveToTask') {

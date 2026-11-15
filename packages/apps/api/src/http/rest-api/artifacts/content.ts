@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express, Response } from 'express'
-import { getArtifactStorage } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage, openArtifactReaderOf } from '@slayzone/task-artifacts/server'
 import type { RenderMode } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
@@ -18,6 +18,7 @@ import {
   unsatisfiedContentRange,
   type RangeAsk
 } from '../byte-range'
+import { streamChunks } from './stream-chunks'
 import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
@@ -212,6 +213,35 @@ function startBody(
   return range
 }
 
+/**
+ * Select one HTTP range from a bounded whole-source reader. Keep one selected chunk back
+ * until the source reaches EOF and completes its hash check, including unselected tail bytes.
+ * Returning/throwing from this loop closes the source iterator; no file-sized buffer is kept.
+ */
+async function* selectedChunks(
+  res: Response,
+  chunks: AsyncIterable<Uint8Array>,
+  range: { start: number; end: number },
+  size: number
+): AsyncGenerator<Uint8Array, void, void> {
+  let offset = 0
+  let pending: Uint8Array | undefined
+  for await (const chunk of chunks) {
+    if (res.destroyed) return
+    const end = offset + chunk.byteLength
+    if (end > size) throw new Error('Artifact reader exceeded its size')
+    const from = Math.max(0, range.start - offset)
+    const to = Math.min(chunk.byteLength, range.end - offset)
+    if (to > from) {
+      if (pending) yield pending
+      pending = chunk.subarray(from, to)
+    }
+    offset = end
+  }
+  if (offset !== size) throw new Error('Artifact reader ended before its size')
+  if (pending && !res.destroyed) yield pending
+}
+
 export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps): void {
   app.get('/api/artifacts/:id/content', async (req, res) => {
     try {
@@ -233,12 +263,29 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
       const artifact = (await storage.getArtifact(deps.db, resolved.row.id)) ?? resolved.row
       const ask = parseRange(queryString(req.headers.range))
       if ('storage' in artifact && artifact.storage) {
-        const bytes = await storage.readArtifactBytes(deps.db, artifact.id)
-        const range = startBody(res, ask, bytes.byteLength, artifact.title)
-        if (range)
-          res.end(
-            Buffer.from(bytes.buffer, bytes.byteOffset + range.start, range.end - range.start)
+        // The reader covers the whole source for integrity; select the HTTP range without
+        // assembling it. Older computers retain their whole read and the same range headers.
+        const open = openArtifactReaderOf(storage)
+        const reader = open ? await open(deps.db, artifact.id, { kind: 'bytes' }) : null
+        try {
+          const bytes = reader ? null : await storage.readArtifactBytes(deps.db, artifact.id)
+          const range = startBody(
+            res,
+            ask,
+            reader ? reader.size : bytes!.byteLength,
+            artifact.title
           )
+          if (!range) return
+          if (reader)
+            await streamChunks(res, selectedChunks(res, reader.chunks, range, reader.size))
+          else
+            res.end(
+              Buffer.from(bytes!.buffer, bytes!.byteOffset + range.start, range.end - range.start)
+            )
+        } finally {
+          // Includes 416, header errors and an interrupted selection, before any body iteration.
+          if (reader) await reader.chunks.return(undefined)
+        }
         return
       }
       const filePath = resolveArtifactFilePath(artifact.task_id, artifact.id, artifact.title)

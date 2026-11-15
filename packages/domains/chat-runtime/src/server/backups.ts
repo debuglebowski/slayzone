@@ -49,7 +49,7 @@ import {
   EVENT_BLOB_FORM,
   type ChatStorage
 } from './storage'
-import { readBlobRange } from './blob-store'
+import { readBlobRange, readFileRangePage } from './blob-store'
 import { captureArtifactWorkingFiles } from './artifact-backup'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
 import {
@@ -1055,29 +1055,28 @@ export function createChatBackups(
         return { records: result, hasMore, nextCursor }
       })
     },
+    /** An archived attachment's file, checked under its archive admission (nothing read). */
+    attachmentSource(id: string, conversationId: string, ref: ChatAttachment) {
+      return withArchive(id, (db) => archiveAttachmentSource(db, id, conversationId, ref))
+    },
     attachment(id: string, conversationId: string, ref: ChatAttachment) {
       return withArchive(id, (db) => {
-        const rows = db
-          .prepare("SELECT value FROM records WHERE conversation_id=? AND kind='attachment'")
-          .all(conversationId) as Array<{ value: string }>
-        const matching = rows
-          .map((r) => JSON.parse(r.value) as ChatAttachment)
-          .filter(
-            (r) =>
-              r.artifactId === ref.artifactId &&
-              (!ref.contentHash || r.contentHash === ref.contentHash)
-          )
-        if (!ref.contentHash && new Set(matching.map((ref) => ref.contentHash)).size > 1)
-          throw new Error(
-            'Archive attachment version is ambiguous; select an explicit saved version'
-          )
-        const record = matching[0]
-        if (!record?.contentHash)
-          throw new Error('Attachment does not belong to this archive conversation')
-        const file = fileWithin(folder(archiveDir, id), `blobs/${record.contentHash}`)
-        if (hashFile(file) !== record.contentHash)
-          throw new Error('Archive attachment integrity failure')
-        return readFileSync(file)
+        const { path, hash } = archiveAttachmentSource(db, id, conversationId, ref)
+        if (hashFile(path) !== hash) throw new Error('Archive attachment integrity failure')
+        return readFileSync(path)
+      })
+    },
+    /** One range of an archived attachment (the reader verifies the hash = `etag`). */
+    attachmentRange(
+      id: string,
+      conversationId: string,
+      ref: ChatAttachment,
+      offset: number,
+      length: number
+    ) {
+      return withArchive(id, (db) => {
+        const { path, hash } = archiveAttachmentSource(db, id, conversationId, ref)
+        return readFileRangePage(path, offset, length, hash)
       })
     },
     /**
@@ -1108,41 +1107,38 @@ export function createChatBackups(
         return { mediaType, size, offset, data: Buffer.from(bytes).toString('base64') }
       })
     },
+    /** An archived file version's file and name, checked under its archive admission. */
+    fileSource(id: string, conversationId: string, artifactId: string, contentHash: string) {
+      return withArchive(id, (db) =>
+        archiveFileSource(db, id, conversationId, artifactId, contentHash)
+      )
+    },
     file(id: string, conversationId: string, artifactId: string, contentHash: string) {
-      if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid archive file hash')
       return withArchive(id, (db) => {
-        const hasWorking = !!db
-          .prepare(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
-          )
-          .get()
-        const row = db
-          .prepare(`SELECT a.title AS name,v.size FROM task_artifacts a
-          JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
-          JOIN artifact_versions v ON v.artifact_id=a.id
-          WHERE o.conversation_id=? AND a.id=? AND v.content_hash=?
-          ${
-            hasWorking
-              ? `UNION ALL SELECT a.title,w.size FROM task_artifacts a
-            JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
-            JOIN artifact_working_files w ON w.artifact_id=a.id
-            WHERE o.conversation_id=? AND a.id=? AND w.content_hash=?`
-              : ''
-          }`)
-          .get(
-            conversationId,
-            artifactId,
-            contentHash,
-            ...(hasWorking ? [conversationId, artifactId, contentHash] : [])
-          ) as { name: string; size: number } | undefined
-        if (!row) throw new Error('File does not belong to this archive conversation')
-        const path = fileWithin(
-          folder(archiveDir, id),
-          `blobs/${contentHash.slice(0, 2)}/${contentHash.slice(2)}`
+        const { path, name, size } = archiveFileSource(
+          db,
+          id,
+          conversationId,
+          artifactId,
+          contentHash
         )
-        if (statSync(path).size !== row.size || hashFile(path) !== contentHash)
+        if (statSync(path).size !== size || hashFile(path) !== contentHash)
           throw new Error('Archive file integrity failure')
-        return { name: row.name, data: readFileSync(path) }
+        return { name, data: readFileSync(path) }
+      })
+    },
+    /** One range of an archived file version, with its name (the reader verifies the hash). */
+    fileRange(
+      id: string,
+      conversationId: string,
+      artifactId: string,
+      contentHash: string,
+      offset: number,
+      length: number
+    ) {
+      return withArchive(id, (db) => {
+        const { path, name } = archiveFileSource(db, id, conversationId, artifactId, contentHash)
+        return { ...readFileRangePage(path, offset, length, contentHash), name }
       })
     },
     eraseTask(taskId: string): Promise<void> {
@@ -1362,6 +1358,73 @@ export function createChatBackups(
       archiveDescriptor(id)
       return withArchiveConnection(fileWithin(path, 'chat.sqlite'), id, true, read)
     })
+  }
+  function archiveAttachmentSource(
+    db: Database.Database,
+    id: string,
+    conversationId: string,
+    ref: ChatAttachment
+  ) {
+    const rows = db
+      .prepare("SELECT value FROM records WHERE conversation_id=? AND kind='attachment'")
+      .all(conversationId) as Array<{ value: string }>
+    const matching = rows
+      .map((r) => JSON.parse(r.value) as ChatAttachment)
+      .filter(
+        (r) =>
+          r.artifactId === ref.artifactId &&
+          (!ref.contentHash || r.contentHash === ref.contentHash)
+      )
+    if (!ref.contentHash && new Set(matching.map((ref) => ref.contentHash)).size > 1)
+      throw new Error(
+        'Archive attachment version is ambiguous; select an explicit saved version'
+      )
+    const record = matching[0]
+    if (!record?.contentHash)
+      throw new Error('Attachment does not belong to this archive conversation')
+    return {
+      path: fileWithin(folder(archiveDir, id), `blobs/${record.contentHash}`),
+      hash: record.contentHash
+    }
+  }
+  function archiveFileSource(
+    db: Database.Database,
+    id: string,
+    conversationId: string,
+    artifactId: string,
+    contentHash: string
+  ) {
+    if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid archive file hash')
+    const hasWorking = !!db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
+      )
+      .get()
+    const row = db
+      .prepare(`SELECT a.title AS name,v.size FROM task_artifacts a
+          JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+          JOIN artifact_versions v ON v.artifact_id=a.id
+          WHERE o.conversation_id=? AND a.id=? AND v.content_hash=?
+          ${
+            hasWorking
+              ? `UNION ALL SELECT a.title,w.size FROM task_artifacts a
+            JOIN artifact_owners o ON o.id=a.id AND o.kind='artifact'
+            JOIN artifact_working_files w ON w.artifact_id=a.id
+            WHERE o.conversation_id=? AND a.id=? AND w.content_hash=?`
+              : ''
+          }`)
+      .get(
+        conversationId,
+        artifactId,
+        contentHash,
+        ...(hasWorking ? [conversationId, artifactId, contentHash] : [])
+      ) as { name: string; size: number } | undefined
+    if (!row) throw new Error('File does not belong to this archive conversation')
+    const path = fileWithin(
+      folder(archiveDir, id),
+      `blobs/${contentHash.slice(0, 2)}/${contentHash.slice(2)}`
+    )
+    return { path, name: row.name, size: row.size }
   }
   return api
 }

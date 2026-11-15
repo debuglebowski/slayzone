@@ -14,10 +14,59 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
+import { BYTE_RANGE_MAX_CHUNK, type ByteRangePage } from '@slayzone/platform/bounded-reads'
 
 const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 /** Staging files of uploads in flight, process-wide (several stores may share a dir in tests). */
 const activeUploads = new Set<string>()
+
+/**
+ * One range of the regular file at `path` as a {@link ByteRangePage}: `length`
+ * (1..{@link BYTE_RANGE_MAX_CHUNK}) bytes from `offset`, through one fd — never
+ * the whole file. `etag` names the file's content (its hash when content-addressed;
+ * otherwise size + mtime): a reader refuses a source whose etag changes.
+ */
+export function readFileRangePage(
+  path: string,
+  offset: number,
+  length: number,
+  etag?: string
+): ByteRangePage {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid range offset')
+  if (!Number.isSafeInteger(length) || length < 1 || length > BYTE_RANGE_MAX_CHUNK)
+    throw new Error(`Invalid range length (1..${BYTE_RANGE_MAX_CHUNK})`)
+  const stat = lstatSync(path)
+  if (!stat.isFile()) throw new Error('Not a regular file')
+  if (offset > stat.size) throw new Error('Range offset past the end')
+  const fd = openSync(path, 'r')
+  try {
+    const buffer = Buffer.allocUnsafe(Math.min(length, stat.size - offset))
+    let read = 0
+    while (read < buffer.length) {
+      const n = readSync(fd, buffer, read, buffer.length - read, offset + read)
+      if (n === 0) break
+      read += n
+    }
+    return {
+      data: buffer.subarray(0, read).toString('base64'),
+      offset,
+      size: stat.size,
+      eof: offset + read >= stat.size,
+      etag: etag ?? `${stat.size}:${stat.mtimeMs}`
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** The empty source's one range. */
+export const EMPTY_RANGE_PAGE: ByteRangePage = {
+  data: '',
+  offset: 0,
+  size: 0,
+  eof: true,
+  etag: 'empty'
+}
 
 /**
  * `length` bytes from `offset` of the blob file at `path` named `hash` (fewer at the

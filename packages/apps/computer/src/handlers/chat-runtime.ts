@@ -1,5 +1,6 @@
 import { computerStorageWorkerEntry } from '../computer-worker-entry'
 import { createComputerTimelineWorkers } from '../timeline-worker'
+import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
   DEFAULT_WORKTREE_BASE_PATH_TEMPLATE,
@@ -24,7 +25,11 @@ import {
   resolveChatScope
 } from '@slayzone/chat-runtime/server'
 import type { WirePathScope } from '@slayzone/platform/path-scope'
-import { parseChatInvocation } from '@slayzone/chat-runtime/shared'
+import {
+  parseChatInvocation,
+  chatRouteSchema,
+  chatAttachmentSchema
+} from '@slayzone/chat-runtime/shared'
 import {
   createRoutingChatBackend,
   type ComputerGatewayEvents,
@@ -121,6 +126,37 @@ import { createTurnGitIo } from './turn-git-io'
 import { createConversationHealIo } from './conversation-heal-io'
 import type { SpawnAdmission } from '../spawn-admission'
 
+// Retain canonical async-runtime requests and add FU1 bounded byte validation.
+const requestSchema = z.discriminatedUnion('kind', [
+  ...computerRequestSchema.options,
+  // One range (≤ 256 KiB) of an attachment or an archived file — the bounded twin of
+  // `attachment.read` / `archive.file` / `archive.attachment` (same checks).
+  z.object({
+    kind: z.literal('bytes.read'),
+    source: z.discriminatedUnion('type', [
+      z.object({
+        type: z.literal('attachment'),
+        route: chatRouteSchema,
+        ref: chatAttachmentSchema
+      }),
+      z.object({
+        type: z.literal('archive.file'),
+        archiveId: z.string().uuid(),
+        conversationId: z.string(),
+        artifactId: z.string().min(1).max(200),
+        contentHash: z.string().regex(/^[a-f0-9]{64}$/)
+      }),
+      z.object({
+        type: z.literal('archive.attachment'),
+        archiveId: z.string().uuid(),
+        conversationId: z.string(),
+        ref: chatAttachmentSchema
+      })
+    ]),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    length: z.number().int().min(1).max(BYTE_RANGE_MAX_CHUNK)
+  })
+])
 /**
  * Where a project's worktrees are made, from its folder HERE (B1): the default
  * `../<folder name>-workspaces` always, and the hub's configured `worktree_base_path`
@@ -468,7 +504,7 @@ export function createChatRuntimeHandlers(opts: {
   }
 
   async function request(raw: unknown): Promise<unknown> {
-    const req = computerRequestSchema.parse(raw)
+    const req = requestSchema.parse(raw)
     if (req.kind.startsWith('test.') && process.env.PLAYWRIGHT !== '1')
       throw new Error('test-only handler unavailable')
     if (req.kind !== 'test.reset' && req.kind.startsWith('test.'))
@@ -501,7 +537,7 @@ export function createChatRuntimeHandlers(opts: {
     return result
   }
   async function handle(
-    req: z.infer<typeof computerRequestSchema>,
+    req: z.infer<typeof requestSchema>,
     r: OnlineComputerChatRuntime
   ): Promise<unknown> {
     switch (req.kind) {
@@ -768,6 +804,27 @@ export function createChatRuntimeHandlers(opts: {
         return await r.requests.handle(req)
       case 'attachment.read':
         return await r.requests.handle(req)
+      case 'bytes.read': {
+        const src = req.source
+        if (src.type === 'attachment')
+          return r.attachments.range(src.route, src.ref, req.offset, req.length)
+        if (src.type === 'archive.file')
+          return r.backups.fileRange(
+            src.archiveId,
+            src.conversationId,
+            src.artifactId,
+            src.contentHash,
+            req.offset,
+            req.length
+          )
+        return r.backups.attachmentRange(
+          src.archiveId,
+          src.conversationId,
+          src.ref,
+          req.offset,
+          req.length
+        )
+      }
       case 'inspectTab':
         return await r.storage.forTab(req.tabId)
 

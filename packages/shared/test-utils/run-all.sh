@@ -967,6 +967,8 @@ run_harness packages/apps/hub/src/chat-compaction.test.ts
 run_harness packages/apps/hub/src/chat-diagnostics.test.ts
 run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
 run_harness packages/apps/hub/src/computer-artifacts.test.ts
+run_harness packages/apps/hub/src/computer-artifacts-ranges.test.ts
+run_harness packages/apps/hub/src/computer-chat-ranges.test.ts
 # Decision 4: files a restored computer no longer holds stay listed as unavailable.
 run_harness packages/apps/hub/src/computer-artifacts-unavailable.test.ts
 run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
@@ -977,6 +979,7 @@ run_harness packages/apps/hub/src/store-rollback-recovery.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
 run_harness packages/domains/chat-runtime/src/server/archive-privacy.test.ts
+run_harness packages/domains/chat-runtime/src/server/byte-ranges.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
 # §5: lifecycle revisions never trusted as proof (rebase, inventory, idempotent erasure).
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle-rebase.test.ts
@@ -1202,6 +1205,7 @@ run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read
 # paths (fixtures are deliberately not valid utf-8, so any string hop shows up).
 run_harness packages/apps/api/src/http/rest-api/artifacts/content.test.ts
+run_harness packages/apps/api/src/http/rest-api/artifacts/stream-ranges.test.ts
 # Workspace file raw bytes routed to the owning computer (slz-file:// previews on a remote hub).
 run_harness packages/apps/api/src/http/rest-api/files/raw.test.ts
 # Artifact VERSION HISTORY routes (write/append + versions *). Byte-exactness of

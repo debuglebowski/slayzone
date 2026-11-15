@@ -7,6 +7,8 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ChatAttachmentReader } from '@slayzone/terminal/runtime'
 import type { ChatStorage } from './storage'
+import { readFileRangePage } from './blob-store'
+import type { ByteRangePage } from '@slayzone/platform/bounded-reads'
 import type { createLocalChatData } from './local-data'
 
 const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -22,30 +24,68 @@ export function createLocalAttachments(
   local: ReturnType<typeof createLocalChatData>
 ) {
   // The store's content-addressed blob dir (shared with event blobs).
-  const { dir, readBlob, writeBlob, collectStaging } = store.blobs
+  const { dir, readBlob, writeBlob, collectStaging, blobPath } = store.blobs
   // Repair pre-fix imported references before retention or GC can remove the
   // original conversation's last pin. New writes pin atomically in storage.
   store.repairAttachmentPins()
   collectStaging()
+  /** The stored blob a reference names (any conversation on this computer). */
+  function storedHashOf(ref: Pick<ChatAttachment, 'artifactId' | 'contentHash'>): string {
+    const records = store.findRecords('attachment').map((r) => r.value as ChatAttachment)
+    const matching = records.filter(
+      (a) =>
+        a.artifactId === ref.artifactId && (!ref.contentHash || a.contentHash === ref.contentHash)
+    )
+    if (!ref.contentHash && new Set(matching.map((a) => a.contentHash)).size > 1)
+      throw new Error('Attachment version is ambiguous; select an explicit saved version')
+    const found = matching[0]
+    if (!found?.contentHash)
+      throw new Error('Attachment artifact/version does not belong to this hub')
+    return found.contentHash
+  }
   const reader: ChatAttachmentReader = {
-    read: async (ref) => {
-      const records = store.findRecords('attachment').map((r) => r.value as ChatAttachment)
-      const matching = records.filter(
-        (a) =>
-          a.artifactId === ref.artifactId && (!ref.contentHash || a.contentHash === ref.contentHash)
+    read: async (ref) => readBlob(storedHashOf(ref))
+  }
+  /**
+   * A hub's read of `ref` for conversation `route` (a session move): the
+   * conversation must be live at that epoch and hold the attachment.
+   */
+  function checkHeld(route: { id: string; epoch: number }, ref: ChatAttachment): void {
+    const owner = store.conversation(route.id)
+    if (!owner || owner.identity.epoch !== route.epoch || owner.state === 'deleted')
+      throw new Error('Attachment ownership mismatch')
+    const held = store
+      .records(route.id, 'attachment')
+      .some(
+        (row) =>
+          row.kind === 'attachment' &&
+          (row.value as { artifactId: string; contentHash: string }).artifactId ===
+            ref.artifactId &&
+          (!ref.contentHash ||
+            (row.value as { contentHash: string }).contentHash === ref.contentHash)
       )
-      if (!ref.contentHash && new Set(matching.map((a) => a.contentHash)).size > 1)
-        throw new Error('Attachment version is ambiguous; select an explicit saved version')
-      const found = matching[0]
-      if (!found?.contentHash)
-        throw new Error('Attachment artifact/version does not belong to this hub')
-      return readBlob(found.contentHash)
-    }
+    if (!held) throw new Error('Attachment does not belong to this conversation')
   }
   return {
     dir,
     reader,
     readBlob,
+    /** `ref`'s bytes for conversation `route` (`attachment.read`). */
+    readFor(route: { id: string; epoch: number }, ref: ChatAttachment): Promise<Uint8Array> {
+      checkHeld(route, ref)
+      return reader.read(ref)
+    },
+    /** One range of `ref` for conversation `route` (the reader verifies the hash = `etag`). */
+    range(
+      route: { id: string; epoch: number },
+      ref: ChatAttachment,
+      offset: number,
+      length: number
+    ): ByteRangePage {
+      checkHeld(route, ref)
+      const hash = storedHashOf(ref)
+      return readFileRangePage(blobPath(hash), offset, length, hash)
+    },
     putPrepared(id: string, epoch: number, ref: ChatAttachment, bytes: Uint8Array): void {
       store.transaction(() => {
         const owner = store.conversation(id)

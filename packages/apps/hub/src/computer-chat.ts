@@ -1,3 +1,4 @@
+import { type ByteRangePage, collectByteRanges } from '@slayzone/platform/bounded-reads'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
@@ -121,6 +122,17 @@ const HUB_HISTORY_STATES: ReadonlySet<HubChatOwnership['state']> = new Set([
   'verified'
 ])
 
+/** A streaming sha256 (bounded reads verify what they assemble). */
+function sha256Hasher() {
+  const h = createHash('sha256')
+  return {
+    update: (b: Uint8Array) => {
+      h.update(b)
+    },
+    digest: () => h.digest('hex')
+  }
+}
+
 export function createComputerChatServices(opts: {
   db: SlayzoneDb
   diagnostics?: LegacyChatDiagnostics
@@ -147,6 +159,8 @@ export function createComputerChatServices(opts: {
   chatTimelineRowSlices?(computerId: string): boolean
   /** Whether the computer compacts its chat store on request (its `chatStorageCompaction`). */
   chatStorageCompaction?(computerId: string): boolean
+  /** Whether the computer answers bounded byte reads (`bytes.read`, its `boundedReads`). */
+  boundedReads?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**
@@ -1008,6 +1022,32 @@ export function createComputerChatServices(opts: {
     await recoverComputer(computerId)
     return request(computerId, body)
   }
+  /**
+   * An attachment's or archived file's bytes from a computer, range by range
+   * (`bytes.read`, ≤ 256 KiB each) and verified against their content hash; null
+   * when the computer answers only whole reads (the caller asks for those).
+   */
+  async function readRanges(
+    computerId: string,
+    source: Record<string, unknown>
+  ): Promise<{ bytes: Buffer; name?: string } | null> {
+    if (!opts.boundedReads?.(computerId)) return null
+    let name: string | undefined
+    const bytes = await collectByteRanges(
+      async (offset, length) => {
+        const page = (await computerRequest(computerId, {
+          kind: 'bytes.read',
+          source,
+          offset,
+          length
+        })) as ByteRangePage & { name?: string }
+        name ??= page.name
+        return page
+      },
+      { sha256: { expect: 'etag', create: sha256Hasher } }
+    )
+    return { bytes: Buffer.from(bytes), ...(name !== undefined ? { name } : {}) }
+  }
   /** The project a task is in on this hub (the computer finds its folder for it). */
   async function moveProjectOf(taskId: string): Promise<string> {
     const row = await opts.db.get<{ project_id: string }>(
@@ -1082,13 +1122,21 @@ export function createComputerChatServices(opts: {
         conversationId,
         afterCursor
       }) as ReturnType<ChatComputerOps['archiveRecords']>,
-    archiveAttachment: (pc, archiveId, conversationId, ref) =>
-      computerRequest(pc, {
+    archiveAttachment: async (pc, archiveId, conversationId, ref) => {
+      const ranged = await readRanges(pc, {
+        type: 'archive.attachment',
+        archiveId,
+        conversationId,
+        ref
+      })
+      if (ranged) return { data: ranged.bytes.toString('base64') }
+      return computerRequest(pc, {
         kind: 'archive.attachment',
         archiveId,
         conversationId,
         ref
-      }) as ReturnType<ChatComputerOps['archiveAttachment']>,
+      }) as ReturnType<ChatComputerOps['archiveAttachment']>
+    },
     archiveBlob: (pc, archiveId, conversationId, sha256, offset) =>
       computerRequest(pc, {
         kind: 'archive.blob',
@@ -1097,14 +1145,23 @@ export function createComputerChatServices(opts: {
         sha256,
         offset
       }) as ReturnType<ChatComputerOps['archiveBlob']>,
-    archiveFile: (pc, archiveId, conversationId, artifactId, contentHash) =>
-      computerRequest(pc, {
+    archiveFile: async (pc, archiveId, conversationId, artifactId, contentHash) => {
+      const ranged = await readRanges(pc, {
+        type: 'archive.file',
+        archiveId,
+        conversationId,
+        artifactId,
+        contentHash
+      })
+      if (ranged) return { name: ranged.name ?? '', data: ranged.bytes.toString('base64') }
+      return computerRequest(pc, {
         kind: 'archive.file',
         archiveId,
         conversationId,
         artifactId,
         contentHash
       }) as ReturnType<ChatComputerOps['archiveFile']>
+    }
   }
   return {
     testing: {
@@ -1231,6 +1288,12 @@ export function createComputerChatServices(opts: {
         return r.data
       },
       async readAttachment(input) {
+        const ranged = await readRanges(input.computerId, {
+          type: 'attachment',
+          route: { id: input.conversationId, epoch: input.epoch },
+          ref: input.ref
+        })
+        if (ranged) return ranged.bytes.toString('base64')
         const r = (await computerRequest(input.computerId, {
           kind: 'attachment.read',
           route: { id: input.conversationId, epoch: input.epoch },

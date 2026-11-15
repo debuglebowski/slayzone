@@ -133,7 +133,11 @@ export interface Sha256Hasher {
 export interface ReadByteRangesOptions {
   /** Range size asked per call (default and max {@link BYTE_RANGE_MAX_CHUNK}). */
   chunkBytes?: number
-  /** Verify the whole source against this sha256 at its end (hashed as it streams). */
+  /**
+   * Verify the whole source against a sha256 at its end (hashed as it streams):
+   * a known digest, or `'etag'` = the source's etag when it is one (64 hex, a
+   * content-addressed source; any other etag is not a hash and is not checked).
+   */
   sha256?: { expect: string; create: () => Sha256Hasher }
 }
 
@@ -178,7 +182,13 @@ export async function* readByteRanges(
     }
     if (page.eof) {
       if (offset !== identity.size) throw new Error('byte read: source ended before its size')
-      if (hasher && opts.sha256 && hasher.digest() !== opts.sha256.expect.toLowerCase())
+      const expected =
+        opts.sha256?.expect === 'etag'
+          ? /^[0-9a-f]{64}$/i.test(identity.etag)
+            ? identity.etag
+            : null
+          : (opts.sha256?.expect ?? null)
+      if (hasher && expected !== null && hasher.digest() !== expected.toLowerCase())
         throw new Error('byte read: sha256 mismatch')
       return
     }

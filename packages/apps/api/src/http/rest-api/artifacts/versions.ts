@@ -6,12 +6,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Express } from 'express'
-import { getArtifactStorage } from '@slayzone/task-artifacts/server'
+import { getArtifactStorage, openArtifactReaderOf } from '@slayzone/task-artifacts/server'
 import type { AuthorContext, VersionRef } from '@slayzone/task-artifacts/shared'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
+import { streamChunks } from './stream-chunks'
 import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
@@ -247,6 +248,16 @@ export function registerArtifactsVersionsRoutes(app: Express, deps: RestApiDeps)
       // the worker: `readArtifactVersion` stringifies to utf-8, which corrupts a
       // binary version. The blob is content-addressed and immutable, so streaming
       // the file directly is safe.
+      // A computer-held version from a computer that answers bounded reads: stream its
+      // ranges as they arrive (the hub never holds the blob).
+      const open = openArtifactReaderOf(store())
+      const reader = open ? await open(deps.db, artifact.id, { kind: 'version', ref }) : null
+      if (reader) {
+        res.setHeader('content-type', 'application/octet-stream')
+        res.setHeader('content-length', String(reader.size))
+        await streamChunks(res, reader.chunks)
+        return
+      }
       const { version, blobPath, bytes } = await store().resolveArtifactVersion(deps.db, {
         artifactId: artifact.id,
         versionRef: ref

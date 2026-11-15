@@ -1178,6 +1178,8 @@ export function composeServer(opts: {
     chatControlLeases: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatControlLeases ===
       true,
+    boundedReads: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.boundedReads === true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -1290,7 +1292,10 @@ export function composeServer(opts: {
       db,
       local: createArtifactStore(dataRoot),
       chat: computerChat,
-      request: computerChat.lifecycle.request
+      request: computerChat.lifecycle.request,
+      // Bounded reads (`readRange`): computers that advertised them in this handshake.
+      boundedReads: (id) =>
+        (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.boundedReads === true
     })
   )
   // Full chat events only for tabs a hub client watches (chat-relay-watch.ts).

@@ -1,8 +1,20 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ArtifactStore } from '@slayzone/task-artifacts/server'
+import {
+  diffVersionContents,
+  type ArtifactRangeReader,
+  type ArtifactStore,
+  type OpenArtifactReader
+} from '@slayzone/task-artifacts/server'
+import type { ArtifactReadSpec, ArtifactVersion, VersionRef } from '@slayzone/task-artifacts/shared'
+import {
+  BYTE_RANGE_MAX_CHUNK,
+  type ByteRangePage,
+  collectByteRanges,
+  readByteRanges
+} from '@slayzone/platform/bounded-reads'
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
@@ -21,8 +33,22 @@ const reads = new Set([
   'listFoldersByTask',
   'readBytes',
   'readBytesRange',
+  'readRange',
   'searchArtifacts'
 ])
+
+/** One range of a computer-held artifact (`readRange`); a version's row rides on range 0. */
+type ArtifactRangePage = ByteRangePage & { version?: ArtifactVersion; missing?: true }
+
+const sha256 = () => {
+  const h = createHash('sha256')
+  return {
+    update: (b: Uint8Array) => {
+      h.update(b)
+    },
+    digest: () => h.digest('hex')
+  }
+}
 const mimeOf = (title: string) =>
   ({
     '.png': 'image/png',
@@ -49,6 +75,8 @@ export function createComputerArtifactStorage(opts: {
   local: ArtifactStore
   chat: ReturnType<typeof createComputerChatServices>
   request: ChatComputerRequest
+  /** Whether a computer answers bounded reads (`readRange`); absent/false = whole reads. */
+  boundedReads?: (computerId: string) => boolean
 }): ArtifactStore {
   const { db, local, chat } = opts
   /**
@@ -110,6 +138,113 @@ export function createComputerArtifactStorage(opts: {
     if (!read)
       await chat.relay.drainMetadata(current.computerId!, false, undefined, undefined, current.id)
     return result
+  }
+  /**
+   * `spec`'s bytes of a computer-held artifact, range by range (`readRange`, ≤ 256 KiB
+   * each). Range 0 is read first (size, version row, errors as the whole read's);
+   * the bytes are verified against the content hash when the etag is one.
+   */
+  async function openRanges(
+    owner: HubChatOwnership,
+    artifactId: string,
+    spec: ArtifactReadSpec
+  ): Promise<ArtifactRangeReader> {
+    const read = (offset: number, length: number) =>
+      call(owner, 'readRange', [artifactId, spec, offset, length]) as Promise<ArtifactRangePage>
+    const first = await read(0, BYTE_RANGE_MAX_CHUNK)
+    let firstServed = false
+    const fetch = (offset: number, length: number) => {
+      if (offset === 0 && !firstServed) {
+        firstServed = true
+        return Promise.resolve(first)
+      }
+      return read(offset, length)
+    }
+    return {
+      size: first.size,
+      version: first.version,
+      missing: first.missing === true,
+      chunks: readByteRanges(fetch, { sha256: { expect: 'etag', create: sha256 } })
+    }
+  }
+  async function collectRanges(
+    owner: HubChatOwnership,
+    artifactId: string,
+    spec: ArtifactReadSpec
+  ) {
+    const reader = await openRanges(owner, artifactId, spec)
+    const parts: Uint8Array[] = []
+    for await (const part of reader.chunks) parts.push(part)
+    return { ...reader, bytes: Buffer.concat(parts) }
+  }
+  /** The same reader, its first range already read (the diff peeks at both version rows). */
+  async function collectRest(reader: ArtifactRangeReader) {
+    const parts: Uint8Array[] = []
+    for await (const part of reader.chunks) parts.push(part)
+    return Buffer.concat(parts)
+  }
+  const specOfRef = (versionRef: VersionRef | undefined): ArtifactReadSpec =>
+    versionRef === undefined || versionRef === 'current'
+      ? { kind: 'bytes' }
+      : { kind: 'version', ref: versionRef }
+  /** The ranged reads of a computer that answers them; null = use the whole reads. */
+  async function rangedRead(
+    owner: HubChatOwnership,
+    key: string,
+    id: string,
+    // biome-ignore lint/suspicious/noExplicitAny: the store method's own arguments.
+    args: any[]
+  ): Promise<{ result: unknown } | null> {
+    if (!opts.boundedReads?.(owner.computerId!)) return null
+    const first = args[0]
+    switch (key) {
+      case 'readArtifactBytes':
+        return { result: (await collectRanges(owner, id, specOfRef(args[1]))).bytes }
+      case 'getArtifactPath': {
+        const [a, read] = await Promise.all([
+          call(owner, 'getArtifact', [id]) as Promise<TaskArtifact>,
+          collectRanges(owner, id, { kind: 'bytes' })
+        ])
+        return {
+          result: `data:${mimeOf(a.title)};name=${encodeURIComponent(a.title)};base64,${read.bytes.toString('base64')}`
+        }
+      }
+      case 'resolveArtifactVersion': {
+        const read = await collectRanges(owner, id, { kind: 'version', ref: first.versionRef })
+        return { result: { version: read.version, blobPath: null, bytes: read.bytes } }
+      }
+      case 'readArtifactContent': {
+        const read = await collectRanges(owner, id, { kind: 'content' })
+        return { result: read.missing ? null : read.bytes.toString('utf-8') }
+      }
+      case 'readArtifactVersion': {
+        const read = await collectRanges(owner, id, { kind: 'version', ref: first.versionRef })
+        return { result: read.bytes.toString('utf-8') }
+      }
+      case 'diffArtifactVersions': {
+        // As the computer's diff: side a, then b (or the current version); equal
+        // contents are an empty diff without reading either.
+        const a = await openRanges(owner, id, { kind: 'version', ref: first.a })
+        const b = await openRanges(
+          owner,
+          id,
+          first.b !== undefined ? { kind: 'version', ref: first.b } : { kind: 'currentVersion' }
+        )
+        if (!a.version || !b.version) throw new Error('Artifact version row missing from its range')
+        if (a.version.content_hash === b.version.content_hash)
+          return { result: { kind: 'text', hunks: [] } }
+        return {
+          result: diffVersionContents(
+            a.version,
+            b.version,
+            await collectRest(a),
+            await collectRest(b)
+          )
+        }
+      }
+      default:
+        return null
+    }
   }
   async function ensureFolder(owner: HubChatOwnership, id: string): Promise<void> {
     await assertFolderResolved(id)
@@ -320,6 +455,15 @@ export function createComputerArtifactStorage(opts: {
   return new Proxy(local, {
     get(target, key, receiver) {
       if (typeof key !== 'string') return Reflect.get(target, key, receiver)
+      if (key === 'openArtifactReader') {
+        const open: OpenArtifactReader = async (_db, artifactId, spec) => {
+          const owner = await location(artifactId)
+          if (!owner || (await isUnavailable(artifactId, false))) return null
+          if (!opts.boundedReads?.(owner.computerId!)) return null
+          return openRanges(owner, artifactId, spec)
+        }
+        return open
+      }
       if (key === 'listArtifactsByTask') return (_db: SlayzoneDb, taskId: string) => list(taskId)
       if (key === 'listFoldersByTask')
         return (_db: SlayzoneDb, taskId: string) => list(taskId, true)
@@ -569,6 +713,8 @@ export function createComputerArtifactStorage(opts: {
             ? { bytes: Buffer.from(r.data, 'base64'), size: r.size, version: r.version }
             : null
         }
+        const ranged = await rangedRead(owner, key, id, args)
+        if (ranged) return ranged.result
         if (key === 'readArtifactBytes') {
           const result = (await call(owner, 'readBytes', args)) as { data: string }
           return Buffer.from(result.data, 'base64')

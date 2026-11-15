@@ -166,6 +166,23 @@ describe('readByteRanges', () => {
     ).rejects.toThrow(/sha256/)
   })
 
+  it('verifies against the hash its etag names, when the caller does not know it upfront', async () => {
+    const etagged = source(bytes, hex(bytes))
+    const got = await collectByteRanges(etagged.fetch, {
+      sha256: { expect: 'etag', create: sha256 }
+    })
+    expect(got.length).toBe(bytes.length)
+    const lying = source(bytes, '0'.repeat(64))
+    await expect(
+      collectByteRanges(lying.fetch, { sha256: { expect: 'etag', create: sha256 } })
+    ).rejects.toThrow(/sha256/)
+    // An etag that is not a sha256 (a file's size:mtime) is not a hash to check.
+    const plain = source(bytes, '123:456')
+    expect(
+      (await collectByteRanges(plain.fetch, { sha256: { expect: 'etag', create: sha256 } })).length
+    ).toBe(bytes.length)
+  })
+
   it('refuses eof before size, and data beyond size', async () => {
     const early = async (offset: number, length: number) => ({
       ...(await source(bytes).fetch(offset, length)),

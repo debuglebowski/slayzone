@@ -19,7 +19,15 @@ import type {
   CreateArtifactFolderInput,
   UpdateArtifactFolderInput
 } from '@slayzone/task-contracts'
-import type { AuthorContext, VersionRef, ArtifactVersion, DiffResult, PruneReport } from '../shared'
+import type {
+  AuthorContext,
+  VersionRef,
+  ArtifactVersion,
+  ArtifactReadSource,
+  ArtifactReadSpec,
+  DiffResult,
+  PruneReport
+} from '../shared'
 import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // Pure node:fs/crypto path math — the blob PATH for a content hash, so a caller
 // can stream a version's bytes off disk instead of hauling them through the
@@ -603,6 +611,62 @@ export function createArtifactStore(dataDir: string) {
           }
         })
         .finally(() => handle.close())
+    },
+
+    /**
+     * WHERE `spec`'s bytes are, read nothing — what a ranged reader pages. Chosen
+     * exactly as the whole read it pages chooses (see {@link ArtifactReadSpec}),
+     * with the same errors; a version's blob is not hashed here (the reader
+     * verifies the bytes it streams against the version's hash).
+     */
+    async resolveArtifactReadSource(
+      db: SlayzoneDb,
+      artifactId: string,
+      spec: ArtifactReadSpec
+    ): Promise<ArtifactReadSource> {
+      const blobs = new BlobStore(dataDir)
+      const blob = (version: ArtifactVersion): ArtifactReadSource => ({
+        kind: 'blob',
+        path: blobs.blobPath(version.content_hash),
+        version
+      })
+      const resolve = (versionRef: VersionRef) =>
+        db.namedTxn('task-artifacts:versions:resolve', {
+          artifactId,
+          versionRef
+        }) as Promise<ArtifactVersion>
+      switch (spec.kind) {
+        case 'bytes': {
+          const p = await this.getArtifactPath(db, artifactId)
+          if (p && existsSync(p)) return { kind: 'file', path: p }
+          return blob(await resolve('current'))
+        }
+        case 'content': {
+          const existing = await getRow(db, artifactId)
+          if (!existing) return { kind: 'missing' }
+          const filePath = getArtifactFilePath(
+            existing.task_id as string,
+            artifactId,
+            existing.title as string
+          )
+          if (existsSync(filePath)) return { kind: 'file', path: filePath }
+          const legacyPath = getLegacyArtifactFilePath(
+            existing.task_id as string,
+            artifactId,
+            existing.title as string
+          )
+          if (existsSync(legacyPath)) return { kind: 'file', path: legacyPath }
+          if (existing.current_version_id == null) return { kind: 'empty' }
+          return resolve('current').then(blob, () => ({ kind: 'empty' }) as ArtifactReadSource)
+        }
+        case 'version':
+          return blob(await resolve(spec.ref))
+        case 'currentVersion': {
+          const current = await this.getCurrentArtifactVersion(db, { artifactId })
+          if (!current) throw new Error('[NOT_FOUND] No current version to compare against')
+          return blob(current)
+        }
+      }
     },
 
     /** The current (HEAD) version row, or null when the artifact has none. */

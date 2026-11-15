@@ -497,8 +497,48 @@ The S8 archive/privacy and S7 recovery contracts remain in force alongside this
 public-control wiring, caller-known leases/concurrent-stop escalation and the B5
 canonical-worker publication protocol. Their scoped native evidence does not
 replace final composed control, close, readiness and publication acceptance.
-Metadata review follow-ups, current-main S514 peer-browser integration and the FU1
-request-abort ALS cleanup seam remain separate composition work. The verified
+Metadata review follow-ups, final composed validation of current-main S514
+peer-browser integration and the FU1 request-abort ALS cleanup seam remain separate
+composition work. The verified
 filesystem runtime-error recovery does not close the historical parallel FS
 deadline RED2 gate or attribute it to a product defect. Final composed gates and
 fresh whole-FU2 review remain required.
+
+- **Byte reads are ranged (FU1 S2, 2026-11-15).** Whole-file reads used to be one base64 reply each: an artifact's bytes, text or version (`readBytes`, `resolveArtifactVersion`, `readArtifactContent`, `readArtifactVersion`, `diffArtifactVersions`), an archived file or attachment (`archive.file`, `archive.attachment`) and a live attachment (`attachment.read`). These have ranged twins of at most 256 KiB per reply, in the shape `ByteRangePage` from `@slayzone/platform/bounded-reads`:
+  - **Artifacts:** the artifact method `readRange [id, spec, offset, length]`. `spec` is `bytes`, `content`, `version` or `currentVersion`, and selects bytes exactly as the whole read does (task-artifacts `resolveArtifactReadSource`). The version row comes with range 0.
+  - **Archives and attachments:** the request kind `bytes.read`, with sources `attachment`, `archive.file` and `archive.attachment`.
+  - **Ownership checks:** the same ones as the whole reads. `attachments.readFor` and `range` share `checkHeld`; backups share `fileSource` and `attachmentSource`.
+  - **Integrity:** the etag is the content hash, and the hub verifies sha256 over what it assembles.
+  - **Hub side:** `computer-artifacts` and `computer-chat` use the ranges when the computer advertised `boundedReads`. The hub computes `diffArtifactVersions` itself from two ranged reads with the same function (`diffVersionContents`). REST streams ranges via `openArtifactReader`. The whole reads remain for older hubs.
+
+- **Canonical-owner integration (FU1 backend rebase, partial replay).** The online
+  host still opens `openComputerChatRuntime`; native artifact, attachment and archive
+  work belongs to its existing canonical worker. B5 publication retains its mutation
+  lane, private data-only API, receipt/outbox, FULL fence and physical lease barriers
+  described in [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md). FU1 `readRange`
+  coexists with protocol-v9 `readBytesRange` and public `readBytesChunk`: the latter
+  retain `{ data, size, version }` generation pinning and existing verification-cache
+  behavior. Their APIs are not replaced by whole-file downloads. Peer client exports
+  stay client-side; removed hub export endpoints stay removed.
+  This content merge does not complete online ranged-read wiring. The additive
+  host `bytes.read` validation must be consolidated into the canonical request schema,
+  and `attachments.range`, `backups.fileRange` and `backups.attachmentRange` need the
+  existing closed named-owner registry entries after replay. Later captured-source
+  lifetime methods must also use that data-only owner seam; no native handles or
+  closures cross threads. Final public-invoke/staging integration and semantic tests
+  remain required; the partial replay is not H2 acceptance.
+
+- **S8 archive admission with FU1 ranges (parent rebase, partial replay).** Archive
+  file/attachment source ports retain the parent's Promise-returning per-archive
+  admission. Legacy whole reads and bounded range reads share worker-local source
+  resolvers; ownership lookup and the complete body read run inside the same
+  `withArchive` action and registered native connection. A queued erasure/restore
+  cannot pass between source resolution and byte consumption. The new range
+  callbacks are synchronous bounded reads, so the synchronous native connection
+  helper encloses their entire work; it never closes around an unawaited read.
+  S8 physical-namespace privacy inventory, failed-close ownership, recovery,
+  serialized erasure/rewrite/manifest/index, retained snapshots and native-copy
+  lifetime exclusions remain authoritative. Future async erasure finish replay
+  must preserve the native registration through its whole awaited action and
+  post-await database checks. Closed port registration, async caller adaptation
+  and final completed-tree checks remain later integration work.

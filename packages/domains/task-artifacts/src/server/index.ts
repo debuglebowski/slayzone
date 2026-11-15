@@ -25,4 +25,10 @@ export {
   type ArtifactsRouterDeps
 } from './artifacts-router-deps'
 
-export { setArtifactStorage, getArtifactStorage } from './artifact-storage'
+export {
+  setArtifactStorage,
+  getArtifactStorage,
+  openArtifactReaderOf,
+  type ArtifactRangeReader,
+  type OpenArtifactReader
+} from './artifact-storage'

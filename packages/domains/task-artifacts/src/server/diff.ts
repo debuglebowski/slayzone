@@ -2,7 +2,14 @@ import { createPatch, structuredPatch } from 'diff'
 import { BlobStore } from './blob-store'
 import type { DbLike } from './db'
 import { getCurrentVersion, resolveVersionRef } from './resolve'
-import type { ArtifactId, ContentHash, DiffHunk, DiffResult, VersionRef } from '../shared/types'
+import type {
+  ArtifactId,
+  ArtifactVersion,
+  ContentHash,
+  DiffHunk,
+  DiffResult,
+  VersionRef
+} from '../shared/types'
 import { VersionError } from './errors'
 
 export interface DiffInput {
@@ -34,10 +41,26 @@ export function diffVersions(db: DbLike, blobStore: BlobStore, input: DiffInput)
   if (verA.content_hash === verB.content_hash) {
     return { kind: 'text', hunks: [] }
   }
+  return diffVersionContents(
+    verA,
+    verB,
+    blobStore.read(verA.content_hash),
+    blobStore.read(verB.content_hash)
+  )
+}
 
-  const bufA = blobStore.read(verA.content_hash)
-  const bufB = blobStore.read(verB.content_hash)
-
+/**
+ * The diff of two versions whose bytes are in hand — what {@link diffVersions}
+ * answers once it read them. A hub reading a computer's versions in ranges
+ * computes the same result with it.
+ */
+export function diffVersionContents(
+  verA: ArtifactVersion,
+  verB: ArtifactVersion,
+  bufA: Buffer,
+  bufB: Buffer
+): DiffResult {
+  if (verA.content_hash === verB.content_hash) return { kind: 'text', hunks: [] }
   if (isBinary(bufA) || isBinary(bufB)) {
     return {
       kind: 'binary',

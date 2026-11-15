@@ -144,3 +144,25 @@ export interface ArchiveListing {
   /** Sum of every entry's uncompressed size. */
   totalSize: number
 }
+
+/**
+ * Which bytes of an artifact a ranged read covers — each chosen exactly as the
+ * whole read it pages: `bytes` = `readArtifactBytes` (the working file, else the
+ * current version), `content` = `readArtifactContent` (the working file, its legacy
+ * path, else the current version, else nothing), `version` = a version REF as
+ * `resolveArtifactVersion` resolves it, `currentVersion` = a diff's default side.
+ */
+export type ArtifactReadSpec =
+  | { kind: 'bytes' }
+  | { kind: 'content' }
+  | { kind: 'version'; ref: VersionRef }
+  | { kind: 'currentVersion' }
+
+/** Where a {@link ArtifactReadSpec}'s bytes are (nothing read). */
+export type ArtifactReadSource =
+  | { kind: 'file'; path: string }
+  | { kind: 'blob'; path: string; version: ArtifactVersion }
+  /** `content` of an artifact with no file and no version: '' */
+  | { kind: 'empty' }
+  /** `content` of no artifact: null */
+  | { kind: 'missing' }
