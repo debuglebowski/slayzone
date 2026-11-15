@@ -18,6 +18,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { createOutputTail } from '@slayzone/worktrees/git-ops'
 import { accessSync, chmodSync, constants as fsConstants, existsSync, lstatSync } from 'node:fs'
 import {
   gitCopyIgnoredFilesParamsSchema,
@@ -162,9 +163,13 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
     }
   }
 
-  function runWorktreeSetupScript(
-    rawParams: unknown
-  ): Promise<{ ran: boolean; success?: boolean; output?: string }> {
+  function runWorktreeSetupScript(rawParams: unknown): Promise<{
+    ran: boolean
+    success?: boolean
+    output?: string
+    outputBytes?: number
+    outputTruncated?: true
+  }> {
     const params = runWorktreeSetupScriptParams.parse(rawParams)
     const worktreePath = allow(params.worktreePath)
     const repoPath = allow(params.repoPath)
@@ -196,10 +201,11 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
         stdio: ['ignore', 'pipe', 'pipe'],
         env
       })
-      const chunks: string[] = []
+      // The reply carries the output's last MiB; all of it streams as notifications.
+      const tail = createOutputTail()
       const onData = (data: Buffer): void => {
         const text = data.toString()
-        chunks.push(text)
+        tail.push(text)
         // Stream progress to the hub over the generic computer event channel.
         ctx.dialer.notify(ComputerNotificationMethods.event, {
           name: 'git.worktreeSetupData',
@@ -212,7 +218,7 @@ export function createGitHandlers(ctx: HandlerContext): HubMethodTable {
       const timeout = setTimeout(() => child.kill('SIGTERM'), SETUP_SCRIPT_TIMEOUT_MS)
       child.on('close', (code) => {
         clearTimeout(timeout)
-        resolvePromise({ ran: true, success: code === 0, output: chunks.join('').trim() })
+        resolvePromise({ ran: true, success: code === 0, ...tail.result() })
       })
       child.on('error', (err) => {
         clearTimeout(timeout)

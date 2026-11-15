@@ -20,7 +20,14 @@ export interface WorktreeSubmoduleResult {
 }
 
 export interface CreateWorktreeResult {
-  setupResult: { ran: boolean; success?: boolean; output?: string }
+  setupResult: {
+    ran: boolean
+    success?: boolean
+    /** The output (its last 1 MiB when longer: `outputTruncated`). */
+    output?: string
+    outputBytes?: number
+    outputTruncated?: true
+  }
   submoduleResult: WorktreeSubmoduleResult
 }
 

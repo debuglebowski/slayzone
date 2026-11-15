@@ -146,6 +146,12 @@ export const gitOpsContract = {
   listRemoteBranches: op(at, ['path']),
   getMergeBase: op(z.object({ path: s, branch1: s, branch2: s }), ['path']),
   getCommitsSince: op(z.object({ path: s, sinceRef: s, branch: s }), ['path']),
+  // `getCommitsSince` in bounded pages (`boundedReads` computers); the hub reads it
+  // for `getCommitsSince` and builds `getResolvedForkGraph` from it.
+  getCommitsSincePage: op(
+    z.object({ path: s, sinceRef: s, branch: s, cursor: s.max(200).nullable() }),
+    ['path']
+  ),
   getCommitsBeforeRef: op(z.object({ path: s, ref: s, count: n.optional() }), ['path']),
   deleteBranch: op(z.object({ path: s, branch: s, force: b.optional() }), ['path']),
   pruneRemote: op(at, ['path']),
@@ -248,6 +254,7 @@ export const gitOpsContract = {
 
 /** Ops that are steps of a composite procedure, not procedures themselves. */
 export const GIT_INTERNAL_OPS: ReadonlySet<string> = new Set([
+  'getCommitsSincePage',
   'ensureBranchPushed',
   'addWorktree',
   'initSubmodules',

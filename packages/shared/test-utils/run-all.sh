@@ -740,6 +740,9 @@ run_harness packages/domains/worktrees/src/server/ignored-trees.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-tree-routing.test.ts
 run_harness packages/domains/worktrees/src/server/paged-diffs.test.ts
 run_harness packages/domains/worktrees/src/server/git-text-routing.test.ts
+run_harness packages/domains/worktrees/src/server/output-tail.test.ts
+run_harness packages/domains/worktrees/src/server/commits-pages.test.ts
+run_harness packages/domains/worktrees/src/server/fork-graph-routing.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.

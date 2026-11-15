@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { platform } from 'os'
-import { PAGE_MAX_BYTES } from '@slayzone/platform/bounded-reads'
+import { type Page, PAGE_MAX_BYTES, pageCut } from '@slayzone/platform/bounded-reads'
 import type { GitDiffDeferred, GitDiffTextOpts, GitFileDiffsPage } from '../shared/git-text'
 import {
   existsSync,
@@ -14,6 +14,8 @@ import {
 import { cp, stat, mkdir } from 'fs/promises'
 import { globToRegex } from '../shared/ignored-tree'
 import { isAlwaysExcluded } from './ignored-index'
+import { createOutputTail } from './output-tail'
+import { resolveForkGraph } from './fork-graph'
 import path from 'path'
 import type {
   ConflictFileContent,
@@ -119,7 +121,10 @@ export async function detectWorktrees(repoPath: string): Promise<DetectedWorktre
 export interface WorktreeSetupResult {
   ran: boolean
   success?: boolean
+  /** The output (its last 1 MiB when longer: `outputTruncated`; all of it streams). */
   output?: string
+  outputBytes?: number
+  outputTruncated?: true
 }
 
 export async function createWorktree(
@@ -189,11 +194,12 @@ export function runWorktreeSetupScript(
       env
     })
 
-    const chunks: string[] = []
+    // The reply carries the output's last MiB; all of it streams through `onData`.
+    const tail = createOutputTail()
 
     const handleData = (data: Buffer) => {
       const text = data.toString()
-      chunks.push(text)
+      tail.push(text)
       onData?.(text)
     }
 
@@ -206,7 +212,7 @@ export function runWorktreeSetupScript(
 
     child.on('close', (code) => {
       clearTimeout(timeout)
-      const output = chunks.join('').trim()
+      const result = tail.result()
       const success = code === 0
 
       recordDiagnosticEvent({
@@ -222,11 +228,11 @@ export function runWorktreeSetupScript(
           scriptPath,
           durationMs: Date.now() - startedAt,
           exitCode: code,
-          output: trimOutput(output)
+          output: trimOutput(result.outputTruncated ? tail.head() : result.output)
         }
       })
 
-      resolve({ ran: true, success, output })
+      resolve({ ran: true, success, ...result })
     })
 
     child.on('error', (err) => {
@@ -1851,6 +1857,60 @@ export async function getCommitsSince(
   }
 }
 
+/** Most commits one page of `getCommitsSincePage` carries (its byte budget applies too). */
+export const COMMITS_PAGE_ITEMS = 2000
+
+/**
+ * {@link getCommitsSince} in bounded pages: newest first, at most
+ * {@link COMMITS_PAGE_ITEMS} commits and {@link PAGE_MAX_BYTES} per page. The cursor
+ * pins the branch's tip as it was at the first page, so one read's pages describe
+ * one history (a commit landing meanwhile is not in it). Errors read as empty, as
+ * the whole read answers them.
+ */
+export async function getCommitsSincePage(
+  repoPath: string,
+  sinceRef: string,
+  branch: string,
+  cursor: string | null,
+  opts: { maxItems?: number } = {}
+): Promise<Page<CommitInfo>> {
+  let tip: string
+  let skip: number
+  if (cursor === null) {
+    const resolved = await execGit(['rev-parse', '--verify', '--quiet', `${branch}^{commit}`], {
+      cwd: repoPath
+    }).catch(() => '')
+    tip = resolved.trim()
+    if (!tip) return { items: [], nextCursor: null }
+    skip = 0
+  } else {
+    const m = /^([0-9a-f]{40,64}):(\d+)$/.exec(cursor)
+    if (!m) throw new Error(`invalid commits cursor '${cursor}'`)
+    tip = m[1]
+    skip = Number(m[2])
+  }
+  const maxItems = Math.max(1, Math.min(opts.maxItems ?? COMMITS_PAGE_ITEMS, COMMITS_PAGE_ITEMS))
+  let commits: CommitInfo[]
+  try {
+    const output = await execGit(
+      [
+        'log',
+        `${sinceRef}..${tip}`,
+        `--skip=${skip}`,
+        `-${maxItems + 1}`,
+        '--format=%H%n%h%n%s%n%an%n%ar'
+      ],
+      { cwd: repoPath }
+    )
+    commits = parseCommitOutput(output)
+  } catch {
+    return { items: [], nextCursor: null }
+  }
+  const n = pageCut(commits.slice(0, maxItems), { maxItems })
+  const more = n < commits.length
+  return { items: commits.slice(0, n), nextCursor: more ? `${tip}:${skip + n}` : null }
+}
+
 export async function getCommitsBeforeRef(
   repoPath: string,
   ref: string,
@@ -2347,79 +2407,6 @@ export function resolveCommitGraph(
  * Build a ResolvedGraph from pre-separated fork data.
  * Fork graphs use simple sequential layout — no parent hashes needed.
  */
-export function resolveForkGraph(opts: {
-  baseBranchCommits: CommitInfo[]
-  baseBranchName: string
-  featureBranchCommits: CommitInfo[]
-  featureBranchName: string
-  forkPoint: string
-  preForkCommits: CommitInfo[]
-}): ResolvedGraph {
-  const resolved: ResolvedCommit[] = []
-  const baseBranch = opts.baseBranchName
-  const featureBranch = opts.featureBranchName
-
-  // Base branch commits
-  for (let i = 0; i < opts.baseBranchCommits.length; i++) {
-    const c = opts.baseBranchCommits[i]
-    resolved.push({
-      ...c,
-      parents: [],
-      branch: baseBranch,
-      branchRefs: i === 0 ? [baseBranch] : [],
-      tags: [],
-      isBranchTip: i === 0,
-      isHead: false
-    })
-  }
-
-  // Feature branch commits
-  for (let i = 0; i < opts.featureBranchCommits.length; i++) {
-    const c = opts.featureBranchCommits[i]
-    resolved.push({
-      ...c,
-      parents: [],
-      branch: featureBranch,
-      branchRefs: i === 0 ? [featureBranch] : [],
-      tags: [],
-      isBranchTip: i === 0,
-      isHead: false
-    })
-  }
-
-  // Fork point
-  resolved.push({
-    hash: opts.forkPoint,
-    shortHash: opts.forkPoint.slice(0, 7),
-    message: 'fork point',
-    author: '',
-    relativeDate: '',
-    parents: [],
-    branch: baseBranch,
-    branchRefs: [],
-    tags: [],
-    isBranchTip: false,
-    isHead: false
-  })
-
-  // Pre-fork context commits
-  for (const c of opts.preForkCommits) {
-    resolved.push({
-      ...c,
-      parents: [],
-      branch: baseBranch,
-      branchRefs: [],
-      tags: [],
-      isBranchTip: false,
-      isHead: false
-    })
-  }
-
-  const branches = opts.featureBranchCommits.length > 0 ? [baseBranch, featureBranch] : [baseBranch]
-
-  return { commits: resolved, baseBranch, branches }
-}
-
 /** IPC-ready: fetch DAG + resolve in one call */
 export async function getResolvedCommitDag(
   repoPath: string,
@@ -2690,3 +2677,5 @@ export async function ensureBranchPushed(repoPath: string): Promise<void> {
     throw new Error(`Failed to push branch: ${stderr}`)
   }
 }
+
+export { resolveForkGraph }

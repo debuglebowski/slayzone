@@ -164,6 +164,38 @@ describe('createGitHandlers — runWorktreeSetupScript env sanitize', () => {
   })
 })
 
+describe('createGitHandlers — runWorktreeSetupScript reply is bounded (FU1 S4)', () => {
+  it('a script printing 3 MiB: the reply holds its last MiB and the total; the notifications have it all', async () => {
+    const wt = realpathSync(dir)
+    mkdirSync(join(wt, '.slay'), { recursive: true })
+    writeFileSync(
+      join(wt, '.slay', 'worktree-setup.sh'),
+      '#!/bin/sh\ni=0\nwhile [ $i -lt 3072 ]; do printf "%01023d\\n" $i; i=$((i+1)); done\necho LAST-LINE\n',
+      { mode: 0o755 }
+    )
+    let streamed = 0
+    const ctx = {
+      ...ctxWithRoots([realpathSync(tmpdir())]),
+      dialer: {
+        notify: ((_m: string, p: { payload: { chunk: string } }) => {
+          streamed += Buffer.byteLength(p.payload.chunk)
+          return true
+        }) as never
+      }
+    }
+    const handlers = createGitHandlers(ctx)
+    const res = (await handlers[GitMethods.runWorktreeSetupScript]({
+      worktreePath: wt,
+      repoPath: wt
+    })) as { output?: string; outputBytes?: number; outputTruncated?: boolean }
+    expect(Buffer.byteLength(res.output ?? '')).toBeLessThanOrEqual(1024 * 1024)
+    expect(res.output?.endsWith('LAST-LINE')).toBe(true)
+    expect(res.outputTruncated).toBe(true)
+    expect(res.outputBytes).toBe(3072 * 1024 + 'LAST-LINE\n'.length)
+    expect(streamed).toBe(res.outputBytes)
+  })
+})
+
 describe('createGitHandlers — git.removeWorktree keeps the branch unless asked', () => {
   // The hub's archive / delete / startup-purge paths remove the worktree and say nothing
   // about its branch. v0.35.0 kept the branch ("Branch is kept" in the Worktrees UI); this

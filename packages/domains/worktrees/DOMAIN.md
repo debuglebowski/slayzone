@@ -90,3 +90,7 @@ exceeded the 100 MiB frame limit and stalled the computer.
 - **Untracked files.** `getUntrackedFileDiffs` gains `paged` (`$paged` answer).
 - **Stash diffs.** They read through `readGitText` too.
 - **Older computers.** The hub serves `readGitText` from the whole-text ops.
+
+**2026-11-15: Setup-script replies and commit lists are bounded (FU1 S4)**
+- **Setup scripts.** A worktree setup script's reply carries only the LAST 1 MiB of its output (`output-tail.ts`, UTF-8-safe), plus `outputBytes` and `outputTruncated`. The full output still streams as it runs; no UI shows the reply's output. Under 1 MiB the reply is unchanged.
+- **Commit lists.** `getCommitsSincePage` pages `getCommitsSince` (≤ 2000 commits / 4 MiB). Its cursor pins the branch's tip as of page 1. For a `boundedReads` computer, the hub assembles `worktrees.getCommitsSince` from those pages, and builds `getResolvedForkGraph` / `getResolvedUpstreamGraph` WHOLE itself, with the same graph and counts (`fork-graph.ts`, pure). Older computers get the whole-answer ops.

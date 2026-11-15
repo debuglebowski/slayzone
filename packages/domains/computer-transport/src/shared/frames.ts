@@ -1939,7 +1939,11 @@ export type GitRunWorktreeSetupScriptParams = z.infer<typeof gitRunWorktreeSetup
 export const gitRunWorktreeSetupScriptResultSchema = z.object({
   ran: z.boolean(),
   success: z.boolean().optional(),
-  output: z.string().optional()
+  /** The output — its last 1 MiB when longer (`outputTruncated`); all of it streamed as
+   *  `git.worktreeSetupData` events. Older computers send it whole. */
+  output: z.string().optional(),
+  outputBytes: z.number().int().nonnegative().optional(),
+  outputTruncated: z.literal(true).optional()
 })
 export type GitRunWorktreeSetupScriptResult = z.infer<typeof gitRunWorktreeSetupScriptResultSchema>
 

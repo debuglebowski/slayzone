@@ -40,6 +40,11 @@ import { gitOpsContract, type GitOpName } from '../shared/git-ops-contract'
 import { executeGitOp, unwatchGitCheckout, watchGitCheckout } from './git-op-routing'
 import { readGitTextRouted } from './git-text-routing'
 import {
+  getCommitsSinceRouted,
+  getResolvedForkGraphRouted,
+  getResolvedUpstreamGraphRouted
+} from './commits-routing'
+import {
   listIgnoredTreeRouted,
   matchIgnoredTreeRouted,
   openIgnoredTreeRouted
@@ -305,7 +310,9 @@ export const worktreesRouter = router({
   listBranchesDetailed: gitQuery('listBranchesDetailed'),
   listRemoteBranches: gitQuery('listRemoteBranches'),
   getMergeBase: gitQuery('getMergeBase'),
-  getCommitsSince: gitQuery('getCommitsSince'),
+  getCommitsSince: publicProcedure
+    .input(gitOpsContract.getCommitsSince.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => getCommitsSinceRouted(input, ctx.db)),
   getCommitsBeforeRef: gitQuery('getCommitsBeforeRef'),
   deleteBranch: gitMutation('deleteBranch'),
   pruneRemote: gitMutation('pruneRemote'),
@@ -331,8 +338,12 @@ export const worktreesRouter = router({
     .query(({ ctx, input }) => matchIgnoredTreeRouted(input, ctx.db)),
   copyIgnoredFiles: gitMutation('copyIgnoredFiles'),
   getResolvedCommitDag: gitQuery('getResolvedCommitDag'),
-  getResolvedForkGraph: gitQuery('getResolvedForkGraph'),
-  getResolvedUpstreamGraph: gitQuery('getResolvedUpstreamGraph'),
+  getResolvedForkGraph: publicProcedure
+    .input(gitOpsContract.getResolvedForkGraph.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => getResolvedForkGraphRouted(input, ctx.db)),
+  getResolvedUpstreamGraph: publicProcedure
+    .input(gitOpsContract.getResolvedUpstreamGraph.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => getResolvedUpstreamGraphRouted(input, ctx.db)),
   getResolvedRecentCommits: gitQuery('getResolvedRecentCommits'),
   // Stashes
   listStashes: gitQuery('listStashes'),

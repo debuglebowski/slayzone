@@ -89,6 +89,8 @@ export const gitOpImpls = {
   getMergeBase: (i: GitOpInput<'getMergeBase'>) => git.getMergeBase(i.path, i.branch1, i.branch2),
   getCommitsSince: (i: GitOpInput<'getCommitsSince'>) =>
     git.getCommitsSince(i.path, i.sinceRef, i.branch),
+  getCommitsSincePage: (i: GitOpInput<'getCommitsSincePage'>) =>
+    git.getCommitsSincePage(i.path, i.sinceRef, i.branch, i.cursor),
   getCommitsBeforeRef: (i: GitOpInput<'getCommitsBeforeRef'>) =>
     git.getCommitsBeforeRef(i.path, i.ref, i.count),
   deleteBranch: (i: GitOpInput<'deleteBranch'>) => git.deleteBranch(i.path, i.branch, i.force),
@@ -176,3 +178,4 @@ export {
 } from '../shared/git-ops-contract'
 export { configureGitExec, type GitExecEnvironment } from './exec-async'
 export { createGitWatcher, type GitWatcher, type GitDiffChangedPayload } from './git-watcher'
+export { createOutputTail, SETUP_OUTPUT_TAIL_BYTES } from './output-tail'
