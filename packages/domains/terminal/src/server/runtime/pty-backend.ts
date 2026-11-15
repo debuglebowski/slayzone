@@ -157,6 +157,54 @@ export interface PtySpawnConfirmation {
    * other end owns one (an older computer), and the caller keeps its own.
    */
   ownsStartupDeadline?: boolean
+  /**
+   * No process was started: the owner took over the session it was ALREADY running
+   * under this id (left by a previous hub run — see {@link PtyBackend.reattach} and
+   * `adoptLive`). The session is past its startup: `seq` is its highest seq (output
+   * up to it is scrollback, read by replay), `conversationId` what it detected.
+   */
+  attached?: { seq: number; conversationId: string | null }
+}
+
+/**
+ * A live terminal session a computer runs that nothing in this hub run tracks —
+ * left by a previous hub run (hub processes restart; computers keep their ptys).
+ * See {@link PtyBackend.untrackedSessions}.
+ */
+export interface UntrackedPtySession {
+  computerId: string
+  sessionId: string
+  /** The attempt it runs as: what {@link PtyBackend.reattach} names. */
+  spawnId?: string
+  pid?: number
+  /** Its highest seq; -1 when it printed nothing yet. */
+  seq?: number
+  /** The computer detects its output — required to take it over. */
+  detection: boolean
+  /** The mode its detection runs as (absent: an older computer). */
+  mode?: string
+  /** When its process started, ms epoch (absent: an older computer). */
+  startedAt?: number
+  conversationId?: string | null
+}
+
+/**
+ * Why {@link PtyBackend.reattach} refused, carried on its rejection as
+ * `reattachRefusal` (read it with {@link ptyReattachRefusal}).
+ * - `not-adoptable`: the computer refused (not running as that attempt any more,
+ *   no detection, another mode or task, another start in flight);
+ * - `computer-too-old`: the computer cannot take a session over (no `pty.adopt`);
+ * - `already-tracked`: this hub tracks a session under that id already.
+ */
+export type PtyReattachRefusal = 'not-adoptable' | 'computer-too-old' | 'already-tracked'
+
+/** The {@link PtyReattachRefusal} a reattach rejection carries; null for any other error. */
+export function ptyReattachRefusal(err: unknown): PtyReattachRefusal | null {
+  const reason =
+    err && typeof err === 'object' ? (err as { reattachRefusal?: unknown }).reattachRefusal : null
+  return reason === 'not-adoptable' || reason === 'computer-too-old' || reason === 'already-tracked'
+    ? reason
+    : null
 }
 
 /**
@@ -276,6 +324,36 @@ export interface PtyBackend {
     /** See `PtySpawnSpec.relay`. */
     relay?: boolean
   ): Promise<PtyHandle>
+  /**
+   * The live sessions computers run that nothing in this hub run tracks (a previous
+   * run's), as of each computer's latest reconnect list — minus those that exited,
+   * were taken over or killed since. Optional: only the routing backend knows.
+   */
+  untrackedSessions?(): UntrackedPtySession[]
+  /** `untrackedSessions()` changed. */
+  onUntrackedChange?(cb: () => void): { dispose(): void }
+  /**
+   * Take over a session `computerId` runs as attempt `fromSpawnId` (one of
+   * {@link untrackedSessions}): nothing starts or stops. The handle is an ordinary
+   * routed session from here on, its `whenSpawned` resolving with `attached`.
+   * Rejects with a {@link PtyReattachRefusal} when it cannot be taken over.
+   */
+  reattach?(
+    computerId: string,
+    sessionId: string,
+    fromSpawnId: string,
+    opts: {
+      /** Cosmetic, like `adopt`'s: `PtyHandle.process`. */
+      processName: string
+      taskId?: string
+      /** Refused unless the session's detection runs as this mode. */
+      mode?: string
+      /** See `PtySpawnSpec.relay`. */
+      relay?: boolean
+    }
+  ): Promise<PtyHandle>
+  /** End an untracked session — exactly that attempt (the user chose to stop it). */
+  killUntracked?(computerId: string, sessionId: string, spawnId: string): Promise<void>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing
    * until `adopt` gives it a real session id — the hub has nowhere to route it to

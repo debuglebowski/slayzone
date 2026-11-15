@@ -100,6 +100,43 @@ describe('output detection on the computer (pty-signal)', () => {
     pty.disposeAll()
   })
 
+  it('lists what a restarted hub needs to adopt a session: its mode and start time', async () => {
+    const { pty } = setup(9106)
+    const before = Date.now()
+    await pty.handlers['pty.spawn']({
+      sessionId: 'task:tab',
+      spawnId: 'one',
+      command: 'cat',
+      cwd: process.cwd(),
+      detection: { mode: 'claude-code', resuming: false }
+    })
+    const [listed] = (pty.handlers['pty.list']({}) as { sessions: Array<Record<string, unknown>> })
+      .sessions
+    expect(listed).toMatchObject({ sessionId: 'task:tab', detection: true, mode: 'claude-code' })
+    expect(listed?.startedAt).toBeGreaterThanOrEqual(before)
+    pty.disposeAll()
+  })
+
+  it('a warm session adopted with detection lists the mode it was adopted as', async () => {
+    const { pty } = setup(9107)
+    await pty.handlers['pty.warmSpawn']({
+      projectId: 'p1',
+      warmId: 'warm',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    await pty.handlers['pty.warmAdopt']({
+      warmId: 'warm',
+      sessionId: 'task:task',
+      taskId: 'task',
+      detection: { mode: 'codex', resuming: false }
+    })
+    const [listed] = (pty.handlers['pty.list']({}) as { sessions: Array<Record<string, unknown>> })
+      .sessions
+    expect(listed).toMatchObject({ sessionId: 'task:task', mode: 'codex' })
+    pty.disposeAll()
+  })
+
   it('answers terminal queries itself and streams the filtered chunk (buffer = stream)', async () => {
     const { notifies, child, pty } = setup(9105)
     await pty.handlers['pty.spawn']({
@@ -244,6 +281,171 @@ describe('output detection on the computer (pty-signal)', () => {
     expect(adopted).toMatchObject({ detection: true })
     child.say('\x1b]0;after adopt\x07')
     expect(signals(notifies).map((s) => [s.sessionId, s.title])).toEqual([['real', 'after adopt']])
+    pty.disposeAll()
+  })
+})
+
+// ── A restarted hub takes over the sessions its previous run left ─────────────
+//
+// The computer keeps every pty across a hub restart. The restarted hub's first spawn
+// of such a session used to REPLACE it (SIGHUP the live agent, start a resumed one):
+// a silent kill on no evidence. Asked with `adoptLive`, the computer instead hands
+// the running process over to the new attempt — same process, same scrollback.
+
+describe('adopting a live session (hub restart)', () => {
+  /** A fake pty whose kill ends it at once (a replacement waits for that exit). */
+  function killablePty(pid: number) {
+    let onData: ((data: string) => void) | undefined
+    let onExit: ((e: { exitCode: number; signal: number }) => void) | undefined
+    const proc = {
+      pid,
+      cols: 80,
+      rows: 24,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(() => onExit?.({ exitCode: 0, signal: 1 })),
+      onData: (l: typeof onData) => {
+        onData = l
+        return { dispose() {} }
+      },
+      onExit: (l: typeof onExit) => {
+        onExit = l
+        return { dispose() {} }
+      }
+    } as unknown as nodePty.IPty
+    return { proc, say: (data: string) => onData?.(data) }
+  }
+
+  function setupMany() {
+    const { ctx, notifies } = makeCtx()
+    const children: Array<ReturnType<typeof killablePty>> = []
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => {
+        const child = killablePty(9200 + children.length)
+        children.push(child)
+        return child.proc
+      }) as typeof nodePty.spawn
+    })
+    return { notifies, children, pty }
+  }
+
+  const spawnAs = (spawnId: string, mode: string, extra: Record<string, unknown> = {}) => ({
+    sessionId: 'task:tab',
+    taskId: 'task',
+    spawnId,
+    command: 'cat',
+    cwd: process.cwd(),
+    detection: { mode, resuming: false },
+    ...extra
+  })
+
+  const listed = (pty: ReturnType<typeof setupMany>['pty']) =>
+    (pty.handlers['pty.list']({}) as { sessions: Array<Record<string, unknown>> }).sessions
+
+  it('a first spawn with adoptLive takes the running process over as the new attempt', async () => {
+    const { notifies, children, pty } = setupMany()
+    await pty.handlers['pty.spawn'](spawnAs('run-1', 'claude-code'))
+    children[0]!.say('\x1b]0;Working\x07hello')
+
+    const reply = await pty.handlers['pty.spawn'](
+      spawnAs('run-2', 'claude-code', { adoptLive: { mode: 'claude-code' } })
+    )
+
+    // No second process: the first one is the new attempt now.
+    expect(children).toHaveLength(1)
+    expect(children[0]!.proc.kill).not.toHaveBeenCalled()
+    expect(reply).toMatchObject({
+      pid: 9200,
+      detection: true,
+      adopted: { seq: 0, detected: expect.objectContaining({ title: 'Working' }) }
+    })
+    expect(listed(pty)).toEqual([
+      expect.objectContaining({ sessionId: 'task:tab', spawnId: 'run-2', adopted: true })
+    ])
+    // Addressed as the new attempt from here on, in both directions.
+    pty.handlers['pty.write']({ sessionId: 'task:tab', spawnId: 'run-2', data: 'x' })
+    expect(children[0]!.proc.write).toHaveBeenCalledWith('x')
+    children[0]!.say('more')
+    const data = notifies.filter((n) => n.method === 'pty.data').at(-1)?.params
+    expect(data).toMatchObject({ spawnId: 'run-2', data: 'more' })
+    // A re-sent copy of the same attempt (its reply was lost) is answered the same way.
+    expect(
+      await pty.handlers['pty.spawn'](
+        spawnAs('run-2', 'claude-code', { adoptLive: { mode: 'claude-code' } })
+      )
+    ).toMatchObject({ pid: 9200, adopted: { seq: expect.any(Number) } })
+    pty.disposeAll()
+  })
+
+  it('a different mode is not taken over: replaced as before, and the reply says so', async () => {
+    const { children, pty } = setupMany()
+    await pty.handlers['pty.spawn'](spawnAs('run-1', 'codex'))
+
+    const reply = await pty.handlers['pty.spawn'](
+      spawnAs('run-2', 'claude-code', { adoptLive: { mode: 'claude-code' } })
+    )
+
+    expect(children).toHaveLength(2)
+    expect(children[0]!.proc.kill).toHaveBeenCalled()
+    expect(reply).toMatchObject({
+      pid: 9201,
+      replacedLive: { spawnId: 'run-1', reason: 'mode-mismatch' }
+    })
+    expect(reply).not.toHaveProperty('adopted')
+    pty.disposeAll()
+  })
+
+  it('without adoptLive a new attempt still replaces the running one (explicit restart)', async () => {
+    const { children, pty } = setupMany()
+    await pty.handlers['pty.spawn'](spawnAs('run-1', 'claude-code'))
+    const reply = await pty.handlers['pty.spawn'](spawnAs('run-2', 'claude-code'))
+    expect(children).toHaveLength(2)
+    expect(reply).not.toHaveProperty('adopted')
+    expect(reply).not.toHaveProperty('replacedLive')
+    pty.disposeAll()
+  })
+
+  it('pty.adopt takes over exactly the listed attempt, and refuses anything else', async () => {
+    const { children, pty } = setupMany()
+    await pty.handlers['pty.spawn'](spawnAs('run-1', 'claude-code'))
+    children[0]!.say('hi')
+
+    expect(() =>
+      pty.handlers['pty.adopt']({ sessionId: 'task:tab', spawnId: 'run-2', fromSpawnId: 'other' })
+    ).toThrow(/not running/)
+    expect(() =>
+      pty.handlers['pty.adopt']({
+        sessionId: 'task:tab',
+        spawnId: 'run-2',
+        fromSpawnId: 'run-1',
+        mode: 'codex'
+      })
+    ).toThrow(/mode/)
+
+    const reply = pty.handlers['pty.adopt']({
+      sessionId: 'task:tab',
+      spawnId: 'run-2',
+      fromSpawnId: 'run-1',
+      mode: 'claude-code',
+      relay: false
+    })
+    expect(reply).toMatchObject({ pid: 9200, seq: 0, detection: true })
+    expect(listed(pty)).toEqual([expect.objectContaining({ spawnId: 'run-2', adopted: true })])
+    expect(children).toHaveLength(1)
+    pty.disposeAll()
+  })
+
+  it('pty.adopt refuses a session without detection (the hub would have to parse it)', async () => {
+    const { pty } = setupMany()
+    await pty.handlers['pty.spawn']({
+      sessionId: 'task:tab',
+      spawnId: 'run-1',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    expect(() =>
+      pty.handlers['pty.adopt']({ sessionId: 'task:tab', spawnId: 'run-2', fromSpawnId: 'run-1' })
+    ).toThrow(/detection/)
     pty.disposeAll()
   })
 })

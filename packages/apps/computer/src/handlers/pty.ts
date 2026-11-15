@@ -32,6 +32,7 @@ import {
   ptyGetBufferSinceParamsSchema,
   ptyKillParamsSchema,
   type PtyListResult,
+  type PtyDetectedSnapshot,
   ptyPrioritizeParamsSchema,
   type PtySpawnParams,
   type PtyWarmSpawnParams,
@@ -43,6 +44,7 @@ import {
   type PtyDoctorResult,
   ptySpawnParamsSchema,
   ptyWarmAdoptParamsSchema,
+  ptyAdoptParamsSchema,
   ptyWarmKillParamsSchema,
   ptyWarmSpawnParamsSchema,
   ptyWriteParamsSchema,
@@ -239,6 +241,10 @@ interface PtySession {
   stopping?: Promise<void>
   /** Keeps a task terminal's output on disk (see pty-history.ts). */
   history?: PtyHistoryTracker
+  /** The terminal mode its detection runs as (`pty.list`: a restarted hub adopts by it). */
+  mode?: string
+  /** A later attempt took this process over (`pty.adopt` / `adoptLive`): see `takeOver`. */
+  adopted?: boolean
 }
 
 /**
@@ -653,6 +659,7 @@ export function createPtyHandlers(
   /** Start output detection for a session; ids are read live (warm adopt rekeys). */
   function attachSignals(session: PtySession, detection: PtyDetectionParams): void {
     session.signals?.dispose()
+    session.mode = detection.mode
     session.signals = createPtySessionSignals({
       // The latest theme the hub pushed wins over the one it spawned with.
       params: { ...detection, ...(theme ? { theme } : {}) },
@@ -788,7 +795,14 @@ export function createPtyHandlers(
     slot.release()
   }
 
-  type SpawnReply = { pid: number; startupDeadline?: true; detection?: true; seq?: number }
+  type SpawnReply = {
+    pid: number
+    startupDeadline?: true
+    detection?: true
+    seq?: number
+    adopted?: { seq: number; detected?: PtyDetectedSnapshot }
+    replacedLive?: { spawnId?: string; reason: string }
+  }
 
   /**
    * `replaced`: the buffer of the session this spawn replaced, when its output was
@@ -955,7 +969,8 @@ export function createPtyHandlers(
         return {
           pid: live.proc.pid,
           ...(live.deadline ? { startupDeadline: true as const } : {}),
-          ...(live.signals ? { detection: true as const } : {})
+          ...(live.signals ? { detection: true as const } : {}),
+          ...(live.adopted ? { adopted: adoptedView(live) } : {})
         }
       }
       if (tombstones.ran(params.sessionId, params.spawnId)) {
@@ -967,6 +982,110 @@ export function createPtyHandlers(
         )
       }
     }
+    // A restarted hub's first spawn of a session this computer still runs from its
+    // previous run: take the running process over rather than replace (kill) it.
+    let replacedLive: SpawnReply['replacedLive']
+    if (params.adoptLive && params.spawnId !== undefined) {
+      const live = sessions.get(params.sessionId)
+      if (live && !live.warm && live.spawnId !== params.spawnId) {
+        const refusal = adoptRefusal(live, {
+          taskId: params.taskId,
+          mode: params.adoptLive.mode
+        })
+        if (!refusal) {
+          takeOver(live, params.spawnId, params.relay)
+          return { pid: live.proc.pid, detection: true, adopted: adoptedView(live) }
+        }
+        replacedLive = { ...(live.spawnId ? { spawnId: live.spawnId } : {}), reason: refusal }
+        ctx.log('pty adoptLive refused: replacing', {
+          sessionId: params.sessionId,
+          reason: refusal
+        })
+      }
+    }
+    const reply = startOrReplace(params)
+    if (!replacedLive) return reply
+    const said = replacedLive
+    return Promise.resolve(reply).then((r) => ({ ...(r as SpawnReply), replacedLive: said }))
+  }
+
+  /** Why `live` cannot be taken over by a new attempt (null: it can). */
+  function adoptRefusal(
+    live: PtySession,
+    want: { taskId?: string; mode?: string; fromSpawnId?: string }
+  ): string | null {
+    if (live.warm || live.replacing || live.stopping) return 'not-running'
+    // Another start for the id is already on its way: that one replaces it.
+    if (starts.has(live.id) || queued.has(live.id)) return 'start-in-flight'
+    if (want.fromSpawnId !== undefined && live.spawnId !== want.fromSpawnId) return 'not-running'
+    if (want.taskId && live.taskId && want.taskId !== live.taskId) return 'task-mismatch'
+    if (!live.signals) return 'no-detection'
+    if (want.mode && live.mode && want.mode !== live.mode) return 'mode-mismatch'
+    return null
+  }
+
+  /**
+   * The process answers to `spawnId` from now on — writes, kills, its output and
+   * signals (all read the session's ids live) — exactly like a warm adopt's rekey.
+   * Nothing starts or stops; its buffer, seq and detection carry on.
+   */
+  function takeOver(live: PtySession, spawnId: string, relay: boolean | undefined): void {
+    const previous = live.spawnId
+    live.spawnId = spawnId
+    live.adopted = true
+    if (relay !== undefined) live.relay = relay
+    ctx.log('pty taken over by a new attempt', {
+      sessionId: live.id,
+      pid: live.proc.pid,
+      previousSpawnId: previous ?? null,
+      spawnId
+    })
+  }
+
+  const adoptedView = (live: PtySession): { seq: number; detected?: PtyDetectedSnapshot } => ({
+    seq: live.buffer.getCurrentSeq(),
+    ...(live.signals ? { detected: live.signals.snapshot() } : {})
+  })
+
+  /** `pty.adopt`: see `ptyAdoptParamsSchema`. */
+  function adopt(rawParams: unknown): {
+    pid: number
+    seq: number
+    detection: true
+    detected?: PtyDetectedSnapshot
+  } {
+    const params = ptyAdoptParamsSchema.parse(rawParams)
+    if (params.taskId) options.assertTaskActive?.(params.taskId)
+    const live = sessions.get(params.sessionId)
+    if (live && !live.warm && live.spawnId === params.spawnId) {
+      // A re-sent adopt whose reply was lost: already this attempt.
+      return { pid: live.proc.pid, detection: true, ...adoptedView(live) }
+    }
+    const refusal = live
+      ? adoptRefusal(live, {
+          taskId: params.taskId,
+          mode: params.mode,
+          fromSpawnId: params.fromSpawnId
+        })
+      : 'not-running'
+    if (refusal || !live) {
+      const why: Record<string, string> = {
+        'not-running': `attempt ${params.fromSpawnId} is not running`,
+        'start-in-flight': 'another start of it is in flight',
+        'task-mismatch': 'it belongs to another task',
+        'no-detection': 'it runs no output detection',
+        'mode-mismatch': `it runs as mode ${live?.mode ?? '?'}, not ${params.mode ?? '?'}`
+      }
+      throw new RpcError(
+        ComputerTransportErrorCodes.sessionNotAdoptable,
+        `pty.adopt ${params.sessionId}: ${why[refusal ?? 'not-running'] ?? refusal ?? 'refused'}`
+      )
+    }
+    takeOver(live, params.spawnId, params.relay)
+    return { pid: live.proc.pid, detection: true, ...adoptedView(live) }
+  }
+
+  function startOrReplace(params: PtySpawnParams): SpawnReply | Promise<unknown> {
     if (params.admission === undefined) {
       // Not an agent start (or an older hub): start now. A start still queued
       // under this id is superseded by this one, like a live session would be.
@@ -1438,8 +1557,15 @@ export function createPtyHandlers(
         // no special case on either side.
         seq: session.buffer.getCurrentSeq(),
         ...(session.signals
-          ? { detection: true as const, detected: session.signals.snapshot() }
-          : {})
+          ? {
+              detection: true as const,
+              detected: session.signals.snapshot(),
+              // What a restarted hub needs to adopt it into the right tab.
+              ...(session.mode ? { mode: session.mode } : {}),
+              startedAt: session.startedAt
+            }
+          : {}),
+        ...(session.adopted ? { adopted: true as const } : {})
       })
     }
     return { sessions: live, exited: tombstones.list() }
@@ -1574,6 +1700,7 @@ export function createPtyHandlers(
     [HubToComputerMethods.ptyForget]: forget,
     [HubToComputerMethods.ptyWarmSpawn]: warmSpawn,
     [HubToComputerMethods.ptyWarmAdopt]: warmAdopt,
+    [HubToComputerMethods.ptyAdopt]: adopt,
     [HubToComputerMethods.ptyWarmKill]: warmKill,
     [HubToComputerMethods.ptyWarmList]: warmList
   }

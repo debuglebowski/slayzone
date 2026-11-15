@@ -56,13 +56,15 @@ import type {
   ChatWriteFailureCode,
   ChatWriteOptions,
   PtyBackend,
+  PtyReattachRefusal,
   PtyDetectionSpec,
   PtyHandle,
   PtyInputFacts,
   PtySignal,
   PtySpawnConfirmation,
   PtySpawnSpec,
-  PtyWriteOptions
+  PtyWriteOptions,
+  UntrackedPtySession
 } from '@slayzone/terminal/server'
 import {
   procStatsResultSchema,
@@ -106,6 +108,7 @@ import {
   ptyListResultSchema,
   ptySpawnResultSchema,
   ptyWarmAdoptResultSchema,
+  ptyAdoptResultSchema,
   ptyWarmListResultSchema,
   ptyBackgroundJobsResultSchema,
   ptyDoctorResultSchema,
@@ -123,6 +126,7 @@ import {
   joinDetachController,
   toSessionList,
   type DetachableEntry,
+  type ListedSession,
   type OwnerGoneProbe
 } from './detach-controller'
 export type { OwnerGoneProbe } from './detach-controller'
@@ -546,6 +550,56 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   /** Each session's highest seq seen, kept past its exit: a continuing spawn starts
    *  after it even when the computer's buffer is gone (M2). Bounded by sessions. */
   const lastSeqs = new Map<string, number>()
+  /**
+   * Session keys registered in this hub run (spawn, adopt, reattach). A spawn of any
+   * other key is the FIRST of its id by this run: the computer may still run it from
+   * a previous hub run, and is asked to take it over (`adoptLive`) rather than
+   * replace it. Bounded like `lastSeqs` — a cleared key only re-asks a question
+   * whose answer, for a session this run started, is "nothing to take over".
+   */
+  const registeredKeys = new Set<string>()
+  /**
+   * Live sessions computers run that nothing here tracks (a previous hub run's), as
+   * of each computer's latest reconnect list (detach controller `onUntracked`),
+   * minus those that exited, were taken over or killed since. computerId →
+   * sessionId → listing; bounded by what the computers run.
+   */
+  const untracked = new Map<string, Map<string, ListedSession>>()
+  const untrackedListeners = new Set<() => void>()
+
+  function notifyUntracked(): void {
+    for (const cb of [...untrackedListeners]) {
+      try {
+        cb()
+      } catch {
+        /* a listener's failure must not stop the others */
+      }
+    }
+  }
+
+  /** Forget an untracked session (exited, taken over, killed, replaced). */
+  function dropUntracked(computerId: string, sessionId: string, spawnId?: string): void {
+    const bySession = untracked.get(computerId)
+    const listed = bySession?.get(sessionId)
+    if (!bySession || !listed) return
+    if (spawnId !== undefined && listed.spawnId !== undefined && listed.spawnId !== spawnId) return
+    bySession.delete(sessionId)
+    if (bySession.size === 0) untracked.delete(computerId)
+    notifyUntracked()
+  }
+
+  function recordPty(
+    event: string,
+    level: 'info' | 'warn',
+    message: string,
+    payload: Record<string, unknown>
+  ): void {
+    try {
+      recordDiagnosticEvent({ level, source: 'pty', event, message, payload })
+    } catch {
+      /* diagnostics unavailable — the session must still be handled */
+    }
+  }
 
   function drain(entry: PtyEntry): void {
     if (entry.sealed) return
@@ -674,6 +728,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     const entry = sessions.get(sessionKey(payload.computerId, payload.sessionId))
     if (entry && (!payload.spawnId || !entry.spawnId || payload.spawnId === entry.spawnId))
       finalize(entry, payload.exitCode, payload.signal ?? null, payload.reason)
+    // An untracked session (a previous run's) ended on its own.
+    else dropUntracked(payload.computerId, payload.sessionId, payload.spawnId)
   })
   /**
    * The computer detects this session's output from what it has delivered on — and
@@ -691,6 +747,55 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     for (const signal of early)
       if (signalIsNew(signal, entry.detectFromSeq)) entry.signalEmitter.emit(signal)
   }
+  /** The computer's settled detection, as one snapshot signal (reattach / take-over). */
+  function emitSnapshot(entry: PtyEntry, detected: PtyDetectedSnapshot | undefined): void {
+    if (!entry.detectsOutput || !detected) return
+    entry.signalEmitter.emit({
+      ...detected,
+      seq: entry.lastSeq,
+      snapshot: true,
+      refreshIdleClock: false,
+      preview: '',
+      suppressOutput: false
+    })
+  }
+
+  /**
+   * `entry` now IS a process the computer was already running (a previous hub run
+   * left it; the computer took it over as `entry.spawnId`). Output up to `seq` is its
+   * scrollback, read by replay from the computer's buffer — the session's only one;
+   * live delivery starts after it.
+   */
+  function bindTakenOver(
+    entry: PtyEntry,
+    taken: { seq: number; detected?: PtyDetectedSnapshot },
+    via: 'spawn' | 'reattach' | 'pending'
+  ): void {
+    entry.spawnInFlight = false
+    entry.pendingSpawn = undefined
+    entry.prioritize = undefined
+    entry.lastSeq = Math.max(entry.lastSeq, taken.seq)
+    for (const seq of [...entry.pending.keys()]) {
+      if (seq <= entry.lastSeq) entry.pending.delete(seq)
+    }
+    ackDetection(entry, true)
+    emitSnapshot(entry, taken.detected)
+    entry.sealed = false
+    drain(entry)
+    dropUntracked(entry.computerId, entry.sessionId)
+    recordPty(
+      'computer.session_adopted',
+      'info',
+      'Took over a terminal session the computer was still running from before the hub restarted.',
+      {
+        computerId: entry.computerId,
+        sessionId: entry.sessionId,
+        spawnId: entry.spawnId ?? null,
+        via
+      }
+    )
+  }
+
   // A client wrote to the computer directly (docs/direct-link.md): the hub applies
   // what the write meant, as it would for a write it relayed.
   gateway.events.on('event', (event) => {
@@ -735,10 +840,23 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     onDetach: (entry) => {
       for (const cb of entry.availability) cb(false)
     },
+    onUntracked: (computerId, _epoch, kept) => {
+      const before = untracked.get(computerId)
+      const next = new Map(kept.map((k) => [k.sessionId, k.listed] as const))
+      if (next.size === 0) untracked.delete(computerId)
+      else untracked.set(computerId, next)
+      const same =
+        (before?.size ?? 0) === next.size &&
+        [...next].every(([id, l]) => before?.get(id)?.spawnId === l.spawnId)
+      if (!same) notifyUntracked()
+    },
     resume: (entry, listed) => {
       entry.detached = false
       for (const cb of entry.availability) cb(true)
-      entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined)
+      // A spawn whose reply was lost and that the computer answered by taking over
+      // the session it already ran: settled as that (no start, no deadline).
+      const tookOver = listed.adopted === true && entry.pendingSpawn !== undefined
+      entry.pendingSpawn?.confirm(listed.pid ?? null, listed.spawnId !== undefined, listed)
       // A continued spawn whose reply was lost: its resume point is unknown, so the
       // backfill below may repeat some scrollback rather than lose output.
       entry.sealed = false
@@ -748,16 +866,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       // above and owns that decision (L2); asking here too sent it twice (N7).
       // The computer kept detecting while the hub was away; its signals then went
       // nowhere. Its settled view brings the mirror up to date in one step.
-      if (entry.detectsOutput && listed.detected) {
-        entry.signalEmitter.emit({
-          ...listed.detected,
-          seq: entry.lastSeq,
-          snapshot: true,
-          refreshIdleClock: false,
-          preview: '',
-          suppressOutput: false
-        })
-      }
+      if (!tookOver) emitSnapshot(entry, listed.detected)
       // Clear the backfill latch: the gap that matters now is whatever the
       // session emitted while the hub was away, which is a different gap from
       // any this entry had already given up on.
@@ -801,6 +910,8 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     setPid: (pid: number | null) => void
   } {
     const key = sessionKey(computerId, sessionId)
+    if (registeredKeys.size > 10_000) registeredKeys.clear()
+    registeredKeys.add(key)
     // Replacing a routed handle must settle its consumers. The computer serializes
     // the actual process replacement and suppresses the old process's exit frame.
     const displaced = sessions.get(key)
@@ -1123,16 +1234,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         else entry.preAckSignals = null
         entry.detectFromSeq = parsed.seq
         if (parsed.data) entry.dataEmitter.emit({ data: parsed.data, seq: parsed.seq })
-        if (entry.detectsOutput && parsed.detected) {
-          entry.signalEmitter.emit({
-            ...parsed.detected,
-            seq: parsed.seq,
-            snapshot: true,
-            refreshIdleClock: false,
-            preview: '',
-            suppressOutput: false
-          })
-        }
+        emitSnapshot(entry, parsed.detected)
         entry.sealed = false
         drain(entry)
         return handle
@@ -1143,6 +1245,103 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         finalize(entry, null, null, 'adopt-failed', errorMessage(err))
         throw err
       }
+    },
+
+    untrackedSessions(): UntrackedPtySession[] {
+      const out: UntrackedPtySession[] = []
+      for (const [computerId, bySession] of untracked) {
+        for (const [sessionId, l] of bySession) {
+          out.push({
+            computerId,
+            sessionId,
+            ...(l.spawnId !== undefined ? { spawnId: l.spawnId } : {}),
+            ...(l.pid !== undefined ? { pid: l.pid } : {}),
+            ...(l.seq !== undefined ? { seq: l.seq } : {}),
+            detection: l.detection === true,
+            ...(l.mode ? { mode: l.mode } : {}),
+            ...(l.startedAt !== undefined ? { startedAt: l.startedAt } : {}),
+            ...(l.detected ? { conversationId: l.detected.conversationId } : {})
+          })
+        }
+      }
+      return out
+    },
+
+    onUntrackedChange(cb: () => void) {
+      untrackedListeners.add(cb)
+      return { dispose: () => untrackedListeners.delete(cb) }
+    },
+
+    async reattach(
+      computerId: string,
+      sessionId: string,
+      fromSpawnId: string,
+      opts: { processName: string; taskId?: string; mode?: string; relay?: boolean }
+    ) {
+      const refusal = (reason: PtyReattachRefusal, message: string): Error =>
+        Object.assign(new Error(message), { reattachRefusal: reason })
+      // Before anything is tracked: a refused reattach leaves no session behind.
+      if (gate) await gate(computerId, { kind: 'session', id: sessionId })
+      const key = sessionKey(computerId, sessionId)
+      const live = sessions.get(key)
+      if (live && !live.disposed) {
+        throw refusal('already-tracked', `session ${sessionId} is already tracked by this hub`)
+      }
+      const firstHere = !registeredKeys.has(key)
+      // Sealed until the reply says where its live output starts.
+      const { entry, handle, setPid } = register(computerId, sessionId, opts.processName, true)
+      const spawnId = randomUUID()
+      entry.spawnId = spawnId
+      entry.spawnInFlight = true
+      entry.relay = opts.relay
+      lastSpawnIds.set(key, spawnId)
+      try {
+        const res = await gateway.request(computerId, HubToComputerMethods.ptyAdopt, {
+          sessionId,
+          spawnId,
+          fromSpawnId,
+          ...(opts.taskId ? { taskId: opts.taskId } : {}),
+          ...(opts.mode ? { mode: opts.mode } : {}),
+          ...(opts.relay !== undefined ? { relay: opts.relay } : {})
+        })
+        const parsed = ptyAdoptResultSchema.parse(res)
+        setPid(parsed.pid)
+        bindTakenOver(
+          entry,
+          { seq: parsed.seq, ...(parsed.detected ? { detected: parsed.detected } : {}) },
+          'reattach'
+        )
+        const confirmation: PtySpawnConfirmation = {
+          pid: parsed.pid,
+          ownsStartupDeadline: true,
+          attached: { seq: entry.lastSeq, conversationId: parsed.detected?.conversationId ?? null }
+        }
+        return Object.assign(handle, { whenSpawned: Promise.resolve(confirmation) })
+      } catch (err) {
+        // Nothing to undo on the computer: a refused adopt changed nothing, and one
+        // whose reply was lost left the process running as `spawnId` — listed again
+        // (untracked) on the next reconnect, and taken over then.
+        finalize(entry, null, null, 'adopt-failed', errorMessage(err))
+        if (firstHere) registeredKeys.delete(key)
+        if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
+          throw refusal(
+            'computer-too-old',
+            'This computer cannot take a running session over (it predates pty.adopt).'
+          )
+        }
+        if (
+          err instanceof RpcError &&
+          err.code === ComputerTransportErrorCodes.sessionNotAdoptable
+        ) {
+          throw refusal('not-adoptable', err.message)
+        }
+        throw err
+      }
+    },
+
+    async killUntracked(computerId: string, sessionId: string, spawnId: string) {
+      await gateway.request(computerId, HubToComputerMethods.ptyKill, { sessionId, spawnId }, 0)
+      dropUntracked(computerId, sessionId, spawnId)
     },
 
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
@@ -1169,6 +1368,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // would deliver that scrollback a second time.
         const continuesFrom = spec.carryOutput ? lastSpawnIds.get(key) : undefined
         const live = sessions.get(key)
+        // Asked before `register` files the key: is this the first spawn of the id here?
+        const takeOverLive =
+          !registeredKeys.has(key) && spec.detection !== undefined && !spec.carryOutput
         const continuesAfter = spec.carryOutput
           ? Math.max(live && !live.disposed ? live.lastSeq : -1, lastSeqs.get(key) ?? -1)
           : -1
@@ -1203,6 +1405,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           // Detection runs where the output is; acknowledged in the reply.
           ...(spec.detection ? { detection: spec.detection } : {}),
           ...(spec.relay !== undefined ? { relay: spec.relay } : {}),
+          // A previous hub run may have left this session running: take it over
+          // rather than replace (kill) it — see `adoptLive` in frames.ts.
+          ...(takeOverLive && spec.detection ? { adoptLive: { mode: spec.detection.mode } } : {}),
           ...(spec.carryOutput
             ? {
                 carryOutput: {
@@ -1259,12 +1464,51 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
             // Started: nothing left to move up the admission queue.
             entry.prioritize = undefined
             setPid(spawnedPid)
+            // The computer replaced whatever ran under the id: nothing untracked left there.
+            dropUntracked(computerId, spec.sessionId)
             resolve({ pid: spawnedPid, ownsStartupDeadline })
+          }
+          // No process started: the computer took the one it already ran over.
+          const attach = (
+            spawnedPid: number | null,
+            taken: { seq: number; detected?: PtyDetectedSnapshot },
+            via: 'spawn' | 'pending'
+          ): void => {
+            setPid(spawnedPid)
+            bindTakenOver(entry, taken, via)
+            resolve({
+              pid: spawnedPid,
+              ownsStartupDeadline: true,
+              attached: {
+                seq: entry.lastSeq,
+                conversationId: taken.detected?.conversationId ?? null
+              }
+            })
           }
           const attempt = (): void => {
             void (admitted ? admitted.then(requestSpawn) : requestSpawn()).then(
               (res) => {
                 const parsed = ptySpawnResultSchema.safeParse(res)
+                if (parsed.success && parsed.data.adopted) {
+                  attach(parsed.data.pid, parsed.data.adopted, 'spawn')
+                  return
+                }
+                if (parsed.success && parsed.data.replacedLive) {
+                  const replaced = parsed.data.replacedLive
+                  recordPty(
+                    'computer.orphan_replaced',
+                    'warn',
+                    `A terminal session the computer was still running (from before the hub ` +
+                      `restarted) was replaced by a new start in its tab (${replaced.reason}).`,
+                    {
+                      computerId,
+                      sessionId: spec.sessionId,
+                      spawnId: replaced.spawnId ?? null,
+                      reason: replaced.reason,
+                      mode: spec.detection?.mode ?? null
+                    }
+                  )
+                }
                 const acked = spec.detection && parsed.success && parsed.data.detection === true
                 if (entry.sealed) {
                   // Continued: frames up to the reply's seq are the scrollback this
@@ -1293,8 +1537,17 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
                   // send it again if it never arrived. Deliberately NOT a timer.
                   entry.pendingSpawn = {
                     resend: attempt,
-                    confirm: (listedPid, listedBySpawnId) =>
-                      confirm(listedPid, requestsDeadline && listedBySpawnId)
+                    confirm: (listedPid, listedBySpawnId, listed) =>
+                      listed?.adopted
+                        ? attach(
+                            listedPid,
+                            {
+                              seq: listed.seq ?? entry.lastSeq,
+                              ...(listed.detected ? { detected: listed.detected } : {})
+                            },
+                            'pending'
+                          )
+                        : confirm(listedPid, requestsDeadline && listedBySpawnId)
                   }
                   // A disconnect already detached every entry it could see; this
                   // one was sent after it, to a computer with no socket.

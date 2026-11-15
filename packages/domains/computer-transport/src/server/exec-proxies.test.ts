@@ -1090,6 +1090,8 @@ describe('createRoutingPtyBackend', () => {
   it('reconnect as a DIFFERENT process ends every detached session without asking', async () => {
     const gateway = new FakeGateway()
     const { exit } = await spawnDetached(gateway)
+    // (First contact lists what a previous hub run left; the reconnect is the subject.)
+    const lists = gateway.requestsOf('pty.list').length
 
     connect(gateway, 'epoch-b') // computer restarted
 
@@ -1101,7 +1103,7 @@ describe('createRoutingPtyBackend', () => {
       })
     )
     // A new process provably holds nothing of ours — no point listing.
-    expect(gateway.requestsOf('pty.list')).toHaveLength(0)
+    expect(gateway.requestsOf('pty.list')).toHaveLength(lists)
   })
 
   it('a computer that reports no epoch keeps the conservative pre-epoch behavior', async () => {
@@ -1110,6 +1112,7 @@ describe('createRoutingPtyBackend', () => {
       sessions: [{ sessionId: 'sess-1', pid: 1, seq: 0 }]
     }))
     const { exit } = await spawnDetached(gateway, undefined)
+    const lists = gateway.requestsOf('pty.list').length
 
     connect(gateway, undefined)
 
@@ -1122,7 +1125,7 @@ describe('createRoutingPtyBackend', () => {
         reason: 'computer-restarted'
       })
     )
-    expect(gateway.requestsOf('pty.list')).toHaveLength(0)
+    expect(gateway.requestsOf('pty.list')).toHaveLength(lists)
   })
 
   // (Replaced: 'kills sessions the computer still holds that the hub no longer
@@ -1159,10 +1162,11 @@ describe('createRoutingPtyBackend', () => {
       throw new Error('computer went away again mid-reattach')
     })
     const { exit } = await spawnDetached(gateway)
+    const lists = gateway.requestsOf('pty.list').length
 
     connect(gateway, 'epoch-a')
 
-    await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(1))
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(lists + 1))
     expect(exit()).toBeNull()
   })
 
@@ -1731,11 +1735,12 @@ describe('createRoutingPtyBackend', () => {
     const gateway = new FakeGateway()
     const { handle } = spawnInFlight(gateway)
     handle.kill()
+    const lists = gateway.requestsOf('pty.list').length
 
     gateway.onMethod('pty.list', () => ({ sessions: [], exited: [] }))
     connect(gateway, 'epoch-a')
 
-    await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(1))
+    await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(lists + 1))
     await settle()
     expect(gateway.requestsOf('pty.spawn')).toHaveLength(1)
   })
@@ -2023,9 +2028,10 @@ describe('createRoutingPtyBackend', () => {
       const first = (await backend.spawn(ptySpec())) as PtyHandle
       await first.whenSpawned
       const respond = heldList(gateway)
+      const lists = gateway.requestsOf('pty.list').length
       gateway.emit('computer-lost', { computerId: 'computer-1', reason: 'heartbeat-timeout' })
       connect(gateway, 'epoch-a')
-      await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(1))
+      await vi.waitFor(() => expect(gateway.requestsOf('pty.list')).toHaveLength(lists + 1))
       // A restart of the session goes out while the list is in flight.
       gateway.onMethod('pty.kill', () => ({ ok: true }))
       gateway.onMethod('pty.spawn', () => new Promise(() => undefined))
@@ -2120,6 +2126,274 @@ describe('createRoutingPtyBackend', () => {
       await settle()
       await settle()
       expect(gateway.requestsOf('pty.kill')).toHaveLength(0)
+    })
+  })
+
+  // ── A previous hub run's sessions (hub restart) ──────────────────────────────
+  //
+  // Hub processes restart; computers keep their ptys. The restarted hub used to
+  // leave such a session unseen (kept, untracked) until a tab's spawn made the
+  // computer REPLACE it — killing a working agent on no evidence. Now the backend
+  // knows them (`untrackedSessions`), takes them over (`reattach`, `pty.adopt`), and
+  // a first spawn of such an id asks the computer to take the live one over
+  // (`adoptLive`) instead of replacing it.
+  describe("a previous hub run's sessions", () => {
+    const detected = {
+      activity: 'idle' as const,
+      title: 'claude',
+      prompt: null,
+      devServerUrls: [],
+      conversationId: 'conv-1',
+      error: null
+    }
+    const leftover = (over: Record<string, unknown> = {}) => ({
+      sessionId: 'task-1:tab-1',
+      spawnId: 'run-1',
+      pid: 4242,
+      seq: 5,
+      detection: true,
+      detected,
+      mode: 'claude-code',
+      startedAt: 1_000,
+      ...over
+    })
+    const restartedHub = (sessions: unknown[] = [leftover()]) => {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.list', () => ({ sessions, exited: [] }))
+      gateway.onMethod('pty.kill', () => ({ ok: true }))
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (s) => s.computerId ?? null,
+        ownerGone: async () => null
+      })
+      return { gateway, backend }
+    }
+    const agentSpec = (over: Partial<PtySpawnSpec> = {}) =>
+      ptySpec({
+        sessionId: 'task-1:tab-1',
+        detection: { mode: 'claude-code', resuming: true },
+        startupTimeoutMs: 10_000,
+        ...over
+      })
+
+    it('knows the sessions the computer runs that nothing here tracks, until they end', async () => {
+      const { gateway, backend } = restartedHub()
+      let changes = 0
+      backend.onUntrackedChange?.(() => changes++)
+      connect(gateway, 'epoch-a')
+
+      await vi.waitFor(() =>
+        expect(backend.untrackedSessions?.()).toEqual([
+          {
+            computerId: 'computer-1',
+            sessionId: 'task-1:tab-1',
+            spawnId: 'run-1',
+            pid: 4242,
+            seq: 5,
+            detection: true,
+            mode: 'claude-code',
+            startedAt: 1_000,
+            conversationId: 'conv-1'
+          }
+        ])
+      )
+      expect(changes).toBeGreaterThan(0)
+      const before = changes
+      gateway.emit('pty.exit', {
+        computerId: 'computer-1',
+        sessionId: 'task-1:tab-1',
+        spawnId: 'run-1',
+        exitCode: 0
+      })
+      expect(backend.untrackedSessions?.()).toEqual([])
+      expect(changes).toBe(before + 1)
+      expect(gateway.requestsOf('pty.kill')).toHaveLength(0)
+    })
+
+    it('a first spawn of an id asks the computer to take a live session over; a restart does not', async () => {
+      const gateway = new FakeGateway()
+      gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
+      gateway.onMethod('pty.kill', () => ({ ok: true }))
+      const backend = createRoutingPtyBackend({
+        gateway,
+        resolveComputerId: (s) => s.computerId ?? null
+      })
+      connect(gateway, 'epoch-a')
+      await (backend.spawn(agentSpec()) as PtyHandle).whenSpawned
+      await settle()
+      const restarted = (await backend.spawn(agentSpec())) as PtyHandle
+      await restarted.whenSpawned
+      await (
+        (await backend.spawn(
+          agentSpec({ sessionId: 'task-1:tab-2', carryOutput: { preamble: 'x' } })
+        )) as PtyHandle
+      ).whenSpawned
+
+      const sent = gateway
+        .requestsOf('pty.spawn')
+        .map((c) => (c.params as { adoptLive?: unknown }).adoptLive)
+      expect(sent).toEqual([{ mode: 'claude-code' }, undefined, undefined])
+    })
+
+    it('a spawn the computer answers by taking the live session over continues that process', async () => {
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.spawn', () => ({
+        pid: 4242,
+        detection: true,
+        adopted: { seq: 5, detected }
+      }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      diagnostics.length = 0
+
+      const handle = backend.spawn(agentSpec()) as PtyHandle
+      const signals: unknown[] = []
+      handle.onSignal?.((s) => signals.push(s))
+      const chunks: Array<[string, number | undefined]> = []
+      handle.onData((d, seq) => chunks.push([d, seq]))
+
+      await expect(handle.whenSpawned).resolves.toEqual({
+        pid: 4242,
+        ownsStartupDeadline: true,
+        attached: { seq: 5, conversationId: 'conv-1' }
+      })
+      expect(handle.pid).toBe(4242)
+      expect(handle.ownsOutput).toBe(true)
+      expect(handle.detectsOutput).toBe(true)
+      expect(signals).toEqual([
+        expect.objectContaining({ snapshot: true, conversationId: 'conv-1', seq: 5 })
+      ])
+      const { spawnId } = requireCall(gateway, 'pty.spawn').params as { spawnId: string }
+      // Output up to its seq is scrollback (replayed from the computer): only later
+      // output is live.
+      for (const seq of [5, 6])
+        gateway.emit('pty.data', {
+          computerId: 'computer-1',
+          sessionId: 'task-1:tab-1',
+          spawnId,
+          seq,
+          data: `s${String(seq)}`
+        })
+      expect(chunks).toEqual([['s6', 6]])
+      expect(backend.untrackedSessions?.()).toEqual([])
+      expect(diagnostics.find((d) => d.event === 'computer.session_adopted')).toMatchObject({
+        level: 'info',
+        payload: { computerId: 'computer-1', sessionId: 'task-1:tab-1', via: 'spawn' }
+      })
+    })
+
+    it('a live session replaced instead (another mode) is recorded as such', async () => {
+      const { gateway, backend } = restartedHub([leftover({ mode: 'codex' })])
+      gateway.onMethod('pty.spawn', () => ({
+        pid: 7,
+        detection: true,
+        replacedLive: { spawnId: 'run-1', reason: 'mode-mismatch' }
+      }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      const handle = backend.spawn(agentSpec()) as PtyHandle
+      await expect(handle.whenSpawned).resolves.toEqual({ pid: 7, ownsStartupDeadline: false })
+      expect(diagnostics.find((d) => d.event === 'computer.orphan_replaced')).toMatchObject({
+        level: 'warn',
+        payload: {
+          computerId: 'computer-1',
+          sessionId: 'task-1:tab-1',
+          spawnId: 'run-1',
+          reason: 'mode-mismatch'
+        }
+      })
+      expect(backend.untrackedSessions?.()).toEqual([])
+    })
+
+    it('reattach takes a listed session over without starting anything', async () => {
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.adopt', () => ({ pid: 4242, seq: 5, detection: true, detected }))
+      gateway.onMethod('pty.relay', () => ({ ok: true, seq: 5 }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+
+      const handle = await backend.reattach!('computer-1', 'task-1:tab-1', 'run-1', {
+        processName: 'claude',
+        taskId: 'task-1',
+        mode: 'claude-code',
+        relay: true
+      })
+
+      expect(gateway.requestsOf('pty.spawn')).toHaveLength(0)
+      const adopt = requireCall(gateway, 'pty.adopt').params as Record<string, unknown>
+      expect(adopt).toMatchObject({
+        sessionId: 'task-1:tab-1',
+        fromSpawnId: 'run-1',
+        taskId: 'task-1',
+        mode: 'claude-code',
+        relay: true
+      })
+      const spawnId = adopt.spawnId as string
+      expect(spawnId).not.toBe('run-1')
+      await expect(handle.whenSpawned).resolves.toEqual({
+        pid: 4242,
+        ownsStartupDeadline: true,
+        attached: { seq: 5, conversationId: 'conv-1' }
+      })
+      expect(handle.ownsOutput).toBe(true)
+      handle.write('hi')
+      handle.kill()
+      await settle()
+      expect(gateway.requestsOf('pty.write').map((c) => c.params)).toEqual([
+        { sessionId: 'task-1:tab-1', spawnId, data: 'hi' }
+      ])
+      expect(gateway.requestsOf('pty.kill').map((c) => c.params)).toEqual([
+        { sessionId: 'task-1:tab-1', spawnId }
+      ])
+      expect(backend.untrackedSessions?.()).toEqual([])
+      // Tracked now: a later reconnect neither offers nor kills it.
+      gateway.onMethod('pty.list', () => ({
+        sessions: [leftover({ spawnId, adopted: true })],
+        exited: []
+      }))
+      gateway.calls.length = 0
+      await blip(gateway)
+      expect(gateway.requestsOf('pty.kill')).toHaveLength(0)
+      expect(backend.untrackedSessions?.()).toEqual([])
+    })
+
+    it('reattach refused: says why, and tracks nothing', async () => {
+      const { gateway, backend } = restartedHub()
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      const refusedWith = async (err: Error) => {
+        gateway.onMethod('pty.adopt', () => {
+          throw err
+        })
+        return backend.reattach!('computer-1', 'task-1:tab-1', 'run-1', { processName: 'claude' })
+          .then(() => null)
+          .catch((e: unknown) => (e as { reattachRefusal?: string }).reattachRefusal ?? 'none')
+      }
+      expect(
+        await refusedWith(
+          new RpcError(ComputerTransportErrorCodes.sessionNotAdoptable, 'not running')
+        )
+      ).toBe('not-adoptable')
+      expect(
+        await refusedWith(new RpcError(ComputerTransportErrorCodes.unimplemented, 'no pty.adopt'))
+      ).toBe('computer-too-old')
+      // Nothing was registered: a spawn of the id is a first one still.
+      gateway.onMethod('pty.spawn', () => ({ pid: 9 }))
+      await (backend.spawn(agentSpec()) as PtyHandle).whenSpawned
+      expect(
+        (requireCall(gateway, 'pty.spawn').params as { adoptLive?: unknown }).adoptLive
+      ).toEqual({ mode: 'claude-code' })
+    })
+
+    it('killUntracked ends exactly the listed attempt', async () => {
+      const { gateway, backend } = restartedHub()
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      await backend.killUntracked?.('computer-1', 'task-1:tab-1', 'run-1')
+      expect(gateway.requestsOf('pty.kill').map((c) => c.params)).toEqual([
+        { sessionId: 'task-1:tab-1', spawnId: 'run-1' }
+      ])
+      expect(backend.untrackedSessions?.()).toEqual([])
     })
   })
 })
