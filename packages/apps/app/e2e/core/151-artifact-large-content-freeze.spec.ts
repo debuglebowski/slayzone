@@ -98,13 +98,27 @@ test.describe('Large artifact selection', () => {
     return p
   }
 
-  /** Click the artifact's row; the longest main-thread block until `shown` + 2 s. */
+  /**
+   * Click the artifact's row; the longest main-thread block until `shown` + 2 s.
+   * SZ_PROFILE_DIR=<dir> also writes a CPU profile of it (diagnosis only).
+   */
   async function open(page: Page, title: string, shown: ReturnType<Page['locator']>) {
+    const profileDir = process.env.SZ_PROFILE_DIR
+    const cdp = profileDir ? await page.context().newCDPSession(page) : null
+    if (cdp) {
+      await cdp.send('Profiler.enable')
+      await cdp.send('Profiler.start')
+    }
     await startJankProbe(page)
     await row(page, title).click()
     await expect(shown).toBeVisible({ timeout: 60_000 })
     await page.waitForTimeout(2_000)
-    return stopJankProbe(page)
+    const block = await stopJankProbe(page)
+    if (cdp && profileDir) {
+      const { profile } = await cdp.send('Profiler.stop')
+      fs.writeFileSync(`${profileDir}/${title}.cpuprofile`, JSON.stringify(profile))
+    }
+    return block
   }
 
   test.beforeAll(async ({ mainWindow }) => {
@@ -178,6 +192,31 @@ test.describe('Large artifact selection', () => {
     await artifactWithBytes(mainWindow, 'big.log', repeatTo(20 * MB, logLine))
     const editor = panel(mainWindow).locator('.cm-editor').first()
     const block = await open(mainWindow, 'big.log', editor)
+    expect(block, 'longest main-thread block on open (ms)').toBeLessThan(MAX_BLOCK_MS)
+
+    await startJankProbe(mainWindow)
+    await editor.locator('.cm-content').click({ position: { x: 5, y: 5 } })
+    await mainWindow.keyboard.type('abc')
+    await mainWindow.waitForTimeout(3_000)
+    expect(
+      await stopJankProbe(mainWindow),
+      'longest main-thread block while typing + autosave (ms)'
+    ).toBeLessThan(MAX_BLOCK_MS)
+  })
+
+  test('a 5 MB one-line JSON file opens in the code view without a freeze', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(120_000)
+    const items: string[] = []
+    for (let i = 0, size = 0; size < 5 * MB; i++) {
+      const item = `{"id":${i},"name":"item-${i}","tags":["a","b"],"ok":true}`
+      items.push(item)
+      size += item.length + 1
+    }
+    await artifactWithBytes(mainWindow, 'min.json', Buffer.from(`[${items.join(',')}]`, 'utf8'))
+    const editor = panel(mainWindow).locator('.cm-editor').first()
+    const block = await open(mainWindow, 'min.json', editor)
     expect(block, 'longest main-thread block on open (ms)').toBeLessThan(MAX_BLOCK_MS)
 
     await startJankProbe(mainWindow)
