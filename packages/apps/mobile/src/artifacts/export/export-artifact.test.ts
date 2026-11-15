@@ -105,7 +105,8 @@ function renderer(
       if (!reply) throw new Error('unexpected render')
       return reply
     }),
-    mermaidScript: jest.fn(async () => 'globalThis.mermaid={/*bundle*/}')
+    mermaidScript: jest.fn(async () => 'globalThis.mermaid={/*bundle*/}'),
+    html2canvasScript: jest.fn(async () => 'window.html2canvas=function(){/*bundle*/}')
   }
 }
 
@@ -281,9 +282,9 @@ describe('exportArtifact: PDF', () => {
     expect(html).not.toContain('<script')
   })
 
-  // Review 6, #4: an html artifact is rendered in the hidden web view first (its scripts
-  // run there, cancellable, navigation blocked), and its DOM as drawn is printed with no
-  // script at all — expo-print's web view never runs the artifact.
+  // Review 6, #4 / review 7, #1–#2: an html artifact runs in the hidden web view, in the
+  // viewer's sandbox, and is drawn there page by page; the PDF is those pictures only —
+  // expo-print's web view never parses anything the artifact wrote.
   describe('an html artifact', () => {
     const report = {
       content: '<div id="chart"></div><script>draw()</script>',
@@ -291,28 +292,32 @@ describe('exportArtifact: PDF', () => {
       title: 'report.html',
       format: 'pdf' as const
     }
-    const SNAPSHOT =
-      '<html><head><title>report.html</title></head><body><div id="chart"><svg>drawn</svg></div></body></html>'
+    const PAGES = ['QUJD', 'REVGRw==']
 
-    it('prints the DOM its scripts drew, with scripts blocked', async () => {
-      const deps = renderer({ type: 'html', html: SNAPSHOT })
+    it('prints the pages its scripts drew, as pictures, and nothing else', async () => {
+      const deps = renderer({ type: 'pages', pages: PAGES })
       const uri = await exportArtifact(report, deps)
-      // Rendered as the artifact, at the printed page's width.
+      // Rendered in the host page with html2canvas, at the printed page's width.
       expect(deps.rendered).toHaveLength(1)
-      expect(deps.pages[0]).toContain('<div id="chart"></div><script>draw()</script>')
-      expect(deps.rendered[0].viewport).toEqual({ width: 595, height: 842 })
+      expect(deps.html2canvasScript).toHaveBeenCalledTimes(1)
+      expect(deps.pages[0]).toContain('<script>window.html2canvas=function(){/*bundle*/}</script>')
+      expect(deps.pages[0]).toContain('sandbox="allow-scripts"')
+      expect(deps.rendered[0].viewport).toEqual({ width: 539, height: 780 })
       const printed = print.mock.calls[0][0]?.html
-      expect(printed).toBe(htmlPrintDocument(SNAPSHOT))
-      expect(printed).toContain('<svg>drawn</svg>')
-      expect(
-        printed?.startsWith(
-          `<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="${HTML_PRINT_POLICY}">`
-        )
-      ).toBe(true)
-      expect(HTML_PRINT_POLICY).toContain("script-src 'none'")
+      expect(printed).toBe(htmlPrintDocument(PAGES))
+      expect(printed).toContain(`content="${HTML_PRINT_POLICY}"`)
+      expect(printed).not.toContain('chart')
       expect(printed).not.toContain('draw()')
       expect(uri).toMatch(inExportDir('report.pdf'))
       expect(deps.mermaidScript).not.toHaveBeenCalled()
+    })
+
+    it('a page WebKit refuses to read back says so, printing nothing', async () => {
+      const deps = renderer({ type: 'error', code: 'tainted', message: 'tainted' })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(
+        "This page draws something this device won't let the export read back"
+      )
+      expect(print).not.toHaveBeenCalled()
     })
 
     it("fails with the page's error, printing nothing", async () => {

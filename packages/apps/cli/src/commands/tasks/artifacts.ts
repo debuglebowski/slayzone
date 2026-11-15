@@ -918,27 +918,42 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
 
         const outputPath = await saveDownload(opts.output, 'artifacts.zip', async (output) => {
           const archive = new ZipArchive({ zlib: { level: 9 } })
+          // Fails as soon as the archive or the output does (disk full, an unwritable
+          // target, a dropped body): every wait below is raced against it, so such a
+          // failure ends the download at once instead of leaving `finalize()` waiting
+          // on a destroyed archive forever.
           const written = pipeline(archive, output)
-          // Awaited below; a failure before then is reported by its own throw.
           written.catch(() => undefined)
+          const orFail = <T>(p: Promise<T>): Promise<T> => Promise.race([p, written.then(() => p)])
+          let body: Readable | undefined
           try {
             for (const entry of plan) {
               // A row whose working copy is absent was SKIPPED before (`if
               // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
               // rather than failing the whole archive.
-              const { body } = await apiGetStream(
-                `/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`,
-                [ARTIFACT_FILE_MISSING]
+              const res = await orFail(
+                apiGetStream(`/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`, [
+                  ARTIFACT_FILE_MISSING
+                ])
               )
-              if (!body) continue
-              archive.append(Readable.fromWeb(body as StreamWebReadable), { name: entry.path })
+              if (!res.body) continue
+              body = Readable.fromWeb(res.body as StreamWebReadable)
+              // One entry at a time: the next is fetched once this one is in the
+              // archive, so a large task never holds every response open at once, and
+              // nothing more is fetched after a failure.
+              const added = new Promise<void>((resolve) => archive.once('entry', () => resolve()))
+              archive.append(body, { name: entry.path })
+              await orFail(added)
+              body = undefined
             }
-            await archive.finalize()
+            await orFail(archive.finalize())
+            await written
           } catch (err) {
             archive.abort()
+            // An unread response keeps its connection (and `slay`) alive.
+            body?.destroy()
             throw err
           }
-          await written
         })
 
         if (opts.json) {

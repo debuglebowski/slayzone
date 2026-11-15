@@ -17,6 +17,12 @@
  * level, with discovery on) and `Target.detachedFromTarget` fail every pending command
  * of that page's session at once. Callers may also listen to events ({@link
  * Browser.onEvent}) — the renderer uses that to dismiss JS dialogs.
+ *
+ * A renderer can also hang without dying: a page script that never yields (one that
+ * starts looping only once printing begins, from `beforeprint`). The browser process
+ * keeps answering then, so a long page command also probes the page itself (the
+ * desktop export's stall watchdog): a trivial `Runtime.evaluate` every second, and one
+ * left unanswered for `stallMs` fails the command.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -63,6 +69,10 @@ const pageCrashed = (): PageGoneError =>
     'The page crashed while rendering (a very large document can run the browser out of memory).'
   )
 const pageClosed = (): PageGoneError => new PageGoneError('The page closed while rendering.')
+const pageStalled = (method: string, ms: number): PageGoneError =>
+  new PageGoneError(
+    `The page stopped responding while running ${method}: a script in it did not yield for ${Math.round(ms / 1000)} s.`
+  )
 
 export interface Browser {
   /** A command answered within the per-command deadline. */
@@ -73,8 +83,8 @@ export interface Browser {
   ): Promise<T>
   /**
    * A command whose work grows with the document (printing, capturing): no fixed
-   * deadline. Instead the browser is checked for liveness while it works; one that
-   * stops answering fails the command.
+   * deadline. Instead the browser is checked for liveness while it works, and (for a
+   * page command) the page itself; either one that stops answering fails the command.
    */
   sendLong<T = Record<string, unknown>>(
     method: string,
@@ -102,12 +112,22 @@ export interface LaunchOptions {
   livenessIntervalMs?: number
   /** After the browser exits, how long its pipes may stay open (default 2 s). */
   exitGraceMs?: number
+  /**
+   * A page that leaves a probe unanswered this long while a long command runs in it
+   * fails the command (default 5 min, as desktop). Long: laying out a huge document
+   * keeps the renderer busy, but it answers between layout steps.
+   */
+  stallMs?: number
+  /** How often a long page command probes the page (default 1 s). */
+  stallProbeIntervalMs?: number
 }
 
 const LAUNCH_TIMEOUT_MS = 30_000
 const COMMAND_TIMEOUT_MS = 60_000
 const LIVENESS_INTERVAL_MS = 30_000
 const EXIT_GRACE_MS = 2_000
+const STALL_MS = 5 * 60_000
+const STALL_PROBE_INTERVAL_MS = 1_000
 const STDERR_KEEP = 16 * 1024
 
 /** Flags for a throwaway, quiet, headless profile. */
@@ -172,6 +192,8 @@ export async function launchBrowser(
   const commandTimeoutMs = opts.commandTimeoutMs ?? COMMAND_TIMEOUT_MS
   const livenessIntervalMs = opts.livenessIntervalMs ?? LIVENESS_INTERVAL_MS
   const exitGraceMs = opts.exitGraceMs ?? EXIT_GRACE_MS
+  const stallMs = opts.stallMs ?? STALL_MS
+  const stallProbeIntervalMs = opts.stallProbeIntervalMs ?? STALL_PROBE_INTERVAL_MS
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-export-profile-'))
   // Its own process group (not on Windows): killing the group also ends whatever a
   // wrapper script (`--browser`) started, so nothing outlives `slay`.
@@ -375,6 +397,46 @@ export async function launchBrowser(
     return Array.isArray(targetInfos) && targetInfos.some((t) => t?.targetId === targetId)
   }
 
+  /**
+   * While a long command runs in page `sessionId`, ask the page a trivial question
+   * every `stallProbeIntervalMs`. One left unanswered for `stallMs` means a script holds
+   * the renderer: every command of that page fails (the long one with it). The browser
+   * is not the one stuck, so it still closes normally afterwards (and is killed if not).
+   * Returns the function that stops watching.
+   */
+  function watchPage(sessionId: string, method: string): () => void {
+    let stopped = false
+    let next: NodeJS.Timeout | undefined
+    let stall: NodeJS.Timeout | undefined
+    const probe = (): void => {
+      next = setTimeout(() => {
+        if (stopped) return
+        stall = setTimeout(() => failSession(sessionId, pageStalled(method, stallMs)), stallMs)
+        // The pending command and the browser pipes keep the process alive meanwhile.
+        stall.unref()
+        // Its own deadline (just past the stall) so an unanswered probe is not kept forever.
+        send(
+          'Runtime.evaluate',
+          { expression: '1', returnByValue: true },
+          sessionId,
+          stallMs + 1_000
+        )
+          .catch(ignore)
+          .finally(() => {
+            clearTimeout(stall)
+            if (!stopped) probe()
+          })
+      }, stallProbeIntervalMs)
+      next.unref()
+    }
+    probe()
+    return () => {
+      stopped = true
+      clearTimeout(next)
+      clearTimeout(stall)
+    }
+  }
+
   async function sendLong<T>(
     method: string,
     params: Record<string, unknown> = {},
@@ -405,11 +467,14 @@ export async function launchBrowser(
       }
       check()
     })
+    const reply = send<T>(method, params, sessionId, null)
+    const unwatchPage = sessionId ? watchPage(sessionId, method) : undefined
     try {
-      return await Promise.race([send<T>(method, params, sessionId, null), stalled])
+      return await Promise.race([reply, stalled])
     } finally {
       settled = true
       clearTimeout(watchdog)
+      unwatchPage?.()
     }
   }
 
@@ -428,13 +493,20 @@ export async function launchBrowser(
     if (ownGroup) kill()
     removeHooks()
     // Windows may hold profile files for a moment after exit.
-    fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    try {
+      fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } catch (err) {
+      throw new Error(
+        `The browser's temp profile could not be removed; delete it by hand: ${userDataDir} (${(err as Error).message})`
+      )
+    }
   }
 
   try {
     await send('Browser.getVersion', {}, undefined, LAUNCH_TIMEOUT_MS)
   } catch (err) {
-    await close()
+    // The launch failure is what to report, not a profile left behind by it.
+    await close().catch(ignore)
     throw err instanceof BrowserLaunchError
       ? err
       : launchFailure(executable, stderr, (err as Error).message)

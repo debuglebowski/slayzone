@@ -36,7 +36,7 @@ import { exportFormatsOf } from './export/export-formats'
 import { useExportRenderer } from './export/use-export-renderer'
 import { downloadArtifactFile } from './files'
 import type { HubTarget } from './hub-rest'
-import { loadMermaidScript } from './page-assets'
+import { loadHtml2canvasScript, loadMermaidScript } from './page-assets'
 import { codePage } from './pages/code-page'
 import { htmlReportPage } from './pages/html-report-page'
 import { markdownNeedsMermaid, markdownPage } from './pages/markdown-page'
@@ -237,7 +237,11 @@ function LoadedArtifact({
             title: artifact.title,
             format: choice.format
           },
-          { render: exportRenderer.render, mermaidScript: loadMermaidScript }
+          {
+            render: exportRenderer.render,
+            mermaidScript: loadMermaidScript,
+            html2canvasScript: loadHtml2canvasScript
+          }
         )
           .then(() => setExportState({ busy: false, error: null }))
           .catch((err: unknown) =>

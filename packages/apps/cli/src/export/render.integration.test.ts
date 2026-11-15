@@ -176,3 +176,23 @@ describe.skipIf(!BROWSER)('an html artifact that opens JS dialogs (review 6, #2)
     expect(pngSize(png).w).toBeGreaterThan(0)
   })
 })
+
+describe.skipIf(!BROWSER)('a script that loops once printing starts (review 7, #3)', () => {
+  // The page's renderer spins while the browser process keeps answering: only a probe
+  // of the page itself can tell. Unanswered for `stallMs`, the export fails (and the
+  // browser goes with it) instead of waiting forever.
+  // (A loop armed for later — `setTimeout` from beforeprint — is not a hang: the print
+  // is laid out synchronously right after the event, before any timer runs.)
+  test('a beforeprint handler that never yields fails the PDF with a clear error', {
+    timeout: 120_000
+  }, async () => {
+    const html =
+      "<!DOCTYPE html><p>x</p><script>addEventListener('beforeprint', () => { for (;;) {} })</script>"
+    await expect(
+      renderPdf(BROWSER as string, html, {
+        waitReady: false,
+        browser: { commandTimeoutMs: 30_000, stallMs: 3_000 }
+      })
+    ).rejects.toThrow(/page stopped responding/)
+  })
+})

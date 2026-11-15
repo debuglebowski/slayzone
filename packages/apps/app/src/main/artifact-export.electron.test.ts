@@ -31,16 +31,19 @@ interface RunResult {
   cases: Record<string, CaseResult>
   console: string[]
   windowsLeft: number
+  sessionInfo: { count: number; distinct: number; persistent: boolean; isDefault: boolean }
 }
 
 const DRIVER = `
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, session } = require('electron')
 const m = require(${JSON.stringify(bundle)})
 const cases = JSON.parse(process.env.SLZ_TEST_CASES)
 const timings = JSON.parse(process.env.SLZ_TEST_TIMINGS)
 const consoleLines = []
+const sessions = []
 app.on('window-all-closed', () => {})
 app.on('web-contents-created', (_e, wc) => {
+  sessions.push(wc.session)
   wc.on('console-message', (...args) => {
     const first = args[0]
     consoleLines.push(first && typeof first.message === 'string' ? first.message : String(args[2]))
@@ -60,7 +63,13 @@ app.whenReady().then(async () => {
   }
   await new Promise((r) => setTimeout(r, 300))
   const windowsLeft = BrowserWindow.getAllWindows().length
-  process.stdout.write('SLZ_RESULT ' + JSON.stringify({ cases: out, console: consoleLines, windowsLeft }) + '\\n')
+  const sessionInfo = {
+    count: sessions.length,
+    distinct: new Set(sessions).size,
+    persistent: sessions.some((s) => s.isPersistent()),
+    isDefault: sessions.some((s) => s === session.defaultSession)
+  }
+  process.stdout.write('SLZ_RESULT ' + JSON.stringify({ cases: out, console: consoleLines, windowsLeft, sessionInfo }) + '\\n')
   app.exit(0)
 })
 `
@@ -177,5 +186,37 @@ describe.skipIf(process.platform === 'win32')('export window in a real Electron'
     expect(r.cases.pdf.head?.startsWith('%PDF-')).toBe(true)
     expect(r.cases.png.ok).toBe(true)
     expect(r.cases.png.head?.slice(1, 4)).toBe('PNG')
+  }, 120_000)
+
+  // Review 7, #5: Electron cannot destroy a session, so a session per export grew the
+  // main process without bound. Every export shares ONE in-memory session — never the
+  // app's — and documents still can't see each other.
+  test('exports share one in-memory session, apart from the app and each other', async () => {
+    const r = await run([
+      [
+        'first',
+        "<p>1</p><script>try { localStorage.setItem('k', 'first') } catch (e) {}" +
+          "try { document.cookie = 'k=first' } catch (e) {}" +
+          "console.log('slz-first ' + location.origin)</script>",
+        'pdf'
+      ],
+      [
+        'second',
+        "<p>2</p><script>var v = 'none'; try { v = String(localStorage.getItem('k')) } catch (e) { v = 'threw' }" +
+          "var c = ''; try { c = document.cookie } catch (e) { c = 'threw' }" +
+          "console.log('slz-second ' + v + ' [' + c + '] ' + location.origin)</script>",
+        'pdf'
+      ],
+      ['third', '<p>3</p>', 'pdf']
+    ])
+    expect(r.cases.first.ok && r.cases.second.ok && r.cases.third.ok).toBe(true)
+    expect(r.sessionInfo.count).toBe(3)
+    expect(r.sessionInfo.distinct).toBe(1)
+    expect(r.sessionInfo.persistent).toBe(false)
+    expect(r.sessionInfo.isDefault).toBe(false)
+    const second = r.console.find((l) => l.startsWith('slz-second ')) ?? ''
+    expect(second).not.toContain('first')
+    expect(r.console.find((l) => l.startsWith('slz-first '))).toBe('slz-first null')
+    expect(r.windowsLeft).toBe(0)
   }, 120_000)
 })

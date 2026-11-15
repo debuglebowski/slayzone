@@ -29,6 +29,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import express from 'express'
 import Database from 'better-sqlite3'
 import { afterAll, describe, expect, test } from 'vitest'
@@ -99,6 +100,13 @@ db.prepare(
 ).run(taskId, projectId, 'Artifact task', 'todo', 3, 0)
 
 const app = express()
+// Every artifact-content fetch, by artifact id (the zip tests check what was fetched).
+const contentFetches: string[] = []
+app.use((req, _res, next) => {
+  const m = /^\/api\/artifacts\/([^/]+)\/content$/.exec(req.path)
+  if (req.method === 'GET' && m) contentFetches.push(decodeURIComponent(m[1]))
+  next()
+})
 app.use(express.json())
 registerRestApi(app, { db: slayDb, notifyRenderer: () => {} })
 const rest = await mountRestApp(app)
@@ -109,6 +117,8 @@ interface CliResult {
   /** Raw stdout bytes — `read`/`download` must be byte-exact for binary artifacts. */
   stdoutBytes: Buffer
   stderr: string
+  /** Still running after `timeoutMs`: killed. */
+  timedOut: boolean
 }
 function runCli(
   args: string[],
@@ -116,6 +126,12 @@ function runCli(
     input?: string | Buffer
     envOverrides?: Record<string, string | undefined>
     cwd?: string
+    /** `ulimit -f` (KiB) for the CLI: a write past it fails with EFBIG. */
+    fileSizeLimitKb?: number
+    /** Kill the CLI after this long (a hang is reported as `timedOut`). */
+    timeoutMs?: number
+    /** The CLI's stdout is this open fd (a file, as `> file` / `>> file` would give). */
+    stdoutFd?: number
   } = {}
 ): Promise<CliResult> {
   return new Promise((resolve) => {
@@ -129,14 +145,29 @@ function runCli(
       if (v === undefined) delete env[k]
       else env[k] = v
     }
-    const p = spawn('node', [SLAY_BIN, ...args], {
+    const [cmd, cmdArgs] =
+      opts.fileSizeLimitKb === undefined
+        ? ['node', [SLAY_BIN, ...args]]
+        : [
+            'sh',
+            ['-c', `ulimit -f ${opts.fileSizeLimitKb}; exec node "$@"`, 'sh', SLAY_BIN, ...args]
+          ]
+    const p = spawn(cmd, cmdArgs, {
       env,
       cwd: opts.cwd,
-      stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe']
+      stdio: [opts.input !== undefined ? 'pipe' : 'ignore', opts.stdoutFd ?? 'pipe', 'pipe']
     })
+    let timedOut = false
+    const timer =
+      opts.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            p.kill('SIGKILL')
+          }, opts.timeoutMs)
     const outChunks: Buffer[] = []
     let stderr = ''
-    p.stdout.on('data', (d: Buffer) => {
+    p.stdout?.on('data', (d: Buffer) => {
       outChunks.push(d)
     })
     p.stderr.on('data', (d) => {
@@ -147,8 +178,15 @@ function runCli(
       p.stdin!.end()
     }
     p.on('close', (code) => {
+      clearTimeout(timer)
       const stdoutBytes = Buffer.concat(outChunks)
-      resolve({ exitCode: code, stdout: stdoutBytes.toString('utf-8'), stdoutBytes, stderr })
+      resolve({
+        exitCode: code,
+        stdout: stdoutBytes.toString('utf-8'),
+        stdoutBytes,
+        stderr,
+        timedOut
+      })
     })
   })
 }
@@ -466,6 +504,63 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.readFileSync(out).toString('hex')).toBe(BINARY.toString('hex'))
   })
 
+  // Review 7, #6: `--output` naming stdout writes into it as it stands — never a temp
+  // file beside it (there is no such directory) renamed over it: a redirect target
+  // keeps what it had (`>>`), a pipe gets the bytes, and the path line follows them.
+  // …and a symlink of the person's own that leads there.
+  const stdoutLink = path.join(tmpDir, 'to-stdout')
+  if (process.platform !== 'win32') fs.symlinkSync('/dev/stdout', stdoutLink)
+  const stdoutPaths =
+    process.platform === 'win32'
+      ? []
+      : [
+          '/dev/stdout',
+          '/dev/fd/1',
+          ...(process.platform === 'linux' ? ['/proc/self/fd/1'] : []),
+          stdoutLink
+        ]
+  for (const target of stdoutPaths) {
+    for (const mode of ['w', 'a'] as const) {
+      test(`download --output ${target} with stdout ${mode === 'a' ? 'appended' : 'redirected'} to a file`, async () => {
+        const file = path.join(tmpDir, `stdout-${mode}-${target.replaceAll('/', '_')}.out`)
+        fs.writeFileSync(file, mode === 'a' ? 'previous\n' : '')
+        const fd = fs.openSync(file, mode)
+        let r: CliResult
+        try {
+          r = await runCli(
+            ['tasks', 'artifacts', 'download', short(pngId), '--type', 'raw', '--output', target],
+            { stdoutFd: fd }
+          )
+        } finally {
+          fs.closeSync(fd)
+        }
+        expect(r.exitCode, r.stderr).toBe(0)
+        const expected = Buffer.concat([
+          Buffer.from(mode === 'a' ? 'previous\n' : ''),
+          BINARY,
+          Buffer.from(`${target}\n`)
+        ])
+        expect(fs.readFileSync(file).toString('hex')).toBe(expected.toString('hex'))
+      })
+    }
+    test(`download --output ${target} with stdout a pipe`, async () => {
+      const r = await runCli([
+        'tasks',
+        'artifacts',
+        'download',
+        short(pngId),
+        '--type',
+        'raw',
+        '--output',
+        target
+      ])
+      expect(r.exitCode, r.stderr).toBe(0)
+      expect(r.stdoutBytes.toString('hex')).toBe(
+        Buffer.concat([BINARY, Buffer.from(`${target}\n`)]).toString('hex')
+      )
+    })
+  }
+
   test('create --copy-from streams a binary file byte-exact', async () => {
     const srcPath = path.join(tmpDir, 'copied.png')
     fs.writeFileSync(srcPath, BINARY)
@@ -609,6 +704,63 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
       expect(n.startsWith('/')).toBe(false)
     }
   })
+
+  // Review 7, #4: the output fails partway (disk full, here a file-size limit). The
+  // failure must end the command — non-zero, no output file, no temp file — and stop
+  // fetching the remaining entries, not hang nor exit 0 with nothing written.
+  test.skipIf(process.platform === 'win32')(
+    'download --type zip whose output fails mid-stream exits non-zero and leaves nothing',
+    async () => {
+      const bigTask = crypto.randomUUID()
+      db.prepare(
+        'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(bigTask, projectId, 'Zip output failure task', 'todo', 3, 2)
+      const ids: string[] = []
+      for (let i = 0; i < 6; i++) {
+        // Random bytes: incompressible, so the archive outgrows the limit by entry 2.
+        const src = path.join(tmpDir, `noise-${i}.bin`)
+        fs.writeFileSync(src, randomBytes(150 * 1024))
+        const u = await runCli([
+          'tasks',
+          'artifacts',
+          'upload',
+          src,
+          '--task',
+          short(bigTask),
+          '--json'
+        ])
+        expect(u.exitCode, u.stderr).toBe(0)
+        ids.push((JSON.parse(u.stdout) as { id: string }).id)
+      }
+      const dir = path.join(tmpDir, 'zip-output-fails')
+      fs.mkdirSync(dir)
+      const before = contentFetches.length
+      const r = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'download',
+          '--type',
+          'zip',
+          '--task',
+          short(bigTask),
+          '--output',
+          path.join(dir, 'out.zip')
+        ],
+        { fileSizeLimitKb: 200, timeoutMs: 120_000 }
+      )
+      expect(r.timedOut).toBe(false)
+      expect(r.exitCode).not.toBe(0)
+      expect(r.stderr).toMatch(/EFBIG|too large/i)
+      expect(r.stdout).toBe('')
+      expect(fs.readdirSync(dir)).toEqual([])
+      // Fetching stopped at the failure: the last entries were never requested.
+      const fetched = contentFetches.slice(before).filter((id) => ids.includes(id))
+      expect(fetched.length).toBeGreaterThan(0)
+      expect(fetched.length).toBeLessThan(ids.length)
+    },
+    180_000
+  )
 
   // pdf/png/html are rendered BY THE CLI from the content route — this harness's hub
   // has no exporter at all (the standalone-hub shape), and the exports still work.

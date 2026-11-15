@@ -7,12 +7,13 @@ import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
 import { exportArtifact } from './export/export-artifact'
 import { downloadArtifactFile } from './files'
 import { hubTarget } from './hub-rest'
-import { loadMermaidScript } from './page-assets'
+import { loadHtml2canvasScript, loadMermaidScript } from './page-assets'
 
 jest.mock('./files', () => ({ ...jest.requireActual('./files'), downloadArtifactFile: jest.fn() }))
 jest.mock('./page-assets', () => ({
   MERMAID_BUNDLE_FILE: 'mermaid.min.js',
-  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}')
+  loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}'),
+  loadHtml2canvasScript: jest.fn(async () => 'window.html2canvas=function(){}')
 }))
 
 jest.mock('./export/export-artifact', () => ({ exportArtifact: jest.fn() }))
@@ -328,7 +329,11 @@ describe('ArtifactViewer, Export', () => {
     await waitFor(() =>
       expect(runExport).toHaveBeenCalledWith(
         { content: 'graph TD; A-->B', mode: 'mermaid-preview', title: 'flow.mmd', format: 'png' },
-        { render: expect.any(Function), mermaidScript: loadMermaidScript }
+        {
+          render: expect.any(Function),
+          mermaidScript: loadMermaidScript,
+          html2canvasScript: loadHtml2canvasScript
+        }
       )
     )
     await screen.findByRole('button', { name: 'Export' })

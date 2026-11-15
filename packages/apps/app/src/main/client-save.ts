@@ -116,7 +116,7 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
   let closed = false
   return {
     async write(_path, data) {
-      await handle.write(data)
+      await writeAll(handle, data)
     },
     async mkdir() {
       throw new Error('A file download has no folders')
@@ -228,14 +228,28 @@ async function commitNoClobber(
 }
 
 /** Copy `src` into an open file, in pieces. */
-async function copyInto(src: string, dest: FileHandle): Promise<void> {
+/**
+ * Write every byte of `data`: one write(2) may write fewer than asked (a nearly full
+ * disk, some network filesystems), and `FileHandle.write` does not retry. A write that
+ * makes no progress at all is an error, never a short file reported saved.
+ */
+async function writeAll(handle: FileHandle, data: Uint8Array): Promise<void> {
+  let off = 0
+  while (off < data.byteLength) {
+    const { bytesWritten } = await handle.write(data, off, data.byteLength - off)
+    if (bytesWritten <= 0) throw new Error('The disk accepted no more bytes')
+    off += bytesWritten
+  }
+}
+
+export async function copyInto(src: string, dest: FileHandle): Promise<void> {
   const from = await open(src, 'r')
   const buf = Buffer.alloc(4 * 1024 * 1024)
   const pump = async (): Promise<void> => {
     for (;;) {
       const { bytesRead } = await from.read(buf, 0, buf.length, null)
       if (bytesRead === 0) return
-      await dest.write(buf, 0, bytesRead)
+      await writeAll(dest, buf.subarray(0, bytesRead))
     }
   }
   await pump().finally(() => from.close())
@@ -349,7 +363,7 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
         }
         current = { path, dest, partial, handle }
       }
-      await current.handle.write(data)
+      await writeAll(current.handle, data)
     },
     async mkdir(path) {
       if (dead) throw cancelled()

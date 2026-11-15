@@ -124,10 +124,11 @@ async function withPage<T>(
     failed = true
     throw err
   } finally {
-    // A close that fails too (Windows holding the temp profile) must not replace the
-    // render's own error; after a good render it is the error.
+    // A close that fails (in practice: Windows still holding the temp profile, so it
+    // could not be removed) must not replace the render's own error, nor discard a
+    // good render — the output is complete; only the leftover is reported.
     await b.close().catch((closeErr: unknown) => {
-      if (!failed) throw closeErr
+      if (!failed) opts.warn?.(`Warning: ${(closeErr as Error).message}`)
     })
   }
 }

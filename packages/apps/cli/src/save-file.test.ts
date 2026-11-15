@@ -5,14 +5,19 @@
  *  - `--output` (`saveReplacing`): what is there is replaced, but whole.
  *  - Either way a failed download leaves no cut file and no temp file.
  */
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
 import { saveNew, saveReplacing, type WriteBody } from './save-file'
 
+// The repo root, from cwd (run-all.sh and vitest run from it): the CLI package
+// typechecks as CommonJS, where `import.meta` is a compile error.
+const REPO_ROOT = process.env.SLZ_REPO_ROOT ?? process.cwd()
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-save-file-'))
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 afterEach(() => vi.restoreAllMocks())
@@ -128,6 +133,76 @@ describe('saveNew (no --output)', () => {
     expect(fs.readdirSync(dir).sort()).toEqual(['a (2).md', 'a (3).md', 'a.md'])
   })
 
+  // Review 7, #8: the copy fallback creates `name` first and fills it after; a Ctrl-C
+  // mid-copy must not leave it cut. Run in a child (the signal ends that process): no
+  // hard links, and a copy that stalls after its first piece until interrupted.
+  test.skipIf(process.platform === 'win32')(
+    'without hard links, a copy interrupted by a signal leaves no cut file',
+    async () => {
+      const dir = freshDir()
+      const script = path.join(root, `interrupted-copy-${n}.mjs`)
+      fs.writeFileSync(
+        script,
+        `import fs from 'node:fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+const { saveNew } = await import(process.argv[2])
+fs.linkSync = () => {
+  throw Object.assign(new Error('EPERM: operation not permitted, link'), { code: 'EPERM' })
+}
+const createReadStream = fs.createReadStream
+fs.createReadStream = (p, ...rest) => {
+  if (!String(p).endsWith('.part')) return createReadStream(p, ...rest)
+  let sent = false
+  return new Readable({
+    read() {
+      if (!sent) this.push(Buffer.from('partial'))
+      sent = true
+    }
+  })
+}
+// Alive until interrupted (a stalled stream alone holds nothing open).
+setInterval(() => undefined, 1_000)
+await saveNew(process.argv[3], 'a.md', (out) => pipeline(Readable.from([Buffer.from('whole')]), out))
+`
+      )
+      // tsx's loader in this very process (its CLI runs the script in a child): the
+      // signal must reach the process doing the copy.
+      const tsx = path.join(REPO_ROOT, 'node_modules/tsx/dist/esm/index.mjs')
+      const child = spawn(
+        'node',
+        [
+          '--import',
+          pathToFileURL(tsx).href,
+          script,
+          path.join(REPO_ROOT, 'packages/apps/cli/src/save-file.ts'),
+          dir
+        ],
+        {
+          stdio: ['ignore', 'ignore', 'pipe']
+        }
+      )
+      let stderr = ''
+      child.stderr.on('data', (d: Buffer) => {
+        stderr += d.toString()
+      })
+      const exited = new Promise<NodeJS.Signals | number | null>((resolve) =>
+        child.on('exit', (code, signal) => resolve(signal ?? code))
+      )
+      const dest = path.join(dir, 'a.md')
+      // The copy is under way: `a.md` exists and holds its first piece.
+      for (;;) {
+        if (fs.existsSync(dest) && fs.statSync(dest).size > 0) break
+        if (child.exitCode !== null) throw new Error(`the child ended early: ${stderr}`)
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      child.kill('SIGINT')
+      expect(await exited).toBe('SIGINT')
+      expect(fs.readdirSync(dir)).toEqual([])
+    },
+    120_000
+  )
+
   test('a large binary download arrives byte-exact', async () => {
     const dir = freshDir()
     const data = Buffer.alloc(3 * 1024 * 1024)
@@ -200,6 +275,25 @@ describe('saveReplacing (--output)', () => {
       expect(await saveReplacing('/dev/null', bytes('discarded'))).toBe('/dev/null')
     }
   )
+
+  // Review 7, #6: no temp file can be made there because the "directory" is none.
+  for (const code of ['ENOENT', 'ENOTDIR']) {
+    test(`${code} creating the temp file: the file is written in place`, async () => {
+      const dir = freshDir()
+      const target = path.join(dir, 'out.md')
+      fs.writeFileSync(target, 'old')
+      const open = fs.openSync
+      vi.spyOn(fs, 'openSync').mockImplementation((p, ...rest) => {
+        if (String(p).endsWith('.part')) {
+          throw Object.assign(new Error(`${code}: open '${String(p)}'`), { code })
+        }
+        return open(p, ...rest)
+      })
+      expect(await saveReplacing(target, bytes('new'))).toBe(target)
+      expect(fs.readFileSync(target, 'utf8')).toBe('new')
+      expect(fs.readdirSync(dir)).toEqual(['out.md'])
+    })
+  }
 
   test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'a directory that refuses the temp file: the file is written in place, as before',

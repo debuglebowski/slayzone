@@ -4,8 +4,8 @@
  * back (a message carrying the page's token; anything else is ignored). The view exists
  * only while a page renders — mounted by whoever shows `view` (the artifact viewer),
  * invisible, untouchable, its page the only thing it may load — and is unmounted when
- * the page answers, fails, takes longer than {@link EXPORT_RENDER_TIMEOUT_MS} (a script
- * that never yields) or its viewer goes away.
+ * the page answers, fails, takes longer than its timeout ({@link EXPORT_RENDER_TIMEOUT_MS}
+ * unless the page says otherwise; a script that never yields) or its viewer goes away.
  *
  * WKWebView runs a page's script only inside the window, so the view is mounted, not
  * offscreen: laid over the screen at zero opacity.
@@ -20,10 +20,18 @@ import {
 } from './render-pages'
 
 /**
- * Mermaid's largest diagrams draw in a few seconds on a phone; an html artifact is taken
- * at most `HTML_SETTLE.maxLoadMs` + `maxAfterLoadMs` (20 s) after it starts.
+ * Mermaid's largest diagrams draw in a few seconds on a phone. A page may ask for longer
+ * (`ExportRenderPage.timeoutMs`: an html artifact's, `HTML_RENDER_TIMEOUT_MS`).
  */
 export const EXPORT_RENDER_TIMEOUT_MS = 30_000
+
+/**
+ * What the view may load: the page itself (`about:blank` with its HTML) and an html
+ * artifact's frame (`about:srcdoc`) — in every frame. Never a link, a redirect, a
+ * refresh, or a remote frame.
+ */
+export const isExportPageLoad = (request: { url: string }): boolean =>
+  request.url === 'about:blank' || request.url === 'about:srcdoc'
 
 interface PendingRender {
   id: number
@@ -48,7 +56,7 @@ export function useExportRenderer(): ExportRenderer {
     const timer = setTimeout(() => {
       setPending((current) => (current === pending ? null : current))
       pending.reject(new Error('Rendering the export took too long.'))
-    }, EXPORT_RENDER_TIMEOUT_MS)
+    }, pending.page.timeoutMs ?? EXPORT_RENDER_TIMEOUT_MS)
     return () => clearTimeout(timer)
   }, [pending])
 
@@ -90,8 +98,7 @@ export function useExportRenderer(): ExportRenderer {
       testID="artifact-export-renderer"
       source={{ html: pending.page.html }}
       originWhitelist={['*']}
-      // The page itself (`about:blank` with its HTML); never a link or a redirect.
-      onShouldStartLoadWithRequest={(request) => request.url === 'about:blank'}
+      onShouldStartLoadWithRequest={isExportPageLoad}
       onMessage={onMessage}
       onError={(event) => fail(`The export renderer failed: ${event.nativeEvent.description}`)}
       onContentProcessDidTerminate={() => fail('The export renderer stopped.')}

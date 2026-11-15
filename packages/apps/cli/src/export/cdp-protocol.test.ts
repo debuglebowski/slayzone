@@ -26,6 +26,9 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
  * `vanish` (no event; the target is simply gone from Target.getTargets).
  * `VERSION_DELAY_MS` delays every Browser.getVersion answer; `LOG_FILE` records each
  * method received, one per line.
+ * `PAGE_SPINS_ON_PRINT`: once a print starts the page's own commands (Runtime.evaluate)
+ * go unanswered and the print never finishes, while the browser keeps answering (a
+ * script looping in the renderer). `EVAL_DELAY_MS` delays every Runtime.evaluate.
  */
 const FAKE = `#!/usr/bin/env node
 const fs = require('fs')
@@ -36,6 +39,9 @@ const chunks = Number(process.env.PDF_CHUNKS || 3)
 const onPrint = process.env.ON_PRINT || ''
 const versionDelay = Number(process.env.VERSION_DELAY_MS || 0)
 const log = process.env.LOG_FILE
+const spinOnPrint = process.env.PAGE_SPINS_ON_PRINT === '1'
+const evalDelay = Number(process.env.EVAL_DELAY_MS || 0)
+let spinning = false
 let targetGone = false
 let hung = false
 let reads = 0
@@ -59,9 +65,12 @@ fs.createReadStream(null, { fd: 3, encoding: 'utf8' }).on('data', (c) => {
       case 'Target.createTarget': reply(m.id, { targetId: 't1' }); break
       case 'Target.attachToTarget': reply(m.id, { sessionId: 's1' }); break
       case 'Page.getFrameTree': reply(m.id, { frameTree: { frame: { id: 'f1' } } }); break
-      case 'Runtime.evaluate': reply(m.id, { result: { value: true } }); break
+      case 'Runtime.evaluate':
+        if (!spinning) setTimeout(() => reply(m.id, { result: { value: true } }), evalDelay)
+        break
       case 'Page.printToPDF':
         if (hang) { hung = true; break }
+        if (spinOnPrint) { spinning = true; break }
         if (onPrint === 'inspector-crash') { emit('Inspector.targetCrashed', {}, m.sessionId); break }
         if (onPrint === 'target-crash') { emit('Target.targetCrashed', { targetId: 't1', status: 'crashed', errorCode: 9 }); break }
         if (onPrint === 'detach') { emit('Target.detachedFromTarget', { sessionId: m.sessionId, targetId: 't1' }); break }
@@ -213,3 +222,40 @@ describe.skipIf(process.platform === 'win32')(
     }, 30_000)
   }
 )
+
+/** Review 7, #3: a page whose script spins once printing starts. */
+describe.skipIf(process.platform === 'win32')('#3: a page that stops answering mid-print', () => {
+  test('the print fails once the page has not answered for stallMs', async () => {
+    const exe = fake('spin')
+    await expect(
+      withEnv({ PAGE_SPINS_ON_PRINT: '1' }, () =>
+        renderPdf(exe, '<p>x</p>', {
+          waitReady: false,
+          // The browser keeps answering its liveness check every 200 ms throughout.
+          browser: {
+            commandTimeoutMs: 300,
+            livenessIntervalMs: 200,
+            stallMs: 1_000,
+            stallProbeIntervalMs: 100
+          }
+        })
+      )
+    ).rejects.toThrow(/page stopped responding/)
+  }, 30_000)
+
+  test('a page that answers slowly but within stallMs is not failed', async () => {
+    const exe = fake('slow-page')
+    const pdf = await withEnv({ PRINT_DELAY_MS: '2500', EVAL_DELAY_MS: '400' }, () =>
+      renderPdf(exe, '<p>x</p>', {
+        waitReady: false,
+        browser: {
+          commandTimeoutMs: 5_000,
+          livenessIntervalMs: 200,
+          stallMs: 1_500,
+          stallProbeIntervalMs: 100
+        }
+      })
+    )
+    expect(pdf.subarray(0, 8).toString()).toBe('%PDF-1.7')
+  }, 30_000)
+})

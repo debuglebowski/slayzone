@@ -4,6 +4,7 @@
  *  - review 6, #2: every JS dialog on the page's session is dismissed, so an html
  *    artifact calling alert()/confirm()/prompt() cannot block the export.
  *  - review 6, #8: a browser that fails to close does not hide the render's own error.
+ *  - review 7, #7: nor does it discard a good render (a warning names what is left).
  */
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { Browser } from './cdp'
@@ -148,13 +149,22 @@ describe('closing the browser (review 6, #8)', () => {
     )
   })
 
-  test('a close that throws after a good render fails the render', async () => {
+  // Review 7, #7: the only realistic close failure is the temp profile still held
+  // (EBUSY on Windows). The finished PDF is kept; the leftover dir is reported.
+  test('a close that throws after a good render keeps the result and warns', async () => {
     script = {
       close: async () => {
-        throw new Error('EBUSY: profile dir still locked')
+        throw new Error("EBUSY: resource busy or locked, rmdir 'C:\\Temp\\slay-export-profile-x'")
       },
       answer: page()
     }
-    await expect(renderPdf('/fake', '<p>x</p>', { waitReady: false })).rejects.toThrow('EBUSY')
+    const warnings: string[] = []
+    const pdf = await renderPdf('/fake', '<p>x</p>', {
+      waitReady: false,
+      warn: (l) => warnings.push(l)
+    })
+    expect(pdf.toString('latin1')).toBe('%PDF-1.7')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(/^Warning: .*slay-export-profile-x/)
   })
 })

@@ -10,9 +10,11 @@
  *   WKWebView prints the moment the page has loaded, before any script has drawn, and
  *   has no navigation policy and no cancel, so nothing that needs a script is printed by
  *   it: a mermaid diagram is drawn first in the hidden web view (`render-pages.ts`) and
- *   printed as the static SVG it became; an html artifact is rendered there with its own
- *   scripts (the view is unmounted at the renderer's timeout, a page that loops
- *   included) and its DOM as drawn is printed with every script blocked.
+ *   printed as the static SVG it became; an html artifact runs there in the viewer's
+ *   sandbox (the view is unmounted at its timeout, a page that loops included) and is
+ *   drawn there page by page: the PDF is those page pictures, nothing else — no text to
+ *   select or search, no links (what html2canvas can't draw is missing: a picture from
+ *   a site that doesn't allow it to be read, a frame's content, a WebGL scene).
  * - PNG: the SVG (a mermaid diagram drawn first, as for PDF) rasterised in the hidden web
  *   view; if WebKit won't read back mermaid's HTML labels, drawn again with text labels.
  *
@@ -36,7 +38,7 @@ import {
   type ExportRenderPage,
   type ExportRenderReply,
   htmlPrintDocument,
-  htmlSnapshotPage,
+  htmlRasterPage,
   mermaidSvgPage,
   pngCapturePage
 } from './render-pages'
@@ -60,6 +62,8 @@ export interface ExportArtifactDeps {
   render: (page: ExportRenderPage) => Promise<ExportRenderReply>
   /** mermaid's browser build (`page-assets.ts`). */
   mermaidScript: () => Promise<string>
+  /** html2canvas's browser build (`page-assets.ts`): draws an html artifact's pages. */
+  html2canvasScript: () => Promise<string>
   /** How long printing may take (default {@link EXPORT_PRINT_TIMEOUT_MS}). */
   printTimeoutMs?: number
 }
@@ -110,7 +114,7 @@ async function exportInto(
         mode === 'mermaid-preview'
           ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
           : mode === 'html-preview'
-            ? htmlPrintDocument(await renderHtml(content, title, deps))
+            ? htmlPrintDocument(await drawHtmlPages(content, title, deps))
             : buildDocumentHtml(content, mode, title)
       if (printsInFlight === 0) sweepLeftoverPrints()
       printsInFlight++
@@ -215,14 +219,19 @@ async function drawMermaid(
   )
 }
 
-/** An html artifact's DOM as its scripts drew it, inert, from the hidden web view. */
-async function renderHtml(
+/** An html artifact's pages as its scripts drew them (PNGs, base64), from the hidden web view. */
+async function drawHtmlPages(
   content: string,
   title: string,
   deps: ExportArtifactDeps
-): Promise<string> {
-  const reply = await deps.render(htmlSnapshotPage(content, title))
-  if (reply.type === 'html') return reply.html
+): Promise<string[]> {
+  const reply = await deps.render(htmlRasterPage(content, title, await deps.html2canvasScript()))
+  if (reply.type === 'pages') return reply.pages
+  if (reply.type === 'error' && reply.code === 'tainted') {
+    throw new Error(
+      "This page draws something this device won't let the export read back, so it can't be made into a PDF here."
+    )
+  }
   throw new Error(
     `Couldn't render the page: ${reply.type === 'error' ? reply.message : 'no page came back.'}`
   )

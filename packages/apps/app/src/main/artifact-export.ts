@@ -27,8 +27,8 @@ import type {
 //
 // An artifact is arbitrary HTML (html-preview runs its own scripts, as on main). It is
 // rendered where it can reach nothing of the app's:
-//   - its own session, in memory and unique to this export: no cookie, storage or cache
-//     of the app's, and nothing it stores outlives the export;
+//   - the export session, in memory and never the app's: no cookie, storage or cache
+//     of the app's, and nothing it stores outlives the export (cleared after each);
 //   - served from memory under a scheme of its own, so its origin is opaque — not
 //     file:// (which would share the app's storage) and no file on disk to plant or race;
 //   - sandboxed, no preload, no node; it can't open windows, navigate away, or get any
@@ -40,7 +40,7 @@ import type {
 // even one that starts looping only once printing begins).
 
 const EXPORT_SCHEME = 'slz-export'
-const EXPORT_DOCUMENT_URL = `${EXPORT_SCHEME}://document/`
+const EXPORT_PARTITION = 'slz-export'
 
 /** How long an export window may take at each step. Overridable for tests. */
 export interface ExportTimings {
@@ -71,22 +71,42 @@ const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 class ExportWindowError extends Error {}
 
-/** A throwaway session for one export: in memory, no permission, serves `html` only. */
-function exportSession(html: string): Session {
-  // No `persist:` prefix: the partition lives in memory only.
-  const ses = session.fromPartition(`slz-export-${randomUUID()}`)
+/** Documents being exported, by the URL each is served at. */
+const exportDocuments = new Map<string, string>()
+let sharedExportSession: Session | null = null
+
+/**
+ * The ONE session every export window uses: in memory (no `persist:` prefix), never
+ * the app's, no permission, serving only the documents being exported. One, not one
+ * per export: Electron can't destroy a session, so a session each grew the main
+ * process with every export. Documents stay apart without it — each is served at its
+ * own URL under a non-standard scheme, so each has an opaque origin (no storage, no
+ * cookies), and the session's storage and cache are cleared after every export.
+ */
+function exportSession(): Session {
+  if (sharedExportSession) return sharedExportSession
+  const ses = session.fromPartition(EXPORT_PARTITION)
   ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   ses.setPermissionCheckHandler(() => false)
-  ses.protocol.handle(EXPORT_SCHEME, (request) =>
-    request.url === EXPORT_DOCUMENT_URL
-      ? new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
-      : new Response(null, { status: 404 })
-  )
+  ses.protocol.handle(EXPORT_SCHEME, (request) => {
+    const html = exportDocuments.get(request.url)
+    return html === undefined
+      ? new Response(null, { status: 404 })
+      : new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+  })
+  sharedExportSession = ses
   return ses
 }
 
-function disposeSession(ses: Session): void {
-  ses.protocol.unhandle(EXPORT_SCHEME)
+/** Serve `html` for one export; returns its URL. */
+function serveDocument(html: string): string {
+  const url = `${EXPORT_SCHEME}://${randomUUID()}/`
+  exportDocuments.set(url, html)
+  return url
+}
+
+function retireDocument(ses: Session, url: string): void {
+  exportDocuments.delete(url)
   ses.clearStorageData().catch(ignore)
   ses.clearCache().catch(ignore)
 }
@@ -106,7 +126,8 @@ async function withExportWindow<T>(
     probe: <R>(code: string) => Promise<R>
   ) => Promise<T>
 ): Promise<T> {
-  const ses = exportSession(html)
+  const ses = exportSession()
+  const documentUrl = serveDocument(html)
   const win = new BrowserWindow({
     show: false,
     ...size,
@@ -183,12 +204,12 @@ async function withExportWindow<T>(
     const loading = new Promise<void>((resolve, reject) => {
       wc.once('did-finish-load', () => resolve())
       wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
-        if (isMainFrame && url === EXPORT_DOCUMENT_URL && code !== -3)
+        if (isMainFrame && url === documentUrl && code !== -3)
           reject(new ExportWindowError(`The export document failed to load (${description})`))
       })
     })
     loading.catch(ignore)
-    wc.loadURL(EXPORT_DOCUMENT_URL).catch(ignore)
+    wc.loadURL(documentUrl).catch(ignore)
     // A stylesheet that never arrives doesn't block the export: render what loaded.
     let loadWait: NodeJS.Timeout | undefined
     await step(
@@ -207,7 +228,7 @@ async function withExportWindow<T>(
       if (broken && !wc.isDestroyed()) wc.forcefullyCrashRenderer()
       win.destroy()
     }
-    disposeSession(ses)
+    retireDocument(ses, documentUrl)
   }
 }
 

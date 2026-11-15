@@ -5,8 +5,8 @@ import {
   type ExportRenderReply,
   HTML_PRINT_POLICY,
   HTML_SETTLE,
+  htmlArtifactDocument,
   htmlPrintDocument,
-  htmlSnapshotPage,
   mermaidSvgPage,
   parseExportRenderReply,
   pngCapturePage
@@ -59,9 +59,9 @@ describe('parseExportRenderReply', () => {
     expect(
       parseExportRenderReply(msg({ type: 'png', base64: 'AAA', width: 20, height: 10 }), TOKEN)
     ).toEqual({ type: 'png', base64: 'AAA', width: 20, height: 10 })
-    expect(parseExportRenderReply(msg({ type: 'html', html: '<html></html>' }), TOKEN)).toEqual({
-      type: 'html',
-      html: '<html></html>'
+    expect(parseExportRenderReply(msg({ type: 'pages', pages: ['QUJD', 'RA=='] }), TOKEN)).toEqual({
+      type: 'pages',
+      pages: ['QUJD', 'RA==']
     })
     expect(
       parseExportRenderReply(msg({ type: 'error', code: 'tainted', message: 'no' }), TOKEN)
@@ -74,7 +74,15 @@ describe('parseExportRenderReply', () => {
       parseExportRenderReply(JSON.stringify({ type: 'svg', svg: '<svg/>', token: TOKEN }), TOKEN)
     ).toBeNull()
     expect(parseExportRenderReply(msg({ type: 'svg' }), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'html' }), TOKEN)).toBeNull()
+    expect(parseExportRenderReply(msg({ type: 'pages' }), TOKEN)).toBeNull()
+    expect(parseExportRenderReply(msg({ type: 'pages', pages: [] }), TOKEN)).toBeNull()
+    // A page is base64 and nothing else.
+    expect(
+      parseExportRenderReply(msg({ type: 'pages', pages: ['QUJD', '<img>'] }), TOKEN)
+    ).toBeNull()
+    expect(parseExportRenderReply(msg({ type: 'pages', pages: [1] }), TOKEN)).toBeNull()
+    // The old snapshot reply is no reply.
+    expect(parseExportRenderReply(msg({ type: 'html', html: '<p/>' }), TOKEN)).toBeNull()
     expect(parseExportRenderReply(msg({ type: 'png', base64: 'A', width: '1' }), TOKEN)).toBeNull()
     expect(
       parseExportRenderReply(msg({ type: 'error', code: 'boom', message: '' }), TOKEN)
@@ -85,7 +93,7 @@ describe('parseExportRenderReply', () => {
   // Review 6, #4: an html artifact's own scripts run in the render; a reply counts only
   // if it carries the page's token, which they never see.
   it("ignores a reply without the page's token", () => {
-    const forged = { source: EXPORT_RENDER_SOURCE, type: 'html', html: '<p>forged</p>' }
+    const forged = { source: EXPORT_RENDER_SOURCE, type: 'pages', pages: ['QUJD'] }
     expect(parseExportRenderReply(JSON.stringify(forged), TOKEN)).toBeNull()
     expect(parseExportRenderReply(JSON.stringify({ ...forged, token: 'guess' }), TOKEN)).toBeNull()
     expect(parseExportRenderReply(JSON.stringify({ ...forged, token: TOKEN }), 'other')).toBeNull()
@@ -304,9 +312,10 @@ describe('pngCapturePage: rasterises the SVG at 2x and posts the PNG back', () =
   })
 })
 
-// Review 6, #4: an html artifact is printed from what its own scripts drew, rendered in
-// the hidden web view (cancellable, navigation blocked), not by expo-print's web view.
-describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back', () => {
+// Review 6, #4 / review 7, #1–#2: an html artifact runs in its own sandboxed frame
+// (`htmlArtifactDocument`, the frame's document); the snapshot script there posts the DOM
+// as drawn to the host page once it has settled. The host's part: html-raster-page.test.ts.
+describe('htmlArtifactDocument: the snapshot script posts the settled DOM to the host', () => {
   /** A small DOM: enough of WebKit's for the snapshot script. */
   class FakeNodeList {
     [index: number]: FakeElement
@@ -344,11 +353,10 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
       return copy
     }
     querySelectorAll(selector: string): FakeNodeList {
-      const tags = selector.split(',').map((s) => s.trim())
       const found: FakeElement[] = []
       const walk = (el: FakeElement) => {
         for (const child of el.children) {
-          if (tags.includes(child.tagName)) found.push(child)
+          if (child.tagName === selector) found.push(child)
           walk(child)
         }
       }
@@ -420,30 +428,34 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
     }
   }
 
-  /** The artifact's DOM (as WebKit parsed the page), and the page loaded in it. */
-  function load(page: ExportRenderPage, build: (head: FakeElement, body: FakeElement) => void) {
+  /** The frame's first script: ours. */
+  function snapshotScriptOf(doc: string): string {
+    const m = /<head><script>([\s\S]*?)<\/script>/.exec(doc)
+    if (!m) throw new Error('no script first in the head')
+    return m[1]
+  }
+
+  /** The artifact's DOM (as WebKit parsed the page), and the frame's script run in it. */
+  function load(doc: string, build: (head: FakeElement, body: FakeElement) => void) {
     const self = new FakeElement('script')
     const head = new FakeElement('head', {}, [self])
     const body = new FakeElement('body')
     build(head, body)
     const root = new FakeElement('html', {}, [head, body])
-    const doc = new FakeDocument(root, self)
-    const posted: string[] = []
+    const document = new FakeDocument(root, self)
+    const posted: { message: unknown; target: string }[] = []
     const listeners: Record<string, (() => void)[]> = {}
     let onMutation: () => void = () => undefined
-    const bridge = { postMessage: (data: string) => posted.push(data) }
     const context: Record<string, unknown> = {
-      document: doc,
+      document,
       window: {
-        ReactNativeWebView: bridge,
+        parent: {
+          postMessage: (message: unknown, target: string) => posted.push({ message, target })
+        },
         addEventListener: (type: string, fn: () => void) => {
           ;(listeners[type] ??= []).push(fn)
         }
       },
-      Node: FakeElement,
-      Element: FakeElement,
-      Document: FakeDocument,
-      NodeList: FakeNodeList,
       MutationObserver: class {
         constructor(fn: () => void) {
           onMutation = fn
@@ -457,20 +469,14 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
       clearTimeout,
       Date
     }
-    const [script] = scriptsOf(page.html)
-    runInNewContext(script, context)
+    runInNewContext(snapshotScriptOf(doc), context)
     return {
-      context,
-      bridge,
       head,
       body,
-      root,
       fire: (type: string) => {
         for (const fn of listeners[type] ?? []) fn()
       },
       mutate: () => onMutation(),
-      replies: () =>
-        posted.map((data) => parseExportRenderReply(data, page.token)).filter((r) => r !== null),
       posted
     }
   }
@@ -478,34 +484,22 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
   beforeEach(() => jest.useFakeTimers({ now: 1_000_000 }))
   afterEach(() => jest.useRealTimers())
 
-  /** The page's own scripts: ours (first) and none other of ours. */
-  function scriptsOf(html: string): string[] {
-    return [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])
-  }
-
   it("is the shared html document, the artifact's scripts on, ours first in its head", () => {
-    const page = htmlSnapshotPage('<h1>Chart</h1><script>draw()</script>', 'r.html')
-    expect(page.token.length).toBeGreaterThanOrEqual(16)
+    const doc = htmlArtifactDocument('<h1>Chart</h1><script>draw()</script>', 'r.html')
     // No policy: the artifact runs as it does in the viewer and on desktop.
-    expect(page.html).not.toContain('Content-Security-Policy')
-    expect(page.html).toContain('<h1>Chart</h1><script>draw()</script>')
+    expect(doc).not.toContain('Content-Security-Policy')
+    expect(doc).toContain('<h1>Chart</h1><script>draw()</script>')
     // Ours is the first thing in the head: it runs before any of the artifact's.
-    expect(page.html.indexOf('<head><script>')).toBeGreaterThan(-1)
-    expect(page.html.indexOf('<head><script>')).toBe(page.html.indexOf('<head>'))
-    // Laid out at the printed page's width.
-    expect(page.viewport).toEqual({ width: 595, height: 842 })
-    // Each page has its own token.
-    expect(htmlSnapshotPage('x', 't').token).not.toBe(page.token)
+    expect(doc.indexOf('<head><script>')).toBe(doc.indexOf('<head>'))
+    // The frame holds no token: it is the host's alone.
+    expect(doc).not.toMatch(/token/i)
   })
 
-  it('waits for load and a quiet DOM, then posts the DOM as drawn, inert', async () => {
-    const page = htmlSnapshotPage('<div id="chart"></div>', 'r.html')
-    const p = load(page, (head, body) => {
-      head.append(new FakeElement('meta', { 'http-equiv': ' Refresh ', content: '0;url=x' }))
+  it('waits for load and a quiet DOM, then posts the DOM as drawn to the host', () => {
+    const p = load(htmlArtifactDocument('<div id="chart"></div>', 'r.html'), (head, body) => {
       head.append(new FakeStyle('', ['.bar { color: red; }']))
       body.append(new FakeElement('div', { id: 'chart' }))
       body.append(new FakeElement('script', {}, []))
-      body.append(new FakeElement('iframe', { src: 'https://embed.example/x' }))
       body.append(
         new FakeCanvas(
           { width: '800', height: '400', style: 'width:400px' },
@@ -538,30 +532,44 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
     expect(p.posted).toEqual([])
     jest.advanceTimersByTime(400)
 
-    const replies = p.replies()
-    expect(replies).toHaveLength(1)
-    const reply = replies[0]
-    if (reply.type !== 'html') throw new Error(`expected html, got ${reply.type}`)
-    // What the artifact drew, late content included.
-    expect(reply.html).toContain('<div id="chart">')
-    expect(reply.html).toContain('<p id="late">')
-    // Inert: no script, no refresh, frames sandboxed.
-    expect(reply.html).not.toContain('<script')
-    expect(reply.html).not.toContain('Refresh')
-    expect(reply.html).toContain('<iframe src="https://embed.example/x" sandbox="">')
+    expect(p.posted).toHaveLength(1)
+    const { message, target } = p.posted[0] as {
+      message: { type: string; html: string }
+      target: string
+    }
+    // To the host page (an opaque-origin frame can only say "*").
+    expect(target).toBe('*')
+    expect(message.type).toBe('slz-export-snapshot')
+    // What the artifact drew, late content included; no script.
+    expect(message.html).toContain('<div id="chart">')
+    expect(message.html).toContain('<p id="late">')
+    expect(message.html).not.toContain('<script')
     // A drawn canvas becomes its picture; one that can't be read stays a canvas.
-    expect(reply.html).toContain(
+    expect(message.html).toContain(
       '<img width="800" height="400" style="width:400px;max-width:100%;height:auto" src="data:image/png;base64,QkFS">'
     )
-    expect(reply.html).toContain('<canvas id="webgl">')
+    expect(message.html).toContain('<canvas id="webgl">')
     // Style rules inserted by script (CSSOM) are kept.
-    expect(reply.html).toContain('<style>.bar { color: red; }\n</style>')
+    expect(message.html).toContain('<style>.bar { color: red; }\n</style>')
     // The page itself is untouched: the snapshot is a copy.
     expect(p.body.children.some((c) => c.tagName === 'script')).toBe(true)
   })
 
+  // Review 7, #1: a CSSOM string can serialize as "</style>"; escaped, it stays CSS.
+  it('escapes "<" in CSSOM text, so no "</style>" can form', () => {
+    const p = load(htmlArtifactDocument('x', 't'), (head) => {
+      head.append(new FakeStyle('', ['.x::before { content: "</style><iframe src=x>"; }']))
+    })
+    jest.advanceTimersByTime(HTML_SETTLE.maxLoadMs + 200)
+    const { message } = p.posted[0] as { message: { html: string } }
+    expect(message.html).toContain(
+      '<style>.x::before { content: "\\3c /style>\\3c iframe src=x>"; }\n</style>'
+    )
+    expect(message.html).not.toContain('</style><iframe')
+  })
+
   it('a page that never stops changing is taken anyway, after the cap', () => {
-    const p = load(htmlSnapshotPage('x', 't'), () => undefined)
+    const p = load(htmlArtifactDocument('x', 't'), () => undefined)
     p.fire('load')
     for (let t = 0; t < HTML_SETTLE.maxAfterLoadMs - 200; t += 100) {
       p.mutate()
@@ -570,85 +578,35 @@ describe('htmlSnapshotPage: renders an html artifact, posts its settled DOM back
     expect(p.posted).toEqual([])
     p.mutate()
     jest.advanceTimersByTime(400)
-    expect(p.replies()).toMatchObject([{ type: 'html' }])
+    expect(p.posted).toMatchObject([{ message: { type: 'slz-export-snapshot' } }])
   })
 
   it('a page whose load never ends (a hung request) is taken anyway, after the cap', () => {
-    const p = load(htmlSnapshotPage('x', 't'), () => undefined)
+    const p = load(htmlArtifactDocument('x', 't'), () => undefined)
     jest.advanceTimersByTime(HTML_SETTLE.maxLoadMs + 200)
-    expect(p.replies()).toMatchObject([{ type: 'html' }])
-  })
-
-  it("the artifact can't forge the reply or read the token", () => {
-    const page = htmlSnapshotPage('x', 't')
-    const p = load(page, () => undefined)
-    // The artifact's scripts run after ours: they post, and swap the bridge, String,
-    // JSON and the DOM helpers, and add a `token` setter and `toJSON` to every object,
-    // to read what we post.
-    const seen: string[] = []
-    const querySelectorAll = FakeElement.prototype.querySelectorAll
-    p.context.seen = seen
-    runInNewContext(
-      `
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        source: ${JSON.stringify(EXPORT_RENDER_SOURCE)}, type: 'html', html: '<p>forged</p>'
-      }));
-      window.ReactNativeWebView.postMessage = function (data) { seen.push(String(data)); };
-      String = function (v) { seen.push('' + v); return '' + v; };
-      JSON.stringify = function () { seen.push('stringify'); return '{}'; };
-      Element.prototype.querySelectorAll = function () { seen.push('qsa'); return []; };
-      Object.defineProperty(Object.prototype, 'token', {
-        configurable: true,
-        set: function (v) { seen.push('set ' + v); }
-      });
-      Object.prototype.toJSON = function () { seen.push('toJSON'); return {}; };
-      `,
-      p.context
-    )
-    p.fire('load')
-    try {
-      jest.advanceTimersByTime(HTML_SETTLE.maxAfterLoadMs + 200)
-    } finally {
-      FakeElement.prototype.querySelectorAll = querySelectorAll
-    }
-    // The forged reply carries no token: not a reply.
-    expect(p.replies()).toHaveLength(1)
-    expect(p.replies()[0]).toMatchObject({ type: 'html' })
-    expect(p.posted).toHaveLength(2)
-    expect(seen).toEqual([])
-    expect(p.posted.slice(1).join('')).toContain(page.token)
-  })
-
-  it('posts through the native message handler when there is one (iOS)', () => {
-    const page = htmlSnapshotPage('x', 't')
-    const p = load(page, () => undefined)
-    // Loaded again, with the iOS handler present before our script runs.
-    const native: string[] = []
-    const window = p.context.window as Record<string, unknown>
-    window.webkit = {
-      messageHandlers: { ReactNativeWebView: { postMessage: (d: string) => native.push(d) } }
-    }
-    const again = new FakeElement('script')
-    ;(p.context.document as FakeDocument).currentScript = again
-    p.head.append(again)
-    runInNewContext(scriptsOf(page.html)[0], p.context)
-    jest.advanceTimersByTime(HTML_SETTLE.maxLoadMs + 200)
-    expect(native).toHaveLength(1)
-    expect(parseExportRenderReply(native[0], page.token)).toMatchObject({ type: 'html' })
+    expect(p.posted).toMatchObject([{ message: { type: 'slz-export-snapshot' } }])
   })
 })
 
-describe('htmlPrintDocument: the snapshot, printed with no script', () => {
-  it('puts a script-blocking policy first, ahead of anything in the snapshot', () => {
-    const snapshot = '<html lang="en"><head><title>R</title></head><body><p>drawn</p></body></html>'
-    const doc = htmlPrintDocument(snapshot)
-    expect(doc).toBe(
-      `<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="${HTML_PRINT_POLICY}">${snapshot}`
+describe('htmlPrintDocument: the page pictures, and nothing else', () => {
+  it('one picture per sheet, behind a policy that loads nothing else', () => {
+    const doc = htmlPrintDocument(['QUJD', 'REVG'])
+    expect(
+      doc.startsWith('<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy"')
+    ).toBe(true)
+    expect(doc).toContain(`content="${HTML_PRINT_POLICY}"`)
+    expect(HTML_PRINT_POLICY).toContain("default-src 'none'")
+    expect(HTML_PRINT_POLICY).toContain('img-src data:')
+    expect(HTML_PRINT_POLICY).not.toMatch(/https?:/)
+    expect(doc).toContain(
+      '<body><img alt="" src="data:image/png;base64,QUJD"><img alt="" src="data:image/png;base64,REVG"></body>'
     )
-    expect(HTML_PRINT_POLICY).toContain("script-src 'none'")
-    expect(HTML_PRINT_POLICY).toContain("object-src 'none'")
-    // Styles, images and fonts load as they did in the render.
-    expect(HTML_PRINT_POLICY).not.toContain('default-src')
-    expect(HTML_PRINT_POLICY).not.toContain('style-src')
+    expect(doc).toContain('img + img { break-before: page; }')
+  })
+
+  it('refuses anything that is not base64 (no markup can be written in)', () => {
+    expect(() => htmlPrintDocument(['QUJD"><iframe src=x>'])).toThrow('not a PNG')
+    expect(() => htmlPrintDocument([''])).toThrow('not a PNG')
+    expect(() => htmlPrintDocument([])).toThrow('no pages')
   })
 })

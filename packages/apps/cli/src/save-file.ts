@@ -18,17 +18,19 @@
  * already at `name` — a file, a directory, a symlink (dangling or not, never
  * followed) — and between checking and creating there is no window. Where the
  * filesystem has no hard links (FAT/exFAT, some network shares) the name is created
- * with `O_CREAT | O_EXCL` instead (same guarantees) and the bytes copied in.
+ * with `O_CREAT | O_EXCL` instead (same guarantees) and the bytes copied in; until
+ * the copy is complete an interrupted `slay` removes that file again.
  */
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { Writable } from 'node:stream'
 import { finished, pipeline } from 'node:stream/promises'
 import { numberedName } from '@slayzone/task-artifacts/download-plan'
 import { onExitOrSignal } from './export/signal-cleanup'
 
 /** Writes the whole download into `out` (resolves once everything is written). */
-export type WriteBody = (out: fs.WriteStream) => Promise<void>
+export type WriteBody = (out: Writable) => Promise<void>
 
 /** Numbers tried before giving up (`name (2)` … `name (10000)`). */
 const MAX_NUMBER = 10_000
@@ -99,18 +101,27 @@ async function placeExclusive(tmp: string, dest: string): Promise<boolean> {
     if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false
     throw err
   }
-  // Which file we created: removed on failure only if it is still that one.
+  // Which file we created: removed on failure only if it is still that one, never
+  // whatever has taken its name since.
   const { dev, ino } = fs.fstatSync(fd)
-  try {
-    await pipeline(fs.createReadStream(tmp), fs.createWriteStream(dest, { fd }))
-  } catch (err) {
+  const removeOurs = (): void => {
     try {
       const now = fs.lstatSync(dest)
       if (now.dev === dev && now.ino === ino) fs.rmSync(dest, { force: true })
     } catch {
       // Already gone.
     }
+  }
+  // Until the copy is complete `dest` is cut short: a Ctrl-C'd or killed `slay` takes
+  // it away too, so the download lands whole or not at all.
+  const unhook = onExitOrSignal(removeOurs)
+  try {
+    await pipeline(fs.createReadStream(tmp), fs.createWriteStream(dest, { fd }))
+  } catch (err) {
+    removeOurs()
     throw err
+  } finally {
+    unhook()
   }
   return true
 }
@@ -150,8 +161,84 @@ async function writeInPlace(target: string, write: WriteBody): Promise<void> {
   }
 }
 
-/** The temp file could not be created beside the target: its directory is not ours to write. */
-const NO_TEMP_HERE = new Set(['EACCES', 'EPERM', 'EROFS'])
+/**
+ * Write into `stream` (our stdout / stderr) as it stands. Its descriptor is the one the
+ * shell set up, so a `>> file` keeps appending, a `> file` is not truncated again, and
+ * what `slay` prints next (the saved path) follows the bytes instead of overwriting
+ * them — reopening `/dev/stdout` would give none of that on Linux, where it opens the
+ * file anew. Left open afterwards: it is not ours to close.
+ */
+async function writeToStdio(stream: NodeJS.WriteStream, write: WriteBody): Promise<void> {
+  const sink = new Writable({
+    write(chunk, _encoding, done) {
+      stream.write(chunk, (err) => done(err ?? null))
+    },
+    final(done) {
+      done()
+    }
+  })
+  // A write error is reported to the callback above; the 'error' event must not crash.
+  const onError = (err: Error): void => {
+    sink.destroy(err)
+  }
+  stream.on('error', onError)
+  try {
+    await write(sink)
+    if (!sink.writableEnded) sink.end()
+    await finished(sink)
+  } finally {
+    stream.off('error', onError)
+  }
+}
+
+/** The descriptor of ours a path names (`/dev/stdout`, `/dev/fd/1`, `/proc/self/fd/1`, …). */
+function ownDescriptor(p: string): number | null {
+  if (p === '/dev/stdout') return 1
+  if (p === '/dev/stderr') return 2
+  const dev = /^\/dev\/fd\/(\d+)$/.exec(p)
+  if (dev) return Number(dev[1])
+  const proc = /^\/proc\/(self|thread-self|\d+)\/fd\/(\d+)$/.exec(p)
+  if (proc && (!/^\d+$/.test(proc[1]) || Number(proc[1]) === process.pid)) return Number(proc[2])
+  return null
+}
+
+/** Our stdout / stderr when `p` names it. */
+function stdioStream(p: string): NodeJS.WriteStream | null {
+  if (process.platform === 'win32') return null
+  const fd = ownDescriptor(p)
+  return fd === 1 ? process.stdout : fd === 2 ? process.stderr : null
+}
+
+/** `p`, then each path its symlinks lead to in turn (the last one is no symlink). */
+function linkChain(p: string): string[] {
+  const chain = [p]
+  // The kernel's own bound on a symlink chain.
+  for (let hop = p; chain.length <= 40; ) {
+    let next: string
+    try {
+      next = fs.readlinkSync(hop)
+    } catch {
+      break
+    }
+    hop = path.resolve(path.dirname(hop), next)
+    chain.push(hop)
+  }
+  return chain
+}
+
+/**
+ * A device or kernel file (`/dev/…`, `/proc/…`): written in place. There is no
+ * directory there to put a temp file in, and replacing the name would not reach what
+ * it stands for.
+ */
+const isSystemPath = (p: string): boolean =>
+  process.platform !== 'win32' && /^\/(dev|proc)\//.test(p)
+
+/**
+ * The temp file could not be created beside the target: its directory is not ours to
+ * write, or is no real directory (`/dev/fd`). Written in place instead.
+ */
+const NO_TEMP_HERE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ENOTDIR'])
 
 /**
  * Save at `target`, replacing what is there (the person named the path). The new
@@ -159,11 +246,25 @@ const NO_TEMP_HERE = new Set(['EACCES', 'EPERM', 'EROFS'])
  * failed download leaves the old file as it was. As before, a symlink at `target` is
  * followed (its target is replaced; the link stays) and an existing file keeps its
  * permission bits. Where a rename cannot stand in for writing into the file, it is
- * written in place as before: a device or pipe (`/dev/stdout`), a file with other
- * hard links (they must see the new bytes), a dangling symlink, or a directory that
- * does not let us create the temp file.
+ * written in place as before: our own stdout / stderr (into the open descriptor), a
+ * device, pipe or anything else under `/dev` or `/proc`, a file with other hard links
+ * (they must see the new bytes), a dangling symlink, or a directory that does not let
+ * us create the temp file.
  */
 export async function saveReplacing(target: string, write: WriteBody): Promise<string> {
+  // The path itself or a symlink it leads through (`out` → `/dev/stdout` → on Linux
+  // `/proc/self/fd/1` → the redirect's file: the hop matters, not where it ends).
+  for (const hop of linkChain(target)) {
+    const stdio = stdioStream(hop)
+    if (stdio) {
+      await writeToStdio(stdio, write)
+      return target
+    }
+    if (isSystemPath(hop)) {
+      await writeInPlace(target, write)
+      return target
+    }
+  }
   fs.mkdirSync(path.dirname(target), { recursive: true })
   let real: string
   let existing: fs.Stats | null = null
@@ -184,7 +285,8 @@ export async function saveReplacing(target: string, write: WriteBody): Promise<s
     }
     real = target
   }
-  if (existing && (!existing.isFile() || existing.nlink > 1)) {
+  // Reached through a directory symlink (realpath resolves those too).
+  if (isSystemPath(real) || (existing && (!existing.isFile() || existing.nlink > 1))) {
     await writeInPlace(target, write)
     return target
   }

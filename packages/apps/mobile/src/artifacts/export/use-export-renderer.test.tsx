@@ -4,7 +4,8 @@ import {
   EXPORT_RENDER_SOURCE,
   type ExportRenderPage,
   type ExportRenderReply,
-  htmlSnapshotPage
+  HTML_RENDER_TIMEOUT_MS,
+  htmlRasterPage
 } from './render-pages'
 import { EXPORT_RENDER_TIMEOUT_MS, useExportRenderer } from './use-export-renderer'
 
@@ -67,9 +68,14 @@ describe('useExportRenderer: a hidden web view per render', () => {
     expect(props.source).toEqual({ html: '<html>page</html>' })
     expect(props.javaScriptEnabled).toBe(true)
     expect(props.pointerEvents).toBe('none')
-    // Only the page itself loads: no link, no redirect.
+    // Only the page itself loads (and an html artifact's srcdoc frame): no link, no
+    // redirect, no refresh, no remote frame.
     expect(props.onShouldStartLoadWithRequest({ url: 'about:blank' })).toBe(true)
+    expect(props.onShouldStartLoadWithRequest({ url: 'about:srcdoc' })).toBe(true)
     expect(props.onShouldStartLoadWithRequest({ url: 'https://x.dev' })).toBe(false)
+    expect(props.onShouldStartLoadWithRequest({ url: 'about:blank#x' })).toBe(false)
+    expect(props.onShouldStartLoadWithRequest({ url: 'data:text/html,x' })).toBe(false)
+    expect(props.onShouldStartLoadWithRequest({ url: 'javascript:alert(1)' })).toBe(false)
     // Noise the page didn't send is ignored, and so is a reply without its token.
     await act(async () => props.onMessage({ nativeEvent: { data: '{"hello":1}' } }))
     await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg id="forged"/>' }, 'x')))
@@ -109,13 +115,13 @@ describe('useExportRenderer: a hidden web view per render', () => {
 })
 
 // Review 6, #4: an html artifact's page runs the artifact's own scripts. A loop in one
-// never answers: the render fails after the timeout and its web view is unmounted
+// never answers: the render fails after its timeout and its web view is unmounted
 // (released), as any page's.
 describe('useExportRenderer: an html artifact', () => {
-  it("is laid out at the page's viewport; a page that loops is released at the timeout", async () => {
+  it("is laid out at the page's viewport; a page that loops is released at its timeout", async () => {
     jest.useFakeTimers()
     const host = await mount()
-    const looping = htmlSnapshotPage('<script>for (;;) {}</script>', 'loop.html')
+    const looping = htmlRasterPage('<script>for (;;) {}</script>', 'loop.html', 'void 0')
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
       result = host.run()(looping)
@@ -123,16 +129,27 @@ describe('useExportRenderer: an html artifact', () => {
     const props = screen.getByTestId('artifact-export-renderer', HIDDEN).props as {
       source: { html: string }
       style: unknown
-      onShouldStartLoadWithRequest: (r: { url: string }) => boolean
+      onShouldStartLoadWithRequest: (r: { url: string; isTopFrame?: boolean }) => boolean
     }
     expect(props.source.html).toBe(looping.html)
     expect(props.style).toEqual(
-      expect.arrayContaining([expect.objectContaining({ width: 595, height: 842 })])
+      expect.arrayContaining([expect.objectContaining({ width: 539, height: 780 })])
     )
-    expect(props.onShouldStartLoadWithRequest({ url: 'https://elsewhere.example' })).toBe(false)
+    // In the artifact's frame too: nothing but the page and its srcdoc.
+    expect(
+      props.onShouldStartLoadWithRequest({ url: 'https://elsewhere.example', isTopFrame: false })
+    ).toBe(false)
+    expect(props.onShouldStartLoadWithRequest({ url: 'about:srcdoc', isTopFrame: false })).toBe(
+      true
+    )
     const settled = expect(result).rejects.toThrow('Rendering the export took too long.')
+    // Drawing a long report takes longer than a diagram: still running at the default.
     await act(async () => {
       jest.advanceTimersByTime(EXPORT_RENDER_TIMEOUT_MS)
+    })
+    expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
+    await act(async () => {
+      jest.advanceTimersByTime(HTML_RENDER_TIMEOUT_MS - EXPORT_RENDER_TIMEOUT_MS)
     })
     await settled
     expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()

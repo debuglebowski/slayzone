@@ -9,6 +9,28 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 const picked = vi.hoisted(() => ({ dir: '', file: '' as string | null }))
 const revealed = vi.hoisted(() => [] as string[])
 
+/** When set, every write(2) through a FileHandle writes at most this many bytes. */
+const shortWrites = vi.hoisted(() => ({ max: 0 }))
+vi.mock('fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs/promises')>()
+  const open = (async (...args: Parameters<typeof real.open>) => {
+    const handle = await real.open(...args)
+    const write = handle.write.bind(handle) as (...a: unknown[]) => Promise<unknown>
+    ;(handle as unknown as { write: unknown }).write = (
+      buf: Uint8Array,
+      off?: number,
+      len?: number
+    ) => {
+      if (!shortWrites.max || !(buf instanceof Uint8Array)) return write(buf, off, len)
+      const start = off ?? 0
+      const want = len ?? buf.byteLength - start
+      return write(buf, start, Math.min(want, shortWrites.max))
+    }
+    return handle
+  }) as typeof real.open
+  return { ...real, default: { ...real, open }, open }
+})
+
 vi.mock('electron', () => ({
   app: { getPath: () => os.tmpdir() },
   BrowserWindow: {},
@@ -20,7 +42,9 @@ vi.mock('electron', () => ({
   shell: { showItemInFolder: (p: string) => revealed.push(p) }
 }))
 
-const { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner } = await import('./client-save')
+const { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner, copyInto } = await import(
+  './client-save'
+)
 const { EventEmitter } = await import('node:events')
 
 let root: string
@@ -722,5 +746,43 @@ describe.skipIf(process.platform === 'win32')('quit closes what it held open', (
     targets.abortAllNow()
     await expect.poll(openFds, { timeout: 2_000 }).toBe(baseline)
     expect(partials(root)).toEqual([])
+  })
+})
+
+// Review 7, #9: a write(2) may write fewer bytes than asked (a nearly full disk, some
+// network filesystems). Every byte still lands, or the download fails — never a file
+// committed short and reported saved.
+describe('short writes', () => {
+  afterEach(() => {
+    shortWrites.max = 0
+  })
+  const big = crypto.randomBytes(64 * 1024)
+
+  test('file target: every byte lands', async () => {
+    shortWrites.max = 1000
+    picked.file = path.join(root, 'short.bin')
+    const id = await openOk({ kind: 'file', fileName: 'short.bin', title: 't' })
+    await targets.write(SENDER, id, '', big)
+    await targets.write(SENDER, id, '', bytes('tail'))
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    expect(fs.readFileSync(picked.file)).toEqual(Buffer.concat([big, Buffer.from('tail')]))
+  })
+
+  test('folder target: every byte lands', async () => {
+    shortWrites.max = 1000
+    const id = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, id, 'docs/a.bin', big)
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    expect(fs.readFileSync(path.join(picked.dir, 'docs', 'a.bin'))).toEqual(big)
+  })
+
+  test('the copy fallback: every byte lands', async () => {
+    const src = path.join(root, 'src.bin')
+    fs.writeFileSync(src, big)
+    shortWrites.max = 1000
+    const fsp = await import('fs/promises')
+    const dest = await fsp.open(path.join(root, 'copy.bin'), 'wx')
+    await copyInto(src, dest).finally(() => dest.close())
+    expect(fs.readFileSync(path.join(root, 'copy.bin'))).toEqual(big)
   })
 })
