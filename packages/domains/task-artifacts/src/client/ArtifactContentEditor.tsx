@@ -932,7 +932,12 @@ function HtmlPreviewFrame({
       </div>
     )
   return (
-    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-white">
+    // Theme background, not white: this shows through before the frame's first
+    // paint (every artifact switch/save remounts it), so white flashed between
+    // dark pages. Unstyled pages still get a browser-correct canvas — Chromium
+    // paints an iframe's canvas opaque in the page's own scheme whenever it
+    // differs from ours, and with matching schemes the page wants our canvas.
+    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-background">
       <iframe
         ref={iframeRef}
         src={src}
