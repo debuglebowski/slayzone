@@ -2235,6 +2235,44 @@ describe('createRoutingPtyBackend', () => {
       expect(sent).toEqual([{ mode: 'claude-code' }, undefined, undefined])
     })
 
+    it.each([false, true])(
+      'an explicit replacement never adopts, including offline resend (%s)',
+      async (offline) => {
+        const gateway = new FakeGateway()
+        let connected = !offline
+        gateway.onMethod('pty.spawn', () => {
+          if (!connected) throw new RpcError(ComputerTransportErrorCodes.unknownComputer, 'offline')
+          return { pid: 1 }
+        })
+        const backend = createRoutingPtyBackend({ gateway, resolveComputerId: (s) => s.computerId })
+        if (!offline) connect(gateway, 'epoch-a')
+        const handle = backend.spawn(agentSpec({ takeOver: false })) as PtyHandle
+        if (offline) {
+          await settle()
+          connected = true
+          connect(gateway, 'epoch-a')
+        }
+        await handle.whenSpawned
+        expect(gateway.requestsOf('pty.spawn')).toHaveLength(offline ? 2 : 1)
+        for (const call of gateway.requestsOf('pty.spawn')) {
+          expect(call.params).not.toHaveProperty('adoptLive')
+        }
+      }
+    )
+
+    it('untracked kill and its verification have finite timeouts', async () => {
+      const { gateway, backend } = restartedHub()
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      gateway.calls.length = 0
+      await backend.killUntracked!('computer-1', 'task-1:tab-1', 'run-1')
+      for (const method of ['pty.kill', 'pty.list']) {
+        const timeout = requireCall(gateway, method).timeoutMs
+        expect(timeout).toBeGreaterThan(0)
+        expect(timeout).toBeLessThanOrEqual(5_000)
+      }
+    })
+
     it('a spawn the computer answers by taking the live session over continues that process', async () => {
       const { gateway, backend } = restartedHub()
       gateway.onMethod('pty.spawn', () => ({

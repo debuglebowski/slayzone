@@ -1,6 +1,7 @@
 import { getPtyHostBridge, type PtySessionWindow } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
+import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import {
   createPty,
   writePty,
@@ -316,14 +317,35 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   // adoption of that tab's running agent never interleave (review H2) — the later one
   // sees what the earlier one registered (and binds to it, never replaces it).
   const oneAtATime = createKeyedSerializer()
+  // A stop is also the next start's intent, even when the computer is offline or
+  // its first list has not landed. Only a successful ordinary create consumes it.
+  // Tokens preserve a newer stop that arrives while a create is being prepared.
+  const replaceNext = new Map<string, object>()
   const ptyCreate = (
     opts: PtyCreateOpts,
     win?: PtySessionWindow | null
-  ): Promise<PtyCreateResult> => oneAtATime(opts.sessionId, () => ptyCreateNow(opts, win))
+  ): Promise<PtyCreateResult> =>
+    oneAtATime(opts.sessionId, async () => {
+      const replacement = replaceNext.get(opts.sessionId)
+      if (replacement && opts.attach) {
+        return {
+          success: false,
+          code: 'attach-refused',
+          attachRefusal: 'not-adoptable',
+          error: 'This session was stopped; its next start must launch a new process.'
+        }
+      }
+      const result = await ptyCreateNow(opts, win, replacement !== undefined)
+      if (result.success && replacement && replaceNext.get(opts.sessionId) === replacement) {
+        replaceNext.delete(opts.sessionId)
+      }
+      return result
+    })
 
   const ptyCreateNow = async (
     opts: PtyCreateOpts,
-    win?: PtySessionWindow | null
+    win?: PtySessionWindow | null,
+    replace = false
   ): Promise<PtyCreateResult> => {
     const host = getPtyHostBridge()
     const targetWin = win ?? host.getFocusedWindow() ?? host.getAllWindows()[0]
@@ -394,6 +416,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     return createPty({
       win: targetWin,
       sessionId: opts.sessionId,
+      ...(replace ? { takeOver: false } : {}),
       computerId,
       projectId,
       cwd,
@@ -453,11 +476,25 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   // tracked here, the agent the computer still runs from a previous hub run is what
   // must end — else the new start would take that old agent over (review M2).
   const ptyKill = async (sessionId: string): Promise<boolean> => {
+    replaceNext.set(sessionId, {})
     if (killPty(sessionId)) return true
-    const outcome = await unattached.killBySession(sessionId)
-    // Attached while this waited: it is the tab's session now — end it as such.
-    if (outcome === 'attached') return killPty(sessionId)
-    return outcome === 'stopped'
+    try {
+      const outcome = await unattached.killBySession(sessionId)
+      // Either adoption path may have won while this waited (including a tab's
+      // in-flight spawn). Retry the tracked kill whenever the old attempt lost.
+      if (outcome === 'attached' || outcome === 'not-stopped') return killPty(sessionId)
+      return outcome === 'stopped'
+    } catch (err) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.orphan_kill_failed',
+        sessionId,
+        message: 'Could not stop an untracked terminal session; the next start will replace it.',
+        payload: { error: err instanceof Error ? err.message : String(err) }
+      })
+      return false
+    }
   }
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
   const ptyInterrupt = (sessionId: string) => interruptPty(sessionId)

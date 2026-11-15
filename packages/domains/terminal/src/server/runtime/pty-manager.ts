@@ -1394,6 +1394,8 @@ export function buildBaseEnv(): Record<string, string> {
 export interface CreatePtyOptions {
   win: PtySessionWindow
   sessionId: string
+  /** False after a requested stop/reset: never bind to a surviving adopted process. */
+  takeOver?: boolean
   /**
    * The session's task + tab, passed explicitly so the runtime no longer has to
    * decode them from the `sessionId` string (plans/agent-sessions.md slice 3 —
@@ -1615,7 +1617,12 @@ async function createPtyImpl(
   // resume a twin. Only a requested end (kill/restart) lets a start replace it.
   const atEntry = sessions.get(sessionId)
   const boundToAdopted = (session: PtySession | undefined): boolean =>
-    !continuation && !attaching && !!session?.adoptedAt && !session.exited && !session.killRequested
+    opts.takeOver !== false &&
+    !continuation &&
+    !attaching &&
+    !!session?.adoptedAt &&
+    !session.exited &&
+    !session.killRequested
   if (boundToAdopted(atEntry)) {
     recordDiagnosticEvent({
       level: 'info',
@@ -2214,6 +2221,7 @@ async function createPtyImpl(
       carryOutput?: { preamble: string }
     ): PtySpawnSpec => ({
       sessionId,
+      ...(opts.takeOver === false ? { takeOver: false } : {}),
       taskId,
       computerId,
       projectId: opts.projectId ?? null,

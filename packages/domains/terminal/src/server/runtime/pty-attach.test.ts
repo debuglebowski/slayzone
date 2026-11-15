@@ -392,6 +392,19 @@ test('a start after the hub attached binds to the adopted session too', async ()
   expect(events('pty.create_bound_to_adopted')).toHaveLength(1)
 })
 
+test('explicit replacement bypasses an adopted session and reaches the backend', async () => {
+  const b = fakeBackend()
+  const sid = nextSessionId()
+  expect(
+    (await createPty(agentOpts(sid, { attach: { computerId: 'pc', spawnId: 'run-1' } }))).success
+  ).toBe(true)
+  opened.push(sid)
+  expect((await createPty(agentOpts(sid, { takeOver: false }))).success).toBe(true)
+  expect(b.handles[0]!.killed).toBe(true)
+  expect(b.specs).toHaveLength(1)
+  expect(b.specs[0]).toMatchObject({ takeOver: false })
+})
+
 test('an explicit restart of an adopted session replaces it, and says so', async () => {
   const b = fakeBackend()
   const sid = nextSessionId()

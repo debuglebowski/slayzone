@@ -44,8 +44,10 @@ import type { OwnerMark } from './owner-policy'
  *               neither ambiguous nor theirs.
  *   projectRef  a project's id OR a case-insensitive name substring, else a unique
  *               id prefix (`resolveProjectRef`); same rule.
+ *   taskSession exact session ownership for `<taskId>:<tabId>` keys; other keys
+ *               have no task owner and require a separate computer check.
  */
-export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef'
+export type HttpIdMatch = 'exact' | 'prefix' | 'projectRef' | 'taskSession'
 
 /**
  * Where an id sits. REST: `params.<name>`, `query.<name>` or `body.<path>` (dotted;
@@ -101,6 +103,8 @@ const tagPrefix = ref('tag', 'prefix')
 const template = ref('template', 'exact')
 const templatePrefix = ref('template', 'prefix')
 const session = ref('session', 'exact')
+/** Task/tab keys require their task's owner; pooled keys have only a computer owner. */
+const taskSession = ref('session', 'taskSession')
 const tab = ref('tab', 'exact')
 const proc = ref('process', 'exact')
 const path = ref('path', 'exact')
@@ -376,17 +380,15 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
   // A previous hub run's sessions still running on a computer: its owner's.
-  // And the task's, when the session belongs to one (review L2). A session id with no
-  // task is ownerless here; such a session is managed through the app (tRPC, which
-  // checks its computer only).
+  // And the task's, when the session belongs to one (same rule as tRPC/list).
   'GET /api/pty/unattached': listed(unattachedRows),
   'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(
     computer('params.computerId'),
-    session('params.sessionId')
+    taskSession('params.sessionId')
   ),
   'DELETE /api/pty/unattached/:computerId/:sessionId': checked(
     computer('params.computerId'),
-    session('params.sessionId')
+    taskSession('params.sessionId')
   ),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──

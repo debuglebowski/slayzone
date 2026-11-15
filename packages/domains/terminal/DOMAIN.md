@@ -54,6 +54,12 @@ on no evidence:
   stays running and is listed with its reason (`pty.orphan_unattached`) — attach
   again or stop it (`pty.orphan_killed`). A tab start in another mode replaces it
   (`computer.orphan_replaced`).
+- **Restart/reset.** A tab stop records replacement intent for its next successful
+  start, even before the first session list or while its computer is offline.
+  That spawn omits `adoptLive`, including reconnect resends; proactive adoption
+  cannot consume the intent. Untracked stop cleanup has a shared 5 s RPC budget
+  for kill and verification. A failed cleanup records `pty.orphan_kill_failed`
+  and returns false so reset, restart and tab close can finish.
 
 ### Codex silence and cancellation provenance
 

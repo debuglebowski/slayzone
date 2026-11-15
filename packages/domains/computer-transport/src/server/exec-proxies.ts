@@ -598,12 +598,13 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
    */
   async function refreshUntracked(
     computerId: string,
-    sessionId: string
+    sessionId: string,
+    timeoutMs?: number
   ): Promise<ListedSession | null | undefined> {
     let parsed: ReturnType<typeof ptyListResultSchema.safeParse>
     try {
       parsed = ptyListResultSchema.safeParse(
-        await gateway.request(computerId, HubToComputerMethods.ptyList, {})
+        await gateway.request(computerId, HubToComputerMethods.ptyList, {}, timeoutMs)
       )
     } catch {
       return undefined
@@ -1382,8 +1383,16 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     async killUntracked(computerId: string, sessionId: string, spawnId: string) {
+      // User stop/reset must finish even if this computer's link is stalled.
+      // Share one finite budget between the stop and its verification.
+      const deadline = Date.now() + 5_000
       const reply = ptyKillResultSchema.safeParse(
-        await gateway.request(computerId, HubToComputerMethods.ptyKill, { sessionId, spawnId }, 0)
+        await gateway.request(
+          computerId,
+          HubToComputerMethods.ptyKill,
+          { sessionId, spawnId },
+          5_000
+        )
       )
       if (reply.success && reply.data.killed === true) {
         dropUntracked(computerId, sessionId, spawnId)
@@ -1391,7 +1400,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
       // Nothing matched (or an older computer that does not say): find out what runs
       // there now. Gone = stopped; another attempt = NOT stopped (it is listed instead).
-      const live = await refreshUntracked(computerId, sessionId)
+      const live = await refreshUntracked(computerId, sessionId, Math.max(1, deadline - Date.now()))
       if (live === undefined) return { stopped: false }
       return { stopped: live === null }
     },
@@ -1422,7 +1431,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const live = sessions.get(key)
         // Asked before `register` files the key: is this the first spawn of the id here?
         const takeOverLive =
-          !registeredKeys.has(key) && spec.detection !== undefined && !spec.carryOutput
+          spec.takeOver !== false &&
+          !registeredKeys.has(key) &&
+          spec.detection !== undefined &&
+          !spec.carryOutput
         const continuesAfter = spec.carryOutput
           ? Math.max(live && !live.disposed ? live.lastSeq : -1, lastSeqs.get(key) ?? -1)
           : -1

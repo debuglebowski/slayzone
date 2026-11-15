@@ -9,6 +9,8 @@ import { describe, expect, test } from 'vitest'
 import type { AccessScope, OwnedResource } from './access'
 import { TRPC_OWNER_POLICY, isCustomRef, type OwnerRule } from './owner-policy'
 import { REST_OWNER_POLICY } from './http-owner-policy'
+import { firstDeniedRef } from './http/owner-scope'
+import type { SlayzoneDb } from '@slayzone/platform'
 
 const scopeOf = (allowed: string[]): AccessScope => {
   const ok = (r: OwnedResource) => allowed.includes(`${r.kind}:${r.id}`)
@@ -74,6 +76,21 @@ describe('unattached sessions: computer AND (when it has one) task', () => {
         'computer@params.computerId',
         'session@params.sessionId'
       ])
+    }
+  })
+
+  test('REST attach / stop admit pooled ids on the owned computer, but enforce both owners for task ids', async () => {
+    for (const route of [
+      'POST /api/pty/unattached/:computerId/:sessionId/attach',
+      'DELETE /api/pty/unattached/:computerId/:sessionId'
+    ]) {
+      const refs = REST_OWNER_POLICY[route]!.ids!
+      for (const row of rows) {
+        const denied = await firstDeniedRef({} as SlayzoneDb, A, refs, { params: row })
+        expect(denied === null, `${route}: ${row.computerId}/${row.sessionId}`).toBe(
+          row.computerId === 'pc-a' && row.sessionId !== 't-b:t-b'
+        )
+      }
     }
   })
 })

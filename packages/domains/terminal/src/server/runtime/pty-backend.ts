@@ -20,6 +20,8 @@ import type { BufferSinceResult } from '@slayzone/terminal-contracts'
  *  them and just spawns `file`/`args` with `options`. */
 export interface PtySpawnSpec {
   sessionId: string
+  /** False for an explicit fresh start: replace any surviving process, even offline. */
+  takeOver?: boolean
   taskId: string
   computerId: string | null
   /**
