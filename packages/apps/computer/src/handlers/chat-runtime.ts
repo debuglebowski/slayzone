@@ -19,6 +19,7 @@ import { chatTestRequestSchema, handleChatTesting } from './chat-testing'
 import {
   openComputerChatRuntime,
   type OnlineComputerChatRuntime,
+  type createComputerChatRuntime,
   computerRequestSchema,
   type ChatBootstrap,
   isStorageOnlyChatOwner,
@@ -126,9 +127,37 @@ import { createTurnGitIo } from './turn-git-io'
 import { createConversationHealIo } from './conversation-heal-io'
 import type { SpawnAdmission } from '../spawn-admission'
 
-// Retain canonical async-runtime requests and add FU1 bounded byte validation.
+// Retain canonical async-runtime requests and add FU1 bounded transfer validation.
 const requestSchema = z.discriminatedUnion('kind', [
-  ...computerRequestSchema.options,
+  ...computerRequestSchema.options.filter(
+    (option) => !option.shape.kind.safeParse('attachment.put').success
+  ),
+  z.object({
+    kind: z.literal('attachment.put'),
+    route: chatRouteSchema,
+    ref: chatAttachmentSchema,
+    // Inline bytes (one frame's worth), or bytes staged with `upload.*` — exactly one.
+    data: z.string().max(14000000).optional(),
+    staged: z
+      .object({
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+      })
+      .optional()
+  }),
+  // Staged uploads (FU1 S3): a file's bytes in chunks of ≤ 256 KiB, by hash + size.
+  z.object({
+    kind: z.literal('upload.begin'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+  }),
+  z.object({
+    kind: z.literal('upload.chunk'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    data: z.string().max(Math.ceil(BYTE_RANGE_MAX_CHUNK / 3) * 4)
+  }),
   // One range (≤ 256 KiB) of an attachment or an archived file — the bounded twin of
   // `attachment.read` / `archive.file` / `archive.attachment` (same checks).
   z.object({
@@ -228,6 +257,8 @@ export function createChatRuntimeHandlers(opts: {
   admission?: SpawnAdmission
   /** Tests only: starts provider processes (default: `child_process.spawn`). */
   spawnProcess?: ProcHandlerOptions['spawnProcess']
+  /** Host-held staging only; publication reserves its exact lease on the canonical owner seam. */
+  uploads?: ReturnType<typeof createComputerChatRuntime>['uploads']
   hasTaskWork?(taskId: string): boolean
   stopTask?(taskId: string, state?: 'paused' | 'deleted'): Promise<void>
 }) {
@@ -800,8 +831,24 @@ export function createChatRuntimeHandlers(opts: {
         return await r.requests.handle(req)
       case 'attachment.has':
         return await r.requests.handle(req)
-      case 'attachment.put':
-        return await r.requests.handle(req)
+      case 'upload.begin':
+        if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
+        return await opts.uploads.begin(req.sha256, req.size)
+      case 'upload.chunk':
+        if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
+        return await opts.uploads.chunk(
+          req.sha256,
+          req.size,
+          req.offset,
+          Buffer.from(req.data, 'base64')
+        )
+      case 'attachment.put': {
+        if ((req.data === undefined) === (req.staged === undefined))
+          throw new Error('Attachment put names inline data or staged bytes, exactly one')
+        if (req.data === undefined)
+          throw new Error('Staged attachments require the canonical-owner upload lease adapter')
+        return await r.requests.handle({ ...req, data: req.data })
+      }
       case 'attachment.read':
         return await r.requests.handle(req)
       case 'bytes.read': {

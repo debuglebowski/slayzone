@@ -625,11 +625,18 @@ export function createArtifactStore(dataDir: string) {
       spec: ArtifactReadSpec
     ): Promise<ArtifactReadSource> {
       const blobs = new BlobStore(dataDir)
-      const blob = (version: ArtifactVersion): ArtifactReadSource => ({
-        kind: 'blob',
-        path: blobs.blobPath(version.content_hash),
-        version
-      })
+      /** As `BlobStore.read`: a blob staged for GC is restored first; a missing one fails alike. */
+      const present = (version: ArtifactVersion): boolean => {
+        blobs.restoreDeleted(version.content_hash)
+        return existsSync(blobs.blobPath(version.content_hash))
+      }
+      const blob = (version: ArtifactVersion): ArtifactReadSource => {
+        if (!present(version))
+          throw new VersionError('BLOB_MISSING', `Blob not found: ${version.content_hash}`, {
+            hash: version.content_hash
+          })
+        return { kind: 'blob', path: blobs.blobPath(version.content_hash), version }
+      }
       const resolve = (versionRef: VersionRef) =>
         db.namedTxn('task-artifacts:versions:resolve', {
           artifactId,
@@ -657,7 +664,16 @@ export function createArtifactStore(dataDir: string) {
           )
           if (existsSync(legacyPath)) return { kind: 'file', path: legacyPath }
           if (existing.current_version_id == null) return { kind: 'empty' }
-          return resolve('current').then(blob, () => ({ kind: 'empty' }) as ArtifactReadSource)
+          // The whole read answers '' whenever reading the current version fails: no
+          // such version, its blob missing (here) or corrupt (the ranged reader checks
+          // the hash on its first range).
+          return resolve('current').then(
+            (version): ArtifactReadSource =>
+              present(version)
+                ? { kind: 'blob', path: blobs.blobPath(version.content_hash), version }
+                : { kind: 'empty' },
+            (): ArtifactReadSource => ({ kind: 'empty' })
+          )
         }
         case 'version':
           return blob(await resolve(spec.ref))

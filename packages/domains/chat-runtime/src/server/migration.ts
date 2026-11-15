@@ -32,6 +32,14 @@ export function createChatMigration(opts: {
   ownership: ChatOwnershipStore
   source: ChatMigrationSource
   request: ChatComputerRequest
+  /**
+   * An attachment's bytes for `attachment.put` on `computerId`: staged in chunks
+   * or inline (FU1 S3). Absent: inline base64, as before.
+   */
+  attachmentBytes?: (
+    computerId: string,
+    bytes: Uint8Array
+  ) => Promise<{ data: string } | { staged: { sha256: string; size: number } }>
 }) {
   const pending = new Map<string, Promise<HubChatOwnership>>()
   async function current(id: string) {
@@ -137,7 +145,9 @@ export function createChatMigration(opts: {
           kind: 'attachment.put',
           route: { id, epoch: owner.epoch + 1 },
           ref,
-          data: Buffer.from(bytes).toString('base64')
+          ...(opts.attachmentBytes
+            ? await opts.attachmentBytes(destination, bytes)
+            : { data: Buffer.from(bytes).toString('base64') })
         })
       }
       const complete = (await opts.request(destination, { kind: 'migration.verify', id })) as {

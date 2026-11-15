@@ -59,6 +59,31 @@ export function readFileRangePage(
   }
 }
 
+/** Whether the file at `path` hashes to `hash` (read in chunks, never whole); false when unreadable. */
+export function fileHashMatches(path: string, hash: string): boolean {
+  let fd: number
+  try {
+    fd = openSync(path, 'r')
+  } catch {
+    return false
+  }
+  try {
+    const h = createHash('sha256')
+    const buffer = Buffer.allocUnsafe(BYTE_RANGE_MAX_CHUNK)
+    for (
+      let n = readSync(fd, buffer, 0, buffer.length, null);
+      n > 0;
+      n = readSync(fd, buffer, 0, buffer.length, null)
+    )
+      h.update(buffer.subarray(0, n))
+    return h.digest('hex') === hash
+  } catch {
+    return false
+  } finally {
+    closeSync(fd)
+  }
+}
+
 /** The empty source's one range. */
 export const EMPTY_RANGE_PAGE: ByteRangePage = {
   data: '',

@@ -969,6 +969,7 @@ run_harness packages/apps/hub/src/computer-chat-maintenance.test.ts
 run_harness packages/apps/hub/src/computer-artifacts.test.ts
 run_harness packages/apps/hub/src/computer-artifacts-ranges.test.ts
 run_harness packages/apps/hub/src/computer-chat-ranges.test.ts
+run_harness packages/apps/hub/src/computer-uploads.test.ts
 # Decision 4: files a restored computer no longer holds stay listed as unavailable.
 run_harness packages/apps/hub/src/computer-artifacts-unavailable.test.ts
 run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
@@ -980,6 +981,7 @@ run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
 run_harness packages/domains/chat-runtime/src/server/archive-privacy.test.ts
 run_harness packages/domains/chat-runtime/src/server/byte-ranges.test.ts
+run_harness packages/domains/chat-runtime/src/server/upload-staging.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
 # §5: lifecycle revisions never trusted as proof (rebase, inventory, idempotent erasure).
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle-rebase.test.ts

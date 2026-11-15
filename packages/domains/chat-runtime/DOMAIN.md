@@ -542,3 +542,31 @@ fresh whole-FU2 review remain required.
   must preserve the native registration through its whole awaited action and
   post-await database checks. Closed port registration, async caller adaptation
   and final completed-tree checks remain later integration work.
+
+- **Uploads are staged in chunks (FU1 S3, 2026-11-15).**
+  - **What changed:** a hub used to send an artifact upload, a content write or an attachment as one base64 frame, capped at 14,000,000 chars by the schemas. Now it stages the bytes with `upload.begin` / `upload.chunk` (≤ 256 KiB each; `upload-staging.ts`, `<storage>/uploads/<sha256>-<size>.part`). The staging is resumable and in order, verified on `take`, released after use, and swept after 24 h.
+  - **How the upload names them:** `uploadArtifactBlob`, `writeArtifactContent` and `attachment.put` take `staged: {sha256, size}` in place of `data`; exactly one of the two. Every check that inline bytes get still applies, because the staged bytes go through the same `attachments.put` / store calls; for example the per-kind attachment size limit, which is tested.
+  - **Size:** this gives parity with hub-local uploads, which never had the 14M cap.
+  - **Older computers:** the hub still sends them inline. Over the cap the hub refuses before encoding, as a frame-too-large error (`hub/computer-uploads.ts`).
+  - **Migration:** the legacy migration's `attachment.put` uses the same path through `createChatMigration({ attachmentBytes })`.
+
+- **Upload integration during backend replay.** The historical staging manager and
+  bounded `upload.begin` / `upload.chunk` validation are retained. The actual online
+  handler accepts a host-held `uploads` dependency; production injection and its
+  lifetime/erasure wiring remain S19 work. A missing injection refuses staging.
+  Standalone compatibility assembly keeps the existing composed services and B5
+  publication/lifecycle/erasure behavior, and exposes its staging dependency without
+  recreating native services. Artifact hooks retain their B5 failure, availability
+  and task-access callbacks alongside the historical upload dependency.
+  New staged final artifact/attachment requests explicitly refuse the old whole-file
+  compatibility consumers until the canonical-owner adapter is connected; existing
+  inline paths remain. Delivered artifact replay is checked before this refusal,
+  and a new staged refusal precedes command acceptance. No `take`/whole staged-file
+  Buffer or consume/release runs on main as a fallback. Final artifact invokes must
+  use `artifactPublication.start` with the original validated intent and exact
+  host-held source lease; attachment publication needs its existing ownership,
+  per-kind limits and prepared/active semantics on the same owner seam. Source
+  release still requires matched physical quiescence or owner exit, including
+  abort/erasure/close failures. See [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md).
+  Canonical request-schema consolidation, the later owned/durable staging replay
+  and final actual-invoke checks remain required; this partial merge is not H2 DONE.

@@ -1,4 +1,5 @@
 import { type ByteRangePage, collectByteRanges } from '@slayzone/platform/bounded-reads'
+import { uploadBytesFor } from './computer-uploads'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
@@ -650,7 +651,11 @@ export function createComputerChatServices(opts: {
         kind: 'attachment.put',
         route,
         ref: pinned,
-        data: Buffer.from(bytes).toString('base64')
+        ...(await uploadBytesFor({
+          bounded: opts.boundedReads?.(pc) === true,
+          send: (body) => request(pc, body),
+          source: bytes
+        }))
       }) as Promise<ChatAttachment>
     }
     async function content(blocks: UserContentBlock[] | undefined) {
@@ -667,7 +672,17 @@ export function createComputerChatServices(opts: {
         draft.attachments[i] = await seal(draft.attachments[i])
     }
   }
-  const migration = createChatMigration({ ownership, source, request })
+  const migration = createChatMigration({
+    ownership,
+    source,
+    request,
+    attachmentBytes: (pc, bytes) =>
+      uploadBytesFor({
+        bounded: opts.boundedReads?.(pc) === true,
+        send: (body) => request(pc, body),
+        source: bytes
+      })
+  })
   /**
    * Is the hub still the source of this task's legacy chat history (its unmigrated
    * chat events)? Task-wide content migrates with the task's
@@ -1427,11 +1442,18 @@ export function createComputerChatServices(opts: {
       },
       async putAttachment(input) {
         const pc = await moveComputerOf(input.taskId)
+        const route = { id: input.conversationId, epoch: input.epoch }
         await computerRequest(pc, {
           kind: 'attachment.put',
-          route: { id: input.conversationId, epoch: input.epoch },
+          route,
           ref: input.ref,
-          data: input.data
+          ...(opts.boundedReads?.(pc)
+            ? await uploadBytesFor({
+                bounded: true,
+                send: (body) => computerRequest(pc, body),
+                source: Buffer.from(input.data, 'base64')
+              })
+            : { data: input.data })
         })
       },
       async activate(input) {

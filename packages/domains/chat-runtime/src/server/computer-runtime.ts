@@ -3,6 +3,7 @@ import { createChatScopeAuthority } from './scope-authority'
 import { createChatRetention } from './retention'
 import { parseChatInvocation, type ChatTabTransition } from '../shared'
 import { createChatInvoker } from './invocation'
+import { createUploadStaging } from './upload-staging'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
 import type { EventMarkerBackfillOptions } from './event-marker-backfill'
 import { createStorageCompaction, type StorageCompactionOptions } from './storage-compaction'
@@ -88,6 +89,9 @@ export function assembleComputerChatRuntime(
     backups,
     workspaceStore
   } = services
+  // Historical standalone staging dependency; online composition holds it on main.
+  const uploads = createUploadStaging(storage.dir)
+  uploads.sweep()
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
   const userInputSessions = new Set<string>()
@@ -337,6 +341,7 @@ export function assembleComputerChatRuntime(
     attachments,
     backups,
     artifacts,
+    uploads,
     workspaceStore,
     local,
     transport,

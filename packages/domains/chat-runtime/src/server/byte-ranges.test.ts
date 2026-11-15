@@ -6,15 +6,16 @@
  * ranges put together equal the whole read exactly.
  */
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   BYTE_RANGE_MAX_CHUNK,
   type ByteRangePage,
   collectByteRanges
 } from '@slayzone/platform/bounded-reads'
+import { BlobStore } from '@slayzone/task-artifacts/storage'
 import { createComputerChatRuntime } from './computer-runtime'
 
 const dirs: string[] = []
@@ -216,5 +217,159 @@ describe('archived files and attachments, live attachments', () => {
     )
     expect(Buffer.from(live).equals(Buffer.from(await r.attachments.reader.read(ref)))).toBe(true)
     expect(() => r.attachments.range({ id: 'c2', epoch: 1 }, ref, 0, 1)).toThrow(/belong/i)
+  })
+})
+
+/** Every file under `dir`. */
+function walk(dir: string): string[] {
+  const out: string[] = []
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) out.push(...walk(p))
+    else out.push(p)
+  }
+  return out
+}
+
+/**
+ * The text read (`content`) keeps the whole read's answers in every state its
+ * working file and current version can be in: the ranged path answers what
+ * `readArtifactContent` answers — including '' where that read caught a failure of
+ * the version read (no version, its blob missing, its blob corrupt), and the
+ * restored content of a blob staged for GC (`BlobStore.read` restores it).
+ */
+describe('content parity with readArtifactContent', () => {
+  async function setup(text: string, title = 'doc.txt') {
+    const r = runtime()
+    const a = (await r.artifacts.invoke({
+      route,
+      method: 'uploadArtifactBlob',
+      operationId: `up-${title}`,
+      args: [{ taskId: 't', title, data: Buffer.from(text).toString('base64') }]
+    })) as { id: string; title: string }
+    const current = (await r.artifacts.invoke({
+      route,
+      method: 'getCurrentArtifactVersion',
+      args: [{ artifactId: a.id }]
+    })) as { content_hash: string }
+    const files = walk(dirs[dirs.length - 1])
+    const blob = files.find(
+      (f) => f.includes(`${sep}blobs${sep}`) && f.endsWith(current.content_hash.slice(2))
+    )!
+    let blobsRoot = blob
+    while (basename(blobsRoot) !== 'blobs') blobsRoot = dirname(blobsRoot)
+    const working = () =>
+      walk(dirs[dirs.length - 1]).find(
+        (f) => f.includes(`${sep}artifacts${sep}`) && basename(f).startsWith(a.id)
+      )
+    return {
+      r,
+      a,
+      hash: current.content_hash,
+      blob,
+      blobs: new BlobStore(dirname(blobsRoot)),
+      working
+    }
+  }
+  const old = (r: ReturnType<typeof runtime>, id: string) =>
+    r.artifacts.invoke({ route, method: 'readArtifactContent', args: [id] })
+  const ranged = async (r: ReturnType<typeof runtime>, id: string) =>
+    Buffer.from((await readAll(r, id, { kind: 'content' })).bytes).toString('utf8')
+  const removeWorking = (path: string | undefined) => {
+    expect(path).toBeDefined()
+    unlinkSync(path!)
+  }
+
+  it('an empty artifact', async () => {
+    const { r, a } = await setup('')
+    expect(await old(r, a.id)).toBe('')
+    expect(await ranged(r, a.id)).toBe('')
+  })
+
+  it('no working file: the current version', async () => {
+    const { r, a, working } = await setup('versioned text')
+    removeWorking(working())
+    expect(await old(r, a.id)).toBe('versioned text')
+    expect(await ranged(r, a.id)).toBe('versioned text')
+  })
+
+  it('no working file, its blob gone: the whole read answered ""', async () => {
+    const { r, a, working, blob } = await setup('gone')
+    removeWorking(working())
+    unlinkSync(blob)
+    expect(await old(r, a.id)).toBe('')
+    expect(await ranged(r, a.id)).toBe('')
+  })
+
+  it('no working file, its blob corrupt: ""', async () => {
+    const { r, a, working, blob } = await setup('corrupt me')
+    removeWorking(working())
+    writeFileSync(blob, 'tampered')
+    expect(await old(r, a.id)).toBe('')
+    expect(await ranged(r, a.id)).toBe('')
+  })
+
+  it('no working file, its blob staged for GC: restored, its text', async () => {
+    const { r, a, working, blob, blobs, hash } = await setup('staged text')
+    removeWorking(working())
+    blobs.stageDelete(hash)
+    unlinkSync(blob)
+    expect(await ranged(r, a.id)).toBe('staged text')
+    expect(await old(r, a.id)).toBe('staged text')
+  })
+
+  it('never-written content (no working file, no current version): ""', async () => {
+    const { r, a, working } = await setup('to be forgotten')
+    removeWorking(working())
+    r.storage.compose((raw) =>
+      raw.prepare('UPDATE task_artifacts SET current_version_id=NULL WHERE id=?').run(a.id)
+    )
+    expect(await old(r, a.id)).toBe('')
+    expect(await ranged(r, a.id)).toBe('')
+  })
+
+  it('a folder id: refused alike', async () => {
+    const r = runtime()
+    const folder = (await r.artifacts.invoke({
+      route,
+      method: 'createFolder',
+      operationId: 'folder',
+      args: [{ taskId: 't', name: 'F' }]
+    })) as { id: string }
+    const oldError = await old(r, folder.id).then(
+      () => null,
+      (e: Error) => e.message
+    )
+    const rangedError = await ranged(r, folder.id).then(
+      () => null,
+      (e: Error) => e.message
+    )
+    expect(oldError).not.toBeNull()
+    expect(rangedError).toBe(oldError)
+  })
+
+  it('a renamed artifact', async () => {
+    const { r, a } = await setup('named')
+    await r.artifacts.invoke({
+      route,
+      method: 'updateArtifact',
+      operationId: 'rename',
+      args: [{ id: a.id, title: 'renamed.txt' }]
+    })
+    expect(await ranged(r, a.id)).toBe(await old(r, a.id))
+    expect(await ranged(r, a.id)).toBe('named')
+  })
+
+  it('bytes and version reads restore a GC-staged blob too (as BlobStore.read does)', async () => {
+    const { r, a, working, blob, blobs, hash } = await setup('bytes text')
+    removeWorking(working())
+    blobs.stageDelete(hash)
+    unlinkSync(blob)
+    expect(Buffer.from((await readAll(r, a.id, { kind: 'bytes' })).bytes).toString()).toBe(
+      'bytes text'
+    )
+    expect(
+      Buffer.from((await readAll(r, a.id, { kind: 'version', ref: 1 })).bytes).toString()
+    ).toBe('bytes text')
   })
 })

@@ -18,6 +18,7 @@ import {
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
+import { uploadBytesFor } from './computer-uploads'
 
 const reads = new Set([
   'listArtifactsByTask',
@@ -377,6 +378,7 @@ export function createComputerArtifactStorage(opts: {
       )) as ArtifactFolder
       folderId = folder.id
     }
+    const pc = owner.computerId!
     return call(
       owner,
       'uploadArtifactBlob',
@@ -385,7 +387,12 @@ export function createComputerArtifactStorage(opts: {
           taskId: data.taskId,
           title: data.title,
           folderId,
-          data: Buffer.from(data.bytes).toString('base64')
+          // Staged in chunks to a computer that takes them, else inline (FU1 S3).
+          ...(await uploadBytesFor({
+            bounded: opts.boundedReads?.(pc) === true,
+            send: (body) => chat.lifecycle.request(pc, body as never),
+            source: data.bytes
+          }))
         }
       ],
       operationId
@@ -735,12 +742,18 @@ export function createComputerArtifactStorage(opts: {
           }
         }
         if (key === 'writeArtifactContent') {
+          const pc = owner.computerId!
           return call(owner, 'writeArtifactContent', [
             {
               ...first,
               sourcePath: undefined,
               bytes: undefined,
-              data: Buffer.from(first.bytes ?? readFileSync(first.sourcePath)).toString('base64')
+              // A file is staged range by range, never read whole (FU1 S3).
+              ...(await uploadBytesFor({
+                bounded: opts.boundedReads?.(pc) === true,
+                send: (body) => chat.lifecycle.request(pc, body as never),
+                source: first.bytes ?? { path: first.sourcePath }
+              }))
             }
           ])
         }

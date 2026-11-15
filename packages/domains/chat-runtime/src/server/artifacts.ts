@@ -27,14 +27,25 @@ import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
 import { bumpTaskStateVersion, type ChatStorage } from './storage'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
-import { EMPTY_RANGE_PAGE, readFileRangePage } from './blob-store'
+import { EMPTY_RANGE_PAGE, fileHashMatches, readFileRangePage } from './blob-store'
 import type { createLocalChatData } from './local-data'
 import type { createLocalAttachments } from './attachments'
+import type { UploadStaging } from './upload-staging'
 
 const id = z.string().min(1).max(200),
   title = z.string().min(1).max(512),
   ref = z.union([z.string().max(200), z.number().int()])
 const artifact = id.transform((v) => v)
+/** Inline bytes, base64 — one frame's worth (bigger bytes are staged). */
+const base64 = z
+  .string()
+  .max(14_000_000)
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+/** Bytes staged on this computer (`upload-staging.ts`), by hash and size. */
+const stagedBytes = z.object({
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+})
 const object = z.object({ artifactId: id })
 const author = z.object({ type: z.enum(['user', 'agent']).nullable(), id: z.string().nullable() })
 export const artifactMethodSchemas = {
@@ -45,15 +56,18 @@ export const artifactMethodSchemas = {
   readArtifactText: z.tuple([id]),
   getArtifactMtime: z.tuple([id]),
   uploadArtifactBlob: z.tuple([
-    z.object({
-      taskId: id,
-      title,
-      data: z
-        .string()
-        .max(14_000_000)
-        .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-      folderId: id.nullish()
-    })
+    z
+      .object({
+        taskId: id,
+        title,
+        data: base64.optional(),
+        // Bytes a hub staged in chunks (`upload.begin` / `upload.chunk`; FU1 S3).
+        staged: stagedBytes.optional(),
+        folderId: id.nullish()
+      })
+      .refine((v) => (v.data === undefined) !== (v.staged === undefined), {
+        message: 'name inline data or staged bytes, exactly one'
+      })
   ]),
   updateArtifact: z.tuple([
     z
@@ -113,16 +127,18 @@ export const artifactMethodSchemas = {
     })
   ]),
   writeArtifactContent: z.tuple([
-    object.extend({
-      data: z
-        .string()
-        .max(14_000_000)
-        .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-      append: z.boolean().optional(),
-      mutateCurrent: z.boolean().optional(),
-      mutateRef: ref.optional(),
-      author: author.optional()
-    })
+    object
+      .extend({
+        data: base64.optional(),
+        staged: stagedBytes.optional(),
+        append: z.boolean().optional(),
+        mutateCurrent: z.boolean().optional(),
+        mutateRef: ref.optional(),
+        author: author.optional()
+      })
+      .refine((v) => (v.data === undefined) !== (v.staged === undefined), {
+        message: 'name inline data or staged bytes, exactly one'
+      })
   ]),
   /** On the DESTINATION task's route: re-owns entries of `sourceTaskId` here. */
   moveToTask: z.tuple([
@@ -197,16 +213,22 @@ export const computerArtifactRequestSchema = z.object({
   operationId: id.optional()
 })
 
+type LocalArtifactHooks = {
+  failure?(error: unknown): void
+  available?(): void
+  artifactAccess?<T>(taskId: string, work: () => Promise<T>): Promise<T>
+}
+
 export function createLocalArtifacts(
   storage: ChatStorage,
   local: ReturnType<typeof createLocalChatData>,
   attachments: ReturnType<typeof createLocalAttachments>,
-  hooks: {
-    failure?(error: unknown): void
-    available?(): void
-    artifactAccess?<T>(taskId: string, work: () => Promise<T>): Promise<T>
-  } = {}
+  hooksOrUploads: LocalArtifactHooks | UploadStaging = {},
+  uploadStaging?: UploadStaging
 ) {
+  // Keep B5 hooks in position four and the historical standalone upload dependency.
+  const hooks: LocalArtifactHooks = 'begin' in hooksOrUploads ? {} : hooksOrUploads
+  const uploads = uploadStaging ?? ('begin' in hooksOrUploads ? hooksOrUploads : undefined)
   const context = new AsyncLocalStorage<import('../shared').ConversationIdentity>()
   let mutationTail: Promise<unknown> = Promise.resolve()
   let mutationPending = 0
@@ -505,6 +527,17 @@ export function createLocalArtifacts(
       )
       if (req.method === 'updateArtifact') await checkFolder(first.folderId, taskId)
     }
+    if (
+      (req.method === 'uploadArtifactBlob' || req.method === 'writeArtifactContent') &&
+      first.staged !== undefined
+    ) {
+      // Delivered replay above needs no source. New staged work must use B5's
+      // inspected source grant and physical lease, never this compatibility path.
+      staging()
+      throw new Error(
+        'Staged artifact publication requires the canonical-owner upload lease adapter'
+      )
+    }
     if (!read) {
       storage.acceptCommand(owner.identity.id, req.route.epoch, req.operationId!, {
         method: req.method,
@@ -554,12 +587,12 @@ export function createLocalArtifacts(
           }))
         )
         result = null
-      } else if (req.method === 'uploadArtifactBlob')
+      } else if (req.method === 'uploadArtifactBlob') {
         result = await store.uploadArtifactBlob(db, {
           ...first,
           bytes: Buffer.from(first.data, 'base64')
         })
-      else if (req.method === 'writeArtifactContent') {
+      } else if (req.method === 'writeArtifactContent') {
         const dir = mkdtempSync(join(storage.dir, '.write-')),
           sourcePath = join(dir, 'content')
         try {
@@ -591,6 +624,15 @@ export function createLocalArtifacts(
         if (source.kind === 'missing' || source.kind === 'empty') {
           if (offset !== 0) throw new Error('Range offset past the end')
           result = { ...EMPTY_RANGE_PAGE, ...(source.kind === 'missing' ? { missing: true } : {}) }
+        } else if (
+          spec.kind === 'content' &&
+          source.kind === 'blob' &&
+          offset === 0 &&
+          !fileHashMatches(source.path, source.version.content_hash)
+        ) {
+          // The text read answers '' when the current version cannot be read (as
+          // `readArtifactContent`, which catches it): a corrupt or unreadable blob.
+          result = EMPTY_RANGE_PAGE
         } else {
           const hash = source.kind === 'blob' ? source.version.content_hash : undefined
           const page = readFileRangePage(source.path, offset, length, hash)
@@ -709,6 +751,10 @@ export function createLocalArtifacts(
       }
       return result
     })
+  }
+  function staging(): UploadStaging {
+    if (!uploads) throw new Error('Staged uploads are not available on this computer')
+    return uploads
   }
   const inFlight = new Map<string, { input: string; result: Promise<unknown> }>()
   async function invoke(raw: unknown): Promise<unknown> {
