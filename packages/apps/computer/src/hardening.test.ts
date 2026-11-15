@@ -89,7 +89,9 @@ function dispatchFor(config: ComputerConfig, folders: Record<string, string> = {
   })
 }
 
-function logLines(): Record<string, unknown>[] {
+/** The request log as written: its lines are appended off the request path (FU5). */
+async function logLines(): Promise<Record<string, unknown>[]> {
+  await log.flush()
   return readFileSync(log.filePath, 'utf8')
     .split('\n')
     .filter((l) => l.length > 0)
@@ -209,7 +211,7 @@ describe('folder limits stay local', () => {
     expect(err.message).toMatch(/slay computer roots cloud-device --add/)
     expect(config.allowedRoots).toEqual([root])
 
-    const [line] = logLines()
+    const [line] = await logLines()
     expect(line).toMatchObject({
       method: 'computer.setAllowedRoots',
       actor: ACTOR,
@@ -258,8 +260,11 @@ describe('folder limits stay local', () => {
         await new Promise((r) => setTimeout(r, 200))
       }
       expect(config.allowedRoots).toEqual([root, added])
-      expect(logLines().some((l) => l.method === 'local.allowedRoots' && l.hub === 'local')).toBe(
-        true
+      // Written by the computer's own log instance, off the request path: wait for it.
+      await vi.waitFor(async () =>
+        expect(
+          (await logLines()).some((l) => l.method === 'local.allowedRoots' && l.hub === 'local')
+        ).toBe(true)
       )
     } finally {
       await handle.stop()
@@ -364,7 +369,7 @@ describe('local request log', () => {
       )
     )
 
-    const lines = logLines()
+    const lines = await logLines()
     expect(lines.map((l) => [l.method, l.result])).toEqual([
       ['fs.writeFile', 'ok'],
       ['git.isGitRepo', 'ok'],
@@ -384,7 +389,7 @@ describe('local request log', () => {
     expect(statSync(log.filePath).mode & 0o777).toBe(0o600)
   })
 
-  it('rotates by size and keeps the configured generations', () => {
+  it('rotates by size and keeps the configured generations', async () => {
     const small = createRequestLog({ stateDir: join(dir, 'rot'), maxBytes: 400, keep: 2 })
     for (let i = 0; i < 20; i++) {
       small.record({
@@ -395,6 +400,7 @@ describe('local request log', () => {
         result: 'ok'
       })
     }
+    await small.flush()
     expect(statSync(small.filePath).size).toBeLessThanOrEqual(400)
     expect(statSync(`${small.filePath}.1`).size).toBeGreaterThan(0)
     expect(statSync(`${small.filePath}.2`).size).toBeGreaterThan(0)
@@ -447,7 +453,7 @@ describe('local request log', () => {
     )) as { results: { path: string }[] }
     expect(found.results.filter((r) => r.path.includes(REQUEST_LOG_DIR_NAME))).toEqual([])
     // The log is intact: one line per request above, refusals included.
-    expect(logLines().length).toBe(1 + attempts.length + 1)
+    expect((await logLines()).length).toBe(1 + attempts.length + 1)
   })
 })
 
@@ -478,7 +484,7 @@ describe('processes start inside the jail', () => {
         )
       )
       expect(pty.code).toBe(ComputerTransportErrorCodes.refusedByComputer)
-      expect(logLines().map((l) => l.result)).toEqual(['refused', 'refused'])
+      expect((await logLines()).map((l) => l.result)).toEqual(['refused', 'refused'])
     } finally {
       dispatch.dispose()
     }
@@ -690,7 +696,7 @@ describe('protocol mismatch', () => {
       expect(err.code).toBe(ComputerTransportErrorCodes.protocolMismatch)
       expect(err.message).toMatch(/upgrade the hub/)
     }
-    expect(logLines().map((l) => [l.result, l.actor])).toEqual([
+    expect((await logLines()).map((l) => [l.result, l.actor])).toEqual([
       ['refused', null],
       ['refused', null],
       ['refused', null]

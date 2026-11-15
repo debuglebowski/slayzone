@@ -1247,6 +1247,8 @@ export function startComputer(
       rtcAnswerer?.close()
       directGrants.close()
       stallDetector.stop()
+      // Every request line recorded before stop is on disk when stop resolves.
+      await requestLog.close()
     }
   }
   return handle

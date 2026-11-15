@@ -13,6 +13,12 @@
  *     fs/git/proc frame can name it even when an allowed root contains it.
  *   - Append-only by construction: every write opens with `O_APPEND`, and the file
  *     and its directory are created `0600` / `0700` in the computer's own state dir.
+ *   - Off the request path (FU5 computer stalls): `record` only queues the line; ONE
+ *     writer appends the queued lines in order, batched, through `fs.promises` (the
+ *     libuv pool), opening the file anew for each batch — so a file a shell removed is
+ *     created again, as before. `flush()` waits for what was recorded; `close()` /
+ *     process exit write what is still queued synchronously. A hard kill loses at most
+ *     the lines of the current turn of the event loop (accepted: orders FU5 Q1).
  *   - Rotated by SIZE, by this module alone: `requests.log` → `.1` … `.{keep}`;
  *     the oldest generation is overwritten. Never on a hub command.
  *   Frame-level only: a shell the hub starts runs as this OS user and can delete
@@ -28,7 +34,16 @@
  * @module computer/request-log
  */
 
-import { chmodSync, closeSync, mkdirSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
+import {
+  appendFileSync,
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  statSync
+} from 'node:fs'
+import { appendFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { RequestActor } from '@slayzone/computer-transport/shared'
 
@@ -56,8 +71,30 @@ export interface RequestLogEntry {
 export interface RequestLog {
   /** Absolute path of the live log file. */
   readonly filePath: string
-  /** Append one line. Never throws: a full disk must not fail the request. */
+  /**
+   * Queue one line; written in order shortly after, off the main thread. Never throws
+   * and never touches the disk itself: a full or slow disk must not fail or stall
+   * the request.
+   */
   record(entry: RequestLogEntry): void
+  /** Resolves once every line recorded so far is written (or reported failed). */
+  flush(): Promise<void>
+  /** Write every queued line now, synchronously (process exit). */
+  flushSync(): void
+  /** Write what is queued and stop the exit hook. Later lines are still written. */
+  close(): Promise<void>
+}
+
+/** Live logs, written out synchronously if the process exits without closing them. */
+const openLogs = new Set<{ flushSync(): void }>()
+let exitHooked = false
+function writeOnExit(log: { flushSync(): void }): void {
+  openLogs.add(log)
+  if (exitHooked) return
+  exitHooked = true
+  process.on('exit', () => {
+    for (const open of openLogs) open.flushSync()
+  })
 }
 
 const MAX_STRING = 300
@@ -169,7 +206,14 @@ export function createRequestLog(opts: {
   chmodSync(filePath, 0o600)
   let size = statSync(filePath).size
 
-  const rotate = (): void => {
+  // `size` is the file's size as the queued lines will leave it: rotation is decided
+  // per line, when it is queued, by the same rule as before — a line that would pass
+  // `maxBytes` starts a new generation — so the generations hold the same lines.
+  /** Lines waiting, each batch tagged with whether a rotation must happen before it. */
+  const queue: Array<{ rotateFirst: boolean; text: string }> = []
+  let writing: Promise<void> | null = null
+
+  const rotateSync = (): void => {
     for (let i = keep - 1; i >= 1; i--) {
       try {
         renameSync(`${filePath}.${i}`, `${filePath}.${i + 1}`)
@@ -178,18 +222,61 @@ export function createRequestLog(opts: {
       }
     }
     renameSync(filePath, `${filePath}.1`)
-    size = 0
   }
-
-  const append = (line: string): void => {
-    const fd = openSync(filePath, 'a', 0o600)
-    try {
-      writeSync(fd, line)
-    } finally {
-      closeSync(fd)
+  const rotateAsync = async (): Promise<void> => {
+    for (let i = keep - 1; i >= 1; i--) {
+      await rename(`${filePath}.${i}`, `${filePath}.${i + 1}`).catch(() => undefined)
     }
-    size += Buffer.byteLength(line)
+    await rename(filePath, `${filePath}.1`)
   }
+  const enqueue = (line: string): void => {
+    const bytes = Buffer.byteLength(line)
+    const rotateFirst = size > 0 && size + bytes > maxBytes
+    if (rotateFirst) size = 0
+    size += bytes
+    const last = queue[queue.length - 1]
+    if (last && !rotateFirst) last.text += line
+    else queue.push({ rotateFirst, text: line })
+  }
+  const report = (err: unknown): void => {
+    try {
+      opts.onError?.(err)
+    } catch {
+      /* a reporter must not break the writer */
+    }
+  }
+  /** The one writer: drains the queue in order, a batch per append. */
+  const drain = async (): Promise<void> => {
+    // One turn later: the lines of this turn go out as one batch.
+    await new Promise<void>((next) => setImmediate(next))
+    for (let batch = queue.shift(); batch; batch = queue.shift()) {
+      try {
+        if (batch.rotateFirst) await rotateAsync()
+        await appendFile(filePath, batch.text, { flag: 'a', mode: 0o600 })
+      } catch (err) {
+        report(err)
+      }
+    }
+  }
+  const schedule = (): void => {
+    if (writing) return
+    writing = drain().finally(() => {
+      writing = null
+      if (queue.length > 0) schedule()
+    })
+  }
+  const flushSync = (): void => {
+    for (let batch = queue.shift(); batch; batch = queue.shift()) {
+      try {
+        if (batch.rotateFirst) rotateSync()
+        appendFileSync(filePath, batch.text, { flag: 'a', mode: 0o600 })
+      } catch (err) {
+        report(err)
+      }
+    }
+  }
+  const handle = { flushSync }
+  writeOnExit(handle)
 
   return {
     filePath,
@@ -205,12 +292,21 @@ export function createRequestLog(opts: {
           ...(entry.code !== undefined ? { code: entry.code } : {}),
           ...(entry.reason !== undefined ? { reason: clip(entry.reason) } : {})
         })}\n`
-        if (size > 0 && size + Buffer.byteLength(line) > maxBytes) rotate()
-        append(line)
+        enqueue(line)
+        schedule()
       } catch (err) {
         // Never fail a request over its log line; say so on the computer's stdout log.
-        opts.onError?.(err)
+        report(err)
       }
+    },
+    async flush() {
+      while (writing) await writing
+    },
+    flushSync,
+    async close() {
+      openLogs.delete(handle)
+      while (writing) await writing
+      flushSync()
     }
   }
 }
