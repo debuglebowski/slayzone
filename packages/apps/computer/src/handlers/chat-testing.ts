@@ -135,8 +135,9 @@ export async function handleChatTesting(
         )
         await new Promise((resolve) => setImmediate(resolve))
       }
-      r.storage.checkpoint()
       await r.blobBackfill.runNow()
+      // The e2e compares physical file sizes; NORMAL commits may still be in the WAL.
+      await r.storage.maintenance.checkpointNow()
       return r.compaction.status()
     }
     if (req.kind === 'test.seedEvents') {

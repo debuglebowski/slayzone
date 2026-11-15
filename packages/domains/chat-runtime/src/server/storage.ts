@@ -2841,8 +2841,17 @@ function recoverInterruptedSwap(dir: string, path: string) {
     renameSync(pre, path)
     syncDirSync(dir)
   }
-  for (const name of readdirSync(dir))
-    if (name.startsWith(COMPACT_PREFIX) || name === PRE_COMPACT)
-      rmSync(join(dir, name), { force: true })
+  const failures: unknown[] = []
+  for (const name of readdirSync(dir)) {
+    try {
+      if (name.startsWith(COMPACT_PREFIX) || name === PRE_COMPACT)
+        rmSync(join(dir, name), { force: true })
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  // Attempt every independent cleanup, but never open with stale content left behind.
+  if (failures.length)
+    throw new AggregateError(failures, 'Cannot remove interrupted chat compaction files')
 }
 export type ChatStorage = ReturnType<typeof openChatStorage>

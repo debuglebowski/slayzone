@@ -6,7 +6,15 @@
  * interrupted swap are cleaned at boot.
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -194,6 +202,30 @@ describe('swappable chat store connection', () => {
 })
 
 describe('boot cleanup', () => {
+  test('every leftover cleanup is attempted before boot refuses unfinished cleanup', () => {
+    const { store, root } = open()
+    store.createConversation(identity)
+    const dir = store.dir
+    store.close()
+    const blocked = ['chat.sqlite.compact-a', 'chat.sqlite.compact-b']
+    for (const name of blocked) mkdirSync(join(dir, name))
+    const removable = join(dir, 'chat.sqlite.compact-z')
+    writeFileSync(removable, 'stale content')
+
+    let failure: unknown
+    try {
+      open(root)
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toHaveLength(2)
+    expect(existsSync(removable)).toBe(false)
+
+    for (const name of blocked) rmSync(join(dir, name), { recursive: true })
+    expect(open(root).store.conversation(identity.id)).not.toBeNull()
+  })
+
   test('leftovers of an interrupted compaction are removed before opening', () => {
     const { store, root } = open()
     store.createConversation(identity)
