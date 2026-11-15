@@ -250,8 +250,10 @@ export function createRequestLog(opts: {
     // One turn later: the lines of this turn go out as one batch.
     await new Promise<void>((next) => setImmediate(next))
     for (let batch = queue.shift(); batch; batch = queue.shift()) {
+      // A failed rotation (the live file removed by a shell) is reported, never a
+      // reason to drop the batch: the append below re-creates the file.
+      if (batch.rotateFirst) await rotateAsync().catch(report)
       try {
-        if (batch.rotateFirst) await rotateAsync()
         await appendFile(filePath, batch.text, { flag: 'a', mode: 0o600 })
       } catch (err) {
         report(err)
@@ -267,8 +269,13 @@ export function createRequestLog(opts: {
   }
   const flushSync = (): void => {
     for (let batch = queue.shift(); batch; batch = queue.shift()) {
+      if (batch.rotateFirst)
+        try {
+          rotateSync()
+        } catch (err) {
+          report(err)
+        }
       try {
-        if (batch.rotateFirst) rotateSync()
         appendFileSync(filePath, batch.text, { flag: 'a', mode: 0o600 })
       } catch (err) {
         report(err)

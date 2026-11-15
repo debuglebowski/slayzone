@@ -81,31 +81,30 @@ function windowsAliasesOff(p: string): string {
  * when `caseInsensitive` (a Windows path always is).
  */
 export function canonicalComputerPath(p: string, caseInsensitive: boolean): string {
-  // A pure function of its arguments, asked about the same roots on every check (the
-  // computer's path jail compares each judged path with every root of its scope):
-  // remembered, bounded.
-  const memo = (caseInsensitive ? '1' : '0') + p
-  const hit = canonicalKeys.get(memo)
-  if (hit !== undefined) return hit
   const n = normalizeComputerPath(p)
-  const key = caseInsensitive || isWindowsComputerPath(n) ? n.toLowerCase() : n
-  if (canonicalKeys.size >= CANONICAL_KEYS_MAX) canonicalKeys.clear()
-  canonicalKeys.set(memo, key)
-  return key
+  return caseInsensitive || isWindowsComputerPath(n) ? n.toLowerCase() : n
 }
-const CANONICAL_KEYS_MAX = 20_000
-const canonicalKeys = new Map<string, string>()
 
 /**
  * `child` is `root` or inside it, compared as {@link canonicalComputerPath} keys. The
  * boundary is the root's own separator (`\` for a Windows root, `/` otherwise).
  */
 export function computerPathWithin(child: string, root: string, caseInsensitive = false): boolean {
-  const c = canonicalComputerPath(child, caseInsensitive)
-  const r = canonicalComputerPath(root, caseInsensitive)
-  if (c === r) return true
-  const sep = isWindowsComputerPath(r) ? '\\' : '/'
-  return c.startsWith(r.endsWith(sep) ? r : r + sep)
+  return computerPathKeyWithin(
+    canonicalComputerPath(child, caseInsensitive),
+    canonicalComputerPath(root, caseInsensitive)
+  )
+}
+
+/**
+ * {@link computerPathWithin} for keys already made by {@link canonicalComputerPath}
+ * (with the same case folding): for a caller that compares one path with many roots
+ * and keeps the roots' keys (the computer's path jail).
+ */
+export function computerPathKeyWithin(childKey: string, rootKey: string): boolean {
+  if (childKey === rootKey) return true
+  const sep = isWindowsComputerPath(rootKey) ? '\\' : '/'
+  return childKey.startsWith(rootKey.endsWith(sep) ? rootKey : rootKey + sep)
 }
 
 /**

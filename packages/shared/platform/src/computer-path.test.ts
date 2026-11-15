@@ -1,7 +1,8 @@
 import { tmpdir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   canonicalComputerPath,
+  computerPathKeyWithin,
   computerPathWithin,
   isWindowsComputerPath,
   normalizeComputerPath,
@@ -74,5 +75,42 @@ describe('computerPathWithin', () => {
     const root = normalizeComputerPath('C:/code/proj')
     expect(computerPathWithin(normalizeComputerPath('C:\\code\\proj\\src'), root)).toBe(true)
     expect(computerPathWithin(normalizeComputerPath('C:\\code\\proj-x'), root)).toBe(false)
+  })
+})
+
+/**
+ * Review R1 (FU5): canonical keys are NOT remembered here. This module serves every
+ * path the hub, the API and the computer compare — a process-wide memo kept every
+ * judged and checked path alive. The computer's jail remembers its ROOTS' keys
+ * itself (path-jail.ts), where the measured win is.
+ */
+describe('canonicalComputerPath retains nothing', () => {
+  it('computes every call afresh', () => {
+    const normalize = vi.spyOn(String.prototype, 'normalize')
+    try {
+      canonicalComputerPath('/Users/x/never-seen/a', false)
+      canonicalComputerPath('/Users/x/never-seen/a', false)
+      expect(normalize).toHaveBeenCalledTimes(2)
+    } finally {
+      normalize.mockRestore()
+    }
+  })
+
+  it('computerPathKeyWithin compares precomputed keys exactly as computerPathWithin', () => {
+    for (const [child, root, folds] of [
+      ['/a/b', '/a', false],
+      ['/a', '/a', false],
+      ['/ab', '/a', false],
+      ['/A/b', '/a', true],
+      ['/A/b', '/a', false],
+      ['C:\\x\\y', 'c:\\x', false],
+      ['/', '/', false]
+    ] as const)
+      expect(
+        computerPathKeyWithin(
+          canonicalComputerPath(child, folds),
+          canonicalComputerPath(root, folds)
+        )
+      ).toBe(computerPathWithin(child, root, folds))
   })
 })

@@ -73,6 +73,26 @@ describe('root spellings are remembered briefly, not re-resolved per path', () =
     expect(counted.realpath).toBeLessThan(200 * 4)
   })
 
+  test('root keys are remembered, judged paths are not (review R1)', () => {
+    const jail = scope()
+    judgeIn(jail, join(proj, 'src', 'f.ts')) // warm: the roots' keys
+    const normalize = vi.spyOn(String.prototype, 'normalize')
+    try {
+      // 200 DIFFERENT paths: each is normalized a few times, the roots never again.
+      for (let i = 0; i < 200; i++) {
+        const path = join(proj, 'src', `f${i}.ts`)
+        expect(judgeIn(jail, path)).toBe(path)
+      }
+      // Was ≈ 200 × (2 × 51 roots + more) with every comparison normalizing both sides.
+      console.log(
+        `[fu5] 200 distinct judged paths, 51-root scope: ${normalize.mock.calls.length} normalizations`
+      )
+      expect(normalize.mock.calls.length).toBeLessThan(200 * 12)
+    } finally {
+      normalize.mockRestore()
+    }
+  })
+
   test("a write the jail performs forgets them at once: a sibling's root moved and re-linked is carved out", () => {
     const moved = siblings[1]!
     const elsewhere = join(base, 'proj-workspaces', 'elsewhere')

@@ -35,7 +35,11 @@
  * And it says which of those it was ({@link classifyStall}, `verdict`; FU5 — 134 of
  * the 186 computer stalls of 2026-11-14/15 were a saturated machine, not our code):
  *
- *   - `busy`    our own work alone passed the threshold: a code cost, find it in `stacks`.
+ *   - `busy`    our own CPU alone crossed the threshold: a code cost, find it in `stacks`.
+ *               It says nothing about how much OF THE FREEZE that was — read
+ *               `mainThreadCpuMs / durationMs`: 48 s with 1.1 s of ours on a saturated
+ *               machine is `busy` (1.1 s would stall an idle machine too) and still
+ *               ~98 % starvation. Loops of short syscalls count as our (sys) CPU.
  *   - `starved` little CPU of ours while the machine was saturated (`machineCpuBusyPct`,
  *               `loadAvg1` vs `cpuCount`): the thread was runnable, not scheduled; the
  *               stack is just where it happened to be.
@@ -105,8 +109,10 @@ const SATURATED_LOAD_PER_CPU = 1.5
 /**
  * The verdict on a freeze (module doc): `busy` when OUR work alone reached the stall
  * threshold, or filled at least half the freeze; otherwise `starved` on a saturated
- * machine, `blocked` on one with CPUs to spare. Pure: a report's verdict can be
- * recomputed from its own fields.
+ * machine, `blocked` on one with CPUs to spare. A hint, not a cause: `busy` names a
+ * code cost worth finding, not the share of the freeze it explains (see
+ * `mainThreadCpuMs / durationMs`). Pure: a report's verdict can be recomputed from
+ * its own fields.
  */
 export function classifyStall(
   s: Pick<

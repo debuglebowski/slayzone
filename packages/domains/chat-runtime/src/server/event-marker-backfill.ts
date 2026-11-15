@@ -16,9 +16,14 @@
  * - Chats a summary just had to scan in full (`prioritize`) go first.
  * - Done = no uncovered conversation left (`uncoveredMarkerConversations`), the one
  *   source of truth: a store restored from an older backup simply runs the pass again.
+ *   A pass reads that list once, and again only when it has worked through it.
+ * - A conversation that fails (anything but a storage-fatal error, which stops the
+ *   pass for a later retry) is skipped for the rest of the pass and counted; the
+ *   next pass tries it again. One bad chat never holds up the others.
  *
  * Progress goes to the computer log: counts only, never content.
  */
+import { isStorageFatal } from '@slayzone/platform/isolation'
 import type { ChatStorage } from './storage'
 
 /** Checkpoint key prefix (`maintenance_cursors`). */
@@ -31,6 +36,8 @@ export interface EventMarkerBackfillReport {
   markers: number
   /** Stored event bytes walked. */
   bytes: number
+  /** Conversations that failed and were skipped for this pass (retried by the next). */
+  failed: number
 }
 
 export interface EventMarkerBackfillOptions {
@@ -119,21 +126,50 @@ export function createEventMarkerBackfill(opts: EventMarkerBackfillOptions) {
   function runNow(): Promise<EventMarkerBackfillReport | null> {
     if (closed) return Promise.resolve(null)
     if (pending) return pending
-    if (store.uncoveredMarkerConversations().length === 0) return Promise.resolve(null)
+    // The pass's work list, read once (and again only when it runs out).
+    let queue = store.uncoveredMarkerConversations()
+    if (queue.length === 0) return Promise.resolve(null)
     pending = (async () => {
-      const report: EventMarkerBackfillReport = { conversations: 0, markers: 0, bytes: 0 }
+      const report: EventMarkerBackfillReport = {
+        conversations: 0,
+        markers: 0,
+        bytes: 0,
+        failed: 0
+      }
       const before = markerCount()
-      const total = store.uncoveredMarkerConversations().length
+      const total = queue.length
+      const skipped = new Set<string>()
+      let complete = false
       log(`[event-marker-backfill] starting: ${total} conversations to index`)
       let lastLog = now()
       for (;;) {
         if (closed) break
-        const uncovered = store.uncoveredMarkerConversations()
-        if (uncovered.length === 0) break
-        const left = new Set(uncovered)
-        const next = [...first].find((id) => left.has(id)) ?? uncovered[0]!
+        if (queue.length === 0) {
+          // Worked through: anything still uncovered (not skipped) is new to this pass.
+          const left = store.uncoveredMarkerConversations()
+          queue = left.filter((id) => !skipped.has(id))
+          if (queue.length === 0) {
+            complete = left.length === 0
+            break
+          }
+        }
+        const firstAt = queue.findIndex((id) => first.has(id))
+        const next = queue.splice(firstAt >= 0 ? firstAt : 0, 1)[0]!
         first.delete(next)
-        if (!(await index(next, report))) break
+        let covered: boolean
+        try {
+          covered = await index(next, report)
+        } catch (error) {
+          // The machine's disk or database is broken: stop; the retry comes later.
+          if (isStorageFatal(error)) throw error
+          skipped.add(next)
+          report.failed++
+          log(
+            `[event-marker-backfill] ${next} failed (${(error as Error | null)?.name ?? 'error'}); skipped for this pass`
+          )
+          continue
+        }
+        if (!covered) break
         report.conversations++
         log(`[event-marker-backfill] indexed ${next}`)
         if (now() - lastLog >= 30_000) {
@@ -145,9 +181,8 @@ export function createEventMarkerBackfill(opts: EventMarkerBackfillOptions) {
         await sleep(idleMs)
       }
       report.markers = markerCount() - before
-      const summary = `${report.conversations} conversations, ${report.markers} markers, ${(report.bytes / MiB).toFixed(1)} MiB walked`
-      if (store.uncoveredMarkerConversations().length === 0)
-        log(`[event-marker-backfill] complete: ${summary}`)
+      const summary = `${report.conversations} conversations, ${report.markers} markers, ${(report.bytes / MiB).toFixed(1)} MiB walked, ${report.failed} failed`
+      if (complete) log(`[event-marker-backfill] complete: ${summary}`)
       else log(`[event-marker-backfill] stopped (resumes later): ${summary}`)
       return report
     })().finally(() => {

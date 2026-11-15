@@ -210,4 +210,48 @@ describe('event-marker backfill', () => {
     expect(await bf.runNow()).toBeNull()
     await bf.close()
   })
+
+  test('a conversation that keeps failing is skipped for the rest of the pass, the others indexed (review R5)', async () => {
+    const { store } = open()
+    legacyConversation(store, 'a', 30)
+    legacyConversation(store, 'b', 30)
+    const failing = new Proxy(store, {
+      get(target, key, receiver) {
+        if (key === 'backfillEventMarkers')
+          return (id: string, ...rest: unknown[]) => {
+            if (id === 'a') throw new Error('disk I/O error')
+            return (target.backfillEventMarkers as (...a: unknown[]) => unknown)(id, ...rest)
+          }
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    const { bf, lines } = backfill(failing)
+    const report = await bf.runNow()
+    expect(report).toMatchObject({ conversations: 1, failed: 1 })
+    expect(store.uncoveredMarkerConversations()).toEqual(['a'])
+    expect(lines.some((l) => /1 failed/.test(l))).toBe(true)
+    await bf.close()
+  })
+
+  test('one pass reads the uncovered list once, not once per conversation (review R6)', async () => {
+    const { store } = open()
+    for (const id of ['a', 'b', 'c', 'd', 'e']) legacyConversation(store, id, 10)
+    let reads = 0
+    const counting = new Proxy(store, {
+      get(target, key, receiver) {
+        if (key === 'uncoveredMarkerConversations')
+          return () => {
+            reads++
+            return target.uncoveredMarkerConversations()
+          }
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    const { bf } = backfill(counting)
+    await bf.runNow()
+    expect(store.uncoveredMarkerConversations()).toEqual([])
+    // Start, the one re-query when the list ran out, and the final verdict.
+    expect(reads).toBeLessThanOrEqual(3)
+    await bf.close()
+  })
 })

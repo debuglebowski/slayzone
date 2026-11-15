@@ -130,4 +130,27 @@ describe('request log: off the request path, same file', () => {
     await log.flush()
     expect(errors.length).toBeGreaterThan(0)
   })
+
+  test('a rotation that fails (the file was removed) still writes the batch, and is reported (review R2)', async () => {
+    const dir = stateDir()
+    const errors: unknown[] = []
+    const log = createRequestLog({
+      stateDir: dir,
+      now: () => at,
+      maxBytes: 400,
+      keep: 2,
+      onError: (e) => errors.push(e)
+    })
+    // Two lines (~320 bytes): the next one passes maxBytes and rotates first.
+    for (let i = 0; i < 2; i++) log.record(entry(i))
+    await log.flush()
+    expect(lineOf(0).length * 3).toBeGreaterThan(400)
+    // A shell removes the live file: that rotation's rename fails …
+    unlinkSync(log.filePath)
+    log.record(entry(2))
+    await log.flush()
+    // … but the line is not lost: the append re-creates the file.
+    expect(readFileSync(log.filePath, 'utf8')).toBe(lineOf(2))
+    expect(errors.length).toBeGreaterThan(0)
+  })
 })

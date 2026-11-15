@@ -71,6 +71,7 @@ import { write as writeCb } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import {
   canonicalComputerPath,
+  computerPathKeyWithin,
   computerPathWithin,
   pathFoldsCase
 } from '@slayzone/platform/computer-path'
@@ -168,7 +169,7 @@ function protectedHit(judged: string, subtree: boolean): boolean {
   const chain = identityChain(judged)
   const self = identity(judged)
   for (const guarded of protectedPaths) {
-    if (isInside(judged, guarded) || (subtree && isInside(guarded, judged))) return true
+    if (isInsideRoot(judged, guarded) || (subtree && isInside(guarded, judged))) return true
     const id = identity(guarded)
     if (id && chain.has(id)) return true
     if (subtree && self && identityChain(guarded).has(self)) return true
@@ -185,6 +186,43 @@ function protectedHit(judged: string, subtree: boolean): boolean {
  */
 function isInside(path: string, dir: string): boolean {
   return computerPathWithin(path, dir, pathFoldsCase(dir))
+}
+
+/**
+ * Comparison keys of ROOTS (allowed roots, scope roots and carve-outs, protected
+ * paths): a pure function of (spelling, case folding), the same few strings on every
+ * judgement — remembered, bounded (review R1: only roots; a judged path is never kept).
+ */
+const ROOT_KEYS_MAX = 10_000
+const rootKeys = new Map<string, string>()
+function rootKey(root: string, folds: boolean): string {
+  const id = (folds ? '1' : '0') + root
+  let key = rootKeys.get(id)
+  if (key === undefined) {
+    if (rootKeys.size >= ROOT_KEYS_MAX) rootKeys.clear()
+    key = canonicalComputerPath(root, folds)
+    rootKeys.set(id, key)
+  }
+  return key
+}
+/**
+ * A judgement compares a couple of paths (the judged one, the scope's home root) with
+ * every root: their keys, in a few slots — nothing else is kept.
+ */
+const PATH_KEY_SLOTS = 4
+const pathKeys: Array<{ path: string; folds: boolean; key: string }> = []
+function pathKey(path: string, folds: boolean): string {
+  for (const slot of pathKeys) if (slot.path === path && slot.folds === folds) return slot.key
+  const key = canonicalComputerPath(path, folds)
+  pathKeys.unshift({ path, folds, key })
+  if (pathKeys.length > PATH_KEY_SLOTS) pathKeys.pop()
+  return key
+}
+
+/** {@link isInside} where `root` is a ROOT (see {@link rootKey}): its key is remembered. */
+function isInsideRoot(path: string, root: string): boolean {
+  const folds = pathFoldsCase(root)
+  return computerPathKeyWithin(pathKey(path, folds), rootKey(root, folds))
 }
 
 /**
@@ -356,8 +394,8 @@ function walk(
         hops
       )
     }
-    if (!isInside(target, root.real)) {
-      const other = liveRoots(allowedRoots).find((r) => isInside(target, r.real))
+    if (!isInsideRoot(target, root.real)) {
+      const other = liveRoots(allowedRoots).find((r) => isInsideRoot(target, r.real))
       if (!other) throw outside(candidate, allowedRoots)
       root = other
     }
@@ -367,7 +405,7 @@ function walk(
   // for `entry`, of its folder only — the entry itself is never followed.
   const real =
     access === 'entry' && current !== root.real ? canonicalEntry(current) : canonical(current)
-  if (!isInside(real, root.real)) throw outside(candidate, allowedRoots)
+  if (!isInsideRoot(real, root.real)) throw outside(candidate, allowedRoots)
   return real
 }
 
@@ -381,7 +419,7 @@ function within(
   hops: { n: number }
 ): string {
   for (const base of [root.lexical, root.real]) {
-    if (isInside(normalized, base)) {
+    if (isInsideRoot(normalized, base)) {
       return walk(root, components(normalized, base), access, candidate, allowedRoots, hops)
     }
   }
@@ -468,7 +506,7 @@ function realRoot(root: string): string | null {
  */
 function judgeScope(judged: string, candidate: string, scope: ScopeJail): string {
   const roots = scope.roots.map(realRoot).filter((r): r is string => r !== null)
-  const home = roots.find((r) => isInside(judged, r))
+  const home = roots.find((r) => isInsideRoot(judged, r))
   if (!home) {
     throw new JailViolationError(
       roots.length === 0
@@ -479,8 +517,8 @@ function judgeScope(judged: string, candidate: string, scope: ScopeJail): string
   for (const excluded of scope.excluded) {
     const real = realRoot(excluded)
     // Another task's root that IS (or holds) this scope's own root is not carved out.
-    if (!real || isInside(home, real)) continue
-    if (isInside(judged, real)) {
+    if (!real || isInsideRoot(home, real)) continue
+    if (isInsideRoot(judged, real)) {
       throw new JailViolationError(
         `path '${candidate}' is inside another task's folder, not ${scope.label}'s; refused`
       )
@@ -510,8 +548,8 @@ function judgeNewRoot(judged: string, candidate: string, scope: ScopeJail): stri
   const own = scope.roots.map(realRoot).filter((r): r is string => r !== null)
   for (const root of scope.foreign) {
     const real = realRoot(root)
-    if (!real || own.some((r) => isInside(r, real))) continue
-    if (isInside(judged, real)) {
+    if (!real || own.some((r) => isInsideRoot(r, real))) continue
+    if (isInsideRoot(judged, real)) {
       throw new JailViolationError(
         `path '${candidate}' is inside a folder that is not ${scope.label}'s; refused`
       )
@@ -539,7 +577,7 @@ function judgeMachine(
   const hops = { n: 0 }
   let judged: string | null = null
   for (const root of roots) {
-    if (isInside(normalized, root.lexical) || isInside(normalized, root.real)) {
+    if (isInsideRoot(normalized, root.lexical) || isInsideRoot(normalized, root.real)) {
       judged = within(root, normalized, access, candidate, allowedRoots, hops)
       break
     }
@@ -547,7 +585,7 @@ function judgeMachine(
   if (judged === null) {
     // Spelled through a link above a root (`/tmp/r` for a root `/private/tmp/r`).
     const canon = canonical(normalized)
-    const root = roots.find((r) => isInside(canon, r.real))
+    const root = roots.find((r) => isInsideRoot(canon, r.real))
     if (!root) throw outside(candidate, allowedRoots)
     judged = walk(root, components(canon, root.real), access, candidate, allowedRoots, hops)
   }
