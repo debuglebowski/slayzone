@@ -14,6 +14,7 @@ import { type ConnectionStateSource, connectDeadlineLink } from './connectDeadli
 import { hubReadsCompactBytes } from './hubCapabilities'
 import { createConnectPacer, getHubConnectProbe } from './connectPacing'
 import { createWatchedWebSocket, type HandshakeTiming } from './connectHandshake'
+import { connectTraceFor } from './connectTrace'
 
 /**
  * The ONE tRPC client runtime, ROUTER-AGNOSTIC: the React context (one
@@ -70,12 +71,14 @@ export type CreateTrpcClientOpts = {
 export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
   // Paces connects while the hub is down (see connectPacing.ts): without an
   // installed probe it only reproduces @trpc/client's own defaults.
-  const pacer = createConnectPacer(opts.url)
+  const trace = connectTraceFor(opts.url)
+  const pacer = createConnectPacer(opts.url, { trace })
   // Every socket attempt is bounded: one stuck in its handshake is given up instead of
   // parking every operation on this hub (see connectHandshake.ts).
   const WatchedWebSocket = createWatchedWebSocket({
     wsUrl: opts.url,
     probe: getHubConnectProbe,
+    trace,
     onAbort: (reason) => {
       if (reason === 'hedge') pacer.noteHubAnswered()
     },

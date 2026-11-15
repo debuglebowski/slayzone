@@ -43,6 +43,8 @@
  * Chromium fork and the web shell install none → byte-identical).
  */
 
+import type { ConnectTrace } from './connectTrace'
+
 /** Resolves true when a socket to `wsUrl` is worth attempting now. */
 export type HubConnectProbe = (wsUrl: string) => Promise<boolean>
 
@@ -98,9 +100,15 @@ export interface ConnectPacer {
 
 export function createConnectPacer(
   wsUrl: string,
-  deps: { now?: () => number; probe?: () => HubConnectProbe | null } = {}
+  deps: {
+    now?: () => number
+    probe?: () => HubConnectProbe | null
+    /** Where each attempt's decision is recorded (connectTrace.ts). */
+    trace?: ConnectTrace
+  } = {}
 ): ConnectPacer {
   const now = deps.now ?? Date.now
+  const trace = deps.trace
   const getProbe = deps.probe ?? (() => installedProbe)
   /** The last attempt ended without the socket ever opening. */
   let failing = false
@@ -127,13 +135,22 @@ export function createConnectPacer(
       // take a stale "retry now" from it.
       hubAnswered = false
       retryNow = false
-      if (probe && failing && !skipProbe && now() < nextScheduledAt - SCHEDULE_SLACK_MS) {
+      const offSchedule = failing && now() < nextScheduledAt - SCHEDULE_SLACK_MS
+      const attempt = trace?.begin(!offSchedule)
+      if (probe && offSchedule && !skipProbe) {
+        const asked = now()
+        if (attempt) attempt.outcome = 'probing'
         const up = await probe(wsUrl).catch(() => false)
+        if (attempt) {
+          attempt.probe = { ms: now() - asked, up }
+          attempt.outcome = 'connecting'
+        }
         // Re-read the schedule: the loop's own attempt may have come due while the probe
         // was out. That attempt JOINS this one (trpc keeps one attempt in flight), so a
         // stale "down" here would cost the loop its unprobed attempt — and with queries
         // arriving faster than a slow probe answers, every one of them, for good.
         if (!up && now() < nextScheduledAt - SCHEDULE_SLACK_MS) {
+          if (attempt) trace?.settle(attempt, 'deferred')
           throw new HubConnectDeferredError(wsUrl)
         }
       }

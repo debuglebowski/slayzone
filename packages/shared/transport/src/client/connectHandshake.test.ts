@@ -22,13 +22,38 @@ import { applyWSSHandler } from '@trpc/server/adapters/ws'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { createTrpcWsClient } from './runtime'
 import { type HubConnectProbe, setHubConnectProbe } from './connectPacing'
+import { type HubConnectAbort, setHubConnectAbortListener } from './connectHandshake'
+import { _resetHubConnectTraces, getHubConnectTrace } from './connectTrace'
 
 // The client's own wire format, so answers decode as they do from a real hub.
 const t = initTRPC.create({ transformer: wireSuperjson })
-const testRouter = t.router({ ping: t.procedure.query(() => 'pong') })
-type TestClient = TRPCClient<typeof testRouter>
-
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+interface HubStats {
+  upgrades: number
+  health: number
+  /** `ticks` subscriptions this hub process started. */
+  subscribes: number
+}
+
+function makeRouter(stats: HubStats) {
+  return t.router({
+    ping: t.procedure.query(() => 'pong'),
+    /** Long enough to still be in flight when the reconnect loop's timer fires. */
+    slow: t.procedure.query(async () => {
+      await sleep(2500)
+      return 'slow'
+    }),
+    ticks: t.procedure.subscription(async function* (opts) {
+      stats.subscribes++
+      while (!opts.signal?.aborted) {
+        yield Date.now()
+        await sleep(100)
+      }
+    })
+  })
+}
+type TestClient = TRPCClient<ReturnType<typeof makeRouter>>
 
 interface HubOpts {
   port?: number
@@ -43,7 +68,7 @@ interface HubOpts {
 interface TestHub {
   port: number
   url: string
-  stats: { upgrades: number; health: number }
+  stats: HubStats
   /** Unblock a `busy` hub: queued upgrades are answered first, then /health. */
   release: () => void
   /** Stop like `apps/hub` `stop()`: reconnect broadcast, close, then the process ends. */
@@ -54,7 +79,7 @@ const hubs = new Set<TestHub>()
 
 async function startHub(o: HubOpts = {}): Promise<TestHub> {
   const conns = new Set<Socket>()
-  const stats = { upgrades: 0, health: 0 }
+  const stats: HubStats = { upgrades: 0, health: 0, subscribes: 0 }
   let held = 0
   let releaseGate: () => void = () => undefined
   const gate = o.busy
@@ -81,7 +106,7 @@ async function startHub(o: HubOpts = {}): Promise<TestHub> {
     c.on('close', () => conns.delete(c))
   })
   const wss = new WebSocketServer({ noServer: true })
-  const handler = applyWSSHandler({ wss, router: testRouter })
+  const handler = applyWSSHandler({ wss, router: makeRouter(stats) })
   srv.on('upgrade', (req, socket, head) => {
     stats.upgrades++
     if (held < (o.holdUpgrades ?? 0)) {
@@ -186,6 +211,8 @@ function makeClient(
 
 afterEach(async () => {
   setHubConnectProbe(null)
+  setHubConnectAbortListener(null)
+  _resetHubConnectTraces()
   vi.unstubAllGlobals()
   // Hubs first: ending them fails any handshake still held, which `close()` waits on.
   for (const h of [...hubs]) await h.stop()
@@ -204,9 +231,21 @@ describe('a hub connect attempt whose handshake does not finish', () => {
     await sleep(300)
     const second = await startHub({ port: first.port, holdUpgrades: 1 })
 
+    const aborts: HubConnectAbort[] = []
+    setHubConnectAbortListener((a) => aborts.push(a))
+
     await firstSuccess(client, 4000)
     // The held socket was given up and a fresh one opened.
     expect(second.stats.upgrades).toBeGreaterThanOrEqual(2)
+    expect(aborts).toEqual([
+      expect.objectContaining({ url: first.url, reason: 'hedge', waitedMs: expect.any(Number) })
+    ])
+    // The trace tells the story: the stuck attempt was hedged, the next one opened.
+    const outcomes = getHubConnectTrace(first.url).map((a) => a.outcome)
+    const hedged = outcomes.lastIndexOf('hedge')
+    expect(hedged).toBeGreaterThan(0)
+    expect(outcomes.slice(hedged + 1)).toContain('open')
+    expect(outcomes[0]).toBe('open')
   }, 15_000)
 
   it('without a probe (fork, web shell) the hard deadline ends a stuck handshake', async () => {
@@ -216,6 +255,10 @@ describe('a hub connect attempt whose handshake does not finish', () => {
     const { client } = makeClient(hub.url, { hedgeAfterMs: 100, deadlineMs: 1500 })
     await firstSuccess(client, 5000)
     expect(hub.stats.upgrades).toBeGreaterThanOrEqual(2)
+    const trace = getHubConnectTrace(hub.url)
+    expect(trace[0]).toMatchObject({ outcome: 'deadline', onSchedule: true, probe: null })
+    expect(trace[0].settledAt! - trace[0].socketAt!).toBeGreaterThanOrEqual(1400)
+    expect(trace.at(-1)?.outcome).toBe('open')
   }, 15_000)
 
   it('a hub that is busy (its /health blocked too) is waited for, never hedged', async () => {
@@ -259,6 +302,52 @@ describe('a hub connect attempt whose handshake does not finish', () => {
   }, 15_000)
 })
 
+describe('after a query reconnected while the reconnect loop slept', () => {
+  // The hub restarts; while the loop sleeps toward its next attempt, a query (the probe
+  // having said "up") reconnects. The loop's job is done at that point.
+
+  it('the loop does not close the healthy socket when it wakes (in-flight calls survive)', async () => {
+    setHubConnectProbe(httpProbe())
+    const first = await startHub()
+    const { client } = makeClient(first.url, { hedgeAfterMs: 150, deadlineMs: 30_000 })
+    await client.ping.query()
+    await first.stop()
+    // Loop: attempt 0 (now) fails against the stopped hub; attempt 1 is due in 2s.
+    await sleep(300)
+    const second = await startHub({ port: first.port })
+    await firstSuccess(client, 1500)
+    // In flight across the loop's 2s wake-up.
+    await expect(client.slow.query()).resolves.toBe('slow')
+    await sleep(500)
+    expect(second.stats.upgrades).toBe(1)
+  }, 20_000)
+
+  it("a live subscription is resent on the socket the query opened, not at the loop's next tick", async () => {
+    setHubConnectProbe(httpProbe())
+    const first = await startHub()
+    const { client } = makeClient(first.url, { hedgeAfterMs: 150, deadlineMs: 30_000 })
+    const seen: number[] = []
+    const sub = client.ticks.subscribe(undefined, { onData: (v) => seen.push(v) })
+    try {
+      await client.ping.query()
+      await first.stop()
+      // Down for 2.5s: loop attempts 0 (0s) and 1 (2s) fail, attempt 2 is due at 6s.
+      await sleep(2500)
+      const second = await startHub({ port: first.port })
+      await firstSuccess(client, 1500)
+      const recoveredAt = Date.now()
+      while (second.stats.subscribes === 0 && Date.now() - recoveredAt < 2000) await sleep(50)
+      expect(second.stats.subscribes).toBe(1)
+      const before = seen.length
+      await sleep(400)
+      expect(seen.length).toBeGreaterThan(before)
+      expect(second.stats.upgrades).toBe(1)
+    } finally {
+      sub.unsubscribe()
+    }
+  }, 20_000)
+})
+
 describe('connect pacing with a probe that is wrong', () => {
   it("a slow probe that says down does not starve the reconnect loop's own attempts", async () => {
     // Main busy: every probe takes 300ms and answers "down" although the hub is up.
@@ -279,5 +368,13 @@ describe('connect pacing with a probe that is wrong', () => {
     // Queries keep coming (each one probes): the 2s attempt must not be lost to them.
     await firstSuccess(client, 7000)
     expect(sockets.count()).toBeGreaterThanOrEqual(3)
+    // Queries between the loop's attempts were probed and opened no socket.
+    const trace = getHubConnectTrace(url)
+    const deferred = trace.filter((a) => a.outcome === 'deferred')
+    expect(deferred.length).toBeGreaterThan(0)
+    for (const a of deferred) {
+      expect(a).toMatchObject({ onSchedule: false, socketAt: null, probe: { up: false } })
+    }
+    expect(trace.at(-1)?.outcome).toBe('open')
   }, 20_000)
 })

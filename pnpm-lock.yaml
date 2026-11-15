@@ -177,6 +177,7 @@ packageExtensionsChecksum: sha256-yucxjBCEEEleMRdCSterOmma5oliL1xHpkU1vW5QBT0=
 patchedDependencies:
   '@convex-dev/auth@0.0.96': 0c3e8e26d92487746d8386f64a1cbe43ed88dfae62fa69fb4738e07d90520256
   '@radix-ui/react-menu@2.2.1': 0d843dd4e468b20e6ce826e5090298cc344be58699a21084871c34d9fadf728a
+  '@trpc/client@11.19.0': 9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2
   '@trpc/server@11.19.0': ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e
   '@xterm/addon-unicode-graphemes@0.5.0-beta.310': fd2ab7951f64746d15d0e1b24444695a175edb5432bf53a506e3996a529a4221
   app-builder-lib@26.18.0: fb86da384173fd3c2d15f34e7e3adca11814c3a886b214eb5f1a0c29017970d5
@@ -865,7 +866,7 @@ importers:
         version: link:../../shared/trpc-server
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
@@ -970,7 +971,7 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -1275,7 +1276,7 @@ importers:
         version: link:../../domains/worktrees
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -1315,7 +1316,7 @@ importers:
         version: link:../../shared/types
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
@@ -3844,13 +3845,13 @@ importers:
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@trpc/client':
         specifier: ^11.19.0
-        version: 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server':
         specifier: ^11.19.0
         version: 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       '@trpc/tanstack-react-query':
         specifier: ^11.19.0
-        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)
+        version: 11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -18922,7 +18923,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)':
+  '@trpc/client@11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)':
     dependencies:
       '@trpc/server': 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       typescript: 7.1.0-dev.20261111.1
@@ -18931,10 +18932,10 @@ snapshots:
     dependencies:
       typescript: 7.1.0-dev.20261111.1
 
-  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)':
+  '@trpc/tanstack-react-query@11.19.0(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(@trpc/client@11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1))(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(react@19.3.1)(typescript@7.1.0-dev.20261111.1)':
     dependencies:
       '@tanstack/react-query': 5.104.5(@types/react@19.3.0)(react@19.3.1)
-      '@trpc/client': 11.19.0(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
+      '@trpc/client': 11.19.0(patch_hash=9be22ddb693eb6e4a03393d4d0b2830d59dc3746e90798c2c92545e33f046ec2)(@trpc/server@11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1))(typescript@7.1.0-dev.20261111.1)
       '@trpc/server': 11.19.0(patch_hash=ef5c44ab1731caece1657d65d25918f0d324b8bdd906dd0fceeb41324ba6504e)(typescript@7.1.0-dev.20261111.1)
       react: 19.3.1
       typescript: 7.1.0-dev.20261111.1

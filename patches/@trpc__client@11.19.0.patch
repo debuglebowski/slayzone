@@ -1,0 +1,106 @@
+diff --git a/dist/wsLink-Bm5LKL6z.mjs b/dist/wsLink-Bm5LKL6z.mjs
+index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..4988487ae110aa31abc3d10007f22b8a75ac2ef7 100644
+--- a/dist/wsLink-Bm5LKL6z.mjs
++++ b/dist/wsLink-Bm5LKL6z.mjs
+@@ -457,6 +457,21 @@ var WsClient = class {
+ 			}));
+ 			return this.reconnecting;
+ 		}
++		// slayzone patch (FU6): a query that reopened the socket resends what an earlier
++		// socket left pending (live subscriptions) now — not at the reconnect loop's next
++		// tick, up to 30s later.
++		this.resendPendingOnce();
++	}
++	/**
++	* slayzone patch (FU6): send the requests still pending from an EARLIER socket,
++	* once per connection. Called right after a connection opened, before anything is
++	* sent on it, so everything pending then was sent on a socket that is gone.
++	*/
++	resendPendingOnce() {
++		const id = this.activeConnection.id;
++		if (this.resentForConnection === id || !this.activeConnection.isOpen()) return;
++		this.resentForConnection = id;
++		if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
+ 	}
+ 	/**
+ 	* Closes the WebSocket connection and stops managing requests.
+@@ -528,13 +543,23 @@ var WsClient = class {
+ 			error: TRPCClientError.from(closedError)
+ 		});
+ 		if (this.reconnecting) return;
++		// slayzone patch (FU6): the socket this reconnect is replacing. A DIFFERENT socket
++		// that is open when the loop wakes was reopened meanwhile (a query reconnected):
++		// the loop's job is done, and closing it would fail every call in flight on it.
++		const startedWith = this.activeConnection.ws;
+ 		const tryReconnect = async (attemptIndex) => {
+ 			try {
+ 				await sleep(this.reconnectRetryDelay(attemptIndex));
+ 				if (this.allowReconnect) {
+-					await this.activeConnection.close();
+-					await this.activeConnection.open();
+-					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
++					const conn = this.activeConnection;
++					const reopenedMeanwhile = conn.isOpen() && conn.ws !== startedWith;
++					// An attempt already in flight (a query's) is joined, not closed.
++					if (reopenedMeanwhile) {} else if (conn.openPromise) await conn.open();
++					else {
++						await conn.close();
++						await conn.open();
++					}
++					this.resendPendingOnce();
+ 				}
+ 				this.reconnecting = null;
+ 			} catch (_unused) {
+diff --git a/dist/wsLink-CKAsNP9P.cjs b/dist/wsLink-CKAsNP9P.cjs
+index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..4baab57f5c7ec9026d6479d6e00d96c9d67f816d 100644
+--- a/dist/wsLink-CKAsNP9P.cjs
++++ b/dist/wsLink-CKAsNP9P.cjs
+@@ -457,6 +457,21 @@ var WsClient = class {
+ 			}));
+ 			return this.reconnecting;
+ 		}
++		// slayzone patch (FU6): a query that reopened the socket resends what an earlier
++		// socket left pending (live subscriptions) now — not at the reconnect loop's next
++		// tick, up to 30s later.
++		this.resendPendingOnce();
++	}
++	/**
++	* slayzone patch (FU6): send the requests still pending from an EARLIER socket,
++	* once per connection. Called right after a connection opened, before anything is
++	* sent on it, so everything pending then was sent on a socket that is gone.
++	*/
++	resendPendingOnce() {
++		const id = this.activeConnection.id;
++		if (this.resentForConnection === id || !this.activeConnection.isOpen()) return;
++		this.resentForConnection = id;
++		if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
+ 	}
+ 	/**
+ 	* Closes the WebSocket connection and stops managing requests.
+@@ -528,13 +543,23 @@ var WsClient = class {
+ 			error: require_TRPCClientError.TRPCClientError.from(closedError)
+ 		});
+ 		if (this.reconnecting) return;
++		// slayzone patch (FU6): the socket this reconnect is replacing. A DIFFERENT socket
++		// that is open when the loop wakes was reopened meanwhile (a query reconnected):
++		// the loop's job is done, and closing it would fail every call in flight on it.
++		const startedWith = this.activeConnection.ws;
+ 		const tryReconnect = async (attemptIndex) => {
+ 			try {
+ 				await (0, _trpc_server_unstable_core_do_not_import.sleep)(this.reconnectRetryDelay(attemptIndex));
+ 				if (this.allowReconnect) {
+-					await this.activeConnection.close();
+-					await this.activeConnection.open();
+-					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
++					const conn = this.activeConnection;
++					const reopenedMeanwhile = conn.isOpen() && conn.ws !== startedWith;
++					// An attempt already in flight (a query's) is joined, not closed.
++					if (reopenedMeanwhile) {} else if (conn.openPromise) await conn.open();
++					else {
++						await conn.close();
++						await conn.open();
++					}
++					this.resendPendingOnce();
+ 				}
+ 				this.reconnecting = null;
+ 			} catch (_unused) {

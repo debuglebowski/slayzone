@@ -1,5 +1,6 @@
 import { isLoopbackAuthority } from '@slayzone/platform/hub-addr'
 import type { HubConnectProbe } from './connectPacing'
+import type { ConnectTrace } from './connectTrace'
 
 /**
  * Bound every connect attempt to a hub: a socket whose opening handshake does not
@@ -67,12 +68,34 @@ export interface HandshakeTiming {
   deadlineMs?: number
 }
 
+/** One stuck socket given up — what the app reports to its diagnostics. */
+export interface HubConnectAbort {
+  url: string
+  reason: HandshakeAbortReason
+  /** How long the socket had been connecting. */
+  waitedMs: number
+}
+
+let abortListener: ((abort: HubConnectAbort) => void) | null = null
+
+/**
+ * Install (or clear with null) the process-wide listener told about every stuck socket
+ * given up, on any hub. The renderer records them as diagnostics events.
+ */
+export function setHubConnectAbortListener(
+  listener: ((abort: HubConnectAbort) => void) | null
+): void {
+  abortListener = listener
+}
+
 export interface HandshakeWatchOpts extends HandshakeTiming {
   wsUrl: string
   /** The probe to ask (read per check, like the pacer). */
   probe: () => HubConnectProbe | null
   /** A stuck socket was closed. `hedge`: the probe had just said the hub is up. */
   onAbort?: (reason: HandshakeAbortReason) => void
+  /** Where each socket's outcome is recorded (connectTrace.ts). */
+  trace?: ConnectTrace
 }
 
 /** Grace before the first hedge for `wsUrl`'s host. */
@@ -101,6 +124,8 @@ export function createWatchedWebSocket(opts: HandshakeWatchOpts): typeof WebSock
   let consecutiveHedges = 0
 
   const watch = (ws: WebSocket): void => {
+    const createdAt = Date.now()
+    const attempt = opts.trace?.socketCreated()
     const grace = Math.min(hedgeBase * 2 ** consecutiveHedges, deadlineMs)
     let hedgeTimer: ReturnType<typeof setTimeout> | null = null
     let probing = false
@@ -116,8 +141,10 @@ export function createWatchedWebSocket(opts: HandshakeWatchOpts): typeof WebSock
       if (settled || ws.readyState !== CONNECTING) return
       stop()
       if (reason === 'hedge') consecutiveHedges++
+      if (attempt) opts.trace?.settle(attempt, reason)
       // Told first, so the pacer has its hint before trpc's failure path reads it.
       opts.onAbort?.(reason)
+      abortListener?.({ url: opts.wsUrl, reason, waitedMs: Date.now() - createdAt })
       // On a CONNECTING socket this FAILS the connection (`error`, then `close`):
       // trpc's ordinary failure path takes it from here.
       ws.close()
@@ -145,12 +172,17 @@ export function createWatchedWebSocket(opts: HandshakeWatchOpts): typeof WebSock
     }
     const deadlineTimer = setTimeout(() => abort('deadline'), deadlineMs)
 
+    const failed = (): void => {
+      if (attempt) opts.trace?.settle(attempt, 'failed')
+      stop()
+    }
     ws.addEventListener('open', () => {
       consecutiveHedges = 0
+      if (attempt) opts.trace?.settle(attempt, 'open')
       stop()
     })
-    ws.addEventListener('close', stop)
-    ws.addEventListener('error', stop)
+    ws.addEventListener('close', failed)
+    ws.addEventListener('error', failed)
     armHedge()
   }
 
