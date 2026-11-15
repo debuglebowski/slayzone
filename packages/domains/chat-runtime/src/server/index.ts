@@ -70,3 +70,10 @@ export {
   type ComputerSessionLedgerDeps
 } from './hub-session-ledger'
 export { createSessionLedgerHarness } from './session-ledger-harness'
+export {
+  createStorageCompaction,
+  ChatCompactionRefused,
+  type StorageCompaction,
+  type StorageCompactionOptions
+} from './storage-compaction'
+export { ChatStorageSwapRefused, type ChatStoreFileStats } from './storage'

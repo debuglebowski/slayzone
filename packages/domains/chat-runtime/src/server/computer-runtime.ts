@@ -10,6 +10,7 @@ import { createChatInvoker } from './invocation'
 import { createLocalAttachments } from './attachments'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
 import { createEventMarkerBackfill, type EventMarkerBackfillOptions } from './event-marker-backfill'
+import { createStorageCompaction, type StorageCompactionOptions } from './storage-compaction'
 import {
   createChatTransport,
   createConversationRegistry,
@@ -67,6 +68,8 @@ export function createComputerChatRuntime(opts: {
   markerBackfill?: Partial<
     Pick<EventMarkerBackfillOptions, 'automatic' | 'sliceBytes' | 'idleMs' | 'startDelayMs'>
   >
+  /** Storage compaction tuning (tests); automatic reclaim defaults to off under `maintenance`. */
+  compaction?: Partial<Omit<StorageCompactionOptions, 'storage' | 'backfillDone' | 'log'>>
   /** The computer's log (`computer.log`): maintenance progress, never chat content. */
   log?: (line: string) => void
 }) {
@@ -296,6 +299,16 @@ export function createComputerChatRuntime(opts: {
       transport.chatEvents.emit('pinned-messages-changed', id)
     }
   })
+  // Opt-in compaction of chat.sqlite (fu-2); a rebuild waits for the backfill above.
+  const compaction = createStorageCompaction({
+    automaticReclaim: !opts.maintenance,
+    ...opts.compaction,
+    storage,
+    backfillDone: () => blobBackfill.done(),
+    ...(opts.log ? { log: opts.log } : {})
+  })
+  // Content erasure stops a rebuild: its copy came from a snapshot holding that content.
+  storage.onTaskPurge(() => compaction.abort('Content was erased during compaction; start again'))
   return {
     diagnosticsConfig,
     async relocateProject(
@@ -370,6 +383,7 @@ export function createComputerChatRuntime(opts: {
     retention: retentionService,
     blobBackfill,
     markerBackfill,
+    compaction,
     captureHook: prompts.capture,
     prompts: prompts.list,
     promptSummaries: prompts.summaries,
@@ -452,6 +466,7 @@ export function createComputerChatRuntime(opts: {
       return applied
     },
     async eraseTask(taskId: string, revision: number, stopExternal?: () => Promise<void>) {
+      compaction.abort('Content was erased during compaction; start again')
       storage.compose((raw) => prepareStoredTaskErasure(raw, taskId))
       const closing = storage
         .listForTask(taskId)
@@ -477,6 +492,7 @@ export function createComputerChatRuntime(opts: {
     async close() {
       if (closed) return
       closed = true
+      await compaction.close()
       await blobBackfill.close()
       await markerBackfill.close()
       await retentionService.close()

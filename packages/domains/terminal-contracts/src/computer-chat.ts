@@ -27,6 +27,66 @@ export interface ComputerChatBackupPolicy {
   intervalMinutes: number
   maxAutoBackups: number
 }
+/**
+ * A computer's chat store on disk and its space maintenance (fu-2): a one-time rebuild
+ * (`VACUUM INTO` off the main thread, swapped in) switches it to incremental
+ * auto-vacuum; from then on freed space is returned in short slices.
+ */
+export type ComputerChatStorageJobKind = 'rebuild' | 'reclaim'
+export type ComputerChatStoragePhase =
+  | 'copying'
+  | 'catching-up'
+  | 'swapping'
+  | 'reclaiming'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+export interface ComputerChatStorageResult {
+  at: number
+  kind: ComputerChatStorageJobKind
+  beforeBytes: number
+  afterBytes: number
+  reclaimedBytes: number
+  durationMs: number
+  /** How long writes waited for the swap (rebuild only). */
+  holdMs: number | null
+}
+export interface ComputerChatStorageJob {
+  id: string
+  kind: ComputerChatStorageJobKind
+  /** Started by the computer itself (incremental reclaim), not by a user. */
+  automatic: boolean
+  phase: ComputerChatStoragePhase
+  startedAt: number
+  /** 0..1 */
+  progress: number
+  /** Why it failed or was cancelled; what it waits for. */
+  message: string | null
+  result: ComputerChatStorageResult | null
+}
+export interface ComputerChatStorageState {
+  supported: true
+  fileBytes: number
+  walBytes: number
+  /** Bytes in use: (pages − free pages) × page size. */
+  liveBytes: number
+  /** Free pages × page size: what a compaction returns. */
+  reclaimableBytes: number
+  autoVacuum: 'none' | 'full' | 'incremental'
+  /** Worth offering to the user. */
+  worthIt: boolean
+  /** The event-blob backfill finished (a rebuild waits for it). */
+  backfillDone: boolean
+  freeDiskBytes: number
+  /** Free disk a rebuild needs now (0 for an incremental reclaim). */
+  requiredDiskBytes: number
+  /** The running job, or the last one this run (until the next starts). */
+  job: ComputerChatStorageJob | null
+  /** The last successful one, kept in the store. */
+  last: ComputerChatStorageResult | null
+}
+/** `supported: false`: the computer predates storage compaction (update it). */
+export type ComputerChatStorageStatus = ComputerChatStorageState | { supported: false }
 export interface ArchivedChatConversation {
   id: string
   taskId: string

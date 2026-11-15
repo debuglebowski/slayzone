@@ -88,10 +88,20 @@ It reads row sizes first (record headers) and a row's body once, only
 when the row fits what is left of its slice and is long enough to hold a binary
 slot (measured on 4,000 real rows: 6,558 body reads → 1,390). The backfill pauses below a free-disk margin (max(1 GiB, 2 × its slice budget)),
 closes its chat sessions only through retention's `withQuiesced` lock, and retries
-chats it could not finish. Space: `chat.sqlite` has no `auto_vacuum`, so pages the
-backfill frees are reused, not returned; backups (`db.backup`, every page, plus every
-pinned blob) grow by the extracted blobs until a one-time compaction follow-up lands —
-a prerequisite for keeping backup size flat.
+chats it could not finish. Space: a store created with `auto_vacuum` NONE keeps the
+pages the backfill frees (and `db.backup` copies them) until the user compacts it once.
+
+Storage compaction (`storage-compaction.ts`), opt-in: a REBUILD (store at auto_vacuum
+NONE, after the backfill finished, with ~live-data size free on disk) copies the store
+with `VACUUM INTO` (incremental auto-vacuum) in a worker on a read-only connection;
+TEMP triggers capture every changed primary key meanwhile; catch-up rounds replay
+them in the worker until the rest fits a small budget; one synchronous window replays
+the rest, restores the copy's triggers, checks the schema and swaps the file in
+(`maintenance.swapIn`; waits for backup leases and secondary connections). From then
+on a RECLAIM returns free pages in `incremental_vacuum` slices — started by the user,
+or automatically when an incremental store holds ≥ 64 MiB and ≥ 10 % free. Content
+erasure (task purge, `eraseTask`) aborts a running rebuild. Kill -9 at any step leaves
+the old or the new file; `compact-*` leftovers go at boot.
 
 Derived indexes over events are trigger-maintained, never written by the JS insert
 path: `event_markers` holds the rows that name a native conversation or carry a
@@ -188,3 +198,9 @@ dropped, or restored when it is the only copy).
   restarting the runtime (that would end live chat sessions), and four services keep
   the `compose` handle for their lifetime — so the handle forwards to the current
   connection instead of every caller being rewritten. No schema bump.
+- 2026-11-15 (fu-2): compaction = VACUUM INTO + captured delta + swap, once; then
+  incremental auto-vacuum. In-place VACUUM held the write lock 5.2 s on a 4 GB store
+  (a write failed); switching a NONE store to incremental needs that rebuild anyway.
+  Capture is TEMP triggers (connection-local: nothing persists after a crash or the
+  swap) keyed by primary key (VACUUM may renumber rowids); replay is delete + insert
+  with the copy's own triggers dropped, so derived rows are copied, never re-derived.

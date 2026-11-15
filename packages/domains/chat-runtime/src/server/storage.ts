@@ -2569,12 +2569,12 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         rmCompaction(compacted)
         throw new ChatStorageSwapRefused(reason, false)
       }
-      if (existsSync(`${compacted}-journal`) || existsSync(`${compacted}-wal`))
-        discard('the compacted copy is not settled')
       const version = db.pragma('user_version', { simple: true }) as number
       const candidate = describeStoreFile(compacted)
       if (candidate.storeId !== storeId) discard('the compacted copy has another store identity')
       if (candidate.version !== version) discard('the compacted copy has another schema version')
+      if (existsSync(`${compacted}-journal`) || existsSync(`${compacted}-wal`))
+        discard('the compacted copy is not settled')
       opts.phase?.('verified')
       const old = connection.current()
       try {
@@ -2613,8 +2613,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         throw error
       }
       connection.replace(next)
+      // Not synced: a `.pre-compact` link a crash brings back is removed at boot.
       unlinkSync(pre)
-      syncDirSync(dir)
       return { holdMs: performance.now() - started }
     }
   }
@@ -2674,8 +2674,9 @@ function describeConnection(db: Database.Database) {
     | undefined
   return { storeId: row?.store_id, version: db.pragma('user_version', { simple: true }) as number }
 }
+/** Read-write on purpose: a read-only connection to a WAL file leaves its -wal/-shm behind. */
 function describeStoreFile(file: string) {
-  const db = new Database(file, { readonly: true, fileMustExist: true })
+  const db = new Database(file, { fileMustExist: true })
   try {
     return describeConnection(db)
   } catch {

@@ -19,7 +19,6 @@
  *
  * Progress and completion go to the computer log: counts and bytes, no content.
  */
-import { statfsSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { StructuralFaultError, isStorageFatal } from '@slayzone/platform/isolation'
 import {
@@ -29,6 +28,7 @@ import {
   type AgentEvent
 } from '@slayzone/terminal-contracts'
 import type { ChatOwnership } from '../shared'
+import { freeDiskBytes } from './disk-space'
 import { EVENT_BLOBS_MAINTENANCE, type ChatStorage } from './storage'
 import { dropTimelineInSteps } from './timeline-drop'
 
@@ -134,12 +134,7 @@ export function createChatBlobBackfill(opts: ChatBlobBackfillOptions) {
       sleepers.add(wake)
     })
   }
-  const freeBytes =
-    opts.freeBytes ??
-    (() => {
-      const stat = statfsSync(store.dir)
-      return Number(stat.bavail) * Number(stat.bsize)
-    })
+  const freeBytes = opts.freeBytes ?? (() => freeDiskBytes(store.dir))
   /** Room the next slice must leave: blobs it may write, twice, and a floor. */
   const freeMargin = Math.max(GiB, 2 * sliceBytes)
   let closed = false,
