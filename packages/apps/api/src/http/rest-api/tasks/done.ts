@@ -5,6 +5,7 @@ import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { refuseCompletionWhileMidReply } from './_agent-guard'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * POST /api/tasks/:id/done — mark a task done (CLI `slay tasks done [--close]`).
@@ -106,6 +107,7 @@ export function registerDoneTaskRoute(app: Express, deps: RestApiDeps): void {
         data: { id: task.id, title: updated.title, status: doneStatus, closed }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

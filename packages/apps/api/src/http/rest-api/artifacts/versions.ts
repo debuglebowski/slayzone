@@ -12,6 +12,7 @@ import type { SlayzoneDb } from '@slayzone/platform'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * Artifact VERSION HISTORY over HTTP — the hub half of `slay tasks artifacts
@@ -107,6 +108,7 @@ function versionErrorOf(err: unknown): { code: string; message: string } | null 
  * verbatim from the route's payload.
  */
 function sendError(res: Res, err: unknown): void {
+  if (respondFrameTooLarge(res, err)) return
   const ve = versionErrorOf(err)
   if (ve) {
     res.status(400).json({ ok: false, code: ve.code, error: `Error [${ve.code}]: ${ve.message}` })

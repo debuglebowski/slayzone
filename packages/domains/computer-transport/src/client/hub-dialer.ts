@@ -57,6 +57,8 @@ export interface ComputerIdentity {
   chatProcessControls?: boolean
   chatControlInvocations?: boolean
   chatControlLeases?: boolean
+  /** Implementing host answers paged/chunked reads and staged uploads. Absent = unavailable. */
+  boundedReads?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -372,7 +374,8 @@ export class HubDialer {
       chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
       chatProcessControls: this.opts.identity.chatProcessControls === true,
       chatControlInvocations: this.opts.identity.chatControlInvocations === true,
-      chatControlLeases: this.opts.identity.chatControlLeases === true
+      chatControlLeases: this.opts.identity.chatControlLeases === true,
+      boundedReads: this.opts.identity.boundedReads === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -424,7 +427,8 @@ export class HubDialer {
             chatStorageCompaction: this.opts.identity.chatStorageCompaction === true,
             chatProcessControls: this.opts.identity.chatProcessControls === true,
             chatControlInvocations: this.opts.identity.chatControlInvocations === true,
-            chatControlLeases: this.opts.identity.chatControlLeases === true
+            chatControlLeases: this.opts.identity.chatControlLeases === true,
+            boundedReads: this.opts.identity.boundedReads === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

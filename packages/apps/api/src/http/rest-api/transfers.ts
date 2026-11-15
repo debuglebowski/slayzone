@@ -4,6 +4,7 @@ import { taskMoveOps, taskOps } from '@slayzone/task/server'
 import type { RestApiDeps } from './types'
 import { restPrincipalOf } from './principal'
 import { isResolveFailure, resolveByIdPrefix, resolveProjectRef } from './resolve'
+import { respondFrameTooLarge } from './computer-frame-limit'
 
 /** REST owns its transport gates; domain operations are shared with the UI. */
 export function registerTransferRoutes(app: Express, deps: RestApiDeps): void {
@@ -97,6 +98,7 @@ export function registerTransferRoutes(app: Express, deps: RestApiDeps): void {
           deps.notifyRenderer()
           res.json({ ok: true, data })
         } catch (error) {
+          if (respondFrameTooLarge(res, error)) return
           res
             .status(400)
             .json({ ok: false, error: error instanceof Error ? error.message : String(error) })
@@ -111,6 +113,7 @@ export function registerTransferRoutes(app: Express, deps: RestApiDeps): void {
     try {
       res.json({ ok: true, data: await taskMoveOps.getTaskMove(deps.db, req.params.id) })
     } catch (error) {
+      if (respondFrameTooLarge(res, error)) return
       res.status(404).json({ ok: false, error: String(error) })
     }
   })
@@ -122,6 +125,7 @@ export function registerTransferRoutes(app: Express, deps: RestApiDeps): void {
           data: await taskMoveOps.requestTaskMoveRunner(deps.db, req.params.id, action)
         })
       } catch (error) {
+        if (respondFrameTooLarge(res, error)) return
         res.status(400).json({ ok: false, error: String(error) })
       }
     })

@@ -39,6 +39,10 @@ import {
 } from '@slayzone/file-editor/hub'
 import { contentTypeForPath } from '@slayzone/platform/mime-types'
 import {
+  COMPUTER_FRAME_TOO_LARGE,
+  isComputerFrameTooLarge
+} from '@slayzone/platform/computer-frame-limit'
+import {
   inPathScopeOf,
   isComputerRefusal,
   PathScopeRequiredError,
@@ -67,6 +71,9 @@ const fail = (res: Response, f: Fail): void => {
 /** Map a read's failure to its REST answer. */
 function classify(err: unknown): Fail {
   const message = err instanceof Error ? err.message : String(err)
+  // A refused oversized frame (one slice is bounded, but a reply can still be refused).
+  if (isComputerFrameTooLarge(err))
+    return { status: 413, code: COMPUTER_FRAME_TOO_LARGE, error: message }
   if (err instanceof PathScopeRequiredError)
     return { status: 400, code: 'PATH_SCOPE_REQUIRED', error: message }
   if (err instanceof UnknownScopeError) return { status: 404, code: 'NOT_FOUND', error: message }

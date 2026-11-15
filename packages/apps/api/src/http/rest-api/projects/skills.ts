@@ -8,6 +8,7 @@ import { recordedProjectRoot } from '@slayzone/computers/server'
 import { restComputerOf } from '../principal'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from '@slayzone/ai-config/db'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * The provider set `slay init` writes instruction/skill files for. Mirrors the
@@ -105,6 +106,7 @@ export function registerProjectSkillsRoute(app: Express, deps: RestApiDeps): voi
         }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

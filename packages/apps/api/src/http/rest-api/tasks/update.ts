@@ -16,6 +16,7 @@ import { isResolveFailure, resolveByIdPrefix, resolveProjectRef } from '../resol
 import { resolveAgentIdAlias } from '../../agent-id-alias'
 import { respondComputerRefusal } from '../computer-refusal'
 import { refuseCompletionWhileMidReply } from './_agent-guard'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * PATCH /api/tasks/:id — update a task (CLI `slay tasks update`, plus the
@@ -167,6 +168,7 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
             { getTask: (id) => getTaskOp(deps.db, id), update }
           )
         } catch (err) {
+          if (respondFrameTooLarge(res, err)) return
           if (
             err instanceof TRPCError &&
             (err.code === 'BAD_REQUEST' || err.code === 'NOT_FOUND')
@@ -189,6 +191,7 @@ export function registerUpdateTaskRoute(app: Express, deps: RestApiDeps): void {
       }
       res.json({ ok: true, data: updated })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       // The computer refused the folder by its own policy (B3): 409, its message.
       if (respondComputerRefusal(res, err)) return
       // A path no connected computer can take now (§9 7e): the caller can fix it.

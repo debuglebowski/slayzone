@@ -115,6 +115,9 @@ export interface ComputerDescriptor {
   chatProcessControls?: boolean
   chatControlInvocations?: boolean
   chatControlLeases?: boolean
+  /** Whether it answers the bounded reads (paged/chunked/staged), from this connection's
+   *  frame. Absent = no. */
+  boundedReads?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -818,6 +821,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatProcessControls: parsed.data.chatProcessControls === true,
       chatControlInvocations: parsed.data.chatControlInvocations === true,
       chatControlLeases: parsed.data.chatControlLeases === true,
+      boundedReads: parsed.data.boundedReads === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -990,6 +994,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatProcessControls: parsed.data.chatProcessControls === true,
       chatControlInvocations: parsed.data.chatControlInvocations === true,
       chatControlLeases: parsed.data.chatControlLeases === true,
+      boundedReads: parsed.data.boundedReads === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

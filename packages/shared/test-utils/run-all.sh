@@ -410,6 +410,7 @@ run_harness packages/shared/platform/src/hub-port-block.test.ts
 # Multi-hub discovery — /health sweep of the port block; no pidfile/registry (P4).
 run_harness packages/shared/platform/src/hub-discovery.test.ts
 run_harness packages/shared/platform/src/direct-link.test.ts
+run_harness packages/shared/platform/src/bounded-reads.test.ts
 # OS-supervisor units (launchd/systemd) behind `slay hub create` + `slay computer
 # create` — generated file CONTENT only; never registers with the real supervisor (P5).
 run_harness packages/shared/platform/src/service-unit.test.ts
@@ -1190,6 +1191,7 @@ run_harness packages/apps/api/src/http/rest-api/automations/crud.test.ts
 run_harness packages/apps/api/src/http/rest-api/switch-refusal.test.ts
 # A frame over the computer link limit (frameTooLarge) answers 413, never an opaque 500.
 run_harness packages/apps/api/src/http/rest-api/computer-frame-limit.test.ts
+run_harness packages/apps/api/src/http/rest-api/computer-frame-limit-routes.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/list.test.ts
 run_harness packages/apps/api/src/http/rest-api/artifacts/crud.test.ts
 # Artifact CONTENT transfer — byte-exactness of the streamed create/upload/read

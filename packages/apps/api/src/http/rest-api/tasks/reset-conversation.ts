@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { resetConversation } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * POST /api/tasks/:id/reset-conversation — reset a task's agent sessions so the
@@ -68,6 +69,7 @@ export function registerTaskResetConversationRoute(app: Express, deps: RestApiDe
       })
       res.json({ ok: true, data: { id: taskId, tab: tabId ?? 'all', reset } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

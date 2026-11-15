@@ -141,7 +141,8 @@ describe('runtime feature flags (additive, no protocol bump)', () => {
     'chatStorageCompaction',
     'chatProcessControls',
     'chatControlInvocations',
-    'chatControlLeases'
+    'chatControlLeases',
+    'boundedReads'
   ] as const)(
     'keeps %s from each live handshake, never from stored enrollment tags',
     async (feature) => {

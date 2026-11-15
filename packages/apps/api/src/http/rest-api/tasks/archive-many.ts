@@ -5,6 +5,7 @@ import { archiveManyInputSchema } from '@slayzone/task-contracts'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { respondUnsafePath } from '../unsafe-path'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 export function registerArchiveManyTaskRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks/archive-many', async (req, res) => {
@@ -12,6 +13,7 @@ export function registerArchiveManyTaskRoute(app: Express, deps: RestApiDeps): v
     try {
       input = archiveManyInputSchema.parse(req.body)
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       const msg =
         err instanceof ZodError
           ? err.issues.map((i) => i.message).join('; ')
@@ -28,6 +30,7 @@ export function registerArchiveManyTaskRoute(app: Express, deps: RestApiDeps): v
       })
       res.json({ ok: true, data: null })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       if (respondUnsafePath(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }

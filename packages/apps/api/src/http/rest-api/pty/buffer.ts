@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 export function registerPtyBufferRoute(app: Express, deps: RestApiDeps): void {
   app.get('/api/pty/:id/buffer', async (req, res) => {
@@ -12,6 +13,7 @@ export function registerPtyBufferRoute(app: Express, deps: RestApiDeps): void {
     try {
       buffer = await deps.pty.getBuffer(req.params.id)
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       // The session's computer holds the scrollback and could not be asked.
       res.status(503).json({ error: err instanceof Error ? err.message : String(err) })
       return

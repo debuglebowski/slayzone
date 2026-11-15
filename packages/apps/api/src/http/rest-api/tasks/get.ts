@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { getRuntimeAdapters } from '@slayzone/task/server'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * GET /api/tasks/:id — single-task detail.
@@ -72,6 +73,7 @@ export function registerGetTaskRoute(app: Express, deps: RestApiDeps): void {
 
       res.json({ ok: true, data: { ...task, tags, blockers, blocking } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

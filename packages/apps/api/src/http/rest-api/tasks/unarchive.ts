@@ -4,6 +4,7 @@ import { unarchiveInputSchema } from '@slayzone/task-contracts'
 import { unarchiveTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 export function registerUnarchiveTaskRoute(app: Express, deps: RestApiDeps): void {
   app.post('/api/tasks/:id/unarchive', async (req, res) => {
@@ -19,6 +20,7 @@ export function registerUnarchiveTaskRoute(app: Express, deps: RestApiDeps): voi
       }
       res.json({ ok: true, data: task })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       if (err instanceof ZodError) {
         res.status(400).json({ ok: false, error: err.message })
         return

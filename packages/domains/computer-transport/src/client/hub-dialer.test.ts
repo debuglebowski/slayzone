@@ -271,6 +271,35 @@ describe('computer protocol v3 (T-27)', () => {
     )
   })
 
+  it('advertises boundedReads on enroll and on hello (paged/chunked reads, additive)', async () => {
+    const seen: Array<{ method: unknown; params: Record<string, unknown> }> = []
+    const seenN = (n: number) =>
+      new Promise<void>((resolve) => {
+        const tick = () => (seen.length >= n ? resolve() : setTimeout(tick, 5))
+        tick()
+      })
+    const port = await rawHub((frame) => {
+      seen.push({ method: frame.method, params: frame.params as Record<string, unknown> })
+      return frame.method === 'enroll'
+        ? {
+            result: {
+              computerId: 'c-1',
+              apiKey: 'k-1',
+              protocolVersion: COMPUTER_PROTOCOL_VERSION
+            }
+          }
+        : { result: { computerId: 'c-1', protocolVersion: COMPUTER_PROTOCOL_VERSION } }
+    })
+    makeDialer(`ws://127.0.0.1:${port}`).start()
+    makeDialer(`ws://127.0.0.1:${port}`, {
+      credentialStore: createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' })
+    }).start()
+    await seenN(2)
+    const methods = seen.map((s) => s.method).sort()
+    expect(methods).toEqual(['enroll', 'hello'])
+    for (const s of seen) expect(s.params.boundedReads).toBe(true)
+  })
+
   it('protocol v8: advertises the direct address read at send time on hello, null without one', async () => {
     const seen: Record<string, unknown>[] = []
     let address: string | null = null

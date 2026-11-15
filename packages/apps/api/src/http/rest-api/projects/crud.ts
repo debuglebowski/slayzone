@@ -5,6 +5,7 @@ import type { CreateProjectInput, UpdateProjectInput } from '@slayzone/projects-
 import type { RestApiDeps } from '../types'
 import { restPrincipalOf } from '../principal'
 import { isResolveFailure, resolveProjectRef } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * Project create/update. Mirrors `slay projects create` / `update`
@@ -50,6 +51,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       deps.notifyRenderer()
       res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -113,6 +115,7 @@ export function registerProjectsCrudRoutes(app: Express, deps: RestApiDeps): voi
       deps.notifyRenderer()
       res.json({ ok: true, data: { ...project, path: await projectFolder(deps.db, project.id) } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

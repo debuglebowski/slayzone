@@ -12,6 +12,7 @@ import type { RestApiDeps } from './rest-api/types'
 import { registerMcpTools } from './mcp-tools'
 import { mcpAuthInfo } from './mcp-tools/admin-gate'
 import { restPrincipalOf } from './rest-api/principal'
+import { computerErrorMiddleware } from './rest-api/computer-frame-limit'
 
 const SESSION_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 min
 const IDLE_CHECK_INTERVAL = 5 * 60 * 1000 // 5 min
@@ -208,6 +209,9 @@ export function createMcpRestApp(deps: RestApiDeps): McpRestAppHandle {
 
   // REST API for CLI + agent hooks
   registerRestApi(app, deps)
+  // Last: a route with no catch of its own still answers a refused oversized
+  // computer frame as 413, not Express's opaque 500.
+  app.use(computerErrorMiddleware)
 
   return {
     app,

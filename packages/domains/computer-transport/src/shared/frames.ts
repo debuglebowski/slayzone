@@ -265,6 +265,13 @@ export const enrollParamsSchema = z.object({
   chatProcessControls: z.boolean().optional(),
   chatControlInvocations: z.boolean().optional(),
   chatControlLeases: z.boolean().optional(),
+  /**
+   * Whether this computer answers the bounded reads (`@slayzone/platform/bounded-reads`):
+   * paged git lists/text, chunked byte reads (`bytes.read`), staged uploads. Absent =
+   * an older computer: the hub uses the whole-value ops it knows (the frame limit is
+   * the backstop). Additive; no protocol bump.
+   */
+  boundedReads: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -332,6 +339,13 @@ export const helloParamsSchema = z.object({
   chatProcessControls: z.boolean().optional(),
   chatControlInvocations: z.boolean().optional(),
   chatControlLeases: z.boolean().optional(),
+  /**
+   * Whether this computer answers the bounded reads (`@slayzone/platform/bounded-reads`):
+   * paged git lists/text, chunked byte reads (`bytes.read`), staged uploads. Absent =
+   * an older computer: the hub uses the whole-value ops it knows (the frame limit is
+   * the backstop). Additive; no protocol bump.
+   */
+  boundedReads: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

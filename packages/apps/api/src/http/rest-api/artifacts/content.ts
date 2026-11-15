@@ -18,6 +18,7 @@ import {
   unsatisfiedContentRange,
   type RangeAsk
 } from '../byte-range'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * Artifact content transfer. Mirrors `slay tasks artifacts read` / `create` /
@@ -156,6 +157,7 @@ export async function createArtifactFromStream(
     deps.notifyRenderer()
     res.json({ ok: true, data: artifact })
   } catch (err) {
+    if (respondFrameTooLarge(res, err)) return
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
   } finally {
     if (tmpPath)
@@ -268,6 +270,7 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
       })
       stream.pipe(res)
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -306,6 +309,7 @@ export function registerArtifactsContentRoutes(app: Express, deps: RestApiDeps):
       deps.notifyRenderer()
       res.json({ ok: true, data: artifact })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     } finally {
       if (tmpPath)

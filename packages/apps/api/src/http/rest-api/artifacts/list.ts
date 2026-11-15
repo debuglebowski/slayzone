@@ -3,6 +3,7 @@ import { getArtifactsDataRoot } from './shared'
 import type { Express } from 'express'
 import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * GET /api/tasks/:id/artifacts — list a task's artifacts + folders.
@@ -44,6 +45,7 @@ export function registerArtifactsListRoute(app: Express, deps: RestApiDeps): voi
         }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

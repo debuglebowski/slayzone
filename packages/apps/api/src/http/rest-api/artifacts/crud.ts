@@ -6,6 +6,7 @@ import type { RestApiDeps } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot, resolveArtifactFilePath } from './shared'
 import { createArtifactFromStream } from './content'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * Artifact + folder metadata CRUD. Mirrors the metadata half of `slay tasks
@@ -119,6 +120,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -175,6 +177,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       deps.notifyRenderer()
       res.json({ ok: true, data: artifact })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -243,6 +246,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       )
       res.json({ ok: true, data: { ...(raw ?? {}), ...artifact, folderName } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -275,6 +279,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         data: { id: resolved.row.id, title: actual?.title ?? resolved.row.title }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -443,6 +448,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
         data: { ...result, destTaskId: dest.row.id, destTaskTitle: dest.row.title }
       })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -482,6 +488,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       deps.notifyRenderer()
       res.json({ ok: true, data: folder })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -499,6 +506,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       deps.notifyRenderer()
       res.json({ ok: true, data: { id: folder.id, name: folder.name } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })
@@ -547,6 +555,7 @@ export function registerArtifactsCrudRoutes(app: Express, deps: RestApiDeps): vo
       // `parentName` (null for "root") echoed so the CLI can print `-> <name>`.
       res.json({ ok: true, data: { ...updated, parentName } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

@@ -3,6 +3,7 @@ import { deleteTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * DELETE /api/tasks/:id — soft-delete a task (CLI `slay tasks delete`).
@@ -43,6 +44,7 @@ export function registerDeleteTaskRoute(app: Express, deps: RestApiDeps): void {
       // task rides ALONGSIDE it so the CLI can echo `id  title` without a DB read.
       res.json({ ok: true, data: result, task: { id: task.id, title: task.title } })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

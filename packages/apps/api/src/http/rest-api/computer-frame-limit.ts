@@ -1,4 +1,4 @@
-import type { Response } from 'express'
+import type { ErrorRequestHandler, Response } from 'express'
 import {
   COMPUTER_FRAME_TOO_LARGE,
   isComputerFrameTooLarge
@@ -14,7 +14,18 @@ import {
  * answers anything else as before.
  */
 export function respondFrameTooLarge(res: Response, err: unknown): boolean {
-  if (!isComputerFrameTooLarge(err)) return false
+  // Once a response has started (a stream), there is no status left to give it.
+  if (!isComputerFrameTooLarge(err) || res.headersSent) return false
   res.status(413).json({ ok: false, error: err.message, code: COMPUTER_FRAME_TOO_LARGE })
   return true
+}
+
+/**
+ * The REST app's last error handler: a route with no catch of its own (Express 5
+ * hands its rejected promise here) answers a refused oversized frame as the 413
+ * above. Everything else goes on to Express's default handler, unchanged.
+ */
+export const computerErrorMiddleware: ErrorRequestHandler = (err, _req, res, next) => {
+  if (respondFrameTooLarge(res, err)) return
+  next(err)
 }

@@ -40,6 +40,7 @@
     "./security-log": "./src/security-log.ts",
     "./path-scope": "./src/path-scope.ts",
     "./computer-frame-limit": "./src/computer-frame-limit.ts",
+    "./bounded-reads": "./src/bounded-reads.ts",
     "./agent-hooks": "./src/agent-hooks/index.ts",
     "./client-address": "./src/client-address.ts",
     "./hub-convex": "./src/hub-convex.ts",

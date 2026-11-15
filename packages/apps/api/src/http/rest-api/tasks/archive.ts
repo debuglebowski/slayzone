@@ -3,6 +3,7 @@ import { archiveTaskOp } from '@slayzone/task/server'
 import type { RestApiDeps } from '../types'
 import { NOOP_TASK_BUS } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * POST /api/tasks/:id/archive — archive a task (CLI `slay tasks archive`).
@@ -42,6 +43,7 @@ export function registerArchiveTaskRoute(app: Express, deps: RestApiDeps): void 
       }
       res.json({ ok: true, data: task })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   })

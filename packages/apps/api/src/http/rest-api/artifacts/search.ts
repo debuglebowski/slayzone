@@ -4,6 +4,7 @@ import type { RestApiDeps } from '../types'
 import { isResolveFailure, queryString, resolveByIdPrefix } from '../resolve'
 import { getArtifactsDataRoot } from './shared'
 import { ownedProjectIdsOrAll } from '../../owner-scope'
+import { respondFrameTooLarge } from '../computer-frame-limit'
 
 /**
  * GET /api/artifacts/search — the hub half of `slay tasks artifacts search`.
@@ -114,6 +115,7 @@ export function registerArtifactsSearchRoute(app: Express, deps: RestApiDeps): v
       })
       res.json({ ok: true, data: report })
     } catch (err) {
+      if (respondFrameTooLarge(res, err)) return
       // An uncompilable `--regex` is the CALLER's mistake, so it must be a 400
       // with the CLI's own wording — not a 500. The worker re-throws it as
       // `[INVALID_REGEX] <message>` (its class identity does not cross the thread
