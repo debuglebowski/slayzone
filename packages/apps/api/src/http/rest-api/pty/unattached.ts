@@ -44,7 +44,13 @@ export function registerPtyUnattachedRoutes(app: Express, deps: RestApiDeps): vo
     }
     const result = await deps.pty.killUnattached(req.params.computerId, req.params.sessionId)
     if (!result.ok) {
-      res.status(404).json({ error: 'No unattached session with that id', reason: result.reason })
+      if (result.reason === 'not-found') {
+        res.status(404).json({ error: 'No unattached session with that id', reason: result.reason })
+        return
+      }
+      // `not-stopped`: another attempt runs it now (listed instead); `attached`: it is
+      // its tab's session now.
+      res.status(409).json({ error: `Not stopped (${result.reason})`, reason: result.reason })
       return
     }
     res.json({ ok: true })

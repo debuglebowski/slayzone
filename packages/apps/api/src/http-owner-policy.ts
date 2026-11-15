@@ -156,6 +156,23 @@ const bareRows =
   async (body, scope) =>
     Array.isArray(body) ? keepRows(body, toResource, scope) : body
 
+/** Unattached terminal sessions: on the caller's computer, and — when the session
+ *  belongs to a task (`<taskId>:<tabId>`) — of a task the caller may access. */
+const unattachedRows: HttpOutputFilter = async (body, scope) => {
+  if (!Array.isArray(body)) return body
+  const out: unknown[] = []
+  for (const row of body) {
+    if (!isRecord(row)) continue
+    const resources = [res('computer', row.computerId)]
+    if (typeof row.sessionId === 'string' && /^[^:]+:[^:]+$/.test(row.sessionId))
+      resources.push(res('session', row.sessionId))
+    const all = resources.filter((r): r is OwnedResource => r !== null)
+    if (all.length > 0 && resources.every((r) => r !== null) && (await scope.allowsAll(all)))
+      out.push(row)
+  }
+  return out
+}
+
 /** `{ ok, data: [...] }`. */
 const dataRows =
   (field: string, kind: ResourceKind): HttpOutputFilter =>
@@ -359,9 +376,18 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
   // A previous hub run's sessions still running on a computer: its owner's.
-  'GET /api/pty/unattached': listed(bareRows(byField('computerId', 'computer'))),
-  'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(computer('params.computerId')),
-  'DELETE /api/pty/unattached/:computerId/:sessionId': checked(computer('params.computerId')),
+  // And the task's, when the session belongs to one (review L2). A session id with no
+  // task is ownerless here; such a session is managed through the app (tRPC, which
+  // checks its computer only).
+  'GET /api/pty/unattached': listed(unattachedRows),
+  'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(
+    computer('params.computerId'),
+    session('params.sessionId')
+  ),
+  'DELETE /api/pty/unattached/:computerId/:sessionId': checked(
+    computer('params.computerId'),
+    session('params.sessionId')
+  ),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
   'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),

@@ -1051,6 +1051,8 @@ run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
 # re-launched or replaced; what cannot be adopted is surfaced with attach/stop.
 run_harness packages/domains/terminal/src/server/runtime/pty-attach.test.ts
 run_harness packages/domains/terminal/src/server/runtime/unattached-sessions.test.ts
+run_harness packages/domains/terminal/src/server/runtime/keyed-serializer.test.ts
+run_harness packages/domains/terminal/src/server/runtime/pty-store-kill.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 
@@ -1685,6 +1687,7 @@ run_vitest_files "vitest (role gate)" \
 run_vitest_files "vitest (owner checks)" \
   packages/apps/api/src/owner-policy.test.ts \
   packages/apps/api/src/http-owner-policy.test.ts \
+  packages/apps/api/src/unattached-owner.test.ts \
   packages/apps/api/src/http/rest-api/agent-hook-owner.test.ts
 
 # The computer is a separate app with its OWN vitest config (node environment, no

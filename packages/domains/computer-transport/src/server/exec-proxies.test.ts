@@ -2385,15 +2385,89 @@ describe('createRoutingPtyBackend', () => {
       ).toEqual({ mode: 'claude-code' })
     })
 
-    it('killUntracked ends exactly the listed attempt', async () => {
+    it('a later spawn that replaces a taken-over session is never silent', async () => {
       const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.adopt', () => ({ pid: 4242, seq: 5, detection: true, detected }))
+      gateway.onMethod('pty.spawn', () => ({ pid: 77 }))
       connect(gateway, 'epoch-a')
       await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
-      await backend.killUntracked?.('computer-1', 'task-1:tab-1', 'run-1')
+      await backend.reattach!('computer-1', 'task-1:tab-1', 'run-1', { processName: 'claude' })
+      diagnostics.length = 0
+      await (backend.spawn(agentSpec()) as Promise<PtyHandle>)
+      expect(diagnostics.find((d) => d.event === 'computer.adopted_replaced')).toMatchObject({
+        level: 'warn',
+        payload: { computerId: 'computer-1', sessionId: 'task-1:tab-1' }
+      })
+    })
+
+    it('killUntracked ends exactly the listed attempt', async () => {
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.kill', () => ({ ok: true, killed: true }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      await expect(backend.killUntracked!('computer-1', 'task-1:tab-1', 'run-1')).resolves.toEqual({
+        stopped: true
+      })
       expect(gateway.requestsOf('pty.kill').map((c) => c.params)).toEqual([
         { sessionId: 'task-1:tab-1', spawnId: 'run-1' }
       ])
       expect(backend.untrackedSessions?.()).toEqual([])
+    })
+
+    // Review M1: the computer may have handed the process to another attempt meanwhile
+    // (a lost adopt reply). A kill of the old attempt stops nothing — never "stopped".
+    it('killUntracked of an attempt no longer running there: not stopped, and the new one is known', async () => {
+      let sessions = [leftover()]
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.list', () => ({ sessions, exited: [] }))
+      gateway.onMethod('pty.kill', () => ({ ok: true, killed: false }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      sessions = [leftover({ spawnId: 'run-2' })]
+      await expect(backend.killUntracked!('computer-1', 'task-1:tab-1', 'run-1')).resolves.toEqual({
+        stopped: false
+      })
+      expect(backend.untrackedSessions?.()).toEqual([
+        expect.objectContaining({ sessionId: 'task-1:tab-1', spawnId: 'run-2' })
+      ])
+    })
+
+    it('killUntracked against an older computer (no `killed` in the reply) checks by listing', async () => {
+      let sessions = [leftover()]
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.list', () => ({ sessions, exited: [] }))
+      gateway.onMethod('pty.kill', () => {
+        sessions = []
+        return { ok: true }
+      })
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      await expect(backend.killUntracked!('computer-1', 'task-1:tab-1', 'run-1')).resolves.toEqual({
+        stopped: true
+      })
+    })
+
+    it('a lost adopt reply: the computer is listed again, the attempt it runs now is known', async () => {
+      let sessions = [leftover()]
+      const { gateway, backend } = restartedHub()
+      gateway.onMethod('pty.list', () => ({ sessions, exited: [] }))
+      gateway.onMethod('pty.adopt', (params) => {
+        // The computer took it over as the new attempt; the reply never arrives.
+        sessions = [leftover({ spawnId: (params as { spawnId: string }).spawnId, adopted: true })]
+        throw new RpcDisposedError('computer-hub', 'socket-closed')
+      })
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      const err = await backend.reattach!('computer-1', 'task-1:tab-1', 'run-1', {
+        processName: 'claude'
+      }).catch((e: unknown) => e)
+      expect((err as { reattachRefusal?: string }).reattachRefusal).toBeUndefined()
+      const now = (requireCall(gateway, 'pty.adopt').params as { spawnId: string }).spawnId
+      await vi.waitFor(() =>
+        expect(backend.untrackedSessions?.()).toEqual([
+          expect.objectContaining({ sessionId: 'task-1:tab-1', spawnId: now })
+        ])
+      )
     })
   })
 })

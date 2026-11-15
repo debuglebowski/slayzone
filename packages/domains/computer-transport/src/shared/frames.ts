@@ -1062,6 +1062,17 @@ export const ptyKillParamsSchema = z.object({
 })
 export type PtyKillParams = z.infer<typeof ptyKillParamsSchema>
 
+export const ptyKillResultSchema = z.object({
+  ok: z.literal(true),
+  /**
+   * Whether the named attempt was running here and is now stopped. False: nothing
+   * matched (it exited, or another attempt took the process over). Absent from older
+   * computers — the hub then re-lists to find out.
+   */
+  killed: z.boolean().optional()
+})
+export type PtyKillResult = z.infer<typeof ptyKillResultSchema>
+
 /**
  * The user is now looking at this session: if its spawn is still waiting for an
  * agent-start slot, start it next. A no-op (`queued: false`) for a session that

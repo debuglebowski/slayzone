@@ -623,10 +623,15 @@ function createDetachController<E extends DetachableEntry>(
     // nothing to resolve. Only a previous hub run's leftovers can be listed — worth
     // the round-trip when the hub can say which of them it has finished with
     // (`ownerGone`) or can adopt them (`onUntracked`).
-    if (previousEpoch === undefined && detached.length === 0) {
+    // Every way out of a first contact ends here: whatever else happened, the
+    // previous run's sessions are listed and offered (review H1).
+    const firstContactSweep = async (): Promise<void> => {
       if (!participants.some((p) => p.ownerGone || p.onUntracked)) return
       const listed = await listComputer(computerId)
       if (listed) await sweep(computerId, epoch, listed, [], { firstContact: true })
+    }
+    if (previousEpoch === undefined && detached.length === 0) {
+      await firstContactSweep()
       return
     }
     clearGrace(computerId)
@@ -651,7 +656,12 @@ function createDetachController<E extends DetachableEntry>(
         })
       }
       detached = detached.filter((o) => !waiting.includes(o))
-      if (detached.length === 0) return
+      // The resent ids are owned (`pendingSpawn` until confirmed): the sweep neither
+      // kills nor offers them, so nothing races the resend.
+      if (detached.length === 0) {
+        await firstContactSweep()
+        return
+      }
     }
 
     // A missing epoch on EITHER side proves nothing — an old computer that cannot
@@ -661,6 +671,8 @@ function createDetachController<E extends DetachableEntry>(
     if (epoch === undefined || previousEpoch === undefined || epoch !== previousEpoch) {
       if (detached.length === 0) return
       for (const o of detached) o.owner.finalize(o.entry, 'computer-restarted')
+      // A first contact that also had entries to give up on still offers the rest.
+      if (previousEpoch === undefined) void firstContactSweep()
       record('computer.sessions_disposed', 'error', detached, computerId, {
         previousEpoch: previousEpoch ?? null,
         epoch: epoch ?? null,

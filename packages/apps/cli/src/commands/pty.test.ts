@@ -98,3 +98,23 @@ test('kill: an attached session is still killed the usual way', async () => {
   await run('kill', 'task-1')
   expect(apiDelete).toHaveBeenCalledWith('/api/pty/task-1%3Atask-1')
 })
+
+// Review L3: the same tab's session left running on two computers.
+test('an id on two computers is ambiguous; `<computerId>/<sessionId>` picks one', async () => {
+  const twice = [unattached[0], { ...unattached[0], computerId: 'pc-2' }]
+  vi.mocked(apiGet).mockImplementation(async (path: string) =>
+    path === '/api/pty/unattached' ? twice : attached
+  )
+  vi.mocked(apiPost).mockResolvedValue({ ok: true })
+  const errors: string[] = []
+  vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+    errors.push(a.join(' '))
+  })
+  vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new Error(`exit ${String(code)}`)
+  }) as never)
+  await expect(run('attach', 'task-2')).rejects.toThrow('exit 1')
+  expect(errors.join('\n')).toMatch(/pc-1\/task-2:tab-9.*pc-2\/task-2:tab-9/)
+  await run('attach', 'pc-2/task-2')
+  expect(apiPost).toHaveBeenCalledWith('/api/pty/unattached/pc-2/task-2%3Atab-9/attach', {})
+})

@@ -344,3 +344,66 @@ test('adoption never resizes the running process; a client resize does', async (
   expect(resizePty(attachedSid, 120, 40)).toBe(true)
   expect(b.handles[0]!.resized).toEqual([[120, 40]])
 })
+
+// Review H2: a tab's ordinary start (`pty.create`) is in its long preparation while the
+// hub's own adoption attaches the running agent. The start must then BIND to the adopted
+// session — never replace it (which killed the agent and resumed a twin).
+test('a start racing the hub attach binds to the adopted session, never replaces it', async () => {
+  const b = fakeBackend()
+  // Held until released (every call: the resolver is retried on null).
+  let held: Promise<void> = new Promise(() => undefined)
+  let release: (id: null) => void = () => undefined
+  held = new Promise<void>((r) => {
+    release = () => r()
+  })
+  setConversationResolver(() => held.then(() => null))
+  const sid = nextSessionId()
+  const starting = createPty(agentOpts(sid)) // held at the resolver
+  await settle()
+  const attach = await createPty(agentOpts(sid, { attach: { computerId: 'pc', spawnId: 'run-1' } }))
+  expect(attach.success).toBe(true)
+  opened.push(sid)
+  release(null)
+  expect((await starting).success).toBe(true)
+  await settle()
+
+  expect(b.specs).toEqual([]) // nothing started
+  expect(b.handles[0]!.killed).toBe(false)
+  expect(hasLivePty(sid)).toBe(true)
+  expect(store.calls.filter((c) => c.method === 'recordPendingSpawn').length).toBe(
+    store.calls
+      .filter((c) => c.method === 'prunePendingSpawns')
+      .reduce((n, c) => n + ((c.args as { ids: string[] }).ids?.length ?? 0), 0)
+  )
+  expect(events('pty.create_bound_to_adopted')).toHaveLength(1)
+})
+
+test('a start after the hub attached binds to the adopted session too', async () => {
+  const b = fakeBackend()
+  const sid = nextSessionId()
+  expect(
+    (await createPty(agentOpts(sid, { attach: { computerId: 'pc', spawnId: 'run-1' } }))).success
+  ).toBe(true)
+  opened.push(sid)
+  expect((await createPty(agentOpts(sid, { existingConversationId: ID }))).success).toBe(true)
+  await settle()
+  expect(b.specs).toEqual([])
+  expect(b.handles[0]!.killed).toBe(false)
+  expect(events('pty.create_bound_to_adopted')).toHaveLength(1)
+})
+
+test('an explicit restart of an adopted session replaces it, and says so', async () => {
+  const b = fakeBackend()
+  const sid = nextSessionId()
+  expect(
+    (await createPty(agentOpts(sid, { attach: { computerId: 'pc', spawnId: 'run-1' } }))).success
+  ).toBe(true)
+  opened.push(sid)
+  killPty(sid) // the user's restart: kill, then start
+  expect((await createPty(agentOpts(sid, { existingConversationId: ID }))).success).toBe(true)
+  await settle()
+  expect(b.specs).toHaveLength(1)
+  expect(events('pty.adopted_replaced')).toMatchObject([
+    { payload: { reason: 'restart-requested' } }
+  ])
+})

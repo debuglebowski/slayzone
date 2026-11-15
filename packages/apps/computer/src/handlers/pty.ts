@@ -1374,7 +1374,7 @@ export function createPtyHandlers(
     return { warms }
   }
 
-  async function kill(rawParams: unknown): Promise<{ ok: true }> {
+  async function kill(rawParams: unknown): Promise<{ ok: true; killed: boolean }> {
     const params = ptyKillParamsSchema.parse(rawParams)
     const starting = starts.get(params.sessionId)
     if (starting && (params.spawnId === undefined || starting.spawnId === params.spawnId)) {
@@ -1413,19 +1413,21 @@ export function createPtyHandlers(
         await forgetHistory(params.sessionId, live.taskId)
         await stopPty(live, params.signal)
       }
-      return { ok: true }
+      return { ok: true, killed: true }
     }
     if (!live || (params.spawnId !== undefined && live.spawnId !== params.spawnId)) {
       // Idempotent: the session may already have exited (network race). Its saved
       // output goes all the same: the hub ended the session (closed, restarted).
       if (!live) await forgetHistory(params.sessionId, undefined)
       ctx.log('pty kill on unknown session', { sessionId: params.sessionId })
-      return { ok: true }
+      // Nothing stopped: the hub learns that the attempt it named is not what runs
+      // here (exited, or taken over by another attempt meanwhile).
+      return { ok: true, killed: false }
     }
     // The hub ended it (a closed tab, a restart): its output goes, as in memory.
     await forgetHistory(params.sessionId, live.taskId)
     await stopPty(live, params.signal)
-    return { ok: true }
+    return { ok: true, killed: true }
   }
 
   function resize(rawParams: unknown): { ok: true } {

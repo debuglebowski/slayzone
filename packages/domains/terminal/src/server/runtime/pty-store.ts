@@ -33,6 +33,7 @@ import type { TaskSessionStore } from './task-session-store'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { resolveSpawnTarget } from './spawn-target'
 import { getPtyBackend, onPtyBackendChange } from './pty-backend'
+import { createKeyedSerializer } from './keyed-serializer'
 import { createUnattachedSessions, type UnattachedLaunchResolver } from './unattached-sessions'
 import { runDoctor } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
@@ -311,7 +312,16 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
    * window (PTY output now fans out via `ptyEvents`, so the window is only
    * needed for legacy `redirectSessionWindow()` codepaths).
    */
-  const ptyCreate = async (
+  // One start or adoption per session id at a time: a tab's start and the hub's
+  // adoption of that tab's running agent never interleave (review H2) — the later one
+  // sees what the earlier one registered (and binds to it, never replaces it).
+  const oneAtATime = createKeyedSerializer()
+  const ptyCreate = (
+    opts: PtyCreateOpts,
+    win?: PtySessionWindow | null
+  ): Promise<PtyCreateResult> => oneAtATime(opts.sessionId, () => ptyCreateNow(opts, win))
+
+  const ptyCreateNow = async (
     opts: PtyCreateOpts,
     win?: PtySessionWindow | null
   ): Promise<PtyCreateResult> => {
@@ -438,7 +448,17 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   const ptyResize = (sessionId: string, cols: number, rows: number) =>
     resizePty(sessionId, cols, rows)
   const ptyGetSize = (sessionId: string) => getPtySize(sessionId)
-  const ptyKill = (sessionId: string) => killPty(sessionId)
+  // Every "new conversation / new process" flow (restart, reset, respawn, Start fresh,
+  // changed flags) kills the tab's session before starting it again. With nothing
+  // tracked here, the agent the computer still runs from a previous hub run is what
+  // must end — else the new start would take that old agent over (review M2).
+  const ptyKill = async (sessionId: string): Promise<boolean> => {
+    if (killPty(sessionId)) return true
+    const outcome = await unattached.killBySession(sessionId)
+    // Attached while this waited: it is the tab's session now — end it as such.
+    if (outcome === 'attached') return killPty(sessionId)
+    return outcome === 'stopped'
+  }
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
   const ptyInterrupt = (sessionId: string) => interruptPty(sessionId)
   const ptyPrioritize = (sessionId: string) => prioritizePty(sessionId)

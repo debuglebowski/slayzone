@@ -291,3 +291,36 @@ describe('untracked sessions are offered to the participants', () => {
     await vi.waitFor(() => expect(seen.at(-1)).toEqual([]))
   })
 })
+
+// Review H1: a spawn sent before the computer's first hello (a restarted app opening a
+// tab) must not stop the first-contact list — every OTHER session a previous hub run
+// left on the computer is still offered (adopted or surfaced), never silently skipped.
+describe('first contact with a spawn already waiting', () => {
+  it('resends the spawn AND still lists, offering the other kept sessions', async () => {
+    const gateway = new Gateway()
+    const sessions = new Map<string, DetachableEntry>()
+    const seen: Array<Array<{ sessionId: string }>> = []
+    join(gateway, sessions, {
+      onUntracked: (_c, _e, kept) => seen.push(kept.map((k) => ({ sessionId: k.sessionId })))
+    })
+    const resent: string[] = []
+    sessions.set('tab-a', {
+      ...entry('tab-a', 'new-a'),
+      detached: true,
+      pendingSpawn: { resend: () => resent.push('tab-a'), confirm: () => undefined }
+    })
+    gateway.listed = [
+      { sessionId: 'tab-a', spawnId: 'run-1-a' },
+      { sessionId: 'tab-b', spawnId: 'run-1-b' },
+      { sessionId: 'tab-c', spawnId: 'run-1-c' }
+    ]
+    gateway.connect('epoch-a')
+
+    await vi.waitFor(() =>
+      expect(seen.at(-1)).toEqual([{ sessionId: 'tab-b' }, { sessionId: 'tab-c' }])
+    )
+    expect(resent).toEqual(['tab-a'])
+    // The waiting spawn's id is owned (its resend is on the way): never swept, never offered.
+    expect(gateway.kills()).toEqual([])
+  })
+})

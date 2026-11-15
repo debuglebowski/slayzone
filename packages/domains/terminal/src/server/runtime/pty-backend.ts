@@ -352,8 +352,16 @@ export interface PtyBackend {
       relay?: boolean
     }
   ): Promise<PtyHandle>
-  /** End an untracked session — exactly that attempt (the user chose to stop it). */
-  killUntracked?(computerId: string, sessionId: string, spawnId: string): Promise<void>
+  /**
+   * End an untracked session — exactly that attempt (the user chose to stop it).
+   * `stopped: false` when that attempt is not what runs there any more (another one
+   * took the process over: it is listed instead), or the computer could not tell.
+   */
+  killUntracked?(
+    computerId: string,
+    sessionId: string,
+    spawnId: string
+  ): Promise<{ stopped: boolean }>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing
    * until `adopt` gives it a real session id — the hub has nowhere to route it to

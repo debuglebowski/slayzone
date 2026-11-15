@@ -42,6 +42,8 @@ function harness(initial: UntrackedPtySession[] = [live()]) {
   let listed = initial
   const listeners = new Set<() => void>()
   const killed: Array<[string, string, string]> = []
+  /** What the computer answers a stop with (`stopped: false` = another attempt runs it now). */
+  let stopAnswer = { stopped: true }
   const backend = {
     spawn: () => {
       throw new Error('never spawns')
@@ -53,8 +55,11 @@ function harness(initial: UntrackedPtySession[] = [live()]) {
     },
     killUntracked: async (computerId: string, sessionId: string, spawnId: string) => {
       killed.push([computerId, sessionId, spawnId])
-      listed = listed.filter((s) => s.sessionId !== sessionId)
-      for (const cb of [...listeners]) cb()
+      if (stopAnswer.stopped) {
+        listed = listed.filter((s) => s.sessionId !== sessionId)
+        for (const cb of [...listeners]) cb()
+      }
+      return stopAnswer
     }
   } as unknown as PtyBackend
   const created: Array<Record<string, unknown>> = []
@@ -90,6 +95,9 @@ function harness(initial: UntrackedPtySession[] = [live()]) {
     },
     resolver: (fn: UnattachedLaunchResolver) => {
       resolve = fn
+    },
+    stopAnswers: (answer: { stopped: boolean }) => {
+      stopAnswer = answer
     }
   }
 }
@@ -234,4 +242,57 @@ test('a session the computer no longer lists leaves the registry', async () => {
   h.set([])
   expect(h.registry.list()).toEqual([])
   expect(changes).toHaveBeenCalled()
+})
+
+// Review M1: Stop is reported only when the session really stopped.
+test('stop that stopped nothing (another attempt runs it now) is not reported as stopped', async () => {
+  const h = harness()
+  h.resolver(async () => ({ ok: false, reason: 'task-elsewhere' }))
+  h.registry.start()
+  await vi.waitFor(() => expect(h.registry.list()).toHaveLength(1))
+  h.stopAnswers({ stopped: false })
+  await expect(h.registry.kill('pc', 'task-1:tab-1')).resolves.toEqual({
+    ok: false,
+    reason: 'not-stopped'
+  })
+  expect(diag.filter((d) => d.event === 'pty.orphan_killed')).toEqual([])
+  expect(h.registry.list()).toHaveLength(1)
+})
+
+test("stop while it is being attached waits; attached = not stopped behind the tab's back", async () => {
+  const h = harness()
+  let release: () => void = () => undefined
+  h.resolver(
+    ({ sessionId }) =>
+      new Promise((r) => {
+        release = () => r({ ok: true, launch: { sessionId, cwd: '/w', mode: 'claude-code' } })
+      })
+  )
+  h.registry.start()
+  await vi.waitFor(() => expect(h.registry.list()[0]?.status).toBe('adopting'))
+  const stopping = h.registry.kill('pc', 'task-1:tab-1')
+  release()
+  await expect(stopping).resolves.toEqual({ ok: false, reason: 'attached' })
+  expect(h.killed).toEqual([])
+})
+
+// Review L1: an adoption that lost a race to the tab's own start (the entry left the set
+// meanwhile) is not reported as a session left unattached.
+test('no "unattached" report for a session that left the set while its adoption ran', async () => {
+  const h = harness()
+  let release: () => void = () => undefined
+  h.resolver(
+    ({ sessionId }) =>
+      new Promise((r) => {
+        release = () => r({ ok: true, launch: { sessionId, cwd: '/w', mode: 'claude-code' } })
+      })
+  )
+  h.answer(() => ({ success: false, code: 'attach-refused', attachRefusal: 'already-tracked' }))
+  h.registry.start()
+  await vi.waitFor(() => expect(h.registry.list()[0]?.status).toBe('adopting'))
+  h.set([]) // the tab's own start took it over
+  release()
+  await idle()
+  await idle()
+  expect(diag.filter((d) => d.event === 'pty.orphan_unattached')).toEqual([])
 })

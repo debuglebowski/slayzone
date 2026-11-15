@@ -461,3 +461,48 @@ describe('adopting a live session (hub restart)', () => {
     pty.disposeAll()
   })
 })
+
+// Review M1: a kill names an attempt; the hub must learn whether that attempt was what it
+// stopped — a mismatched one (taken over meanwhile) answered "ok" and the hub reported a
+// still-running agent as stopped.
+describe('pty.kill says whether it stopped the named attempt', () => {
+  it('true for the running attempt, false for another or an unknown one', async () => {
+    const { ctx } = makeCtx()
+    let onExit: ((e: { exitCode: number; signal: number }) => void) | undefined
+    const proc = {
+      pid: 9300,
+      cols: 80,
+      rows: 24,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(() => onExit?.({ exitCode: 0, signal: 1 })),
+      onData: () => ({ dispose() {} }),
+      onExit: (l: typeof onExit) => {
+        onExit = l
+        return { dispose() {} }
+      }
+    } as unknown as nodePty.IPty
+    const pty = createPtyHandlers(ctx, undefined, {
+      spawnPty: (() => proc) as typeof nodePty.spawn
+    })
+    await pty.handlers['pty.spawn']({
+      sessionId: 's',
+      spawnId: 'run-2',
+      command: 'cat',
+      cwd: process.cwd()
+    })
+    expect(await pty.handlers['pty.kill']({ sessionId: 's', spawnId: 'run-1' })).toEqual({
+      ok: true,
+      killed: false
+    })
+    expect(await pty.handlers['pty.kill']({ sessionId: 'nope', spawnId: 'x' })).toEqual({
+      ok: true,
+      killed: false
+    })
+    expect(await pty.handlers['pty.kill']({ sessionId: 's', spawnId: 'run-2' })).toEqual({
+      ok: true,
+      killed: true
+    })
+    pty.disposeAll()
+  })
+})

@@ -77,7 +77,14 @@ export function ComputerUnattachedSessions({ computerId }: { computerId: string 
     killMutation
       .mutateAsync({ computerId, sessionId })
       .then(
-        () => toast.success('Stopped'),
+        (r) =>
+          r.ok
+            ? toast.success('Stopped')
+            : toast.error(
+                r.reason === 'attached'
+                  ? 'It was attached to its tab meanwhile: stop it there'
+                  : 'Not stopped: the computer runs it under another attempt now — try again'
+              ),
         (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
       )
       .finally(refresh)

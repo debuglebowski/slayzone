@@ -109,6 +109,7 @@ import {
   ptySpawnResultSchema,
   ptyWarmAdoptResultSchema,
   ptyAdoptResultSchema,
+  ptyKillResultSchema,
   ptyWarmListResultSchema,
   ptyBackgroundJobsResultSchema,
   ptyDoctorResultSchema,
@@ -520,6 +521,8 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
   relay?: boolean
   /** Listeners for the computer going away (false) and coming back (true). */
   availability: Set<(available: boolean) => void>
+  /** A process the computer was already running, taken over (a previous hub run's). */
+  takenOver?: boolean
   setRelay?: (on: boolean) => Promise<void> | void
   /**
    * The computer has no `pty.relay` (it predates it, v0.37.2): it streams every
@@ -586,6 +589,36 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     bySession.delete(sessionId)
     if (bySession.size === 0) untracked.delete(computerId)
     notifyUntracked()
+  }
+
+  /**
+   * Ask the computer again what it runs under `sessionId`, and update the untracked
+   * snapshot from its answer: an attempt this backend does not track is (still) the
+   * one to address; nothing live drops it. Null when the computer cannot answer.
+   */
+  async function refreshUntracked(
+    computerId: string,
+    sessionId: string
+  ): Promise<ListedSession | null | undefined> {
+    let parsed: ReturnType<typeof ptyListResultSchema.safeParse>
+    try {
+      parsed = ptyListResultSchema.safeParse(
+        await gateway.request(computerId, HubToComputerMethods.ptyList, {})
+      )
+    } catch {
+      return undefined
+    }
+    if (!parsed.success) return undefined
+    const live = toSessionList(parsed.data).live.get(sessionId) ?? null
+    const tracked = sessions.get(sessionKey(computerId, sessionId))
+    const bySession = untracked.get(computerId) ?? new Map<string, ListedSession>()
+    const before = bySession.get(sessionId)
+    if (live && !(tracked && !tracked.disposed)) bySession.set(sessionId, live)
+    else bySession.delete(sessionId)
+    if (bySession.size === 0) untracked.delete(computerId)
+    else untracked.set(computerId, bySession)
+    if (before?.spawnId !== bySession.get(sessionId)?.spawnId) notifyUntracked()
+    return live
   }
 
   function recordPty(
@@ -774,6 +807,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     entry.spawnInFlight = false
     entry.pendingSpawn = undefined
     entry.prioritize = undefined
+    entry.takenOver = true
     entry.lastSeq = Math.max(entry.lastSeq, taken.seq)
     for (const seq of [...entry.pending.keys()]) {
       if (seq <= entry.lastSeq) entry.pending.delete(seq)
@@ -1323,6 +1357,14 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // (untracked) on the next reconnect, and taken over then.
         finalize(entry, null, null, 'adopt-failed', errorMessage(err))
         if (firstHere) registeredKeys.delete(key)
+        const refused =
+          err instanceof RpcError &&
+          (err.code === ComputerTransportErrorCodes.unimplemented ||
+            err.code === ComputerTransportErrorCodes.sessionNotAdoptable)
+        // No verdict (a lost or timed-out reply): the computer may have handed the
+        // process over to `spawnId` already. Ask it, so the untracked entry names the
+        // attempt it runs NOW — never a stale one that Attach and Stop would miss.
+        if (!refused) void refreshUntracked(computerId, sessionId)
         if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
           throw refusal(
             'computer-too-old',
@@ -1340,8 +1382,18 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     },
 
     async killUntracked(computerId: string, sessionId: string, spawnId: string) {
-      await gateway.request(computerId, HubToComputerMethods.ptyKill, { sessionId, spawnId }, 0)
-      dropUntracked(computerId, sessionId, spawnId)
+      const reply = ptyKillResultSchema.safeParse(
+        await gateway.request(computerId, HubToComputerMethods.ptyKill, { sessionId, spawnId }, 0)
+      )
+      if (reply.success && reply.data.killed === true) {
+        dropUntracked(computerId, sessionId, spawnId)
+        return { stopped: true }
+      }
+      // Nothing matched (or an older computer that does not say): find out what runs
+      // there now. Gone = stopped; another attempt = NOT stopped (it is listed instead).
+      const live = await refreshUntracked(computerId, sessionId)
+      if (live === undefined) return { stopped: false }
+      return { stopped: live === null }
     },
 
     spawn(spec: PtySpawnSpec): PtyHandle | Promise<PtyHandle> {
@@ -1588,6 +1640,15 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       if (sessions.has(key) || preceding) {
         const replacement = (preceding ?? Promise.resolve()).catch(noop).then(async () => {
           const old = sessions.get(key)
+          if (old && !old.disposed && old.takenOver) {
+            // Never silent: this ends an agent the hub took over after a restart.
+            recordPty(
+              'computer.adopted_replaced',
+              'warn',
+              'A new start replaced a terminal session taken over from before the hub restarted.',
+              { computerId, sessionId: spec.sessionId, spawnId: old.spawnId ?? null }
+            )
+          }
           if (old && !old.disposed) {
             await gateway.request(
               computerId,

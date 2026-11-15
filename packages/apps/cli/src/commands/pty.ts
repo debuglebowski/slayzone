@@ -29,12 +29,21 @@ interface UnattachedInfo {
 const unattachedPath = (u: UnattachedInfo): string =>
   `/api/pty/unattached/${encodeURIComponent(u.computerId)}/${encodeURIComponent(u.sessionId)}`
 
-/** The one unattached session `idPrefix` names; null when none does. Exits on ambiguity. */
+/**
+ * The one unattached session `idPrefix` names; null when none does. Exits on ambiguity.
+ * `<computerId>/<sessionId>` (each a prefix) picks the computer when the same session
+ * runs on more than one.
+ */
 function findUnattached(list: UnattachedInfo[], idPrefix: string): UnattachedInfo | null {
-  const matches = list.filter((u) => u.sessionId.startsWith(idPrefix))
+  const slash = idPrefix.indexOf('/')
+  const computerPrefix = slash >= 0 ? idPrefix.slice(0, slash) : ''
+  const sessionPrefix = slash >= 0 ? idPrefix.slice(slash + 1) : idPrefix
+  const matches = list.filter(
+    (u) => u.computerId.startsWith(computerPrefix) && u.sessionId.startsWith(sessionPrefix)
+  )
   if (matches.length > 1) {
     console.error(
-      `Ambiguous id prefix "${idPrefix}". Matches: ${matches.map((u) => u.sessionId).join(', ')}`
+      `Ambiguous id "${idPrefix}". Matches: ${matches.map((u) => `${u.computerId}/${u.sessionId}`).join(', ')} — name one as <computerId>/<sessionId>.`
     )
     process.exit(1)
   }
@@ -182,7 +191,9 @@ export function ptyCommand(): Command {
   // slay pty attach <id>
   cmd
     .command('attach <id>')
-    .description('Attach an unattached session to its tab again (id prefix supported)')
+    .description(
+      'Attach an unattached session to its tab again (id prefix, or <computerId>/<sessionId>)'
+    )
     .action(async (idPrefix: string) => {
       const target = findUnattached(await apiGet<UnattachedInfo[]>('/api/pty/unattached'), idPrefix)
       if (!target) {

@@ -96,6 +96,13 @@ export interface UnattachedSessions {
   ): Promise<{ ok: true } | { ok: false; reason: string; detail?: string }>
   /** End it — exactly the attempt listed (the user's "Stop"). */
   kill(computerId: string, sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>
+  /**
+   * The hub was asked to end the tab's session (a restart, reset, respawn, Start
+   * fresh) while it tracks none there: end what the computer still runs under that
+   * id, on every computer (review M2). `attached`: an adoption in flight attached it
+   * meanwhile — the caller ends it as the tab's session.
+   */
+  killBySession(sessionId: string): Promise<'stopped' | 'attached' | 'none' | 'not-stopped'>
   onChange(cb: () => void): () => void
 }
 
@@ -127,6 +134,8 @@ export function createUnattachedSessions(deps: {
   /** Reasons already recorded, per attempt: one diagnostic per (session, attempt, reason). */
   const recorded = new Set<string>()
   const queue: string[] = []
+  /** Adoptions running now, per entry key: a Stop waits for one (review M1). */
+  const inflight = new Map<string, Promise<void>>()
   let running = 0
   let subscription: { dispose(): void } | null = null
   let subscribedTo: PtyBackend | null = null
@@ -142,6 +151,9 @@ export function createUnattachedSessions(deps: {
   }
 
   function surface(entry: UnattachedSession, reason: UnattachedReason, detail?: string): void {
+    // It left the set meanwhile (taken over by its tab's own start, exited): nothing
+    // to report — it is not a session left unattached (review L1).
+    if (entries.get(keyOf(entry)) !== entry) return
     entry.status = 'unattached'
     entry.reason = reason
     if (detail) entry.detail = detail
@@ -230,13 +242,22 @@ export function createUnattachedSessions(deps: {
       const entry = entries.get(key)
       if (!entry || entry.status !== 'adopting') continue
       running++
-      void adopt(entry)
-        .catch(() => undefined)
-        .finally(() => {
-          running--
-          pump()
-        })
+      void track(entry, adopt(entry)).then(() => {
+        running--
+        pump()
+      })
     }
+  }
+
+  /** Remember `work` as `entry`'s adoption in flight until it settles (never rejects). */
+  function track(entry: UnattachedSession, work: Promise<void>): Promise<void> {
+    const key = keyOf(entry)
+    const settled = work.catch(() => undefined)
+    inflight.set(key, settled)
+    void settled.then(() => {
+      if (inflight.get(key) === settled) inflight.delete(key)
+    })
+    return settled
   }
 
   function schedule(entry: UnattachedSession): void {
@@ -312,7 +333,7 @@ export function createUnattachedSessions(deps: {
       delete entry.reason
       delete entry.detail
       changed()
-      await adopt(entry)
+      await track(entry, adopt(entry))
       if (!entries.has(keyOf(entry))) return { ok: true }
       return {
         ok: false,
@@ -321,11 +342,22 @@ export function createUnattachedSessions(deps: {
       }
     },
     async kill(computerId, sessionId) {
+      // Being attached right now: wait for that first. Attached = it is its tab's
+      // session now, stopped (if at all) there — never behind the tab's back.
+      const adopting = inflight.get(keyOf({ computerId, sessionId }))
+      if (adopting) await adopting
       const entry = find(computerId, sessionId)
-      if (!entry) return { ok: false, reason: 'not-found' }
+      if (!entry) return { ok: false, reason: adopting ? 'attached' : 'not-found' }
       const backend = deps.backend()
       if (!entry.spawnId || !backend.killUntracked) return { ok: false, reason: 'no-attempt-key' }
-      await backend.killUntracked(entry.computerId, entry.sessionId, entry.spawnId)
+      const { stopped } = await backend.killUntracked(
+        entry.computerId,
+        entry.sessionId,
+        entry.spawnId
+      )
+      // Another attempt runs it now (the set lists that one), or the computer could
+      // not say: never reported as stopped (review M1).
+      if (!stopped) return { ok: false, reason: 'not-stopped' }
       recordDiagnosticEvent({
         level: 'info',
         source: 'pty',
@@ -345,6 +377,23 @@ export function createUnattachedSessions(deps: {
         changed()
       }
       return { ok: true }
+    },
+    async killBySession(sessionId) {
+      const computers = [
+        ...new Set(
+          [...entries.values()].filter((e) => e.sessionId === sessionId).map((e) => e.computerId)
+        )
+      ]
+      if (computers.length === 0) return 'none'
+      let outcome: 'stopped' | 'attached' | 'none' | 'not-stopped' = 'none'
+      for (const computerId of computers) {
+        const r = await this.kill(computerId, sessionId)
+        if (r.ok) {
+          if (outcome === 'none') outcome = 'stopped'
+        } else if (r.reason === 'attached') outcome = 'attached'
+        else if (r.reason === 'not-stopped') outcome = 'not-stopped'
+      }
+      return outcome
     },
     onChange(cb) {
       listeners.add(cb)

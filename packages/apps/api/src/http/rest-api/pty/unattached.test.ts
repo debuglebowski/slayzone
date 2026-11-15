@@ -29,7 +29,10 @@ const pty = {
   },
   killUnattached: async (computerId: string, sessionId: string) => {
     calls.push(['kill', computerId, sessionId])
-    return sessionId === 'task-1:tab-1' ? { ok: true } : { ok: false, reason: 'not-found' }
+    if (sessionId === 'task-1:tab-1') return { ok: true }
+    return sessionId === 'moved:on'
+      ? { ok: false, reason: 'not-stopped' }
+      : { ok: false, reason: 'not-found' }
   }
 }
 
@@ -63,9 +66,12 @@ describe('unattached terminal sessions over REST', () => {
   test('kill: stops exactly that session; 404 for one not listed', async () => {
     expect((await fetch(at('task-1:tab-1'), { method: 'DELETE' })).status).toBe(200)
     expect((await fetch(at('gone:gone'), { method: 'DELETE' })).status).toBe(404)
+    // Another attempt runs it now: never reported as stopped.
+    expect((await fetch(at('moved:on'), { method: 'DELETE' })).status).toBe(409)
     expect(calls.filter((c) => c[0] === 'kill')).toEqual([
       ['kill', 'pc', 'task-1:tab-1'],
-      ['kill', 'pc', 'gone:gone']
+      ['kill', 'pc', 'gone:gone'],
+      ['kill', 'pc', 'moved:on']
     ])
   })
 

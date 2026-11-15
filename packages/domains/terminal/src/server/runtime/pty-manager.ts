@@ -389,6 +389,12 @@ interface PtySession {
   // unexpectedly): input typed meanwhile, held for the resumed process instead of
   // being written to the dead one (`writePty`, flushed on adoption).
   heldInput?: string[]
+  /**
+   * Set when this session is a process the computer was ALREADY running (a previous
+   * hub run's), taken over rather than started (`adoptAttached`). A later ordinary
+   * start of the tab binds to it instead of replacing it (review H2).
+   */
+  adoptedAt?: number
   createdAt: number
   state: TerminalState
   // CLI state tracking
@@ -1604,6 +1610,23 @@ async function createPtyImpl(
     }
   })
 
+  // A process the hub took over (a previous run's agent) is THE agent of this tab: an
+  // ordinary start of the tab binds to it — replacing it would kill it mid-work and
+  // resume a twin. Only a requested end (kill/restart) lets a start replace it.
+  const atEntry = sessions.get(sessionId)
+  const boundToAdopted = (session: PtySession | undefined): boolean =>
+    !continuation && !attaching && !!session?.adoptedAt && !session.exited && !session.killRequested
+  if (boundToAdopted(atEntry)) {
+    recordDiagnosticEvent({
+      level: 'info',
+      source: 'pty',
+      event: 'pty.create_bound_to_adopted',
+      sessionId,
+      taskId,
+      payload: { when: 'entry' }
+    })
+    return { success: true }
+  }
   // An attach never replaces: a session tracked under the id already is the live one.
   if (attaching && sessions.has(sessionId)) {
     return {
@@ -1624,6 +1647,24 @@ async function createPtyImpl(
       sessionId,
       taskId
     })
+    // Never silent: an adopted agent ending here is a choice someone made.
+    if (atEntry?.adoptedAt) {
+      recordDiagnosticEvent({
+        level: 'warn',
+        source: 'pty',
+        event: 'pty.adopted_replaced',
+        sessionId,
+        taskId,
+        message: 'A start replaced an agent the hub had taken over after a restart.',
+        payload: {
+          reason: atEntry.killRequested
+            ? 'restart-requested'
+            : atEntry.exited
+              ? 'exited'
+              : 'replace'
+        }
+      })
+    }
     // Emit BEFORE killPty (see `replacing` doc on PtyEventMap): this is the one
     // deterministic point where we know the id is being reused, ahead of the
     // outgoing process's own (unawaited, possibly delayed) exit. Guarded: a
@@ -2220,6 +2261,26 @@ async function createPtyImpl(
       (await getPtyBackend().spawn(
         buildSpec(rawFile, rawArgs, deadlineMs, admission, carryOutput)
       )) as unknown as pty.IPty
+    // Re-checked right before starting anything: the hub may have taken this tab's
+    // running agent over while this start was being prepared (review H2).
+    const appeared = sessions.get(sessionId)
+    if (appeared !== atEntry && boundToAdopted(appeared)) {
+      if (ledger && pendingRowIds.length) {
+        const ids = pendingRowIds.splice(0)
+        void ledger.prunePendingSpawns({ computerId, ids }).catch(() => {
+          // Best-effort — a leftover token row cannot claim another launch.
+        })
+      }
+      recordDiagnosticEvent({
+        level: 'info',
+        source: 'pty',
+        event: 'pty.create_bound_to_adopted',
+        sessionId,
+        taskId,
+        payload: { when: 'pre-spawn' }
+      })
+      return { success: true }
+    }
     if (opts.attach) {
       // Attach: the process already runs on the computer (a previous hub run's).
       // Taking it over starts and stops nothing; what comes back is an ordinary
@@ -2376,7 +2437,9 @@ async function createPtyImpl(
         if (live) writeQueryReply(live, reply)
       }),
       lastEmittedTitle: '',
-      relayed: spawnRelay
+      relayed: spawnRelay,
+      // Taken over, not started: marked at once (its confirmation settles a tick later).
+      ...(attaching ? { adoptedAt: Date.now() } : {})
     })
     // Interest may have changed while the spawn was in flight.
     syncRelay(sessions.get(sessionId)!)
@@ -3582,6 +3645,7 @@ async function createPtyImpl(
       taken: NonNullable<PtySpawnConfirmation['attached']>
     ): void => {
       if (firstOutputTs === null) firstOutputTs = Date.now()
+      session.adoptedAt = Date.now()
       clearStartupTimeout()
       clearEarlyExitWatchdog()
       agentStarts.clear(sessionId)
