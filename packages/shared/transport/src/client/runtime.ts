@@ -12,7 +12,8 @@ import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { compactBytesLink } from './compactBytesLink'
 import { type ConnectionStateSource, connectDeadlineLink } from './connectDeadlineLink'
 import { hubReadsCompactBytes } from './hubCapabilities'
-import { createConnectPacer } from './connectPacing'
+import { createConnectPacer, getHubConnectProbe } from './connectPacing'
+import { createWatchedWebSocket, type HandshakeTiming } from './connectHandshake'
 
 /**
  * The ONE tRPC client runtime, ROUTER-AGNOSTIC: the React context (one
@@ -57,6 +58,11 @@ export type CreateTrpcClientOpts = {
    * short one; callers otherwise take the default.
    */
   connectDeadlineMs?: number
+  /**
+   * Override the per-attempt handshake bounds (see `connectHandshake.ts`). Tests pass
+   * short ones; callers otherwise take the defaults.
+   */
+  handshakeTiming?: HandshakeTiming
 }
 
 // Vanilla (non-React) client — used by the provider boot and by e2e via
@@ -65,7 +71,18 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
   // Paces connects while the hub is down (see connectPacing.ts): without an
   // installed probe it only reproduces @trpc/client's own defaults.
   const pacer = createConnectPacer(opts.url)
+  // Every socket attempt is bounded: one stuck in its handshake is given up instead of
+  // parking every operation on this hub (see connectHandshake.ts).
+  const WatchedWebSocket = createWatchedWebSocket({
+    wsUrl: opts.url,
+    probe: getHubConnectProbe,
+    onAbort: (reason) => {
+      if (reason === 'hedge') pacer.noteHubAnswered()
+    },
+    ...opts.handshakeTiming
+  })
   const wsClient = createWSClient({
+    ...(WatchedWebSocket ? { WebSocket: WatchedWebSocket } : {}),
     url: pacer.url,
     retryDelayMs: pacer.retryDelayMs,
     onOpen: pacer.onOpen,

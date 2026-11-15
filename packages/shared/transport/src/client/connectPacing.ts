@@ -27,6 +27,17 @@
  * a certificate only Chromium trusts — can delay a reconnect to the next
  * backoff tick, never prevent it).
  *
+ * THE SCHEDULE WINS OVER A STALE "DOWN". trpc keeps one attempt in flight, and the
+ * loop's own attempt JOINS a query's attempt that is still waiting on the probe. So
+ * the probe's answer is read against the schedule as it is when the answer
+ * arrives: once the loop's attempt is due, a "down" no longer defers. Otherwise a
+ * slow probe that says down (main busy, timing out) took every scheduled attempt
+ * with it while queries kept arriving, and the client never reconnected.
+ *
+ * A STUCK SOCKET GIVEN UP WHILE THE HUB ANSWERS (connectHandshake.ts →
+ * `noteHubAnswered`): the next attempt is immediate — loop delay 0, no probe —
+ * once. The watchdog's doubling grace keeps those rare.
+ *
  * Untouched: the first connect, the first reconnect after a drop, every
  * scheduled loop attempt, and every client when no probe is installed (the
  * Chromium fork and the web shell install none → byte-identical).
@@ -40,6 +51,11 @@ let installedProbe: HubConnectProbe | null = null
 /** Install (or clear with null) the process-wide probe. Read per attempt. */
 export function setHubConnectProbe(probe: HubConnectProbe | null): void {
   installedProbe = probe
+}
+
+/** The process-wide probe, as installed now (the handshake watchdog asks it too). */
+export function getHubConnectProbe(): HubConnectProbe | null {
+  return installedProbe
 }
 
 /**
@@ -72,6 +88,12 @@ export interface ConnectPacer {
   onOpen: () => void
   /** Wire to both onClose and onError. */
   onCloseOrError: () => void
+  /**
+   * The probe just said the hub is up while a socket sat in its handshake, and that
+   * socket was given up (connectHandshake.ts). The retry should not wait: the loop's
+   * next delay is 0 and the next attempt is not probed again.
+   */
+  noteHubAnswered: () => void
 }
 
 export function createConnectPacer(
@@ -86,18 +108,34 @@ export function createConnectPacer(
   let opened = false
   /** When the reconnect loop's next attempt is due. */
   let nextScheduledAt = 0
+  /** `noteHubAnswered`: the loop's next delay is 0 (consumed by `retryDelayMs`). */
+  let retryNow = false
+  /** `noteHubAnswered`: the next attempt skips the probe (consumed by `url`). */
+  let hubAnswered = false
 
   return {
     retryDelayMs: (attemptIndex) => {
-      const delay = exponentialBackoff(attemptIndex)
+      const delay = retryNow ? 0 : exponentialBackoff(attemptIndex)
+      retryNow = false
       nextScheduledAt = now() + delay
       return delay
     },
     url: async () => {
       const probe = getProbe()
-      if (probe && failing && now() < nextScheduledAt - SCHEDULE_SLACK_MS) {
+      const skipProbe = hubAnswered
+      // Whoever makes the next attempt used the hint; a later loop tick must not
+      // take a stale "retry now" from it.
+      hubAnswered = false
+      retryNow = false
+      if (probe && failing && !skipProbe && now() < nextScheduledAt - SCHEDULE_SLACK_MS) {
         const up = await probe(wsUrl).catch(() => false)
-        if (!up) throw new HubConnectDeferredError(wsUrl)
+        // Re-read the schedule: the loop's own attempt may have come due while the probe
+        // was out. That attempt JOINS this one (trpc keeps one attempt in flight), so a
+        // stale "down" here would cost the loop its unprobed attempt — and with queries
+        // arriving faster than a slow probe answers, every one of them, for good.
+        if (!up && now() < nextScheduledAt - SCHEDULE_SLACK_MS) {
+          throw new HubConnectDeferredError(wsUrl)
+        }
       }
       opened = false
       return wsUrl
@@ -108,6 +146,10 @@ export function createConnectPacer(
     },
     onCloseOrError: () => {
       if (!opened) failing = true
+    },
+    noteHubAnswered: () => {
+      retryNow = true
+      hubAnswered = true
     }
   }
 }
