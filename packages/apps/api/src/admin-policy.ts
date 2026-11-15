@@ -366,6 +366,7 @@ export const TRPC_ADMIN_POLICY: Record<string, AccessClass> = {
   'artifacts.move': 'user',
   'artifacts.pasteFiles': 'user',
   'artifacts.readContent': 'user',
+  'artifacts.readText': 'user',
   'artifacts.reorder': 'user',
   'artifacts.update': 'user',
   'artifacts.upload': 'user',

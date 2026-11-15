@@ -451,6 +451,7 @@ export const SCOPE_POLICY: Record<string, ProcedureScope> = {
   'artifacts.move': 'tasks',
   'artifacts.pasteFiles': 'tasks',
   'artifacts.readContent': 'tasks',
+  'artifacts.readText': 'tasks',
   'artifacts.reorder': 'tasks',
   'artifacts.update': 'tasks',
   'artifacts.upload': 'tasks',

@@ -717,6 +717,7 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.delete': checked(artifact('id')),
   'artifacts.reorder': checked(artifact('[]'), artifact('artifactIds[]'), folder('folderId')),
   'artifacts.readContent': checked(artifact('id')),
+  'artifacts.readText': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
   'artifacts.upload': checked(task('taskId'), owned('sourcePath')),
