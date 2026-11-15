@@ -7,9 +7,12 @@
  * - HTML: the document, as is (a mermaid file keeps the mermaid build and draws itself
  *   wherever it is opened).
  * - PDF: the document printed by `expo-print`, on A4 with 1cm margins as desktop. Its
- *   WKWebView prints the moment the page has loaded, before any script has drawn, so a
- *   mermaid diagram is drawn first in the hidden web view (`render-pages.ts`) and printed
- *   as the static SVG it became.
+ *   WKWebView prints the moment the page has loaded, before any script has drawn, and
+ *   has no navigation policy and no cancel, so nothing that needs a script is printed by
+ *   it: a mermaid diagram is drawn first in the hidden web view (`render-pages.ts`) and
+ *   printed as the static SVG it became; an html artifact is rendered there with its own
+ *   scripts (the view is unmounted at the renderer's timeout, a page that loops
+ *   included) and its DOM as drawn is printed with every script blocked.
  * - PNG: the SVG (a mermaid diagram drawn first, as for PDF) rasterised in the hidden web
  *   view; if WebKit won't read back mermaid's HTML labels, drawn again with text labels.
  *
@@ -29,7 +32,14 @@ import { Directory, File, Paths } from 'expo-file-system'
 import { printToFileAsync } from 'expo-print'
 import { shareAsync } from 'expo-sharing'
 import { canExport, EXPORT_FILE_TYPES, exportFileName, formatLabel } from './export-formats'
-import { type ExportRenderReply, mermaidSvgPage, pngCapturePage } from './render-pages'
+import {
+  type ExportRenderPage,
+  type ExportRenderReply,
+  htmlPrintDocument,
+  htmlSnapshotPage,
+  mermaidSvgPage,
+  pngCapturePage
+} from './render-pages'
 
 export const EXPORT_DIR = 'slayzone-exports'
 
@@ -47,7 +57,7 @@ export interface ExportRequest {
 
 export interface ExportArtifactDeps {
   /** Loads a page in the hidden web view; its reply (`use-export-renderer.ts`). */
-  render: (html: string) => Promise<ExportRenderReply>
+  render: (page: ExportRenderPage) => Promise<ExportRenderReply>
   /** mermaid's browser build (`page-assets.ts`). */
   mermaidScript: () => Promise<string>
   /** How long printing may take (default {@link EXPORT_PRINT_TIMEOUT_MS}). */
@@ -99,7 +109,9 @@ async function exportInto(
       const html =
         mode === 'mermaid-preview'
           ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
-          : buildDocumentHtml(content, mode, title)
+          : mode === 'html-preview'
+            ? htmlPrintDocument(await renderHtml(content, title, deps))
+            : buildDocumentHtml(content, mode, title)
       if (printsInFlight === 0) sweepLeftoverPrints()
       printsInFlight++
       const job = printToFileAsync({
@@ -200,6 +212,19 @@ async function drawMermaid(
   if (reply.type === 'svg') return reply.svg
   throw new Error(
     `Couldn't draw the diagram: ${reply.type === 'error' ? reply.message : 'no diagram came back.'}`
+  )
+}
+
+/** An html artifact's DOM as its scripts drew it, inert, from the hidden web view. */
+async function renderHtml(
+  content: string,
+  title: string,
+  deps: ExportArtifactDeps
+): Promise<string> {
+  const reply = await deps.render(htmlSnapshotPage(content, title))
+  if (reply.type === 'html') return reply.html
+  throw new Error(
+    `Couldn't render the page: ${reply.type === 'error' ? reply.message : 'no page came back.'}`
   )
 }
 

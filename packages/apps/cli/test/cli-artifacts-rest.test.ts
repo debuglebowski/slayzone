@@ -668,6 +668,88 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     expect(fs.existsSync(path.join(tmpDir, 'l2', 'escape-raw.md'))).toBe(false)
   })
 
+  // Review 6, #5: with no --output the name comes from the title, so it may already be
+  // taken in the cwd — by a file the person cares about, or a symlink to one. Neither
+  // is overwritten (nor written through): the download is numbered `name (2).ext`.
+  test('download without --output never overwrites an existing name in the cwd', async () => {
+    const cwd = path.join(tmpDir, 'no-clobber')
+    const outside = path.join(tmpDir, 'no-clobber-outside')
+    fs.mkdirSync(cwd, { recursive: true })
+    fs.mkdirSync(outside, { recursive: true })
+    const c = await runCli(
+      ['tasks', 'artifacts', 'create', 'keep.md', '--task', short(taskId), '--json'],
+      { input: '# fresh\n' }
+    )
+    expect(c.exitCode, c.stderr).toBe(0)
+    const id = (JSON.parse(c.stdout) as { id: string }).id
+
+    // keep.md: a precious regular file. keep.html: a symlink to a file elsewhere.
+    // artifacts.zip: the zip's default name, also taken.
+    fs.writeFileSync(path.join(cwd, 'keep.md'), 'precious md')
+    fs.writeFileSync(path.join(outside, 'target.html'), 'precious html')
+    fs.symlinkSync(path.join(outside, 'target.html'), path.join(cwd, 'keep.html'))
+    fs.writeFileSync(path.join(cwd, 'artifacts.zip'), 'precious zip')
+
+    const download = async (args: string[]) => {
+      const r = await runCli(['tasks', 'artifacts', 'download', ...args], { cwd })
+      expect(r.exitCode, r.stderr).toBe(0)
+      return fs.realpathSync(r.stdout.trim())
+    }
+    const at = (name: string) => fs.realpathSync(path.join(cwd, name))
+
+    expect(await download([short(id), '--type', 'raw'])).toBe(at('keep (2).md'))
+    expect(fs.readFileSync(path.join(cwd, 'keep (2).md'), 'utf8')).toBe('# fresh\n')
+    // Taken again (by our own previous download): the next number.
+    expect(await download([short(id), '--type', 'raw'])).toBe(at('keep (3).md'))
+    expect(await download([short(id), '--type', 'html'])).toBe(at('keep (2).html'))
+    expect(fs.readFileSync(path.join(cwd, 'keep (2).html'), 'utf8')).toContain('<h1>fresh</h1>')
+    expect(await download(['--type', 'zip', '--task', short(taskId)])).toBe(at('artifacts (2).zip'))
+    expect(
+      fs.readFileSync(path.join(cwd, 'artifacts (2).zip')).subarray(0, 4).toString('hex')
+    ).toBe('504b0304')
+
+    expect(fs.readFileSync(path.join(cwd, 'keep.md'), 'utf8')).toBe('precious md')
+    expect(fs.lstatSync(path.join(cwd, 'keep.html')).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(path.join(outside, 'target.html'), 'utf8')).toBe('precious html')
+    expect(fs.readFileSync(path.join(cwd, 'artifacts.zip'), 'utf8')).toBe('precious zip')
+    // Nothing else left behind (no temp files).
+    expect(fs.readdirSync(cwd).sort()).toEqual(
+      [
+        'artifacts (2).zip',
+        'artifacts.zip',
+        'keep (2).html',
+        'keep (2).md',
+        'keep (3).md',
+        'keep.html',
+        'keep.md'
+      ].sort()
+    )
+    expect(fs.readdirSync(outside)).toEqual(['target.html'])
+  })
+
+  // With --output the person chose the path: an existing file there is replaced, as
+  // before — but whole, never left half-written.
+  test('download --output replaces an existing file there, leaving no temp file', async () => {
+    const dir = path.join(tmpDir, 'explicit-output')
+    fs.mkdirSync(dir, { recursive: true })
+    const out = path.join(dir, 'chosen.md')
+    fs.writeFileSync(out, 'old content')
+    const r = await runCli([
+      'tasks',
+      'artifacts',
+      'download',
+      short(artifactId),
+      '--type',
+      'raw',
+      '--output',
+      out
+    ])
+    expect(r.exitCode, r.stderr).toBe(0)
+    expect(r.stdout.trim()).toBe(out)
+    expect(fs.readFileSync(out, 'utf8')).not.toBe('old content')
+    expect(fs.readdirSync(dir)).toEqual(['chosen.md'])
+  })
+
   test('download --type html of a mermaid artifact embeds the bundled mermaid build', async () => {
     const c = await runCli(
       ['tasks', 'artifacts', 'create', 'flow.mmd', '--task', short(taskId), '--json'],

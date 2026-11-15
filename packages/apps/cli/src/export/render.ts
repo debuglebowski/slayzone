@@ -8,6 +8,11 @@
  *
  * The document goes in with `Page.setDocumentContent`, not a temp file: nothing is
  * shared through the filesystem, which a sandboxed (snap) browser could not read.
+ *
+ * JS dialogs (alert / confirm / prompt / beforeunload) are dismissed as they open: an
+ * html artifact runs its scripts, and an unanswered dialog blocks the page — its
+ * document never finishes loading, nor does a print or capture. Dismissed means
+ * `accept: false`: confirm() returns false, prompt() null, beforeunload stays.
  */
 import {
   EXPORT_READY_EXPRESSION,
@@ -75,6 +80,7 @@ async function withPage<T>(
   fn: (b: Browser, sessionId: string) => Promise<T>
 ): Promise<T> {
   const b = await launchBrowser(executable, opts.browser)
+  let failed = false
   try {
     // Crash/destroy events for every target: a page that dies mid-print fails the
     // print at once instead of leaving it waiting (see cdp.ts).
@@ -88,6 +94,15 @@ async function withPage<T>(
     })
     // Inspector.targetCrashed / Inspector.detached on the page's own session.
     await b.send('Inspector.enable', {}, sessionId)
+    // Page events on, so a dialog announces itself (Page.javascriptDialogOpening) and
+    // is answered at once, wherever it opens: while the document loads, during the
+    // ready wait, or from a timer mid-print. The listener goes with the browser.
+    b.onEvent((method, _params, sid) => {
+      if (method !== 'Page.javascriptDialogOpening' || sid !== sessionId) return
+      // Fails only when the page is gone, which the pending command reports itself.
+      b.send('Page.handleJavaScriptDialog', { accept: false }, sessionId).catch(() => undefined)
+    })
+    await b.send('Page.enable', {}, sessionId)
     if (viewport) {
       await b.send('Emulation.setDeviceMetricsOverride', { ...viewport, mobile: false }, sessionId)
     }
@@ -105,8 +120,15 @@ async function withPage<T>(
       if (!ok) opts.warn?.('Warning: the diagram did not finish drawing in time; exporting as is.')
     }
     return await fn(b, sessionId)
+  } catch (err) {
+    failed = true
+    throw err
   } finally {
-    await b.close()
+    // A close that fails too (Windows holding the temp profile) must not replace the
+    // render's own error; after a good render it is the error.
+    await b.close().catch((closeErr: unknown) => {
+      if (!failed) throw closeErr
+    })
   }
 }
 

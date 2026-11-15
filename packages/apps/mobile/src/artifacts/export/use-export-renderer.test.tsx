@@ -1,12 +1,24 @@
 import { act, render, screen } from '@testing-library/react-native'
 import type { ReactNode } from 'react'
-import { EXPORT_RENDER_SOURCE, type ExportRenderReply } from './render-pages'
+import {
+  EXPORT_RENDER_SOURCE,
+  type ExportRenderPage,
+  type ExportRenderReply,
+  htmlSnapshotPage
+} from './render-pages'
 import { EXPORT_RENDER_TIMEOUT_MS, useExportRenderer } from './use-export-renderer'
 
 /** The view is hidden from accessibility on purpose: look for it anyway. */
 const HIDDEN = { includeHiddenElements: true }
 
-type Render = (html: string) => Promise<ExportRenderReply>
+type Render = (page: ExportRenderPage) => Promise<ExportRenderReply>
+
+const TOKEN = 'page-token'
+const page = (html: string, viewport?: ExportRenderPage['viewport']): ExportRenderPage => ({
+  html,
+  token: TOKEN,
+  viewport
+})
 
 async function mount(): Promise<{ run: () => Render }> {
   let run: Render | null = null
@@ -34,8 +46,10 @@ const viewProps = () =>
     pointerEvents: string
   }
 
-const reply = (body: object) =>
-  ({ nativeEvent: { data: JSON.stringify({ source: EXPORT_RENDER_SOURCE, ...body }) } }) as const
+const reply = (body: object, token: string = TOKEN) =>
+  ({
+    nativeEvent: { data: JSON.stringify({ source: EXPORT_RENDER_SOURCE, token, ...body }) }
+  }) as const
 
 describe('useExportRenderer: a hidden web view per render', () => {
   it('shows nothing until asked', async () => {
@@ -47,7 +61,7 @@ describe('useExportRenderer: a hidden web view per render', () => {
     const host = await mount()
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
-      result = host.run()('<html>page</html>')
+      result = host.run()(page('<html>page</html>'))
     })
     const props = viewProps()
     expect(props.source).toEqual({ html: '<html>page</html>' })
@@ -56,8 +70,10 @@ describe('useExportRenderer: a hidden web view per render', () => {
     // Only the page itself loads: no link, no redirect.
     expect(props.onShouldStartLoadWithRequest({ url: 'about:blank' })).toBe(true)
     expect(props.onShouldStartLoadWithRequest({ url: 'https://x.dev' })).toBe(false)
-    // Noise the page didn't send is ignored.
+    // Noise the page didn't send is ignored, and so is a reply without its token.
     await act(async () => props.onMessage({ nativeEvent: { data: '{"hello":1}' } }))
+    await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg id="forged"/>' }, 'x')))
+    expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
     await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg/>' })))
     await expect(result).resolves.toEqual({ type: 'svg', svg: '<svg/>' })
     expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
@@ -67,7 +83,7 @@ describe('useExportRenderer: a hidden web view per render', () => {
     const host = await mount()
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
-      result = host.run()('<html/>')
+      result = host.run()(page('<html/>'))
     })
     const settled = expect(result).rejects.toThrow('The export renderer stopped.')
     await act(async () => viewProps().onContentProcessDidTerminate())
@@ -80,8 +96,40 @@ describe('useExportRenderer: a hidden web view per render', () => {
     const host = await mount()
     let result: Promise<ExportRenderReply> | null = null
     await act(async () => {
-      result = host.run()('<html/>')
+      result = host.run()(page('<html/>'))
     })
+    const settled = expect(result).rejects.toThrow('Rendering the export took too long.')
+    await act(async () => {
+      jest.advanceTimersByTime(EXPORT_RENDER_TIMEOUT_MS)
+    })
+    await settled
+    expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
+    jest.useRealTimers()
+  })
+})
+
+// Review 6, #4: an html artifact's page runs the artifact's own scripts. A loop in one
+// never answers: the render fails after the timeout and its web view is unmounted
+// (released), as any page's.
+describe('useExportRenderer: an html artifact', () => {
+  it("is laid out at the page's viewport; a page that loops is released at the timeout", async () => {
+    jest.useFakeTimers()
+    const host = await mount()
+    const looping = htmlSnapshotPage('<script>for (;;) {}</script>', 'loop.html')
+    let result: Promise<ExportRenderReply> | null = null
+    await act(async () => {
+      result = host.run()(looping)
+    })
+    const props = screen.getByTestId('artifact-export-renderer', HIDDEN).props as {
+      source: { html: string }
+      style: unknown
+      onShouldStartLoadWithRequest: (r: { url: string }) => boolean
+    }
+    expect(props.source.html).toBe(looping.html)
+    expect(props.style).toEqual(
+      expect.arrayContaining([expect.objectContaining({ width: 595, height: 842 })])
+    )
+    expect(props.onShouldStartLoadWithRequest({ url: 'https://elsewhere.example' })).toBe(false)
     const settled = expect(result).rejects.toThrow('Rendering the export took too long.')
     await act(async () => {
       jest.advanceTimersByTime(EXPORT_RENDER_TIMEOUT_MS)
@@ -104,7 +152,7 @@ it('rejects a pending render when the viewer unmounts', async () => {
   const view = await render(<Host />)
   let result: Promise<ExportRenderReply> | null = null
   await act(async () => {
-    result = (run as unknown as Render)('<html>page</html>')
+    result = (run as unknown as Render)(page('<html>page</html>'))
   })
   const settled = (result as unknown as Promise<ExportRenderReply>).catch((e: Error) => e)
   await act(async () => view.unmount())

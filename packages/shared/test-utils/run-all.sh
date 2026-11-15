@@ -484,6 +484,8 @@ run_harness packages/apps/cli/src/export/zip-extract.test.ts
 run_harness packages/apps/cli/src/export/missing-libs.test.ts
 run_harness packages/apps/cli/src/export/export-artifact.test.ts
 run_harness packages/apps/cli/src/export/render.integration.test.ts
+run_harness packages/apps/cli/src/export/render.test.ts
+run_harness packages/apps/cli/src/save-file.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_harness packages/apps/api/src/http/rest-api/artifacts/data-root.test.ts
 # Storage migration — DB/artifacts/recent-backups extract into <ROOT>/storage, idempotent, copy-verify-delete.
@@ -576,6 +578,7 @@ run_harness packages/apps/app/src/main/lifecycle/unload-veto.test.ts
 # Background update checks never leave a rejection unhandled (pilot: startup unhandled_rejection).
 run_harness packages/apps/app/src/main/auto-updater.test.ts
 run_harness packages/apps/app/src/main/client-save.test.ts
+run_harness packages/apps/app/src/main/artifact-export.electron.test.ts
 # How both supervisors kill their child: resolves only once it is gone, shared per process.
 run_harness packages/apps/app/src/main/child-reaper.test.ts
 # The packaged app forces NODE_ENV=production in its first import (dev/e2e keep theirs).

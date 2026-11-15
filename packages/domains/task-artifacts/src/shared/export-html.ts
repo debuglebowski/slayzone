@@ -175,7 +175,8 @@ ${mermaidRunScript(mermaidJs, nonce)}
   // An html artifact is a page of its own: rendered as written — its scripts and
   // external styles included, as main rendered it. Each host isolates that render
   // (desktop: a throwaway session on an opaque origin; CLI: a throwaway profile; web:
-  // the hub's sandboxed export frame; phone: the print web view, no app bridge).
+  // the hub's sandboxed export frame; phone: a hidden web view it controls, then prints
+  // the drawn page with scripts blocked).
   const head = documentHead(title, opts.nonce ?? null, !opts.standalone && mode !== 'html-preview')
 
   let body: string

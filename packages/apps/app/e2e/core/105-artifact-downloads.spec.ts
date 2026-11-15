@@ -481,5 +481,92 @@ test.describe('Artifact downloads', () => {
         })
       }
     })
+
+    /** Run `fn` with the export window's waits shortened to 2 s. */
+    const withShortTimings = async (
+      electronApp: ElectronApplication,
+      fn: () => Promise<void>
+    ): Promise<void> => {
+      await electronApp.evaluate(() => {
+        ;(globalThis as unknown as { __e2eExportTimings?: unknown }).__e2eExportTimings = {
+          loadWaitMs: 2_000,
+          unresponsiveMs: 2_000,
+          stallMs: 3_000,
+          readyWaitMs: 10_000
+        }
+      })
+      try {
+        await fn()
+      } finally {
+        await electronApp.evaluate(() => {
+          delete (globalThis as unknown as { __e2eExportTimings?: unknown }).__e2eExportTimings
+        })
+      }
+    }
+
+    // Review 6, M1: a script that starts looping only once printing begins (after the
+    // load and the first probe) used to leave printToPDF pending forever (the
+    // `beforeprint` case hung on the old build; a timer-started loop may or may not beat
+    // the print — either outcome is fine, a hang is not).
+    for (const [name, script] of [
+      ['when printing starts', "addEventListener('beforeprint', function () { for (;;) {} })"],
+      ['shortly after load', 'setTimeout(function () { for (;;) {} }, 300)']
+    ] as const) {
+      test(`a document that starts looping ${name} fails the export, no window left`, async ({
+        mainWindow,
+        electronApp
+      }) => {
+        test.setTimeout(60_000)
+        await withShortTimings(electronApp, async () => {
+          const before = await windowCount(electronApp)
+          const dest = path.join(DEST_DIR, 'late-loop.pdf')
+          fs.rmSync(dest, { force: true })
+          await nextSavePath(electronApp, dest)
+          const started = Date.now()
+          const res = (await exportContent(mainWindow, {
+            // A big page: printing it takes longer than the delayed loop's timer.
+            content: `<p>x</p>${'<p>filler line</p>'.repeat(4000)}<script>${script}</script>`,
+            mode: 'html-preview',
+            title: 'late-loop.html',
+            format: 'pdf'
+          })) as { ok: boolean; error?: string }
+          // Either it printed before the loop began (fine) or it failed — never a hang.
+          if (!res.ok) {
+            expect(res.error).toMatch(/stopped responding/)
+            expect(fs.existsSync(dest)).toBe(false)
+          }
+          expect(Date.now() - started).toBeLessThan(30_000)
+          await expect.poll(() => windowCount(electronApp), { timeout: 10_000 }).toBe(before)
+        })
+      })
+    }
+
+    // Review 6, M2: alert/confirm/prompt in an html artifact never block the export.
+    // Playwright's own CDP connection answers dialogs in every page it attaches to, so
+    // this passes on the old build too: the proof is artifact-export.electron.test.ts
+    // (a real Electron without Playwright). Kept as the end-to-end path through IPC.
+    test('alert, confirm and prompt in an html artifact do not block the export', async ({
+      mainWindow,
+      electronApp
+    }) => {
+      test.setTimeout(60_000)
+      await withShortTimings(electronApp, async () => {
+        const dest = path.join(DEST_DIR, 'dialogs.pdf')
+        fs.rmSync(dest, { force: true })
+        await nextSavePath(electronApp, dest)
+        const started = Date.now()
+        const res = await exportContent(mainWindow, {
+          content:
+            "<p id=r>x</p><script>alert('a'); var c = confirm('b'); var p = prompt('c', 'd');" +
+            "document.getElementById('r').textContent = 'answered ' + c + ' ' + p;</script>",
+          mode: 'html-preview',
+          title: 'dialogs.html',
+          format: 'pdf'
+        })
+        expect(res).toEqual({ ok: true })
+        expect(Date.now() - started).toBeLessThan(20_000)
+        expect(fs.readFileSync(dest).subarray(0, 5).toString('latin1')).toBe('%PDF-')
+      })
+    })
   })
 })

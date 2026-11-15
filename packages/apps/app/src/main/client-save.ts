@@ -132,6 +132,13 @@ async function fileTarget(filePath: string, reveal: boolean): Promise<Target> {
       await unlink(partial).catch(ignore)
     },
     abortNow() {
+      // The close starts now (no handle is left for garbage collection); the unlink
+      // can't wait for it. Unlinked again once closed, for Windows, where an open file
+      // can't be removed.
+      if (!closed) {
+        closed = true
+        handle.close().then(() => unlinkNow(partial), ignore)
+      }
       unlinkNow(partial)
     },
     interrupt() {
@@ -373,8 +380,13 @@ function directoryTarget(root: string, fsOps: CommitFs): Target {
     },
     abortNow() {
       dead = true
-      if (current) removeIfOursNow(current.partial)
+      const c = current
       current = null
+      if (c) {
+        // As the file target: start the close, remove now, and again once closed.
+        c.handle.close().then(() => removeIfOursNow(c.partial), ignore)
+        removeIfOursNow(c.partial)
+      }
       dropCommitting()
       removeCreated()
     },

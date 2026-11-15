@@ -32,10 +32,12 @@ import type {
 //   - served from memory under a scheme of its own, so its origin is opaque — not
 //     file:// (which would share the app's storage) and no file on disk to plant or race;
 //   - sandboxed, no preload, no node; it can't open windows, navigate away, or get any
-//     permission.
+//     permission, and its alert/confirm/prompt are answered at once (ok, false, null)
+//     instead of waiting for a person who never sees them.
 // No fixed deadline caps a big document. The window is given up only when it can no
-// longer finish: its renderer died, or stopped answering for `unresponsiveMs` (a
-// script that never yields — a printing renderer runs no script).
+// longer finish: its renderer died, or stopped answering — for `unresponsiveMs` while
+// loading, for `stallMs` while printing or capturing (a script that never yields,
+// even one that starts looping only once printing begins).
 
 const EXPORT_SCHEME = 'slz-export'
 const EXPORT_DOCUMENT_URL = `${EXPORT_SCHEME}://document/`
@@ -44,8 +46,14 @@ const EXPORT_DOCUMENT_URL = `${EXPORT_SCHEME}://document/`
 export interface ExportTimings {
   /** Longest wait for the page's subresources (a hung stylesheet); then it renders anyway. */
   loadWaitMs: number
-  /** A renderer silent this long (a script that never yields) fails the export. */
+  /** A renderer silent this long while loading (a script that never yields) fails it. */
   unresponsiveMs: number
+  /**
+   * A renderer silent this long while it prints or captures fails the export. Longer
+   * than `unresponsiveMs`: laying out a huge document for print can keep the renderer
+   * busy for a while without being stuck.
+   */
+  stallMs: number
   /** Longest wait for a mermaid diagram to flag itself drawn; then it renders anyway. */
   readyWaitMs: number
 }
@@ -53,6 +61,7 @@ export interface ExportTimings {
 export const DEFAULT_EXPORT_TIMINGS: ExportTimings = {
   loadWaitMs: 60_000,
   unresponsiveMs: 60_000,
+  stallMs: 5 * 60_000,
   readyWaitMs: 10_000
 }
 
@@ -93,7 +102,7 @@ async function withExportWindow<T>(
   timings: ExportTimings,
   render: (
     win: BrowserWindow,
-    step: <R>(p: Promise<R>) => Promise<R>,
+    watched: <R>(p: Promise<R>) => Promise<R>,
     probe: <R>(code: string) => Promise<R>
   ) => Promise<T>
 ): Promise<T> {
@@ -108,7 +117,10 @@ async function withExportWindow<T>(
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: false,
-      spellcheck: false
+      spellcheck: false,
+      // Electron answers a JS dialog itself (alert: ok, confirm: false, prompt: null)
+      // instead of showing it: nobody sees this window, so a dialog would wait forever.
+      ...({ disableDialogs: true } as WebPreferences)
     }
   })
   const wc = win.webContents
@@ -138,6 +150,33 @@ async function withExportWindow<T>(
     return step(wc.executeJavaScript(code) as Promise<R>).finally(() => clearTimeout(timer))
   }
 
+  /**
+   * A long step (print, capture) watched for a stall: the page is asked a trivial
+   * question every second; one left unanswered for `stallMs` means a script holds the
+   * renderer forever, and the export fails instead of waiting with it.
+   */
+  const watched = <R>(p: Promise<R>): Promise<R> => {
+    let settled = false
+    let timer: NodeJS.Timeout | undefined
+    const watch = (): void => {
+      timer = setTimeout(() => {
+        if (settled || wc.isDestroyed()) return
+        const stall = setTimeout(hung, timings.stallMs)
+        wc.executeJavaScript('1')
+          .catch(ignore)
+          .finally(() => {
+            clearTimeout(stall)
+            if (!settled) watch()
+          })
+      }, 1_000)
+    }
+    watch()
+    return step(p).finally(() => {
+      settled = true
+      clearTimeout(timer)
+    })
+  }
+
   try {
     // Our own load events, not loadURL's promise: that one rejects when the artifact
     // tries to navigate away (refused above), though the document itself loads fine.
@@ -161,7 +200,7 @@ async function withExportWindow<T>(
       ])
     ).finally(() => clearTimeout(loadWait))
     await probe('1')
-    return await render(win, step, probe)
+    return await render(win, watched, probe)
   } finally {
     if (!win.isDestroyed()) {
       // A hung renderer is stopped, not left spinning.
@@ -195,10 +234,10 @@ export function renderToPdf(
     { width: 800, height: 600 },
     true,
     timings,
-    async (win, step, probe) => {
+    async (win, watched, probe) => {
       if (waitReady) await waitForReady(probe, timings)
       return Buffer.from(
-        await step(
+        await watched(
           win.webContents.printToPDF({
             printBackground: true,
             // Margins left at printToPDF's default (1cm each side), which is what the
@@ -225,12 +264,12 @@ export function renderToPng(
     // default until Electron 42 made it 1.0.
     { deviceScaleFactor: screen.getPrimaryDisplay().scaleFactor },
     timings,
-    async (win, step, probe) => {
+    async (win, watched, probe) => {
       if (waitReady) await waitForReady(probe, timings)
       const { w, h } = await probe<{ w: number; h: number }>(PNG_MEASURE_EXPRESSION)
       win.setContentSize(w, h)
       await delay(100)
-      const image = await step(win.webContents.capturePage({ x: 0, y: 0, width: w, height: h }))
+      const image = await watched(win.webContents.capturePage({ x: 0, y: 0, width: w, height: h }))
       return image.toPNG()
     }
   )

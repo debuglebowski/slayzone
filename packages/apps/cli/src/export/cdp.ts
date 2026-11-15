@@ -15,7 +15,8 @@
  * browser process keeps answering. `Inspector.targetCrashed` (page session, after
  * `Inspector.enable`), `Target.targetCrashed` / `Target.targetDestroyed` (browser
  * level, with discovery on) and `Target.detachedFromTarget` fail every pending command
- * of that page's session at once.
+ * of that page's session at once. Callers may also listen to events ({@link
+ * Browser.onEvent}) — the renderer uses that to dismiss JS dialogs.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -80,8 +81,19 @@ export interface Browser {
     params?: Record<string, unknown>,
     sessionId?: string
   ): Promise<T>
+  /**
+   * Every event the browser sends (`sessionId`: the page session it belongs to, none
+   * for the browser itself). Returns the function that stops listening.
+   */
+  onEvent(listener: CdpEventListener): () => void
   close(): Promise<void>
 }
+
+export type CdpEventListener = (
+  method: string,
+  params: Record<string, unknown>,
+  sessionId?: string
+) => void
 
 export interface LaunchOptions {
   /** Deadline for an ordinary command (default 60 s). */
@@ -213,6 +225,7 @@ export async function launchBrowser(
     for (const [sid, tid] of [...sessionTargets]) if (tid === targetId) failSession(sid, err)
   }
 
+  const listeners = new Set<CdpEventListener>()
   const onEvent = (msg: CdpMessage): void => {
     const params = msg.params ?? {}
     switch (msg.method) {
@@ -231,6 +244,15 @@ export async function launchBrowser(
       case 'Target.detachedFromTarget':
         if (typeof params.sessionId === 'string') failSession(params.sessionId, pageClosed())
         break
+    }
+    if (typeof msg.method !== 'string') return
+    for (const listener of [...listeners]) {
+      // A listener's bug must not stop the pipe reader (and with it every reply).
+      try {
+        listener(msg.method, params, msg.sessionId)
+      } catch {
+        // Ignored: the listener's own concern.
+      }
     }
   }
 
@@ -417,5 +439,11 @@ export async function launchBrowser(
       ? err
       : launchFailure(executable, stderr, (err as Error).message)
   }
-  return { send: (m, p, sid) => send(m, p, sid), sendLong, close }
+  const onEventListener = (listener: CdpEventListener): (() => void) => {
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }
+  return { send: (m, p, sid) => send(m, p, sid), sendLong, onEvent: onEventListener, close }
 }

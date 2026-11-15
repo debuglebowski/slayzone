@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, userEvent, waitFor } from '@testing-library/react-native'
 import { ActionSheetIOS, Image, Linking, Share } from 'react-native'
 import { hubEntryOf } from '../hub-session'
-import { trpcTest } from '../testing'
+import { pending, trpcTest } from '../testing'
 import { ArtifactViewer, type ArtifactViewerProps } from './ArtifactViewer'
 import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
 import { exportArtifact } from './export/export-artifact'
@@ -350,6 +350,73 @@ describe('ArtifactViewer, Export', () => {
         expect.anything()
       )
     )
+  })
+
+  // Review 6, #7: Export makes a file of what is on screen. While the version picked is
+  // still loading or doesn't exist (or the text failed to load), what is on screen is a
+  // spinner or an error, not the working copy still in the cache: nothing to export.
+  describe('only what is on screen', () => {
+    async function viewThenPick(
+      hub: ReturnType<typeof fakeArtifactsHub>,
+      version: number
+    ): Promise<void> {
+      const { wrapper } = trpcTest(hub.backend)
+      const props: ArtifactViewerProps = {
+        target,
+        taskId: 't1',
+        artifactId: 'a1',
+        version: null,
+        onSelectVersion: jest.fn(),
+        onOpenArtifact: jest.fn()
+      }
+      const { rerender } = await render(<ArtifactViewer {...props} />, { wrapper })
+      // The working copy is loaded (and cached) first.
+      await screen.findByTestId('artifact-page-markdown')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
+      await rerender(<ArtifactViewer {...props} version={version} />)
+    }
+
+    it('a version that does not exist: Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Working copy' },
+        versions: { a1: [versionRow('a1', 1)] }
+      })
+      await viewThenPick(hub, 7)
+      await screen.findByText('This artifact has no version 7.')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+      // Share would hand over the working copy as "version 7": off too.
+      expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled()
+      await userEvent.setup().press(screen.getByRole('button', { name: 'Export' }))
+      expect(runExport).not.toHaveBeenCalled()
+    })
+
+    it('a version still loading: Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Working copy' }
+      })
+      hub.on('artifacts.versionsList', pending)
+      await viewThenPick(hub, 2)
+      await screen.findByTestId('artifact-loading')
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled()
+    })
+
+    it('text that failed to load (an older copy still cached): Export is off', async () => {
+      const hub = fakeArtifactsHub({
+        artifacts: [artifactRow('a1', 'plan.md')],
+        content: { a1: '# Before' }
+      })
+      await view(hub, { artifactId: 'a1' })
+      await screen.findByTestId('artifact-page-markdown')
+      hub.on('artifacts.readContent', () => {
+        throw new Error('The hub could not read the file.')
+      })
+      await act(async () => hub.emit('artifacts.onContentChanged', 'a1'))
+      await screen.findByText(/could not read the file/)
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
+    })
   })
 
   it('a failed export says why, under the toolbar', async () => {

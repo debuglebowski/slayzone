@@ -5,7 +5,12 @@ import {
 import { printToFileAsync } from 'expo-print'
 import { shareAsync } from 'expo-sharing'
 import { EXPORT_DIR, type ExportArtifactDeps, exportArtifact } from './export-artifact'
-import type { ExportRenderReply } from './render-pages'
+import {
+  type ExportRenderPage,
+  type ExportRenderReply,
+  HTML_PRINT_POLICY,
+  htmlPrintDocument
+} from './render-pages'
 
 jest.mock('expo-print', () => ({ printToFileAsync: jest.fn() }))
 jest.mock('expo-sharing', () => ({ shareAsync: jest.fn() }))
@@ -85,12 +90,17 @@ const print = jest.mocked(printToFileAsync)
 const share = jest.mocked(shareAsync)
 
 /** A renderer that answers each page with the next reply, and the pages it got. */
-function renderer(...replies: ExportRenderReply[]): ExportArtifactDeps & { pages: string[] } {
+function renderer(
+  ...replies: ExportRenderReply[]
+): ExportArtifactDeps & { pages: string[]; rendered: ExportRenderPage[] } {
   const pages: string[] = []
+  const rendered: ExportRenderPage[] = []
   return {
     pages,
-    render: jest.fn(async (html: string) => {
-      pages.push(html)
+    rendered,
+    render: jest.fn(async (page: ExportRenderPage) => {
+      pages.push(page.html)
+      rendered.push(page)
       const reply = replies.shift()
       if (!reply) throw new Error('unexpected render')
       return reply
@@ -269,6 +279,69 @@ describe('exportArtifact: PDF', () => {
     expect(html).toBe(buildDrawnMermaidDocumentHtml('<svg id="drawn"></svg>', 'flow.mmd'))
     // Nothing left to run in the printer's web view.
     expect(html).not.toContain('<script')
+  })
+
+  // Review 6, #4: an html artifact is rendered in the hidden web view first (its scripts
+  // run there, cancellable, navigation blocked), and its DOM as drawn is printed with no
+  // script at all — expo-print's web view never runs the artifact.
+  describe('an html artifact', () => {
+    const report = {
+      content: '<div id="chart"></div><script>draw()</script>',
+      mode: 'html-preview' as const,
+      title: 'report.html',
+      format: 'pdf' as const
+    }
+    const SNAPSHOT =
+      '<html><head><title>report.html</title></head><body><div id="chart"><svg>drawn</svg></div></body></html>'
+
+    it('prints the DOM its scripts drew, with scripts blocked', async () => {
+      const deps = renderer({ type: 'html', html: SNAPSHOT })
+      const uri = await exportArtifact(report, deps)
+      // Rendered as the artifact, at the printed page's width.
+      expect(deps.rendered).toHaveLength(1)
+      expect(deps.pages[0]).toContain('<div id="chart"></div><script>draw()</script>')
+      expect(deps.rendered[0].viewport).toEqual({ width: 595, height: 842 })
+      const printed = print.mock.calls[0][0]?.html
+      expect(printed).toBe(htmlPrintDocument(SNAPSHOT))
+      expect(printed).toContain('<svg>drawn</svg>')
+      expect(
+        printed?.startsWith(
+          `<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="${HTML_PRINT_POLICY}">`
+        )
+      ).toBe(true)
+      expect(HTML_PRINT_POLICY).toContain("script-src 'none'")
+      expect(printed).not.toContain('draw()')
+      expect(uri).toMatch(inExportDir('report.pdf'))
+      expect(deps.mermaidScript).not.toHaveBeenCalled()
+    })
+
+    it("fails with the page's error, printing nothing", async () => {
+      const deps = renderer({ type: 'error', code: 'render', message: 'no body' })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(
+        "Couldn't render the page: no body"
+      )
+      expect(print).not.toHaveBeenCalled()
+      expect(share).not.toHaveBeenCalled()
+    })
+
+    it('a render that never answers fails the export (the renderer gave up), printing nothing', async () => {
+      const deps = renderer()
+      deps.render = jest.fn(async () => {
+        throw new Error('Rendering the export took too long.')
+      })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(
+        'Rendering the export took too long.'
+      )
+      expect(print).not.toHaveBeenCalled()
+    })
+
+    it('a reply of another kind is no page', async () => {
+      const deps = renderer({ type: 'svg', svg: '<svg/>' })
+      await expect(exportArtifact(report, deps)).rejects.toThrow(
+        "Couldn't render the page: no page came back."
+      )
+      expect(print).not.toHaveBeenCalled()
+    })
   })
 
   it("fails with mermaid's error when the diagram doesn't parse", async () => {

@@ -28,6 +28,7 @@ import {
 import { cliAuthor, resolveId } from './_shared'
 import type { ArtifactExportFormat } from '@slayzone/task-artifacts/export-html'
 import { planTaskDownload, safeFileName } from '@slayzone/task-artifacts/download-plan'
+import { saveNew, saveReplacing, type WriteBody } from '../../save-file'
 
 /*
  * Hub/computer split (Wave 3.5): the subcommands below route through api.ts — the
@@ -283,6 +284,17 @@ async function streamToStdout(body: ReadableStream<Uint8Array>): Promise<void> {
  */
 async function openArtifactInApp(artifactId: string): Promise<void> {
   await apiFetch(`/api/open-artifact/${encodeURIComponent(artifactId)}`, { method: 'POST' })
+}
+
+/**
+ * Where a download lands. `--output`: that path, replacing what is there (the person
+ * chose it). Otherwise `name` in the cwd, numbered `name (2).ext` when taken — the
+ * name comes from a title, so it must never overwrite (or write through a symlink to)
+ * a file that happens to share it. Either way the bytes land whole or not at all
+ * (see save-file.ts). Returns the final path.
+ */
+function saveDownload(output: string | undefined, name: string, write: WriteBody): Promise<string> {
+  return output ? saveReplacing(path.resolve(output), write) : saveNew(process.cwd(), name, write)
 }
 
 function getAvailableExportTypes(mode: RenderMode): string[] {
@@ -844,7 +856,10 @@ Examples:
     .command('download [artifactId]')
     .description('Download an artifact in a given format')
     .option('--type <type>', 'Export type: raw, pdf, png, html, zip', 'raw')
-    .option('--output <path>', 'Output file path (default: ./<filename>)')
+    .option(
+      '--output <path>',
+      'Output file path, replaced if it exists (default: ./<filename>, numbered "<name> (2).<ext>" if taken)'
+    )
     .option('--task <id>', 'Task ID for zip (or $SLAYZONE_TASK_ID)')
     .option('--browser <path>', 'pdf/png: Chrome/Chromium/Edge executable to render with')
     .option(
@@ -894,9 +909,6 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
           process.exit(1)
         }
 
-        const outputPath = opts.output ? path.resolve(opts.output) : path.resolve('artifacts.zip')
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-
         // Entry names from the shared planner (desktop and web use it too): titles
         // and folder names are free text, so every entry is `/`-separated plain
         // segments legal on every OS (no `..`, drive, backslash or reserved name — nothing
@@ -904,26 +916,29 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
         // numbered `name (2).ext` instead of becoming two entries with one name.
         const plan = planTaskDownload(folders, artifacts)
 
-        const output = fs.createWriteStream(outputPath)
-        const archive = new ZipArchive({ zlib: { level: 9 } })
-        archive.pipe(output)
-
-        for (const entry of plan) {
-          // A row whose working copy is absent was SKIPPED before (`if
-          // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
-          // rather than failing the whole archive.
-          const { body } = await apiGetStream(
-            `/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`,
-            [ARTIFACT_FILE_MISSING]
-          )
-          if (!body) continue
-          archive.append(Readable.fromWeb(body as StreamWebReadable), { name: entry.path })
-        }
-
-        await archive.finalize()
-        await new Promise<void>((resolve, reject) => {
-          output.on('close', resolve)
-          output.on('error', reject)
+        const outputPath = await saveDownload(opts.output, 'artifacts.zip', async (output) => {
+          const archive = new ZipArchive({ zlib: { level: 9 } })
+          const written = pipeline(archive, output)
+          // Awaited below; a failure before then is reported by its own throw.
+          written.catch(() => undefined)
+          try {
+            for (const entry of plan) {
+              // A row whose working copy is absent was SKIPPED before (`if
+              // (!fs.existsSync(fp)) continue`) — the pass-through code preserves that
+              // rather than failing the whole archive.
+              const { body } = await apiGetStream(
+                `/api/artifacts/${encodeURIComponent(entry.artifactId)}/content`,
+                [ARTIFACT_FILE_MISSING]
+              )
+              if (!body) continue
+              archive.append(Readable.fromWeb(body as StreamWebReadable), { name: entry.path })
+            }
+            await archive.finalize()
+          } catch (err) {
+            archive.abort()
+            throw err
+          }
+          await written
         })
 
         if (opts.json) {
@@ -962,13 +977,10 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
           `/api/artifacts/${encodeURIComponent(artifact.id)}/content`
         )
         // No --output: the title's name in the cwd, never a path the title spells out.
-        const outputPath = opts.output
-          ? path.resolve(opts.output)
-          : path.resolve(safeFileName(artifact.title, artifact.id))
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-        await pipeline(
-          Readable.fromWeb(body as StreamWebReadable),
-          fs.createWriteStream(outputPath)
+        const outputPath = await saveDownload(
+          opts.output,
+          safeFileName(artifact.title, artifact.id),
+          (out) => pipeline(Readable.fromWeb(body as StreamWebReadable), out)
         )
 
         if (opts.json) {
@@ -1015,13 +1027,11 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
       const ext = opts.type
       // No --output: the title's name with the export's extension, made safe as ONE
       // name (extension included, so the result stays within the 255-byte limit).
-      const outputPath = opts.output
-        ? path.resolve(opts.output)
-        : path.resolve(
-            safeFileName(`${exportBaseName(artifact.title)}.${ext}`, `${artifact.id}.${ext}`)
-          )
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-      fs.writeFileSync(outputPath, bytes)
+      const outputPath = await saveDownload(
+        opts.output,
+        safeFileName(`${exportBaseName(artifact.title)}.${ext}`, `${artifact.id}.${ext}`),
+        (out) => pipeline(Readable.from([bytes]), out)
+      )
 
       if (opts.json) {
         console.log(JSON.stringify({ path: outputPath, type: opts.type, artifactId: artifact.id }))

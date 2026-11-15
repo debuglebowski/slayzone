@@ -30,15 +30,15 @@ const SAMPLE = {
         'chrome-headless-shell': [
           {
             platform: 'linux64',
-            url: 'https://storage.googleapis.com/cft/157.0.8103.38/linux64/chrome-headless-shell-linux64.zip'
+            url: 'https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux64/chrome-headless-shell-linux64.zip'
           },
           {
             platform: 'mac-arm64',
-            url: 'https://storage.googleapis.com/cft/157.0.8103.38/mac-arm64/chrome-headless-shell-mac-arm64.zip'
+            url: 'https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-arm64/chrome-headless-shell-mac-arm64.zip'
           },
           {
             platform: 'win64',
-            url: 'https://storage.googleapis.com/cft/157.0.8103.38/win64/chrome-headless-shell-win64.zip'
+            url: 'https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win64/chrome-headless-shell-win64.zip'
           }
         ]
       }
@@ -69,7 +69,7 @@ describe('selectHeadlessShellDownload', () => {
   test('the Stable channel headless-shell build for the platform', () => {
     expect(selectHeadlessShellDownload(SAMPLE, 'mac-arm64')).toEqual({
       version: '157.0.8103.38',
-      url: 'https://storage.googleapis.com/cft/157.0.8103.38/mac-arm64/chrome-headless-shell-mac-arm64.zip'
+      url: 'https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-arm64/chrome-headless-shell-mac-arm64.zip'
     })
   })
 
@@ -109,6 +109,55 @@ describe('selectHeadlessShellDownload', () => {
         'mac-arm64'
       )
     ).toThrow(/https/)
+  })
+})
+
+// Review 6, #6: the zip is downloaded and executed with no hash to check it against,
+// so where it comes from is the only check. The real list names one place only.
+describe('selectHeadlessShellDownload: the download host is pinned', () => {
+  const listNaming = (url: string) => ({
+    channels: {
+      Stable: {
+        version: '1.2.3.4',
+        downloads: { 'chrome-headless-shell': [{ platform: 'mac-arm64', url }] }
+      }
+    }
+  })
+
+  test('the Chrome for Testing bucket on storage.googleapis.com is accepted', () => {
+    const url =
+      'https://storage.googleapis.com/chrome-for-testing-public/1.2.3.4/mac-arm64/chrome-headless-shell-mac-arm64.zip'
+    expect(selectHeadlessShellDownload(listNaming(url), 'mac-arm64')?.url).toBe(url)
+  })
+
+  test.each([
+    ['another host', 'https://evil.example/chrome-headless-shell-mac-arm64.zip'],
+    [
+      'a lookalike host',
+      'https://storage.googleapis.com.evil.example/chrome-for-testing-public/x.zip'
+    ],
+    [
+      'credentials in the URL',
+      'https://storage.googleapis.com@evil.example/chrome-for-testing-public/x.zip'
+    ],
+    ['a non-default port', 'https://storage.googleapis.com:8443/chrome-for-testing-public/x.zip'],
+    [
+      'another bucket on the same host',
+      'https://storage.googleapis.com/someone-elses-bucket/x.zip'
+    ],
+    [
+      'a path climbing out of the bucket',
+      'https://storage.googleapis.com/chrome-for-testing-public/../evil/x.zip'
+    ],
+    [
+      'an encoded climb',
+      'https://storage.googleapis.com/chrome-for-testing-public/%2e%2e/evil/x.zip'
+    ],
+    ['not a URL', 'chrome-headless-shell.zip']
+  ])('%s is refused', (_what, url) => {
+    expect(() => selectHeadlessShellDownload(listNaming(url), 'mac-arm64')).toThrow(
+      BrowserInstallError
+    )
   })
 })
 
@@ -468,6 +517,34 @@ describe('concurrent installs (review 5, #13)', () => {
     expect(fs.readFileSync(bin, 'utf8')).toContain('# ours')
     expect(fs.existsSync(path.join(root, VERSION_DIR, 'junk'))).toBe(false)
     expect(fs.readdirSync(root)).toEqual([VERSION_DIR])
+  })
+
+  test('a version list naming another host is refused before any download', async () => {
+    const home = path.join(tmp, 'home-foreign-host')
+    const seen: string[] = []
+    const foreign = JSON.parse(
+      JSON.stringify(SAMPLE).replaceAll(
+        'https://storage.googleapis.com/',
+        'https://mirror.example/'
+      )
+    )
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input)
+      seen.push(url)
+      if (url.endsWith('.json')) return new Response(JSON.stringify(foreign))
+      return new Response(new Uint8Array(zipWithShell('foreign')))
+    }) as typeof fetch
+    const err = await installHeadlessShell({ ctx: realCtx(home), fetchImpl, log: () => {} }).catch(
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(BrowserInstallError)
+    expect(String((err as Error).message)).toContain('https://mirror.example/')
+    // Only the version list was fetched.
+    expect(seen).toEqual([
+      'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
+    ])
+    const root = path.join(home, '.cache/slayzone/chrome-headless-shell')
+    expect(fs.existsSync(root) ? fs.readdirSync(root) : []).toEqual([])
   })
 
   test('a redirect to plain http is refused', async () => {

@@ -10,8 +10,10 @@
  * its own `slay`): the rename is the commit, and whoever finds the version already in
  * place keeps it — a version dir holding a working executable is never deleted.
  *
- * Every hop is https (a redirect to plain http is refused) and the download is capped
- * while it streams.
+ * The download must come from Chrome for Testing's own bucket ({@link CFT_DOWNLOAD_PREFIX},
+ * the only place the version list names): no hash is published, so the source is the
+ * one check on a binary that is then run. Every hop is https (a redirect to plain http
+ * is refused) and the download is capped while it streams.
  */
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
@@ -34,6 +36,14 @@ export { cftPlatformFor }
 
 export const CFT_VERSIONS_URL =
   'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
+
+/**
+ * Where every Chrome for Testing download lives (checked against the live version
+ * lists: all their URLs are in this bucket). The bucket, not just the host:
+ * storage.googleapis.com serves anyone's bucket.
+ */
+export const CFT_DOWNLOAD_HOST = 'storage.googleapis.com'
+export const CFT_DOWNLOAD_PREFIX = `https://${CFT_DOWNLOAD_HOST}/chrome-for-testing-public/`
 
 export class BrowserInstallError extends Error {
   constructor(message: string) {
@@ -68,7 +78,34 @@ export function selectHeadlessShellDownload(
   if (typeof hit.url !== 'string' || !hit.url.startsWith('https://')) {
     throw new BrowserInstallError(`Refusing non-https download URL: ${String(hit.url)}`)
   }
-  return { version, url: hit.url }
+  return { version, url: pinnedDownloadUrl(hit.url) }
+}
+
+/**
+ * `url` parsed, normalised (`..` and `%2e%2e` resolved) and checked to sit inside
+ * {@link CFT_DOWNLOAD_PREFIX}: no other host, port, credentials or bucket. The
+ * normalised form is what gets fetched, so what was checked is what is downloaded.
+ */
+function pinnedDownloadUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new BrowserInstallError(`Refusing download URL: ${url}`)
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.hostname !== CFT_DOWNLOAD_HOST ||
+    parsed.port !== '' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    !parsed.href.startsWith(CFT_DOWNLOAD_PREFIX)
+  ) {
+    throw new BrowserInstallError(
+      `Refusing download URL outside Chrome for Testing (${CFT_DOWNLOAD_PREFIX}): ${url}`
+    )
+  }
+  return parsed.href
 }
 
 function noBuildMessage(platform: string, arch: string, cft: string | null): string {

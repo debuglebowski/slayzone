@@ -8,7 +8,7 @@ import { defaultBrowserEnv, findBrowser } from './browser'
 import { buildDocumentHtml } from '@slayzone/task-artifacts/export-html'
 import { launchBrowser } from './cdp'
 import { defaultExportDeps, exportArtifact, type ExportDeps } from './export-artifact'
-import { renderPdf } from './render'
+import { renderPdf, renderPng } from './render'
 
 const BROWSER = findBrowser(defaultBrowserEnv())
 if (!BROWSER) console.error('SKIP render.integration: no Chrome/Chromium/Edge/Brave found')
@@ -144,5 +144,35 @@ describe.skipIf(!BROWSER)('a page that crashes mid-render (review 5, #2)', () =>
     } finally {
       await b.close()
     }
+  })
+})
+
+describe.skipIf(!BROWSER)('an html artifact that opens JS dialogs (review 6, #2)', () => {
+  // alert/confirm/prompt block the page until answered: unanswered, the document
+  // never finishes loading and the export waits out the command deadline.
+  test('alert/confirm/prompt are dismissed and the PDF is produced', {
+    timeout: 60_000
+  }, async () => {
+    const html =
+      "<!DOCTYPE html><script>alert('hi');document.title=String(confirm('x'))+'|'+String(prompt('y'))</script><p>done</p>"
+    const pdf = await renderPdf(BROWSER as string, html, {
+      waitReady: false,
+      // A dialog left open blocks the page until this deadline fails the render (no
+      // wall-clock bound asserted: render time on a loaded box varies too much).
+      browser: { commandTimeoutMs: 15_000 }
+    })
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+  })
+
+  test('a dialog opened after load (timer) does not stall the PNG', {
+    timeout: 60_000
+  }, async () => {
+    const html =
+      "<!DOCTYPE html><body style='margin:0'><div style='width:50px;height:40px;background:red'></div><script>setTimeout(() => alert('late'), 0)</script></body>"
+    const png = await renderPng(BROWSER as string, html, {
+      waitReady: false,
+      browser: { commandTimeoutMs: 15_000 }
+    })
+    expect(pngSize(png).w).toBeGreaterThan(0)
   })
 })

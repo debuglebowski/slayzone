@@ -705,3 +705,22 @@ describe('a download that has just finished', () => {
     else expect(leftovers(picked.dir)).toEqual([])
   })
 })
+
+// Review 6, #9: quitting closes every file a download holds open (no handle is left
+// for garbage collection to close — Node warns today and will throw later).
+describe.skipIf(process.platform === 'win32')('quit closes what it held open', () => {
+  const openFds = (): number => fs.readdirSync('/dev/fd').length
+  test('file and folder targets release their handles on abortAllNow', async () => {
+    const baseline = openFds()
+    picked.file = path.join(root, 'held.bin')
+    await openOk({ kind: 'file', fileName: 'held.bin', title: 't' }).then((id) =>
+      targets.write(SENDER, id, '', bytes('B'))
+    )
+    const dir = await openOk({ kind: 'directory', folderName: 'docs', title: 't' })
+    await targets.write(SENDER, dir, 'docs/a.md', bytes('A'))
+    expect(openFds()).toBeGreaterThanOrEqual(baseline + 2)
+    targets.abortAllNow()
+    await expect.poll(openFds, { timeout: 2_000 }).toBe(baseline)
+    expect(partials(root)).toEqual([])
+  })
+})

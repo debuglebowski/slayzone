@@ -1,8 +1,11 @@
 /**
- * The export's hidden web view (`render-pages.ts` holds its pages): `render(html)` loads
+ * The export's hidden web view (`render-pages.ts` holds its pages): `render(page)` loads
  * one page in a web view the person never sees and resolves with what the page posts
- * back. The view exists only while a page renders — mounted by whoever shows `view`
- * (the artifact viewer), invisible, untouchable, its page the only thing it may load.
+ * back (a message carrying the page's token; anything else is ignored). The view exists
+ * only while a page renders — mounted by whoever shows `view` (the artifact viewer),
+ * invisible, untouchable, its page the only thing it may load — and is unmounted when
+ * the page answers, fails, takes longer than {@link EXPORT_RENDER_TIMEOUT_MS} (a script
+ * that never yields) or its viewer goes away.
  *
  * WKWebView runs a page's script only inside the window, so the view is mounted, not
  * offscreen: laid over the screen at zero opacity.
@@ -10,14 +13,21 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { StyleSheet } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
-import { type ExportRenderReply, parseExportRenderReply } from './render-pages'
+import {
+  type ExportRenderPage,
+  type ExportRenderReply,
+  parseExportRenderReply
+} from './render-pages'
 
-/** Mermaid's largest diagrams draw in a few seconds on a phone. */
+/**
+ * Mermaid's largest diagrams draw in a few seconds on a phone; an html artifact is taken
+ * at most `HTML_SETTLE.maxLoadMs` + `maxAfterLoadMs` (20 s) after it starts.
+ */
 export const EXPORT_RENDER_TIMEOUT_MS = 30_000
 
 interface PendingRender {
   id: number
-  html: string
+  page: ExportRenderPage
   resolve: (reply: ExportRenderReply) => void
   reject: (error: Error) => void
 }
@@ -27,7 +37,7 @@ let nextRenderId = 0
 export interface ExportRenderer {
   /** The hidden web view while a page renders, else null. */
   view: ReactNode
-  render: (html: string) => Promise<ExportRenderReply>
+  render: (page: ExportRenderPage) => Promise<ExportRenderReply>
 }
 
 export function useExportRenderer(): ExportRenderer {
@@ -54,10 +64,10 @@ export function useExportRenderer(): ExportRenderer {
     []
   )
 
-  const render = (html: string) =>
+  const render = (page: ExportRenderPage) =>
     new Promise<ExportRenderReply>((resolve, reject) => {
       nextRenderId += 1
-      setPending({ id: nextRenderId, html, resolve, reject })
+      setPending({ id: nextRenderId, page, resolve, reject })
     })
 
   const fail = (message: string) => {
@@ -67,8 +77,9 @@ export function useExportRenderer(): ExportRenderer {
   }
 
   const onMessage = (event: WebViewMessageEvent) => {
-    const reply = parseExportRenderReply(event.nativeEvent.data)
-    if (!pending || !reply) return
+    if (!pending) return
+    const reply = parseExportRenderReply(event.nativeEvent.data, pending.page.token)
+    if (!reply) return
     setPending(null)
     pending.resolve(reply)
   }
@@ -77,7 +88,7 @@ export function useExportRenderer(): ExportRenderer {
     <WebView
       key={pending.id}
       testID="artifact-export-renderer"
-      source={{ html: pending.html }}
+      source={{ html: pending.page.html }}
       originWhitelist={['*']}
       // The page itself (`about:blank` with its HTML); never a link or a redirect.
       onShouldStartLoadWithRequest={(request) => request.url === 'about:blank'}
@@ -92,7 +103,7 @@ export function useExportRenderer(): ExportRenderer {
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={styles.hidden}
+      style={[styles.hidden, pending.page.viewport]}
     />
   ) : null
 

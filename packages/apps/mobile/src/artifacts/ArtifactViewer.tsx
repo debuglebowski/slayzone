@@ -194,6 +194,7 @@ function LoadedArtifact({
   }
 
   const share = () => {
+    if (!versionReady) return
     setShareState({ busy: true, error: null })
     const ready =
       fileKind && file.data !== undefined
@@ -213,8 +214,10 @@ function LoadedArtifact({
       )
   }
 
-  // What is on screen: the working copy's text or the version's.
-  const exportContent = isText ? text.data : undefined
+  // What is on screen: the working copy's text or the version's. Nothing while the
+  // version picked is loading or missing, or the text failed to load: the screen shows
+  // a spinner or an error then, and the cache may still hold another copy's text.
+  const exportContent = versionReady && !text.error && isText ? text.data : undefined
   const chooseExport = () => {
     if (exportContent === undefined) return
     ActionSheetIOS.showActionSheetWithOptions(
@@ -288,7 +291,9 @@ function LoadedArtifact({
       />
       <HeaderButton
         label={shareState.busy ? 'Sharing…' : 'Share'}
-        disabled={shareState.busy}
+        // The version picked is loading or missing: there is nothing of it to share
+        // (the download would fall back to the working copy).
+        disabled={shareState.busy || !versionReady}
         onPress={share}
       />
       {exportFormats.length > 0 ? (

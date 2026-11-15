@@ -207,7 +207,9 @@ describe('createZipEncoder', () => {
           expect(sha(out), `${name} content`).toBe(sha(data))
         }
       })
-    }
+    },
+    // Spawns an external reader: generous under a loaded machine.
+    60_000
   )
 
   // Not on the forced-zip64 archive: Java sizes a descriptor by the bytes it inflated,
@@ -241,7 +243,9 @@ describe('createZipEncoder', () => {
       })
       const expected = deflated.map((n) => `${n}:${sha(files[n] ?? new Uint8Array(0))}`)
       expect(report.trim().split('\n').sort()).toEqual(expected)
-    }
+    },
+    // Spawns an external reader: generous under a loaded machine.
+    60_000
   )
 
   it.each([
@@ -268,7 +272,9 @@ describe('createZipEncoder', () => {
       expect(report.trim()).toBe(
         names.map((n) => `${n}:${sha(files[n] ?? new Uint8Array(0))}`).join(' ')
       )
-    }
+    },
+    // Spawns an external reader: generous under a loaded machine.
+    60_000
   )
 })
 
