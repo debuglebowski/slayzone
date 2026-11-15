@@ -257,9 +257,9 @@ export function finishStoredTaskErasure(
   // Free pages, stale cell copies in live pages and WAL frames still hold removed rows
   // (secure_delete misses the copies a page split leaves): only a full rewrite of the
   // file removes them. Not needed when nothing was removed since the last one.
-  if (removed > 0 || candidates.compacted !== true) return { compact: true }
-  truncateWal(db)
-  return { compact: false }
+  // Nothing removed since the last rewrite: no copy of this task's content can be
+  // left (the rewrite started from a fresh WAL too).
+  return { compact: removed > 0 || candidates.compacted !== true }
 }
 
 /** After the whole file was rewritten for this task's erasure: never again for it, unless more is removed. */
@@ -268,14 +268,8 @@ export function markStoredTaskErasureCompacted(db: Database.Database, taskId: st
     .prepare('SELECT candidates FROM task_erasure_checks WHERE task_id=?')
     .get(taskId) as { candidates: string } | undefined
   if (!saved) throw new Error('Computer erasure inventory is missing')
-  truncateWal(db)
   db.prepare('UPDATE task_erasure_checks SET candidates=? WHERE task_id=?').run(
     JSON.stringify({ ...(JSON.parse(saved.candidates) as Candidates), compacted: true }),
     taskId
   )
-}
-
-function truncateWal(db: Database.Database) {
-  const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
-  if (checkpoint.some((row) => row.busy)) throw new Error('Computer checkpoint is busy')
 }

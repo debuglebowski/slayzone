@@ -20,6 +20,8 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { createSwappableDb } from './chat-db-handle'
+import { attachCheckpointer, type CheckpointResult } from './checkpointer'
+import { uptime } from 'node:os'
 import {
   createSyncFaultLedger,
   ITEM_FAULTS_DDL,
@@ -335,7 +337,18 @@ export const TASK_PATHS_DDL = `
   );
 `
 
-export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
+export function openChatStorage(opts: {
+  stateDir: string
+  hubScope: string
+  /**
+   * When this machine booted (epoch ms). Default: now − `os.uptime()`. A start after
+   * an unclean stop on ANOTHER boot (an OS crash or power loss: the last second of
+   * commits may be gone) rotates the store id — see `store-session`.
+   */
+  machineBootedAt?: number
+  /** WAL sync / checkpoint cadence of the off-thread checkpointer (ms). Default 1000. */
+  checkpointIntervalMs?: number
+}) {
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
   const dir = join(opts.stateDir, 'computer-runtime', digest(opts.hubScope))
   mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -521,6 +534,37 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     'CREATE TABLE IF NOT EXISTS store_identity (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL)'
   )
   db.prepare('INSERT OR IGNORE INTO store_identity VALUES(1,?)').run(randomUUID())
+  // Commits are durable within about a second (NORMAL + the off-thread checkpointer).
+  // An OS crash can therefore leave this store behind what the hub and its clients
+  // already saw. Such a start — not cleanly stopped, and the machine booted since —
+  // counts as another database: a new store id makes the hub re-read every
+  // conversation's metadata from here (counted in another store = rollback) and its
+  // clients reload their history. A process crash loses nothing: same boot, same id.
+  const machineBootedAt = Math.round(opts.machineBootedAt ?? Date.now() - uptime() * 1000)
+  const session = (
+    db.prepare("SELECT value FROM maintenance_cursors WHERE id='store-session'").get() as
+      | { value: string }
+      | undefined
+  )?.value
+  const previous = session ? (JSON.parse(session) as StoreSession) : null
+  const rebooted =
+    !!previous &&
+    !previous.clean &&
+    Math.abs(machineBootedAt - previous.bootedAt) > STORE_SESSION_BOOT_SLACK_MS
+  const saveSession = (clean: boolean) =>
+    db
+      .prepare(
+        "INSERT INTO maintenance_cursors VALUES('store-session',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value"
+      )
+      .run(JSON.stringify({ clean, bootedAt: machineBootedAt } satisfies StoreSession))
+  // Durable before anything is served (a boot-time fsync on this thread): a crash
+  // later in this run must find "not clean".
+  db.pragma('synchronous = FULL')
+  db.transaction(() => {
+    if (rebooted) db.prepare('UPDATE store_identity SET store_id=? WHERE id=1').run(randomUUID())
+    saveSession(false)
+  })()
+  db.pragma('synchronous = NORMAL')
   const storeId = (
     db.prepare('SELECT store_id FROM store_identity WHERE id=1').get() as { store_id: string }
   ).store_id
@@ -1040,9 +1084,35 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     close() {
       if (!closed) {
         for (const reader of [...exportReaders]) reader.close()
+        // Its files are free when this returns (callers remove them right after).
+        checkpointer.closeSync()
         connection.current().close()
         closed = true
       }
+    },
+    /**
+     * A clean stop: marked clean, the WAL checkpointed and truncated off this thread,
+     * then closed. Nothing committed is lost. (`close` alone also loses nothing on a
+     * process exit; only an OS crash could lose the last second.)
+     */
+    async shutdown(): Promise<void> {
+      if (closed) return
+      for (const reader of [...exportReaders]) reader.close()
+      saveSession(true)
+      if (checkpointer.active) await checkpointer.close(true).catch(() => undefined)
+      else db.pragma('wal_checkpoint(TRUNCATE)')
+      api.close()
+    },
+    /**
+     * Committed data is on disk when this resolves: the WAL synced off this thread.
+     * Await it before telling the hub something it then relies on (data it handed over
+     * and will drop, a durable state change). Never for live output.
+     */
+    async flush(): Promise<void> {
+      if (closed) throw new Error('Chat storage is closed')
+      while (resumed) await resumed.promise
+      if (inline || !checkpointer.active) return // FULL commits: already durable
+      await checkpointer.flush()
     },
     conversation(id: string): ChatOwnership | null {
       const r = row(id)
@@ -2503,16 +2573,64 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     hasBlobLeases() {
       return !!db.prepare('SELECT 1 FROM blob_leases WHERE expires_at>? LIMIT 1').get(Date.now())
     },
+    /**
+     * Hygiene after deletions: a checkpoint off this thread, soon. (A TRUNCATE here
+     * fsyncs on this thread, and one from another connection would block this one's
+     * writes.) The WAL is reset by a later write and capped by `journal_size_limit`.
+     */
     checkpoint(): void {
-      db.pragma('wal_checkpoint(TRUNCATE)')
+      if (inline || !checkpointer.active) return
+      void checkpointer.checkpoint().catch(() => undefined)
     }
   }
+  // ── the off-thread checkpointer (S5) ─────────────────────────────────────
+  /** The checkpointer failed: this connection makes its own commits durable again. */
+  let inline = false
+  /** Set while it is paused (a swap): `flush` waits for the resume. */
+  let resumed: { promise: Promise<void>; resolve(): void } | null = null
+  const checkpointer = attachCheckpointer(path, {
+    intervalMs: opts.checkpointIntervalMs,
+    onFailure: (message) => {
+      if (inline || closed) return
+      inline = true
+      db.pragma('synchronous = FULL')
+      db.pragma('wal_autocheckpoint = 1000')
+      console.error(`[chat-storage] checkpointer unavailable (${message}); committing with FULL`)
+    }
+  })
+  void checkpointer.open()
   /**
    * Connection lifecycle for storage maintenance (compaction): the live file's size,
    * other connections on it, and the swap that replaces it. See DOMAIN.md.
    */
   const secondaries = new Map<symbol, string>()
   const maintenance = {
+    /** Before a swap: the checkpointer syncs, checkpoints and closes its connection. */
+    async pauseCheckpointer(): Promise<void> {
+      if (inline || !checkpointer.active) return
+      if (!resumed) {
+        let resolve: () => void = () => undefined
+        const promise = new Promise<void>((r) => {
+          resolve = r
+        })
+        resumed = { promise, resolve }
+      }
+      await checkpointer.checkpoint().catch(() => undefined)
+      await checkpointer.close(false)
+    },
+    /** After a swap (or a refused one): open again on the live file. */
+    resumeCheckpointer(): void {
+      if (closed) return
+      const waiting = resumed
+      resumed = null
+      if (!inline) void checkpointer.open()
+      waiting?.resolve()
+    },
+    /** A checkpoint now, off this thread (complete unless a reader holds old frames). */
+    async checkpointNow(): Promise<CheckpointResult | null> {
+      if (inline || !checkpointer.active) return null
+      return checkpointer.checkpoint()
+    },
     /** Page-level size of the live file: O(1) pragmas and a stat. */
     fileStats(): ChatStoreFileStats {
       const pragma = (name: string) => db.pragma(name, { simple: true }) as number
@@ -2565,6 +2683,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           `a secondary connection is open (${[...secondaries.values()].join(', ')})`,
           true
         )
+      if (checkpointer.active)
+        throw new ChatStorageSwapRefused('the checkpointer is running (pause it first)', true)
       const discard = (reason: string): never => {
         rmCompaction(compacted)
         throw new ChatStorageSwapRefused(reason, false)
@@ -2621,6 +2741,16 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   return Object.assign(api, { maintenance })
 }
 
+/** The store's last run (`maintenance_cursors` 'store-session'). */
+interface StoreSession {
+  /** Stopped with `shutdown` (everything checkpointed). */
+  clean: boolean
+  /** When the machine had booted (epoch ms) during that run. */
+  bootedAt: number
+}
+/** Boot times derived from uptime drift a little: further apart than this = another boot. */
+const STORE_SESSION_BOOT_SLACK_MS = 120_000
+
 /** Name prefix of compacted copies in a store dir (`<prefix><pid>-<uuid>`). */
 const COMPACT_PREFIX = 'chat.sqlite.compact-'
 /** The live file's second name while a swap renames over it. */
@@ -2656,7 +2786,10 @@ export function openChatConnection(path: string): Database.Database {
   try {
     chmodSync(path, 0o600)
     db.pragma('journal_mode = WAL')
-    db.pragma('synchronous = FULL')
+    // NORMAL: a commit appends to the WAL without an fsync; the off-thread checkpointer
+    // syncs it within a second (`checkpointer.ts`). No checkpoint on this connection.
+    db.pragma('synchronous = NORMAL')
+    db.pragma('wal_autocheckpoint = 0')
     db.pragma('foreign_keys = ON')
     db.pragma('busy_timeout = 5000')
     db.pragma('secure_delete = ON')

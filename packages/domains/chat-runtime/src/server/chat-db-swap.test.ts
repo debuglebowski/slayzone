@@ -41,7 +41,7 @@ const text = (t: string) => ({ kind: 'assistant-text', messageId: t, text: t }) 
 
 /** A compacted copy of the live store, as the compactor makes it (VACUUM INTO). */
 function compactedCopy(store: ChatStorage): string {
-  store.checkpoint()
+  checkpointHere(store)
   const target = store.maintenance.tempPath()
   const reader = new Database(store.path, { readonly: true, fileMustExist: true })
   try {
@@ -52,18 +52,27 @@ function compactedCopy(store: ChatStorage): string {
   }
   return target
 }
+/** A swap as compaction does it: the checkpointer paused around it. */
+async function swap(store: ChatStorage, copy: string) {
+  await store.maintenance.pauseCheckpointer()
+  try {
+    return store.maintenance.swapIn(copy)
+  } finally {
+    store.maintenance.resumeCheckpointer()
+  }
+}
 const leftovers = (store: ChatStorage) =>
   readdirSync(store.dir).filter((n) => n.startsWith('chat.sqlite.'))
 
 describe('swappable chat store connection', () => {
-  test('a handle kept from compose reaches the new file after a swap', () => {
+  test('a handle kept from compose reaches the new file after a swap', async () => {
     const { store } = open()
     store.createConversation(identity)
     store.append(identity.id, 1, text('before'))
     const held = store.compose((db) => db)
     expect(store.maintenance.fileStats().autoVacuum).toBe(0)
 
-    const result = store.maintenance.swapIn(compactedCopy(store))
+    const result = await swap(store, compactedCopy(store))
 
     expect(result.holdMs).toBeGreaterThanOrEqual(0)
     expect(store.maintenance.fileStats().autoVacuum).toBe(2)
@@ -77,7 +86,7 @@ describe('swappable chat store connection', () => {
     expect(leftovers(store)).toEqual([])
   })
 
-  test('connection pragmas hold on the new connection, journal_size_limit included', () => {
+  test('connection pragmas hold on the new connection, journal_size_limit included', async () => {
     const { store } = open()
     const db = store.compose((d) => d)
     const pragmas = () => ({
@@ -86,36 +95,39 @@ describe('swappable chat store connection', () => {
       foreignKeys: db.pragma('foreign_keys', { simple: true }),
       busy: db.pragma('busy_timeout', { simple: true }),
       secureDelete: db.pragma('secure_delete', { simple: true }),
-      walLimit: db.pragma('journal_size_limit', { simple: true })
+      walLimit: db.pragma('journal_size_limit', { simple: true }),
+      autocheckpoint: db.pragma('wal_autocheckpoint', { simple: true })
     })
     const expected = {
       journal: 'wal',
-      synchronous: 2,
+      // NORMAL, no checkpoint on this connection: the checkpointer syncs off-thread (S5).
+      synchronous: 1,
       foreignKeys: 1,
       busy: 5000,
       secureDelete: 1,
-      walLimit: 64 * 1024 * 1024
+      walLimit: 64 * 1024 * 1024,
+      autocheckpoint: 0
     }
     expect(pragmas()).toEqual(expected)
-    store.maintenance.swapIn(compactedCopy(store))
+    await swap(store, compactedCopy(store))
     expect(pragmas()).toEqual(expected)
   })
 
-  test('connection state set through the handle is re-applied: SQL functions and pragmas', () => {
+  test('connection state set through the handle is re-applied: SQL functions and pragmas', async () => {
     const { store } = open()
     const db = store.compose((d) => d)
     db.function('swap_probe', () => 42)
     db.pragma('cache_size = -4096')
-    store.maintenance.swapIn(compactedCopy(store))
+    await swap(store, compactedCopy(store))
     expect(db.prepare('SELECT swap_probe() v').get()).toEqual({ v: 42 })
     expect(db.pragma('cache_size', { simple: true })).toBe(-4096)
   })
 
-  test('a statement prepared before the swap fails loudly after it', () => {
+  test('a statement prepared before the swap fails loudly after it', async () => {
     const { store } = open()
     store.createConversation(identity)
     const stale = store.compose((db) => db.prepare('SELECT count(*) n FROM events'))
-    store.maintenance.swapIn(compactedCopy(store))
+    await swap(store, compactedCopy(store))
     expect(() => stale.get()).toThrow(/not open/)
   })
 
@@ -125,25 +137,25 @@ describe('swappable chat store connection', () => {
     expect(store.compose((db) => db.open)).toBe(true)
   })
 
-  test('a registered secondary connection makes the swap wait; the live store is unchanged', () => {
+  test('a registered secondary connection makes the swap wait; the live store is unchanged', async () => {
     const { store } = open()
     store.createConversation(identity)
     store.append(identity.id, 1, text('kept'))
     const copy = compactedCopy(store)
     const reader = store.maintenance.registerSecondary('export reader')
     expect(store.maintenance.secondaryConnections()).toEqual(['export reader'])
-    expect(() => store.maintenance.swapIn(copy)).toThrow(/secondary connection/)
+    await expect(swap(store, copy)).rejects.toThrow(/secondary connection/)
     expect(store.maintenance.fileStats().autoVacuum).toBe(0)
     expect(store.read(identity.id, -1)).toHaveLength(1)
     reader.release()
     reader.release()
     expect(store.maintenance.secondaryConnections()).toEqual([])
-    store.maintenance.swapIn(copy)
+    await swap(store, copy)
     expect(store.maintenance.fileStats().autoVacuum).toBe(2)
     expect(store.read(identity.id, -1)).toHaveLength(1)
   })
 
-  test('backstop: an unregistered connection keeps the WAL alive → swap refused, nothing lost', () => {
+  test('backstop: an unregistered connection keeps the WAL alive → swap refused, nothing lost', async () => {
     const { store } = open()
     store.createConversation(identity)
     const copy = compactedCopy(store)
@@ -153,7 +165,7 @@ describe('swappable chat store connection', () => {
     extra.push(rogue)
     rogue.prepare('SELECT count(*) FROM events').get()
     store.append(identity.id, 1, text('in the wal'))
-    expect(() => store.maintenance.swapIn(copy)).toThrow(/WAL/)
+    await expect(swap(store, copy)).rejects.toThrow(/WAL/)
     expect(store.maintenance.fileStats().autoVacuum).toBe(0)
     expect(store.read(identity.id, -1).map((e) => (e.event as { text: string }).text)).toEqual([
       'in the wal'
@@ -164,14 +176,14 @@ describe('swappable chat store connection', () => {
     expect(leftovers(store)).toEqual([])
   })
 
-  test('a file from another store is refused and the live file restored', () => {
+  test('a file from another store is refused and the live file restored', async () => {
     const { store } = open()
     store.createConversation(identity)
     store.append(identity.id, 1, text('mine'))
     const other = open().store
     const foreign = compactedCopy(other)
     renameSync(foreign, join(store.dir, 'chat.sqlite.compact-foreign'))
-    expect(() => store.maintenance.swapIn(join(store.dir, 'chat.sqlite.compact-foreign'))).toThrow(
+    await expect(swap(store, join(store.dir, 'chat.sqlite.compact-foreign'))).rejects.toThrow(
       /store identity/
     )
     expect(store.read(identity.id, -1)).toHaveLength(1)
@@ -228,7 +240,7 @@ describe('computer runtime services across a swap', () => {
     const cursors = usageCursorStore(r.storage)
     const turns = agentTurnsStore(r.storage)
 
-    r.storage.maintenance.swapIn(compactedCopy(r.storage))
+    await swap(r.storage, compactedCopy(r.storage))
 
     // retention keeps its handle from construction
     r.retention.configure(3)
@@ -265,3 +277,8 @@ describe('computer runtime services across a swap', () => {
     ).toEqual({ conversation_id: 'c' })
   })
 })
+
+/** Test setup only: everything into the file now, on this thread (the store itself never does). */
+function checkpointHere(store: ChatStorage) {
+  store.compose((db) => db.pragma('wal_checkpoint(TRUNCATE)'))
+}

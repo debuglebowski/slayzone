@@ -35,7 +35,8 @@ const CONNECTION_PRAGMAS = new Set([
   'synchronous',
   'temp_store',
   'threads',
-  'trusted_schema'
+  'trusted_schema',
+  'wal_autocheckpoint'
 ])
 /** Methods that change connection state: recorded, then replayed on the next connection. */
 const REGISTRATIONS = new Set(['function', 'aggregate', 'table', 'loadExtension'])

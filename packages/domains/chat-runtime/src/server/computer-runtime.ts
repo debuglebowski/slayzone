@@ -513,7 +513,8 @@ export function createComputerChatRuntime(opts: {
       await transport.shutdownAll()
       transfers.close()
       await artifacts.close()
-      storage.close()
+      // Clean stop: WAL checkpointed off the main thread, nothing lost.
+      await storage.shutdown()
     }
   }
 }

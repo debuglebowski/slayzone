@@ -327,7 +327,8 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
       if (free === 0) break
       await sleep(idleMs)
     }
-    store.checkpoint()
+    // The file shrinks when a checkpoint copies the moved pages back: off this thread.
+    await store.maintenance.checkpointNow()
     return null
   }
 
@@ -514,6 +515,13 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     let worker: WorkerHandle | null = null
     let triggers: Array<{ name: string; sql: string }> = []
     let swapped = false
+    /** The checkpointer is paused for the window: resumed on every way out. */
+    let paused = false
+    const resume = () => {
+      if (!paused) return
+      paused = false
+      store.maintenance.resumeCheckpointer()
+    }
     // Set when the job ends without a swap: only then is the copy garbage.
     let abandoned = false
     let workerAlive = false
@@ -580,12 +588,17 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
           continue
         }
         current.message = null
-        // Empty the live WAL now (no reader left), on its own tick: closing the live
-        // connection in the window then has nothing to checkpoint.
-        store.checkpoint()
-        await until(sleep(0))
-        if (blocked()) continue
+        // The checkpointer empties the live WAL and closes its connection (it must not
+        // hold the file across the swap): closing the live connection in the window then
+        // has nothing to checkpoint on this thread.
+        paused = true
+        await until(store.maintenance.pauseCheckpointer())
+        if (blocked()) {
+          resume()
+          continue
+        }
         if (!fits(tables)) {
+          resume()
           worker = spawn('resume')
           await until(worker.ready)
           continue
@@ -605,6 +618,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
           // A transient refusal (the live connection busy): the copy holds the replayed
           // delta and capture still runs — try again shortly.
           if (!(error instanceof ChatStorageSwapRefused) || !error.transient) throw error
+          resume()
           current.message = 'Waiting for the chat store to be idle'
           hook('waiting')
           await sleep(idleMs)
@@ -613,6 +627,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         swapped = true
         capture = []
         const holdMs = performance.now() - held
+        resume()
         log(
           `[chat-compaction] window: ${keys.length} changed rows replayed in ${(replayed - held).toFixed(0)} ms, swap ${(performance.now() - replayed).toFixed(0)} ms`
         )
@@ -620,6 +635,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         return holdMs
       }
     } finally {
+      resume()
       if (worker) {
         const exit = worker.terminate()
         // Between messages it exits at once: wait, so the copy is gone when the job

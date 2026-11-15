@@ -54,7 +54,7 @@ function seeded(liveMb = 4, freeMb = 16) {
       CREATE TABLE IF NOT EXISTS test_auto(id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT);
       INSERT INTO test_nopk VALUES('a'); INSERT INTO test_auto(v) VALUES('a');`)
   )
-  store.checkpoint()
+  checkpointHere(store)
   return { store, root }
 }
 function compaction(store: ChatStorage, opts: Partial<StorageCompactionOptions> = {}) {
@@ -352,7 +352,7 @@ describe('incremental reclaim', () => {
         store.append(identity.id, 1, text(`again ${i} ${'c'.repeat(100_000)}`))
     })
     store.compose((db) => db.prepare("DELETE FROM events WHERE event LIKE '%again %'").run())
-    store.checkpoint()
+    checkpointHere(store)
     return { store, root }
   }
 
@@ -488,7 +488,7 @@ describe('erasure: the rewrite leaves no stale copy secure_delete missed', () =>
   test('live store: rebuildForErasure rewrites the file; the mark is gone from file and WAL', async () => {
     const { store } = seeded(2, 2)
     store.compose((db) => residueTable(db))
-    store.checkpoint()
+    checkpointHere(store)
     expect(holds(store.path), 'precondition: secure_delete left a copy').not.toEqual([])
     const c = compaction(store)
     await c.rebuildForErasure()
@@ -531,3 +531,8 @@ describe('erasure: the rewrite leaves no stale copy secure_delete missed', () =>
     expect(readdirSync(root).filter((n) => n.includes('compact'))).toEqual([])
   })
 })
+
+/** Test setup only: everything into the file now, on this thread (the store itself never does). */
+function checkpointHere(store: ChatStorage) {
+  store.compose((db) => db.pragma('wal_checkpoint(TRUNCATE)'))
+}

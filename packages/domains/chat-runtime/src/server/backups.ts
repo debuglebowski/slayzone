@@ -1112,6 +1112,8 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
       await rebuildStoreFile(file)
       const rewritten = new Database(file, { fileMustExist: true })
       try {
+        // No fsync on this thread: a lost flag only means another rewrite next time.
+        rewritten.pragma('synchronous = OFF')
         markStoredTaskErasureCompacted(rewritten, taskId)
       } finally {
         rewritten.close()

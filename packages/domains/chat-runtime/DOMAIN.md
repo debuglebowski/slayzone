@@ -173,7 +173,19 @@ through the filesystem (an in-place VACUUM on a copy-on-write filesystem also le
 old blocks to the filesystem). Backups keep erased content by design.
 
 Connection lifecycle: the store owns ONE read-write connection (`openChatConnection`:
-WAL, synchronous FULL, secure_delete, `journal_size_limit` 64 MiB). `compose` hands out
+WAL, synchronous NORMAL, `wal_autocheckpoint` 0, secure_delete, `journal_size_limit`
+64 MiB). It never fsyncs or checkpoints: one off-thread checkpointer per process
+(`checkpointer.ts`, its own connection per store) fsyncs each store's WAL and runs a
+PASSIVE checkpoint every second; `storage.flush()` is the barrier (an off-thread WAL
+sync) the computer awaits before answering a request whose data the hub hands over or
+records as done (`durableAck`, apps/computer chat-runtime handler) — never for live
+output. `shutdown()` marks the store clean and truncates the WAL off-thread. If the
+checkpointer dies the store falls back to FULL commits with autocheckpoint on its own
+connection. **Durability window: a process crash loses nothing; an OS crash or power
+loss can lose the commits of the last ~1 s that no durable ack covered.** A start
+after such an unclean stop on another machine boot rotates the store id, so the hub
+re-reads every conversation (another database = rollback) and clients reload: they
+converge on what the computer kept, never on duplicated or interleaved sequences. `compose` hands out
 a stable handle (`chat-db-handle`) that always reaches the current connection, so
 services may keep it; SQL functions and connection pragmas set through it are
 re-applied after a swap. Statements and `transaction()` wrappers must not be kept
@@ -226,3 +238,13 @@ dropped, or restored when it is the only copy).
   test whose stale copy survives a plain delete with secure_delete and is gone after
   the rewrite; the erasure waits for the rewrite. A rebuild needs about the live data
   size free on disk — an in-place VACUUM needed the same in temporary space.
+- 2026-11-15 (fu-2, S5): no fsync on the computer's main thread in steady state. A
+  FULL commit waited 32 s behind a disk backlog (FU4), longer than the hub's 10 s
+  heartbeat timeout. NORMAL + off-thread checkpointer + durable acks keep every
+  hand-over durable before it is acknowledged; live output is unchanged. Measured with
+  a 2 GB-burst writer: commit p99 16-17 ms vs 51-117 ms (FULL), max 124-172 vs
+  272-288 ms. Under three steady competing writers both stay under 1 s but NORMAL's
+  tail is not better (p99 ~220 vs ~160-200 ms): that cost is the write path itself, not
+  the fsync. Exceptions that still fsync on this thread: boot (the store-session mark),
+  the compaction swap window (replay commit, directory sync) and `close()` without
+  `shutdown()`.

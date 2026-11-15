@@ -449,6 +449,50 @@ export function projectWorktreeBases(folder: string, scope: WirePathScope): stri
 }
 
 /** A per-hub runtime. Raw subprocess output never leaves this process. */
+/**
+ * Requests whose reply the hub relies on as durable (S5): it handed data over and may
+ * drop its own copy, or it records the change as done. Their reply waits for
+ * `storage.flush()` (an off-thread WAL sync). A chat or artifact command counts when
+ * it mutates (it carries an operation id); reads, `ackMetadata` (its loss only
+ * repeats a delivery the receipts dedupe) and live output never wait.
+ */
+const DURABLE_ACK_KINDS = new Set([
+  'bootstrap',
+  'data.import',
+  'ledger',
+  'turns',
+  'taskPaths',
+  'task.lifecycle',
+  'task.erase',
+  'conversation.delete',
+  'conversation.transition',
+  'hook.capture',
+  'migration.checkpoint',
+  'migration.prepared',
+  'migration.activate',
+  'transfer.begin',
+  'transfer.chunk',
+  'transfer.finish',
+  'sessionMove.export',
+  'sessionMove.discard',
+  'sessionMove.forget',
+  'sessionMove.fileWrite',
+  'attachment.put',
+  'folders.delete',
+  'retention.configure',
+  'diagnostics.configure',
+  'backup.configure'
+])
+export function durableAck(req: { kind: string; value?: unknown }): boolean {
+  if (req.kind === 'invoke' || req.kind === 'artifact.invoke')
+    return (
+      typeof req.value === 'object' &&
+      req.value !== null &&
+      typeof (req.value as { operationId?: unknown }).operationId === 'string'
+    )
+  return DURABLE_ACK_KINDS.has(req.kind)
+}
+
 export function createChatRuntimeHandlers(opts: {
   ctx: HandlerContext
   stateDir: string
@@ -746,6 +790,17 @@ export function createChatRuntimeHandlers(opts: {
       }
     }
     const r = runtime()
+    const result = await handle(req, r)
+    // The hub hands this data over (and may drop its copy) or records the change as
+    // done: the reply waits until it is on disk (S5: commits are synced off the main
+    // thread within ~1 s). Reads and live output never wait.
+    if (durableAck(req)) await r.storage.flush()
+    return result
+  }
+  async function handle(
+    req: z.infer<typeof requestSchema>,
+    r: ReturnType<typeof runtime>
+  ): Promise<unknown> {
     switch (req.kind) {
       case 'relay.watch':
         relay.configure(req.all, req.tabIds)

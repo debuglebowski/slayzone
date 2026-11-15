@@ -964,6 +964,7 @@ run_harness packages/apps/hub/src/computer-folder-deletion.test.ts
 run_harness packages/domains/chat-runtime/src/server/artifacts.test.ts
 run_harness packages/domains/task-artifacts/src/server/standalone.test.ts
 run_harness packages/apps/hub/src/computer-chat.test.ts
+run_harness packages/apps/hub/src/store-rollback-recovery.test.ts
 run_harness packages/domains/terminal-contracts/src/agent-hook.test.ts
 run_harness packages/domains/chat-runtime/src/server/backups.test.ts
 run_harness packages/domains/chat-runtime/src/server/hub-lifecycle.test.ts
@@ -975,6 +976,7 @@ run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.test.ts
 run_harness packages/domains/chat-runtime/src/server/chat-db-swap.test.ts
+run_harness packages/domains/chat-runtime/src/server/chat-durability.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-compaction.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage-compaction-crash.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
@@ -1041,6 +1043,7 @@ run_harness packages/domains/chat-runtime/src/server/tab-state-ownership.test.ts
 run_harness packages/domains/task-terminals/src/client/chat/queued-submissions.test.ts
 run_harness packages/domains/chat-runtime/src/shared/protocol.test.ts
 run_harness packages/apps/computer/src/handlers/chat-runtime.test.ts
+run_harness packages/apps/computer/src/handlers/chat-durable-ack.test.ts
 # Codex chat through the transport: minted thread ids, resume failures, Stop, approvals (X1).
 run_harness packages/domains/terminal/src/server/runtime/chat-transport-codex.test.ts
 # Which of a task's agents are mid-reply: the CLI completion guard.
