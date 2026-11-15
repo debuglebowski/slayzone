@@ -391,6 +391,7 @@ run_harness_node packages/domains/computer-runtime/src/runtime.test.ts
 # A closed window's warm-pool tab counts are dropped (after a reconnect grace).
 run_harness packages/apps/hub/src/warm-window-sockets.test.ts
 run_harness packages/apps/hub/src/web-assets.test.ts
+run_harness packages/apps/hub/src/export-frame.test.ts
 # Hub port block — hubs bind a KNOWN range so `slay hub ls` can find them (P3).
 # git is spawned by absolute path (cached per PATH, re-resolved when PATH changes or the
 # binary is gone); no production code spawns a bare `git`.
@@ -489,6 +490,7 @@ run_harness packages/apps/cli/src/export/missing-libs.test.ts
 run_harness packages/apps/cli/src/export/export-artifact.test.ts
 run_harness packages/apps/cli/src/export/render.integration.test.ts
 run_harness packages/apps/cli/src/export/render.test.ts
+run_harness packages/apps/cli/src/export/signal-cleanup.test.ts
 run_harness packages/apps/cli/src/save-file.test.ts
 # Artifacts data-root: SLAYZONE_ROOT-derived <ROOT>, flat (retired DB_DIR ignored).
 run_harness packages/apps/api/src/http/rest-api/artifacts/data-root.test.ts

@@ -98,6 +98,23 @@ describe('parseExportRenderReply', () => {
     expect(parseExportRenderReply(JSON.stringify({ ...forged, token: 'guess' }), TOKEN)).toBeNull()
     expect(parseExportRenderReply(JSON.stringify({ ...forged, token: TOKEN }), 'other')).toBeNull()
   })
+  // Review 8, L11: an artifact's frame can post to the app straight, megabytes a message;
+  // nothing without the page's own opening (its token) is parsed at all.
+  it('parses nothing that does not open as a reply of the page does', () => {
+    const parse = jest.spyOn(JSON, 'parse')
+    try {
+      const flood = `{"source":"${EXPORT_RENDER_SOURCE}","token":"guess","pages":["${'A'.repeat(1_000_000)}"]}`
+      expect(parseExportRenderReply(flood, TOKEN)).toBeNull()
+      expect(parseExportRenderReply(`  ${msg({ type: 'svg', svg: '<svg/>' })}`, TOKEN)).toBeNull()
+      expect(parse).not.toHaveBeenCalled()
+      expect(parseExportRenderReply(msg({ type: 'svg', svg: '<svg/>' }), TOKEN)).toEqual({
+        type: 'svg',
+        svg: '<svg/>'
+      })
+    } finally {
+      parse.mockRestore()
+    }
+  })
 })
 
 describe('mermaidSvgPage: draws the diagram and posts it back as static SVG', () => {

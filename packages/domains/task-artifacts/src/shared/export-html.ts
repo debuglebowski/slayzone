@@ -12,6 +12,7 @@
  * printing or capturing.
  */
 import { marked } from 'marked'
+import { safeFileName } from './download-plan'
 import type { RenderMode } from '@slayzone/task-contracts'
 
 /** What a client produces from an artifact. */
@@ -64,6 +65,17 @@ export function needsMermaidScript(mode: RenderMode | string): boolean {
 /** File name for an export: the artifact title without its extension. */
 export function exportBaseName(title: string): string {
   return title.replace(/\.[^.]+$/, '') || title
+}
+
+/**
+ * The file name an export is offered under: the title without its extension plus the
+ * format's, made ONE safe name like every download's (no path, legal everywhere,
+ * ≤ 255 bytes with the extension kept).
+ */
+export function exportFileName(title: string, format: ArtifactExportFormat): string {
+  // The base made safe first: a title of only dots or separators has no base left.
+  const base = safeFileName(exportBaseName(title), 'artifact')
+  return safeFileName(`${base}.${format}`, `artifact.${format}`)
 }
 
 export function escapeHtml(str: string): string {

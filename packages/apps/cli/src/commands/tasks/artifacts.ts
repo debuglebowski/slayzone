@@ -287,6 +287,19 @@ async function openArtifactInApp(artifactId: string): Promise<void> {
 }
 
 /**
+ * A zip entry whose bytes stopped arriving partway (the hub dropped the connection,
+ * or it failed mid-body): names the entry, and the lower-level cause undici hides
+ * behind its bare `terminated`.
+ */
+function entryDownloadError(entryPath: string, err: Error): Error {
+  const cause = err.cause instanceof Error ? `: ${err.cause.message}` : ''
+  return new Error(
+    `Downloading "${entryPath}" from the hub failed partway (${err.message}${cause}). Nothing was saved.`,
+    { cause: err }
+  )
+}
+
+/**
  * Where a download lands. `--output`: that path, replacing what is there (the person
  * chose it). Otherwise `name` in the cwd, numbered `name (2).ext` when taken — the
  * name comes from a title, so it must never overwrite (or write through a symlink to)
@@ -937,12 +950,30 @@ or Brave, else Chromium from an earlier --install-browser (kept in the user cach
                 ])
               )
               if (!res.body) continue
-              body = Readable.fromWeb(res.body as StreamWebReadable)
+              const source = Readable.fromWeb(res.body as StreamWebReadable)
+              body = source
               // One entry at a time: the next is fetched once this one is in the
               // archive, so a large task never holds every response open at once, and
-              // nothing more is fetched after a failure.
-              const added = new Promise<void>((resolve) => archive.once('entry', () => resolve()))
-              archive.append(body, { name: entry.path })
+              // nothing more is fetched after a failure. A body that fails partway
+              // (the hub drops the connection) fails the download here: archiver
+              // does not listen to its sources' errors, so unheard it would crash
+              // `slay` with an unhandled 'error' and never emit 'entry'.
+              const added = new Promise<void>((resolve, reject) => {
+                const onError = (err: Error): void => {
+                  archive.off('entry', onEntry)
+                  reject(entryDownloadError(entry.path, err))
+                }
+                const onEntry = (): void => {
+                  source.off('error', onError)
+                  resolve()
+                }
+                source.once('error', onError)
+                archive.once('entry', onEntry)
+              })
+              // Only awaited below; a failure after another one ended the download
+              // must not surface as an unhandled rejection.
+              added.catch(() => undefined)
+              archive.append(source, { name: entry.path })
               await orFail(added)
               body = undefined
             }

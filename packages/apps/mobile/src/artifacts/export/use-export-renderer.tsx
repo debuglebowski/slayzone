@@ -31,7 +31,15 @@ export const EXPORT_RENDER_TIMEOUT_MS = 30_000
  * refresh, or a remote frame.
  */
 export const isExportPageLoad = (request: { url: string }): boolean =>
-  request.url === 'about:blank' || request.url === 'about:srcdoc'
+  request.url === EXPORT_PAGE_URL || request.url === 'about:srcdoc'
+
+/**
+ * The page's own frame: react-native-webview loads `source.html` at `about:blank` and
+ * hands each message over with the URL of the frame that posted it. WKWebView gives its
+ * message handler to every frame, so an html artifact's frame (`about:srcdoc`) can post
+ * to the app without the page: only the page's own messages are read.
+ */
+const EXPORT_PAGE_URL = 'about:blank'
 
 interface PendingRender {
   id: number
@@ -50,21 +58,24 @@ export interface ExportRenderer {
 
 export function useExportRenderer(): ExportRenderer {
   const [pending, setPending] = useState<PendingRender | null>(null)
+  // The render in progress, kept as it changes (state lags a render): a render asked for
+  // while one is pending, and a viewer that goes away, end it — nothing is left pending
+  // forever.
+  const live = useRef<PendingRender | null>(null)
+  const settle = (done: PendingRender) => {
+    if (live.current === done) live.current = null
+    setPending((current) => (current === done ? null : current))
+  }
 
   useEffect(() => {
     if (!pending) return
     const timer = setTimeout(() => {
-      setPending((current) => (current === pending ? null : current))
+      settle(pending)
       pending.reject(new Error('Rendering the export took too long.'))
     }, pending.page.timeoutMs ?? EXPORT_RENDER_TIMEOUT_MS)
     return () => clearTimeout(timer)
   }, [pending])
 
-  // A viewer that goes away ends its render: nothing is left pending forever.
-  const live = useRef<PendingRender | null>(null)
-  useEffect(() => {
-    live.current = pending
-  }, [pending])
   useEffect(
     () => () => {
       live.current?.reject(new Error('The export was cancelled: the viewer was closed.'))
@@ -74,21 +85,25 @@ export function useExportRenderer(): ExportRenderer {
 
   const render = (page: ExportRenderPage) =>
     new Promise<ExportRenderReply>((resolve, reject) => {
+      const replaced = live.current
       nextRenderId += 1
-      setPending({ id: nextRenderId, page, resolve, reject })
+      const next = { id: nextRenderId, page, resolve, reject }
+      live.current = next
+      setPending(next)
+      replaced?.reject(new Error('The export was replaced by another one.'))
     })
 
   const fail = (message: string) => {
     if (!pending) return
-    setPending(null)
+    settle(pending)
     pending.reject(new Error(message))
   }
 
   const onMessage = (event: WebViewMessageEvent) => {
-    if (!pending) return
+    if (!pending || event.nativeEvent.url !== EXPORT_PAGE_URL) return
     const reply = parseExportRenderReply(event.nativeEvent.data, pending.page.token)
     if (!reply) return
-    setPending(null)
+    settle(pending)
     pending.resolve(reply)
   }
 

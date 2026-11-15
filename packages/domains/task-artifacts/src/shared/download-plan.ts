@@ -59,14 +59,21 @@ function safeSegments(name: string): string[] {
     .map((s) => fitName(s))
 }
 
-/** `name` cut to {@link NAME_MAX_BYTES}, its extension kept. */
+/**
+ * `name` cut to {@link NAME_MAX_BYTES}, its extension kept — and still legal after the
+ * cut: a cut can leave a trailing dot or space (Windows drops it, so two "different"
+ * names collide) or, via the `_` prefix, run over again. Repeats until stable.
+ */
 function fitName(name: string): string {
-  if (utf8Length(name) <= NAME_MAX_BYTES) return name
-  const dot = name.lastIndexOf('.')
-  const ext = dot > 0 && utf8Length(name.slice(dot)) < 32 ? name.slice(dot) : ''
-  return (
-    truncateUtf8(name.slice(0, name.length - ext.length), NAME_MAX_BYTES - utf8Length(ext)) + ext
-  )
+  let out = name
+  for (let i = 0; i < 4 && utf8Length(out) > NAME_MAX_BYTES; i++) {
+    const dot = out.lastIndexOf('.')
+    const ext = dot > 0 && utf8Length(out.slice(dot)) < 32 ? out.slice(dot) : ''
+    const cut =
+      truncateUtf8(out.slice(0, out.length - ext.length), NAME_MAX_BYTES - utf8Length(ext)) + ext
+    out = legalSegment(cut)
+  }
+  return out
 }
 
 /** folderId → its segments from the task root (unknown id or a cycle → []). */
@@ -101,14 +108,30 @@ export function folderAndDescendants(folders: FolderRow[], rootId: string): Set<
   return ids
 }
 
+/** The name when neither a title nor its fallback leaves anything usable. */
+const LAST_RESORT_NAME = 'artifact'
+
 /**
  * A title as ONE safe file name: path separators can't climb or nest (`../../x.md` →
- * `x.md`, `/a/b.md` → `a_b.md`); `fallback` when nothing usable is left.
+ * `x.md`, `/a/b.md` → `a_b.md`). When nothing usable is left, `fallback` — made safe
+ * the same way (it may be an id the hub sent, which is not trusted to be a plain name).
  */
 export function safeFileName(title: string, fallback: string): string {
   const segs = safeSegments(title)
-  return segs.length ? fitName(segs.join('_')) : fallback
+  if (segs.length) return fitName(segs.join('_'))
+  const backup = safeSegments(fallback)
+  return backup.length ? fitName(backup.join('_')) : LAST_RESORT_NAME
 }
+
+/**
+ * The largest piece of an artifact one read returns (bytes, before base64): the hub's
+ * `artifacts.readBytesChunk` and a computer's `readBytesRange` both accept exactly up
+ * to this, so raising it can't break only computer-held artifacts.
+ */
+export const ARTIFACT_CHUNK_MAX_BYTES = 8 * 1024 * 1024
+
+/** The piece a client asks for while downloading: well inside the cap. */
+export const DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 
 /** The longest file name the filesystems people save to accept, in UTF-8 bytes. */
 export const NAME_MAX_BYTES = 255

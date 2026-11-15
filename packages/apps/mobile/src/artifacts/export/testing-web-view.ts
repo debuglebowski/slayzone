@@ -9,9 +9,15 @@
  *   its own, whose `parent.postMessage` reaches the page as a message event from that
  *   frame (`event.source` is the frame's window), as WebKit delivers it.
  * - jsdom has no canvas: `getContext` answers with a 2D context that draws nothing, and
- *   `toDataURL` with a blank picture (`taint`: throws as WebKit does for a tainted one).
- * - jsdom has no layout: `onFrame` sees each frame the page adds itself (to stub sizes).
+ *   `toDataURL` with a blank picture (`taint`: throws as WebKit does for a tainted one) —
+ *   in every frame, so the real html2canvas (`HTML2CANVAS_BUILD`) runs too.
+ * - jsdom has no layout: `onFrame` sees each frame the page adds itself (to stub sizes),
+ *   at any depth (html2canvas's copy of the stage too).
+ * - jsdom loads no image: an `<img>` with a URL never completes, as on a server that
+ *   never answers — but an inline one (`data:`) has (`onFrame` can say otherwise).
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type * as Jsdom from 'jsdom'
 import {
   type ExportRenderPage,
@@ -48,22 +54,67 @@ export interface WebViewOptions {
   nativeHandler?: boolean
   /** Fails the render if no reply came by then. */
   timeoutMs?: number
+  /** The page's window before its scripts run. */
+  beforeScripts?: (window: JsdomWindow) => void
+}
+
+/** The html2canvas build the app ships (the config plugin's), as the page embeds it. */
+export const HTML2CANVAS_BUILD: string = (() => {
+  const plugin = require('../../../plugins/with-artifact-page-assets') as {
+    HTML2CANVAS_BUNDLE_FILE: string
+    PAGE_ASSETS: { file: string; build: (projectRoot: string) => string }[]
+  }
+  const asset = plugin.PAGE_ASSETS.find((a) => a.file === plugin.HTML2CANVAS_BUNDLE_FILE)
+  if (!asset) throw new Error('no html2canvas build')
+  return readFileSync(asset.build(join(__dirname, '..', '..', '..')), 'utf8')
+})()
+
+/** An inline picture (`data:` src) has loaded, as in WebKit: it waits on no server. */
+function stubImages(window: JsdomWindow): void {
+  const proto = window.HTMLImageElement.prototype
+  const native = Object.getOwnPropertyDescriptor(proto, 'complete')?.get
+  Object.defineProperty(proto, 'complete', {
+    configurable: true,
+    get(this: HTMLImageElement) {
+      if (/^data:/i.test(this.getAttribute('src') ?? '') && !this.hasAttribute('srcset'))
+        return true
+      return native ? (native.call(this) as boolean) : false
+    }
+  })
 }
 
 function stubCanvas(window: JsdomWindow, options: WebViewOptions): void {
+  stubImages(window)
   const proto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>
-  proto.getContext = () => ({
-    drawImage: () => undefined,
-    fillRect: () => undefined,
-    scale: () => undefined,
-    getImageData: (_x: number, y: number, w: number, h: number) => {
-      const data = new Uint8ClampedArray(Math.max(0, w * h * 4))
-      for (let row = 0; row < h; row++) {
-        if (options.inkRow?.(y + row)) data[row * w * 4 + 4] = 255
-      }
-      return { data, width: w, height: h }
+  proto.getContext = function getContext(this: HTMLCanvasElement) {
+    const context: Record<string | symbol, unknown> = {
+      canvas: this,
+      getImageData: (_x: number, y: number, w: number, h: number) => {
+        const data = new Uint8ClampedArray(Math.max(0, w * h * 4))
+        for (let row = 0; row < h; row++) {
+          if (options.inkRow?.(y + row)) data[row * w * 4 + 4] = 255
+        }
+        return { data, width: w, height: h }
+      },
+      measureText: () => ({
+        width: 1,
+        actualBoundingBoxAscent: 1,
+        actualBoundingBoxDescent: 1,
+        fontBoundingBoxAscent: 1,
+        fontBoundingBoxDescent: 1
+      })
     }
-  })
+    // Every other method draws nothing (a gradient or pattern takes colour stops).
+    return new Proxy(context, {
+      get: (target, key) =>
+        key in target
+          ? target[key]
+          : typeof key === 'string'
+            ? () => ({ addColorStop: () => undefined })
+            : undefined,
+      set: () => true
+    })
+  }
   proto.toDataURL = function toDataURL(this: HTMLCanvasElement) {
     if (options.taint) throw new window.DOMException('The canvas is tainted.', 'SecurityError')
     options.onPicture?.(this.height)
@@ -107,16 +158,26 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
       } else {
         globals.ReactNativeWebView = bridge
       }
+      options.beforeScripts?.(window)
     }
   })
-  const { document, MessageEvent, MutationObserver } = host.window
-  new MutationObserver((records) => {
-    for (const record of records)
-      for (const node of Array.from(record.addedNodes)) {
-        const frame = node as HTMLIFrameElement
-        if (frame.localName === 'iframe' && !frame.hasAttribute('srcdoc')) options.onFrame?.(frame)
-      }
-  }).observe(document, { childList: true, subtree: true })
+  const { document, MessageEvent } = host.window
+  // Each frame the page adds, and each frame added in one of those (html2canvas's copy).
+  const watchFrames = (window: JsdomWindow) => {
+    new window.MutationObserver((records) => {
+      for (const record of records)
+        for (const node of Array.from(record.addedNodes)) {
+          const frame = node as HTMLIFrameElement
+          if (frame.localName !== 'iframe' || frame.hasAttribute('srcdoc')) continue
+          const inner = frame.contentWindow as unknown as JsdomWindow | null
+          if (!inner) continue
+          stubCanvas(inner, options)
+          options.onFrame?.(frame)
+          watchFrames(inner)
+        }
+    }).observe(window.document, { childList: true, subtree: true })
+  }
+  watchFrames(host.window)
   const artifactFrame = document.querySelector('iframe[srcdoc]') as HTMLIFrameElement | null
   return {
     window: host.window,

@@ -240,6 +240,133 @@ const isSystemPath = (p: string): boolean =>
  */
 const NO_TEMP_HERE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ENOTDIR'])
 
+/** What {@link resolveForWrite} reads — injectable, so the rule is testable on any OS. */
+export interface LinkFs {
+  lstat(p: string): { mode: number; uid: number; isSymbolicLink(): boolean }
+  readlink(p: string): string
+  /** Our effective uid; null where there are none (Windows): no link is refused. */
+  uid: number | null
+}
+
+const nodeLinkFs = (): LinkFs => ({
+  lstat: (p) => fs.lstatSync(p),
+  readlink: (p) => fs.readlinkSync(p, 'utf8'),
+  uid: typeof process.geteuid === 'function' ? process.geteuid() : null
+})
+
+/**
+ * Where writing `target` lands:
+ *  - `resolved`: it exists; `real` is its physical path (no symlink in it).
+ *  - `missing`: some part of it does not exist (or cannot be walked) yet.
+ *  - `protected`: following `link` is what Linux `fs.protected_symlinks` forbids.
+ */
+export type Resolution =
+  | { kind: 'resolved'; real: string }
+  | { kind: 'missing' }
+  | { kind: 'protected'; link: string }
+
+/** Sticky and world-writable: `/tmp`, `/var/tmp`, `/dev/shm`. */
+const STICKY_WORLD_WRITABLE = 0o1002
+/** The kernel's own bound on symlinks followed in one lookup (beyond it: ELOOP). */
+const MAX_LINKS = 40
+
+/**
+ * Resolve `target` (POSIX) the way the kernel would to open it, one component at a
+ * time, applying Linux `fs.protected_symlinks` to every symlink followed — the final
+ * one and any directory link on the way. That rule (fs/namei.c `may_follow_link`):
+ * a symlink in a sticky, world-writable directory is followed only by its owner, or
+ * when the directory's owner also owns the link.
+ *
+ * Why here: `--output` used to open the path, so on Linux the kernel refused a link
+ * another user planted in `/tmp` (`/tmp/out.pdf` → `~victim/.bashrc`). Replacing
+ * whole means resolving the link ourselves and renaming onto its target, which no
+ * kernel check covers — so the same rule is applied here, and `real` comes from this
+ * very walk (never a second resolution a planted link could slip into). Applied on
+ * every POSIX system, not only where the sysctl is on: the caller then just opens
+ * the path in place, as before, so the kernel has the last word either way.
+ */
+export function resolveForWrite(target: string, lfs: LinkFs = nodeLinkFs()): Resolution {
+  const P = path.posix
+  let dir = '/'
+  let rest = P.resolve(target).split('/').filter(Boolean)
+  let links = 0
+  while (rest.length > 0) {
+    const name = rest.shift() as string
+    if (name === '.') continue
+    if (name === '..') {
+      dir = P.dirname(dir)
+      continue
+    }
+    const p = P.join(dir, name)
+    let st: ReturnType<LinkFs['lstat']>
+    try {
+      st = lfs.lstat(p)
+    } catch {
+      return { kind: 'missing' }
+    }
+    if (!st.isSymbolicLink()) {
+      dir = p
+      continue
+    }
+    if (++links > MAX_LINKS) return { kind: 'missing' }
+    if (lfs.uid !== null && st.uid !== lfs.uid) {
+      try {
+        const parent = lfs.lstat(dir)
+        if (
+          (parent.mode & STICKY_WORLD_WRITABLE) === STICKY_WORLD_WRITABLE &&
+          parent.uid !== st.uid
+        ) {
+          return { kind: 'protected', link: p }
+        }
+      } catch {
+        // Changed under us: let the kernel decide.
+        return { kind: 'protected', link: p }
+      }
+    }
+    let to: string
+    try {
+      to = lfs.readlink(p)
+    } catch {
+      return { kind: 'protected', link: p }
+    }
+    if (to.startsWith('/')) dir = '/'
+    rest = [...to.split('/').filter(Boolean), ...rest]
+  }
+  return { kind: 'resolved', real: dir }
+}
+
+/** {@link resolveForWrite}; on Windows (no such rule) the platform's realpath. */
+function resolveTarget(target: string): Resolution {
+  if (process.platform !== 'win32') return resolveForWrite(target)
+  try {
+    return { kind: 'resolved', real: fs.realpathSync(target) }
+  } catch {
+    return { kind: 'missing' }
+  }
+}
+
+/**
+ * A symlink only the kernel may decide on ({@link resolveForWrite}): opened in place,
+ * as `--output` always did. Linux with `fs.protected_symlinks` refuses it (said
+ * plainly); anywhere else it is written through, as before.
+ */
+async function writeThroughProtected(
+  target: string,
+  link: string,
+  write: WriteBody
+): Promise<void> {
+  try {
+    await writeInPlace(target, write)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EACCES') throw err
+    throw new Error(
+      `Cannot write ${target}: it leads through ${link}, a symlink another user owns in a ` +
+        'shared sticky directory, which this system does not follow (fs.protected_symlinks).',
+      { cause: err }
+    )
+  }
+}
+
 /**
  * Save at `target`, replacing what is there (the person named the path). The new
  * bytes go to a temp file first and are renamed over the target once complete, so a
@@ -248,8 +375,9 @@ const NO_TEMP_HERE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ENOTDIR'])
  * permission bits. Where a rename cannot stand in for writing into the file, it is
  * written in place as before: our own stdout / stderr (into the open descriptor), a
  * device, pipe or anything else under `/dev` or `/proc`, a file with other hard links
- * (they must see the new bytes), a dangling symlink, or a directory that does not let
- * us create the temp file.
+ * (they must see the new bytes), a dangling symlink, a symlink Linux
+ * `fs.protected_symlinks` guards ({@link resolveForWrite}: the kernel decides, as it
+ * did), or a directory that does not let us create the temp file.
  */
 export async function saveReplacing(target: string, write: WriteBody): Promise<string> {
   // The path itself or a symlink it leads through (`out` → `/dev/stdout` → on Linux
@@ -266,10 +394,16 @@ export async function saveReplacing(target: string, write: WriteBody): Promise<s
     }
   }
   fs.mkdirSync(path.dirname(target), { recursive: true })
+  const resolved = resolveTarget(target)
+  if (resolved.kind === 'protected') {
+    await writeThroughProtected(target, resolved.link, write)
+    return target
+  }
   let real: string
   let existing: fs.Stats | null = null
   try {
-    real = fs.realpathSync(target)
+    if (resolved.kind !== 'resolved') throw new Error('nothing there')
+    real = resolved.real
     existing = fs.statSync(real)
   } catch {
     // Nothing there — or a dangling symlink, which writing creates the target of.
@@ -285,7 +419,7 @@ export async function saveReplacing(target: string, write: WriteBody): Promise<s
     }
     real = target
   }
-  // Reached through a directory symlink (realpath resolves those too).
+  // Reached through a directory symlink (the resolution follows those too).
   if (isSystemPath(real) || (existing && (!existing.isFile() || existing.nlink > 1))) {
     await writeInPlace(target, write)
     return target

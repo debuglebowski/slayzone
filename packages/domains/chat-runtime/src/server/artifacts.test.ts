@@ -251,3 +251,18 @@ test('migration verify reports missing attachments as wire refs, not storage rec
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// Review 8, L9: one cap for one piece. The hub's `readBytesChunk` and a computer's
+// `readBytesRange` must accept exactly the same lengths, and the client's piece must
+// fit both — else raising one breaks only computer-held artifacts.
+test('the hub and the computer accept the same largest piece, and the client fits', async () => {
+  const { ARTIFACT_CHUNK_MAX_BYTES } = await import('@slayzone/task-artifacts/download-plan')
+  const { artifactMethodSchemas } = await import('./artifacts')
+  const { ARTIFACT_CHUNK_MAX } = await import('@slayzone/task-artifacts/server')
+  const { DOWNLOAD_CHUNK_BYTES } = await import('@slayzone/task-artifacts/download-plan')
+  expect(ARTIFACT_CHUNK_MAX).toBe(ARTIFACT_CHUNK_MAX_BYTES)
+  const range = artifactMethodSchemas.readBytesRange
+  expect(range.safeParse(['a', 0, ARTIFACT_CHUNK_MAX_BYTES]).success).toBe(true)
+  expect(range.safeParse(['a', 0, ARTIFACT_CHUNK_MAX_BYTES + 1]).success).toBe(false)
+  expect(DOWNLOAD_CHUNK_BYTES).toBeLessThanOrEqual(ARTIFACT_CHUNK_MAX_BYTES)
+})

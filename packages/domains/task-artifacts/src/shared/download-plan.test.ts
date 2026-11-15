@@ -193,3 +193,28 @@ describe('names safe on Windows too', () => {
     ).toBe('_AUX/a_.md')
   })
 })
+
+// Review 8, L1 / L6: the fallback (a hub-supplied id) is a name like any other, and a
+// name cut to fit is still legal at its end.
+describe('names from every source are safe', () => {
+  it('a title that cleans to nothing falls back to a SAFE name, never the raw id', () => {
+    expect(safeFileName('...', '../../.zshrc')).toBe('.zshrc')
+    expect(safeFileName('', '/etc/passwd')).toBe('etc_passwd')
+    expect(safeFileName(' / ', '..')).toBe('artifact')
+    expect(safeFileName('..', 'CON')).toBe('_CON')
+    expect(
+      planTaskDownload([], [{ id: '../../evil', title: '...', folder_id: null }])[0].path
+    ).toBe('evil')
+  })
+
+  it('a name cut to 255 bytes never ends in a dot or a space', () => {
+    for (const title of [
+      `${'a'.repeat(254)}.${'b'.repeat(40)}`,
+      `${'a'.repeat(254)} ${'b'.repeat(40)}`
+    ]) {
+      const n = safeFileName(title, 'x')
+      expect(Buffer.byteLength(n)).toBeLessThanOrEqual(NAME_MAX_BYTES)
+      expect(n).not.toMatch(/[. ]$/)
+    }
+  })
+})

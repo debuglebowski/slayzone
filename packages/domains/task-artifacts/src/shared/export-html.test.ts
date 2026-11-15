@@ -4,6 +4,7 @@ import {
   buildDrawnMermaidDocumentHtml,
   buildPngHtml,
   exportBaseName,
+  exportFileName,
   needsMermaidScript,
   needsReadyWait
 } from './export-html'
@@ -160,5 +161,21 @@ describe('content security policy', () => {
 
   it('backgrounds print (code blocks, table headers) on every renderer', () => {
     expect(buildDocumentHtml('x', 'markdown', 't')).toContain('print-color-adjust: exact')
+  })
+})
+
+// Review 8, L13: the name an export is offered under (desktop's save dialog, the web
+// download) is one safe file name like every download's, never a path.
+describe('exportFileName', () => {
+  it('is one safe name with the format as its extension', () => {
+    expect(exportFileName('notes.md', 'pdf')).toBe('notes.pdf')
+    expect(exportFileName('../../Library/LaunchAgents/x.md', 'pdf')).toBe(
+      'Library_LaunchAgents_x.pdf'
+    )
+    expect(exportFileName('C:evil.mmd', 'png')).toBe('C_evil.png')
+    expect(exportFileName('..', 'html')).toBe('artifact.html')
+    const long = exportFileName(`${'é'.repeat(200)}.md`, 'pdf')
+    expect(Buffer.byteLength(long)).toBeLessThanOrEqual(255)
+    expect(long.endsWith('.pdf')).toBe(true)
   })
 })

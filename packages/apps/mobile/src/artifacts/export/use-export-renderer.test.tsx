@@ -41,15 +41,16 @@ const viewProps = () =>
   screen.getByTestId('artifact-export-renderer', HIDDEN).props as {
     source: { html: string }
     javaScriptEnabled: boolean
-    onMessage: (e: { nativeEvent: { data: string } }) => void
+    onMessage: (e: { nativeEvent: { data: string; url?: string } }) => void
     onShouldStartLoadWithRequest: (r: { url: string }) => boolean
     onContentProcessDidTerminate: () => void
     pointerEvents: string
   }
 
-const reply = (body: object, token: string = TOKEN) =>
+/** A message as react-native-webview's iOS view hands it over: its frame's URL with it. */
+const reply = (body: object, token: string = TOKEN, url = 'about:blank') =>
   ({
-    nativeEvent: { data: JSON.stringify({ source: EXPORT_RENDER_SOURCE, token, ...body }) }
+    nativeEvent: { data: JSON.stringify({ source: EXPORT_RENDER_SOURCE, token, ...body }), url }
   }) as const
 
 describe('useExportRenderer: a hidden web view per render', () => {
@@ -77,7 +78,9 @@ describe('useExportRenderer: a hidden web view per render', () => {
     expect(props.onShouldStartLoadWithRequest({ url: 'data:text/html,x' })).toBe(false)
     expect(props.onShouldStartLoadWithRequest({ url: 'javascript:alert(1)' })).toBe(false)
     // Noise the page didn't send is ignored, and so is a reply without its token.
-    await act(async () => props.onMessage({ nativeEvent: { data: '{"hello":1}' } }))
+    await act(async () =>
+      props.onMessage({ nativeEvent: { data: '{"hello":1}', url: 'about:blank' } })
+    )
     await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg id="forged"/>' }, 'x')))
     expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
     await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg/>' })))
@@ -174,4 +177,61 @@ it('rejects a pending render when the viewer unmounts', async () => {
   const settled = (result as unknown as Promise<ExportRenderReply>).catch((e: Error) => e)
   await act(async () => view.unmount())
   expect(String(await settled)).toMatch(/closed/)
+})
+
+// Review 8, L11: WKWebView hands its message handler to every frame: an html artifact's
+// own frame (`about:srcdoc`) can post to the app without the host page. Only the page
+// itself (its frame, `about:blank`) answers.
+it('takes replies only from the page itself, not from a frame in it', async () => {
+  const host = await mount()
+  let result: Promise<ExportRenderReply> | null = null
+  await act(async () => {
+    result = host.run()(page('<html/>'))
+  })
+  const props = viewProps()
+  await act(async () =>
+    props.onMessage(reply({ type: 'svg', svg: '<svg/>' }, TOKEN, 'about:srcdoc'))
+  )
+  await act(async () =>
+    props.onMessage(reply({ type: 'svg', svg: '<svg/>' }, TOKEN, 'https://x.dev/'))
+  )
+  expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
+  await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg id="page"/>' })))
+  await expect(result).resolves.toEqual({ type: 'svg', svg: '<svg id="page"/>' })
+})
+
+// Review 8, L12: a render asked for while one is pending replaces it; the first is ended,
+// not left pending forever.
+it('a render asked for while one is pending ends that one', async () => {
+  const host = await mount()
+  let first: Promise<ExportRenderReply> | null = null
+  let second: Promise<ExportRenderReply> | null = null
+  await act(async () => {
+    first = host.run()(page('<html>first</html>'))
+  })
+  const firstSettled = (first as unknown as Promise<ExportRenderReply>).catch((e: Error) => e)
+  await act(async () => {
+    second = host.run()(page('<html>second</html>'))
+  })
+  expect(String(await firstSettled)).toMatch(/replaced/)
+  const props = viewProps()
+  expect(props.source).toEqual({ html: '<html>second</html>' })
+  await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg/>' })))
+  await expect(second).resolves.toEqual({ type: 'svg', svg: '<svg/>' })
+  expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
+})
+
+it('two renders asked for at once: the first is ended, the second runs', async () => {
+  const host = await mount()
+  let first: Promise<ExportRenderReply> | null = null
+  let second: Promise<ExportRenderReply> | null = null
+  await act(async () => {
+    first = host.run()(page('<html>first</html>'))
+    second = host.run()(page('<html>second</html>'))
+  })
+  await expect(first).rejects.toThrow(/replaced/)
+  const props = viewProps()
+  expect(props.source).toEqual({ html: '<html>second</html>' })
+  await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg/>' })))
+  await expect(second).resolves.toEqual({ type: 'svg', svg: '<svg/>' })
 })

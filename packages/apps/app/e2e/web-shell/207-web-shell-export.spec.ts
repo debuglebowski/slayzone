@@ -405,6 +405,63 @@ test.describe('web shell — artifact export renders in the browser', () => {
     expect(await lastReady(page)).toMatchObject({ settled: true })
   })
 
+  // Review 8, L4: the export frame keeps `allow-modals` (print() needs it), so an html
+  // artifact could raise a native dialog over the shell during Export PDF (a fake
+  // "password?" prompt). The frame's own alert/confirm/prompt are no-ops. Known gap,
+  // not asserted: a cross-origin child the artifact creates (srcdoc, javascript:, data:,
+  // remote) inherits `allow-modals` and can still raise one (export-frame.ts).
+  test('html → PDF: the artifact cannot raise alert/confirm/prompt, and still prints', async () => {
+    const probe = `<!doctype html><html><body><p>report</p><script>
+      var calls = []
+      function attempt(name, f) { try { calls.push(name + ':' + String(f())) } catch (e) { calls.push(name + ':' + e.name) } }
+      attempt('alert', function () { return alert('direct') })
+      attempt('confirm', function () { return confirm('Continue?') })
+      attempt('prompt', function () { return prompt('Session expired - password?') })
+      try { delete window.alert } catch (e) {}
+      attempt('alert-after-delete', function () { return alert('after delete') })
+      attempt('redefine', function () { Object.defineProperty(window, 'prompt', { value: function () { return 'x' } }); return 'redefined' })
+      attempt('prompt-after-redefine', function () { return prompt('after redefine') })
+      var child = document.createElement('iframe')
+      document.body.appendChild(child)
+      attempt('child-prompt', function () { return child.contentWindow.prompt('from child') })
+      setTimeout(function () {
+        attempt('timer-prompt', function () { return prompt('from a timer') })
+        parent.postMessage({ probe: 'dialogs', calls: calls }, '*')
+      }, 0)
+    </script></body></html>`
+    const dialogs: string[] = []
+    const onDialog = (d: import('@playwright/test').Dialog): void => {
+      dialogs.push(`${d.type()}: ${d.message()}`)
+      void d.dismiss().catch(() => {})
+    }
+    page.on('dialog', onDialog)
+    try {
+      const res = await exportInPage(page, {
+        format: 'pdf',
+        mode: 'html-preview',
+        title: 'phish.html',
+        content: probe
+      })
+      expect(res, 'printed').toEqual({ ok: true })
+      expect(dialogs, 'no dialog reached the page').toEqual([])
+      const report = (await received(page)).find((m) => m.data?.probe === 'dialogs')
+      expect(report?.data.calls, 'every call ran, and each was a no-op').toEqual([
+        'alert:undefined',
+        'confirm:false',
+        'prompt:null',
+        'alert-after-delete:undefined',
+        'redefine:TypeError',
+        'prompt-after-redefine:null',
+        // Chromium gives a sandboxed document's about:blank child a fresh opaque origin.
+        'child-prompt:SecurityError',
+        'timer-prompt:null'
+      ])
+      expect(await lastReady(page)).toMatchObject({ settled: true })
+    } finally {
+      page.off('dialog', onDialog)
+    }
+  })
+
   // Review 5, #8: markdown's remote images print (another origin than the hub's).
   test('markdown → PDF with a remote image: the image loads in the export frame', async () => {
     const image = await serveImage()

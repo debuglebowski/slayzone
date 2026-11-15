@@ -6,6 +6,7 @@
 // in render-pages.test.ts; the whole export in html-pdf-safety.test.ts.
 import {
   EXPORT_RENDER_SOURCE,
+  HTML_DRAW_TIMEOUT_MS,
   HTML_PAGE,
   HTML_RENDER_TIMEOUT_MS,
   HTML_STAGE_POLICY,
@@ -14,6 +15,7 @@ import {
 } from './render-pages'
 import {
   BLANK_PNG,
+  HTML2CANVAS_BUILD,
   type HostPage,
   JSDOM,
   loadHostPage,
@@ -284,4 +286,148 @@ describe('htmlRasterPage: the host page', () => {
     await until(() => h2.replies.length > 0)
     expect(h2.replies).toEqual([{ type: 'error', code: 'render', message: 'cloneNode broke' }])
   })
+})
+
+// Review 8, L10: the parser keeps a root attribute no DOM call can set (`=x`); the stage
+// copies the root's attributes one by one.
+it('stages a root attribute the DOM cannot set by skipping it, the others kept', async () => {
+  const { host: h } = host()
+  h.post({
+    type: 'slz-export-snapshot',
+    html: '<html lang="en" =x="1" data-theme="light"><head></head><body><p>drawn</p></body></html>'
+  })
+  await until(() => h.replies.length > 0)
+  expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+  const root = callsOf(h)[0].doc.documentElement
+  expect(root.getAttribute('lang')).toBe('en')
+  expect(root.getAttribute('data-theme')).toBe('light')
+})
+
+// Review 8, M2: html2canvas draws a copy of the stage and waits — with no end — for every
+// image of the copy to load or fail, and for its fonts. A picture or font on a server that
+// never answers held the export until the render's own timeout (90 s). Drawn with the
+// html2canvas build the app ships (jsdom: no layout, a canvas that draws nothing).
+describe('htmlRasterPage: what never loads (the real html2canvas)', () => {
+  const STAGE_SANDBOX = 'allow-same-origin allow-scripts'
+  const isStage = (frame: HTMLIFrameElement) => frame.getAttribute('sandbox') === STAGE_SANDBOX
+
+  /** An image's picked URL, as WebKit picks it: a `<source>` of its picture, its srcset, its src. */
+  function picked(img: HTMLImageElement): string {
+    const parent = img.parentElement
+    const source =
+      parent?.localName === 'picture'
+        ? Array.from(parent.children).find((el) => el.localName === 'source')
+        : undefined
+    const set = source?.getAttribute('srcset') ?? img.getAttribute('srcset')
+    return set ? set.trim().split(/\s+/)[0] : (img.getAttribute('src') ?? '')
+  }
+
+  /**
+   * Images made in a frame: complete unless `pending` (a server that never answers). A
+   * node keeps its frame's prototype when html2canvas moves its copy into a frame of its own.
+   */
+  function images(
+    frame: HTMLIFrameElement,
+    pending: (url: string, img: HTMLImageElement) => boolean
+  ) {
+    const win = frame.contentWindow as unknown as typeof globalThis
+    const proto = win.HTMLImageElement.prototype
+    Object.defineProperty(proto, 'currentSrc', {
+      configurable: true,
+      get(this: HTMLImageElement) {
+        return picked(this)
+      }
+    })
+    Object.defineProperty(proto, 'complete', {
+      configurable: true,
+      get(this: HTMLImageElement) {
+        const url = picked(this)
+        return url === '' || !pending(url, this)
+      }
+    })
+  }
+
+  function realHost(options: WebViewOptions = {}) {
+    const page = htmlRasterPage('x', 'r.html', HTML2CANVAS_BUILD)
+    return { page, host: loadHostPage(page, options) }
+  }
+
+  const stageOf = (h: HostPage) =>
+    Array.from(h.window.document.querySelectorAll('iframe')).find(isStage)?.contentDocument
+
+  const NEVER = /never\.example/
+
+  it('draws the page without the pictures that never loaded; lazy ones load', async () => {
+    const { host: h } = realHost({ onFrame: (frame) => images(frame, (url) => NEVER.test(url)) })
+    h.post(
+      SNAPSHOT(
+        [
+          '<p>text</p>',
+          '<img id="a" src="https://never.example/a.png" alt="A">',
+          '<img id="b" srcset="https://never.example/b.png 2x">',
+          '<picture id="p"><source srcset="https://never.example/c.png"><img id="d" src="https://never.example/d.png"></picture>',
+          '<img id="e" src="https://ok.example/e.png" loading="lazy">',
+          '<img id="f" src="data:image/png;base64,QUJD">'
+        ].join('')
+      )
+    )
+    await until(() => h.messages.length > 0, 20_000)
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+    const stage = stageOf(h)
+    if (!stage) throw new Error('no stage')
+    const img = (id: string) => stage.getElementById(id) as HTMLImageElement
+    // Never loaded: nothing left to wait on.
+    for (const id of ['a', 'b', 'd']) {
+      expect(img(id).hasAttribute('src')).toBe(false)
+      expect(img(id).hasAttribute('srcset')).toBe(false)
+    }
+    expect(img('a').getAttribute('alt')).toBe('A')
+    expect(stage.querySelector('#p source')).toBeNull()
+    // Loaded: drawn. A lazy picture loads with the page (the stage is never scrolled).
+    expect(img('e').getAttribute('src')).toBe('https://ok.example/e.png')
+    expect(img('e').getAttribute('loading')).toBe('eager')
+    expect(img('f').getAttribute('src')).toBe('data:image/png;base64,QUJD')
+  }, 30_000)
+
+  it('draws the page when a font never loads', async () => {
+    // A font set whose fonts never finish: `ready` never settles (in every frame).
+    const fontsNeverReady = (frame: HTMLIFrameElement) => {
+      const win = frame.contentWindow as unknown as typeof globalThis
+      const set = Object.create({
+        get ready() {
+          return new Promise(() => undefined)
+        },
+        get status() {
+          return 'loading'
+        }
+      }) as object
+      Object.defineProperty(win.Document.prototype, 'fonts', { configurable: true, get: () => set })
+    }
+    const { host: h } = realHost({ onFrame: fontsNeverReady })
+    h.post(SNAPSHOT('<p style="font-family: Never, serif">text</p>'))
+    await until(() => h.messages.length > 0, 20_000)
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+  }, 30_000)
+
+  it('a drawing that still waits on something fails at its own timeout, naming it', async () => {
+    // Loaded in the stage, never in html2canvas's copy (a second request that hangs).
+    const inCopy = (img: HTMLImageElement) =>
+      !!img.ownerDocument.defaultView?.frameElement?.classList.contains('html2canvas-container')
+    const { host: h } = realHost({
+      onFrame: (frame) => images(frame, (url, img) => inCopy(img) && NEVER.test(url)),
+      beforeScripts: (window) => {
+        const wait = window.setTimeout.bind(window)
+        const scaled = (fn: () => void, ms?: number) =>
+          wait(fn, ms === HTML_DRAW_TIMEOUT_MS ? 300 : ms)
+        ;(window as unknown as { setTimeout: unknown }).setTimeout = scaled
+      }
+    })
+    h.post(SNAPSHOT('<p>text</p><img src="https://never.example/slow.png">'))
+    await until(() => h.messages.length > 0, 20_000)
+    expect(h.replies).toHaveLength(1)
+    const reply = h.replies[0]
+    expect(reply).toMatchObject({ type: 'error', code: 'render' })
+    expect(reply.type === 'error' && reply.message).toContain('https://never.example/slow.png')
+    expect(reply.type === 'error' && reply.message).toContain(`${HTML_DRAW_TIMEOUT_MS / 1000} s`)
+  }, 30_000)
 })

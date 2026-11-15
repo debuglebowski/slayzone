@@ -1,11 +1,14 @@
 import { electronBootstrap } from '@slayzone/transport/client'
 import type { SaveTargetRequest } from '@slayzone/platform/electron-bootstrap-contract'
 import {
+  DOWNLOAD_CHUNK_BYTES,
   planFolderDownload,
   planTaskDownload,
   safeFileName,
   type DownloadEntry
 } from '@slayzone/task-artifacts/download-plan'
+
+export { DOWNLOAD_CHUNK_BYTES }
 
 /**
  * Artifact downloads on the device the person is using. The client reads each file
@@ -25,7 +28,6 @@ import {
 const ignore = (): void => undefined
 
 /** The size of each piece read from the hub. */
-export const DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 
 /**
  * One piece of an artifact's bytes, its total size and the version it came from;
@@ -67,7 +69,8 @@ const CHANGED = 'The artifact changed while it was being downloaded. Download it
  * (two reads in flight at most). Throws {@link ArtifactGoneError} before the first
  * piece when the hub has no such file. The first piece pins the version and size:
  * a later piece from any other version (rewritten, truncated, replaced, deleted)
- * throws, so a download is never saved truncated or spliced.
+ * throws, as does a piece that is empty before the end or overruns it, so a download
+ * is never saved truncated or spliced: it ends exactly at the pinned size.
  */
 async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint8Array> {
   let offset = 0
@@ -82,7 +85,12 @@ async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint
     pinned ??= { version: piece.version, size: piece.size }
     if (piece.version !== pinned.version || piece.size !== pinned.size) throw new Error(CHANGED)
     const end = offset + piece.data.byteLength
-    const more = piece.data.byteLength > 0 && end < piece.size
+    // Never more than asked for, never past the size; and an empty piece before the
+    // end (the hub's read stopped early: EOF on a network filesystem, a size that no
+    // longer matches the bytes) is a download that can't complete, never a short file.
+    if (piece.data.byteLength > DOWNLOAD_CHUNK_BYTES || end > pinned.size) throw new Error(CHANGED)
+    if (piece.data.byteLength === 0 && offset < pinned.size) throw new Error(CHANGED)
+    const more = end < pinned.size
     if (more) {
       next = read(id, end, DOWNLOAD_CHUNK_BYTES)
       // Consumed on the next turn; a consumer that stops early must not leave it unhandled.
@@ -90,6 +98,7 @@ async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint
     }
     yield piece.data
     offset = end
+    // Done only when every byte of the pinned size has arrived.
     if (!more) return
   }
 }

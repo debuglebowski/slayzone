@@ -32,6 +32,7 @@ interface RunResult {
   console: string[]
   windowsLeft: number
   sessionInfo: { count: number; distinct: number; persistent: boolean; isDefault: boolean }
+  downloadStates: string[]
 }
 
 const DRIVER = `
@@ -41,6 +42,8 @@ const cases = JSON.parse(process.env.SLZ_TEST_CASES)
 const timings = JSON.parse(process.env.SLZ_TEST_TIMINGS)
 const consoleLines = []
 const sessions = []
+const downloads = []
+app.on('session-created', (s) => s.on('will-download', (_e, item) => downloads.push(item)))
 app.on('window-all-closed', () => {})
 app.on('web-contents-created', (_e, wc) => {
   sessions.push(wc.session)
@@ -69,7 +72,8 @@ app.whenReady().then(async () => {
     persistent: sessions.some((s) => s.isPersistent()),
     isDefault: sessions.some((s) => s === session.defaultSession)
   }
-  process.stdout.write('SLZ_RESULT ' + JSON.stringify({ cases: out, console: consoleLines, windowsLeft, sessionInfo }) + '\\n')
+  const downloadStates = downloads.map((d) => d.getState())
+  process.stdout.write('SLZ_RESULT ' + JSON.stringify({ cases: out, console: consoleLines, windowsLeft, sessionInfo, downloadStates }) + '\\n')
   app.exit(0)
 })
 `
@@ -218,5 +222,41 @@ describe.skipIf(process.platform === 'win32')('export window in a real Electron'
     expect(second).not.toContain('first')
     expect(r.console.find((l) => l.startsWith('slz-first '))).toBe('slz-first null')
     expect(r.windowsLeft).toBe(0)
+  }, 120_000)
+
+  // Review 8, M1: `window.print()` in an artifact opened macOS's app-modal print panel
+  // and froze Electron's main process until someone dismissed it. A print call (from
+  // the page or a child frame it makes) is a no-op in the export window.
+  test('print() in the artifact or a child frame never opens a print panel', async () => {
+    const r = await run([
+      [
+        'print',
+        "<p>x</p><script>window.print(); var f = document.createElement('iframe');" +
+          'document.body.appendChild(f); try { f.contentWindow.print() } catch (e) {}' +
+          "setTimeout(function () { window.print() }, 50); console.log('slz-print-returned')</script>",
+        'pdf'
+      ],
+      ['after', '<p>fine</p>', 'pdf']
+    ])
+    expect(r.cases.print).toMatchObject({ ok: true })
+    expect(r.cases.print.head?.startsWith('%PDF-')).toBe(true)
+    expect(r.console).toContain('slz-print-returned')
+    expect(r.cases.after).toMatchObject({ ok: true })
+    expect(r.windowsLeft).toBe(0)
+  }, 120_000)
+
+  // Review 8, L3: an artifact can't start a download (which would prompt a save dialog
+  // with its chosen name after the export window is gone).
+  test('a download started by the artifact never happens', async () => {
+    const r = await run([
+      [
+        'download',
+        '<a id="d" download="invoice.pdf.command" href="data:text/plain,hi">x</a>' +
+          "<script>document.getElementById('d').click(); location.href = 'data:application/octet-stream,hi'</script>",
+        'pdf'
+      ]
+    ])
+    expect(r.cases.download).toMatchObject({ ok: true })
+    expect(r.downloadStates.filter((s) => s !== 'cancelled')).toEqual([])
   }, 120_000)
 })

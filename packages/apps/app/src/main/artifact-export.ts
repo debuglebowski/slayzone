@@ -12,7 +12,7 @@ import {
   PNG_MEASURE_EXPRESSION,
   buildDocumentHtml,
   buildPngHtml,
-  exportBaseName,
+  exportFileName,
   needsMermaidScript,
   needsReadyWait
 } from '@slayzone/task-artifacts/export-html'
@@ -41,6 +41,7 @@ import type {
 
 const EXPORT_SCHEME = 'slz-export'
 const EXPORT_PARTITION = 'slz-export'
+const EXPORT_DOCUMENT_SANDBOX = 'sandbox allow-scripts'
 
 /** How long an export window may take at each step. Overridable for tests. */
 export interface ExportTimings {
@@ -88,11 +89,25 @@ function exportSession(): Session {
   const ses = session.fromPartition(EXPORT_PARTITION)
   ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   ses.setPermissionCheckHandler(() => false)
+  // Nothing in an export window downloads (an artifact's `<a download>` would prompt a
+  // save dialog with its own name once the window is gone).
+  ses.on('will-download', (event) => event.preventDefault())
   ses.protocol.handle(EXPORT_SCHEME, (request) => {
     const html = exportDocuments.get(request.url)
     return html === undefined
       ? new Response(null, { status: 404 })
-      : new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      : new Response(html, {
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            // The document is sandboxed: scripts run (html artifacts work as written)
+            // but there are no modals — `print()`, which opened macOS's app-modal print
+            // panel and froze the main process, and alert/confirm/prompt are no-ops,
+            // in every frame it makes too — and no downloads, popups, forms or top
+            // navigation. The export's own print is the browser's printToPDF, which no
+            // sandbox flag touches.
+            'content-security-policy': EXPORT_DOCUMENT_SANDBOX
+          }
+        })
   })
   sharedExportSession = ses
   return ses
@@ -340,7 +355,7 @@ export async function exportArtifactOnDesktop(
 
   const options = {
     title: `Download as ${spec.label}`,
-    defaultPath: join(app.getPath('downloads'), `${exportBaseName(title)}.${format}`),
+    defaultPath: join(app.getPath('downloads'), exportFileName(title, format)),
     filters: [{ name: spec.label, extensions: [format] }]
   }
   const picked = parent

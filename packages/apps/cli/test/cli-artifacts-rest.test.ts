@@ -102,9 +102,25 @@ db.prepare(
 const app = express()
 // Every artifact-content fetch, by artifact id (the zip tests check what was fetched).
 const contentFetches: string[] = []
-app.use((req, _res, next) => {
+// Artifacts whose content response is cut off: headers and a first piece of the body
+// arrive, then the hub drops the connection (a hub crash or a network loss mid-body).
+const dropContentMidBody = new Set<string>()
+app.use((req, res, next) => {
   const m = /^\/api\/artifacts\/([^/]+)\/content$/.exec(req.path)
-  if (req.method === 'GET' && m) contentFetches.push(decodeURIComponent(m[1]))
+  if (req.method === 'GET' && m) {
+    const id = decodeURIComponent(m[1])
+    contentFetches.push(id)
+    if (dropContentMidBody.has(id)) {
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(1024 * 1024)
+      })
+      res.write(Buffer.alloc(64 * 1024, 1), () => {
+        setTimeout(() => res.socket?.destroy(), 100)
+      })
+      return
+    }
+  }
   next()
 })
 app.use(express.json())
@@ -761,6 +777,59 @@ describe.skipIf(!HAS_SLAY_BIN)('CLI artifact content is binary-safe end to end',
     },
     180_000
   )
+
+  // Review 8, L2: the hub drops the connection partway through an entry's body. The
+  // command must fail cleanly — non-zero, a message naming the entry, no output file,
+  // no temp file — not crash on an unhandled stream 'error' (archiver does not listen
+  // to its sources' errors).
+  test('download --type zip whose hub drops a body mid-stream exits non-zero and leaves nothing', async () => {
+    const dropTask = crypto.randomUUID()
+    db.prepare(
+      'INSERT INTO tasks (id, project_id, title, status, priority, "order") VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(dropTask, projectId, 'Zip dropped body task', 'todo', 3, 3)
+    const ids: string[] = []
+    for (const title of ['first.md', 'cut.md', 'last.md']) {
+      const c = await runCli(
+        ['tasks', 'artifacts', 'create', title, '--task', short(dropTask), '--json'],
+        { input: `# ${title}\n` }
+      )
+      expect(c.exitCode, c.stderr).toBe(0)
+      ids.push((JSON.parse(c.stdout) as { id: string }).id)
+    }
+    dropContentMidBody.add(ids[1])
+    try {
+      const dir = path.join(tmpDir, 'zip-body-dropped')
+      fs.mkdirSync(dir)
+      const before = contentFetches.length
+      const r = await runCli(
+        [
+          'tasks',
+          'artifacts',
+          'download',
+          '--type',
+          'zip',
+          '--task',
+          short(dropTask),
+          '--output',
+          path.join(dir, 'out.zip')
+        ],
+        { timeoutMs: 120_000 }
+      )
+      expect(r.timedOut).toBe(false)
+      expect(r.exitCode, r.stderr).toBe(1)
+      expect(r.stderr).not.toMatch(/Unhandled 'error' event|^\s+at /m)
+      expect(r.stderr).toMatch(/cut\.md/)
+      expect(r.stdout).toBe('')
+      expect(fs.readdirSync(dir)).toEqual([])
+      // Nothing more is fetched after the failure.
+      expect(contentFetches.slice(before).filter((id) => ids.includes(id))).toEqual([
+        ids[0],
+        ids[1]
+      ])
+    } finally {
+      dropContentMidBody.delete(ids[1])
+    }
+  }, 180_000)
 
   // pdf/png/html are rendered BY THE CLI from the content route — this harness's hub
   // has no exporter at all (the standalone-hub shape), and the exports still work.

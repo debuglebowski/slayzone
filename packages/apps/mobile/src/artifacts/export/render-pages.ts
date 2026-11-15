@@ -55,6 +55,13 @@ export type ExportRenderReply =
   /** `render`: nothing could be drawn (`message` says why); `tainted`: see above. */
   | { type: 'error'; code: ExportRenderErrorCode; message: string }
 
+/**
+ * How every reply of the page with `token` opens: its source and token, written by hand
+ * in this order (the pages' `post`). `parseExportRenderReply` parses nothing else.
+ */
+const replyHead = (token: string): string =>
+  `{"source":${JSON.stringify(EXPORT_RENDER_SOURCE)},"token":${JSON.stringify(token)}`
+
 /** A fresh token: three nonces, so no page can guess another's. */
 const newToken = (): string => `${newNonce()}${newNonce()}${newNonce()}`
 
@@ -78,7 +85,7 @@ function scriptJson(value: unknown): string {
  * `window.ReactNativeWebView.postMessage` reaches through `String(data)`.
  */
 function replyHelpers(token: string): string {
-  const head = `{"source":${JSON.stringify(EXPORT_RENDER_SOURCE)},"token":${JSON.stringify(token)}`
+  const head = replyHead(token)
   return `
   var __apply = Reflect.apply;
   var __stringify = JSON.stringify;
@@ -248,6 +255,20 @@ export const HTML_SETTLE = {
 export const HTML_RENDER_TIMEOUT_MS = 90_000
 
 /**
+ * One html2canvas call (a few pages): a drawing that takes longer still waits on
+ * something that never finished loading, and the export fails naming it — well before
+ * {@link HTML_RENDER_TIMEOUT_MS}. html2canvas's own image loads end at 10 s.
+ */
+export const HTML_DRAW_TIMEOUT_MS = 30_000
+
+/**
+ * How long html2canvas's copy of the page waits for its fonts (it would wait with no
+ * end): the page's own fonts loaded during its settle, so the copy's come from the cache;
+ * a font that never came is drawn in its fallback, as the page showed it.
+ */
+export const HTML_COPY_FONT_WAIT_MS = 3000
+
+/**
  * The page an html artifact is laid out and cut at, in CSS pixels: A4 (595 × 842 pt)
  * less expo-print's 1cm (28 pt) margins is 539 × 786 pt. The print scales each picture
  * to the sheet's width (`htmlPrintDocument`); at 780/539 of that width at most, it is
@@ -389,11 +410,12 @@ export const HTML_STAGE_POLICY =
  * html2canvas: no artifact code ever runs here, so the token is safe in it.
  */
 const hostScript = (token: string): string => `(function () {
-  var head = ${scriptJson(`{"source":${JSON.stringify(EXPORT_RENDER_SOURCE)},"token":${JSON.stringify(token)}`)};
+  var head = ${scriptJson(replyHead(token))};
   var handlers = window.webkit && window.webkit.messageHandlers;
   var bridge = (handlers && handlers.ReactNativeWebView) || window.ReactNativeWebView;
   var W = ${HTML_PAGE.width}, PAGE = ${HTML_PAGE.height}, SCALE = ${RASTER_SCALE};
   var PER_DRAW = ${PAGES_PER_DRAW}, SOFT = ${SOFT_BREAK};
+  var DRAW_TIMEOUT = ${HTML_DRAW_TIMEOUT_MS}, COPY_FONT_WAIT = ${HTML_COPY_FONT_WAIT_MS};
   var POLICY = ${scriptJson(HTML_STAGE_POLICY)};
   // Whatever can run, navigate, load a page or a plugin, or hide content: never staged.
   var DROPPED = ${scriptJson(DROPPED_ELEMENTS.join(' '))}.split(' ');
@@ -423,12 +445,15 @@ const hostScript = (token: string): string => `(function () {
         var url = attr.value.replace(/[\\t\\n\\r]/g, '');
         if (key.indexOf('on') === 0 || key === 'srcdoc' || SCRIPT_URL.test(url)) el.removeAttribute(attr.name);
       }
+      // A lazy picture loads with the page: the stage is never scrolled to it.
+      if (name === 'img' && el.hasAttribute('loading')) el.setAttribute('loading', 'eager');
     }
     return parsed;
   }
 
   // The stage: a frame of this page's origin (so html2canvas can read it) whose policy,
-  // first in its head before any of the artifact's content, lets nothing run.
+  // first in its head before any of the artifact's content, lets nothing run. Returns its
+  // document and the pictures that failed to load in it (\`broken\`, see \`release\`).
   function stage(html) {
     var parsed = inert(html);
     var frame = document.createElement('iframe');
@@ -440,9 +465,18 @@ const hostScript = (token: string): string => `(function () {
     policy.setAttribute('http-equiv', 'Content-Security-Policy');
     policy.setAttribute('content', POLICY);
     doc.head.insertBefore(policy, doc.head.firstChild);
+    // Before anything of the artifact's is in: a picture can fail as soon as it is.
+    var broken = [];
+    doc.addEventListener('error', function (event) {
+      var target = event.target;
+      if (target && target.localName === 'img') broken.push(target);
+    }, true);
     var root = parsed.documentElement;
     for (var i = 0; i < root.attributes.length; i++) {
-      doc.documentElement.setAttribute(root.attributes[i].name, root.attributes[i].value);
+      // The parser keeps names no DOM call can set (\`<html =x>\`): those are skipped.
+      try {
+        doc.documentElement.setAttribute(root.attributes[i].name, root.attributes[i].value);
+      } catch (error) {}
     }
     var parts = parsed.head ? doc.importNode(parsed.head, true) : null;
     while (parts && parts.firstChild) doc.head.appendChild(parts.firstChild);
@@ -453,7 +487,7 @@ const hostScript = (token: string): string => `(function () {
     for (var k = 0; k < found.length; k++) {
       if (found[k] !== policy) throw new Error('The page holds content the export cannot draw safely.');
     }
-    return doc;
+    return { doc: doc, broken: broken };
   }
 
   // Images and stylesheets loaded (or failed), fonts ready: then the layout is final.
@@ -471,6 +505,93 @@ const hostScript = (token: string): string => `(function () {
     return Promise.resolve(poll())
       .then(function () { return fonts && Promise.race([fonts, delay(3000)]); })
       .then(function () { return delay(50); });
+  }
+
+  // html2canvas draws a copy of the stage and waits, with no end, for each picture of the
+  // copy to load or fail: a picture on a server that never answers would hold the export
+  // until its timeout. Once the stage has loaded, a picture that hasn't (or failed) is
+  // left out — its sources too, so the copy doesn't ask for it again.
+  function release(staged) {
+    var images = staged.doc.images;
+    for (var i = 0; i < images.length; i++) {
+      var img = images[i];
+      if (img.complete && staged.broken.indexOf(img) === -1) continue;
+      img.removeAttribute('srcset');
+      img.removeAttribute('src');
+      var picture = img.parentNode;
+      if (!picture || picture.localName !== 'picture') continue;
+      for (var s = picture.children.length - 1; s >= 0; s--) {
+        if (picture.children[s].localName === 'source') picture.children[s].remove();
+      }
+    }
+  }
+
+  // html2canvas's copy of the stage is a frame it adds to the stage's body, and it waits
+  // for that copy's fonts with no end: the copy gets COPY_FONT_WAIT for them (see
+  // HTML_COPY_FONT_WAIT_MS). Each copy is bounded as it is added, before it loads.
+  function boundCopyFonts(doc) {
+    function bound(fonts) {
+      var ready = null;
+      for (var p = fonts; p && !ready; p = Object.getPrototypeOf(p)) {
+        ready = Object.getOwnPropertyDescriptor(p, 'ready') || null;
+      }
+      if (!ready || typeof ready.get !== 'function') return;
+      var get = ready.get;
+      Object.defineProperty(fonts, 'ready', {
+        configurable: true,
+        get: function () { return Promise.race([get.call(fonts), delay(COPY_FONT_WAIT)]); }
+      });
+    }
+    var observer = new MutationObserver(function (records) {
+      for (var r = 0; r < records.length; r++) {
+        var added = records[r].addedNodes;
+        for (var n = 0; n < added.length; n++) {
+          if (added[n].localName !== 'iframe') continue;
+          try {
+            var copy = added[n].contentDocument;
+            if (copy && copy.fonts) bound(copy.fonts);
+          } catch (error) {}
+        }
+      }
+    });
+    observer.observe(doc.body, { childList: true });
+    return observer;
+  }
+
+  // What a drawing still waits on: a picture or a font of html2canvas's copy.
+  function stalled(doc) {
+    var frames = doc.body ? doc.body.getElementsByTagName('iframe') : [];
+    for (var f = frames.length - 1; f >= 0; f--) {
+      var copy;
+      try { copy = frames[f].contentDocument; } catch (error) { copy = null; }
+      if (!copy) continue;
+      var images = copy.images;
+      for (var i = 0; i < images.length; i++) {
+        if (images[i].complete) continue;
+        var url = '' + (images[i].currentSrc || images[i].src);
+        return 'the picture ' + (url.length > 200 ? url.slice(0, 200) + '…' : url);
+      }
+      if (copy.fonts && copy.fonts.status === 'loading') return 'a font';
+    }
+    return 'a picture, font or stylesheet';
+  }
+
+  // One html2canvas call, ended at DRAW_TIMEOUT with what it still waits on.
+  function drawPart(doc, options) {
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    if (controller) options.signal = controller.signal;
+    var timer = null;
+    var timeout = new Promise(function (resolve, reject) {
+      timer = setTimeout(function () {
+        var cause = stalled(doc);
+        if (controller) controller.abort();
+        reject(new Error('Drawing the page took longer than ' + DRAW_TIMEOUT / 1000 + ' s: ' + cause + ' never finished loading.'));
+      }, DRAW_TIMEOUT);
+    });
+    return Promise.race([html2canvas(doc.documentElement, options), timeout]).then(
+      function (canvas) { clearTimeout(timer); return canvas; },
+      function (error) { clearTimeout(timer); throw error; }
+    );
   }
 
   // Rows [y, y + band) of the drawing all one colour.
@@ -530,11 +651,12 @@ const hostScript = (token: string): string => `(function () {
     var root = doc.documentElement;
     var total = Math.max(1, Math.ceil(Math.max(root.scrollHeight, doc.body ? doc.body.scrollHeight : 0)));
     var pages = [], top = 0;
+    var fonts = boundCopyFonts(doc);
     function next() {
       if (top >= total) return Promise.resolve(pages);
       var height = Math.min(PAGE * PER_DRAW, total - top);
       var last = top + height >= total;
-      return html2canvas(root, {
+      return drawPart(doc, {
         x: 0, y: top, width: W, height: height, windowWidth: W, windowHeight: PAGE,
         scrollX: 0, scrollY: 0, scale: SCALE, backgroundColor: PAPER,
         useCORS: true, logging: false, imageTimeout: 10000
@@ -543,7 +665,10 @@ const hostScript = (token: string): string => `(function () {
         return next();
       });
     }
-    return next();
+    return next().then(
+      function (drawn) { fonts.disconnect(); return drawn; },
+      function (error) { fonts.disconnect(); throw error; }
+    );
   }
 
   var taken = false;
@@ -562,10 +687,13 @@ const hostScript = (token: string): string => `(function () {
       fail(new Error('' + data.message));
       return;
     }
-    var doc;
-    try { doc = stage(data.html); } catch (error) { fail(error); return; }
-    loaded(doc)
-      .then(function () { return draw(doc); })
+    var staged;
+    try { staged = stage(data.html); } catch (error) { fail(error); return; }
+    loaded(staged.doc)
+      .then(function () {
+        release(staged);
+        return draw(staged.doc);
+      })
       .then(function (pages) { post({ type: 'pages', pages: pages }); }, fail);
   });
 })();`
@@ -667,8 +795,14 @@ export function htmlPrintDocument(pages: readonly string[]): string {
 
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-/** A reply of the page with `token`, or null for anything else. */
+/**
+ * A reply of the page with `token`, or null for anything else. A message that doesn't
+ * open as the page's replies do (`replyHead`: its token) is never parsed: a frame of an
+ * html artifact can post to the app straight (WKWebView gives every frame the handler),
+ * megabytes at a time, and never knows the token.
+ */
 export function parseExportRenderReply(data: string, token: string): ExportRenderReply | null {
+  if (typeof data !== 'string' || !data.startsWith(replyHead(token))) return null
   let raw: unknown
   try {
     raw = JSON.parse(data)

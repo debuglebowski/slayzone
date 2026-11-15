@@ -21,6 +21,7 @@ import {
   referencedArtifactBlobHashes,
   hasArtifactBlobLeases
 } from '@slayzone/task-artifacts/storage'
+import { ARTIFACT_CHUNK_MAX_BYTES } from '@slayzone/task-artifacts/download-plan'
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import { chatAttachmentSchema, chatRouteSchema } from '../shared'
 import { bumpTaskStateVersion, type ChatStorage } from './storage'
@@ -130,15 +131,11 @@ export const artifactMethodSchemas = {
     })
   ]),
   readBytes: z.tuple([id, ref.optional()]),
-  /** [artifactId, offset, length]: one bounded piece of the current content (≤ 8 MiB). */
+  /** [artifactId, offset, length]: one bounded piece of the current content (the shared cap). */
   readBytesRange: z.tuple([
     id,
     z.number().int().min(0),
-    z
-      .number()
-      .int()
-      .min(1)
-      .max(8 * 1024 * 1024)
+    z.number().int().min(1).max(ARTIFACT_CHUNK_MAX_BYTES)
   ]),
   seal: z.tuple([chatAttachmentSchema]),
   searchArtifacts: z.tuple([

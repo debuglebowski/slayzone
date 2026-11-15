@@ -28,7 +28,7 @@ import type {
 import {
   buildDocumentHtml,
   buildPngHtml,
-  exportBaseName
+  exportFileName
 } from '@slayzone/task-artifacts/export-html'
 import { canExportAsHtml, canExportAsPdf, canExportAsPng } from '@slayzone/task-contracts'
 import type { RenderMode } from '@slayzone/task-contracts'
@@ -285,7 +285,7 @@ async function exportOrThrow(
   if (!CAN_EXPORT[format](mode as RenderMode)) {
     return { ok: false, error: `Cannot export ${mode} as ${format.toUpperCase()}` }
   }
-  const fileName = `${exportBaseName(title)}.${format}`
+  const fileName = exportFileName(title, format)
   const isMermaid = mode === 'mermaid-preview'
 
   if (format === 'html') {

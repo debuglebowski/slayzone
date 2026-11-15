@@ -17,7 +17,9 @@
  * The page is a bootstrap and nothing else (web-shell `artifact-export.ts` drives it):
  *   1. It tells its parent it is here: `{ slayzoneExportFrame: EXPORT_FRAME_VERSION }`.
  *   2. It takes ONE message from its parent, `{ slayzoneExport: id, html, waitForReady }`,
- *      and writes `html` as its document (`document.open/write/close`).
+ *      and writes `html` as its document (`document.open/write/close`). The page's
+ *      alert/confirm/prompt are no-ops by then (`allow-modals` is only for print();
+ *      see `silenceDialogs`, and its known gap).
  *   3. Once the document has loaded (images, styles, scripts), its fonts are ready and,
  *      with `waitForReady`, it has flagged itself ready (`data-export-ready="1"`, the
  *      mermaid document's flag) — or after `deadlineMs` — it reports
@@ -45,6 +47,7 @@ const BOOTSTRAP = `(function () {
   'use strict';
   var host = window.parent;
   if (host === window) return;
+  silenceDialogs(window);
   var taken = false;
   function post(message) { host.postMessage(message, '*'); }
   window.addEventListener('message', function (event) {
@@ -69,6 +72,7 @@ const BOOTSTRAP = `(function () {
       return;
     }
     // document.open() removed every listener this page had: nothing else is listening.
+    silenceChildren();
     var deadline = Date.now() + deadlineMs;
     var fontsReady = !document.fonts;
     if (document.fonts) {
@@ -110,6 +114,43 @@ const BOOTSTRAP = `(function () {
       }, 0);
     }
     check();
+  }
+
+  // The frame keeps allow-modals for print(), so the document it writes could raise a
+  // native dialog over the shell (a fake "password?" prompt). Its own alert/confirm/
+  // prompt become no-ops before it is written, and stay ours: not deletable, writable
+  // or redefinable (window's own properties outlive document.open()).
+  function silenceDialogs(w) {
+    var quiet = { alert: function () {}, confirm: function () { return false; }, prompt: function () { return null; } };
+    for (var name in quiet) {
+      try {
+        Object.defineProperty(w, name, { value: quiet[name], writable: false, enumerable: true, configurable: false });
+      } catch (err) {
+        // Already ours, or a child this realm cannot reach.
+      }
+    }
+  }
+  // A child frame the document adds, when this realm can reach it. Chromium gives a
+  // sandboxed document's about:blank child a fresh opaque origin, so it is unreachable
+  // there, and so are its dialogs to the document; this covers an engine that shares it.
+  // KNOWN GAP: a cross-origin child the document creates (srcdoc, javascript:, data:,
+  // a remote page) inherits allow-modals (sandbox flags inherit) and can still raise a
+  // dialog. Every way to stop it, measured in Chromium, costs print fidelity: print()
+  // is ignored without allow-modals; printing the document from a modal-less inner
+  // frame slices it by height and drops its page breaks; frame-src 'none' drops remote
+  // iframes and still lets srcdoc through; printing a script-free copy loses canvas,
+  // shadow DOM and live state.
+  function silenceChildren() {
+    function each() {
+      for (var i = 0; i < window.length; i++) {
+        try { silenceDialogs(window[i]); } catch (err) { /* cross-origin */ }
+      }
+    }
+    each();
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(each).observe(document, { childList: true, subtree: true });
+    }
+    document.addEventListener('load', each, true);
   }
 
   post({ slayzoneExportFrame: ${EXPORT_FRAME_VERSION} });

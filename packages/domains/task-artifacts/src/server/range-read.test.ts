@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { BlobStore } from './blob-store'
 import { createStandaloneArtifacts } from './standalone'
 
@@ -84,4 +84,30 @@ test('a blob-backed artifact is versioned by its content hash', async () => {
   expect((await store.readArtifactBytesRange(db, a.id, 0, 2))!.version).toBe(
     `blob:${version.content_hash}`
   )
+})
+
+// Review 8, L8: a download's first piece checks the whole blob's hash. Asking for
+// `{offset: 0, length: 1}` again and again must not re-hash a multi-GB blob each time:
+// a blob verified once is trusted until its file changes.
+test('the whole-blob hash check runs once per unchanged blob, again after it changes', async () => {
+  const { store, db } = setup()
+  const a = (await store.createArtifact(db, {
+    taskId: 't',
+    title: 'h.txt',
+    content: 'hashed once'
+  }))!
+  unlinkSync((await store.getArtifactPath(db, a.id))!)
+  const verify = vi.spyOn(BlobStore.prototype, 'verifyAsync')
+  try {
+    for (let i = 0; i < 5; i++) await store.readArtifactBytesRange(db, a.id, 0, 1)
+    expect(verify).toHaveBeenCalledTimes(1)
+    // The blob's file changes (damaged on disk): checked again, and refused.
+    const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
+    const file = new BlobStore(roots[roots.length - 1]).blobPath(version.content_hash)
+    writeFileSync(file, 'tampered!!!')
+    await expect(store.readArtifactBytesRange(db, a.id, 0, 1)).rejects.toThrow()
+    expect(verify).toHaveBeenCalledTimes(2)
+  } finally {
+    verify.mockRestore()
+  }
 })

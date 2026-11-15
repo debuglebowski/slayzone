@@ -252,3 +252,57 @@ describe('an artifact that changes mid-download', () => {
     ).rejects.toThrow('changed while it was being downloaded')
   })
 })
+
+// Review 8, M3: the hub's read loop can stop early (EOF on a network/FUSE filesystem,
+// a stat/read mismatch under an unchanged stamp) and answer with fewer bytes than the
+// pinned size, same version. That is never a complete download.
+describe('a piece that comes back short of the pinned size', () => {
+  const size = DOWNLOAD_CHUNK_BYTES * 2 + 10
+  /** Same version and size every time, but no byte past `cut` ever comes back. */
+  function cutAt(cut: number): ReadArtifactChunk {
+    return async (_id, offset, length) => {
+      const n = Math.max(0, Math.min(length, cut - offset))
+      return { data: new Uint8Array(n), size, version: 'v1' }
+    }
+  }
+
+  for (const [name, cut] of [
+    ['nothing at all', 0],
+    ['an empty piece mid-way', DOWNLOAD_CHUNK_BYTES],
+    ['the last bytes missing', DOWNLOAD_CHUNK_BYTES * 2 + 3]
+  ] as const) {
+    it(`${name}: aborted, never saved`, async () => {
+      await expect(
+        downloadArtifactOnThisDevice({ id: 'a', title: 'a.bin', folder_id: null }, cutAt(cut))
+      ).rejects.toThrow('changed while it was being downloaded')
+      // Before the first byte: no save dialog at all. Later: the target is aborted.
+      if (cut === 0) expect(rec.request).toBeNull()
+      else expect(rec.aborted).toBe(true)
+      expect(rec.closed).toBe(false)
+    })
+  }
+
+  it('short pieces that the rest follows are a complete download', async () => {
+    // The hub may answer with fewer bytes than asked; the next read continues there.
+    const halves: ReadArtifactChunk = async (_id, offset, length) => ({
+      data: new Uint8Array(Math.max(0, Math.min(Math.ceil(length / 2), size - offset))),
+      size,
+      version: 'v1'
+    })
+    await downloadArtifactOnThisDevice({ id: 'a', title: 'a.bin', folder_id: null }, halves)
+    expect(rec.closed).toBe(true)
+    expect(rec.writes.reduce((n, w) => n + w.bytes, 0)).toBe(size)
+  })
+
+  it('a piece longer than asked for, or past the size: aborted', async () => {
+    const long: ReadArtifactChunk = async (_id, offset, length) => ({
+      data: new Uint8Array(offset === 0 ? length + 1 : Math.min(length, size - offset)),
+      size,
+      version: 'v1'
+    })
+    await expect(
+      downloadTaskZipOnThisDevice(folders, [{ id: 'a', title: 'a.bin', folder_id: null }], long)
+    ).rejects.toThrow('changed while it was being downloaded')
+    expect(rec.aborted).toBe(true)
+  })
+})

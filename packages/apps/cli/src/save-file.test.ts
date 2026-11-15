@@ -13,11 +13,13 @@ import { pathToFileURL } from 'node:url'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
-import { saveNew, saveReplacing, type WriteBody } from './save-file'
+import { type LinkFs, resolveForWrite, saveNew, saveReplacing, type WriteBody } from './save-file'
 
-// The repo root, from cwd (run-all.sh and vitest run from it): the CLI package
+// The repo root, from this file's own location — never the cwd, which is wherever
+// vitest happened to be started (from packages/apps/cli it pointed the tsx loader at
+// a node_modules that has none). `__dirname`, not `import.meta`: the CLI package
 // typechecks as CommonJS, where `import.meta` is a compile error.
-const REPO_ROOT = process.env.SLZ_REPO_ROOT ?? process.cwd()
+const REPO_ROOT = process.env.SLZ_REPO_ROOT ?? path.resolve(__dirname, '../../../..')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slay-save-file-'))
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 afterEach(() => vi.restoreAllMocks())
@@ -309,6 +311,188 @@ describe('saveReplacing (--output)', () => {
       }
       expect(fs.readFileSync(target, 'utf8')).toBe('new')
       expect(fs.readdirSync(dir)).toEqual(['out.md'])
+    }
+  )
+})
+
+/**
+ * Review 8, L5: Linux `fs.protected_symlinks` refuses to follow a symlink in a sticky,
+ * world-writable directory (`/tmp`) that another user owns, unless that user also
+ * owns the directory. `--output` used to open the path, so the kernel applied it; the
+ * replace-whole save resolves the link itself, so it must apply the same rule — or a
+ * link another user plants (`/tmp/out.pdf` → `~victim/.bashrc`) would have the
+ * victim's file replaced. The rule is mirrored here and checked against a fake
+ * filesystem (macOS has no such kernel rule to exercise).
+ */
+describe('resolveForWrite (the protected_symlinks rule)', () => {
+  const ME = 501
+  const OTHER = 502
+  const ROOT = 0
+  type Node =
+    | { kind: 'dir'; mode: number; uid: number }
+    | { kind: 'file'; uid: number }
+    | { kind: 'link'; uid: number; to: string }
+  const fakeFs = (nodes: Record<string, Node>, uid: number | null = ME): LinkFs => {
+    const all: Record<string, Node> = { '/': { kind: 'dir', mode: 0o755, uid: ROOT }, ...nodes }
+    const get = (p: string): Node => {
+      const n = all[p]
+      if (!n) throw Object.assign(new Error(`ENOENT: ${p}`), { code: 'ENOENT' })
+      return n
+    }
+    return {
+      uid,
+      lstat: (p) => {
+        const n = get(p)
+        return {
+          uid: n.uid,
+          mode: n.kind === 'dir' ? 0o040000 | n.mode : n.kind === 'link' ? 0o120777 : 0o100644,
+          isSymbolicLink: () => n.kind === 'link'
+        }
+      },
+      readlink: (p) => {
+        const n = get(p)
+        if (n.kind !== 'link') throw Object.assign(new Error(`EINVAL: ${p}`), { code: 'EINVAL' })
+        return n.to
+      }
+    }
+  }
+  const tmp: Node = { kind: 'dir', mode: 0o1777, uid: ROOT }
+  const home: Record<string, Node> = {
+    '/home': { kind: 'dir', mode: 0o755, uid: ROOT },
+    '/home/me': { kind: 'dir', mode: 0o755, uid: ME },
+    '/home/me/.bashrc': { kind: 'file', uid: ME }
+  }
+
+  test("another user's symlink in sticky world-writable /tmp is not followed", () => {
+    const lfs = fakeFs({
+      ...home,
+      '/tmp': tmp,
+      '/tmp/out.pdf': { kind: 'link', uid: OTHER, to: '/home/me/.bashrc' }
+    })
+    expect(resolveForWrite('/tmp/out.pdf', lfs)).toEqual({
+      kind: 'protected',
+      link: '/tmp/out.pdf'
+    })
+  })
+
+  test('our own symlink there is followed (the normal --output case)', () => {
+    const lfs = fakeFs({
+      ...home,
+      '/tmp': tmp,
+      '/tmp/out.pdf': { kind: 'link', uid: ME, to: '/home/me/.bashrc' }
+    })
+    expect(resolveForWrite('/tmp/out.pdf', lfs)).toEqual({
+      kind: 'resolved',
+      real: '/home/me/.bashrc'
+    })
+  })
+
+  test("a link owned by the directory's owner is followed (root's link in root's /tmp)", () => {
+    const lfs = fakeFs({
+      ...home,
+      '/tmp': tmp,
+      '/tmp/out.pdf': { kind: 'link', uid: ROOT, to: '/home/me/.bashrc' }
+    })
+    expect(resolveForWrite('/tmp/out.pdf', lfs).kind).toBe('resolved')
+  })
+
+  test('only a directory both sticky AND world-writable triggers the rule', () => {
+    for (const mode of [0o777, 0o1775, 0o755]) {
+      const lfs = fakeFs({
+        ...home,
+        '/shared': { kind: 'dir', mode, uid: ROOT },
+        '/shared/out.pdf': { kind: 'link', uid: OTHER, to: '/home/me/.bashrc' }
+      })
+      expect(resolveForWrite('/shared/out.pdf', lfs).kind, mode.toString(8)).toBe('resolved')
+    }
+  })
+
+  test('a directory symlink another user planted in /tmp is not followed either', () => {
+    const lfs = fakeFs({
+      ...home,
+      '/tmp': tmp,
+      '/tmp/d': { kind: 'link', uid: OTHER, to: '/home/me' }
+    })
+    expect(resolveForWrite('/tmp/d/.bashrc', lfs)).toEqual({ kind: 'protected', link: '/tmp/d' })
+  })
+
+  test("a chain through our own link to another user's link in /tmp is not followed", () => {
+    const lfs = fakeFs({
+      ...home,
+      '/home/me/out.pdf': { kind: 'link', uid: ME, to: '../../tmp/x' },
+      '/tmp': tmp,
+      '/tmp/x': { kind: 'link', uid: OTHER, to: '/home/me/.bashrc' }
+    })
+    expect(resolveForWrite('/home/me/out.pdf', lfs)).toEqual({ kind: 'protected', link: '/tmp/x' })
+  })
+
+  test('relative and dot-dot links resolve physically; nothing there yet → missing', () => {
+    const lfs = fakeFs({
+      ...home,
+      '/home/me/docs': { kind: 'link', uid: ME, to: './sub/../real' },
+      '/home/me/real': { kind: 'dir', mode: 0o755, uid: ME },
+      '/home/me/sub': { kind: 'dir', mode: 0o755, uid: ME },
+      '/home/me/real/a.md': { kind: 'file', uid: ME }
+    })
+    expect(resolveForWrite('/home/me/docs/a.md', lfs)).toEqual({
+      kind: 'resolved',
+      real: '/home/me/real/a.md'
+    })
+    expect(resolveForWrite('/home/me/docs/new.md', lfs)).toEqual({ kind: 'missing' })
+  })
+
+  test('without uids (Windows) no link is refused', () => {
+    const lfs = fakeFs(
+      {
+        ...home,
+        '/tmp': tmp,
+        '/tmp/out.pdf': { kind: 'link', uid: OTHER, to: '/home/me/.bashrc' }
+      },
+      null
+    )
+    expect(resolveForWrite('/tmp/out.pdf', lfs).kind).toBe('resolved')
+  })
+
+  // Through saveReplacing: such a link is opened in place, as `--output` did before
+  // the replace-whole save — so on Linux the kernel refuses it, and elsewhere it is
+  // written through exactly as before (never renamed over the link's target).
+  test.skipIf(process.platform === 'win32')(
+    "saveReplacing opens another user's /tmp link in place instead of renaming over its target",
+    async () => {
+      const shared = freshDir()
+      const mine = freshDir()
+      const victim = path.join(mine, 'victim.md')
+      fs.writeFileSync(victim, 'old')
+      const inode = fs.statSync(victim).ino
+      const link = path.join(shared, 'out.md')
+      fs.symlinkSync(victim, link)
+      // This process's own files: report the link as another user's and its directory
+      // as a sticky, world-writable one owned by a third (the kernel's refusing case).
+      // The walk reaches it by its physical path (macOS: /var → /private/var).
+      const realLink = path.join(fs.realpathSync(shared), 'out.md')
+      const lstat = fs.lstatSync
+      const me = process.geteuid?.() ?? 0
+      vi.spyOn(fs, 'lstatSync').mockImplementation(((p: fs.PathLike, ...rest: never[]) => {
+        const st = lstat(p, ...rest) as fs.Stats
+        if (String(p) === link || String(p) === realLink) {
+          return Object.assign(Object.create(st), { uid: me + 1 })
+        }
+        if (String(p) === fs.realpathSync(shared)) {
+          return Object.assign(Object.create(st), { uid: me + 2, mode: st.mode | 0o1777 })
+        }
+        return st
+      }) as typeof fs.lstatSync)
+      const open = fs.openSync
+      const temps: string[] = []
+      vi.spyOn(fs, 'openSync').mockImplementation((p, ...rest) => {
+        if (String(p).endsWith('.part')) temps.push(String(p))
+        return open(p, ...rest)
+      })
+      expect(await saveReplacing(link, bytes('new'))).toBe(link)
+      // Written into the open file (same inode), no temp file renamed over it.
+      expect(temps).toEqual([])
+      expect(fs.statSync(victim).ino).toBe(inode)
+      expect(fs.readFileSync(victim, 'utf8')).toBe('new')
     }
   )
 })

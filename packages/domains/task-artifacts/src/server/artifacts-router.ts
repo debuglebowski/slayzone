@@ -20,9 +20,10 @@ import { type ArtifactStore } from './artifact-store'
 import { getArtifactStorage } from './artifact-storage'
 import { signalTasksChanged } from './artifacts-router-deps'
 
-/** The largest piece `readBytesChunk` serves (bytes before base64). */
-export const ARTIFACT_CHUNK_MAX = 8 * 1024 * 1024
+/** The largest piece `readBytesChunk` serves (bytes before base64): the shared cap. */
+export const ARTIFACT_CHUNK_MAX = ARTIFACT_CHUNK_MAX_BYTES
 import { TRPCError } from '@trpc/server'
+import { ARTIFACT_CHUNK_MAX_BYTES } from '@slayzone/task-artifacts/download-plan'
 import {
   clearMoveStaging,
   missingMoveFiles,

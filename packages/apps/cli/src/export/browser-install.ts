@@ -317,7 +317,10 @@ export async function installHeadlessShell({
   const staging = path.join(work, 'unpacked')
   const finalDir = path.join(root, pick.version)
   const rel = headlessShellBinaryRel(ctx.platform, cft)
-  const removeWork = (): void => fs.rmSync(work, { recursive: true, force: true })
+  // Retried: on Ctrl-C the write stream's open of download.zip may still be in flight
+  // on the thread pool, creating the file after rmSync listed the dir (ENOTEMPTY).
+  const removeWork = (): void =>
+    fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   const unhook = onExitOrSignal(removeWork)
 
   log(`Downloading Chromium headless shell ${pick.version} (${cft})…`)

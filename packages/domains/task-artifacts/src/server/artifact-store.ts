@@ -8,7 +8,7 @@ import {
   writeFileSync,
   mkdirSync
 } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { open, stat } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type {
   CreateArtifactInput,
@@ -38,6 +38,42 @@ import {
 } from '@slayzone/task/server/artifact-paths'
 // Loads the TxnRegistry augmentation that types this file's `db.namedTxn` calls.
 import type {} from './artifact-store-txns'
+
+/**
+ * Blobs whose whole-file hash check passed, by path → the file's stamp then
+ * (inode:size:mtime). A download's first piece checks the blob; asking for that first
+ * piece again must not re-hash a multi-GB blob every time. A changed file (damaged,
+ * replaced) has a new stamp and is checked again. Bounded: oldest forgotten first.
+ */
+const verifiedBlobs = new Map<string, string>()
+const VERIFIED_BLOBS_MAX = 1024
+
+async function blobStamp(file: string): Promise<string | null> {
+  const st = await stat(file, { bigint: true }).catch(() => null)
+  return st ? `${st.ino}:${st.size}:${st.mtimeNs}` : null
+}
+
+/** The blob's content matches its hash: checked once per unchanged file. */
+async function blobIntact(blobs: BlobStore, hash: string): Promise<boolean> {
+  const file = blobs.blobPath(hash)
+  const before = await blobStamp(file)
+  if (before && verifiedBlobs.get(file) === before) return true
+  if (!(await blobs.verifyAsync(hash))) {
+    verifiedBlobs.delete(file)
+    return false
+  }
+  // The stamp after the check: what was hashed (the check may restore a deleted blob).
+  const after = await blobStamp(file)
+  if (after) {
+    verifiedBlobs.delete(file)
+    verifiedBlobs.set(file, after)
+    if (verifiedBlobs.size > VERIFIED_BLOBS_MAX) {
+      const oldest = verifiedBlobs.keys().next().value
+      if (oldest !== undefined) verifiedBlobs.delete(oldest)
+    }
+  }
+  return true
+}
 
 // Electron-free artifact store. Single implementation behind both the IPC handlers
 // (../main/handlers.ts) and the tRPC `artifacts` router. Disk reads + the worker
@@ -516,7 +552,7 @@ export function createArtifactStore(dataDir: string) {
           versionRef: 'current'
         })) as ArtifactVersion
         const blobs = new BlobStore(dataDir)
-        if (offset === 0 && !(await blobs.verifyAsync(version.content_hash)))
+        if (offset === 0 && !(await blobIntact(blobs, version.content_hash)))
           throw new VersionError(
             'BLOB_HASH_MISMATCH',
             'Artifact version hash integrity check failed'
