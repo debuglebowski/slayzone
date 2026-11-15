@@ -7,8 +7,20 @@ import { artifactRow, fakeArtifactsHub, versionRow } from './fake-artifacts-hub'
 import { downloadArtifactFile } from './files'
 import { hubTarget } from './hub-rest'
 import { loadMermaidScript } from './page-assets'
+import { mediaPlayer } from './media-player'
 
 jest.mock('./files', () => ({ ...jest.requireActual('./files'), downloadArtifactFile: jest.fn() }))
+// expo-video's native half is absent in Node: a stand-in player that records its
+// source, and a view that keeps its props. `mediaPlayer` is switched per test between
+// that module and null (a build without the native module).
+jest.mock('expo-video', () => {
+  const { View } = require('react-native')
+  return {
+    useVideoPlayer: (source: string) => ({ source }),
+    VideoView: (props: object) => <View {...props} />
+  }
+})
+jest.mock('./media-player', () => ({ mediaPlayer: jest.fn() }))
 jest.mock('./page-assets', () => ({
   MERMAID_BUNDLE_FILE: 'mermaid.min.js',
   loadMermaidScript: jest.fn(async () => 'globalThis.mermaid={}')
@@ -48,6 +60,7 @@ const pageOf = (testID: string) =>
 
 beforeEach(() => {
   download.mockReset()
+  jest.mocked(mediaPlayer).mockReturnValue(jest.requireActual('./ArtifactMediaPlayer'))
   jest.mocked(loadMermaidScript).mockClear()
   // `getSize` is overloaded (promise / callbacks): the promise form, which the image uses.
   jest
@@ -161,20 +174,52 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     expect(pageOf('artifact-page-pdf').source).toEqual({ uri: 'file:///cache/a1/spec.pdf' })
   })
 
-  it('video: no player on the phone, so it says so and offers Share; nothing is read up front', async () => {
+  it.each([
+    ['clip.mp4', 'video'],
+    ['voice.m4a', 'audio']
+  ])('%s: the downloaded file in the native player', async (title) => {
+    download.mockResolvedValue(`file:///cache/a1/${title}`)
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-media')
+    const props = screen.getByTestId('artifact-media').props as {
+      player: { source: string }
+      nativeControls: boolean
+    }
+    expect(props.player.source).toBe(`file:///cache/a1/${title}`)
+    expect(props.nativeControls).toBe(true)
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+  })
+
+  it('video in a build without the native player: says so and offers Share, fetching nothing', async () => {
+    jest.mocked(mediaPlayer).mockReturnValue(null)
     const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'clip.mp4')] })
     await view(hub, { artifactId: 'a1' })
-    await screen.findByTestId('artifact-video')
+    expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+      /can't be played in this build/
+    )
     // The note's own Share, beside the header's.
     expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
-    // A video is often large: neither its text nor its file is fetched until Share.
     expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
     expect(download).not.toHaveBeenCalled()
   })
 
+  it.each(['bundle.zip', 'face.woff2'])(
+    '%s: no viewer on the phone yet, so a note and Share; nothing fetched up front',
+    async (title) => {
+      const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', title)] })
+      await view(hub, { artifactId: 'a1' })
+      expect((await screen.findByTestId('artifact-unsupported')).props.children).toMatch(
+        /can't be shown in the app yet/
+      )
+      expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+      expect(download).not.toHaveBeenCalled()
+    }
+  )
+
   it("a file that isn't text, in a text kind: says so and offers Share", async () => {
     const hub = fakeArtifactsHub({
-      artifacts: [artifactRow('a1', 'archive.zip')],
+      artifacts: [artifactRow('a1', 'dump.bin')],
       content: { a1: 'PK\u0003\u0004\u0000\u0000' }
     })
     await view(hub, { artifactId: 'a1' })

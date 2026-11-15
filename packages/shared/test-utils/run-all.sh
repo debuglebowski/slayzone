@@ -1259,6 +1259,8 @@ run_harness packages/domains/task-contracts/src/handoff.test.ts
 run_harness packages/domains/task-contracts/src/panel-config.test.ts
 # Render modes: video is inferred from its extension and stays binary (never read as text).
 run_harness packages/domains/task-contracts/src/render-modes.test.ts
+# Artifact export HTML: a diff exports as line-numbered source (as code).
+run_harness packages/domains/task/src/electron/artifact-export.test.ts
 run_harness packages/domains/task-contracts/src/reparent-validation.test.ts
 run_harness packages/domains/terminal/src/shared/chat-timeline.test.ts
 run_harness packages/domains/terminal/src/shared/chat-transcript.test.ts

@@ -720,6 +720,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'artifacts.readText': checked(artifact('id')),
   'artifacts.getFilePath': checked(artifact('id')),
   'artifacts.getMtime': checked(artifact('id')),
+  'artifacts.listArchive': checked(artifact('id')),
+  'artifacts.readBase64': checked(artifact('id')),
   'artifacts.upload': checked(task('taskId'), owned('sourcePath')),
   'artifacts.uploadBlob': checked(task('taskId'), folder('folderId')),
   'artifacts.copy': checked(artifact('artifactIds[]'), task('destTaskId'), folder('destFolderId')),

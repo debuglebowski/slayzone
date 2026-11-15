@@ -14,6 +14,11 @@ describe('viewerKindOf', () => {
     expect(viewerKindOf(a('spec.pdf'))).toBe('pdf')
     expect(viewerKindOf(a('clip.MP4'))).toBe('video')
     expect(viewerKindOf(a('clip.webm'))).toBe('video')
+    expect(viewerKindOf(a('voice.flac'))).toBe('audio')
+    expect(viewerKindOf(a('bundle.zip'))).toBe('archive')
+    expect(viewerKindOf(a('face.ttf'))).toBe('font')
+    // A patch is shown as its source, as before it had its own desktop mode.
+    expect(viewerKindOf(a('fix.diff'))).toBe('code')
     expect(viewerKindOf(a('main.ts'))).toBe('code')
     expect(viewerKindOf(a('data.csv'))).toBe('code')
     expect(viewerKindOf(a('notes.txt'))).toBe('markdown')

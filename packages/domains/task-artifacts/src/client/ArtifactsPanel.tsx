@@ -1240,6 +1240,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 <ArtifactContentEditor
                   key={selectedArtifact.id}
                   artifact={selectedArtifact}
+                  siblingArtifacts={artifacts}
                   viewMode={viewMode}
                   readText={readText}
                   saveContent={saveContent}

@@ -19,6 +19,9 @@ export type ViewerKind =
   | 'image'
   | 'pdf'
   | 'video'
+  | 'audio'
+  | 'archive'
+  | 'font'
 
 const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   markdown: 'markdown',
@@ -28,7 +31,12 @@ const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   'mermaid-preview': 'mermaid',
   image: 'image',
   pdf: 'pdf',
-  video: 'video'
+  video: 'video',
+  audio: 'audio',
+  // A patch reads as its source here, as it did before desktop gave it a diff view.
+  diff: 'code',
+  archive: 'archive',
+  font: 'font'
 }
 
 export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode'>): ViewerKind {
@@ -39,11 +47,16 @@ export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode
 export const isFileKind = (kind: ViewerKind): kind is 'image' | 'pdf' =>
   kind === 'image' || kind === 'pdf'
 
+/** Kinds played by the native player (`media-player.ts`), from the downloaded file. */
+export const isMediaKind = (kind: ViewerKind): kind is 'video' | 'audio' =>
+  kind === 'video' || kind === 'audio'
+
 /**
- * Kinds the phone has no viewer for yet (no native player is bundled): a note and
- * Share. Nothing is fetched up front: a video is often large, and only Share needs it.
+ * Kinds the phone has no viewer for yet: a note and Share. Nothing is fetched up
+ * front; only Share needs the file.
  */
-export const isShareOnlyKind = (kind: ViewerKind): kind is 'video' => kind === 'video'
+export const isShareOnlyKind = (kind: ViewerKind): kind is 'archive' | 'font' =>
+  kind === 'archive' || kind === 'font'
 
 /**
  * Text that was not text: a binary file in a text kind (desktop's fallback for an unknown

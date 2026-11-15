@@ -674,6 +674,180 @@ test.describe('Artifacts panel', () => {
     })
   }
 
+  /** An artifact whose working file is a copy of `fixtures/media/<fixture>`. */
+  async function seedFileArtifact(page: Page, title: string, fixture = title): Promise<string> {
+    const s = seed(page)
+    const artifact = requireSeeded(
+      await s.createArtifact({ taskId, title, content: '' }),
+      `artifact ${title}`
+    )
+    const filePath = await page.evaluate(
+      (id) => window.getTrpcVanillaClient().artifacts.getFilePath.query({ id }),
+      artifact.id
+    )
+    fs.copyFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'media', fixture),
+      filePath as string
+    )
+    return artifact.id
+  }
+
+  // Each container the audio mode claims: a 2s tone, played and seeked through the
+  // hub's ranged content route.
+  for (const title of [
+    'voice.mp3',
+    'voice.wav',
+    'voice.m4a',
+    'voice.ogg',
+    'voice.opus',
+    'voice.flac'
+  ]) {
+    test(`audio artifact plays in a native player and seeks (${title})`, async ({ mainWindow }) => {
+      await seedFileArtifact(mainWindow, title)
+      await seed(mainWindow).refreshData()
+      await openArtifactsPanel(mainWindow)
+      await artifactRow(mainWindow, title).click()
+      const panel = artifactsPanel(mainWindow)
+      const audio = panel.locator('[data-testid="artifact-audio"]')
+      await expect(audio).toBeVisible({ timeout: 5_000 })
+      await expect
+        .poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(1)
+      expect(await audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(2, 0)
+      expect(
+        await audio.evaluate((a: HTMLAudioElement) => (a.seekable.length ? a.seekable.end(0) : 0))
+      ).toBeGreaterThan(1.5)
+      const landed = await audio.evaluate(
+        (a: HTMLAudioElement) =>
+          new Promise<number>((resolve) => {
+            a.addEventListener('seeked', () => resolve(a.currentTime), { once: true })
+            a.currentTime = 1.5
+          })
+      )
+      expect(landed).toBeCloseTo(1.5, 0)
+      await expect(panel.locator('[data-testid="artifact-audio-error"]')).toHaveCount(0)
+      await expect(panel.locator('[data-testid="artifact-zoom"]')).toHaveCount(0)
+    })
+  }
+
+  test('a video picks up same-named subtitle artifacts as text tracks', async ({ mainWindow }) => {
+    await seedFileArtifact(mainWindow, 'subbed.mp4', 'clip.mp4')
+    const s = seed(mainWindow)
+    await s.createArtifact({
+      taskId,
+      title: 'subbed.vtt',
+      content: 'WEBVTT\n\n00:00.000 --> 00:01.000\nHello\n\n00:01.000 --> 00:02.000\nWorld\n'
+    })
+    await s.createArtifact({
+      taskId,
+      title: 'subbed.sv.srt',
+      content: '1\n00:00:00,000 --> 00:00:01,500\nHej\n'
+    })
+    await s.refreshData()
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'subbed.mp4').click()
+    const video = artifactsPanel(mainWindow).locator('[data-testid="artifact-video"]')
+    await expect(video).toBeVisible({ timeout: 5_000 })
+    await expect
+      .poll(
+        () =>
+          video.evaluate((v: HTMLVideoElement) =>
+            [...v.textTracks].map((t) => [t.label, t.language, t.mode, t.cues?.length ?? 0])
+          ),
+        { timeout: 10_000 }
+      )
+      .toEqual([
+        ['Subtitles', '', 'showing', 2],
+        ['sv', 'sv', 'hidden', 1]
+      ])
+  })
+
+  test('a .diff/.patch previews as a diff per file (git and plain diff -u)', async ({
+    mainWindow
+  }) => {
+    const s = seed(mainWindow)
+    await s.createArtifact({
+      taskId,
+      title: 'change.diff',
+      content: [
+        'diff --git a/src/one.ts b/src/one.ts',
+        '--- a/src/one.ts',
+        '+++ b/src/one.ts',
+        '@@ -1,2 +1,2 @@',
+        ' keep me',
+        '-const before = 1',
+        '+const after = 2'
+      ].join('\n')
+    })
+    await s.createArtifact({
+      taskId,
+      title: 'plain.patch',
+      content: [
+        '--- notes.txt.orig',
+        '+++ notes.txt',
+        '@@ -1 +1 @@',
+        '-old note',
+        '+new note'
+      ].join('\n')
+    })
+    await s.refreshData()
+    await openArtifactsPanel(mainWindow)
+    const panel = artifactsPanel(mainWindow)
+
+    await artifactRow(mainWindow, 'change.diff').click()
+    await expect(panel.getByText('src/one.ts', { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(panel.getByText('const after = 2').first()).toBeVisible()
+
+    await artifactRow(mainWindow, 'plain.patch').click()
+    // `diff -u notes.txt.orig notes.txt`: the header names both sides.
+    await expect(panel.getByText('notes.txt.orig → notes.txt', { exact: true })).toBeVisible({
+      timeout: 5_000
+    })
+    await expect(panel.getByText('new note').first()).toBeVisible()
+    await expect(panel.locator('[data-testid="artifact-diff-empty"]')).toHaveCount(0)
+  })
+
+  test("a .zip lists its entries from the hub's read of the central directory", async ({
+    mainWindow
+  }) => {
+    await seedFileArtifact(mainWindow, 'bundle.zip')
+    await seed(mainWindow).refreshData()
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'bundle.zip').click()
+    const panel = artifactsPanel(mainWindow)
+    await expect(panel.locator('[data-testid="archive-summary"]')).toContainText('4 entries', {
+      timeout: 5_000
+    })
+    await expect(panel.locator('[data-testid="archive-entry"]')).toHaveText([
+      /docs\//,
+      /docs\/readme\.md/,
+      /docs\/naïve café\.txt/,
+      /big\.bin/
+    ])
+  })
+
+  test('a font shows a specimen set in that font', async ({ mainWindow }) => {
+    await seedFileArtifact(mainWindow, 'block.ttf')
+    await seed(mainWindow).refreshData()
+    await openArtifactsPanel(mainWindow)
+    await artifactRow(mainWindow, 'block.ttf').click()
+    const specimen = artifactsPanel(mainWindow).locator('[data-testid="artifact-font"]')
+    await expect(specimen).toBeVisible({ timeout: 5_000 })
+    const family = await specimen.evaluate((el) =>
+      el.style.fontFamily.split(',')[0].trim().replace(/^"|"$/g, '')
+    )
+    expect(family).toMatch(/^slz-artifact-font-/)
+    // The face is registered and loaded, and the specimen resolves to it.
+    expect(
+      await mainWindow.evaluate(
+        (name) =>
+          document.fonts.check(`16px "${name}"`) &&
+          [...document.fonts].some((f) => f.family === name && f.status === 'loaded'),
+        family
+      )
+    ).toBe(true)
+  })
+
   test('SVG preview fit/full controls sit on an opaque popover surface', async ({ mainWindow }) => {
     const s = seed(mainWindow)
     await s.createArtifact({
