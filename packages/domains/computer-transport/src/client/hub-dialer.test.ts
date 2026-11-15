@@ -271,7 +271,12 @@ describe('computer protocol v3 (T-27)', () => {
     )
   })
 
-  it('advertises boundedReads on enroll and on hello (paged/chunked reads, additive)', async () => {
+  it.each([
+    [undefined, false],
+    [false, false],
+    ['true', false],
+    [true, true]
+  ])('advertises runtime boundedReads=%s as %s on enroll and hello', async (value, expected) => {
     const seen: Array<{ method: unknown; params: Record<string, unknown> }> = []
     const seenN = (n: number) =>
       new Promise<void>((resolve) => {
@@ -290,14 +295,16 @@ describe('computer protocol v3 (T-27)', () => {
           }
         : { result: { computerId: 'c-1', protocolVersion: COMPUTER_PROTOCOL_VERSION } }
     })
-    makeDialer(`ws://127.0.0.1:${port}`).start()
+    const identity = { ...IDENTITY, boundedReads: value } as HubDialerOptions['identity']
+    makeDialer(`ws://127.0.0.1:${port}`, { identity }).start()
     makeDialer(`ws://127.0.0.1:${port}`, {
+      identity,
       credentialStore: createMemoryCredentialStore({ computerId: 'c-1', apiKey: 'k-1' })
     }).start()
     await seenN(2)
     const methods = seen.map((s) => s.method).sort()
     expect(methods).toEqual(['enroll', 'hello'])
-    for (const s of seen) expect(s.params.boundedReads).toBe(true)
+    for (const s of seen) expect(s.params.boundedReads).toBe(expected)
   })
 
   it('protocol v8: advertises the direct address read at send time on hello, null without one', async () => {

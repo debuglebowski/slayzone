@@ -57,7 +57,7 @@ export interface ComputerIdentity {
   chatProcessControls?: boolean
   chatControlInvocations?: boolean
   chatControlLeases?: boolean
-  /** Implementing host answers paged/chunked reads and staged uploads. Absent = unavailable. */
+  /** Host implements the paged git and ranged/staged chat operations. Absent: legacy. */
   boundedReads?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
@@ -375,6 +375,7 @@ export class HubDialer {
       chatProcessControls: this.opts.identity.chatProcessControls === true,
       chatControlInvocations: this.opts.identity.chatControlInvocations === true,
       chatControlLeases: this.opts.identity.chatControlLeases === true,
+      // The runtime host may predate this connector's paged/chunked operations.
       boundedReads: this.opts.identity.boundedReads === true
     })
     return enrollResultSchema.parse(raw)

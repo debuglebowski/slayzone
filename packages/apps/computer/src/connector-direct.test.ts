@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { startLoopbackHub } from '../../../domains/computer-transport/src/testing/loopback'
 import { startConnector } from './connector'
-import { hostControl, startSessionHost, type ConnectorGrant } from './session-host'
+import { connectorHost, hostControl, startSessionHost, type ConnectorGrant } from './session-host'
 
 it('a connector-mode computer advertises its direct listener and WebRTC to the hub', async () => {
   const root = mkdtempSync(join(tmpdir(), 'connector-direct-'))
@@ -30,6 +30,12 @@ it('a connector-mode computer advertises its direct listener and WebRTC to the h
   let connector: Awaited<ReturnType<typeof startConnector>> | undefined
   try {
     const grant = await control.rpc.request<ConnectorGrant>('reserve', { hubUrl: hub.url })
+    const native = await connectorHost(root, grant, hub.url, {})
+    try {
+      expect(await native.rpc.request('identity')).toMatchObject({ boundedReads: true })
+    } finally {
+      native.close()
+    }
     connector = await startConnector(root, config, grant)
     await connector.dialer.events.once('connected')
     const [computer] = hub.gateway.listComputers()
@@ -40,6 +46,7 @@ it('a connector-mode computer advertises its direct listener and WebRTC to the h
       chatTimelineRowSlices: true,
       promptSummariesAll: true
     })
+    expect(computer?.boundedReads).toBe(true)
   } finally {
     await connector?.stop()
     control.close()
