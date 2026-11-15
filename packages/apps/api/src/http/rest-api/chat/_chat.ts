@@ -162,8 +162,12 @@ export async function withChatTabHistory<T>(
   const ops = chat.deps().ops
   const reads: ChatHistoryReads = {
     openTimeline: (tabId, version) => Promise.resolve(ops.openTimeline(tabId, version)),
-    timelinePages: (tabId, pages, asOfSeq, epoch) =>
-      Promise.resolve(ops.timelinePages(tabId, pages, asOfSeq, epoch)),
+    timelinePages: (tabId, pages, asOfSeq, epoch, startRow) =>
+      Promise.resolve(
+        startRow === undefined
+          ? ops.timelinePages(tabId, pages, asOfSeq, epoch)
+          : ops.timelinePages(tabId, pages, asOfSeq, epoch, startRow)
+      ),
     getEventPage: (tabId, afterSeq) => Promise.resolve(ops.getEventPage(tabId, afterSeq))
   }
   const opts = { agentStartedTurns: chatCapabilitiesForMode(target.mode).agentStartedTurns }

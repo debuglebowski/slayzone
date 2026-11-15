@@ -245,6 +245,12 @@ export const enrollParamsSchema = z.object({
    * asks it 500 session ids at a time. Additive; no protocol bump.
    */
   promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -297,6 +303,12 @@ export const helloParamsSchema = z.object({
    * asks it 500 session ids at a time. Additive; no protocol bump.
    */
   promptSummariesAll: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat-runtime `timelinePages` by row slices from a
+   * `startRow` (5th argument). Absent = an older computer: the hub asks it for whole
+   * pages (it refuses a 5th argument). Additive; no protocol bump.
+   */
+  chatTimelineRowSlices: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

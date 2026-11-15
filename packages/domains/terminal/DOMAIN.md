@@ -149,7 +149,14 @@ read `getEventPage` / `getReplayPage` (tRPC: `getBufferSince` / `getReplay` with
 `page`); whole reads stay for older callers, assembled from pages. Hub routes read
 the reduced history through `@slayzone/terminal/chat-history` (projection snapshot,
 older rows on demand). `timelinePages` answers within the same byte budget and
-names what it left out (`omitted`).
+names what it left out (`omitted`). Asked from a row (`startRow`, what every current
+client sends) the budget cuts between ROWS — one row always fits — so a 256-row page
+larger than the budget (long tool output made one 6.6 MB) comes in slices: `next`
+names the row to ask from. Without `startRow` (an older client) whole pages, as
+before; a computer takes `startRow` only once it advertised `chatTimelineRowSlices`
+(hello/enroll, additive) — the hub drops it for an older one. `openTimeline`'s events
+after its snapshot are one history page at most: more, and it takes a fresh snapshot
+(up to 3), else answers `full`.
 
 Heavy history work takes turns process-wide (`historyReadTurns`): a page read is
 one `take`; a projection's rebuild folds (256 events a step), its page writes

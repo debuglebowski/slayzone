@@ -126,6 +126,12 @@ export function createHubChatRelay(opts: {
    * computer, asked for the whole reads it knows.
    */
   chatHistoryPages?(computerId: string): boolean
+  /**
+   * Whether this computer slices a timeline page by rows (`timelinePages`' 5th
+   * argument, `startRow`; it advertised `chatTimelineRowSlices`). False/absent: an
+   * older computer, whose operation takes 4 arguments — asked for whole pages.
+   */
+  chatTimelineRowSlices?(computerId: string): boolean
   hasLegacyTaskContent?(taskId: string): Promise<boolean>
   resolveMigrationComputer?(owner: HubChatOwnership): Promise<string | null>
   resolveComputer(taskId: string): Promise<string | null>
@@ -1414,6 +1420,16 @@ export function createHubChatRelay(opts: {
       await opts.beforeInvoke?.(owner, method, args)
       if (target === 'ops' && PAGED_HISTORY_METHODS.has(method))
         return await historyRead(owner, method, args)
+      // `startRow` only to a computer that knows it (an older one refuses a 5-tuple),
+      // and never as `undefined` (it would travel as `null`): without it, whole
+      // pages — what an older client gets too.
+      if (
+        target === 'ops' &&
+        method === 'timelinePages' &&
+        args.length > 4 &&
+        (args[4] === undefined || opts.chatTimelineRowSlices?.(owner.computerId!) !== true)
+      )
+        args = args.slice(0, 4)
       const read =
         target === 'queue' ? method === 'list' : CHAT_READ_OPERATIONS.has(method as ChatOperation)
       const result = await opts.request(owner.computerId!, {

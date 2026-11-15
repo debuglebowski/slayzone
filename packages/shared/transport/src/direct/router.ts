@@ -409,7 +409,9 @@ export function createDirectRouter(services: DirectRouterServices) {
             tabId,
             pages: z.array(z.number().int().nonnegative()).max(512),
             asOfSeq: z.number().int(),
-            epoch: z.number().int()
+            epoch: z.number().int(),
+            // Row slices from this row (`next`); an older computer strips it: whole pages.
+            startRow: z.number().int().nonnegative().optional()
           })
         )
         .query(({ ctx, input }) => {
@@ -418,7 +420,8 @@ export function createDirectRouter(services: DirectRouterServices) {
             input.tabId,
             input.pages,
             input.asOfSeq,
-            input.epoch
+            input.epoch,
+            ...(input.startRow !== undefined ? [input.startRow] : [])
           ])
         }),
       searchTimeline: t.procedure

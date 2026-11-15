@@ -351,8 +351,10 @@ export class HubDialer {
       directRtc: this.opts.identity.directRtc?.() ?? false,
       // The grant registry of this release enforces `notAfter` (apps/computer grants.ts).
       directNotAfter: true,
-      // This release's chat runtime answers history in bounded pages.
+      // This release's chat runtime answers history in bounded pages, and timeline
+      // pages by row slices.
       chatHistoryPages: true,
+      chatTimelineRowSlices: true,
       // ...and a task's prompt summaries in one request (FU5).
       promptSummariesAll: true
     })
@@ -401,7 +403,8 @@ export class HubDialer {
             directRtc: this.opts.identity.directRtc?.() ?? false,
             directNotAfter: true,
             chatHistoryPages: true,
-            promptSummariesAll: true
+            promptSummariesAll: true,
+            chatTimelineRowSlices: true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

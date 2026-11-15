@@ -569,3 +569,71 @@ describe('written in slices, one heavy step per loop turn (a boot restore opens 
     expect(perTick.size).toBeGreaterThan(stores.length)
   })
 })
+
+describe('a page larger than the answer budget, asked from a row on (`startRow`)', () => {
+  // A 256-row page of long tool output measured 4–6.6 MB on the dev store (rows up
+  // to 2.2 MB), nothing bounds it: the page was the smallest unit an answer had.
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 5,
+    provider: 'claude',
+    askEveryTool: true
+  })
+  const rowBytes = (rows: unknown[]) =>
+    rows.reduce<number>((n, r) => n + JSON.stringify(r).length, 0)
+
+  test('row slices within the budget (one row always), resumed from `next`, complete the view', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const budget = 8 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    const open = await p.openSnapshot()
+    let state = decodeTimelineState(open.state)
+    let wanted = Array.from({ length: open.summaries.length }, (_, i) => i)
+    expect(wanted.length).toBeGreaterThan(2)
+    let startRow = 0
+    let partial = 0
+    for (let guard = 0; wanted.length > 0; guard++) {
+      expect(guard).toBeLessThan(10_000)
+      const got = await p.pagesAsOf(wanted, open.seq, open.epoch, startRow)
+      if (got.expired) throw new Error('expired')
+      expect(got.pages.length).toBeGreaterThan(0)
+      const rows = got.pages.flatMap((x) => x.rows)
+      if (rows.length > 1) expect(rowBytes(rows)).toBeLessThanOrEqual(budget)
+      for (const page of got.pages)
+        state = reducer(state, {
+          type: 'rows-loaded',
+          from: page.from,
+          rows: page.rows,
+          epoch: open.epoch
+        })
+      if (got.next !== undefined) partial++
+      wanted = got.omitted ?? []
+      startRow = got.next ?? (wanted[0] ?? 0) * TIMELINE_PAGE_ROWS
+    }
+    expect(partial).toBeGreaterThan(0)
+    expect(meaning(state)).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('without `startRow` a page is answered whole, as before (older clients)', async () => {
+    const mem = memoryStore()
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: buffered(events),
+      agentStartedTurns: true,
+      pageBudgetBytes: 8 * 1024
+    })
+    const open = await p.openSnapshot()
+    const got = await p.pagesAsOf([0, 1], open.seq, open.epoch)
+    if (got.expired) throw new Error('expired')
+    expect(got.pages.map((x) => x.page)).toEqual([0])
+    expect(got.pages[0].rows).toHaveLength(TIMELINE_PAGE_ROWS)
+    expect(got.omitted).toEqual([1])
+    expect(got).not.toHaveProperty('next')
+  })
+})

@@ -138,6 +138,8 @@ export function createComputerChatServices(opts: {
   chatHistoryPages?(computerId: string): boolean
   /** Whether the computer answers a task's prompt summaries in one request (FU5). */
   promptSummariesAll?(computerId: string): boolean
+  /** Whether the computer slices timeline pages by rows (its `chatTimelineRowSlices`). */
+  chatTimelineRowSlices?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**

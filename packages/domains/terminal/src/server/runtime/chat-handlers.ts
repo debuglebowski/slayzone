@@ -976,8 +976,13 @@ export function createChatOps(opts: ChatHandlerOpts) {
      */
     openTimeline: (tabId: string, version: string) => openTimeline(tabId, version),
     /** Rows of sealed pages as of the client's newest event (`expired`: open again). */
-    timelinePages: (tabId: string, pages: number[], asOfSeq: number, epoch: number) =>
-      timelinePages(tabId, pages, asOfSeq, epoch),
+    timelinePages: (
+      tabId: string,
+      pages: number[],
+      asOfSeq: number,
+      epoch: number,
+      startRow?: number
+    ) => timelinePages(tabId, pages, asOfSeq, epoch, startRow),
     /** Sealed pages that may hold `query`. */
     searchTimeline: (tabId: string, query: string) => searchTimeline(tabId, query),
 

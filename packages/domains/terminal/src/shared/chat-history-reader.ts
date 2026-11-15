@@ -36,13 +36,22 @@ export type ChatHistoryPages =
       expired: false
       pages: Array<{ page: number; from: number; rows: TimelineItem[] }>
       omitted?: number[]
+      /** Ended inside the first `omitted` page: ask again from this row. */
+      next?: number
     }
   | { expired: true }
 
 /** The chat reads the reader makes (the hub's chat ops). */
 export interface ChatHistoryReads {
   openTimeline(tabId: string, version: string): Promise<unknown>
-  timelinePages(tabId: string, pages: number[], asOfSeq: number, epoch: number): Promise<unknown>
+  /** `startRow`: row slices from that row (an older peer ignores it: whole pages). */
+  timelinePages(
+    tabId: string,
+    pages: number[],
+    asOfSeq: number,
+    epoch: number,
+    startRow?: number
+  ): Promise<unknown>
   getEventPage(tabId: string, afterSeq: number): Promise<unknown>
 }
 
@@ -90,16 +99,20 @@ export async function openChatHistory(
   const sealed = opened.kind === 'paged' ? opened.snapshot.summaries.length : 0
 
   async function loadPages(pages: number[]): Promise<void> {
+    // Asked from a row: a page larger than an answer's budget comes in row slices.
+    let startRow = (pages[0] ?? 0) * pageRows
     for (let at = 0; at < pages.length; ) {
       const wanted = pages.slice(at, at + PAGES_PER_REQUEST)
       const got = (await reads.timelinePages(
         tabId,
         wanted,
         state.appliedSeq,
-        state.rowsEpoch
+        state.rowsEpoch,
+        startRow
       )) as ChatHistoryPages
       if (got.expired) throw new ChatHistoryExpired()
-      if (got.pages.length === 0) throw new ChatHistoryExpired()
+      if (got.pages.length === 0 || got.pages.every((p) => p.rows.length === 0))
+        throw new ChatHistoryExpired()
       for (const page of got.pages)
         state = reducer(state, {
           type: 'rows-loaded',
@@ -107,8 +120,11 @@ export async function openChatHistory(
           rows: page.rows,
           epoch: state.rowsEpoch
         })
-      // What did not fit in the answer is asked for again.
-      at += got.pages.length
+      // What did not fit in the answer is asked for again: a page cut short from
+      // the row it stopped at (`next`), the others whole.
+      const cut = got.next !== undefined ? Math.floor(got.next / pageRows) : null
+      at += got.pages.length - (cut !== null && got.pages.at(-1)?.page === cut ? 1 : 0)
+      startRow = cut !== null && pages[at] === cut ? got.next! : (pages[at] ?? 0) * pageRows
     }
   }
 

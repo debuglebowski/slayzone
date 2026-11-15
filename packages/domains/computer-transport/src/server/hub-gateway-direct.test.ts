@@ -133,7 +133,12 @@ describe('protocol v8: direct-link address', () => {
 })
 
 describe('runtime feature flags (additive, no protocol bump)', () => {
-  it.each(['chatHistoryPages', 'aiConfigHashFiles', 'promptSummariesAll'] as const)(
+  it.each([
+    'chatHistoryPages',
+    'chatTimelineRowSlices',
+    'aiConfigHashFiles',
+    'promptSummariesAll'
+  ] as const)(
     'keeps %s from each live handshake, never from stored enrollment tags',
     async (feature) => {
       for (const [advertised, kept] of [

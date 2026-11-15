@@ -676,6 +676,9 @@ export interface StopTurnResult extends StopResult {
  * after it, and what streams right now; `full` — replay every event
  * (`getReplay`): no projection, or the client's reducer is another version.
  */
+/** Snapshots `openTimeline` takes at most before it answers `full`. */
+const OPEN_TIMELINE_ATTEMPTS = 3
+
 export type ChatTimelineOpenResult =
   | {
       kind: 'paged'
@@ -3933,32 +3936,46 @@ export function createChatTransport(
     if (!tab || clientVersion !== TIMELINE_PROJECTION_VERSION) return { kind: 'full' }
     const projection = await tab.projection
     if (!projection?.usable) return { kind: 'full' }
-    let snapshot: TimelineOpen
-    try {
-      snapshot = await projection.openSnapshot()
-    } catch {
-      return { kind: 'full' }
+    // The snapshot waits for every projection step queued before it; the events
+    // saved meanwhile follow it — within ONE history page (a busy chat can save MBs
+    // while it waits). More than a page: a fresh snapshot covers them (it waits for
+    // their steps). A tail that keeps outrunning it: the client opens from the
+    // events instead (`full`, paged replay).
+    for (let attempt = 0; attempt < OPEN_TIMELINE_ATTEMPTS; attempt++) {
+      let snapshot: TimelineOpen
+      try {
+        snapshot = await projection.openSnapshot()
+      } catch {
+        return { kind: 'full' }
+      }
+      const tail = await tab.log.readPage(snapshot.seq)
+      if (tail.hasMore) continue
+      // Taken in the same turn the saved events end (only microtasks between), so
+      // the live part follows exactly the newest of them.
+      return {
+        kind: 'paged',
+        snapshot,
+        events: tail.events,
+        live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
+      }
     }
-    // Events saved while the snapshot was taken; the live part follows the newest.
-    const events = await tab.log.readSince(snapshot.seq)
-    return {
-      kind: 'paged',
-      snapshot,
-      events,
-      live: { afterSeq: tab.log.lastSeq, liveSeq: tab.liveSeq, events: tab.splitter.snapshot() }
-    }
+    return { kind: 'full' }
   }
 
-  /** Rows of sealed pages as of a client's newest event (`expired`: open again). */
+  /**
+   * Rows of sealed pages as of a client's newest event (`expired`: open again).
+   * `startRow`: answered by row slices from that row (`next`: ask from there).
+   */
   async function timelinePages(
     tabId: string,
     pages: number[],
     asOfSeq: number,
-    epoch: number
+    epoch: number,
+    startRow?: number
   ): Promise<TimelinePagesResult> {
     const projection = await tabs.get(tabId)?.projection
     if (!projection) return { expired: true }
-    return projection.pagesAsOf(pages, asOfSeq, epoch)
+    return projection.pagesAsOf(pages, asOfSeq, epoch, startRow)
   }
 
   /** Sealed pages that may hold `query` (the client checks the rows it loads). */

@@ -135,7 +135,14 @@ export type TimelinePagesResult =
   | {
       expired: false
       pages: Array<{ page: number; from: number; rows: TimelineItem[] }>
+      /** Pages asked for and not (completely) in this answer: ask again. */
       omitted?: number[]
+      /**
+       * Asked from a row on (`startRow`): the answer ended INSIDE a page, which is the
+       * first of `omitted`; ask again from this row (absolute). Absent: the answered
+       * pages are complete.
+       */
+      next?: number
     }
   | { expired: true }
 
@@ -374,11 +381,18 @@ export class TimelineProjection {
    * The rows of `pages` as they were after event `asOfSeq` (a client's newest,
    * maybe behind the hub). Expired when rows moved since (`epoch`) or the
    * changes since are no longer remembered.
+   *
+   * An answer carries at most the byte budget of rows. Without `startRow` (older
+   * clients) whole pages: the first always fits, however large. With `startRow`
+   * (absolute row: where the first page asked is to start) the budget cuts between
+   * ROWS — one row always fits — so a page larger than the budget comes in slices:
+   * `next` names the row to ask from, its page first in `omitted`.
    */
   pagesAsOf(
     pages: readonly number[],
     asOfSeq: number,
-    epoch: number
+    epoch: number,
+    startRow?: number
   ): Promise<TimelinePagesResult> {
     return this.enqueue(async (): Promise<TimelinePagesResult> => {
       if (
@@ -393,28 +407,55 @@ export class TimelineProjection {
       const out: Array<{ page: number; from: number; rows: TimelineItem[] }> = []
       const omitted: number[] = []
       let bytes = 0
+      let next: number | undefined
       try {
-        for (const page of wanted) {
-          if (omitted.length > 0) {
-            omitted.push(page)
-            continue
+        if (startRow !== undefined)
+          for (const page of wanted) {
+            if (omitted.length > 0) {
+              omitted.push(page)
+              continue
+            }
+            const from = page * TIMELINE_PAGE_ROWS
+            const rows = this.resident.includes(page)
+              ? this.pageRows(page)
+              : (JSON.parse(await this.readStoredPage(page)) as TimelineItem[])
+            const skip = startRow > from && startRow < from + rows.length ? startRow - from : 0
+            const taken: TimelineItem[] = []
+            for (let k = skip; k < rows.length; k++) {
+              const size = jsonByteLength(rows[k])
+              if ((out.length > 0 || taken.length > 0) && bytes + size > this.pageBudgetBytes) break
+              bytes += size
+              taken.push(rows[k])
+            }
+            if (taken.length > 0) out.push({ page, from: from + skip, rows: taken })
+            if (skip + taken.length < rows.length) {
+              // Not (completely) answered: asked again, from where it stopped.
+              omitted.push(page)
+              if (taken.length > 0) next = from + skip + taken.length
+            }
           }
-          // In memory, or as stored (a page leaves memory only once stored: current).
-          const resident = this.resident.includes(page)
-          const rows = resident ? this.pageRows(page) : null
-          const stored = resident ? null : await this.readStoredPage(page)
-          const size = rows ? jsonByteLength(rows) : utf8Length(stored!)
-          if (out.length > 0 && bytes + size > this.pageBudgetBytes) {
-            omitted.push(page)
-            continue
+        else
+          for (const page of wanted) {
+            if (omitted.length > 0) {
+              omitted.push(page)
+              continue
+            }
+            // In memory, or as stored (a page leaves memory only once stored: current).
+            const resident = this.resident.includes(page)
+            const rows = resident ? this.pageRows(page) : null
+            const stored = resident ? null : await this.readStoredPage(page)
+            const size = rows ? jsonByteLength(rows) : utf8Length(stored!)
+            if (out.length > 0 && bytes + size > this.pageBudgetBytes) {
+              omitted.push(page)
+              continue
+            }
+            bytes += size
+            out.push({
+              page,
+              from: page * TIMELINE_PAGE_ROWS,
+              rows: rows ?? (JSON.parse(stored!) as TimelineItem[])
+            })
           }
-          bytes += size
-          out.push({
-            page,
-            from: page * TIMELINE_PAGE_ROWS,
-            rows: rows ?? (JSON.parse(stored!) as TimelineItem[])
-          })
-        }
       } catch (err) {
         // The client opens again (from the events: this one is no longer served).
         this.fail(err)
@@ -426,7 +467,12 @@ export class TimelineProjection {
         const hit = out.find((p) => u.row >= p.from && u.row < p.from + p.rows.length)
         if (hit) hit.rows[u.row - hit.from] = u.prev
       }
-      return { expired: false, pages: out, ...(omitted.length > 0 ? { omitted } : {}) }
+      return {
+        expired: false,
+        pages: out,
+        ...(omitted.length > 0 ? { omitted } : {}),
+        ...(next !== undefined ? { next } : {})
+      }
     })
   }
 

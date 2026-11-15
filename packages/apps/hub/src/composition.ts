@@ -1163,6 +1163,9 @@ export function composeServer(opts: {
     promptSummariesAll: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.promptSummariesAll ===
       true,
+    chatTimelineRowSlices: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
+        ?.chatTimelineRowSlices === true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),

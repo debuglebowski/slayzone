@@ -361,27 +361,36 @@ type PagesAnswer =
       expired: false
       pages: Array<{ page: number; from: number; rows: unknown[] }>
       omitted?: number[]
+      /** The answer ended inside the first `omitted` page: ask again from this row. */
+      next?: number
     }
 
 /**
  * `timelinePages` for every page asked: an answer carries at most a byte budget of
  * rows and names the pages it left out (`omitted`), which are asked for again at
- * once. `expired` as soon as one answer is.
+ * once. Asked from a row (`startRow`, always sent): a page larger than the budget
+ * comes in row slices, the next asked from `next`. An older peer ignores
+ * `startRow` and answers whole pages. `expired` as soon as one answer is.
  */
 async function timelinePagesAll(
   io: Pick<ChatIo, 'timelinePages'>,
-  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number }
+  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number; pageRows: number }
 ): Promise<PagesAnswer> {
+  const { pageRows, ...ask } = input
   const pages: Array<{ page: number; from: number; rows: unknown[] }> = []
-  for (let wanted = input.pages; wanted.length > 0; ) {
-    const res = (await io.timelinePages({ ...input, pages: wanted })) as PagesAnswer
+  for (let wanted = ask.pages, startRow = (ask.pages[0] ?? 0) * pageRows; wanted.length > 0; ) {
+    const res = (await io.timelinePages({ ...ask, pages: wanted, startRow })) as PagesAnswer
     if (res.expired) return res
     pages.push(...res.pages)
     const asked = wanted
     const again = (res.omitted ?? []).filter((page) => asked.includes(page))
-    // An answer with no page and nothing left out has nothing more to give.
-    if (res.pages.length === 0) break
+    // An answer with no row and nothing left out has nothing more to give.
+    if (res.pages.length === 0 || res.pages.every((p) => p.rows.length === 0)) break
     wanted = again
+    startRow =
+      res.next !== undefined && again[0] === Math.floor(res.next / pageRows)
+        ? res.next
+        : (again[0] ?? 0) * pageRows
   }
   return { expired: false, pages }
 }
@@ -639,7 +648,13 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      timelinePagesAll(chatIo, { tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
+      timelinePagesAll(chatIo, {
+        tabId: opts.tabId,
+        pages: wanted,
+        asOfSeq,
+        epoch,
+        pageRows: paging?.pageRows ?? 0
+      }).then(
         (res) => {
           for (const page of wanted) loadingPagesRef.current.delete(page)
           if (gen !== genRef.current) return

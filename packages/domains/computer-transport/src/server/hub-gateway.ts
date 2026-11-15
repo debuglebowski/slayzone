@@ -108,6 +108,8 @@ export interface ComputerDescriptor {
   chatHistoryPages?: boolean
   /** Whether it answers a task's prompt summaries in one request (FU5). Absent = no. */
   promptSummariesAll?: boolean
+  /** Whether it slices a timeline page by rows (`startRow`), from this connection's frame. Absent = no. */
+  chatTimelineRowSlices?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -806,6 +808,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directNotAfter: parsed.data.directNotAfter === true,
       chatHistoryPages: parsed.data.chatHistoryPages === true,
       promptSummariesAll: parsed.data.promptSummariesAll === true,
+      chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -973,6 +976,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directNotAfter: parsed.data.directNotAfter === true,
       chatHistoryPages: parsed.data.chatHistoryPages === true,
       promptSummariesAll: parsed.data.promptSummariesAll === true,
+      chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

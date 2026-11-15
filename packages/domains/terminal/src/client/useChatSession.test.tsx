@@ -987,6 +987,46 @@ describe('paged history (opened from the hub projection)', () => {
     expect(h.calls.pages.length).toBeGreaterThan(Math.ceil(paging.sealed / 32))
   })
 
+  it('a page larger than an answer comes in row slices, asked again from `next` until complete', async () => {
+    const h = fakeHub(all, all.length - 1)
+    const pagesOf = h.pages
+    const starts: Array<number | undefined> = []
+    // The computer answers at most a third of a page, from `startRow` on; without
+    // one (an older client) whole pages, as before.
+    h.pages = async (input) => {
+      const { startRow } = input as { startRow?: number }
+      starts.push(startRow)
+      const got = (await pagesOf(input)) as {
+        expired: false
+        pages: Array<{ page: number; from: number; rows: unknown[] }>
+      }
+      if (startRow === undefined) return got
+      const first = got.pages[0]
+      const skip = Math.max(0, startRow - first.from)
+      const rows = first.rows.slice(skip, skip + Math.ceil(PAGE / 3))
+      const end = skip + rows.length
+      const partial = end < first.rows.length
+      return {
+        expired: false,
+        pages: [{ page: first.page, from: first.from + skip, rows }],
+        ...(partial || input.pages.length > 1
+          ? { omitted: partial ? input.pages : input.pages.slice(1) }
+          : {}),
+        ...(partial ? { next: first.from + end } : {})
+      }
+    }
+    hub = h
+    const { result: r } = setup()
+    await openPaged(0)
+    const paging = r.current.paging!
+    act(() => r.current.loadPages(Array.from({ length: paging.sealed }, (_, p) => p)))
+    await settle()
+    expect(meaning(r.current.state)).toEqual(meaning(stateAt(all, all.length - 1)))
+    expect(starts.length).toBeGreaterThan(paging.sealed)
+    expect(starts.every((s) => s !== undefined)).toBe(true)
+    expect(starts.some((s) => s! % PAGE !== 0)).toBe(true)
+  })
+
   it('a live event that needs an old row waits for its page, then applies — as a full replay would', async () => {
     const head = all.slice(0, 200)
     const firstTool = stateAt(all, 199).timeline.findIndex((it) => it?.kind === 'tool')
