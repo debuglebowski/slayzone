@@ -30,6 +30,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import type { ChatOwnership } from '../shared'
 import { EVENT_BLOBS_MAINTENANCE, type ChatStorage } from './storage'
+import { dropTimelineInSteps } from './timeline-drop'
 
 /** Done marker (`storage_maintenance`) and checkpoint key (`maintenance_cursors`). */
 export const CHAT_BLOB_BACKFILL = EVENT_BLOBS_MAINTENANCE
@@ -291,7 +292,9 @@ export function createChatBlobBackfill(opts: ChatBlobBackfillOptions) {
         (await opts.withQuiesced(
           owner,
           async () => {
-            store.resetTimeline(id, owner.identity.epoch)
+            // In byte-bounded steps, the event loop running between them (and so
+            // between chats: an idle chat's quiesce resolves without a loop turn).
+            await dropTimelineInSteps(store, id, owner.identity.epoch)
             report.timelines++
             opts.changed(owner.identity.tabId)
           },

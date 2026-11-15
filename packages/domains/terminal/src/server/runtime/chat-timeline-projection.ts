@@ -43,7 +43,7 @@ import {
   summarizeRows,
   type TimelinePageSummary
 } from '../../shared/timeline-summary'
-import type { BufferedEvent } from '../chat-events-store'
+import { historyReadTurns, type BufferedEvent } from '../chat-events-store'
 import type { TimelineCheckpointRow, TimelineWrite } from '../chat-timeline-store'
 import type { TimelineRecordStore } from './chat-timeline-records'
 
@@ -55,6 +55,13 @@ const UNDO_KEEP = 4096
 const FLUSH_DELAY_MS = 1500
 /** Events folded per step of a long run (a rebuild): pages written + unloaded between steps. */
 const FOLD_CHUNK = 256
+/**
+ * Encoded rows one store write carries at most (one page always): a flush of many
+ * pages goes out in slices, each in its own turn of the process's history work
+ * (2026-11-14: ~60 chats restoring at once, every dirty page in one synchronous
+ * write per chat, stalled the computer 1–11 s).
+ */
+export const TIMELINE_FLUSH_SLICE_BYTES = 1024 * 1024
 /** Where the projection persists (the tab's rows of `chat-timeline-store.ts`). */
 export interface TimelineProjectionStore {
   /** Computer-local raw records: decoding/encoding can run in a projection worker. */
@@ -172,7 +179,9 @@ export class TimelineProjection {
     private readonly agentStartedTurns: boolean,
     private readonly onError: (what: string, err: unknown) => void,
     /** Bytes of rows one `pagesAsOf` answer carries, at most (the first page always fits). */
-    private readonly pageBudgetBytes: number
+    private readonly pageBudgetBytes: number,
+    /** Encoded rows one store write carries, at most (one page always). */
+    private readonly flushSliceBytes: number
   ) {
     this.state = initialState({ agentStartedTurns })
   }
@@ -189,6 +198,8 @@ export class TimelineProjection {
     onError?: (what: string, err: unknown) => void
     /** Defaults to {@link CHAT_HISTORY_PAGE_MAX_BYTES}. */
     pageBudgetBytes?: number
+    /** Defaults to {@link TIMELINE_FLUSH_SLICE_BYTES}. */
+    flushSliceBytes?: number
   }): Promise<TimelineProjection> {
     const history = 'pages' in opts.history ? opts.history : historyOfEvents(opts.history)
     const { projection, from } = await TimelineProjection.begin({
@@ -212,14 +223,21 @@ export class TimelineProjection {
     agentStartedTurns: boolean
     onError?: (what: string, err: unknown) => void
     pageBudgetBytes?: number
+    flushSliceBytes?: number
   }): Promise<{ projection: TimelineProjection; from: number }> {
     const p = new TimelineProjection(
       opts.store,
       opts.agentStartedTurns,
       opts.onError ?? ((what, err) => console.error(`[chat-timeline] ${what}:`, err)),
-      opts.pageBudgetBytes ?? CHAT_HISTORY_PAGE_MAX_BYTES
+      opts.pageBudgetBytes ?? CHAT_HISTORY_PAGE_MAX_BYTES,
+      opts.flushSliceBytes ?? TIMELINE_FLUSH_SLICE_BYTES
     )
-    if (await p.restore(opts.lastSeq)) return { projection: p, from: p.seq }
+    // Its checkpoint read and decoded (the tail's rows) in one turn of the process's
+    // history work: dozens of chats restoring at once take turns. One unit, so a
+    // `take` (a loop turn only while others wait): a lone open adds none before
+    // its agent spawns.
+    if (await historyReadTurns.take(() => p.restore(opts.lastSeq)))
+      return { projection: p, from: p.seq }
     // Rebuild: every event, every page written again.
     p.rebuilding = true
     p.state = initialState({ agentStartedTurns: p.agentStartedTurns })
@@ -266,8 +284,11 @@ export class TimelineProjection {
    * by the caller).
    */
   private async applyRun(entries: readonly BufferedEvent[]): Promise<void> {
+    // A chunk is one step of the process's history work: dozens of chats opening at
+    // once fold about one chunk per loop turn in total.
+    const job = historyReadTurns.job()
     for (let i = 0; i < entries.length; i += FOLD_CHUNK) {
-      await this.applyBatch(entries.slice(i, i + FOLD_CHUNK))
+      await job.step(() => this.applyBatch(entries.slice(i, i + FOLD_CHUNK)))
       await this.flushIfOverBudget(false)
     }
   }
@@ -614,40 +635,60 @@ export class TimelineProjection {
   }
 
   /**
-   * Write the dirty pages and the checkpoint in one transaction. Without the
-   * checkpoint (`withCheckpoint` false, along a long run): the stored one is
-   * deleted, as the pages are now ahead of it (replaying its later events onto
-   * them would apply some twice); the next write with one stores it again.
+   * Write the dirty pages and the checkpoint. In slices of at most
+   * `flushSliceBytes` of encoded rows (one page always), each its own store write
+   * in its own turn of the process's history work — a chat whose rows moved rewrites
+   * every page, and dozens of chats restore at once. Only the first slice drops
+   * pages; every slice but the last deletes the stored checkpoint (the pages are now
+   * ahead of it), so a write that fails or a process that dies half way leaves NO
+   * checkpoint: the next open rebuilds, never restores onto pages it does not match.
+   * Without the checkpoint (`withCheckpoint` false, along a long run) the last slice
+   * deletes it too; the next write with one stores it again.
    */
   private async flushNow(withCheckpoint = true): Promise<void> {
     if (!this.checkpointDirty && this.dirty.size === 0 && this.dropFrom === null) return
     if (this.broken) return
-    const pages = [...this.dirty]
-      .filter((p) => p < this.sealed)
-      .sort((a, b) => a - b)
-      .map((page) => {
-        const rows = this.pageRows(page)
-        return {
-          page,
-          startRow: page * TIMELINE_PAGE_ROWS,
-          endRow: page * TIMELINE_PAGE_ROWS + rows.length,
-          rows: JSON.stringify(rows),
-          summary: JSON.stringify(this.summaries[page]),
-          searchText: pageSearchText(rows)
-        }
-      })
-    const checkpoint = withCheckpoint
-      ? {
-          version: TIMELINE_PROJECTION_VERSION,
-          seq: this.seq,
-          data: JSON.stringify({
-            sealed: this.sealed,
-            state: encodeTimelineState(this.state, this.sealed * TIMELINE_PAGE_ROWS)
-          } satisfies CheckpointData)
-        }
-      : null
+    const dirty = [...this.dirty].filter((p) => p < this.sealed).sort((a, b) => a - b)
+    let dropPagesFrom = this.dropFrom
+    let next = 0
+    const job = historyReadTurns.job()
     try {
-      await this.store.save({ dropPagesFrom: this.dropFrom, pages, checkpoint })
+      do {
+        await job.step(async () => {
+          const pages: TimelineWrite['pages'] = []
+          let bytes = 0
+          while (next < dirty.length && (pages.length === 0 || bytes < this.flushSliceBytes)) {
+            const page = dirty[next]
+            const rows = this.pageRows(page)
+            const encoded = JSON.stringify(rows)
+            if (pages.length > 0 && bytes + encoded.length > this.flushSliceBytes) break
+            bytes += encoded.length
+            next++
+            pages.push({
+              page,
+              startRow: page * TIMELINE_PAGE_ROWS,
+              endRow: page * TIMELINE_PAGE_ROWS + rows.length,
+              rows: encoded,
+              summary: JSON.stringify(this.summaries[page]),
+              searchText: pageSearchText(rows)
+            })
+          }
+          const last = next >= dirty.length
+          const checkpoint =
+            last && withCheckpoint
+              ? {
+                  version: TIMELINE_PROJECTION_VERSION,
+                  seq: this.seq,
+                  data: JSON.stringify({
+                    sealed: this.sealed,
+                    state: encodeTimelineState(this.state, this.sealed * TIMELINE_PAGE_ROWS)
+                  } satisfies CheckpointData)
+                }
+              : null
+          await this.store.save({ dropPagesFrom, pages, checkpoint })
+          dropPagesFrom = null
+        })
+      } while (next < dirty.length)
     } catch (err) {
       this.onError('saving the timeline projection failed; it is rebuilt on the next open', err)
       this.broken = true

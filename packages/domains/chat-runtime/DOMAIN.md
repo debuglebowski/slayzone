@@ -65,6 +65,15 @@ resume / sessions-list SQL is served by `agent_sessions_task_mode_owned` and
 `agent_sessions_conversation_task`; keep a probe's `ORDER BY` and comparisons in
 the indexes' exact form when editing those rules.
 
+Timeline projection records (`kind='timeline'`, derived from the events) are never
+decoded to drop a page range: drops are SQL on ids. Compatibility summary and search
+APIs use JSON paths without loading whole pages; worker reads stay encoded as above.
+A stored projection goes in byte-bounded steps (`dropTimelineStep`,
+`TIMELINE_DROP_STEP_BYTES` 4 MiB,
+checkpoint first; `dropTimelineInSteps` runs one step per turn of the process's
+history work): its pages can be hundreds of MB and `secure_delete` zero-fills every
+freed byte — the backfill's reset of 63 chats at once froze the computer 12.7 s.
+
 ## Decisions
 
 - 2026-11-02: Dedicated per-hub SQLite schema, WAL and synchronous FULL. No hub

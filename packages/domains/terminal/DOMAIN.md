@@ -151,6 +151,19 @@ the reduced history through `@slayzone/terminal/chat-history` (projection snapsh
 older rows on demand). `timelinePages` answers within the same byte budget and
 names what it left out (`omitted`).
 
+Heavy history work takes turns process-wide (`historyReadTurns`): a page read is
+one `take`; a projection's rebuild folds (256 events a step), its page writes
+(`TIMELINE_FLUSH_SLICE_BYTES`, 1 MiB of encoded rows a store write, one page always)
+and a stored projection's drop (chat-runtime `dropTimelineInSteps`) are `job`s whose
+steps each take a turn, with the event loop running between two steps even when
+nothing else waits — but no turn before a job's first step or after its last, so a
+lone open adds none before its agent spawns. A sliced flush drops the stored
+checkpoint with its first slice and stores the new one only with its last: stopped
+half way, the next open rebuilds. Measured (FU4, 60 chats × 2,000 events, real
+computer store): most main-thread CPU in one loop iteration, rebuild 5.0 s → 50 ms,
+restore 2.7 s → 28 ms, reset 4.1 s → 62 ms
+(`chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts`).
+
 ### Chat side questions (`/btw`)
 
 `chat.sideQuestion.ask` answers a question from the tab's conversation without

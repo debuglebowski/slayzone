@@ -39,6 +39,7 @@ import {
 import type { ChatRecordKind, ConversationIdentity } from '../shared'
 import { chatStorageDigest, type ChatStorage } from './storage'
 import { trimLocalPromptHistory } from './prompts'
+import { dropTimelineInSteps } from './timeline-drop'
 import { chatStorageMode, isStorageOnlyChatOwner, terminalStorageAgentId } from './storage-mode'
 import { createSessionLedgerService, type SessionLedgerService } from './session-ledger-service'
 
@@ -152,7 +153,7 @@ export function createLocalChatData(
       },
       save: async (write) => store.writeTimeline(identity.id, identity.epoch, write),
       discard: async () => {
-        store.resetTimeline(identity.id, identity.epoch)
+        await dropTimelineInSteps(store, identity.id, identity.epoch)
       }
     }
   }
@@ -1186,12 +1187,11 @@ export function createLocalChatData(
       timelineStoreFromRecords(timelineRecords(tabId)).loadCheckpoint(),
     loadTimelinePages: async (tabId, pages) =>
       timelineStoreFromRecords(timelineRecords(tabId)).loadPages(pages),
-    loadTimelineSummaries: async (tabId) =>
-      timelineStoreFromRecords(timelineRecords(tabId)).loadSummaries(),
+    // Compatibility reads use SQL paths; worker reads use the raw records above.
+    loadTimelineSummaries: async (tabId) => store.timelineSummaries(owner(tabId).id),
     saveTimeline: async (tabId, write: TimelineWrite) =>
       timelineStoreFromRecords(timelineRecords(tabId)).save(write),
-    searchTimelinePages: async (tabId, needle) =>
-      timelineStoreFromRecords(timelineRecords(tabId)).searchPages(needle),
+    searchTimelinePages: async (tabId, needle) => store.searchTimelinePages(owner(tabId).id, needle),
     clearTimeline: async (tabId) => timelineRecords(tabId).discard(),
     clearChatQueue: (tabId) => queue.clear(tabId),
     buildMcpEnv: async (taskId) =>

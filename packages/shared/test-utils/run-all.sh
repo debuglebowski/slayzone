@@ -946,6 +946,8 @@ run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
 run_harness packages/domains/chat-runtime/src/server/event-blobs.test.ts
 # Backfill of pre-v13 inline rows: verified in-place rewrite, slices, resume, backup/erasure/retention exclusion.
 run_harness packages/domains/chat-runtime/src/server/chat-blob-backfill.test.ts
+# Timeline records: no page loaded to drop/list/search; drops in byte-bounded steps (FU4).
+run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 # Migration, recovery and failure-atomicity regressions from the storage audits.
 run_harness packages/apps/hub/src/computer-chat-stability-audit.test.ts
 run_harness packages/apps/hub/src/artifacts-second-pass.test.ts
@@ -1362,6 +1364,8 @@ run_harness packages/domains/worktrees/src/server/resolve-graph.visual.test.ts
 # has a follow-up task; drop the skip_suite line when the suite is fixed.
 skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.test.ts \
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts \
+  "event-loop measurement of many chats' timeline projections (machine-dependent, minutes); run it by hand, see its header"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app

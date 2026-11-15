@@ -77,6 +77,12 @@ export const CHAT_STORAGE_SCHEMA_VERSION = 13
  * direct link's 1 MiB message and any hub↔computer frame limit. Clients page.
  */
 export const CHAT_BLOB_CHUNK_BYTES = 512 * 1024
+/**
+ * Stored bytes of timeline pages one `dropTimelineStep` deletes at most (one page
+ * always): the event loop runs between steps (secure-delete zero-fills every freed
+ * byte, so a chat's whole projection at once froze the computer for seconds).
+ */
+export const TIMELINE_DROP_STEP_BYTES = 4 * 1024 * 1024
 
 /** A referenced event blob cannot be read back (export / transfer refuses: no lossy copy). */
 export class EventBlobUnavailableError extends Error {
@@ -1264,12 +1270,39 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         .filter((page) => Number.isSafeInteger(page) && page >= 0)
         .sort((a, b) => a - b)
     },
-    /** Drop a conversation's timeline projection (derived; rebuilt from its events on next open). */
-    resetTimeline(id: string, epoch: number): number {
+    /**
+     * One step of dropping a conversation's timeline projection (derived; rebuilt from
+     * its events on next open): the checkpoint first — so a drop stopped half way is
+     * never restored from — then pages, oldest first, up to `budget` stored bytes (one
+     * page always; sizes from record headers, no page loaded). A page can be MBs and
+     * every freed byte is zeroed (`secure_delete`): the caller lets the event loop run
+     * between steps (`dropTimelineInSteps`). True once nothing of it is left.
+     */
+    dropTimelineStep(id: string, epoch: number, budget: number): boolean {
       return api.transaction(() => {
         requireOwner(id, epoch)
-        return db.prepare("DELETE FROM records WHERE conversation_id=? AND kind='timeline'").run(id)
-          .changes
+        db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id NOT GLOB 'page:*'"
+        ).run(id)
+        const pages = db
+          .prepare(
+            `SELECT id, octet_length(value) AS bytes FROM records
+              WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
+              ORDER BY CAST(substr(id, 6) AS INTEGER)`
+          )
+          .all(id) as Array<{ id: string; bytes: number }>
+        const remove = db.prepare(
+          "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id=?"
+        )
+        let bytes = 0,
+          removed = 0
+        for (const p of pages) {
+          if (removed > 0 && bytes + p.bytes > budget) break
+          remove.run(id, p.id)
+          bytes += p.bytes
+          removed++
+        }
+        return removed === pages.length
       })
     },
     /**
@@ -1315,6 +1348,42 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
           db.prepare('INSERT OR IGNORE INTO event_marker_coverage VALUES(?)').run(id)
         return { through: bounds.through ?? afterSeq, done: !bounds.more, bytes }
       })
+    },
+    /**
+     * Timeline pages `from` and later go (a projection whose rows moved writes them
+     * again): by id, no page loaded.
+     */
+    dropTimelinePagesFrom(id: string, epoch: number, from: number): void {
+      api.transaction(() => {
+        requireOwner(id, epoch)
+        db.prepare(
+          `DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
+            AND CAST(substr(id, 6) AS INTEGER) >= ?`
+        ).run(id, from)
+      })
+    },
+    /** Every stored timeline page's summary (page order), read from the JSON — no page parsed. */
+    timelineSummaries(id: string): Array<{ page: number; summary: string }> {
+      return db
+        .prepare(
+          `SELECT CAST(substr(id, 6) AS INTEGER) AS page, json_extract(value, '$.summary') AS summary
+            FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
+            ORDER BY page`
+        )
+        .all(id) as Array<{ page: number; summary: string }>
+    },
+    /** Stored timeline pages whose (lowercased) search text holds `needle`, ascending. */
+    searchTimelinePages(id: string, needle: string): number[] {
+      return (
+        db
+          .prepare(
+            `SELECT CAST(substr(id, 6) AS INTEGER) AS page FROM records
+              WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'
+                AND instr(json_extract(value, '$.searchText'), ?) > 0
+              ORDER BY page`
+          )
+          .all(id, needle) as Array<{ page: number }>
+      ).map((r) => r.page)
     },
     hasTimeline(id: string): boolean {
       return !!db

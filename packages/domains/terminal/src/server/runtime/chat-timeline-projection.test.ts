@@ -36,6 +36,8 @@ function memoryStore() {
   let checkpoint: { version: string; seq: number; data: string } | null = null
   const writes: TimelineWrite[] = []
   let fail = false
+  /** Fail the write with this index (0-based count of writes), once. */
+  let failAt = -1
   let discarded = 0
   const store: TimelineProjectionStore = {
     loadCheckpoint: async () => checkpoint,
@@ -50,6 +52,10 @@ function memoryStore() {
         .map(([page, p]) => ({ page, summary: p.summary })),
     save: async (write) => {
       if (fail) throw new Error('disk full')
+      if (writes.length === failAt) {
+        failAt = -1
+        throw new Error('disk full')
+      }
       writes.push(write)
       if (write.dropPagesFrom !== null) {
         for (const page of [...pages.keys()]) if (page >= write.dropPagesFrom) pages.delete(page)
@@ -84,6 +90,9 @@ function memoryStore() {
     },
     failWrites: (on: boolean) => {
       fail = on
+    },
+    failWriteAt: (index: number) => {
+      failAt = index
     }
   }
 }
@@ -463,5 +472,100 @@ describe('pages answered within a byte budget (rows carry screenshots: 32 pages 
     })
     expect(pagesRead.length).toBeGreaterThan(1)
     expect(meaning(await clientView(fromPages))).toEqual(meaning(await clientView(fromArray)))
+  })
+})
+
+describe('written in slices, one heavy step per loop turn (a boot restore opens dozens of chats)', () => {
+  // 2026-11-14: restoring ~60 chats froze the computer 1–11 s at a time in
+  // `flushNow → saveTimeline`: every dirty page plus the checkpoint went out in one
+  // synchronous write, and every chat did its fold and write in the same loop turn.
+  const events = buildLongSession({
+    events: 6_000,
+    seed: 9,
+    provider: 'claude',
+    askEveryTool: true
+  })
+  const slice = 64 * 1024
+  const rowsBytes = (w: TimelineWrite) => w.pages.reduce((n, p) => n + p.rows.length, 0)
+
+  test('a rebuild writes pages a slice at a time; the checkpoint only with the last', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice
+    })
+    expect(mem.pages.size).toBeGreaterThan(4)
+    expect(mem.writes.length).toBeGreaterThan(mem.pages.size / 2)
+    // A slice holds one page, or pages within the slice budget.
+    for (const w of mem.writes)
+      if (w.pages.length > 1) expect(rowsBytes(w)).toBeLessThanOrEqual(slice)
+    // Only the first write of a run drops pages; only the last stores the checkpoint.
+    expect(mem.writes.filter((w) => w.dropPagesFrom !== null)).toHaveLength(1)
+    expect(mem.writes[0].dropPagesFrom).toBe(0)
+    expect(mem.writes.filter((w) => w.checkpoint !== null)).toHaveLength(1)
+    expect(mem.writes.at(-1)!.checkpoint).not.toBeNull()
+    expect(meaning(await clientView(p))).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('a failure between two slices leaves no checkpoint: the next open rebuilds it whole', async () => {
+    const mem = memoryStore()
+    const history = buffered(events)
+    mem.failWriteAt(1)
+    const broken = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice,
+      onError: () => undefined
+    })
+    await broken.close()
+    // The first slice dropped the stored checkpoint; nothing stored one after the failure.
+    expect(mem.checkpoint).toBeNull()
+    const reopened = await TimelineProjection.open({
+      store: mem.store,
+      history,
+      agentStartedTurns: true,
+      flushSliceBytes: slice
+    })
+    expect(mem.checkpoint?.seq).toBe(history.at(-1)!.seq)
+    expect(meaning(await clientView(reopened))).toEqual(meaning(fullReplay(history, true)))
+  })
+
+  test('many chats rebuilding at once: at most two heavy steps between two loop turns', async () => {
+    let tick = 0
+    let spinning = true
+    const spin = () => {
+      tick++
+      if (spinning) setImmediate(spin)
+    }
+    setImmediate(spin)
+    const perTick = new Map<number, number>()
+    const stores = Array.from({ length: 6 }, () => {
+      const mem = memoryStore()
+      const save = mem.store.save
+      mem.store.save = async (w) => {
+        perTick.set(tick, (perTick.get(tick) ?? 0) + 1)
+        return save(w)
+      }
+      return mem
+    })
+    const history = buffered(events)
+    const opened = await Promise.all(
+      stores.map((mem) =>
+        TimelineProjection.open({
+          store: mem.store,
+          history,
+          agentStartedTurns: true,
+          flushSliceBytes: slice
+        })
+      )
+    )
+    spinning = false
+    expect(opened.every((p) => p.usable)).toBe(true)
+    expect(Math.max(...perTick.values())).toBeLessThanOrEqual(2)
+    expect(perTick.size).toBeGreaterThan(stores.length)
   })
 })

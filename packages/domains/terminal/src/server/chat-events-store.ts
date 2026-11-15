@@ -136,12 +136,13 @@ export function yieldToEventLoop(): Promise<void> {
 }
 
 /**
- * Turns for reading history pages, shared by every chat log of this process: one
- * page read (and what its caller does with it before awaiting again) per turn;
- * while other reads wait, the event loop runs between turns. A burst of hydrates
- * (a restore opening dozens of tabs) then parses about one page per loop turn in
- * total — never one page per tab per turn — so heartbeats and sockets stay
- * answered. (A lone long read yields between its own pages: `ChatEventLog.pages`.)
+ * Turns for the heavy history work of this process, shared by every chat: reading a
+ * history page (and what its caller does with it before awaiting again), and the
+ * timeline projection's folds, page writes and page drops (`job`). One unit per
+ * turn; while others wait, the event loop runs between turns. A burst of hydrates
+ * (a restore opening dozens of tabs) then does about one unit per loop turn in
+ * total — never one per tab per turn — so heartbeats and sockets stay answered.
+ * (A lone long read yields between its own pages: `ChatEventLog.pages`.)
  */
 export class HistoryReadTurns {
   private tail: Promise<void> = Promise.resolve()
@@ -156,6 +157,26 @@ export class HistoryReadTurns {
     const next = () => (this.waiting > 0 ? yieldToEventLoop() : undefined)
     this.tail = run.then(next, next)
     return run
+  }
+
+  /**
+   * A long job (a projection rebuild's folds, its page writes, a page drop) done in
+   * steps: each step in its turn (`take`), and the event loop ALWAYS runs between two
+   * steps of the job, even with nobody waiting — its steps never run back to back in
+   * one loop turn. No turn before its first step (`yieldFirst` asks for one) nor after
+   * its last: a lone short job (an empty projection's one write) adds no loop turn to
+   * what follows it (an agent's spawn). Never step from inside a turn's own work: that
+   * waits on itself.
+   */
+  job(opts: { yieldFirst?: boolean } = {}): { step<T>(work: () => T | Promise<T>): Promise<T> } {
+    let started = !!opts.yieldFirst
+    return {
+      step: async <T>(work: () => T | Promise<T>): Promise<T> => {
+        if (started) await yieldToEventLoop()
+        started = true
+        return this.take(async () => work())
+      }
+    }
   }
 }
 
