@@ -21,9 +21,59 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   type EventLoopStall,
+  classifyStall,
   startEventLoopStallDetector,
   parseStallProcesses
 } from './event-loop-stall'
+
+/**
+ * FU5 (computer stalls): 134 of 186 stalls on 2026-11-14/15 were the machine at 100 %,
+ * not our code, and telling them apart took an offline analysis. Every report now
+ * carries a verdict, and the load / paging / context-switch evidence behind it.
+ */
+describe('classifyStall: busy / starved / blocked', () => {
+  const at = (over: Partial<Parameters<typeof classifyStall>[0]>) =>
+    classifyStall(
+      {
+        durationMs: 5_000,
+        mainThreadCpuMs: 100,
+        processCpuMs: 120,
+        machineCpuBusyPct: 40,
+        loadAvg1: 2,
+        cpuCount: 10,
+        ...over
+      },
+      1_000
+    )
+  test('our own work alone passed the threshold → busy, however loaded the machine', () => {
+    expect(at({ mainThreadCpuMs: 1_200, machineCpuBusyPct: 100 })).toBe('busy')
+    expect(at({ durationMs: 1_500, mainThreadCpuMs: 900 })).toBe('busy')
+  })
+  test('little CPU of ours on a saturated machine → starved', () => {
+    expect(at({ machineCpuBusyPct: 100 })).toBe('starved')
+    expect(at({ machineCpuBusyPct: 90 })).toBe('starved')
+    expect(at({ machineCpuBusyPct: null, loadAvg1: 150 })).toBe('starved')
+  })
+  test('little CPU of ours with CPUs to spare → blocked (a sync call, I/O, a lock, a suspend)', () => {
+    expect(at({})).toBe('blocked')
+    expect(at({ machineCpuBusyPct: null, loadAvg1: null })).toBe('blocked')
+  })
+  test('without a main-thread figure the process CPU stands in', () => {
+    expect(at({ mainThreadCpuMs: null, processCpuMs: 1_500 })).toBe('busy')
+    expect(at({ mainThreadCpuMs: null, processCpuMs: 10 })).toBe('blocked')
+  })
+})
+
+/** The verdict and its evidence, as every report must carry them. */
+function expectVerdictEvidence(s: EventLoopStall): void {
+  expect(s.verdict).toBe(classifyStall(s, 500))
+  expect(s.cpuCount).toBeGreaterThanOrEqual(1)
+  if (s.loadAvg1 !== null) expect(s.loadAvg1).toBeGreaterThanOrEqual(0)
+  for (const n of [s.majorPageFaults, s.voluntaryCtxSwitches, s.involuntaryCtxSwitches]) {
+    expect(Number.isInteger(n), String(n)).toBe(true)
+    expect(n).toBeGreaterThanOrEqual(0)
+  }
+}
 
 test('process samples bound top CPU entries and exclude their arguments', () => {
   const sample = parseStallProcesses(
@@ -215,6 +265,11 @@ describe('busy JavaScript', () => {
     )
   })
 
+  test('a verdict with its evidence (load, paging, context switches)', () => {
+    expect(s, 'no stall').toBeDefined()
+    expectVerdictEvidence(s!)
+  })
+
   test('machine CPU and GC time are reported as numbers', () => {
     expect(s, 'no stall').toBeDefined()
     expect(typeof s!.gcMs, 'gcMs').toBe('number')
@@ -242,6 +297,14 @@ describe('many short blocking calls (the suspected git pattern)', () => {
   test('a stack sample names the caller between the calls', () => {
     expect(s, 'no stall').toBeDefined()
     expect(stackText(s!)).toContain('manyBlockingCallsForTest')
+  })
+
+  test('waiting shows as voluntary context switches, with the verdict', () => {
+    expect(s, 'no stall').toBeDefined()
+    expectVerdictEvidence(s!)
+    // macOS does not count voluntary switches (getrusage reports 0); Linux does.
+    if (process.platform === 'linux') expect(s!.voluntaryCtxSwitches).toBeGreaterThan(0)
+    expect(['blocked', 'starved']).toContain(s!.verdict)
   })
 
   test('the main thread mostly WAITED (almost no CPU), unlike a busy freeze', () => {

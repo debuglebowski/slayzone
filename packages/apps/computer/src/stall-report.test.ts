@@ -83,6 +83,20 @@ describe('sanitizeStallForHub', () => {
     // What the hub accepts.
     expect(computerEventLoopStallPayloadSchema.safeParse(out).success).toBe(true)
   })
+
+  it('keeps the verdict and its evidence (FU5)', () => {
+    const evidence = {
+      verdict: 'starved' as const,
+      loadAvg1: 151.2,
+      cpuCount: 10,
+      majorPageFaults: 3,
+      voluntaryCtxSwitches: 0,
+      involuntaryCtxSwitches: 812
+    }
+    const out = sanitizeStallForHub({ ...stall, ...evidence })
+    expect(out).toMatchObject(evidence)
+    expect(computerEventLoopStallPayloadSchema.parse(out)).toMatchObject(evidence)
+  })
 })
 
 describe('createStallReporter', () => {

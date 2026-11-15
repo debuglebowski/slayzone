@@ -474,7 +474,15 @@ export const computerEventLoopStallPayloadSchema = z.object({
     5
   ).optional(),
   /** Earlier reports the computer could not deliver (hub away, outbox full). */
-  dropped: z.number().int().nonnegative().optional()
+  dropped: z.number().int().nonnegative().optional(),
+  // FU5: the detector's verdict and its evidence (platform `event-loop-stall`). Absent
+  // from an older computer's reports.
+  verdict: z.enum(['busy', 'starved', 'blocked']).optional(),
+  loadAvg1: z.number().nonnegative().nullable().optional(),
+  cpuCount: z.number().int().positive().optional(),
+  majorPageFaults: z.number().int().nonnegative().optional(),
+  voluntaryCtxSwitches: z.number().int().nonnegative().optional(),
+  involuntaryCtxSwitches: z.number().int().nonnegative().optional()
 })
 export type ComputerEventLoopStallPayload = z.infer<typeof computerEventLoopStallPayloadSchema>
 

@@ -67,6 +67,17 @@ export function sanitizeStallForHub(stall: EventLoopStall): ComputerEventLoopSta
             }))
           }))
         }
+      : {}),
+    // FU5: the verdict and the counters behind it (numbers only, nothing to strip).
+    ...(stall.verdict !== undefined ? { verdict: stall.verdict } : {}),
+    ...(stall.loadAvg1 !== undefined ? { loadAvg1: stall.loadAvg1 } : {}),
+    ...(stall.cpuCount !== undefined ? { cpuCount: stall.cpuCount } : {}),
+    ...(stall.majorPageFaults !== undefined ? { majorPageFaults: stall.majorPageFaults } : {}),
+    ...(stall.voluntaryCtxSwitches !== undefined
+      ? { voluntaryCtxSwitches: stall.voluntaryCtxSwitches }
+      : {}),
+    ...(stall.involuntaryCtxSwitches !== undefined
+      ? { involuntaryCtxSwitches: stall.involuntaryCtxSwitches }
       : {})
   }
 }

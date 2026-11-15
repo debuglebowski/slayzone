@@ -86,6 +86,23 @@ describe('event-loop stall report bounds', () => {
     expect(parsed.children[0].processes[0].command.length).toBeLessThanOrEqual(64)
   })
 
+  it('carries the verdict and its evidence (FU5); a report from an older computer has none', () => {
+    const verdict = {
+      ...stall,
+      verdict: 'starved',
+      loadAvg1: 151.2,
+      cpuCount: 10,
+      majorPageFaults: 3,
+      voluntaryCtxSwitches: 0,
+      involuntaryCtxSwitches: 812
+    }
+    expect(computerEventLoopStallPayloadSchema.parse(verdict)).toEqual(verdict)
+    expect(computerEventLoopStallPayloadSchema.parse(stall)).not.toHaveProperty('verdict')
+    expect(
+      computerEventLoopStallPayloadSchema.safeParse({ ...stall, verdict: 'sleepy' }).success
+    ).toBe(false)
+  })
+
   it('rejects a report without its measurements', () => {
     expect(computerEventLoopStallPayloadSchema.safeParse({ durationMs: 'x' }).success).toBe(false)
   })
