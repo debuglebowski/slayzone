@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { toSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import type { TaskArtifact } from '@slayzone/task-contracts'
+import { RICH_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
 
 // Stable clients, like the real providers' (the editor's callbacks depend on them).
 vi.mock('./trpc', () => {
@@ -50,7 +51,7 @@ vi.mock('@slayzone/ui', async (importOriginal) => ({
   useVisibleInterval: () => undefined
 }))
 vi.mock('@slayzone/editor', () => ({
-  RichTextEditor: () => null,
+  RichTextEditor: () => <div data-testid="rich" />,
   resolveReadOnlyLinkClickTarget: () => null,
   usePdfViewerLinks: () => undefined,
   useHtmlPreviewLinks: () => undefined
@@ -71,11 +72,26 @@ vi.mock('@slayzone/file-editor/client/EditorToc', () => ({ EditorToc: () => null
 
 const { ArtifactContentEditor } = await import('./ArtifactContentEditor')
 
-const disk: { content: Record<string, string>; mtime: Record<string, number> } = {
+const disk: {
+  content: Record<string, string>
+  mtime: Record<string, number>
+  /** Not text on disk: what readText reports instead of content. */
+  notText: Record<string, Exclude<ArtifactTextRead, { kind: 'text' }>>
+} = {
   content: {},
-  mtime: {}
+  mtime: {},
+  notText: {}
 }
-const readContent = vi.fn(async (id: string): Promise<string | null> => disk.content[id] ?? null)
+const textRead = (id: string): ArtifactTextRead | null =>
+  disk.notText[id] ??
+  (disk.content[id] == null
+    ? null
+    : {
+        kind: 'text',
+        content: disk.content[id],
+        size: new TextEncoder().encode(disk.content[id]).length
+      })
+const readText = vi.fn(async (id: string): Promise<ArtifactTextRead | null> => textRead(id))
 const saveContent = vi.fn(async (id: string, content: string) => {
   disk.content[id] = content
   disk.mtime[id] = (disk.mtime[id] ?? 0) + 1
@@ -88,11 +104,19 @@ const NOTES = artifact('a1', 'notes.md')
 const IMAGE = artifact('img', 'pic.png')
 const VIDEO = artifact('vid', 'clip.mp4')
 
-function Tab({ mode, art = NOTES }: { mode: 'visible' | 'hidden'; art?: TaskArtifact }) {
+function Tab({
+  mode,
+  art = NOTES,
+  viewMode = 'raw'
+}: {
+  mode: 'visible' | 'hidden'
+  art?: TaskArtifact
+  viewMode?: 'preview' | 'split' | 'raw'
+}) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
     artifact: art,
-    viewMode: 'raw',
-    readContent,
+    viewMode,
+    readText,
     saveContent,
     getFilePath,
     effectiveReadability: 'normal',
@@ -119,8 +143,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   disk.content = { a1: 'v1' }
   disk.mtime = { a1: 1, img: 1 }
-  readContent.mockClear()
-  readContent.mockImplementation(async (id: string) => disk.content[id] ?? null)
+  disk.notText = {}
+  readText.mockClear()
+  readText.mockImplementation(async (id: string) => textRead(id))
   saveContent.mockClear()
   getFilePath.mockClear()
 })
@@ -158,13 +183,13 @@ describe('ArtifactContentEditor across a tab switch', () => {
   it('showing reloads the file from disk', async () => {
     const view = render(<Tab mode="visible" />)
     await flush()
-    expect(readContent).toHaveBeenCalledTimes(1)
+    expect(readText).toHaveBeenCalledTimes(1)
 
     view.rerender(<Tab mode="hidden" />)
     disk.content.a1 = 'changed on disk'
     view.rerender(<Tab mode="visible" />)
     await flush()
-    expect(readContent).toHaveBeenCalledTimes(2)
+    expect(readText).toHaveBeenCalledTimes(2)
     expect(code()?.value).toBe('changed on disk')
   })
 
@@ -213,7 +238,7 @@ describe('ArtifactContentEditor video', () => {
     await flush()
     expect(video().getAttribute('src')).toBe(toSlzFileUrl('/data/vid', 1))
     expect(video().controls).toBe(true)
-    expect(readContent).not.toHaveBeenCalled()
+    expect(readText).not.toHaveBeenCalled()
   })
 
   it('hiding the tab pauses playback, so a hidden tab never keeps playing sound', async () => {
@@ -252,10 +277,10 @@ describe('ArtifactContentEditor switching artifacts', () => {
   it("a read that finishes after the switch never shows the old artifact's text", async () => {
     disk.content.a2 = 'second'
     const pending: Record<string, () => void> = {}
-    readContent.mockImplementation(
+    readText.mockImplementation(
       (id: string) =>
-        new Promise<string | null>((resolve) => {
-          pending[id] = () => resolve(disk.content[id] ?? null)
+        new Promise<ArtifactTextRead | null>((resolve) => {
+          pending[id] = () => resolve(textRead(id))
         })
     )
     const view = render(<Tab mode="visible" />)
@@ -304,13 +329,13 @@ describe('ArtifactContentEditor and its own autosave', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(500)
     })
-    const reads = readContent.mock.calls.length
+    const reads = readText.mock.calls.length
     act(() => contentChanged?.('a1'))
     await save.release()
     act(() => contentChanged?.('a1'))
     await flush()
     expect(banner()).toBeNull()
-    expect(readContent.mock.calls.length).toBe(reads)
+    expect(readText.mock.calls.length).toBe(reads)
     expect(code()?.value).toBe('abc')
   })
 
@@ -350,5 +375,150 @@ describe('ArtifactContentEditor and its own autosave', () => {
     act(() => contentChanged?.('a1'))
     await flush()
     expect(code()?.value).toBe('from outside')
+  })
+})
+
+describe('ArtifactContentEditor: files not shown as text', () => {
+  // An unknown extension falls back to markdown, so a binary file reached the
+  // rich-text editor as decoded UTF-8: a multi-second freeze, and one keystroke
+  // autosaved the decoded text over the original bytes.
+  const BLOB = artifact('bin', 'blob.bin')
+  const noPreview = () => screen.queryByTestId('artifact-no-preview')
+
+  it('a binary file shows No preview, never an editor, and is never written', async () => {
+    disk.notText.bin = { kind: 'binary', size: 4_194_304 }
+    disk.mtime.bin = 1
+    const onDownload = vi.fn()
+    render(
+      <Activity mode="visible">
+        <ArtifactContentEditor
+          {...({
+            artifact: BLOB,
+            viewMode: 'preview',
+            readText,
+            saveContent,
+            getFilePath,
+            effectiveReadability: 'normal',
+            effectiveWidth: 'wide',
+            zoomPct: 100,
+            htmlTheme: 'system',
+            searchQuery: '',
+            searchActiveIndex: 0,
+            searchMatchCase: false,
+            searchRegex: false,
+            onSearchMatchCountChange: () => undefined,
+            onDownload
+          } satisfies React.ComponentProps<typeof ArtifactContentEditor>)}
+        />
+      </Activity>
+    )
+    await flush()
+    expect(noPreview()?.getAttribute('data-reason')).toBe('binary')
+    expect(noPreview()?.textContent).toContain('4.0 MB')
+    expect(code()).toBeNull()
+    expect(screen.queryByTestId('rich')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /download/i }))
+    expect(onDownload).toHaveBeenCalledTimes(1)
+
+    // A watcher event re-reads, still binary: still no editor, nothing saved.
+    disk.mtime.bin = 2
+    act(() => contentChanged?.('bin'))
+    await flush()
+    expect(noPreview()).not.toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(saveContent).not.toHaveBeenCalled()
+  })
+
+  it('a file over the size cap is not opened', async () => {
+    disk.notText.bin = { kind: 'too-large', size: 70 * 1024 * 1024 }
+    render(<Tab mode="visible" art={BLOB} />)
+    await flush()
+    expect(noPreview()?.getAttribute('data-reason')).toBe('too-large')
+    expect(noPreview()?.textContent).toContain('70.0 MB')
+    expect(code()).toBeNull()
+  })
+
+  it('a text file rewritten as binary from outside switches to No preview', async () => {
+    render(<Tab mode="visible" />)
+    await flush()
+    expect(code()?.value).toBe('v1')
+    disk.notText.a1 = { kind: 'binary', size: 10 }
+    disk.mtime.a1 = 2
+    act(() => contentChanged?.('a1'))
+    await flush()
+    expect(code()).toBeNull()
+    expect(noPreview()?.getAttribute('data-reason')).toBe('binary')
+  })
+
+  it('a failed first read shows an error with Retry, not an empty editor', async () => {
+    readText.mockImplementationOnce(async () => {
+      throw new Error('computer offline')
+    })
+    render(<Tab mode="visible" />)
+    await flush()
+    expect(code()).toBeNull()
+    expect(noPreview()?.getAttribute('data-reason')).toBe('error')
+    expect(noPreview()?.textContent).toContain('computer offline')
+    expect(saveContent).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await flush()
+    expect(noPreview()).toBeNull()
+    expect(code()?.value).toBe('v1')
+  })
+})
+
+describe('ArtifactContentEditor: large markdown', () => {
+  const big = '# Big\n\n' + 'x'.repeat(RICH_TEXT_MAX_BYTES)
+  const notice = () => screen.queryByTestId('artifact-large-doc-notice')
+
+  it('opens as source with a notice, and as rich text on request', async () => {
+    disk.content.a1 = big
+    render(<Tab mode="visible" viewMode="preview" />)
+    await flush()
+    expect(screen.queryByTestId('rich')).toBeNull()
+    expect(code()?.value).toBe(big)
+    expect(notice()).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId('artifact-large-doc-open-rich'))
+    expect(screen.queryByTestId('rich')).not.toBeNull()
+    expect(notice()).toBeNull()
+  })
+
+  it('the split view also opens as source', async () => {
+    disk.content.a1 = big
+    render(<Tab mode="visible" viewMode="split" />)
+    await flush()
+    expect(screen.getAllByTestId('code')).toHaveLength(1)
+    expect(notice()).not.toBeNull()
+  })
+
+  it('raw view needs no notice', async () => {
+    disk.content.a1 = big
+    render(<Tab mode="visible" viewMode="raw" />)
+    await flush()
+    expect(code()?.value).toBe(big)
+    expect(notice()).toBeNull()
+  })
+
+  it('markdown at the limit opens as rich text', async () => {
+    disk.content.a1 = 'x'.repeat(RICH_TEXT_MAX_BYTES)
+    render(<Tab mode="visible" viewMode="preview" />)
+    await flush()
+    expect(screen.queryByTestId('rich')).not.toBeNull()
+    expect(notice()).toBeNull()
+  })
+
+  it('typing past the limit does not swap the rich editor out', async () => {
+    // The choice follows the size read from disk, not the draft.
+    disk.content.a1 = 'small'
+    render(<Tab mode="visible" viewMode="raw" />)
+    await flush()
+    fireEvent.change(code()!, { target: { value: big } })
+    expect(code()?.value).toBe(big)
+    expect(notice()).toBeNull()
   })
 })

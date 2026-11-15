@@ -24,6 +24,8 @@ import type { ArtifactSearchOptions, ArtifactSearchReport } from './search'
 // can stream a version's bytes off disk instead of hauling them through the
 // worker boundary as a utf-8 string.
 import { BlobStore } from './blob-store'
+import { readArtifactTextFile } from './text-content'
+import { ARTIFACT_TEXT_MAX_BYTES, type ArtifactTextRead } from '../shared/text-read'
 import { VersionError } from './errors'
 import { isErasureDoneOrCompacting } from '@slayzone/content-erasure'
 import { eraseContent } from '@slayzone/content-erasure/server'
@@ -247,6 +249,39 @@ export function createArtifactStore(dataDir: string) {
         }
       }
       return ''
+    },
+
+    /**
+     * The artifact for the in-app text editor: its text, or why it is not shown as
+     * text (binary, or over the size cap — then it is not read at all). Same source
+     * order as `readArtifactContent`: the working file, the legacy file, then the
+     * current version's blob. An artifact with no content yet is empty text.
+     */
+    async readArtifactText(
+      db: SlayzoneDb,
+      id: string,
+      maxBytes: number = ARTIFACT_TEXT_MAX_BYTES
+    ): Promise<ArtifactTextRead | null> {
+      const existing = await getRow(db, id)
+      if (!existing) return null
+      const taskId = existing.task_id as string
+      const title = existing.title as string
+      const filePath = getArtifactFilePath(taskId, id, title)
+      if (existsSync(filePath)) return readArtifactTextFile(filePath, maxBytes)
+      const legacyPath = getLegacyArtifactFilePath(taskId, id, title)
+      if (existsSync(legacyPath)) return readArtifactTextFile(legacyPath, maxBytes)
+      if (existing.current_version_id != null) {
+        try {
+          const { blobPath } = await this.resolveArtifactVersion(db, {
+            artifactId: id,
+            versionRef: 'current'
+          })
+          if (blobPath && existsSync(blobPath)) return readArtifactTextFile(blobPath, maxBytes)
+        } catch {
+          // Unreadable version: empty text, as readArtifactContent.
+        }
+      }
+      return { kind: 'text', content: '', size: 0 }
     },
 
     async getArtifactPath(db: SlayzoneDb, id: string): Promise<string | null> {

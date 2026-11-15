@@ -358,6 +358,11 @@ export const artifactsRouter = router({
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactContent(ctx.db, input.id)),
 
+  /** The in-app editor's read: the text, or why it is not shown as text (binary / too large). */
+  readText: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactText(ctx.db, input.id)),
+
   getFilePath: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => store(ctx.dataRoot).getArtifactPath(ctx.db, input.id)),
