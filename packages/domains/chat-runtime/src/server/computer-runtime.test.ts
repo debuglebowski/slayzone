@@ -252,11 +252,13 @@ test('a failed timeline page write rolls back all pages and its checkpoint', asy
     pages: [page(0, 'old')],
     checkpoint: { version: 'v', seq: 0, data: 'old' }
   })
-  const original = r.storage.putRecord.bind(r.storage)
-  r.storage.putRecord = (id, epoch, record) => {
-    if (record.kind === 'timeline' && record.id === 'page:1') throw new Error('disk full')
-    return original(id, epoch, record)
-  }
+  r.storage.compose((db) =>
+    db.exec(`
+    CREATE TEMP TRIGGER fail_timeline_page BEFORE INSERT ON records
+    WHEN NEW.kind='timeline' AND NEW.id='page:1'
+    BEGIN SELECT RAISE(ABORT, 'disk full'); END;
+  `)
+  )
   await expect(
     r.local.data.saveTimeline('tab-a', {
       dropPagesFrom: 0,

@@ -13,6 +13,16 @@ A receipt means an operation was accepted, not that a provider received it. Prov
 transcripts remain provider-managed. Existing hub backups and separately created
 hub task artifacts are outside the live-chat storage boundary.
 
+Chat timeline reduction, checkpoint encoding, page decoding and search run on a
+lazy worker shared by this runtime's tabs. The computer bundles the worker source
+inside its single executable. The existing SQLite owner commits pre-encoded dirty
+pages plus checkpoint atomically, with the captured ownership epoch; it does not
+scan or decode old pages to drop a range. Reads hand one encoded page at a time to
+the worker. SQLite I/O and IPC string copying still run on the computer thread.
+There is no second database writer or extra content store. Worker failure falls
+back to event replay; a later projection open starts a new worker. Close drains
+accepted projection work before releasing its storage callbacks.
+
 Task/provider settings have one computer authority and monotonic revisions;
 per-tab caches and historical session replay cannot overwrite newer settings.
 Every retained user attachment reference owns a verified pin. Tool payloads are

@@ -2,6 +2,8 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
+import { build } from 'esbuild'
+import { TIMELINE_PROJECTION_VERSION } from '@slayzone/terminal/timeline-projection'
 import { createChatRuntimeHandlers } from './chat-runtime'
 import { createFixtureChatRuntime, projectScopedDeps } from '../project-scope.fixture'
 const dirs: string[] = [],
@@ -479,4 +481,60 @@ test('archive.blob: a restored archive serves an image only to the conversation 
       offset: 0
     })
   ).rejects.toThrow()
+})
+
+test('computer handler uses the bundled projection worker and survives its startup failure', async () => {
+  const source = (
+    await build({
+      entryPoints: ['packages/domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      write: false
+    })
+  ).outputFiles[0].text
+  for (const [workerSource, expectedKind] of [
+    [source, 'paged'],
+    ["throw new Error('worker startup fault')", 'full']
+  ] as const) {
+    vi.stubGlobal('__SLAYZONE_TIMELINE_WORKER_SOURCE__', workerSource)
+    const { h } = setup()
+    try {
+      await h.request({ kind: 'bootstrap', value: bootstrap })
+      await h.request({
+        kind: 'invoke',
+        value: {
+          route: { id: 'store', epoch: 1 },
+          target: 'ops',
+          method: 'hydrate',
+          operationId: 'hydrate-worker',
+          args: [{ taskId: 'task', tabId: 'tab', mode: 'claude-chat', cwd: bootstrap.cwd }]
+        }
+      })
+      expect(
+        await h.request({
+          kind: 'invoke',
+          value: {
+            route: { id: 'store', epoch: 1 },
+            target: 'ops',
+            method: 'openTimeline',
+            args: ['tab', TIMELINE_PROJECTION_VERSION]
+          }
+        })
+      ).toMatchObject({ kind: expectedKind })
+      await h.request({
+        kind: 'invoke',
+        value: {
+          route: { id: 'store', epoch: 1 },
+          target: 'ops',
+          method: 'saveTabDraft',
+          operationId: 'draft-worker',
+          args: ['tab', { text: 'draft stays available', attachments: [] }]
+        }
+      })
+    } finally {
+      await h.close()
+      vi.unstubAllGlobals()
+    }
+  }
 })

@@ -45,6 +45,7 @@ import {
 } from '../../shared/timeline-summary'
 import type { BufferedEvent } from '../chat-events-store'
 import type { TimelineCheckpointRow, TimelineWrite } from '../chat-timeline-store'
+import type { TimelineRecordStore } from './chat-timeline-records'
 
 export const TIMELINE_PAGE_ROWS = 256
 /** Sealed pages kept in memory besides the tail, most recently used. */
@@ -56,6 +57,8 @@ const FLUSH_DELAY_MS = 1500
 const FOLD_CHUNK = 256
 /** Where the projection persists (the tab's rows of `chat-timeline-store.ts`). */
 export interface TimelineProjectionStore {
+  /** Computer-local raw records: decoding/encoding can run in a projection worker. */
+  records?: TimelineRecordStore
   loadCheckpoint(): Promise<TimelineCheckpointRow | null>
   loadPages(pages: readonly number[]): Promise<Array<{ page: number; rows: string }>>
   loadSummaries(): Promise<Array<{ page: number; summary: string }>>
@@ -64,6 +67,22 @@ export interface TimelineProjectionStore {
   /** Throw the stored projection away (the next open rebuilds it from the events). */
   discard(): Promise<void>
 }
+
+export type TimelineProjectionHandle = Pick<
+  TimelineProjection,
+  | 'feed'
+  | 'finish'
+  | 'apply'
+  | 'openSnapshot'
+  | 'pagesAsOf'
+  | 'searchPages'
+  | 'flush'
+  | 'close'
+  | 'usable'
+>
+export type BeginTimelineProjection = (
+  opts: Parameters<typeof TimelineProjection.begin>[0]
+) => Promise<{ projection: TimelineProjectionHandle; from: number }>
 
 /**
  * A tab's saved events as the projection reads them on open: `lastSeq` (its
@@ -141,6 +160,7 @@ export class TimelineProjection {
   /** A step failed: this projection may be wrong — clients open from the events instead. */
   private failed = false
   private closed = false
+  private discarding: Promise<void> | null = null
   private peakResident = 0
   /** The stored checkpoint was deleted by a write ahead of it (none stored yet since). */
   private checkpointDropped = false
@@ -212,16 +232,30 @@ export class TimelineProjection {
   }
 
   /** Saved events of the history being opened, in seq order (those already folded in are skipped). */
-  async feed(entries: readonly BufferedEvent[]): Promise<void> {
-    const fresh = entries.filter((b) => b.seq > this.seq)
-    if (fresh.length > 0) await this.applyRun(fresh)
+  feed(entries: readonly BufferedEvent[]): Promise<void> {
+    // Storage can yield to a timed flush while rebuilding. Both must share the
+    // same chain, or one save can clear dirty pages created during another save.
+    return this.enqueue(async () => {
+      try {
+        const fresh = entries.filter((b) => b.seq > this.seq)
+        if (fresh.length > 0) await this.applyRun(fresh)
+      } catch (err) {
+        this.fail(err)
+        throw err
+      }
+    })
   }
 
   /** The opening is done: a rebuild writes everything out; a restore stores a checkpoint again if pages went out. */
   async finish(): Promise<void> {
     // Pages went out along the way (the checkpoint with them): store one again.
-    if (this.rebuilding || this.checkpointDropped) await this.flush()
-    this.rebuilding = false
+    try {
+      if (this.rebuilding || this.checkpointDropped) await this.flush()
+      this.rebuilding = false
+    } catch (err) {
+      this.fail(err)
+      throw err
+    }
   }
 
   /**
@@ -288,8 +322,8 @@ export class TimelineProjection {
   }
 
   /** A saved event, in seq order (later ones queue behind it). */
-  apply(entry: BufferedEvent): void {
-    void this.enqueue(async () => {
+  apply(entry: BufferedEvent): Promise<void> {
+    return this.enqueue(async () => {
       if (this.failed || entry.seq <= this.seq) return
       try {
         await this.applyBatch([entry])
@@ -414,6 +448,7 @@ export class TimelineProjection {
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = null
     await this.flush()
+    await this.discarding
     this.closed = true
   }
 
@@ -431,7 +466,7 @@ export class TimelineProjection {
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = null
     this.onError('projection failed, thrown away', err)
-    void this.store
+    this.discarding = this.store
       .discard()
       .catch((e: unknown) => this.onError('throwing the stored projection away failed', e))
   }
@@ -573,7 +608,7 @@ export class TimelineProjection {
     if (this.flushTimer || this.closed) return
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null
-      void this.flush()
+      void this.flush().catch((err: unknown) => this.fail(err))
     }, FLUSH_DELAY_MS)
     this.flushTimer.unref?.()
   }

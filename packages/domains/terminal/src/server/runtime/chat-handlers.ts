@@ -825,6 +825,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
       data.loadUserMessageContent?.(taskId, ids) ?? Promise.resolve(new Map()),
     // Each tab's timeline projection (paged history), derived from those events.
     timelineStore: (tabId) => ({
+      records: data.timelineRecords?.(tabId),
       loadCheckpoint: () => data.loadTimelineCheckpoint(tabId),
       loadPages: (pages) => data.loadTimelinePages(tabId, pages),
       loadSummaries: () => data.loadTimelineSummaries(tabId),

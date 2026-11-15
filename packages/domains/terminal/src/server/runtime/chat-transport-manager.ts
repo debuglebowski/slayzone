@@ -30,7 +30,9 @@ import {
   type TimelineHistorySource,
   type TimelineOpen,
   type TimelinePagesResult,
-  type TimelineProjectionStore
+  type TimelineProjectionStore,
+  type TimelineProjectionHandle,
+  type BeginTimelineProjection
 } from './chat-timeline-projection'
 import type {
   RewindFilesPreview,
@@ -336,6 +338,8 @@ export interface TransportDeps {
    * open from the full replay, as before.
    */
   timelineStore?: (tabId: string) => TimelineProjectionStore
+  /** Computer composition runs projection CPU work on its shared worker. */
+  beginTimelineProjection?: BeginTimelineProjection
   /**
    * Non-destructive process-liveness probe (`process.kill(pid, 0)`-style).
    * Injected so the watchdog tests can control the verdict deterministically.
@@ -449,7 +453,7 @@ interface ChatTab {
   /** Sole owner of this tab's seqs; written insert-only. */
   log: ChatEventLog
   /** Its timeline projection, fed every saved event (null: none, or it failed to open). */
-  projection: Promise<TimelineProjection | null>
+  projection: Promise<TimelineProjectionHandle | null>
   splitter: ChatEventSplitter
   outbox: ChatOutbox
   /** The current agent process (generation), or null before the first spawn. */
@@ -3883,10 +3887,10 @@ export function createChatTransport(
     tabId: string,
     mode: string,
     lastSeq: number
-  ): Promise<TimelineProjection | null> {
+  ): Promise<TimelineProjectionHandle | null> {
     const store = deps.timelineStore?.(tabId)
     if (!store) return null
-    return TimelineProjection.begin({
+    return (deps.beginTimelineProjection ?? TimelineProjection.begin)({
       store,
       lastSeq,
       agentStartedTurns: chatCapabilitiesForMode(mode).agentStartedTurns
@@ -3897,21 +3901,27 @@ export function createChatTransport(
   }
   function feedProjection(
     tabId: string,
-    projection: TimelineProjection,
+    projection: TimelineProjectionHandle,
     page: readonly BufferedEvent[]
-  ): Promise<TimelineProjection | null> {
+  ): Promise<TimelineProjectionHandle | null> {
     return projection.feed(page).then(
       () => projection,
-      (err: unknown) => projectionFailed(tabId, err)
+      async (err: unknown) => {
+        await projection.close().catch(() => undefined)
+        return projectionFailed(tabId, err)
+      }
     )
   }
   function finishProjection(
     tabId: string,
-    projection: TimelineProjection
-  ): Promise<TimelineProjection | null> {
+    projection: TimelineProjectionHandle
+  ): Promise<TimelineProjectionHandle | null> {
     return projection.finish().then(
       () => projection,
-      (err: unknown) => projectionFailed(tabId, err)
+      async (err: unknown) => {
+        await projection.close().catch(() => undefined)
+        return projectionFailed(tabId, err)
+      }
     )
   }
 

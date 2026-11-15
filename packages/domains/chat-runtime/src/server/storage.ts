@@ -33,6 +33,7 @@ import type {
   ChatTabTransition
 } from '../shared'
 import { CHAT_RECORD_KINDS } from '../shared'
+import type { EncodedTimelineWrite } from '@slayzone/terminal/timeline-records'
 
 function digest(value: unknown): string {
   return createHash('sha256')
@@ -1156,6 +1157,47 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             .run(JSON.stringify(stored), id, seq).changes === 1
         )
       })
+    },
+    /** Timeline bodies are already encoded off-thread. No history scan or JSON decoding. */
+    writeTimeline(id: string, epoch: number, write: EncodedTimelineWrite): void {
+      api.transaction(() => {
+        requireOwner(id, epoch)
+        if (write.dropPagesFrom !== null)
+          db.prepare(`DELETE FROM records WHERE conversation_id=? AND kind='timeline'
+            AND id GLOB 'page:*' AND CAST(substr(id,6) AS INTEGER)>=?`).run(id, write.dropPagesFrom)
+        const put = db.prepare(`INSERT INTO records VALUES(?,'timeline',?,?,?)
+          ON CONFLICT(conversation_id,kind,id) DO UPDATE SET value=excluded.value,saved_at=excluded.saved_at`)
+        const at = Date.now()
+        for (const page of write.pages) put.run(id, `page:${page.page}`, page.value, at)
+        if (write.checkpoint === null)
+          db.prepare(
+            "DELETE FROM records WHERE conversation_id=? AND kind='timeline' AND id='checkpoint'"
+          ).run(id)
+        else put.run(id, 'checkpoint', write.checkpoint, at)
+      })
+    },
+    timelineRecord(id: string, key: string): string | null {
+      return (
+        (
+          db
+            .prepare(
+              "SELECT value FROM records WHERE conversation_id=? AND kind='timeline' AND id=?"
+            )
+            .get(id, key) as { value: string } | undefined
+        )?.value ?? null
+      )
+    },
+    timelinePageIds(id: string): number[] {
+      return (
+        db
+          .prepare(
+            "SELECT id FROM records WHERE conversation_id=? AND kind='timeline' AND id GLOB 'page:*'"
+          )
+          .all(id) as Array<{ id: string }>
+      )
+        .map((r) => Number(r.id.slice(5)))
+        .filter((page) => Number.isSafeInteger(page) && page >= 0)
+        .sort((a, b) => a - b)
     },
     /** Drop a conversation's timeline projection (derived; rebuilt from its events on next open). */
     resetTimeline(id: string, epoch: number): number {

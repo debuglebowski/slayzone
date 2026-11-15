@@ -1,3 +1,4 @@
+import { createComputerTimelineWorkers } from '../timeline-worker'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
@@ -452,6 +453,7 @@ export function createChatRuntimeHandlers(opts: {
 }) {
   let closed = false,
     resetting = false
+  const timelineWorkers = createComputerTimelineWorkers()
   let instance: ReturnType<typeof createComputerChatRuntime> | null = null
   let moveFilesInstance: SessionMoveFiles | null = null
   /** A moved task's session files here (Claude transcripts, scrollback): see session-move-files.ts. */
@@ -583,6 +585,7 @@ export function createChatRuntimeHandlers(opts: {
           omitted: number
         }>,
       transport: {
+        beginTimelineProjection: timelineWorkers?.begin,
         backend,
         onStateChange: (sessionId, newState, oldState) =>
           publish('state', {
@@ -1269,7 +1272,11 @@ export function createChatRuntimeHandlers(opts: {
       if (closed) return
       closed = true
       directFanout.endAll()
-      if (instance) await instance.close()
+      try {
+        if (instance) await instance.close()
+      } finally {
+        await timelineWorkers?.close()
+      }
       localProcs?.disposeAll()
       instance = null
       localProcs = null
