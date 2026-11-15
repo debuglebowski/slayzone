@@ -74,7 +74,7 @@ test.describe('Copy files dialog: lazy ignored-file tree', () => {
 
     // Expanding the folder loads one page of it, with a way to the rest.
     await dialog.getByText('node_modules/').click()
-    await expect(dialog.getByText('pkg0', { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'pkg0/ 1 file', exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Load more' })).toBeVisible()
     await dialog.getByRole('button', { name: 'Load more' }).click()
     await expect(dialog.getByRole('button', { name: 'Load more' })).toHaveCount(0)
