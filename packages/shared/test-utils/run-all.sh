@@ -657,6 +657,7 @@ run_harness packages/shared/platform/src/startup-deadline.test.ts
 run_harness packages/shared/platform/src/event-loop-stall.test.ts
 # A computer's own main-thread stall, reported over its socket, becomes the hub diagnostic computer.event_loop_stall.
 run_harness packages/apps/hub/src/computer-stall-consumer.test.ts
+run_harness packages/apps/hub/src/tab-change-coalescer.test.ts
 # Cursor-position/status query+response stripping — shared by pty-manager and the
 # computer (spontaneous-/clear regression guard; scope must stay narrow).
 run_harness packages/shared/platform/src/device-status-queries.test.ts
@@ -1398,6 +1399,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/search/src/SearchDialog.algorithm.test.ts \
   packages/domains/task/src/client/CreateTaskDialog.test.tsx \
   packages/domains/task/src/client/TaskDetailPage.test.tsx \
+  packages/domains/task/src/client/coalesced-invalidate.test.ts \
+  packages/domains/task/src/client/task-detail/useWorkspacePathProbe.test.tsx \
   packages/domains/task/src/client/TaskMetadataSidebar.test.tsx \
   packages/domains/task/src/client/terminal-first.test.ts \
   packages/domains/task/src/client/TaskHistoryPanel.test.tsx \

@@ -230,6 +230,10 @@ describe('summaries: the same answer from markers as from the full scan', () => 
       const viaScan = prompts.summaries('t', sessions)
       expect(mixed).toEqual(viaScan)
       expect(viaMarkers).toEqual(viaScan)
+      // Every conversation of the task at once (`null`, FU5 S6) = asking for each.
+      const byId = (rows: typeof viaScan) =>
+        [...rows].sort((a, b) => a.conversationId.localeCompare(b.conversationId))
+      expect(byId(prompts.summaries('t', null))).toEqual(byId(viaScan))
     })
   }
 

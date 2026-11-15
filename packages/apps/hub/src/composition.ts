@@ -1,5 +1,6 @@
 import { createChatRelayWatch } from './chat-relay-watch'
 import { createChatDirectWriteHandler } from './chat-direct-write'
+import { createTabChangeCoalescer } from './tab-change-coalescer'
 import { CHAT_DIRECT_WRITE_EVENT_NAME } from '@slayzone/computer-transport/shared'
 import {
   createDirectLinkIssuer,
@@ -1153,6 +1154,9 @@ export function composeServer(opts: {
     chatHistoryPages: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatHistoryPages ===
       true,
+    promptSummariesAll: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.promptSummariesAll ===
+      true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -1353,21 +1357,32 @@ export function composeServer(opts: {
       settle: afterBoot(d.settle)
     })
   }
+  /** How long the hub gathers one tab's prompt changes into one notification (FU5). */
+  const PROMPT_CHANGE_COALESCE_MS = 200
   setTaskSessionPromptReader((_db, taskId, ids) =>
     throughLocalBoot(() => computerChat.promptSummaries(taskId, ids), promptsOffline)
   )
   // Every saved event is reported to the hub (`saved`), relayed in full or not
   // (docs/direct-link.md): the prompt lists follow it even for a tab no hub client watches.
+  // Coalesced per tab (FU5): a message and its delivery receipt — or a burst of them —
+  // are ONE "prompts + sessions changed" per 200 ms, so every client re-reads the
+  // sessions list (a summaries read + ledger queries on the computer) once, not 2× per event.
+  const promptChanges = createTabChangeCoalescer({
+    delayMs: PROMPT_CHANGE_COALESCE_MS,
+    flush: (tabId) => {
+      void computerChat.ownership
+        .forTab(tabId)
+        .then((owner) => {
+          if (!owner) return
+          agentPromptsEvents.emit('agent-prompts:changed', owner.taskId)
+          agentSessionsEvents.emit('agent-sessions:changed', { taskId: owner.taskId })
+        })
+        .catch(() => console.error('[chat] prompt notification pending'))
+    }
+  })
   computerChat.relay.events.on('saved', (tabId, saved) => {
     if (saved.kind !== 'user-message' && saved.kind !== 'user-message-delivery') return
-    void computerChat.ownership
-      .forTab(tabId)
-      .then((owner) => {
-        if (!owner) return
-        agentPromptsEvents.emit('agent-prompts:changed', owner.taskId)
-        agentSessionsEvents.emit('agent-sessions:changed', { taskId: owner.taskId })
-      })
-      .catch(() => console.error('[chat] prompt notification pending'))
+    promptChanges.notify(tabId)
   })
   let resettingForTest = false
   const chatNotificationChains = new Map<string, Promise<void>>()
@@ -3051,6 +3066,8 @@ export function composeServer(opts: {
    */
   const resetForTest = async (): Promise<void> => {
     resettingForTest = true
+    // A change notified before the wipe names a tab that no longer exists.
+    promptChanges.close()
     try {
       await drainComputerChatMaintenance()
       await Promise.all(

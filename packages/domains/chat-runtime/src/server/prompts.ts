@@ -138,9 +138,14 @@ export function createLocalPrompts(
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   }
   return {
-    /** Full-history summaries are independent of the bounded composer recall list. */
-    summaries(taskId: string, conversationIds: string[]) {
-      const wanted = new Set(conversationIds)
+    /**
+     * Full-history summaries are independent of the bounded composer recall list.
+     * `conversationIds` null = every provider conversation of the task (one request
+     * per task instead of one per 500 ids, FU5).
+     */
+    summaries(taskId: string, conversationIds: readonly string[] | null) {
+      const wanted = conversationIds ? new Set(conversationIds) : null
+      const isWanted = (id: string) => wanted === null || wanted.has(id)
       type Summary = { conversationId: string; count: number; firstPrompt: string; firstAt: number }
       const captured = new Map<string, Summary>(),
         events = new Map<string, Summary>()
@@ -158,7 +163,7 @@ export function createLocalPrompts(
         }
       }
       for (const p of list(taskId)) {
-        if (!p.cliSessionId || !wanted.has(p.cliSessionId) || seenPrompts.has(p.id)) continue
+        if (!p.cliSessionId || !isWanted(p.cliSessionId) || seenPrompts.has(p.id)) continue
         seenPrompts.add(p.id)
         add(captured, p.cliSessionId, p.text, p.createdAt)
       }
@@ -190,7 +195,7 @@ export function createLocalPrompts(
           nativeId: string | null = null
         let pending: Array<{ id: string; text: string; at: number }> = []
         function message(id: string, text: string, at: number) {
-          if (!nativeId || !wanted.has(nativeId)) return
+          if (!nativeId || !isWanted(nativeId)) return
           const key = JSON.stringify([nativeId, id])
           if (seenEvents.has(key)) return
           seenEvents.add(key)
@@ -216,7 +221,7 @@ export function createLocalPrompts(
         }
       })
       const result: Summary[] = []
-      for (const id of wanted) {
+      for (const id of wanted ?? new Set([...captured.keys(), ...events.keys()])) {
         const a = captured.get(id),
           b = events.get(id)
         if (!a && !b) continue

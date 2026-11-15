@@ -311,11 +311,19 @@ const requestSchema = z.discriminatedUnion('kind', [
     operationId: z.string().optional()
   }),
   z.object({ kind: z.literal('sessions') }),
-  z.object({
-    kind: z.literal('prompt.summaries'),
-    taskId: z.string(),
-    conversationIds: z.array(z.string()).max(500)
-  }),
+  z
+    .object({
+      kind: z.literal('prompt.summaries'),
+      taskId: z.string(),
+      conversationIds: z.array(z.string()).max(500).optional(),
+      // FU5: every provider conversation of the task in ONE answer (bounded by the
+      // task's own sessions). Asked only of a computer that advertised
+      // `promptSummariesAll`; exactly one of the two.
+      all: z.literal(true).optional()
+    })
+    .refine((r) => (r.all === true) !== (r.conversationIds !== undefined), {
+      message: 'prompt.summaries names its conversations or asks for all of them'
+    }),
   z.object({
     kind: z.literal('prompts'),
     taskId: z.string(),
@@ -912,7 +920,7 @@ export function createChatRuntimeHandlers(opts: {
       case 'prompts':
         return r.prompts(req.taskId, req.agentId, req.excluded)
       case 'prompt.summaries':
-        return r.promptSummaries(req.taskId, req.conversationIds)
+        return r.promptSummaries(req.taskId, req.all === true ? null : (req.conversationIds ?? []))
       case 'sessions':
         return r.transport.listChatSessions().map((row) => ({
           ...row,

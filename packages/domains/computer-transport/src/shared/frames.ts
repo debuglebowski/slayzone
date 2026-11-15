@@ -233,6 +233,12 @@ export const enrollParamsSchema = z.object({
    * for the whole reads it knows. Additive; no protocol bump.
    */
   chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -279,6 +285,12 @@ export const helloParamsSchema = z.object({
    * for the whole reads it knows. Additive; no protocol bump.
    */
   chatHistoryPages: z.boolean().optional(),
+  /**
+   * Whether this computer answers a task's prompt summaries in one request
+   * (`prompt.summaries` with `all: true`; FU5). Absent = an older computer: the hub
+   * asks it 500 session ids at a time. Additive; no protocol bump.
+   */
+  promptSummariesAll: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),

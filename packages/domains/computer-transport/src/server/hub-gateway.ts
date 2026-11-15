@@ -106,6 +106,8 @@ export interface ComputerDescriptor {
   directNotAfter?: boolean
   /** Whether it answers chat history in bounded pages, from this connection's frame. Absent = no. */
   chatHistoryPages?: boolean
+  /** Whether it answers a task's prompt summaries in one request (FU5). Absent = no. */
+  promptSummariesAll?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -803,6 +805,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directRtc: parsed.data.directRtc === true,
       directNotAfter: parsed.data.directNotAfter === true,
       chatHistoryPages: parsed.data.chatHistoryPages === true,
+      promptSummariesAll: parsed.data.promptSummariesAll === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -969,6 +972,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       directRtc: parsed.data.directRtc === true,
       directNotAfter: parsed.data.directNotAfter === true,
       chatHistoryPages: parsed.data.chatHistoryPages === true,
+      promptSummariesAll: parsed.data.promptSummariesAll === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
