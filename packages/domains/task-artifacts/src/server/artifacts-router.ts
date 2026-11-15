@@ -56,7 +56,8 @@ const renderMode = z.enum([
   'svg-preview',
   'mermaid-preview',
   'image',
-  'pdf'
+  'pdf',
+  'video'
 ]) satisfies z.ZodType<RenderMode>
 const createArtifactInput = z.object({
   taskId: z.string(),

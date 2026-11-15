@@ -104,6 +104,73 @@ function PdfViewer({
   return <iframe ref={iframeRef} src={src} className="flex-1 w-full" title="PDF preview" />
 }
 
+// --- Video viewer ---
+
+/**
+ * Chromium's native player over the slz-file URL. The bytes come through main's
+ * slz-file handler from the hub, which answers `Range`, so the player can read an
+ * mp4's index from the end of the file and seek without fetching it whole.
+ */
+function VideoViewer({
+  artifactId,
+  contentVersion,
+  getFilePath
+}: {
+  artifactId: string
+  contentVersion: number
+  getFilePath: (id: string) => Promise<string | null>
+}) {
+  const hubId = useHubId()
+  const [src, setSrc] = useState<string | null>(null)
+  // The source the player refused, so a newer version of the file gets a fresh try.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    getFilePath(artifactId).then((p) => {
+      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
+    })
+  }, [hubId, artifactId, contentVersion, getFilePath])
+
+  // Task tabs hide in <Activity>, which keeps this element in the DOM: pause on
+  // hide (effect cleanup) so a tab nobody is looking at never keeps playing sound.
+  useEffect(() => {
+    const video = videoRef.current
+    return () => video?.pause()
+  }, [src])
+
+  if (!src)
+    return (
+      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+        Loading...
+      </div>
+    )
+  if (failedSrc === src)
+    return (
+      <div
+        data-testid="artifact-video-error"
+        className="flex-1 flex items-center justify-center px-6 text-center text-xs text-muted-foreground"
+      >
+        This video can't be played here: its format or codec isn't supported. Download it to open it
+        in another app.
+      </div>
+    )
+
+  return (
+    <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/20 overflow-hidden">
+      <video
+        ref={videoRef}
+        data-testid="artifact-video"
+        src={src}
+        controls
+        preload="metadata"
+        className="max-w-full max-h-full"
+        onError={() => setFailedSrc(src)}
+      />
+    </div>
+  )
+}
+
 // --- Zoom ---
 
 /**
@@ -494,6 +561,14 @@ export function ArtifactContentEditor({
     if (renderMode === 'image')
       return (
         <ImageViewer
+          artifactId={artifact.id}
+          contentVersion={previewVersion}
+          getFilePath={getFilePath}
+        />
+      )
+    if (renderMode === 'video')
+      return (
+        <VideoViewer
           artifactId={artifact.id}
           contentVersion={previewVersion}
           getFilePath={getFilePath}

@@ -10,7 +10,15 @@ import {
   type TaskArtifact
 } from '@slayzone/task-contracts/types'
 
-export type ViewerKind = 'markdown' | 'code' | 'html' | 'svg' | 'mermaid' | 'image' | 'pdf'
+export type ViewerKind =
+  | 'markdown'
+  | 'code'
+  | 'html'
+  | 'svg'
+  | 'mermaid'
+  | 'image'
+  | 'pdf'
+  | 'video'
 
 const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   markdown: 'markdown',
@@ -19,7 +27,8 @@ const KIND_OF_MODE: Record<RenderMode, ViewerKind> = {
   'svg-preview': 'svg',
   'mermaid-preview': 'mermaid',
   image: 'image',
-  pdf: 'pdf'
+  pdf: 'pdf',
+  video: 'video'
 }
 
 export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode'>): ViewerKind {
@@ -29,6 +38,12 @@ export function viewerKindOf(artifact: Pick<TaskArtifact, 'title' | 'render_mode
 /** Kinds shown from the downloaded file; the others from the artifact's text. */
 export const isFileKind = (kind: ViewerKind): kind is 'image' | 'pdf' =>
   kind === 'image' || kind === 'pdf'
+
+/**
+ * Kinds the phone has no viewer for yet (no native player is bundled): a note and
+ * Share. Nothing is fetched up front: a video is often large, and only Share needs it.
+ */
+export const isShareOnlyKind = (kind: ViewerKind): kind is 'video' => kind === 'video'
 
 /**
  * Text that was not text: a binary file in a text kind (desktop's fallback for an unknown

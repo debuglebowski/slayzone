@@ -47,6 +47,7 @@ import {
 import { isHubSwitchedOffError, refuseNoComputer } from '@slayzone/platform/hub-switch-refusal'
 import type { RestApiDeps } from '../types'
 import { queryString } from '../resolve'
+import { contentRange, parseRange, resolveRange, unsatisfiedContentRange } from '../byte-range'
 
 const CHUNK = WORKSPACE_READ_BYTES_MAX_CHUNK
 
@@ -90,42 +91,6 @@ function classify(err: unknown): Fail {
       return { status: 503, code: 'COMPUTER_OFFLINE', error: message }
   }
   return { status: 500, code: 'INTERNAL', error: message }
-}
-
-/** A single byte range against a file of `size` bytes. */
-type RangeAsk =
-  | { kind: 'none' }
-  | { kind: 'from'; start: number; end: number | null }
-  | { kind: 'suffix'; length: number }
-
-/**
- * Parse `Range`. Only a single `bytes=` range is honoured; anything else (several
- * ranges, another unit, a malformed or backwards one) is ignored and the whole file
- * served — what RFC 9110 §14.2 allows a server to do.
- */
-export function parseRange(header: string | undefined): RangeAsk {
-  if (!header) return { kind: 'none' }
-  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
-  if (!m) return { kind: 'none' }
-  const [, a, b] = m
-  if (a === '' && b === '') return { kind: 'none' }
-  if (a === '') return { kind: 'suffix', length: Number(b) }
-  const start = Number(a)
-  const end = b === '' ? null : Number(b)
-  if (!Number.isSafeInteger(start) || (end !== null && (!Number.isSafeInteger(end) || end < start)))
-    return { kind: 'none' }
-  return { kind: 'from', start, end }
-}
-
-/** `[start, endExclusive)` to send, or null when unsatisfiable (416). */
-function resolveRange(ask: RangeAsk, size: number): { start: number; end: number } | null {
-  if (ask.kind === 'none') return { start: 0, end: size }
-  if (ask.kind === 'suffix') {
-    if (ask.length === 0 || size === 0) return null
-    return { start: Math.max(0, size - ask.length), end: size }
-  }
-  if (ask.start >= size) return null
-  return { start: ask.start, end: Math.min(size, (ask.end ?? size - 1) + 1) }
 }
 
 const etagOf = (r: Pick<ReadBytesResult, 'size' | 'mtimeMs'>): string =>
@@ -206,7 +171,7 @@ async function serveRaw(req: Request, res: Response, deps: RestApiDeps): Promise
     }
     const range = resolveRange(ask, version.size)
     if (!range) {
-      res.setHeader('Content-Range', `bytes */${version.size}`)
+      res.setHeader('Content-Range', unsatisfiedContentRange(version.size))
       fail(res, {
         status: 416,
         code: 'RANGE_NOT_SATISFIABLE',
@@ -216,8 +181,7 @@ async function serveRaw(req: Request, res: Response, deps: RestApiDeps): Promise
     }
 
     res.status(ask.kind === 'none' ? 200 : 206)
-    if (ask.kind !== 'none')
-      res.setHeader('Content-Range', `bytes ${range.start}-${range.end - 1}/${version.size}`)
+    if (ask.kind !== 'none') res.setHeader('Content-Range', contentRange(range, version.size))
     res.setHeader('Content-Type', contentTypeForPath(filePath))
     res.setHeader('Content-Length', String(range.end - range.start))
     res.flushHeaders()

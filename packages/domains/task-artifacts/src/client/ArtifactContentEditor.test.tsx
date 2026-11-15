@@ -29,7 +29,9 @@ let contentChanged: ((id: string) => void) | undefined
 vi.mock('@slayzone/transport/client', () => ({
   useSubscription: (opts: { onData?: (id: string) => void }) => {
     contentChanged = opts?.onData
-  }
+  },
+  // No hub scope: previews are plain local `slz-file://` paths (`toArtifactFileUrl`).
+  useHubId: () => null
 }))
 const appearance = {
   notesFontFamily: 'sans',
@@ -84,6 +86,7 @@ const artifact = (id: string, title: string): TaskArtifact =>
   ({ id, task_id: 't1', title, folder_id: null, render_mode: null }) as unknown as TaskArtifact
 const NOTES = artifact('a1', 'notes.md')
 const IMAGE = artifact('img', 'pic.png')
+const VIDEO = artifact('vid', 'clip.mp4')
 
 function Tab({ mode, art = NOTES }: { mode: 'visible' | 'hidden'; art?: TaskArtifact }) {
   const props: React.ComponentProps<typeof ArtifactContentEditor> = {
@@ -199,6 +202,35 @@ describe('ArtifactContentEditor across a tab switch', () => {
     expect(screen.queryByText('Loading...')).toBeNull()
     await flush()
     expect(code()).toBe(before)
+  })
+})
+
+describe('ArtifactContentEditor video', () => {
+  const video = () => screen.getByTestId('artifact-video') as HTMLVideoElement
+
+  it('plays the file in a native player and never reads it as text', async () => {
+    render(<Tab mode="visible" art={VIDEO} />)
+    await flush()
+    expect(video().getAttribute('src')).toBe(toSlzFileUrl('/data/vid', 1))
+    expect(video().controls).toBe(true)
+    expect(readContent).not.toHaveBeenCalled()
+  })
+
+  it('hiding the tab pauses playback, so a hidden tab never keeps playing sound', async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    const view = render(<Tab mode="visible" art={VIDEO} />)
+    await flush()
+    pause.mockClear()
+    view.rerender(<Tab mode="hidden" art={VIDEO} />)
+    expect(pause).toHaveBeenCalled()
+    pause.mockRestore()
+  })
+
+  it('a file the player cannot decode says so instead of a blank frame', async () => {
+    render(<Tab mode="visible" art={VIDEO} />)
+    await flush()
+    fireEvent.error(video())
+    expect(screen.getByTestId('artifact-video-error').textContent).toMatch(/can't be played/i)
   })
 })
 

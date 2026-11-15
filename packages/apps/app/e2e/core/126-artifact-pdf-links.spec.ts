@@ -138,16 +138,15 @@ test.describe('PDF artifact links', () => {
     }
     await artifactRow(page, title).click()
     // THIS artifact's frame: an earlier test's viewer can still be alive (and
-    // bridged) while the panel swaps documents.
-    const filePath = await page.evaluate(
-      (id) => window.getTrpcVanillaClient().artifacts.getFilePath.query({ id }),
-      artifact.id
-    )
-    expect(filePath).toBeTruthy()
-    // Matched by path, not full URL: selecting a PDF swaps the iframe's src
+    // bridged) while the panel swaps documents. The preview URL (`toArtifactFileUrl`)
+    // ends in the artifact's file name on the hub, `<id>.pdf`.
+    const frame = pdfFrame(page)
+    await expect(frame).toHaveAttribute('src', new RegExp(`/${artifact.id}\\.pdf\\?`))
+    // Matched without the query: selecting a PDF swaps the iframe's src
     // `?v=N` → `?v=N+1` (preview version bump), and the frame can still report
     // either one (measured: attribute `?v=2`, live bridged frame `?v=1`).
-    const docUrl = `slz-file://app${filePath}`
+    const docUrl = ((await frame.getAttribute('src')) ?? '').split('?')[0]
+    expect(docUrl).toBeTruthy()
     await expect
       .poll(
         () =>

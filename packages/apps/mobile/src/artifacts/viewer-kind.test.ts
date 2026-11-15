@@ -12,6 +12,8 @@ describe('viewerKindOf', () => {
     expect(viewerKindOf(a('flow.mmd'))).toBe('mermaid')
     expect(viewerKindOf(a('shot.HEIC'))).toBe('image')
     expect(viewerKindOf(a('spec.pdf'))).toBe('pdf')
+    expect(viewerKindOf(a('clip.MP4'))).toBe('video')
+    expect(viewerKindOf(a('clip.webm'))).toBe('video')
     expect(viewerKindOf(a('main.ts'))).toBe('code')
     expect(viewerKindOf(a('data.csv'))).toBe('code')
     expect(viewerKindOf(a('notes.txt'))).toBe('markdown')
