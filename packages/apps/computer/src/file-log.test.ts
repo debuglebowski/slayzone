@@ -1,8 +1,15 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { COMPUTER_LOG_DIR_NAME, COMPUTER_LOG_FILE_NAME, createComputerFileLog } from './file-log'
+import {
+  COMPUTER_LOG_DIR_NAME,
+  COMPUTER_LOG_FILE_NAME,
+  createComputerFileLog,
+  createComputerLog,
+  rotateLogFile
+} from './file-log'
+import { sessionHostLog } from './session-host'
 
 const until = async (check: () => boolean): Promise<void> => {
   for (let i = 0; i < 100 && !check(); i++) await new Promise((r) => setTimeout(r, 10))
@@ -30,5 +37,71 @@ describe('computer file log', () => {
     writeFileSync(blocker, '')
     const log = createComputerFileLog(blocker)
     expect(() => log('still running')).not.toThrow()
+  })
+})
+
+describe('rotation while running (a computer runs for weeks; it used to rotate only when it opened the file)', () => {
+  it('a log past its size goes to .1 and a new one starts', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'computer-log-'))
+    const log = createComputerFileLog(stateDir, { maxBytes: 1000 })
+    const file = join(stateDir, COMPUTER_LOG_DIR_NAME, COMPUTER_LOG_FILE_NAME)
+    const size = () => (existsSync(file) ? statSync(file).size : 0)
+    const text = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8') : '')
+    log(`line 0 ${'x'.repeat(40)}`)
+    await until(() => text(file).includes('line 0'))
+    // A turn between lines (the file opens asynchronously; a log's lines are not a
+    // single synchronous burst).
+    for (let i = 1; i < 20; i++) {
+      log(`line ${i} ${'x'.repeat(40)}`)
+      await new Promise((r) => setTimeout(r, 2))
+    }
+    log('the newest line')
+    await until(() => text(file).includes('the newest line'))
+    expect(existsSync(`${file}.1`)).toBe(true)
+    expect(size()).toBeLessThanOrEqual(1000 + 120)
+    // One cut (~1.6 KB written, 1 KB max), nothing lost: every line is in one of the two.
+    await until(() => text(`${file}.1`).length > 0)
+    const both = text(`${file}.1`) + text(file)
+    for (let i = 0; i < 20; i++) expect(both).toContain(`line ${i} `)
+  })
+
+  it('rotateLogFile: over the size → .1; under it, or missing, untouched', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'computer-log-'))
+    const big = join(dir, 'host.log')
+    writeFileSync(big, 'x'.repeat(500))
+    rotateLogFile(big, 100)
+    expect(existsSync(big)).toBe(false)
+    expect(readFileSync(`${big}.1`, 'utf8')).toHaveLength(500)
+    const small = join(dir, 'small.log')
+    writeFileSync(small, 'ok')
+    rotateLogFile(small, 100)
+    expect(readFileSync(small, 'utf8')).toBe('ok')
+    expect(() => rotateLogFile(join(dir, 'missing.log'), 100)).not.toThrow()
+  })
+})
+
+describe('one computer log for every process that runs the computer', () => {
+  it('createComputerLog: the line, tagged, to stdout and, timestamped, to computer.log', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'computer-log-'))
+    const out: string[] = []
+    const log = createComputerLog({ stateDir, tag: 'computer', stdout: (s) => out.push(s) })
+    log('started', { pid: 1 })
+    log('plain')
+    expect(out).toEqual(['[computer] started {"pid":1}\n', '[computer] plain\n'])
+    const file = join(stateDir, COMPUTER_LOG_DIR_NAME, COMPUTER_LOG_FILE_NAME)
+    await until(() => existsSync(file) && readFileSync(file, 'utf8').includes('plain'))
+    expect(readFileSync(file, 'utf8')).toMatch(/^\S+ started \{"pid":1\}\n\S+ plain\n$/)
+  })
+
+  it('the standalone session host logs to <root>/logs/computer.log, not only stdout', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'computer-log-'))
+    mkdirSync(join(root, 'computer-runtime'), { recursive: true })
+    const out: string[] = []
+    const log = sessionHostLog(root, (s) => out.push(s))
+    log('connected to hub', { hubUrl: 'ws://127.0.0.1:1/computers' })
+    expect(out).toEqual(['[host] connected to hub {"hubUrl":"ws://127.0.0.1:1/computers"}\n'])
+    const file = join(root, COMPUTER_LOG_DIR_NAME, COMPUTER_LOG_FILE_NAME)
+    await until(() => existsSync(file) && readFileSync(file, 'utf8').includes('connected'))
+    expect(readFileSync(file, 'utf8')).toContain('connected to hub {"hubUrl"')
   })
 })
