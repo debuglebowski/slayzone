@@ -6,7 +6,7 @@
  * byte-bounded steps (`ChatStorage.dropTimelineStep`, checkpoint first), each in its
  * turn of the process's history work — the event loop runs between every two.
  */
-import { historyReadTurns } from '@slayzone/terminal/runtime'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
 import { TIMELINE_DROP_STEP_BYTES, type ChatStorage } from './storage'
 
 export async function dropTimelineInSteps(

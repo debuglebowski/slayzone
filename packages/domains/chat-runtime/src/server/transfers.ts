@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { ChatMigrationSnapshot, ChatTransferHeader, ChatTransferManifest } from '../shared'
 import { chatTransferManifestSchema } from '../shared'
-import { historyReadTurns } from '@slayzone/terminal/runtime'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
 import type { ChatExportReader, ChatStorage } from './storage'
 export const TRANSFER_CHUNK_BYTES = 256 * 1024
 /**

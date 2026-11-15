@@ -43,7 +43,8 @@ import {
   summarizeRows,
   type TimelinePageSummary
 } from '../../shared/timeline-summary'
-import { historyReadTurns, type BufferedEvent } from '../chat-events-store'
+import type { BufferedEvent } from '../chat-events-store'
+import { historyReadTurns } from '../history-turns'
 import type { TimelineCheckpointRow, TimelineWrite } from '../chat-timeline-store'
 import type { TimelineRecordStore } from './chat-timeline-records'
 

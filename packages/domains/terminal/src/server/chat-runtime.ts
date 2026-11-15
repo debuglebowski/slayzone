@@ -6,8 +6,6 @@ export {
   type CreateChatOpts
 } from './runtime/chat-transport-manager'
 export { createConversationRegistry, type ConversationRegistry } from './runtime/live-conversations'
-/** The process's turns for heavy chat-history work (reads, projection writes, drops). */
-export { historyReadTurns } from './chat-events-store'
 export {
   createChatOps,
   type ChatHandlerOpts,

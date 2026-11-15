@@ -36,7 +36,7 @@ import {
   TimelineProjection,
   type TimelineHistorySource
 } from '@slayzone/terminal/timeline-projection'
-import { historyReadTurns } from '@slayzone/terminal/runtime'
+import { historyReadTurns } from '@slayzone/terminal/history-turns'
 import { openChatStorage, type ChatStorage } from '../storage'
 import { createLocalChatData } from '../local-data'
 import { dropTimelineInSteps } from '../timeline-drop'

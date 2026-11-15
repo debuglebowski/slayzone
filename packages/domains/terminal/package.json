@@ -29,6 +29,7 @@
     "./timeline-records": "./src/server/runtime/chat-timeline-records.ts",
     "./timeline-worker": "./src/server/runtime/chat-timeline-worker.ts",
     "./timeline-projection": "./src/server/runtime/chat-timeline-projection.ts",
+    "./history-turns": "./src/server/history-turns.ts",
     "./terminal-themes": "./src/client/terminal-themes.ts",
     "./suppress-device-status": "./src/client/suppress-device-status.ts",
     "./terminal-state": "./src/client/terminal-state-reducer.ts",
