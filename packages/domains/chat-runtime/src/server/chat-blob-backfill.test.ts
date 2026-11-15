@@ -559,3 +559,73 @@ test('timeline resets go in byte-bounded steps, the event loop running between s
   for (const id of ['task-a', 'task-b']) expect(r.storage.hasTimeline(id)).toBe(false)
   expect(b.done()).toBe(true)
 })
+
+/**
+ * Every legacy row body the pass reads, by seq (whatever store read returns bodies).
+ * Review-2 L1: a slice read 16 whole rows, used 1–2 large ones and read the rest
+ * again in the next slice (≈8× per large-row chat), and the read itself was unbounded.
+ */
+function bodyReads(r: Runtime): number[] {
+  const seen: number[] = []
+  const store = r.storage as unknown as Record<string, unknown>
+  for (const name of ['legacyEvents', 'legacyEvent'] as const) {
+    const original = store[name]
+    if (typeof original !== 'function') continue
+    store[name] = (...args: unknown[]) => {
+      const got = (original as (...a: unknown[]) => unknown).apply(r.storage, args)
+      const rows = Array.isArray(got) ? got : got ? [got] : []
+      for (const row of rows as Array<{ seq: number }>) seen.push(row.seq)
+      return got
+    }
+  }
+  return seen
+}
+
+test('reads each legacy row once, never one it cannot use, and no slice reads past its byte budget', async () => {
+  const { r } = runtime()
+  // Large rows between small ones (a short text never holds a blob slot).
+  let seq = 0
+  const large: number[] = [],
+    small: number[] = []
+  for (let i = 0; i < 12; i++) {
+    large.push(seq)
+    legacy(r, 'task-a', seq++, screenshot(png(40 + i, 96 * 1024)))
+    for (let k = 0; k < 3; k++) {
+      small.push(seq)
+      legacy(r, 'task-a', seq++, text(`short ${i}.${k}`))
+    }
+  }
+  const reads = bodyReads(r)
+  const sliceBytes = 300 * 1024
+  const perSlice: number[][] = [[]]
+  let counted = 0
+  const { b } = backfill(r, {
+    sliceBytes,
+    sleep: async () => {
+      perSlice[perSlice.length - 1].push(...reads.slice(counted))
+      counted = reads.length
+      perSlice.push([])
+    }
+  })
+  await b.runNow()
+  perSlice[perSlice.length - 1].push(...reads.slice(counted))
+  expect(forms(r, 'task-a').filter((_, s) => large.includes(s))).toEqual(large.map(() => 1))
+  // Once each, and never a row too short to hold a blob.
+  expect([...reads].sort((a, c) => a - c)).toEqual(large)
+  // A slice reads one row, or rows within its budget (sizes as stored).
+  const size = (s: number) =>
+    r.storage.compose(
+      (db) =>
+        (
+          db
+            .prepare(
+              'SELECT octet_length(event) AS n FROM events WHERE conversation_id=? AND seq=?'
+            )
+            .get('task-a', s) as { n: number }
+        ).n
+    )
+  expect(perSlice.filter((s) => s.length > 0).length).toBeGreaterThan(1)
+  for (const slice of perSlice)
+    if (slice.length > 1)
+      expect(slice.reduce((n, s) => n + size(s), 0)).toBeLessThanOrEqual(sliceBytes)
+})

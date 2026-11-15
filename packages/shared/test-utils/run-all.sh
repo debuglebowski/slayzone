@@ -1366,6 +1366,8 @@ skip_suite packages/domains/task-terminals/src/client/chat/__perf__/baseline.tes
   "timing benchmark against a committed baseline (machine-dependent); run it with pnpm test:chat:perf"
 skip_suite packages/domains/chat-runtime/src/server/__perf__/timeline-restore.perf.test.ts \
   "event-loop measurement of many chats' timeline projections (machine-dependent, minutes); run it by hand, see its header"
+skip_suite packages/domains/chat-runtime/src/server/__perf__/blob-backfill.perf.test.ts \
+  "event-loop + read-count measurement of the blob backfill (machine-dependent, minutes); run it by hand, see its header"
 
 # jsdom React client suites (vi.mock + JSX + @vitest-environment jsdom) run under the
 # app's vitest config, not the node harness config above. The app

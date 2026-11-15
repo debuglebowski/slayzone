@@ -1179,19 +1179,31 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       return { mediaType, size, offset, data: Buffer.from(bytes).toString('base64') }
     },
     /**
-     * Backfill (chat-blob-backfill.ts): up to `limit` LEGACY rows (form 0, saved
-     * before v13) of `id` after `afterSeq`, in seq order, as saved.
+     * Backfill (chat-blob-backfill.ts): seq and stored size (record header,
+     * `octet_length` — no row loaded) of up to `limit` LEGACY rows (form 0, saved
+     * before v13) of `id` after `afterSeq`, in seq order. The backfill reads a body
+     * only once it knows the row fits its slice (and could hold a blob at all).
      */
-    legacyEvents(
+    legacyEventSizes(
       id: string,
       afterSeq: number,
       limit: number
-    ): Array<{ seq: number; at: number; event: string }> {
+    ): Array<{ seq: number; bytes: number }> {
       return db
         .prepare(
-          'SELECT seq,saved_at AS at,event FROM events WHERE conversation_id=? AND seq>? AND blob_form=0 ORDER BY seq LIMIT ?'
+          'SELECT seq,octet_length(event) AS bytes FROM events WHERE conversation_id=? AND seq>? AND blob_form=0 ORDER BY seq LIMIT ?'
         )
-        .all(id, afterSeq, limit) as Array<{ seq: number; at: number; event: string }>
+        .all(id, afterSeq, limit) as Array<{ seq: number; bytes: number }>
+    },
+    /** Backfill: legacy row `seq` of `id` as saved (null: gone or no longer legacy). */
+    legacyEvent(id: string, seq: number): { seq: number; at: number; event: string } | null {
+      return (
+        (db
+          .prepare(
+            'SELECT seq,saved_at AS at,event FROM events WHERE conversation_id=? AND seq=? AND blob_form=0'
+          )
+          .get(id, seq) as { seq: number; at: number; event: string } | undefined) ?? null
+      )
     },
     /**
      * Backfill: legacy row `seq` — only if it is still exactly `original` and still

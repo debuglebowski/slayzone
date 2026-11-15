@@ -47,7 +47,9 @@ migrations carry the raw inline form, so any version reads them; the destination
 stores it out-of-line again. Events rows are insert-only with ONE sanctioned
 in-place rewrite: the v13 backfill turns a legacy row (`blob_form = 0`) into its
 stored form — representation only, proven by a verified round trip before commit.
-The backfill pauses below a free-disk margin (max(1 GiB, 2 × its slice budget)),
+It reads row sizes first (record headers) and a row's body once, only
+when the row fits what is left of its slice and is long enough to hold a binary
+slot (measured on 4,000 real rows: 6,558 body reads → 1,390). The backfill pauses below a free-disk margin (max(1 GiB, 2 × its slice budget)),
 closes its chat sessions only through retention's `withQuiesced` lock, and retries
 chats it could not finish. Space: `chat.sqlite` has no `auto_vacuum`, so pages the
 backfill frees are reused, not returned; backups (`db.backup`, every page, plus every
