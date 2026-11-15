@@ -54,7 +54,9 @@ export function buildPdfHtml(content: string, mode: string, title: string): stri
       body = `<div style="display:flex;justify-content:center;padding:2rem">${content}</div>`
       break
 
-    case 'code': {
+    // A diff exports as its source, line-numbered like code.
+    case 'code':
+    case 'diff': {
       const lines = content.split('\n')
       const rows = lines
         .map(

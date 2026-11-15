@@ -13,10 +13,12 @@ import type {
   ArtifactVersion,
   VersionRef,
   DiffResult,
-  PruneReport
+  PruneReport,
+  ArtifactTextRead
 } from '@slayzone/task-artifacts/shared'
 import { useTrack } from '@slayzone/telemetry/client'
 import { toast, useDepsChanged, useStableCallback } from '@slayzone/ui'
+import { readTextWithFallback } from './read-text-fallback'
 
 // Downloads reach the Electron host over the capability bridge, so they can fail for
 // reasons the user must see (no host capability, render failure, unwritable path).
@@ -51,6 +53,8 @@ export interface UseArtifactsReturn {
   renameArtifact: (id: string, newTitle: string) => Promise<void>
   moveArtifactToFolder: (artifactId: string, folderId: string | null) => Promise<void>
   readContent: (id: string) => Promise<string | null>
+  /** The in-app editor's read: the text, or why it is not shown as text. Always fresh from disk. */
+  readText: (id: string) => Promise<ArtifactTextRead | null>
   saveContent: (id: string, content: string) => Promise<void>
   uploadArtifact: (sourcePath: string, title?: string) => Promise<TaskArtifact | null>
   uploadDir: (dirPath: string, parentFolderId?: string | null) => Promise<void>
@@ -353,6 +357,19 @@ export function useArtifacts(
     [queryClient, trpc]
   )
 
+  // Same fresh-from-disk reasoning as readContent: never serve a cached read.
+  const readText = useCallback(
+    (id: string): Promise<ArtifactTextRead | null> =>
+      readTextWithFallback(
+        () =>
+          queryClient.fetchQuery(
+            trpc.artifacts.readText.queryOptions({ id }, { staleTime: 0, gcTime: 0 })
+          ),
+        () => readContent(id)
+      ),
+    [queryClient, trpc, readContent]
+  )
+
   const saveContent = useCallback(
     async (id: string, content: string): Promise<void> => {
       // UI saves always mutate the latest version in place. The explicit
@@ -566,6 +583,7 @@ export function useArtifacts(
     renameArtifact,
     moveArtifactToFolder,
     readContent,
+    readText,
     saveContent,
     uploadArtifact,
     uploadDir,

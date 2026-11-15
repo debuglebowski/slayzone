@@ -166,6 +166,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
             agentState={pane.tab.agentState}
             isMain={pane.tab.isMain}
             isTemporary={pane.isTemporary}
+            {...(pane.tab.chatFontSize != null ? { fontSize: pane.tab.chatFontSize } : {})}
             {...(pane.onHandoff ? { onHandoff: pane.onHandoff } : {})}
             {...(pane.onShowSessions ? { onShowSessions: pane.onShowSessions } : {})}
             {...(pane.onReady ? { onReady: pane.onReady } : {})}

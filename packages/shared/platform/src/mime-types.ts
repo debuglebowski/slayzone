@@ -31,10 +31,20 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   woff2: 'font/woff2',
   ttf: 'font/ttf',
   pdf: 'application/pdf',
+  otf: 'font/otf',
   mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
   webm: 'video/webm',
+  vtt: 'text/vtt; charset=utf-8',
   mp3: 'audio/mpeg',
-  wav: 'audio/wav'
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/ogg',
+  flac: 'audio/flac'
 }
 
 export const DEFAULT_CONTENT_TYPE = 'application/octet-stream'

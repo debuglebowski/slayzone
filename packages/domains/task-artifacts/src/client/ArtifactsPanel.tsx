@@ -158,6 +158,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
       renameArtifact,
       moveArtifactToFolder,
       readContent,
+      readText,
       saveContent,
       uploadArtifact,
       uploadDir,
@@ -1239,8 +1240,9 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                 <ArtifactContentEditor
                   key={selectedArtifact.id}
                   artifact={selectedArtifact}
+                  siblingArtifacts={artifacts}
                   viewMode={viewMode}
-                  readContent={readContent}
+                  readText={readText}
                   saveContent={saveContent}
                   getFilePath={getFilePath}
                   effectiveReadability={effectiveReadability}
@@ -1253,6 +1255,7 @@ export const ArtifactsPanel = forwardRef<ArtifactsPanelHandle, ArtifactsPanelPro
                   searchRegex={findUseRegex}
                   onSearchMatchCountChange={setFindMatchCount}
                   onOpenUrl={onOpenUrl}
+                  onDownload={() => void downloadFile(selectedArtifact.id)}
                 />
               </>
             ) : (

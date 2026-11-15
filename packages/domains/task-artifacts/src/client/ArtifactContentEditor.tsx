@@ -33,8 +33,79 @@ import {
 } from '@slayzone/file-editor/client/SearchableCodeView'
 import { EditorToc } from '@slayzone/file-editor/client/EditorToc'
 import { type MarkdownHeading } from '@slayzone/file-editor/client/markdown-headings'
+import {
+  ARTIFACT_TEXT_MAX_BYTES,
+  RICH_TEXT_MAX_BYTES,
+  type ArtifactTextRead
+} from '../shared/text-read'
+import { Download, FileQuestion } from 'lucide-react'
 import type { ArtifactViewMode } from './ArtifactsPanel.types'
+import { MediaPlayerViewer } from './MediaPlayerViewer'
+import { ArchiveViewer } from './ArchiveViewer'
+import { FontViewer } from './FontViewer'
+import { DiffPreview } from './DiffPreview'
+import { subtitlesFor } from './subtitles'
 import type { HtmlArtifactTheme } from './ArtifactsPanel.constants'
+import { formatByteSize } from './ArtifactsPanel.utils'
+
+/** Why an artifact is not in a text editor: the server's verdict, or a failed read. */
+type NotTextState = Exclude<ArtifactTextRead, { kind: 'text' }> | { kind: 'error'; message: string }
+
+// --- Not shown as text ---
+
+/**
+ * In place of an editor for a file that is not opened as text. Never a text
+ * surface: there is nothing to type into, so nothing can autosave over the file.
+ */
+function NotTextView({
+  state,
+  title,
+  onDownload,
+  onRetry
+}: {
+  state: NotTextState
+  title: string
+  onDownload?: () => void
+  onRetry: () => void
+}) {
+  const [heading, detail] =
+    state.kind === 'binary'
+      ? [
+          'No preview',
+          `${title} is not UTF-8 text (${formatByteSize(state.size)}), so it can't be shown or edited here.`
+        ]
+      : state.kind === 'too-large'
+        ? [
+            `File too large (${formatByteSize(state.size)})`,
+            `Files over ${formatByteSize(ARTIFACT_TEXT_MAX_BYTES)} aren't opened in the editor.`
+          ]
+        : ['Could not open this file', state.message]
+  return (
+    <div
+      data-testid="artifact-no-preview"
+      data-reason={state.kind}
+      className="flex-1 flex items-center justify-center p-6 text-muted-foreground"
+    >
+      <div className="text-center space-y-3 max-w-sm">
+        <FileQuestion className="size-8 mx-auto opacity-40" />
+        <p className="text-sm text-foreground">{heading}</p>
+        <p className="text-xs">{detail}</p>
+        {state.kind === 'error' ? (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        ) : (
+          onDownload && (
+            <Button variant="outline" size="sm" onClick={onDownload}>
+              <Download className="size-3.5 mr-1.5" />
+              Download
+            </Button>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
 
 // --- Image viewer ---
 
@@ -104,73 +175,6 @@ function PdfViewer({
   return <iframe ref={iframeRef} src={src} className="flex-1 w-full" title="PDF preview" />
 }
 
-// --- Video viewer ---
-
-/**
- * Chromium's native player over the slz-file URL. The bytes come through main's
- * slz-file handler from the hub, which answers `Range`, so the player can read an
- * mp4's index from the end of the file and seek without fetching it whole.
- */
-function VideoViewer({
-  artifactId,
-  contentVersion,
-  getFilePath
-}: {
-  artifactId: string
-  contentVersion: number
-  getFilePath: (id: string) => Promise<string | null>
-}) {
-  const hubId = useHubId()
-  const [src, setSrc] = useState<string | null>(null)
-  // The source the player refused, so a newer version of the file gets a fresh try.
-  const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  useEffect(() => {
-    getFilePath(artifactId).then((p) => {
-      if (p) setSrc(toArtifactFileUrl(hubId, artifactId, p, contentVersion))
-    })
-  }, [hubId, artifactId, contentVersion, getFilePath])
-
-  // Task tabs hide in <Activity>, which keeps this element in the DOM: pause on
-  // hide (effect cleanup) so a tab nobody is looking at never keeps playing sound.
-  useEffect(() => {
-    const video = videoRef.current
-    return () => video?.pause()
-  }, [src])
-
-  if (!src)
-    return (
-      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
-        Loading...
-      </div>
-    )
-  if (failedSrc === src)
-    return (
-      <div
-        data-testid="artifact-video-error"
-        className="flex-1 flex items-center justify-center px-6 text-center text-xs text-muted-foreground"
-      >
-        This video can't be played here: its format or codec isn't supported. Download it to open it
-        in another app.
-      </div>
-    )
-
-  return (
-    <div className="flex-1 min-h-0 flex items-center justify-center bg-muted/20 overflow-hidden">
-      <video
-        ref={videoRef}
-        data-testid="artifact-video"
-        src={src}
-        controls
-        preload="metadata"
-        className="max-w-full max-h-full"
-        onError={() => setFailedSrc(src)}
-      />
-    </div>
-  )
-}
-
 // --- Zoom ---
 
 /**
@@ -231,8 +235,9 @@ function countedSave(
 
 export function ArtifactContentEditor({
   artifact,
+  siblingArtifacts,
   viewMode,
-  readContent,
+  readText,
   saveContent,
   getFilePath,
   effectiveReadability,
@@ -244,11 +249,15 @@ export function ArtifactContentEditor({
   searchMatchCase,
   searchRegex,
   onSearchMatchCountChange,
-  onOpenUrl
+  onOpenUrl,
+  onDownload
 }: {
   artifact: TaskArtifact
+  /** The task's artifacts (a video's same-named `.srt`/`.vtt` become its subtitles). */
+  siblingArtifacts?: readonly TaskArtifact[]
   viewMode: ArtifactViewMode
-  readContent: (id: string) => Promise<string | null>
+  /** Fresh disk read: the text, or why it is not shown as text. */
+  readText: (id: string) => Promise<ArtifactTextRead | null>
   saveContent: (id: string, content: string) => Promise<void>
   getFilePath: (id: string) => Promise<string | null>
   effectiveReadability: 'compact' | 'normal'
@@ -262,6 +271,8 @@ export function ArtifactContentEditor({
   onSearchMatchCountChange: (count: number) => void
   /** ⌘-clicked links (markdown, PDF, HTML): open in the task's in-app browser. */
   onOpenUrl?: (url: string) => void
+  /** Save the file elsewhere: offered where the artifact is not shown as text. */
+  onDownload?: () => void
 }) {
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
@@ -297,6 +308,14 @@ export function ArtifactContentEditor({
     [themeColors]
   )
   const [content, setContent] = useState<string | null>(null)
+  // Set when the last disk read is not shown as text (binary, too large, failed):
+  // then there is no text surface at all, so nothing can autosave over the file.
+  const [notText, setNotText] = useState<NotTextState | null>(null)
+  // Byte size of the text as last read from disk. Not updated by typing, so the
+  // rich-text/source choice below never flips under the user mid-edit.
+  const [diskSize, setDiskSize] = useState(0)
+  // The user asked for rich text on a markdown file over RICH_TEXT_MAX_BYTES.
+  const [richTextAnyway, setRichTextAnyway] = useState(false)
   // Which artifact's text `content` holds. "Loading" is derived from it, so it
   // is shown only until an artifact's text first arrives — never on a tab
   // re-show, where the editor must stay mounted (caret, scroll, undo).
@@ -337,17 +356,26 @@ export function ArtifactContentEditor({
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const isBinary = isBinaryRenderMode(renderMode)
   const zoom = zoomPct / 100
-  const loading = !isBinary && loadedId !== artifact.id
+  // A binary preview waits for its first cache-bust version (set once the mtime
+  // baseline is in, below), so it loads once instead of at v0 and again at v1.
+  const loading = isBinary ? previewVersion === 0 : loadedId !== artifact.id
 
   // Read file + mtime from disk. Pure: callers apply the result.
   const readFromDisk = useCallback(
-    (): Promise<[string | null, number | null]> =>
-      Promise.all([readContent(artifact.id), getMtime(artifact.id)]),
-    [artifact.id, readContent, getMtime]
+    (): Promise<[ArtifactTextRead | null, number | null]> =>
+      Promise.all([readText(artifact.id), getMtime(artifact.id)]),
+    [artifact.id, readText, getMtime]
   )
   // Show a disk read + refresh baseline mtime. Clears dirty + pending flags.
-  const applyDisk = useCallback(([c, mtime]: [string | null, number | null]): void => {
-    setContent(c ?? '')
+  const applyDisk = useCallback(([read, mtime]: [ArtifactTextRead | null, number | null]): void => {
+    if (read && read.kind !== 'text') {
+      setNotText(read)
+      setContent(null)
+    } else {
+      setNotText(null)
+      setContent(read?.content ?? '')
+      setDiskSize(read?.size ?? 0)
+    }
     baselineMtimeRef.current = mtime
     setIsDirty(false)
     setExternalChangePending(false)
@@ -386,6 +414,15 @@ export function ArtifactContentEditor({
     readFromDisk()
       .then((disk) => {
         if (!cancelled) applyDisk(disk)
+      })
+      .catch((e: unknown) => {
+        // Never an empty editor in place of text that failed to load: its first
+        // autosave would write '' over the file. Text already shown stays.
+        if (!cancelled && contentRef.current === null)
+          setNotText({
+            kind: 'error',
+            message: e instanceof Error ? e.message : 'The file could not be read.'
+          })
       })
       .finally(() => {
         if (!cancelled) setLoadedId(id)
@@ -551,12 +588,59 @@ export function ArtifactContentEditor({
     </div>
   ) : null
 
+  const handleRetry = useStableCallback((): void => {
+    readFromDisk()
+      .then(applyDisk)
+      .catch((e: unknown) =>
+        setNotText({
+          kind: 'error',
+          message: e instanceof Error ? e.message : 'The file could not be read.'
+        })
+      )
+  })
+
+  // Markdown over RICH_TEXT_MAX_BYTES opens as source: Milkdown (and the split
+  // view's rendered pane) parses and lays out the whole document on the UI thread,
+  // which froze the window for seconds and crashed the renderer at 2 MB.
+  const sourceOnly = renderMode === 'markdown' && diskSize > RICH_TEXT_MAX_BYTES && !richTextAnyway
+  const shownViewMode: ArtifactViewMode = sourceOnly ? 'raw' : viewMode
+  const largeDocNotice =
+    sourceOnly && viewMode !== 'raw' ? (
+      <div
+        data-testid="artifact-large-doc-notice"
+        className="shrink-0 flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground"
+      >
+        <span className="min-w-0">
+          Large document ({formatByteSize(diskSize)}): showing the source. Rich text may freeze the
+          app while it loads.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="!h-6 text-[10px] px-2 ml-auto shrink-0"
+          onClick={() => setRichTextAnyway(true)}
+          data-testid="artifact-large-doc-open-rich"
+        >
+          Open as rich text anyway
+        </Button>
+      </div>
+    ) : null
+
   const inner = ((): React.ReactElement => {
     if (loading)
       return (
         <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
           Loading...
         </div>
+      )
+    if (notText)
+      return (
+        <NotTextView
+          state={notText}
+          title={artifact.title}
+          onDownload={onDownload}
+          onRetry={handleRetry}
+        />
       )
     if (renderMode === 'image')
       return (
@@ -566,14 +650,23 @@ export function ArtifactContentEditor({
           getFilePath={getFilePath}
         />
       )
-    if (renderMode === 'video')
+    if (renderMode === 'video' || renderMode === 'audio')
       return (
-        <VideoViewer
+        <MediaPlayerViewer
+          kind={renderMode}
           artifactId={artifact.id}
           contentVersion={previewVersion}
           getFilePath={getFilePath}
+          subtitles={
+            renderMode === 'video' ? subtitlesFor(artifact, siblingArtifacts ?? []) : undefined
+          }
+          readSubtitle={(id) => readText(id).then((r) => (r?.kind === 'text' ? r.content : null))}
         />
       )
+    if (renderMode === 'archive')
+      return <ArchiveViewer artifactId={artifact.id} contentVersion={previewVersion} />
+    if (renderMode === 'font')
+      return <FontViewer artifactId={artifact.id} contentVersion={previewVersion} />
     if (renderMode === 'pdf')
       return (
         <PdfViewer
@@ -588,9 +681,10 @@ export function ArtifactContentEditor({
       renderMode === 'markdown' ||
       renderMode === 'html-preview' ||
       renderMode === 'svg-preview' ||
-      renderMode === 'mermaid-preview'
+      renderMode === 'mermaid-preview' ||
+      renderMode === 'diff'
 
-    if (renderMode === 'markdown' && viewMode === 'preview') {
+    if (renderMode === 'markdown' && shownViewMode === 'preview') {
       return (
         <ZoomPane zoom={zoom}>
           <RichTextEditor
@@ -614,7 +708,7 @@ export function ArtifactContentEditor({
       )
     }
 
-    if (renderMode === 'markdown' && viewMode === 'split') {
+    if (renderMode === 'markdown' && shownViewMode === 'split') {
       return (
         <ZoomPane zoom={zoom}>
           <div className="flex-1 flex flex-row overflow-hidden">
@@ -672,7 +766,7 @@ export function ArtifactContentEditor({
 
     // Preview-only: the HTML frame scales itself (see HtmlPreviewFrame); the SVG
     // and mermaid canvases own their zoom via MediaView, so no ZoomPane here.
-    if (hasPreview && viewMode === 'preview') {
+    if (hasPreview && shownViewMode === 'preview') {
       return (
         <div className="flex-1 flex flex-col overflow-hidden">
           <ArtifactPreview
@@ -689,7 +783,7 @@ export function ArtifactContentEditor({
       )
     }
 
-    if (hasPreview && viewMode === 'split') {
+    if (hasPreview && shownViewMode === 'split') {
       return (
         <div className="flex-1 flex flex-row overflow-hidden">
           <ZoomPane zoom={zoom}>
@@ -743,7 +837,7 @@ export function ArtifactContentEditor({
   })()
 
   const handleTocJump = (heading: MarkdownHeading) => {
-    if (viewMode === 'preview') {
+    if (shownViewMode === 'preview') {
       const root = contentAreaRef.current
       if (!root) return
       const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
@@ -763,6 +857,7 @@ export function ArtifactContentEditor({
   return (
     <div className="relative flex-1 flex flex-row min-h-0">
       <div ref={contentAreaRef} className="relative flex-1 flex flex-col min-h-0 min-w-0">
+        {largeDocNotice}
         {inner}
         {banner}
       </div>
@@ -772,7 +867,7 @@ export function ArtifactContentEditor({
           width={tocWidth}
           onWidthChange={setTocWidth}
           onJump={handleTocJump}
-          minimapVisible={editorMinimapEnabled && viewMode !== 'preview'}
+          minimapVisible={editorMinimapEnabled && shownViewMode !== 'preview'}
         />
       )}
     </div>
@@ -825,6 +920,7 @@ function ArtifactPreview({
     )
   if (renderMode === 'mermaid-preview' && content.trim())
     return <MermaidBlock code={content} fill />
+  if (renderMode === 'diff') return <DiffPreview content={content} />
   return null
 }
 
@@ -932,7 +1028,12 @@ function HtmlPreviewFrame({
       </div>
     )
   return (
-    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-white">
+    // Theme background, not white: this shows through before the frame's first
+    // paint (every artifact switch/save remounts it), so white flashed between
+    // dark pages. Unstyled pages still get a browser-correct canvas — Chromium
+    // paints an iframe's canvas opaque in the page's own scheme whenever it
+    // differs from ours, and with matching schemes the page wants our canvas.
+    <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden bg-background">
       <iframe
         ref={iframeRef}
         src={src}

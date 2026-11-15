@@ -389,6 +389,10 @@ export type RenderMode =
   | 'image'
   | 'pdf'
   | 'video'
+  | 'audio'
+  | 'diff'
+  | 'archive'
+  | 'font'
 
 /** Maps file extensions → default render mode. Unlisted/no extension defaults to 'markdown'. */
 export const EXTENSION_RENDER_MODES: Record<string, RenderMode> = {
@@ -430,6 +434,25 @@ export const EXTENSION_RENDER_MODES: Record<string, RenderMode> = {
   '.m4v': 'video',
   '.mov': 'video',
   '.webm': 'video',
+
+  // Audio — Chromium's native <audio> player
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.m4a': 'audio',
+  '.aac': 'audio',
+  '.ogg': 'audio',
+  '.oga': 'audio',
+  '.opus': 'audio',
+  '.flac': 'audio',
+
+  // Archives — a listing of the entries
+  '.zip': 'archive',
+
+  // Fonts — a type specimen
+  '.ttf': 'font',
+  '.otf': 'font',
+  '.woff': 'font',
+  '.woff2': 'font',
 
   // Code — programming languages
   '.ts': 'code',
@@ -518,9 +541,13 @@ export const EXTENSION_RENDER_MODES: Record<string, RenderMode> = {
 
   // Code — build / patch / log
   '.tex': 'code',
-  '.diff': 'code',
-  '.patch': 'code',
-  '.log': 'code'
+  '.diff': 'diff',
+  '.patch': 'diff',
+  '.log': 'code',
+
+  // Subtitles — shown on a same-named video's player; read as text on their own
+  '.srt': 'code',
+  '.vtt': 'code'
 }
 
 export const RENDER_MODE_INFO: Record<RenderMode, { label: string }> = {
@@ -531,12 +558,23 @@ export const RENDER_MODE_INFO: Record<RenderMode, { label: string }> = {
   'mermaid-preview': { label: 'Mermaid Preview' },
   image: { label: 'Image' },
   pdf: { label: 'PDF' },
-  video: { label: 'Video' }
+  video: { label: 'Video' },
+  audio: { label: 'Audio' },
+  diff: { label: 'Diff' },
+  archive: { label: 'Archive' },
+  font: { label: 'Font' }
 }
 
 /** Whether a render mode represents a binary (non-text) artifact. */
 export function isBinaryRenderMode(mode: RenderMode): boolean {
-  return mode === 'image' || mode === 'pdf' || mode === 'video'
+  return (
+    mode === 'image' ||
+    mode === 'pdf' ||
+    mode === 'video' ||
+    mode === 'audio' ||
+    mode === 'archive' ||
+    mode === 'font'
+  )
 }
 
 /** Render modes that support "Download as PDF" conversion. */
@@ -544,6 +582,7 @@ export function canExportAsPdf(mode: RenderMode): boolean {
   return (
     mode === 'markdown' ||
     mode === 'code' ||
+    mode === 'diff' ||
     mode === 'html-preview' ||
     mode === 'svg-preview' ||
     mode === 'mermaid-preview'
@@ -555,9 +594,12 @@ export function canExportAsPng(mode: RenderMode): boolean {
   return mode === 'svg-preview' || mode === 'mermaid-preview'
 }
 
-/** Render modes that support "Download as HTML" export. */
+/**
+ * Render modes that support "Download as HTML" export. A diff exports as its source,
+ * line-numbered like code (what it was before it had its own mode).
+ */
 export function canExportAsHtml(mode: RenderMode): boolean {
-  return mode === 'markdown' || mode === 'code' || mode === 'mermaid-preview'
+  return mode === 'markdown' || mode === 'code' || mode === 'diff' || mode === 'mermaid-preview'
 }
 
 /**
@@ -568,12 +610,23 @@ export function canExportAsHtml(mode: RenderMode): boolean {
  * pan-zoom canvas with wheel zoom and fit/full buttons (`MediaView`), so a
  * second zoom control over them would fight the fit-to-host transform. They
  * still qualify in split/raw view, where the visible surface is the CodeMirror
- * source pane. PDF and video are excluded outright — Chromium's embedded PDF
- * viewer owns its own zoom UI, and the native video player its fullscreen.
+ * source pane. PDF, video, audio, archive and font are excluded outright —
+ * Chromium's embedded PDF viewer owns its own zoom UI, the native media players
+ * their fullscreen, and the archive listing and font specimen are fixed-size UI.
  */
 export function hasZoomableSurface(mode: RenderMode, viewMode: string | null): boolean {
-  if (mode === 'pdf' || mode === 'image' || mode === 'video') return false
-  if (mode === 'svg-preview' || mode === 'mermaid-preview') return viewMode !== 'preview'
+  if (
+    mode === 'pdf' ||
+    mode === 'image' ||
+    mode === 'video' ||
+    mode === 'audio' ||
+    mode === 'archive' ||
+    mode === 'font'
+  )
+    return false
+  // The diff view is virtualized (its own scroller), like the media canvases.
+  if (mode === 'svg-preview' || mode === 'mermaid-preview' || mode === 'diff')
+    return viewMode !== 'preview'
   return true
 }
 

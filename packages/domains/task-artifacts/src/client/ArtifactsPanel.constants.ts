@@ -1,4 +1,18 @@
-import { FileText, Code, Film, Globe, Image, GitBranch, Monitor, Moon, Sun } from 'lucide-react'
+import {
+  FileArchive,
+  FileDiff,
+  FileText,
+  Code,
+  Film,
+  Globe,
+  Image,
+  GitBranch,
+  Monitor,
+  Moon,
+  Music,
+  Sun,
+  Type
+} from 'lucide-react'
 import type { RenderMode } from '@slayzone/task-contracts'
 
 export const INDENT_PX = 20
@@ -55,5 +69,9 @@ export const RENDER_MODE_ICONS: Record<RenderMode, typeof FileText> = {
   'mermaid-preview': GitBranch,
   image: Image,
   pdf: FileText,
-  video: Film
+  video: Film,
+  audio: Music,
+  diff: FileDiff,
+  archive: FileArchive,
+  font: Type
 }

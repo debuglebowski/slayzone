@@ -231,6 +231,18 @@ describe('chat display preferences', () => {
     expect(chatAppearance.chatShowLastMessageTools).toBe(expected === 'recent')
   })
 
+  it('chat font size follows the terminal font size until set on its own', async () => {
+    snapshot = { terminal_font_size: '15' }
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatFontSize).toBe(15)
+    cleanup()
+    snapshot = { terminal_font_size: '15', chat_font_size: '18' }
+    renderProvider()
+    await flush()
+    expect(chatAppearance.chatFontSize).toBe(18)
+  })
+
   it('reads advanced settings and preserves existing defaults', async () => {
     snapshot = {
       chat_show_thinking: '0',

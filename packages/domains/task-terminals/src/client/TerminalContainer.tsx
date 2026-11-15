@@ -20,7 +20,8 @@ import {
   withModalGuard,
   getThemeChrome,
   getChromeStyleOverrides,
-  useStableCallback
+  useStableCallback,
+  useAppearance
 } from '@slayzone/ui'
 import { useTheme } from '@slayzone/ui'
 import type { TerminalTab } from '../shared/types'
@@ -41,6 +42,7 @@ import {
   useSessionsSidebarOpen
 } from './agent-sessions/SessionsSidebar'
 import { useFamilySessions } from './agent-sessions/useFamilySessions'
+import { ChatFontSizeControl } from './chat/ChatFontSizeControl'
 
 export interface TerminalContainerHandle {
   closeActiveGroup: () => Promise<boolean>
@@ -164,8 +166,10 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
       closeTab,
       movePane,
       renameTab,
+      setChatFontSize,
       getSessionId
     } = useTaskTerminals(taskId, defaultMode)
+    const { chatFontSize: defaultChatFontSize } = useAppearance()
 
     // Owns keyboard shortcuts; falls back to isActive so non-explode callers need not set it.
     const shortcutActive = hasShortcutFocus ?? isActive
@@ -205,6 +209,14 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
     // Get active group
     const activeGroup = groups.find((g) => g.id === activeGroupId)
     const mainGroupId = groups.find((group) => group.tabs.some((tab) => tab.isMain))?.id ?? null
+
+    // Chat font size: the header control sizes the active group's chat(s). A group
+    // rarely holds two chats; when it does they move together, read from the first.
+    const activeChatTabs = activeGroup?.tabs.filter((t) => isChatSupported(t.mode)) ?? []
+    const activeChatFontSize = activeChatTabs[0]?.chatFontSize ?? null
+    const setActiveChatFontSize = (size: number | null): void => {
+      for (const tab of activeChatTabs) void setChatFontSize(tab.id, size)
+    }
 
     // Agent-prompts sidebar: lists user messages sent to the MAIN agent. Only
     // for terminal (non-chat) agents whose prompts we can capture cleanly, and
@@ -613,8 +625,15 @@ export const TerminalContainer = forwardRef<TerminalContainerHandle, TerminalCon
             onPaneMove={movePane}
             onGroupRename={renameTab}
             rightContent={
-              canShowSessions || (canShowPrompts && !promptsOpen) ? (
+              activeChatTabs.length > 0 || canShowSessions || (canShowPrompts && !promptsOpen) ? (
                 <div className="flex items-center gap-2">
+                  {activeChatTabs.length > 0 && (
+                    <ChatFontSizeControl
+                      override={activeChatFontSize}
+                      defaultSize={defaultChatFontSize}
+                      onChange={setActiveChatFontSize}
+                    />
+                  )}
                   {canShowSessions && (
                     <SessionHistoryToggleButton onToggle={toggleSessions} open={sessionsOpen} />
                   )}

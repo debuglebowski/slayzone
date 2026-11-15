@@ -135,6 +135,8 @@ export interface ChatPanelProps {
   /** The task's main tab (the startup mode applies to it). */
   isMain?: boolean
   isTemporary?: boolean
+  /** This chat's own text size, px; unset follows the `chat_font_size` setting. */
+  fontSize?: number
   /** "Continue in terminal": hand the conversation to the terminal agent (main tab). */
   onHandoff?: () => void
   /** Open the task's sessions sidebar (the palette's "Sessions…"). */
@@ -188,7 +190,8 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
       isTemporary,
       onHandoff,
       onShowSessions,
-      onReady
+      onReady,
+      fontSize: fontSizeOverride
     } = props
     const {
       state,
@@ -232,6 +235,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const historyOfSession = useMemo(() => historySummary(timeline, paging), [timeline, paging])
 
     const appearance = useAppearance()
+    const fontSize = fontSizeOverride ?? appearance.chatFontSize
     const finalOnly = false
     const showLastMessageTools = false
 
@@ -871,7 +875,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                           'relative flex flex-col h-full min-w-0 flex-1 bg-background',
                           CHAT_PANEL_GUTTER_CLASS
                         )}
-                        style={{ fontSize: `${appearance.terminalFontSize}px` }}
+                        style={{ fontSize: `${fontSize}px` }}
                         onFocus={palette.claim}
                         onDragEnter={attachmentsApi.onDragEnter}
                         onDragOver={attachmentsApi.onDragOver}
@@ -1223,6 +1227,7 @@ const ChatPanelBody = forwardRef<ChatPanelHandle, ChatPanelProps>(
                               cwd={cwd}
                               providerFlagsOverride={providerFlagsOverride}
                               isThread
+                              fontSize={fontSize}
                               isActive={isActive && active}
                               onOpenUrl={onOpenUrl}
                               onOpenFile={onOpenFile}

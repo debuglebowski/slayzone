@@ -38,6 +38,7 @@ export const artifactMethodSchemas = {
   listArtifactsByTask: z.tuple([id]),
   getArtifact: z.tuple([id]),
   readArtifactContent: z.tuple([id]),
+  readArtifactText: z.tuple([id]),
   getArtifactMtime: z.tuple([id]),
   uploadArtifactBlob: z.tuple([
     z.object({
@@ -148,6 +149,7 @@ const reads = new Set([
   'listArtifactsByTask',
   'getArtifact',
   'readArtifactContent',
+  'readArtifactText',
   'getArtifactMtime',
   'listArtifactVersions',
   'readArtifactVersion',

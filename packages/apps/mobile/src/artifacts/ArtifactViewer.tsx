@@ -19,6 +19,7 @@ import { type ReactNode, useMemo, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native'
 import { type ChromeColors, useTheme, useThemeVariant } from '../theme'
 import { useTRPC, useTRPCClient } from '../trpc'
+import { mediaPlayer } from './media-player'
 import { DocumentWebView, type DocumentPage } from './DocumentWebView'
 import { downloadArtifactFile } from './files'
 import type { HubTarget } from './hub-rest'
@@ -39,6 +40,7 @@ import {
 import {
   extensionBadge,
   isFileKind,
+  isMediaKind,
   isShareOnlyKind,
   looksBinary,
   type ViewerKind,
@@ -84,7 +86,8 @@ type Body =
   | { kind: 'page'; page: DocumentPage }
   | { kind: 'image'; uri: string }
   | { kind: 'binary' }
-  | { kind: 'video' }
+  | { kind: 'media'; uri: string }
+  | { kind: 'unsupported'; message: string }
   | { kind: 'loading' }
   | { kind: 'error'; message: string; retry: () => void }
 
@@ -106,7 +109,11 @@ function LoadedArtifact({
 
   const kind = viewerKindOf(artifact)
   const fileKind = isFileKind(kind)
-  const shareOnly = isShareOnlyKind(kind)
+  const mediaKind = isMediaKind(kind)
+  const player = mediaKind ? mediaPlayer() : null
+  // Played from the downloaded file when this build has the native player.
+  const downloads = fileKind || player !== null
+  const shareOnly = isShareOnlyKind(kind) || (mediaKind && player === null)
   const [showHistory, setShowHistory] = useState(false)
   const [view, setView] = useState<'preview' | 'source'>(
     artifact.view_mode === 'raw' ? 'source' : 'preview'
@@ -121,8 +128,8 @@ function LoadedArtifact({
     version === null ? null : (versions.data?.find((v) => v.version_num === version) ?? null)
   const versionReady = version === null || selected !== null
 
-  const text = useArtifactText(artifact.id, selected, !fileKind && !shareOnly && versionReady)
-  const file = useArtifactFile(target, artifact, selected, contentTick, fileKind && versionReady)
+  const text = useArtifactText(artifact.id, selected, !downloads && !shareOnly && versionReady)
+  const file = useArtifactFile(target, artifact, selected, contentTick, downloads && versionReady)
   const isText = text.data !== undefined && !looksBinary(text.data)
   const needsMermaid = useMemo(
     () =>
@@ -158,15 +165,22 @@ function LoadedArtifact({
           }
         : { kind: 'loading' }
   } else if (shareOnly) {
-    body = { kind: 'video' }
-  } else if (fileKind) {
+    body = {
+      kind: 'unsupported',
+      message: mediaKind
+        ? `This ${kind} can't be played in this build of the app. Share it to open it in another app.`
+        : `${kind === 'font' ? 'Fonts' : 'Archives'} can't be shown in the app yet. Share it to open it in another app.`
+    }
+  } else if (downloads) {
     body = file.error
       ? { kind: 'error', message: file.error, retry: file.retry }
       : file.data === undefined
         ? { kind: 'loading' }
-        : kind === 'image'
-          ? { kind: 'image', uri: file.data }
-          : { kind: 'page', page: { kind: 'file', fileUri: file.data } }
+        : mediaKind
+          ? { kind: 'media', uri: file.data }
+          : kind === 'image'
+            ? { kind: 'image', uri: file.data }
+            : { kind: 'page', page: { kind: 'file', fileUri: file.data } }
   } else if (text.error) {
     body = { kind: 'error', message: text.error, retry: text.retry }
   } else if (text.data !== undefined && !isText) {
@@ -356,15 +370,19 @@ function ArtifactBody({
           <HeaderButton label="Share" onPress={onShare} />
         </Center>
       )
-    case 'video':
+    case 'unsupported':
       return (
         <Center>
-          <Text style={styles.note} testID="artifact-video">
-            Videos can't be played in the app yet. Share it to open it in another app.
+          <Text style={styles.note} testID="artifact-unsupported">
+            {body.message}
           </Text>
           <HeaderButton label="Share" onPress={onShare} />
         </Center>
       )
+    case 'media': {
+      const Player = mediaPlayer()?.ArtifactMediaPlayer
+      return Player ? <Player uri={body.uri} testID="artifact-media" /> : null
+    }
     case 'image':
       return <ZoomableImage uri={body.uri} testID="artifact-image" />
     case 'page':

@@ -17,6 +17,9 @@ export interface TerminalTab {
    * agent — see `agentStartsOnOpen`.
    */
   agentState: AgentState
+  /** This chat's own font size, px (`terminal_tabs.chat_font_size`); null follows
+   *  the `chat_font_size` setting. Only chat tabs read it. */
+  chatFontSize: number | null
 }
 
 export interface TerminalGroup {
@@ -36,4 +39,6 @@ export interface UpdateTerminalTabInput {
   label?: string | null
   mode?: AgentId
   position?: number
+  /** null clears the override (back to the setting); undefined leaves it. */
+  chatFontSize?: number | null
 }

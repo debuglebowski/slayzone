@@ -129,8 +129,137 @@ function applyInlineHighlights(hunks: DiffHunk[]): void {
   }
 }
 
+const DEV_NULL = '/dev/null'
+
+/** The path on a `--- ` / `+++ ` header line, without the timestamp `diff -u` appends after a tab. */
+function headerPath(line: string): string {
+  const rest = line.slice(4)
+  const tab = rest.indexOf('\t')
+  return (tab >= 0 ? rest.slice(0, tab) : rest).trim()
+}
+
+/**
+ * Drop the directory each side was diffed from (`patch -p1`): `a/` and `b/`, or any two
+ * differing first segments (`diff -ru old/ new/`). Two sides under the same first
+ * directory (`src/x.ts.orig` → `src/x.ts`) keep it: that is part of the path.
+ */
+function stripSidePrefixes(
+  oldPath: string | null,
+  newPath: string | null
+): [string | null, string | null] {
+  const head = (p: string) => p.slice(0, p.indexOf('/'))
+  const tail = (p: string) => p.slice(p.indexOf('/') + 1)
+  if (oldPath && newPath) {
+    return oldPath.includes('/') && newPath.includes('/') && head(oldPath) !== head(newPath)
+      ? [tail(oldPath), tail(newPath)]
+      : [oldPath, newPath]
+  }
+  const gitSide = (p: string | null) => (p && /^[ab]\//.test(p) ? tail(p) : p)
+  return [gitSide(oldPath), gitSide(newPath)]
+}
+
+/**
+ * A plain unified diff (`diff -u`, svn, hg): files start at a `--- ` line followed by
+ * `+++ ` and a hunk header, with no `diff --git` line. A hunk ends after the lines its
+ * header counts, never at text that merely looks like a header (deleting a SQL comment
+ * `-- note` shows as `--- note`).
+ */
+function parsePlainUnifiedDiff(patch: string): FileDiff[] {
+  const lines = patch.split('\n')
+  const files: FileDiff[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (
+      !lines[i].startsWith('--- ') ||
+      !lines[i + 1]?.startsWith('+++ ') ||
+      !HUNK_HEADER.test(lines[i + 2] ?? '')
+    ) {
+      i++
+      continue
+    }
+    const rawOld = headerPath(lines[i])
+    const rawNew = headerPath(lines[i + 1])
+    const [oldPath, newPath] = stripSidePrefixes(
+      rawOld === DEV_NULL ? null : rawOld,
+      rawNew === DEV_NULL ? null : rawNew
+    )
+    const path = newPath ?? oldPath ?? ''
+    const fileDiff: FileDiff = {
+      path,
+      oldPath: oldPath && newPath && oldPath !== newPath ? oldPath : null,
+      hunks: [],
+      isBinary: false,
+      isNew: rawOld === DEV_NULL,
+      isDeleted: rawNew === DEV_NULL,
+      additions: 0,
+      deletions: 0
+    }
+    i += 2
+
+    let m: RegExpMatchArray | null
+    while (i < lines.length && (m = lines[i].match(HUNK_HEADER))) {
+      const hunk: DiffHunk = {
+        header: lines[i],
+        oldStart: parseInt(m[1], 10),
+        oldLen: m[2] != null ? parseInt(m[2], 10) : 1,
+        newStart: parseInt(m[3], 10),
+        newLen: m[4] != null ? parseInt(m[4], 10) : 1,
+        label: (m[5] ?? '').trim(),
+        lines: []
+      }
+      let oldLine = hunk.oldStart
+      let newLine = hunk.newStart
+      let oldLeft = hunk.oldLen
+      let newLeft = hunk.newLen
+      i++
+      while (i < lines.length && (oldLeft > 0 || newLeft > 0)) {
+        const raw = lines[i]
+        if (raw.startsWith('\\')) {
+          // "\ No newline at end of file"
+        } else if (raw.startsWith('+') && newLeft > 0) {
+          hunk.lines.push({
+            type: 'add',
+            content: raw.slice(1),
+            oldLineNo: null,
+            newLineNo: newLine++
+          })
+          fileDiff.additions++
+          newLeft--
+        } else if (raw.startsWith('-') && oldLeft > 0) {
+          hunk.lines.push({
+            type: 'delete',
+            content: raw.slice(1),
+            oldLineNo: oldLine++,
+            newLineNo: null
+          })
+          fileDiff.deletions++
+          oldLeft--
+        } else if ((raw.startsWith(' ') || raw === '') && oldLeft > 0 && newLeft > 0) {
+          // An empty line is context whose leading space an editor stripped.
+          hunk.lines.push({
+            type: 'context',
+            content: raw.slice(1),
+            oldLineNo: oldLine++,
+            newLineNo: newLine++
+          })
+          oldLeft--
+          newLeft--
+        } else {
+          break
+        }
+        i++
+      }
+      if (lines[i]?.startsWith('\\')) i++
+      fileDiff.hunks.push(hunk)
+    }
+    files.push(fileDiff)
+  }
+  return files
+}
+
 function parseUnifiedDiffImpl(patch: string): FileDiff[] {
   if (!patch.trim()) return []
+  if (!/^diff --git /m.test(patch)) return parsePlainUnifiedDiff(patch)
 
   const files: FileDiff[] = []
   // Split into per-file chunks

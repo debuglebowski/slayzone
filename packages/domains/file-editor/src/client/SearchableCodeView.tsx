@@ -54,6 +54,20 @@ import { yaml } from '@codemirror/lang-yaml'
 import { sql } from '@codemirror/lang-sql'
 import { hcl } from 'codemirror-lang-hcl'
 import { buildCodeMirrorTheme } from './codemirror-theme'
+import { hasLineLongerThan } from './long-lines'
+
+/**
+ * A document with a line longer than this is not wrapped. Wrapping a very long
+ * line makes Chromium lay the wrapped block out on CodeMirror's first selection
+ * read: a 5 MB one-line JSON file blocked the window 1.1 s (2026-11-15). Unwrapped
+ * it opens without a block: CodeMirror draws only the visible slice of the line.
+ * Same figure as VS Code's `editor.stopRenderingLineAfter`.
+ */
+export const WRAP_MAX_LINE_CHARS = 10_000
+
+/** Wrapping for `text`: on, unless a line is too long to wrap without a freeze. */
+const wrappingFor = (text: string) =>
+  hasLineLongerThan(text, WRAP_MAX_LINE_CHARS) ? [] : EditorView.lineWrapping
 
 function getLanguageByExt(ext: string | undefined) {
   switch (ext?.toLowerCase()) {
@@ -260,6 +274,9 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
 
     const themeComp = useRef(new Compartment())
     const minimapComp = useRef(new Compartment())
+    // Set from the text as loaded (mount, disk reload), never while typing, so
+    // the layout does not flip under the caret mid-edit.
+    const wrapComp = useRef(new Compartment())
     // What the view held when it was last destroyed (tab hidden, or a
     // language/size change), restored on rebuild so caret, selection, undo
     // history and scroll survive. Scroll is recorded while visible: a hidden
@@ -293,7 +310,7 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
         foldGutter(),
         bracketMatching(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        EditorView.lineWrapping,
+        wrapComp.current.of(wrappingFor(initial.value)),
         indentUnit.of('  '),
         keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
         themeComp.current.of(initial.themeExt),
@@ -369,7 +386,8 @@ export const SearchableCodeView = forwardRef<SearchableCodeViewHandle, Searchabl
       if (currentDoc !== contentRef.current) {
         suppressOnChange.current = true
         view.dispatch({
-          changes: { from: 0, to: currentDoc.length, insert: contentRef.current }
+          changes: { from: 0, to: currentDoc.length, insert: contentRef.current },
+          effects: wrapComp.current.reconfigure(wrappingFor(contentRef.current))
         })
         suppressOnChange.current = false
       }
