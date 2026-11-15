@@ -113,6 +113,60 @@ const LOCAL_ONLY_RECORD_KINDS = [
   'pinned-message',
   'event-blob'
 ] as const satisfies readonly ChatRecordKind[]
+/** The event kinds `prompts.summaries` reads: they name a native conversation, or are a prompt. */
+export const EVENT_MARKER_KINDS = ['turn-init', 'conversation-branch', 'user-message'] as const
+const MARKER_KINDS_SQL = EVENT_MARKER_KINDS.map((k) => `'${k}'`).join(',')
+/** One marker row's values from event JSON `e` — the extracts the old full scan made. */
+const markerValues = (e: string) =>
+  `json_extract(${e},'$.kind'),json_extract(${e},'$.sessionId'),json_extract(${e},'$.conversationId'),json_extract(${e},'$.id')`
+/** `e` is a valid event of a marker kind (an invalid row never refuses its write). */
+const isMarker = (e: string) =>
+  `json_valid(${e}) AND json_extract(${e},'$.kind') IN (${MARKER_KINDS_SQL})`
+
+/**
+ * Event markers (FU5 computer stalls; derived, no schema version): the ~0.4 % of event
+ * rows `prompts.summaries` needs, so it never parses every event of a task again.
+ *
+ * - `event_markers`: per marker-kind row, the values the old scan extracted. Value
+ *   columns have NO declared type: they keep `json_extract`'s exact SQL type.
+ * - `event_marker_coverage`: conversations whose rows are ALL indexed. Born covered
+ *   (the conversation row exists before any of its events: FK); a conversation from
+ *   before markers is covered once `event-marker-backfill.ts` reaches its end.
+ * - Triggers, not the JS insert path: every writer is covered (inserts, the legacy-row
+ *   rewrite, retention / clear deletes) — including an OLDER build reopening this
+ *   file, because the triggers live in it. That is why no version bump is needed.
+ */
+export const EVENT_MARKERS_DDL = `
+  CREATE TABLE IF NOT EXISTS event_markers (
+    conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, kind, session_id, branch_id, message_id,
+    PRIMARY KEY(conversation_id, seq)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS event_marker_coverage (conversation_id TEXT PRIMARY KEY) WITHOUT ROWID;
+  CREATE TRIGGER IF NOT EXISTS event_markers_insert AFTER INSERT ON events
+  WHEN ${isMarker('NEW.event')}
+  BEGIN
+    INSERT OR REPLACE INTO event_markers VALUES(NEW.conversation_id,NEW.seq,${markerValues('NEW.event')});
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_markers_update AFTER UPDATE OF conversation_id,seq,event ON events
+  BEGIN
+    DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq;
+    INSERT OR REPLACE INTO event_markers
+      SELECT NEW.conversation_id,NEW.seq,${markerValues('NEW.event')} WHERE ${isMarker('NEW.event')};
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_markers_delete AFTER DELETE ON events
+  BEGIN
+    DELETE FROM event_markers WHERE conversation_id=OLD.conversation_id AND seq=OLD.seq;
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_marker_coverage_insert AFTER INSERT ON conversations
+  BEGIN
+    INSERT OR IGNORE INTO event_marker_coverage VALUES(NEW.id);
+  END;
+  CREATE TRIGGER IF NOT EXISTS event_marker_coverage_delete AFTER DELETE ON conversations
+  BEGIN
+    DELETE FROM event_marker_coverage WHERE conversation_id=OLD.id;
+  END;
+`
+
 /** Trigger body: bump `task_state_versions` for the task named by SQL expression `task`. */
 export function bumpTaskStateVersion(task: string): string {
   return `INSERT INTO task_state_versions(task_id,version) SELECT ${task},1 WHERE ${task} IS NOT NULL
@@ -303,6 +357,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     db.exec(USAGE_CURSORS_DDL)
     // v11: task worktree paths and base dirs (task-paths.ts).
     db.exec(TASK_PATHS_DDL)
+    // FU5: the event-marker index of `prompts.summaries` (derived; see the DDL).
+    db.exec(EVENT_MARKERS_DDL)
     // Version of the hub-facing metadata state, per task. Triggers are the one
     // choke point, so every writer (bootstrap, retention, migration, future code)
     // bumps it. Fail safe: a record kind counts unless it is known to stay local.
@@ -1214,6 +1270,50 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         requireOwner(id, epoch)
         return db.prepare("DELETE FROM records WHERE conversation_id=? AND kind='timeline'").run(id)
           .changes
+      })
+    },
+    /**
+     * Marker backfill (event-marker-backfill.ts): conversations not yet covered by
+     * `event_markers` — rows saved before markers existed — oldest first. Deleted
+     * ones are skipped: nothing reads their summaries.
+     */
+    uncoveredMarkerConversations(): string[] {
+      return (
+        db
+          .prepare(
+            `SELECT c.id FROM conversations c WHERE c.state<>'deleted'
+              AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)
+              ORDER BY c.rowid`
+          )
+          .all() as Array<{ id: string }>
+      ).map((r) => r.id)
+    },
+    /**
+     * Marker backfill: ONE slice — the markers of `id`'s rows after `afterSeq`, up to
+     * the budget (cut from record-header sizes, no body loaded: the first row always
+     * fits) — in one transaction. When no row follows the slice the conversation is
+     * covered in that same transaction: rows appended later carry markers already
+     * (trigger), so nothing can slip between the slice and the coverage.
+     */
+    backfillEventMarkers(
+      id: string,
+      afterSeq: number,
+      budget: Required<ChatHistoryPageBudget>
+    ): { through: number; done: boolean; bytes: number } {
+      return api.transaction(() => {
+        const bounds = pageBounds(id, afterSeq, Number.MAX_SAFE_INTEGER, budget)
+        let bytes = 0
+        if (bounds.through !== null) {
+          for (const [seq, size] of bounds.sizes) if (seq <= bounds.through) bytes += size
+          db.prepare(
+            `INSERT OR IGNORE INTO event_markers
+              SELECT conversation_id,seq,${markerValues('event')} FROM events
+              WHERE conversation_id=? AND seq>? AND seq<=? AND ${isMarker('event')}`
+          ).run(id, afterSeq, bounds.through)
+        }
+        if (!bounds.more)
+          db.prepare('INSERT OR IGNORE INTO event_marker_coverage VALUES(?)').run(id)
+        return { through: bounds.through ?? afterSeq, done: !bounds.more, bytes }
       })
     },
     hasTimeline(id: string): boolean {

@@ -5,7 +5,7 @@ import {
   isSyntheticChatPrompt,
   type ResolvedAgentHook
 } from '@slayzone/terminal-contracts'
-import type { ChatStorage } from './storage'
+import { EVENT_MARKER_KINDS, type ChatStorage } from './storage'
 import { chatStorageMode } from './storage-mode'
 export interface LocalPrompt {
   id: string
@@ -76,15 +76,59 @@ export function storePrompt(store: ChatStorage, prompt: LocalPrompt, once = fals
   })
 }
 
-export function createLocalPrompts(store: ChatStorage) {
+const KINDS_SQL = EVENT_MARKER_KINDS.map((k) => `'${k}'`).join(',')
+/**
+ * The rows `summaries` folds, ordered `storage_id, seq`. Params: the task id three
+ * times. A conversation covered by `event_markers` (storage.ts) is read through its
+ * markers and each marker's event by primary key — only a prompt's `text` is parsed;
+ * one not yet covered (rows from before markers, until the backfill reaches it) by
+ * the full scan of its events, as before. Same columns, same values either way.
+ */
+export const PROMPT_SUMMARY_ROWS_SQL = `SELECT m.conversation_id AS storage_id,m.seq,e.saved_at,
+          m.kind,m.session_id,m.branch_id,m.message_id,
+          CASE WHEN m.kind='user-message' THEN json_extract(e.event,'$.text') END AS text
+          FROM conversations c
+          JOIN event_marker_coverage v ON v.conversation_id=c.id
+          JOIN event_markers m ON m.conversation_id=c.id
+          JOIN events e ON e.conversation_id=m.conversation_id AND e.seq=m.seq
+          WHERE c.task_id=? AND c.state='active'
+          UNION ALL
+          SELECT e.conversation_id,e.seq,e.saved_at,
+          json_extract(e.event,'$.kind'),json_extract(e.event,'$.sessionId'),
+          json_extract(e.event,'$.conversationId'),json_extract(e.event,'$.id'),
+          json_extract(e.event,'$.text')
+          FROM events e JOIN conversations c ON c.id=e.conversation_id
+          WHERE c.task_id=? AND c.state='active'
+            AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)
+            AND json_extract(e.event,'$.kind') IN (${KINDS_SQL})
+          UNION ALL
+          SELECT r.conversation_id,json_extract(r.value,'$.seq'),r.saved_at,
+            'turn-init',json_extract(r.value,'$.sessionId'),NULL,NULL,NULL
+          FROM records r JOIN conversations c ON c.id=r.conversation_id
+          WHERE c.task_id=? AND c.state='active' AND r.kind='settings' AND r.id GLOB 'session-anchor:*'
+          ORDER BY storage_id,seq`
+
+export function createLocalPrompts(
+  store: ChatStorage,
+  opts: {
+    /** Active conversations a summary had to scan in full (no markers yet): index them first. */
+    uncovered?(conversationIds: string[]): void
+  } = {}
+) {
   function list(
     taskId: string,
     agentId?: string,
     excluded: Array<{ mode: string; conversationId: string }> = []
   ) {
+    // One ownership lookup per conversation, not per prompt (≤ 500 per agent).
+    const states = new Map<string, string | undefined>()
+    const stateOf = (id: string) => {
+      if (!states.has(id)) states.set(id, store.conversation(id)?.state)
+      return states.get(id)
+    }
     return store
       .findRecords('prompt', taskId)
-      .filter((r) => store.conversation(r.conversationId)?.state === 'active')
+      .filter((r) => stateOf(r.conversationId) === 'active')
       .map((r) => r.value as LocalPrompt)
       .filter(
         (p) =>
@@ -119,21 +163,20 @@ export function createLocalPrompts(store: ChatStorage) {
         add(captured, p.cliSessionId, p.text, p.createdAt)
       }
       store.compose((raw) => {
+        if (opts.uncovered) {
+          const uncovered = (
+            raw
+              .prepare(
+                `SELECT c.id FROM conversations c WHERE c.task_id=? AND c.state='active'
+                  AND NOT EXISTS (SELECT 1 FROM event_marker_coverage v WHERE v.conversation_id=c.id)`
+              )
+              .all(taskId) as Array<{ id: string }>
+          ).map((r) => r.id)
+          if (uncovered.length) opts.uncovered(uncovered)
+        }
         const rows = raw
-          .prepare(`SELECT e.conversation_id AS storage_id,e.seq,e.saved_at,
-          json_extract(e.event,'$.kind') AS kind,json_extract(e.event,'$.sessionId') AS session_id,
-          json_extract(e.event,'$.conversationId') AS branch_id,json_extract(e.event,'$.id') AS message_id,
-          json_extract(e.event,'$.text') AS text
-          FROM events e JOIN conversations c ON c.id=e.conversation_id
-          WHERE c.task_id=? AND c.state='active'
-            AND json_extract(e.event,'$.kind') IN ('turn-init','conversation-branch','user-message')
-          UNION ALL
-          SELECT r.conversation_id,json_extract(r.value,'$.seq'),r.saved_at,
-            'turn-init',json_extract(r.value,'$.sessionId'),NULL,NULL,NULL
-          FROM records r JOIN conversations c ON c.id=r.conversation_id
-          WHERE c.task_id=? AND c.state='active' AND r.kind='settings' AND r.id GLOB 'session-anchor:*'
-          ORDER BY storage_id,seq`)
-          .iterate(taskId, taskId) as Iterable<{
+          .prepare(PROMPT_SUMMARY_ROWS_SQL)
+          .iterate(taskId, taskId, taskId) as Iterable<{
           storage_id: string
           seq: number
           saved_at: number

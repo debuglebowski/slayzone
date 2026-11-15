@@ -899,6 +899,8 @@ run_harness packages/domains/chat-runtime/src/server/task-data.test.ts
 run_harness packages/domains/chat-runtime/src/server/session-ledger.test.ts
 run_harness packages/domains/chat-runtime/src/server/agent-turns.test.ts
 run_harness packages/domains/chat-runtime/src/server/prompts.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-markers.test.ts
+run_harness packages/domains/chat-runtime/src/server/event-marker-backfill.test.ts
 run_harness packages/domains/chat-runtime/src/server/task-paths.test.ts
 # Hub hand-off kinds on the computer: task-conversation, legacy-conversation-history, chat-settings (S6).
 run_harness packages/domains/chat-runtime/src/server/handoff-imports.test.ts

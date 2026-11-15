@@ -54,6 +54,17 @@ backfill frees are reused, not returned; backups (`db.backup`, every page, plus 
 pinned blob) grow by the extracted blobs until a one-time compaction follow-up lands —
 a prerequisite for keeping backup size flat.
 
+Derived indexes over events are trigger-maintained, never written by the JS insert
+path: `event_markers` holds the rows that name a native conversation or carry a
+prompt (`turn-init`, `conversation-branch`, `user-message`), so session summaries
+read those rows by key instead of parsing every event of a task. A conversation is
+`event_marker_coverage`-covered from birth; one saved before markers is scanned in
+full (same answer) until `event-marker-backfill.ts` reaches it — paced slices,
+per-conversation checkpoints, chats a summary waits on first. The ledger's
+resume / sessions-list SQL is served by `agent_sessions_task_mode_owned` and
+`agent_sessions_conversation_task`; keep a probe's `ORDER BY` and comparisons in
+the indexes' exact form when editing those rules.
+
 ## Decisions
 
 - 2026-11-02: Dedicated per-hub SQLite schema, WAL and synchronous FULL. No hub
@@ -72,3 +83,8 @@ a prerequisite for keeping backup size flat.
   unchanged. Extraction escapes reference-shaped objects in raw tool output, so a
   tool can never forge a reference. v13 also stops older builds opening the store:
   their GC knows only attachment pins and would delete event blobs.
+- 2026-11-15 (FU5 computer stalls): event markers as SQLite triggers + a derived
+  table, no schema version: every writer — an older build reopening the file included —
+  keeps them exact, so downgrade stays possible; a `json_valid` guard means the index
+  can never refuse an event write. Backfill done = no uncovered conversation left (no
+  done flag to go stale after a backup restore).

@@ -9,6 +9,7 @@ import { createLocalWorkspaceStore } from './workspace-store'
 import { createChatInvoker } from './invocation'
 import { createLocalAttachments } from './attachments'
 import { createChatBlobBackfill, type ChatBlobBackfillOptions } from './chat-blob-backfill'
+import { createEventMarkerBackfill, type EventMarkerBackfillOptions } from './event-marker-backfill'
 import {
   createChatTransport,
   createConversationRegistry,
@@ -62,6 +63,10 @@ export function createComputerChatRuntime(opts: {
   blobBackfill?: Partial<
     Pick<ChatBlobBackfillOptions, 'automatic' | 'sliceBytes' | 'idleMs' | 'freeBytes'>
   >
+  /** Event-marker backfill of pre-marker conversations (FU5); default: automatic unless `maintenance`. */
+  markerBackfill?: Partial<
+    Pick<EventMarkerBackfillOptions, 'automatic' | 'sliceBytes' | 'idleMs' | 'startDelayMs'>
+  >
   /** The computer's log (`computer.log`): maintenance progress, never chat content. */
   log?: (line: string) => void
 }) {
@@ -92,7 +97,17 @@ export function createComputerChatRuntime(opts: {
       })
     })
   }
-  const prompts = createLocalPrompts(storage)
+  // Indexes conversations saved before `event_markers` (FU5), so session summaries
+  // stop scanning every event of a task; a chat a summary had to scan goes first.
+  const markerBackfill = createEventMarkerBackfill({
+    ...opts.markerBackfill,
+    storage,
+    automatic: opts.markerBackfill?.automatic ?? !opts.maintenance,
+    ...(opts.log ? { log: opts.log } : {})
+  })
+  const prompts = createLocalPrompts(storage, {
+    uncovered: (ids) => markerBackfill.prioritize(ids)
+  })
   // Agent-turn snapshots (robustness plan §9, P0): only here, never on the hub.
   const turns = createAgentTurns(storage, opts.turnGit ?? refusingTurnGit)
   // The agent-session ledger (robustness plan §9, P0): only here, never on the hub.
@@ -354,6 +369,7 @@ export function createComputerChatRuntime(opts: {
       retentionService.access(parseChatInvocation(input).route.id, () => invoke(input)),
     retention: retentionService,
     blobBackfill,
+    markerBackfill,
     captureHook: prompts.capture,
     prompts: prompts.list,
     promptSummaries: prompts.summaries,
@@ -462,6 +478,7 @@ export function createComputerChatRuntime(opts: {
       if (closed) return
       closed = true
       await blobBackfill.close()
+      await markerBackfill.close()
       await retentionService.close()
       await backups.close()
       await queueRuntime.close()
