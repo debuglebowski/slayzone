@@ -130,6 +130,15 @@ export const SESSION_LEDGER_DDL = `
   CREATE INDEX IF NOT EXISTS agent_sessions_task_tab ON agent_sessions(task_id, mode, tab_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS agent_sessions_conversation ON agent_sessions(conversation_id);
   CREATE INDEX IF NOT EXISTS agent_sessions_pool ON agent_sessions(cwd, mode) WHERE status = 'pooled';
+  -- FU5: a chat task holds hundreds of spawns on ONE conversation. Without these the
+  -- resume / sessions-list rules probed every spawn of it per candidate row (n²;
+  -- 250–520 ms on the dev store). The first serves CURRENT_CONVERSATION_SQL's ORDER BY
+  -- (same expression) so the newest accepted row ends the walk; the second answers the
+  -- claim probes' (conversation, task) test from the index. Plain indexes: older builds
+  -- ignore them, inserts keep them.
+  CREATE INDEX IF NOT EXISTS agent_sessions_task_mode_owned
+    ON agent_sessions(task_id, mode, coalesce(bound_at, created_at) DESC);
+  CREATE INDEX IF NOT EXISTS agent_sessions_conversation_task ON agent_sessions(conversation_id, task_id);
   CREATE TABLE IF NOT EXISTS task_conversations (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL, mode TEXT NOT NULL, tab_id TEXT,
     conversation_id TEXT, origin TEXT NOT NULL, pending_meta TEXT, created_at INTEGER NOT NULL

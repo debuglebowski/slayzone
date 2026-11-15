@@ -70,11 +70,16 @@ function firstClaimSql(taskExpr: string, convExpr: string): string {
  * One task per provider session: the task that claimed it FIRST (ties: lower task
  * id). Any other task's claim is not its session. Correlated NOT EXISTS for a row
  * aliased `s`.
+ *
+ * "Another task" is spelled as two ranges (`<` OR `>`), not `<>`: identical for these
+ * non-null text keys (NULL compares unknown either way), but SQLite seeks both ranges
+ * of `agent_sessions_conversation_task`, so the spawns of `s`'s OWN task — hundreds on
+ * one chat conversation — are never visited (FU5: 22 → 2 ms per sessions list).
  */
 const NOT_CLAIMED_ELSEWHERE_SQL = `NOT EXISTS (
        SELECT 1 FROM agent_sessions o
         WHERE o.conversation_id = s.conversation_id
-          AND o.task_id <> s.task_id
+          AND (o.task_id < s.task_id OR o.task_id > s.task_id)
           AND ${claimSql('o')}
           AND (coalesce(o.bound_at, o.created_at), o.task_id)
               < (${firstClaimSql('s.task_id', 's.conversation_id')}, s.task_id)
@@ -182,6 +187,21 @@ const TTL_PENDING_MS = 10 * 60 * 1000
 const TTL_PENDING_NULL_EXPECTED_MS = 30 * 1000
 const FIND_PENDING_RETRY_MS = 100
 
+/**
+ * {@link getCurrentConversationId}'s statement. Params: {@link resetParams}, then
+ * (task, mode, tab). Its `ORDER BY` is exactly `agent_sessions_task_mode_owned`'s
+ * expression, so SQLite walks that index newest-owned first and stops at the first
+ * row the rules accept — never evaluating the per-row probes for every spawn of a
+ * conversation (chat tasks hold hundreds on one).
+ */
+export const CURRENT_CONVERSATION_SQL = `WITH reset AS (SELECT ${TAB_RESET_AT_SQL} AS at)
+     SELECT s.conversation_id AS conversation_id
+       FROM agent_sessions s
+       WHERE s.task_id = ? AND s.mode = ?
+         AND ${resumableSessionSql('(SELECT at FROM reset)', '?')}
+       ORDER BY ${OWNED_AT_SQL} DESC
+       LIMIT 1`
+
 /** The conversation tab `tabId` (default: main) of (task, mode) resumes next, or null. */
 export async function getCurrentConversationId(
   db: SlayzoneDb,
@@ -189,16 +209,12 @@ export async function getCurrentConversationId(
   mode: string,
   tabId: string = taskId
 ): Promise<string | null> {
-  const row = await db.get<{ conversation_id: string | null }>(
-    `WITH reset AS (SELECT ${TAB_RESET_AT_SQL} AS at)
-     SELECT s.conversation_id AS conversation_id
-       FROM agent_sessions s
-       WHERE s.task_id = ? AND s.mode = ?
-         AND ${resumableSessionSql('(SELECT at FROM reset)', '?')}
-       ORDER BY ${OWNED_AT_SQL} DESC
-       LIMIT 1`,
-    [...resetParams(taskId, mode, tabId), taskId, mode, tabId]
-  )
+  const row = await db.get<{ conversation_id: string | null }>(CURRENT_CONVERSATION_SQL, [
+    ...resetParams(taskId, mode, tabId),
+    taskId,
+    mode,
+    tabId
+  ])
   return row?.conversation_id ?? null
 }
 
@@ -389,6 +405,32 @@ export interface TaskSessionRow {
   isCurrent: boolean
 }
 
+/**
+ * {@link listTaskSessionRows}'s session rows of (task, mode). Params: (task, mode). Its
+ * per-row claim probes (`o`, `m`) seek `agent_sessions_conversation_task`, so a spawn of
+ * the SAME task is skipped from the index alone.
+ */
+export const TASK_SESSION_ROWS_SQL = `SELECT
+       s.conversation_id                         AS conversation_id,
+       (SELECT ${sessionTabSql('w')} FROM agent_sessions w
+          WHERE w.task_id = s.task_id AND w.conversation_id = s.conversation_id
+            AND ${claimSql('w')}
+          ORDER BY coalesce(w.bound_at, w.created_at) DESC, w.rowid DESC LIMIT 1) AS owner_tab_id,
+       (SELECT o.origin FROM agent_sessions o
+          WHERE o.task_id = s.task_id AND o.mode = s.mode
+            AND o.conversation_id = s.conversation_id
+            AND o.origin IN (${HONORED_ORIGINS_SQL})
+          ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
+       min(s.created_at)                         AS started_at,
+       max(s.created_at)                         AS last_active_at
+     FROM agent_sessions s
+     WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
+       AND s.origin IN (${HONORED_ORIGINS_SQL})
+       AND ${NOT_DELETED_SQL}
+       AND ${NOT_CLAIMED_ELSEWHERE_SQL}
+     GROUP BY s.conversation_id
+     ORDER BY started_at DESC`
+
 /** Every honored, undeleted session of (task, mode), newest first; `isCurrent` = `tabId`'s. */
 export async function listTaskSessionRows(
   db: SlayzoneDb,
@@ -413,29 +455,7 @@ export async function listTaskSessionRows(
     started_at: number
     last_active_at: number
     owner_tab_id: string
-  }>(
-    `SELECT
-       s.conversation_id                         AS conversation_id,
-       (SELECT ${sessionTabSql('w')} FROM agent_sessions w
-          WHERE w.task_id = s.task_id AND w.conversation_id = s.conversation_id
-            AND ${claimSql('w')}
-          ORDER BY coalesce(w.bound_at, w.created_at) DESC, w.rowid DESC LIMIT 1) AS owner_tab_id,
-       (SELECT o.origin FROM agent_sessions o
-          WHERE o.task_id = s.task_id AND o.mode = s.mode
-            AND o.conversation_id = s.conversation_id
-            AND o.origin IN (${HONORED_ORIGINS_SQL})
-          ORDER BY o.created_at ASC, o.rowid ASC LIMIT 1) AS origin,
-       min(s.created_at)                         AS started_at,
-       max(s.created_at)                         AS last_active_at
-     FROM agent_sessions s
-     WHERE s.task_id = ? AND s.mode = ? AND s.conversation_id IS NOT NULL
-       AND s.origin IN (${HONORED_ORIGINS_SQL})
-       AND ${NOT_DELETED_SQL}
-       AND ${NOT_CLAIMED_ELSEWHERE_SQL}
-     GROUP BY s.conversation_id
-     ORDER BY started_at DESC`,
-    [taskId, mode]
-  )
+  }>(TASK_SESSION_ROWS_SQL, [taskId, mode])
   return rows.map((r) => ({
     conversationId: r.conversation_id,
     origin: r.origin,
