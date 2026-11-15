@@ -494,6 +494,21 @@ export function getPtyBackend(): PtyBackend {
   return ptyBackend
 }
 
+const backendListeners = new Set<() => void>()
+
+/** `setPtyBackend` swapped the backend (the composition root installs the routing one). */
+export function onPtyBackendChange(cb: () => void): () => void {
+  backendListeners.add(cb)
+  return () => backendListeners.delete(cb)
+}
+
 export function setPtyBackend(backend: PtyBackend | null): void {
   ptyBackend = backend ?? noComputerPtyBackend
+  for (const cb of [...backendListeners]) {
+    try {
+      cb()
+    } catch {
+      /* a listener's failure must not stop the swap */
+    }
+  }
 }

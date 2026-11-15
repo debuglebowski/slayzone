@@ -27,7 +27,7 @@ import {
   getRuntimeAdapters,
   setTaskPathsDelegate
 } from './ops/shared'
-import { resolveChatAgentLaunch, setMainAgentDeps } from './main-agent'
+import { resolveChatAgentLaunch, resolveTerminalTabLaunch, setMainAgentDeps } from './main-agent'
 import { openTasksFromViewState, restoreRunningChatAgents } from './agent-restore'
 import { setTaskSessionLedger, type SessionLedgerClient } from './ops'
 
@@ -626,5 +626,80 @@ describe('boot restore of running chat agents', () => {
     ).toEqual({ order: ['a', 'b'], active: 'b' })
     expect(openTasksFromViewState('not json')).toEqual({ order: [], active: null })
     expect(openTasksFromViewState(null)).toEqual({ order: [], active: null })
+  })
+})
+
+// A restarted hub adopts the terminal sessions its previous run left running on a
+// computer: each into its tab, launched (for a later resume) exactly as that tab
+// would be — from the hub's records, never from what the process says about itself.
+describe('the launch a left-running terminal session is adopted with', () => {
+  const getTask = (id: string) => taskOps.getTaskOp(h.slayDb, id)
+
+  test("the main tab: the task's agent, flags and folder", async () => {
+    const taskId = seedTask(seedProject('/p'), { flags: '--verbose', baseDir: '/base' })
+    expect(
+      await resolveTerminalTabLaunch(
+        h.slayDb,
+        { taskId, tabId: taskId, mode: 'claude-code' },
+        getTask
+      )
+    ).toEqual({
+      ok: true,
+      launch: {
+        sessionId: `${taskId}:${taskId}`,
+        cwd: '/base',
+        mode: 'claude-code',
+        providerFlags: '--verbose',
+        executionContext: null
+      }
+    })
+  })
+
+  test('a plain shell tab (a long-running `pnpm dev`): its own mode, no agent flags', async () => {
+    const taskId = seedTask(seedProject('/p'), { flags: '--verbose', baseDir: '/base' })
+    h.db
+      .prepare('INSERT INTO terminal_tabs(id,task_id,mode,position) VALUES(?,?,?,1)')
+      .run('dev-server', taskId, 'terminal')
+    expect(
+      await resolveTerminalTabLaunch(
+        h.slayDb,
+        { taskId, tabId: 'dev-server', mode: 'terminal' },
+        getTask
+      )
+    ).toEqual({
+      ok: true,
+      launch: {
+        sessionId: `${taskId}:dev-server`,
+        cwd: '/base',
+        mode: 'terminal',
+        providerFlags: null,
+        executionContext: null
+      }
+    })
+  })
+
+  test('not adoptable: another agent in the tab now, or no such task or tab', async () => {
+    const taskId = seedTask(seedProject('/p'), { baseDir: '/base' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: taskId, mode: 'codex' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'mode-mismatch' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: 'gone' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'launch-unresolved' })
+    expect(
+      await resolveTerminalTabLaunch(h.slayDb, { taskId: crypto.randomUUID(), tabId: 'x' }, getTask)
+    ).toMatchObject({ ok: false, reason: 'launch-unresolved' })
+  })
+
+  test('a folder that cannot be read right now does not stop the adoption', async () => {
+    const taskId = seedTask(seedProject('/p'), { baseDir: '/base' })
+    pathsAway = true
+    try {
+      expect(
+        await resolveTerminalTabLaunch(h.slayDb, { taskId, tabId: taskId }, getTask)
+      ).toMatchObject({ ok: true, launch: { cwd: '', mode: 'claude-code' } })
+    } finally {
+      pathsAway = false
+    }
   })
 })

@@ -28,6 +28,7 @@ export {
   setMainAgentDeps,
   resolveMainAgentLaunch,
   resolveChatAgentLaunch,
+  resolveTerminalTabLaunch,
   startMainAgent,
   switchMainAgentMode,
   type SwitchMainAgentModeInput,

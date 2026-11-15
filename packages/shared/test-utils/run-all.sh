@@ -1045,6 +1045,10 @@ run_harness packages/domains/terminal/src/server/runtime/createpty-resume-locati
 run_harness packages/domains/terminal/src/server/runtime/createpty-codex-no-daemon.test.ts
 # An agent that dies mid-session unasked is resumed in place, not buried under a recovery shell.
 run_harness packages/domains/terminal/src/server/runtime/pty-auto-resume.test.ts
+# A hub restart: the session a previous run left running is adopted (attached), never
+# re-launched or replaced; what cannot be adopted is surfaced with attach/stop.
+run_harness packages/domains/terminal/src/server/runtime/pty-attach.test.ts
+run_harness packages/domains/terminal/src/server/runtime/unattached-sessions.test.ts
 run_harness packages/domains/terminal/src/server/runtime/live-conversations.test.ts
 
 

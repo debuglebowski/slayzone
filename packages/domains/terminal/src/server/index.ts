@@ -77,7 +77,18 @@ export {
   type PtySessionWindow,
   type IpcMainLike
 } from './pty-host'
-export { createPtyOps, setPtySpawnLookups, type PtyCreateOpts } from './runtime/pty-store'
+export {
+  createPtyOps,
+  setPtySpawnLookups,
+  setUnattachedLaunchResolver,
+  type PtyCreateOpts
+} from './runtime/pty-store'
+export type {
+  UnattachedLaunch,
+  UnattachedLaunchResolver,
+  UnattachedReason,
+  UnattachedSession
+} from './runtime/unattached-sessions'
 // Hub/computer split spawn-backend seam (wave 2, Model A) + spawn-time lookups /
 // session ledger (wave 1) interfaces. Default backend/lookups/ledger are the
 // in-process db-backed impls, so this lands dark; a later wave injects remote

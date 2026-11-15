@@ -32,7 +32,8 @@ import { createDbPtySpawnLookups, mapAgentRow, type PtySpawnLookups } from './pt
 import type { TaskSessionStore } from './task-session-store'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { resolveSpawnTarget } from './spawn-target'
-import { getPtyBackend } from './pty-backend'
+import { getPtyBackend, onPtyBackendChange } from './pty-backend'
+import { createUnattachedSessions, type UnattachedLaunchResolver } from './unattached-sessions'
 import { runDoctor } from './runtime-doctor'
 import { getAdapter, type ExecutionContext } from '../adapters'
 import type {
@@ -83,6 +84,22 @@ export interface PtyCreateOpts {
   rows?: number
   /** The creating tab is on screen: its agent starts first (see `CreatePtyOptions.foreground`). */
   foreground?: boolean
+  /**
+   * Hub-internal (never from a client — the router drops it): take over the session
+   * the computer already runs under this id instead of starting one. See
+   * `CreatePtyOptions.attach` and ./unattached-sessions.
+   */
+  attach?: { computerId: string; spawnId: string }
+}
+
+/**
+ * How a tab's agent is launched, from the hub's records — the composition root
+ * wires it (the task domain resolves tasks and tabs). Unset: sessions a previous
+ * hub run left on a computer are surfaced, not adopted.
+ */
+let unattachedLaunchResolver: UnattachedLaunchResolver | null = null
+export function setUnattachedLaunchResolver(next: UnattachedLaunchResolver | null): void {
+  unattachedLaunchResolver = next
 }
 
 /**
@@ -340,7 +357,16 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
           })
       }
     )
-    if (taskId) {
+    if (opts.attach && computerId !== opts.attach.computerId) {
+      // The task runs on another computer now: its tab is not this process's to own.
+      return {
+        success: false,
+        code: 'attach-refused',
+        attachRefusal: 'task-elsewhere',
+        error: `The task runs on another computer now (${computerId ?? 'none'}).`
+      }
+    }
+    if (taskId && !opts.attach) {
       if (computerId != null) {
         warmClaim = claimWarmShell({
           taskId,
@@ -376,9 +402,32 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
       cols: opts.cols,
       rows: opts.rows,
       foreground: opts.foreground === true,
-      adoptPty: warmClaim ?? undefined
+      adoptPty: warmClaim ?? undefined,
+      ...(opts.attach ? { attach: opts.attach } : {})
     })
   }
+
+  // Sessions a previous hub run left running on a computer: adopted into their
+  // tabs, or surfaced (./unattached-sessions). Follows whichever backend is installed.
+  const unattached = createUnattachedSessions({
+    backend: getPtyBackend,
+    resolve: (target) => unattachedLaunchResolver?.(target) ?? Promise.resolve(null),
+    create: (launch) =>
+      ptyCreate({
+        sessionId: launch.sessionId,
+        cwd: launch.cwd,
+        mode: launch.mode as AgentId,
+        providerFlags: launch.providerFlags ?? null,
+        executionContext: (launch.executionContext ?? null) as ExecutionContext | null,
+        attach: launch.attach
+      })
+  })
+  unattached.start()
+  onPtyBackendChange(() => unattached.start())
+  const unattachedList = () => unattached.list()
+  const unattachedAttach = (sessionId: string) => unattached.attach(sessionId)
+  const unattachedKill = (sessionId: string) => unattached.kill(sessionId)
+  const onUnattachedChange = (cb: () => void) => unattached.onChange(cb)
 
   const ptyTestExecutionContext = (context: ExecutionContext) => testExecutionContext(context)
   const ptyWrite = (sessionId: string, data: string, writeId?: string) =>
@@ -454,6 +503,10 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     agentsRestoreDefaults,
     agentsResetToDefaultState,
     ptyCreate,
+    unattachedList,
+    unattachedAttach,
+    unattachedKill,
+    onUnattachedChange,
     setCreateCapture: setPtyCreateCapture,
     takeCreateOpts: takePtyCreateOpts,
     takeKillCalls: takePtyKillCalls,

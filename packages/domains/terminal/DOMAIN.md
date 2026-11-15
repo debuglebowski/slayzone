@@ -33,6 +33,28 @@ session per 5 min; a second death in that window gets the recovery shell plus
 the interactive recovery shell, a stale resume its overlay, a requested kill ends.
 Regression: 2026-11-14, the hub's stray sweep SIGHUP'd 31 live agents (exit 129).
 
+### Hub restart: adopt, else surface
+
+Hub processes restart (Restart local hub, a crashed sidecar, a standalone hub, a
+desktop restart with a remote computer); computers keep their ptys. A restarted hub
+never starts a second process for a tab whose agent still runs, and never kills it
+on no evidence:
+
+- **Adopt.** Every reconnect list hands the routing backend the sessions nothing in
+  this hub run tracks (`PtyBackend.untrackedSessions`). `unattached-sessions.ts`
+  resolves each `<taskId>:<tabId>` into its tab's launch (task domain
+  `resolveTerminalTabLaunch`, plain shell tabs included) and calls `pty.create`
+  with `attach`: nothing is launched; the computer hands the running process to a
+  new attempt (`pty.adopt`) and it is registered like any session (output, input,
+  state, exit, auto-resume). A tab's own start of such an id does the same through
+  `pty.spawn` `adoptLive` (the first spawn of an id in a hub run). Both record
+  `pty.orphan_adopted`.
+- **Surface.** What cannot be adopted (not a task tab, no detection or an older
+  computer, the task elsewhere, another agent in the tab now, the computer refused)
+  stays running and is listed with its reason (`pty.orphan_unattached`) — attach
+  again or stop it (`pty.orphan_killed`). A tab start in another mode replaces it
+  (`computer.orphan_replaced`).
+
 ### Codex silence and cancellation provenance
 
 The running watchdog checks Codex with a bounded `thread/read` before treating

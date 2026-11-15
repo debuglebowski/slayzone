@@ -49,7 +49,12 @@ export const ptyRouter = router({
   agentsResetToDefaultState: publicProcedure.mutation(() => ops().agentsResetToDefaultState()),
 
   // PTY ops
-  create: publicProcedure.input(anyInput).mutation(({ input }) => ops().ptyCreate(input as never)),
+  create: publicProcedure.input(anyInput).mutation(({ input }) => {
+    // `attach` is hub-internal (adopting a session a previous hub run left): a client
+    // never asks for it.
+    const { attach: _hubOnly, ...opts } = (input ?? {}) as Record<string, unknown>
+    return ops().ptyCreate(opts as never)
+  }),
   // Test-only (PLAYWRIGHT): capture createPty opts at the spawn chokepoint (no spawn).
   testSetPtyCreateCapture: publicProcedure
     .input(z.object({ enabled: z.boolean() }))

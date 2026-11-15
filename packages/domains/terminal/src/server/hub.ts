@@ -107,8 +107,15 @@ export {
 } from './runtime/pty-manager'
 export {
   createPtyOps,
-  setPtySpawnLookups
+  setPtySpawnLookups,
+  setUnattachedLaunchResolver
 } from './runtime/pty-store'
+export type {
+  UnattachedLaunch,
+  UnattachedLaunchResolver,
+  UnattachedReason,
+  UnattachedSession
+} from './runtime/unattached-sessions'
 export { setChatSessionSource } from './runtime/session-registry'
 export { beginTerminalShutdown } from './runtime/shutdown'
 export { resetTerminalRuntimeForTest } from './runtime/test-reset'

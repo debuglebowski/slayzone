@@ -163,6 +163,7 @@ import {
   getTaskOp,
   resolveMainAgentLaunch,
   resolveChatAgentLaunch,
+  resolveTerminalTabLaunch,
   startMainAgent,
   restoreRunningChatAgents,
   type TaskRuntimeAdapters
@@ -233,6 +234,7 @@ import {
   setTerminalCommandProbe,
   getPtyDirectTarget,
   onPtyInputSubmit,
+  setUnattachedLaunchResolver,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -2455,6 +2457,11 @@ export function composeServer(opts: {
     // tracks (a previous run's): a reconnect ends one only on that proof — its
     // task or tab gone, its process row deleted — never for being unknown.
     const sessionOwners = createComputerSessionOwners(db)
+    // Terminal sessions a previous hub run left running on a computer are adopted
+    // into their tabs, launched as those tabs would be (terminal unattached-sessions).
+    setUnattachedLaunchResolver((target) =>
+      resolveTerminalTabLaunch(db, target, (id) => getTaskOp(db, id))
+    )
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
