@@ -1339,6 +1339,7 @@ run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
+run_harness packages/domains/file-editor/src/client/long-lines.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
 run_harness packages/domains/worktrees/src/server/list-project-repos.test.ts
 run_harness packages/domains/worktrees/src/server/remove-worktree.test.ts
