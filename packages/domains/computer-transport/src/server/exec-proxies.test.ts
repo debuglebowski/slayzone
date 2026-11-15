@@ -504,6 +504,41 @@ describe('createRoutingPtyBackend', () => {
     })
   })
 
+  it('a write the frame limit refuses is recorded (not silently dropped); others stay quiet', async () => {
+    const gateway = new FakeGateway()
+    gateway.onMethod('pty.spawn', () => ({ pid: 1 }))
+    gateway.onMethod('pty.write', (params) => {
+      if ((params as { data: string }).data === 'huge')
+        throw Object.assign(
+          new Error("request 'pty.write' is 104857700 bytes; the frame limit is 104857600"),
+          {
+            name: 'RpcError',
+            code: -32008
+          }
+        )
+      if ((params as { data: string }).data === 'gone') throw new Error('computer disconnected')
+      return null
+    })
+    const backend = createRoutingPtyBackend({
+      gateway,
+      resolveComputerId: (spec) => spec.computerId ?? null
+    })
+    const handle = (await backend.spawn(
+      ptySpec({
+        file: 'zsh',
+        args: [],
+        options: { cwd: '/work', env: {}, cols: 80, rows: 24, name: 'xterm-256color' }
+      })
+    )) as PtyHandle
+    handle.write('huge')
+    handle.write('gone')
+    await new Promise((r) => setTimeout(r, 0))
+    const refused = diagnostics.filter((d) => d.event === 'computer.pty_write_too_large')
+    expect(refused).toHaveLength(1)
+    expect(refused[0]).toMatchObject({ level: 'warn', payload: { sessionId: 'sess-1' } })
+    expect(diagnostics.filter((d) => d.event.startsWith('computer.pty_write'))).toHaveLength(1)
+  })
+
   it('maps the spawn spec to a pty.spawn frame and issues write/resize/kill frames', async () => {
     const gateway = new FakeGateway()
     gateway.onMethod('pty.spawn', () => ({ pid: 1 }))

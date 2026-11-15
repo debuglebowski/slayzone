@@ -44,6 +44,24 @@ export function createUploadStaging(dir: string, opts: UploadStagingOptions = {}
     }
   }
 
+  function sweepOne(name: string, cutoff: number): void {
+    if (!name.endsWith('.part')) return
+    const path = join(root, name)
+    const at =
+      touched.get(path) ??
+      (() => {
+        try {
+          return statSync(path).mtimeMs
+        } catch {
+          return Number.POSITIVE_INFINITY
+        }
+      })()
+    if (at < cutoff) {
+      rmSync(path, { force: true })
+      touched.delete(path)
+    }
+  }
+
   return {
     /** Start (or resume) staging `size` bytes named `sha256`: how many are here already. */
     begin(sha256: string, size: number): { received: number } {
@@ -100,20 +118,11 @@ export function createUploadStaging(dir: string, opts: UploadStagingOptions = {}
     sweep(): void {
       const cutoff = now() - staleMs
       for (const name of readdirSync(root)) {
-        if (!name.endsWith('.part')) continue
-        const path = join(root, name)
-        const at =
-          touched.get(path) ??
-          (() => {
-            try {
-              return statSync(path).mtimeMs
-            } catch {
-              return Number.POSITIVE_INFINITY
-            }
-          })()
-        if (at < cutoff) {
-          rmSync(path, { force: true })
-          touched.delete(path)
+        // One leftover that cannot be removed never stops the sweep of the others.
+        try {
+          sweepOne(name, cutoff)
+        } catch {
+          /* retried on the next sweep */
         }
       }
     }

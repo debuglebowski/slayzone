@@ -95,6 +95,7 @@ export async function collectPages<T>(
   const all: T[] = []
   const seen = new Set<string>()
   let cursor: string | null = null
+  // isolation: fatal — one paged read of one list: a failed page fails the read, never a partial list
   for (;;) {
     const page: Page<T> = await fetch(cursor)
     for (const item of page.items) all.push(item)

@@ -120,6 +120,7 @@ import {
   isProjectNotPlacedError
 } from '../shared/frames'
 import { RpcDisposedError, RpcError, RpcTimeoutError } from '../shared/rpc'
+import { isComputerFrameTooLarge } from '@slayzone/platform/computer-frame-limit'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
@@ -282,6 +283,32 @@ function seqGapSkip(entry: SeqGapState): OutputGap | null {
   const gap = { fromSeq: entry.lastSeq + 1, toSeq: lowest - 1 }
   entry.lastSeq = lowest - 1
   return gap
+}
+
+/**
+ * Terminal input is fire-and-forget; most failures (the computer went away) need
+ * no word here. A write REFUSED by the frame limit (`frameTooLarge`: input over
+ * 100 MiB in one write) is input the user typed or pasted that never arrived —
+ * recorded, never silently dropped.
+ */
+function reportWriteRefused(
+  computerId: string,
+  sessionId: string,
+  chars: number,
+  err: unknown
+): void {
+  if (!isComputerFrameTooLarge(err)) return
+  try {
+    recordDiagnosticEvent({
+      level: 'warn',
+      source: 'pty',
+      event: 'computer.pty_write_too_large',
+      message: `pty ${sessionId} on computer ${computerId}: a ${chars}-char write was refused (${err.message})`,
+      payload: { computerId, sessionId, chars }
+    })
+  } catch {
+    // Diagnostics are best-effort.
+  }
 }
 
 /** One diagnostic per lost range: output the hub can never show. */
@@ -1018,7 +1045,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ...(opts?.watchConversationId && entry.detectsOutput
             ? { watchConversationId: true as const }
             : {})
-        }).catch(noop)
+        }).catch((err: unknown) => reportWriteRefused(computerId, sessionId, data.length, err))
       },
       get detectsOutput(): boolean {
         return entry.detectsOutput

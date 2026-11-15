@@ -39,15 +39,7 @@ export function usePagedStashDiff(
   useEffect(() => {
     if (!key || !repoPath || index === null) return
     let live = true
-    setState({
-      key,
-      text: '',
-      cursor: null,
-      totalBytes: 0,
-      loading: true,
-      restLoading: false,
-      failed: false
-    })
+    // Until this key's first page arrives, `current` (below) is null: loading.
     client.worktrees.readGitText
       .query({ repoPath, kind: 'stashDiff', index, cursor: null })
       .then((page) => {
@@ -105,7 +97,7 @@ export function usePagedStashDiff(
 
   return {
     files: key ? files : NO_FILES,
-    loading: !!key && (current?.loading ?? true),
+    loading: !!key && current === null,
     rest:
       current?.cursor != null
         ? {
