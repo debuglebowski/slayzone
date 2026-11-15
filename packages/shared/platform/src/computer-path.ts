@@ -81,9 +81,20 @@ function windowsAliasesOff(p: string): string {
  * when `caseInsensitive` (a Windows path always is).
  */
 export function canonicalComputerPath(p: string, caseInsensitive: boolean): string {
+  // A pure function of its arguments, asked about the same roots on every check (the
+  // computer's path jail compares each judged path with every root of its scope):
+  // remembered, bounded.
+  const memo = (caseInsensitive ? '1' : '0') + p
+  const hit = canonicalKeys.get(memo)
+  if (hit !== undefined) return hit
   const n = normalizeComputerPath(p)
-  return caseInsensitive || isWindowsComputerPath(n) ? n.toLowerCase() : n
+  const key = caseInsensitive || isWindowsComputerPath(n) ? n.toLowerCase() : n
+  if (canonicalKeys.size >= CANONICAL_KEYS_MAX) canonicalKeys.clear()
+  canonicalKeys.set(memo, key)
+  return key
 }
+const CANONICAL_KEYS_MAX = 20_000
+const canonicalKeys = new Map<string, string>()
 
 /**
  * `child` is `root` or inside it, compared as {@link canonicalComputerPath} keys. The

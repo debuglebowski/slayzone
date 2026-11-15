@@ -27,6 +27,22 @@
  * WHAT THIS BOUNDS: hub frames. A shell or agent the hub starts runs as this OS user
  * and can touch anything that user can; the real boundary is the OS account.
  *
+ * ROOT SPELLINGS ARE REMEMBERED FOR 2 s (FU5 computer stalls). Judging a path used to
+ * `realpath` every allowed root and every root of the request's scope — a task's own
+ * folders plus every other task's worktree carved out of them (≈ 50 on a busy
+ * computer): 3 ms a call, and request bursts judge hundreds of paths. So the
+ * canonical spelling of a ROOT (allowed roots, scope roots, carve-outs, foreign roots)
+ * is reused for at most {@link ROOT_SPELLING_TTL_MS}, and forgotten at once whenever a
+ * hub frame may have changed the tree: any judgement for `write` / `entry` / a new
+ * root, and every {@link jailedFs} write. Never cached: the judged path itself (the
+ * walk, its links, its canonical spelling) and the protected-path identities. A root
+ * remembered as missing is re-checked with one `lstat` (it counts the moment it exists).
+ * Why this bound is acceptable: what can change a root's spelling WITHOUT a jailed
+ * write is a process running as this user — a shell or agent the hub started, or the
+ * user — which could touch the same files directly anyway (see above); its change
+ * reaches the jail within 2 s, the same order as the judge-then-act race every op
+ * already has.
+ *
  * @module computer/path-jail
  */
 import {
@@ -217,15 +233,55 @@ interface LiveRoot {
   real: string
 }
 
+/** How long a root's canonical spelling is reused (see the module doc). */
+export const ROOT_SPELLING_TTL_MS = 2_000
+const ROOT_SPELLINGS_MAX = 10_000
+/** Bumped by every judged or performed write: remembered spellings are void at once. */
+let rootGeneration = 0
+const rootSpellings = new Map<
+  string,
+  { real: string; exists: boolean; at: number; generation: number }
+>()
+
+/** A hub frame may have changed the tree: forget every remembered root spelling. */
+function forgetRootSpellings(): void {
+  rootGeneration++
+}
+
+/**
+ * The canonical spelling of ROOT `lexical` (resolved): `exists` when the whole path
+ * resolves (its `realpath`), else the realpath of its deepest existing ancestor plus
+ * the rest ({@link canonical}). Remembered per the module doc; a remembered absence
+ * is re-checked with one `lstat`, so a root counts the moment it exists.
+ */
+function rootSpelling(lexical: string): { real: string; exists: boolean } {
+  const now = Date.now()
+  const hit = rootSpellings.get(lexical)
+  if (
+    hit &&
+    hit.generation === rootGeneration &&
+    now - hit.at < ROOT_SPELLING_TTL_MS &&
+    (hit.exists || lstatOrNull(lexical) === null)
+  )
+    return hit
+  let spelling: { real: string; exists: boolean }
+  try {
+    spelling = { real: realpathSync.native(lexical), exists: true }
+  } catch {
+    spelling = { real: canonical(lexical), exists: false }
+  }
+  if (rootSpellings.size >= ROOT_SPELLINGS_MAX) rootSpellings.clear()
+  rootSpellings.set(lexical, { ...spelling, at: now, generation: rootGeneration })
+  return spelling
+}
+
 function liveRoots(allowedRoots: readonly string[]): LiveRoot[] {
   const out: LiveRoot[] = []
   for (const root of allowedRoots) {
     const lexical = resolve(root)
-    try {
-      out.push({ lexical, real: realpathSync.native(lexical) })
-    } catch {
-      // A configured root that does not exist cannot contain anything.
-    }
+    // A configured root that does not exist cannot contain anything.
+    const spelling = rootSpelling(lexical)
+    if (spelling.exists) out.push({ lexical, real: spelling.real })
   }
   return out
 }
@@ -342,6 +398,8 @@ export function judgePath(
   allowedRoots: readonly string[],
   opts: JailOptions = {}
 ): string {
+  // A write is about to happen: no root spelling remembered from before it is reused.
+  if ((opts.access ?? 'read') !== 'read' || opts.newRoot === true) forgetRootSpellings()
   const judged = judgeMachine(candidate, allowedRoots, opts)
   const scope = scopeStore.getStore()
   if (!scope || (opts.hostRead === true && scope.hostReads)) return judged
@@ -395,7 +453,7 @@ export function currentScopeJail(): ScopeJail | undefined {
 /** The canonical (real) spelling of a root, or null when it does not exist here. */
 function realRoot(root: string): string | null {
   try {
-    return canonical(resolve(root))
+    return rootSpelling(resolve(root)).real
   } catch {
     return null
   }
@@ -602,7 +660,8 @@ function assertParentUnchanged(judged: string): void {
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
   try {
-    return lstatSync(p)
+    // A missing entry is an answer, not an error: no exception built per probe (FU5).
+    return lstatSync(p, { throwIfNoEntry: false }) ?? null
   } catch {
     return null
   }
@@ -773,10 +832,35 @@ async function copyEntryAsync(
 }
 
 /**
+ * Every op of `ops`, forgetting the remembered root spellings once it has acted
+ * (an async one once it settles) — whether it succeeded or not.
+ */
+function forgettingRootSpellings<T extends Record<string, (...args: never[]) => unknown>>(
+  ops: T
+): T {
+  const out: Record<string, (...args: never[]) => unknown> = {}
+  for (const [name, op] of Object.entries(ops))
+    out[name] = (...args: never[]) => {
+      let result: unknown
+      try {
+        result = op(...args)
+      } catch (error) {
+        forgetRootSpellings()
+        throw error
+      }
+      if (result instanceof Promise) return result.finally(forgetRootSpellings)
+      forgetRootSpellings()
+      return result
+    }
+  return out as T
+}
+
+/**
  * The only writes a hub frame can cause. Every path is one {@link judgePath}
  * returned (with the access the op needs); each op re-checks right before it acts.
+ * Each one forgets the remembered root spellings once it has acted (module doc).
  */
-export const jailedFs = {
+export const jailedFs = forgettingRootSpellings({
   /** Create or overwrite a file (its folders too). */
   writeFile(judged: string, content: string | Uint8Array): void {
     const fd = openForWrite(judged, false)
@@ -864,4 +948,4 @@ export const jailedFs = {
     }
     await copyEntryAsync(judgedSrc, judgedDest, { n: 0, buf: Buffer.allocUnsafe(256 * 1024) })
   }
-}
+})
