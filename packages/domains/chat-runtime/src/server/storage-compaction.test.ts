@@ -4,14 +4,15 @@
  * auto-vacuum; then short reclaim slices — automatic on stores already switched.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type Database from 'better-sqlite3'
+import Database from 'better-sqlite3'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createComputerChatRuntime } from './computer-runtime'
 import { openChatStorage, type ChatStorage } from './storage'
 import {
+  rebuildStoreFile,
   createStorageCompaction,
   type StorageCompactionOptions,
   type StorageCompaction
@@ -459,5 +460,74 @@ describe('computer runtime', () => {
     expect(r.compaction.status().job).toMatchObject({ phase: 'cancelled', message: /erased/ })
     expect(r.compaction.status().autoVacuum).toBe('none')
     expect(leftovers(r.storage)).toEqual([])
+  })
+})
+
+describe('erasure: the rewrite leaves no stale copy secure_delete missed', () => {
+  const MARK = 'SECRET-MARK'
+  /**
+   * Deleted index entries survive as divider keys in index interior pages even with
+   * secure_delete (deterministic for this exact data: a copy of 'SECRET-MARK148…' on
+   * an interior page) — what only a whole-file rewrite removes.
+   */
+  function residueTable(db: Database.Database) {
+    db.exec('CREATE TABLE IF NOT EXISTS test_residue(c, id, v, PRIMARY KEY(c, id))')
+    db.exec('CREATE INDEX IF NOT EXISTS test_residue_v ON test_residue(v)')
+    const insert = db.prepare('INSERT INTO test_residue VALUES(?,?,?)')
+    for (let i = 0; i < 300; i++) {
+      insert.run('a', i, `${MARK}${i}${'x'.repeat(100)}`)
+      insert.run('b', i, `y${i}${'y'.repeat(100)}`)
+    }
+    db.prepare("DELETE FROM test_residue WHERE c='a'").run()
+  }
+  const holds = (path: string) =>
+    [path, `${path}-wal`].filter(
+      (file) => existsSync(file) && readFileSync(file).includes(Buffer.from(MARK))
+    )
+
+  test('live store: rebuildForErasure rewrites the file; the mark is gone from file and WAL', async () => {
+    const { store } = seeded(2, 2)
+    store.compose((db) => residueTable(db))
+    store.checkpoint()
+    expect(holds(store.path), 'precondition: secure_delete left a copy').not.toEqual([])
+    const c = compaction(store)
+    await c.rebuildForErasure()
+    expect(holds(store.path)).toEqual([])
+    expect(store.compose((db) => db.prepare('SELECT count(*) n FROM test_residue').get())).toEqual({
+      n: 300
+    })
+  })
+
+  test('a file nothing else has open (an archive): rebuildStoreFile, same check', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'slz-chat-compact-file-'))
+    roots.push(root)
+    const path = join(root, 'chat.sqlite')
+    const db = new Database(path)
+    db.pragma('journal_mode = WAL')
+    db.pragma('secure_delete = ON')
+    db.exec(
+      "CREATE TABLE store_identity(id INTEGER PRIMARY KEY, store_id TEXT); INSERT INTO store_identity VALUES(1,'s')"
+    )
+    db.exec(
+      "CREATE TRIGGER keep_identity BEFORE DELETE ON store_identity BEGIN SELECT RAISE(ABORT, 'kept'); END"
+    )
+    residueTable(db)
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    db.close()
+    expect(holds(path), 'precondition: secure_delete left a copy').not.toEqual([])
+    await rebuildStoreFile(path, { batchBytes: 64 * 1024, syncBytes: 256 * 1024, pauseMs: 0 })
+    expect(holds(path)).toEqual([])
+    const after = new Database(path, { readonly: true })
+    try {
+      expect(after.prepare('SELECT count(*) n FROM test_residue').get()).toEqual({ n: 300 })
+      expect(after.pragma('quick_check', { simple: true })).toBe('ok')
+      // its triggers came along
+      expect(after.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all()).toEqual([
+        { name: 'keep_identity' }
+      ])
+    } finally {
+      after.close()
+    }
+    expect(readdirSync(root).filter((n) => n.includes('compact'))).toEqual([])
   })
 })

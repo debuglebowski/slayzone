@@ -16,7 +16,7 @@ import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
 interface Candidates {
   attachments: string[]
   artifacts: string[]
-  /** A VACUUM ran after this task's content was last removed: a repeated request
+  /** A full rewrite ran after this task's content was last removed: a repeated request
    *  that removes nothing more needs no new one. */
   compacted?: boolean
 }
@@ -118,8 +118,20 @@ export function prepareStoredTaskErasure(db: Database.Database, taskId: string):
   }).immediate()
 }
 
-/** Shared by live computer stores and restored, readable archive copies. */
-export function finishStoredTaskErasure(db: Database.Database, root: string, taskId: string): void {
+/**
+ * Shared by live computer stores and restored, readable archive copies. Deletes and
+ * verifies; never rewrites the file here (a VACUUM froze the computer's main thread for
+ * seconds on a large store). `compact: true` = removed content may survive as stale
+ * copies (free pages, cell copies a page split leaves — secure_delete misses those,
+ * old WAL frames): the caller rewrites the whole file off the main thread (the store's
+ * compaction rebuild, `rebuildStoreFile` for an archive), then calls
+ * {@link markStoredTaskErasureCompacted}. The erasure is not done before that.
+ */
+export function finishStoredTaskErasure(
+  db: Database.Database,
+  root: string,
+  taskId: string
+): { compact: boolean } {
   assertPathSafeId(taskId, 'taskId')
   const saved = db
     .prepare('SELECT candidates FROM task_erasure_checks WHERE task_id=?')
@@ -243,15 +255,27 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
     )
       throw new Error('Computer content remains')
   // Free pages, stale cell copies in live pages and WAL frames still hold removed rows
-  // (secure_delete misses the copies a page split leaves): only a VACUUM rewrites them.
-  // Skipped when nothing was removed since the last one for this task.
-  const vacuum = removed > 0 || candidates.compacted !== true
-  if (vacuum) db.exec('VACUUM')
+  // (secure_delete misses the copies a page split leaves): only a full rewrite of the
+  // file removes them. Not needed when nothing was removed since the last one.
+  if (removed > 0 || candidates.compacted !== true) return { compact: true }
+  truncateWal(db)
+  return { compact: false }
+}
+
+/** After the whole file was rewritten for this task's erasure: never again for it, unless more is removed. */
+export function markStoredTaskErasureCompacted(db: Database.Database, taskId: string): void {
+  const saved = db
+    .prepare('SELECT candidates FROM task_erasure_checks WHERE task_id=?')
+    .get(taskId) as { candidates: string } | undefined
+  if (!saved) throw new Error('Computer erasure inventory is missing')
+  truncateWal(db)
+  db.prepare('UPDATE task_erasure_checks SET candidates=? WHERE task_id=?').run(
+    JSON.stringify({ ...(JSON.parse(saved.candidates) as Candidates), compacted: true }),
+    taskId
+  )
+}
+
+function truncateWal(db: Database.Database) {
   const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
   if (checkpoint.some((row) => row.busy)) throw new Error('Computer checkpoint is busy')
-  if (vacuum)
-    db.prepare('UPDATE task_erasure_checks SET candidates=? WHERE task_id=?').run(
-      JSON.stringify({ ...candidates, compacted: true }),
-      taskId
-    )
 }

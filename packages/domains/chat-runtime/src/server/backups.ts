@@ -50,7 +50,12 @@ import {
 import { readBlobRange } from './blob-store'
 import { captureArtifactWorkingFiles } from './artifact-backup'
 import { eventAttachmentReferences, recordAttachmentReferences } from './attachment-references'
-import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
+import {
+  prepareStoredTaskErasure,
+  finishStoredTaskErasure,
+  markStoredTaskErasureCompacted
+} from './erase-stored-task'
+import { rebuildStoreFile } from './storage-compaction'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const activeBackupStaging = new Set<string>()
 
@@ -1083,7 +1088,9 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
   async function eraseFromArchive(id: string, taskId: string) {
     const path = folder(archiveDir, id),
       m = manifest(archiveDir, id)
-    const db = new Database(fileWithin(path, 'chat.sqlite'), { fileMustExist: true })
+    const file = fileWithin(path, 'chat.sqlite')
+    const db = new Database(file, { fileMustExist: true })
+    let compact = false
     try {
       if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId)) return
       // A restored copy has no live backup writer; copied leases are stale.
@@ -1095,9 +1102,20 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
       )
         db.exec('DELETE FROM artifact_blob_leases')
       prepareStoredTaskErasure(db, taskId)
-      finishStoredTaskErasure(db, path, taskId)
+      ;({ compact } = finishStoredTaskErasure(db, path, taskId))
     } finally {
       db.close()
+    }
+    // The whole archive file is rewritten off the main thread (stale copies of the
+    // erased rows), then marked: a retry after a crash rewrites again.
+    if (compact) {
+      await rebuildStoreFile(file)
+      const rewritten = new Database(file, { fileMustExist: true })
+      try {
+        markStoredTaskErasureCompacted(rewritten, taskId)
+      } finally {
+        rewritten.close()
+      }
     }
     // Archive manifests describe the remaining readable files. Rebuild after
     // every retry, including a crash between DB cleanup and manifest publish.

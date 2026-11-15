@@ -19,6 +19,8 @@
  *   4.7 s behind it). Rows read in different batches are not one snapshot — the owner's
  *   captured keys cover every row changed since capture began.
  * mode `resume`: opens an existing copy for more catch-up rounds.
+ * mode `file`: `build` for a file nothing else writes (a restored archive): the copy
+ *   gets the triggers too and is complete once copied.
  *
  * Messages in:  {t:'copy', tables, keys} — copy each key's CURRENT row from live
  *               (deleted there = deleted here); {t:'finish', check} — optional
@@ -104,6 +106,9 @@ async function build() {
   out.pragma('auto_vacuum = INCREMENTAL')
   out.pragma('journal_mode = OFF')
   out.pragma('synchronous = OFF')
+  // Tables are copied one by one in name order, and rows are replayed out of order:
+  // the copy is consistent only once complete (better-sqlite3 turns this on by default).
+  out.pragma('foreign_keys = OFF')
   const schema = live
     .prepare('SELECT type, name, sql FROM main.sqlite_master WHERE sql IS NOT NULL ORDER BY rowid')
     .all()
@@ -174,12 +179,21 @@ async function main() {
 try {
   live = new Database(workerData.live, { readonly: true, fileMustExist: true })
   let triggers = []
-  if (workerData.mode === 'build') {
+  if (workerData.mode === 'build' || workerData.mode === 'file') {
     await build()
     triggers = live.prepare("SELECT name, sql FROM main.sqlite_master WHERE type = 'trigger' ORDER BY rowid").all()
+    if (workerData.mode === 'file') {
+      // A file nothing else writes (a restored archive): no changes to replay, so the
+      // copy gets its triggers now and is complete.
+      out.transaction(() => {
+        for (const t of triggers) out.exec(t.sql)
+      })()
+      triggers = []
+    }
   } else {
     out = new Database(workerData.out, { fileMustExist: true })
     out.pragma('synchronous = OFF')
+    out.pragma('foreign_keys = OFF')
   }
   out.pragma('secure_delete = ON')
   parentPort.postMessage({ t: 'ready', triggers })

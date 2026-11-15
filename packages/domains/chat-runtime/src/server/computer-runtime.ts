@@ -42,7 +42,11 @@ const refusingTurnGit: TurnGit = {
   diffIsEmpty: refuseTurnGit,
   filterTurns: refuseTurnGit
 }
-import { prepareStoredTaskErasure, finishStoredTaskErasure } from './erase-stored-task'
+import {
+  prepareStoredTaskErasure,
+  finishStoredTaskErasure,
+  markStoredTaskErasureCompacted
+} from './erase-stored-task'
 
 export function createComputerChatRuntime(opts: {
   stateDir: string
@@ -483,7 +487,15 @@ export function createComputerChatRuntime(opts: {
       artifacts.cleanupDeletedTasks(taskId)
       await artifacts.retryErasures(taskId)
       artifacts.collectGarbage()
-      storage.compose((raw) => finishStoredTaskErasure(raw, storage.dir, taskId))
+      const { compact } = storage.compose((raw) =>
+        finishStoredTaskErasure(raw, storage.dir, taskId)
+      )
+      // Stale copies of the erased rows go only with a whole-file rewrite: off the main
+      // thread, and the erasure is not done before it completed.
+      if (compact) {
+        await compaction.rebuildForErasure()
+        storage.compose((raw) => markStoredTaskErasureCompacted(raw, taskId))
+      }
       await backups.eraseTask(taskId)
       // Needs-attention records name the task (and quote its errors): erased too.
       storage.deleteTaskFaults(taskId)

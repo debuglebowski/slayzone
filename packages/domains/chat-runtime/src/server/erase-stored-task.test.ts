@@ -3,7 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { finishStoredTaskErasure, prepareStoredTaskErasure } from './erase-stored-task'
+import {
+  finishStoredTaskErasure,
+  markStoredTaskErasureCompacted,
+  prepareStoredTaskErasure
+} from './erase-stored-task'
+import { rebuildStoreFile } from './storage-compaction'
 
 function store() {
   const root = mkdtempSync(join(tmpdir(), 'stored-task-erasure-')),
@@ -32,21 +37,24 @@ function store() {
   return { root, path, db, vacuums: () => vacuums, event }
 }
 
-test('a repeated erase request for an already erased and compacted task does not VACUUM again', () => {
-  const { root, path, db, vacuums, event } = store()
+test('erasure never VACUUMs on the calling thread; the off-thread rebuild leaves no copy; a repeat needs none', async () => {
+  let { root, path, db, vacuums, event } = store()
   const secret = 'COMPUTER-ERASURE-MARKER-9f02'
   try {
     event('c-alice', 1, secret.repeat(100))
     event('c-bob', 1, 'bob keeps this')
     prepareStoredTaskErasure(db, 'alice')
-    finishStoredTaskErasure(db, root, 'alice')
-    expect(vacuums()).toBe(1)
-    for (const file of [path, path + '-wal'])
+    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
+    expect(vacuums()).toBe(0)
+    db.close()
+    await rebuildStoreFile(path)
+    db = new Database(path)
+    markStoredTaskErasureCompacted(db, 'alice')
+    for (const file of [path, `${path}-wal`])
       if (existsSync(file)) expect(readFileSync(file).includes(Buffer.from(secret))).toBe(false)
     // The hub re-sends after a lost reply, or an account erasure lists old tasks again.
     prepareStoredTaskErasure(db, 'alice')
-    finishStoredTaskErasure(db, root, 'alice')
-    expect(vacuums()).toBe(1)
+    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: false })
     expect(db.prepare("SELECT event FROM events WHERE conversation_id='c-bob'").get()).toEqual({
       event: 'bob keeps this'
     })
@@ -56,20 +64,19 @@ test('a repeated erase request for an already erased and compacted task does not
   }
 })
 
-test('content removed by another path between preparation and finish is still compacted', () => {
-  const { root, db, vacuums, event } = store()
+test('content removed by another path between preparation and finish still needs the rewrite', () => {
+  const { root, db, event } = store()
   try {
     event('c-alice', 1, 'first')
     prepareStoredTaskErasure(db, 'alice')
-    finishStoredTaskErasure(db, root, 'alice')
-    expect(vacuums()).toBe(1)
+    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
+    markStoredTaskErasureCompacted(db, 'alice')
     // A restored copy brings content back; the lifecycle purge deletes it after the
     // preparation, so the finishing step itself deletes nothing.
     event('c-alice', 2, 'restored content')
     prepareStoredTaskErasure(db, 'alice')
     db.prepare("DELETE FROM events WHERE conversation_id='c-alice'").run()
-    finishStoredTaskErasure(db, root, 'alice')
-    expect(vacuums()).toBe(2)
+    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
   } finally {
     db.close()
     rmSync(root, { recursive: true, force: true })

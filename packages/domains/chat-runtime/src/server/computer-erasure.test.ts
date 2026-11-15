@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
@@ -50,7 +50,12 @@ test('computer erasure verifies local history, originals and sealed files while 
     lease.release()
     await r.close()
     r = createComputerChatRuntime({ stateDir, hubScope: 'hub', computerId: 'pc' })
+    const vacuums = countVacuums(r)
     expect(await r.eraseTask('alice', 2)).toEqual({ taskId: 'alice', revision: 2, erased: true })
+    // Rewritten off the main thread (no VACUUM there), done before erasure reported done.
+    expect(vacuums()).toBe(0)
+    expect(r.storage.maintenance.fileStats().autoVacuum).toBe(2)
+    expect(storeFilesHolding(stateDir, 'alice secret')).toEqual([])
     expect(existsSync(join(r.storage.dir, 'artifacts', 'alice'))).toBe(false)
     expect(existsSync(join(r.storage.dir, 'blobs', files.alice.hash))).toBe(false)
     expect(r.storage.read('alice', -1)).toEqual([])
@@ -69,6 +74,90 @@ test('computer erasure verifies local history, originals and sealed files while 
         Date.now()
       )
     ).toThrow()
+  } finally {
+    await r.close()
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})
+
+/** Counts VACUUMs run on the store's own connection (the main thread). */
+function countVacuums(r: ReturnType<typeof createComputerChatRuntime>) {
+  let n = 0
+  r.storage.compose((db) => {
+    const exec = db.exec.bind(db)
+    db.exec = ((sql: string) => {
+      if (/^\s*VACUUM\b/i.test(sql)) n++
+      return exec(sql)
+    }) as typeof db.exec
+  })
+  return () => n
+}
+/**
+ * SQLite files (live store, WAL, restored archives) under `root` that still hold `text`.
+ * Backups are skipped: they keep content erased later, by design (Settings says so).
+ */
+function storeFilesHolding(root: string, text: string): string[] {
+  const found: string[] = []
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name !== 'backups') walk(path)
+      } else if (/chat\.sqlite/.test(entry.name) && readFileSync(path).includes(Buffer.from(text)))
+        found.push(path)
+    }
+  }
+  walk(root)
+  return found
+}
+
+test('concurrent erasures share one off-thread rewrite; a user compaction waits for it', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'computer-erasure-'))
+  const r = createComputerChatRuntime({
+    stateDir,
+    hubScope: 'hub',
+    computerId: 'pc',
+    blobBackfill: { automatic: false }
+  })
+  try {
+    for (const taskId of ['alice', 'bob', 'carol']) {
+      r.bootstrap({
+        identity: { id: taskId, taskId, tabId: taskId, mode: 'claude-chat', epoch: 1 },
+        projectId: null,
+        cwd: stateDir,
+        revision: 1,
+        providerConfig: {},
+        defaultFlags: null,
+        env: {}
+      })
+      r.storage.transaction(() => {
+        for (let i = 0; i < 20; i++)
+          r.storage.append(
+            taskId,
+            1,
+            {
+              kind: 'assistant-text',
+              messageId: `${taskId}-${i}`,
+              text: `${taskId} secret ${'x'.repeat(50_000)}`
+            },
+            Date.now()
+          )
+      })
+    }
+    await r.applyTaskLifecycle('alice', 'deleted', 2)
+    await r.applyTaskLifecycle('bob', 'deleted', 2)
+    const vacuums = countVacuums(r)
+    const both = Promise.all([r.eraseTask('alice', 2), r.eraseTask('bob', 2)])
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(() => r.compaction.start()).toThrow(/erasure/i)
+    expect(await both).toEqual([
+      { taskId: 'alice', revision: 2, erased: true },
+      { taskId: 'bob', revision: 2, erased: true }
+    ])
+    expect(vacuums()).toBe(0)
+    expect(storeFilesHolding(stateDir, 'alice secret')).toEqual([])
+    expect(storeFilesHolding(stateDir, 'bob secret')).toEqual([])
+    expect(r.storage.read('carol', -1)).toHaveLength(20)
   } finally {
     await r.close()
     rmSync(stateDir, { recursive: true, force: true })

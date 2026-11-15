@@ -161,6 +161,17 @@ prepared sources read the bounded fallback without writing an index. Hot summari
 never parse page bodies; search scans metadata in byte-bounded turns as well. Worker
 metadata callbacks retain the same owner fence, and actual page reads stay encoded.
 
+Content erasure never VACUUMs on the main thread. `finishStoredTaskErasure` deletes and
+verifies and says whether the file needs a rewrite (removed rows may survive as stale
+copies secure_delete misses — e.g. index divider keys — and in old WAL frames); the
+live store then runs a forced rebuild (`compaction.rebuildForErasure`: any mode, any
+backfill state; concurrent erasures share one rebuild that started after all their
+deletions), a restored archive `rebuildStoreFile` (the same throttled worker copy,
+renamed over it). The erasure reports done only after that rewrite. The old file is
+unlinked, not overwritten: what the guarantee covers is the store's files as read
+through the filesystem (an in-place VACUUM on a copy-on-write filesystem also leaves
+old blocks to the filesystem). Backups keep erased content by design.
+
 Connection lifecycle: the store owns ONE read-write connection (`openChatConnection`:
 WAL, synchronous FULL, secure_delete, `journal_size_limit` 64 MiB). `compose` hands out
 a stable handle (`chat-db-handle`) that always reaches the current connection, so
@@ -210,3 +221,8 @@ dropped, or restored when it is the only copy).
 - 2026-11-15 (fu-2, S2b): no `VACUUM INTO`. It is one native call that writes the
   whole store at once; the OS then flushes gigabytes and a live FULL commit waited
   4.7 s behind them (bench). The batched copy bounds our unsynced bytes instead.
+- 2026-11-15 (fu-2, S4): erasure without a main-thread VACUUM (seconds frozen on a
+  large store, trigger B of the 2026-11-14 crash chain). Same guarantee, proven by a
+  test whose stale copy survives a plain delete with secure_delete and is gone after
+  the rewrite; the erasure waits for the rewrite. A rebuild needs about the live data
+  size free on disk — an in-place VACUUM needed the same in temporary space.

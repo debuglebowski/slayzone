@@ -32,11 +32,12 @@
  * deleted, live untouched) by cancel, close, or `abort` — content erasure aborts it:
  * the copy was taken from a snapshot that still held the erased content.
  */
-import { existsSync, rmSync } from 'node:fs'
+import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Worker } from 'node:worker_threads'
+import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type {
   ComputerChatStorageJob,
@@ -222,29 +223,40 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     }
   }
 
-  function start(automatic = false): ComputerChatStorageJob {
+  /**
+   * `forced` (content erasure): a rebuild whatever the store's mode, backfill or free
+   * space — only the whole-file rewrite removes stale copies of erased content.
+   */
+  function start(automatic = false, forced = false): ComputerChatStorageJob {
     if (closed) throw new ChatCompactionRefused('Chat storage is closing')
+    if (!forced && erasurePending())
+      throw new ChatCompactionRefused(
+        'A content erasure is rewriting the chat store; try again when it finishes'
+      )
     if (running) throw new ChatCompactionRefused('A chat storage compaction is already running')
     const s = stats()
-    if (s.incremental && s.freePages === 0) throw new ChatCompactionRefused('Nothing to reclaim')
-    if (!s.incremental) {
-      if (!opts.backfillDone())
+    const kind = forced || !s.incremental ? 'rebuild' : 'reclaim'
+    if (!forced && s.incremental && s.freePages === 0)
+      throw new ChatCompactionRefused('Nothing to reclaim')
+    if (kind === 'rebuild') {
+      if (!forced && !opts.backfillDone())
         throw new ChatCompactionRefused(
           'The image backfill is still moving screenshots out of chat history; try again when it finishes'
         )
+      const required = Math.ceil(s.liveBytes * 1.1) + GiB
       const free = freeBytes()
-      if (free < s.requiredDiskBytes)
+      if (free < required)
         throw new ChatCompactionRefused(
-          `Not enough free disk space: needs ${formatBytes(s.requiredDiskBytes)}, ${formatBytes(free)} available`
+          `Not enough free disk space: needs ${formatBytes(required)}, ${formatBytes(free)} available`
         )
     }
     stop = null
     stopSignal = deferred()
     job = {
       id: randomUUID(),
-      kind: s.incremental ? 'reclaim' : 'rebuild',
+      kind,
       automatic,
-      phase: s.incremental ? 'reclaiming' : 'copying',
+      phase: kind === 'rebuild' ? 'copying' : 'reclaiming',
       startedAt: now(),
       progress: 0,
       message: null,
@@ -320,28 +332,6 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
   }
 
   // ── rebuild ────────────────────────────────────────────────────────────────
-  function describeTables(): TableInfo[] {
-    return (
-      db
-        .prepare(
-          "SELECT name, sql FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
-        )
-        .all() as Array<{ name: string; sql: string }>
-    ).map(({ name, sql }) => {
-      const info = db.pragma(`main.table_info(${ident(name)})`) as Array<{
-        name: string
-        pk: number
-      }>
-      const pk = info
-        .filter((c) => c.pk > 0)
-        .sort((a, b) => a.pk - b.pk)
-        .map((c) => c.name)
-      if (pk.length > MAX_PK) throw new Error(`Table ${name} has too wide a primary key to compact`)
-      const withoutRowid = /\bWITHOUT\s+ROWID\b/i.test(sql)
-      if (withoutRowid && !pk.length) throw new Error(`Table ${name} has no key to copy by`)
-      return { name, cols: info.map((c) => c.name), pk, withoutRowid }
-    })
-  }
   function installCapture(tables: TableInfo[]): string[] {
     const triggers: string[] = []
     db.exec(
@@ -494,113 +484,22 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     }
   }
 
-  interface WorkerHandle {
-    ready: Promise<Array<{ name: string; sql: string }>>
-    copy(tables: TableInfo[], keys: Key[]): Promise<void>
-    finish(check: boolean): Promise<string>
-    /** Inside a long native call (quick_check): it cannot stop before returning. */
-    busyNative(): boolean
-    /** Ends the thread; settles when it has exited. */
-    terminate(): Promise<void>
-  }
-  /** The worker; `onExit` runs when its thread really ended (the copy is then free). */
+  /** The worker on the live store; `on.exit` runs when its thread really ended. */
   function spawnWorker(
     mode: 'build' | 'resume',
     out: string,
     tables: TableInfo[],
     on: { exit(): void; progress(bytes: number): void }
   ): WorkerHandle {
-    const registration = store.maintenance.registerSecondary(READER)
-    const worker = new Worker(COMPACTION_WORKER_SOURCE, {
-      eval: true,
-      workerData: {
-        modulePath: sqliteModulePath(),
-        live: store.path,
-        out,
-        mode,
-        tables,
-        throttle: { batchBytes: copyBatchBytes, syncBytes: copySyncBytes, pauseMs: copyPauseMs }
-      }
+    return startCompactionWorker({
+      mode,
+      live: store.path,
+      out,
+      tables,
+      throttle: { batchBytes: copyBatchBytes, syncBytes: copySyncBytes, pauseMs: copyPauseMs },
+      registration: store.maintenance.registerSecondary(READER),
+      ...on
     })
-    let waiting: { resolve(m: WorkerMessage): void; reject(e: Error): void } | null = null
-    let failure: Error | null = null
-    let ended = false
-    let state: 'building' | 'idle' | 'copying' | 'finishing' =
-      mode === 'build' ? 'building' : 'idle'
-    let markExited: () => void = () => undefined
-    const exited = new Promise<void>((resolve) => {
-      markExited = resolve
-    })
-    const end = () => {
-      if (ended) return
-      ended = true
-      registration.release()
-    }
-    const settle = (m: WorkerMessage | Error) => {
-      const w = waiting
-      waiting = null
-      if (m instanceof Error) {
-        failure = m
-        w?.reject(m)
-      } else w?.resolve(m)
-    }
-    worker.on('message', (m: WorkerMessage) => {
-      if (m.t === 'progress') {
-        on.progress(m.bytes)
-        return
-      }
-      if (m.t === 'error') {
-        end()
-        settle(new Error(m.message))
-      } else {
-        if (m.t === 'finished') end()
-        settle(m)
-      }
-    })
-    worker.on('error', (error) => {
-      end()
-      settle(error)
-    })
-    worker.on('exit', () => {
-      end()
-      if (waiting) settle(new Error('The compaction worker stopped'))
-      on.exit()
-      markExited()
-    })
-    const next = () =>
-      failure
-        ? Promise.reject(failure)
-        : new Promise<WorkerMessage>((resolve, reject) => {
-            waiting = { resolve, reject }
-          })
-    const ready = next().then((m) => {
-      state = 'idle'
-      return m.t === 'ready' ? m.triggers : []
-    })
-    return {
-      ready,
-      async copy(tables, keys) {
-        const reply = next()
-        state = 'copying'
-        worker.postMessage({ t: 'copy', tables, keys })
-        await reply
-        state = 'idle'
-      },
-      async finish(check) {
-        const reply = next()
-        state = 'finishing'
-        worker.postMessage({ t: 'finish', check })
-        const m = await reply
-        return m.t === 'finished' ? m.check : 'no reply'
-      },
-      busyNative: () => state === 'finishing',
-      terminate() {
-        // Ends at the next JS boundary (between copy batches; quick_check runs to its
-        // end). Only its read-only connection and its own copy are involved.
-        void worker.terminate().catch(() => undefined)
-        return exited
-      }
-    }
   }
 
   /** A backup streams from, or another connection reads, the live file: no swap now. */
@@ -608,7 +507,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
 
   async function rebuild(current: ComputerChatStorageJob, liveBytes: number): Promise<number> {
     const out = store.maintenance.tempPath()
-    const list = describeTables()
+    const list = describeTables(db)
     const tables = new Map(list.map((t) => [t.name, t]))
     const schemaVersion = db.pragma('schema_version', { simple: true })
     let capture: string[] = installCapture(list)
@@ -737,8 +636,38 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     }
   }
 
+  // ── content erasure ──────────────────────────────────────────────────────
+  // An erasure is done only after a rebuild that STARTED after its deletions finished.
+  // Requests coalesce: a newer one stops a rebuild in flight (its copy predates the
+  // newer deletions) and one restarted rebuild satisfies every request before it.
+  let erasureWanted = 0
+  let erasureDone = 0
+  let erasureChain: Promise<void> = Promise.resolve()
+  function erasurePending() {
+    return erasureDone < erasureWanted
+  }
+  function rebuildForErasure(): Promise<void> {
+    const need = ++erasureWanted
+    halt('Content was erased during compaction; start again')
+    const step = erasureChain.then(async () => {
+      while (erasureDone < need) {
+        if (closed) throw new Error('Chat storage is closing')
+        await running?.catch(() => undefined)
+        const gen = erasureWanted
+        const started = start(true, true)
+        await running?.catch(() => undefined)
+        const ended = job?.id === started.id ? job : null
+        if (ended?.phase === 'done') erasureDone = Math.max(erasureDone, gen)
+        else if (ended?.phase === 'failed') throw new Error(ended.message ?? 'Compaction failed')
+        // Cancelled: a newer erasure (run again) or closing (throws above).
+      }
+    })
+    erasureChain = step.catch(() => undefined)
+    return step
+  }
+
   function checkReclaim(): boolean {
-    if (closed || running || opts.automaticReclaim === false) return false
+    if (closed || running || erasurePending() || opts.automaticReclaim === false) return false
     const s = stats()
     if (!s.incremental || s.reclaimableBytes < reclaimThreshold) return false
     if (s.reclaimableBytes < 0.1 * s.fileBytes) return false
@@ -769,6 +698,12 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     abort: (reason: string) => halt(reason),
     /** Automatic reclaim check (incremental stores only); true when it started one. */
     checkReclaim,
+    /**
+     * Content erasure: resolves once a whole-file rewrite that started after this call
+     * completed (stale copies of what the caller deleted are gone). Throws when it
+     * cannot run (disk too full) or failed; the erasure then is not done.
+     */
+    rebuildForErasure,
     /** Resolves when the current job ended. */
     idle: () => running ?? Promise.resolve(),
     async close() {
@@ -783,6 +718,211 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
   }
 }
 export type StorageCompaction = ReturnType<typeof createStorageCompaction>
+
+interface WorkerHandle {
+  ready: Promise<Array<{ name: string; sql: string }>>
+  copy(tables: TableInfo[], keys: Key[]): Promise<void>
+  finish(check: boolean): Promise<string>
+  /** Inside a long native call (quick_check): it cannot stop before returning. */
+  busyNative(): boolean
+  /** Ends the thread; settles when it has exited. */
+  terminate(): Promise<void>
+}
+/**
+ * A compaction worker (`compaction-worker.ts`). `exit` runs when its thread really
+ * ended (its copy is free then); `registration` (a live store's secondary-connection
+ * entry) is released as soon as its connections are closed.
+ */
+function startCompactionWorker(spec: {
+  mode: 'build' | 'resume' | 'file'
+  live: string
+  out: string
+  tables: TableInfo[]
+  throttle: { batchBytes: number; syncBytes: number; pauseMs: number }
+  registration?: { release(): void }
+  exit(): void
+  progress(bytes: number): void
+}): WorkerHandle {
+  const { mode, registration } = spec
+  const on = spec
+  const worker = new Worker(COMPACTION_WORKER_SOURCE, {
+    eval: true,
+    workerData: {
+      modulePath: sqliteModulePath(),
+      live: spec.live,
+      out: spec.out,
+      mode,
+      tables: spec.tables,
+      throttle: spec.throttle
+    }
+  })
+  let waiting: { resolve(m: WorkerMessage): void; reject(e: Error): void } | null = null
+  let failure: Error | null = null
+  let ended = false
+  let state: 'building' | 'idle' | 'copying' | 'finishing' = mode === 'resume' ? 'idle' : 'building'
+  let markExited: () => void = () => undefined
+  const exited = new Promise<void>((resolve) => {
+    markExited = resolve
+  })
+  const end = () => {
+    if (ended) return
+    ended = true
+    registration?.release()
+  }
+  const settle = (m: WorkerMessage | Error) => {
+    const w = waiting
+    waiting = null
+    if (m instanceof Error) {
+      failure = m
+      w?.reject(m)
+    } else w?.resolve(m)
+  }
+  worker.on('message', (m: WorkerMessage) => {
+    if (m.t === 'progress') {
+      on.progress(m.bytes)
+      return
+    }
+    if (m.t === 'error') {
+      end()
+      settle(new Error(m.message))
+    } else {
+      if (m.t === 'finished') end()
+      settle(m)
+    }
+  })
+  worker.on('error', (error) => {
+    end()
+    settle(error)
+  })
+  worker.on('exit', () => {
+    end()
+    if (waiting) settle(new Error('The compaction worker stopped'))
+    on.exit()
+    markExited()
+  })
+  const next = () =>
+    failure
+      ? Promise.reject(failure)
+      : new Promise<WorkerMessage>((resolve, reject) => {
+          waiting = { resolve, reject }
+        })
+  const ready = next().then((m) => {
+    state = 'idle'
+    return m.t === 'ready' ? m.triggers : []
+  })
+  return {
+    ready,
+    async copy(tables, keys) {
+      const reply = next()
+      state = 'copying'
+      worker.postMessage({ t: 'copy', tables, keys })
+      await reply
+      state = 'idle'
+    },
+    async finish(check) {
+      const reply = next()
+      state = 'finishing'
+      worker.postMessage({ t: 'finish', check })
+      const m = await reply
+      return m.t === 'finished' ? m.check : 'no reply'
+    },
+    busyNative: () => state === 'finishing',
+    terminate() {
+      // Ends at the next JS boundary (between copy batches; quick_check runs to its
+      // end). Only its read-only connection and its own copy are involved.
+      void worker.terminate().catch(() => undefined)
+      return exited
+    }
+  }
+}
+
+/** The tables of `db`'s main schema, with the columns and keys a copy needs. */
+function describeTables(db: Database.Database): TableInfo[] {
+  return (
+    db
+      .prepare(
+        "SELECT name, sql FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
+      )
+      .all() as Array<{ name: string; sql: string }>
+  ).map(({ name, sql }) => {
+    const info = db.pragma(`main.table_info(${ident(name)})`) as Array<{
+      name: string
+      pk: number
+    }>
+    const pk = info
+      .filter((c) => c.pk > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name)
+    if (pk.length > MAX_PK) throw new Error(`Table ${name} has too wide a primary key to compact`)
+    const withoutRowid = /\bWITHOUT\s+ROWID\b/i.test(sql)
+    if (withoutRowid && !pk.length) throw new Error(`Table ${name} has no key to copy by`)
+    return { name, cols: info.map((c) => c.name), pk, withoutRowid }
+  })
+}
+
+/**
+ * Rewrite a store file nothing else has open (a restored archive) the way a rebuild
+ * does — a fresh copy built off the main thread in throttled batches, checked, then
+ * renamed over it. Leaves no stale copies of deleted content in the file. The caller
+ * has closed its own connection; the file's WAL must be gone by then.
+ */
+export async function rebuildStoreFile(
+  path: string,
+  throttle: { batchBytes: number; syncBytes: number; pauseMs: number } = {
+    batchBytes: 4 * MiB,
+    syncBytes: 16 * MiB,
+    pauseMs: 25
+  }
+): Promise<void> {
+  // Settle the WAL first (an archive opened in WAL mode): the last close removes it.
+  const probe = new Database(path, { fileMustExist: true })
+  let tables: TableInfo[]
+  try {
+    probe.pragma('wal_checkpoint(TRUNCATE)')
+    tables = describeTables(probe)
+  } finally {
+    probe.close()
+  }
+  if (existsSync(`${path}-wal`)) throw new Error('The store file is still open elsewhere')
+  const out = `${path}.compact-${randomUUID()}`
+  const discard = () => {
+    for (const suffix of ['', '-journal', '-wal', '-shm'])
+      rmSync(`${out}${suffix}`, { force: true })
+  }
+  const worker = startCompactionWorker({
+    mode: 'file',
+    live: path,
+    out,
+    tables,
+    throttle,
+    exit: () => undefined,
+    progress: () => undefined
+  })
+  try {
+    await worker.ready
+    const check = await worker.finish(true)
+    if (check !== 'ok') throw new Error(`The rewritten copy failed its check (${check})`)
+  } catch (error) {
+    // Closed by its own exit (finish) or ended now; the copy is free once it exited.
+    await worker.terminate()
+    discard()
+    throw error
+  }
+  await worker.terminate()
+  // Same name, same directory: the rename replaces it atomically.
+  rmSync(`${path}-shm`, { force: true })
+  renameSync(out, path)
+  syncDirSync(dirname(path))
+}
+function syncDirSync(dir: string) {
+  if (process.platform === 'win32') return
+  const fd = openSync(dir, 'r')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
 
 type WorkerMessage =
   | { t: 'ready'; triggers: Array<{ name: string; sql: string }> }
