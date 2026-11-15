@@ -67,6 +67,18 @@ resume / sessions-list SQL is served by `agent_sessions_task_mode_owned` and
 `agent_sessions_conversation_task`; keep a probe's `ORDER BY` and comparisons in
 the indexes' exact form when editing those rules.
 
+A task move's export (`session-moves.ts` `exportTask`) freezes each chat only long
+enough to open a READ SNAPSHOT of it (`storage.openExportReader`: a second, read-only
+connection on `chat.sqlite` in a WAL read transaction, plus a blob lease so GC keeps
+every image it references), unfreezes it at once — live writes go on — and streams
+the snapshot to the transfer file a page at a time (`writeExportTransfer`, one turn of
+the process's history work per step, images resolved back inline per event). The
+bytes are exactly `encodeTransfer(exportConversation(...))` of that moment (one shared
+line encoder). Readers are short-lived (closed in `finally`, and by `store.close()`);
+`hasExportReaders()` lists them. Anything that replaces or swaps the `chat.sqlite`
+file (compaction) must wait until no export reader is open — an open reader keeps
+reading the file it opened.
+
 Timeline projection records (`kind='timeline'`, derived from the events) are never
 decoded to drop a page range: drops are SQL on ids. Compatibility summary and search
 APIs use JSON paths without loading whole pages; worker reads stay encoded as above.

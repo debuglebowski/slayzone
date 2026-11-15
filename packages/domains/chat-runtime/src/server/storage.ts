@@ -12,6 +12,7 @@ import { eventAttachmentReferences, recordAttachmentReferences } from './attachm
 import { createBlobStore } from './blob-store'
 import {
   chatBlobRefs,
+  clampChatHistoryPageBudget,
   cutChatHistoryPage,
   escapeChatBlobLiterals,
   extractChatBlobs,
@@ -85,6 +86,26 @@ export const CHAT_BLOB_CHUNK_BYTES = 512 * 1024
 export const TIMELINE_DROP_STEP_BYTES = 4 * 1024 * 1024
 
 /** A referenced event blob cannot be read back (export / transfer refuses: no lossy copy). */
+/** How long an export's blob lease lasts without renewal (renewed while it runs). */
+const EXPORT_LEASE_MS = 60_000
+
+/** A move's export of one conversation, from a read snapshot (`openExportReader`). */
+export interface ChatExportReader {
+  readonly identity: ConversationIdentity
+  readonly migrationId: string
+  /** Saved events in the snapshot. */
+  readonly eventCount: number
+  /** Records the export carries (derived ones left out), as `exportConversation`. */
+  readonly records: ChatRecord[]
+  readonly receipts: CommandReceipt[]
+  /** One history page (stored form) after `afterSeq`; `more`: pages follow. */
+  eventPage(afterSeq: number): { events: StoredChatEvent[]; more: boolean }
+  /** A stored event's raw form (images back inline, hash-verified). */
+  resolve(event: AgentEvent): AgentEvent
+  /** End the snapshot, release its blob lease. Idempotent. */
+  close(): void
+}
+
 export class EventBlobUnavailableError extends Error {
   constructor(
     readonly sha256: string,
@@ -462,8 +483,9 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   ).store_id
   const purgeListeners: Array<(taskId: string) => void> = []
   let closed = false
-  const row = (id: string) =>
-    db.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
+  /** `on`: another connection on this file (an export's read snapshot); default the store's. */
+  const row = (id: string, on: Database.Database = db) =>
+    on.prepare('SELECT * FROM conversations WHERE id=?').get(id) as OwnerRow | undefined
   const identity = (r: OwnerRow): ConversationIdentity => ({
     id: r.id,
     taskId: r.task_id,
@@ -484,10 +506,11 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   function read(
     id: string,
     afterSeq: number,
-    beforeSeq = Number.MAX_SAFE_INTEGER
+    beforeSeq = Number.MAX_SAFE_INTEGER,
+    on: Database.Database = db
   ): StoredChatEvent[] {
     return (
-      db
+      on
         .prepare(
           'SELECT seq,saved_at,event,blob_form FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq'
         )
@@ -516,9 +539,10 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     id: string,
     afterSeq: number,
     beforeSeq: number,
-    budget: Required<ChatHistoryPageBudget>
+    budget: Required<ChatHistoryPageBudget>,
+    on: Database.Database = db
   ): { through: number | null; more: boolean; sizes: Map<number, number> } {
-    const sizes = db
+    const sizes = on
       .prepare(
         'SELECT seq, octet_length(event) AS bytes FROM events WHERE conversation_id=? AND seq>? AND seq<? ORDER BY seq LIMIT ?'
       )
@@ -590,9 +614,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       .get(id, count - 1) as { seq: number } | undefined
     return r?.seq ?? null
   }
-  function records(id: string, kind?: ChatRecord['kind']): ChatRecord[] {
+  function records(
+    id: string,
+    kind?: ChatRecord['kind'],
+    on: Database.Database = db
+  ): ChatRecord[] {
     return (
-      db
+      on
         .prepare(
           'SELECT kind,id,value,saved_at FROM records WHERE conversation_id=?' +
             (kind ? ' AND kind=?' : '') +
@@ -639,13 +667,21 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       resultExpired: !!r.resultExpired
     }
   }
-  function receipts(id: string): CommandReceipt[] {
+  function receipts(id: string, on: Database.Database = db): CommandReceipt[] {
     return (
-      db
+      on
         .prepare(`SELECT ${receiptColumns} FROM receipts WHERE conversation_id=? ORDER BY id`)
         .all(id) as ReceiptRow[]
     ).map(decodeReceipt)
   }
+  /** What a migration export carries of a conversation's records: derived ones left out. */
+  function exportRecords(id: string, on: Database.Database = db): ChatRecord[] {
+    return records(id, undefined, on).filter(
+      (r) => r.kind !== 'event-blob' && r.kind !== 'timeline'
+    )
+  }
+  /** Open export read snapshots (`openExportReader`), closed with the store. */
+  const exportReaders = new Set<ChatExportReader>()
   function nextSeq(id: string): number {
     const last = (
       db
@@ -814,6 +850,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     },
     close() {
       if (!closed) {
+        for (const reader of [...exportReaders]) reader.close()
         db.close()
         closed = true
       }
@@ -1633,28 +1670,117 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             // the timeline projection (pages embed rows as strings) is rebuilt from the
             // events where it lands.
             events: read(id, -1).map((e) => ({ ...e, event: resolveEventBlobs(e.event) })),
-            records: records(id).filter((r) => r.kind !== 'event-blob' && r.kind !== 'timeline'),
+            records: exportRecords(id),
             receipts: receipts(id)
           }
           return { ...body, hash: digest(body) }
         })()
       } catch (error) {
-        // The move fails (never a silently degraded copy). The fault — recorded after
-        // the read transaction, so it is kept — names the chat and the blob, no content.
-        if (error instanceof EventBlobUnavailableError)
-          api.faults.record(
-            {
-              pass: 'computer.chat-event-blob',
-              itemKey: `${id}:${error.sha256}`,
-              taskId: row(id)?.task_id ?? null,
-              kind: 'structural',
-              fingerprint: error.sha256,
-              error
-            },
-            Date.now()
-          )
+        api.recordExportBlobFault(id, error)
         throw error
       }
+    },
+    /**
+     * A move's export of conversation `id`, which the caller has frozen for it
+     * (`freeze` … this … `unfreeze`, all synchronous): a READ SNAPSHOT of the chat as
+     * of now, on its own read-only connection, held until `close()` — the chat is
+     * unfrozen again at once (live writes go on), while the export reads it a page
+     * at a time (`writeExportTransfer`) and gets exactly what `exportConversation`
+     * would have read here. A blob lease keeps every image it references (GC skips
+     * while one is held). Open readers are listed (`hasExportReaders`) and closed with
+     * the store; a file swap of the store must wait for them to close.
+     */
+    openExportReader(id: string, epoch: number, migrationId: string): ChatExportReader {
+      const conn = new Database(path, { readonly: true, fileMustExist: true })
+      let owner: OwnerRow
+      try {
+        conn.pragma('busy_timeout = 5000')
+        // The snapshot starts with the transaction's first read.
+        conn.exec('BEGIN')
+        const r = row(id, conn)
+        if (!r) throw new Error('Unknown conversation')
+        if (r.epoch !== epoch) throw new Error('Stale ownership epoch')
+        if (r.state !== 'frozen' || r.migration_id !== migrationId)
+          throw new Error('Migration must freeze source first')
+        owner = r
+      } catch (error) {
+        conn.close()
+        throw error
+      }
+      const leaseId = `export:${migrationId}:${id}`
+      const lease = api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+      const renew = setInterval(() => {
+        if (!closed) api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+      }, EXPORT_LEASE_MS / 3)
+      renew.unref?.()
+      let open = true
+      const live = () => {
+        if (!open) throw new Error('Export reader closed')
+      }
+      const reader: ChatExportReader = {
+        identity: identity(owner),
+        migrationId,
+        eventCount: (
+          conn.prepare('SELECT COUNT(*) AS n FROM events WHERE conversation_id=?').get(id) as {
+            n: number
+          }
+        ).n,
+        records: exportRecords(id, conn),
+        receipts: receipts(id, conn),
+        eventPage(afterSeq) {
+          live()
+          const bounds = pageBounds(
+            id,
+            afterSeq,
+            Number.MAX_SAFE_INTEGER,
+            clampChatHistoryPageBudget(),
+            conn
+          )
+          if (bounds.through === null) return { events: [], more: false }
+          return { events: read(id, afterSeq, bounds.through + 1, conn), more: bounds.more }
+        },
+        resolve(event) {
+          live()
+          return resolveEventBlobs(event)
+        },
+        close() {
+          if (!open) return
+          open = false
+          clearInterval(renew)
+          exportReaders.delete(reader)
+          try {
+            conn.exec('COMMIT')
+          } finally {
+            conn.close()
+            if (!closed) lease.release()
+          }
+        }
+      }
+      exportReaders.add(reader)
+      return reader
+    },
+    /** An export's read snapshot is open (`openExportReader`): a store file swap waits. */
+    hasExportReaders(): boolean {
+      return exportReaders.size > 0
+    },
+    /**
+     * An export failed on an image it could not read: the move fails (never a
+     * silently degraded copy); a structural fault names the chat and the blob, no
+     * content. Other errors: nothing recorded.
+     */
+    recordExportBlobFault(id: string, error: unknown): void {
+      if (!(error instanceof EventBlobUnavailableError)) return
+      api.faults.record(
+        {
+          pass: 'computer.chat-event-blob',
+          itemKey: `${id}:${error.sha256}`,
+          taskId: row(id)?.task_id ?? null,
+          kind: 'structural',
+          fingerprint: error.sha256,
+          error
+        },
+        Date.now()
+      )
     },
     stageTransfer(manifest: ChatTransferManifest, lines: Iterable<string>): void {
       const h = manifest.header

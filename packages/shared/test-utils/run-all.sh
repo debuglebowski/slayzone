@@ -883,6 +883,8 @@ run_harness packages/domains/terminal/src/server/runtime/chat-transport-instance
 run_harness packages/domains/terminal/src/server/runtime/chat-queue-instance.test.ts
 run_harness packages/domains/chat-runtime/src/server/transfers.test.ts
 run_harness packages/domains/chat-runtime/src/server/session-moves.test.ts
+# A move's export streamed from a read snapshot, byte-identical (FU4).
+run_harness packages/domains/chat-runtime/src/server/session-move-export.test.ts
 run_harness packages/domains/chat-runtime/src/server/pinned-messages.test.ts
 run_harness packages/domains/chat-runtime/src/server/thread-close.test.ts
 run_harness packages/domains/chat-runtime/src/server/retention.test.ts

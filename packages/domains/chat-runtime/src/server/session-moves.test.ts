@@ -90,14 +90,14 @@ const events = (c: Computer, id: string) =>
   c.store.read(id, -1).map((e) => (e.event as { text: string }).text)
 
 describe('a task’s sessions leaving a computer', () => {
-  test('the chats arrive whole and active, one epoch up; the source chat is untouched', () => {
+  test('the chats arrive whole and active, one epoch up; the source chat is untouched', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(A, 'c1', ['one', 'two', 'three'])
     chat(A, 'c2', ['other'], 1, 'tab-2')
     ledgerRows(A, { conversationId: 'c1' })
 
-    const exported = A.moves.exportTask('move-1', TASK)
+    const exported = await A.moves.exportTask('move-1', TASK)
     expect(exported.transfers.map((t) => t.header.identity.id)).toEqual(['c1', 'c2'])
     expect(exported.transfers.every((t) => t.header.move === true)).toBe(true)
     // The export froze each chat only for the read.
@@ -115,12 +115,12 @@ describe('a task’s sessions leaving a computer', () => {
     expect(events(A, 'c1')).toEqual(['one', 'two', 'three'])
   })
 
-  test('the ledger comes along, without paths, and a provider config keeps its session id', () => {
+  test('the ledger comes along, without paths, and a provider config keeps its session id', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(A, 'c1', ['one'])
     ledgerRows(A, { conversationId: 'c1' })
-    const exported = A.moves.exportTask('move-1', TASK)
+    const exported = await A.moves.exportTask('move-1', TASK)
     carry(A, B, 'move-1', exported)
 
     B.store.compose((db) => {
@@ -141,41 +141,41 @@ describe('a task’s sessions leaving a computer', () => {
     })
   })
 
-  test('the export is repeatable: a retry answers what the first did, not what changed since', () => {
+  test('the export is repeatable: a retry answers what the first did, not what changed since', async () => {
     const A = computer('hub-a')
     chat(A, 'c1', ['one'])
-    const first = A.moves.exportTask('move-1', TASK)
+    const first = await A.moves.exportTask('move-1', TASK)
     A.store.append('c1', 1, { kind: 'assistant-text', messageId: 'late', text: 'late' }, 2000)
-    expect(A.moves.exportTask('move-1', TASK)).toEqual(first)
+    expect(await A.moves.exportTask('move-1', TASK)).toEqual(first)
     // A later move of the same task is a new export.
-    const later = A.moves.exportTask('move-2', TASK)
+    const later = await A.moves.exportTask('move-2', TASK)
     expect(later.transfers[0].header.events).toBe(2)
   })
 
-  test('chats that are deleted, and the artifact store, are not exported', () => {
+  test('chats that are deleted, and the artifact store, are not exported', async () => {
     const A = computer('hub-a')
     chat(A, 'kept', ['x'])
     chat(A, 'gone', ['y'], 1, 'tab-gone')
     A.store.deleteConversation('gone', 2)
     chat(A, 'files', ['z'], 1, 'artifact-store:task-1')
-    expect(A.moves.exportTask('move-1', TASK).transfers.map((t) => t.header.identity.id)).toEqual([
-      'kept'
-    ])
+    expect(
+      (await A.moves.exportTask('move-1', TASK)).transfers.map((t) => t.header.identity.id)
+    ).toEqual(['kept'])
   })
 
-  test('a task coming back replaces the older copy this store kept; the ledger follows', () => {
+  test('a task coming back replaces the older copy this store kept; the ledger follows', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(A, 'c1', ['before'])
     ledgerRows(A, { conversationId: 'c1' })
-    carry(A, B, 'out', A.moves.exportTask('out', TASK))
+    carry(A, B, 'out', await A.moves.exportTask('out', TASK))
     // The task lives on B for a while: its chat grows there, its session ends.
     B.store.append('c1', 2, { kind: 'assistant-text', messageId: 'm9', text: 'on hub B' }, 5000)
     B.store.compose((db) =>
       db.prepare("UPDATE agent_sessions SET status = 'dead', ended_at = 99 WHERE id = 's1'").run()
     )
 
-    carry(B, A, 'back', B.moves.exportTask('back', TASK))
+    carry(B, A, 'back', await B.moves.exportTask('back', TASK))
     expect(events(A, 'c1')).toEqual(['before', 'on hub B'])
     expect(A.store.conversation('c1')).toMatchObject({ state: 'active', identity: { epoch: 3 } })
     A.store.compose((db) =>
@@ -185,7 +185,7 @@ describe('a task’s sessions leaving a computer', () => {
     )
   })
 
-  test('a plain transfer still refuses to overwrite a chat this store holds', () => {
+  test('a plain transfer still refuses to overwrite a chat this store holds', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(B, 'c1', ['already here'])
@@ -199,12 +199,12 @@ describe('a task’s sessions leaving a computer', () => {
     expect(events(B, 'c1')).toEqual(['already here'])
   })
 
-  test('a move never replaces a chat of another tab, or one that is not older', () => {
+  test('a move never replaces a chat of another tab, or one that is not older', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(A, 'c1', ['a'])
     chat(B, 'c1', ['b'], 1, 'a-different-tab')
-    const exported = A.moves.exportTask('m', TASK)
+    const exported = await A.moves.exportTask('m', TASK)
     const begun = B.transfers.begin(exported.transfers[0])
     let offset = 0
     for (;;) {
@@ -218,19 +218,19 @@ describe('a task’s sessions leaving a computer', () => {
     expect(events(B, 'c1')).toEqual(['b'])
   })
 
-  test('read answers nothing past the end; an unknown move or a bad id is refused', () => {
+  test('read answers nothing past the end; an unknown move or a bad id is refused', async () => {
     const A = computer('hub-a')
     chat(A, 'c1', ['x'])
-    const exported = A.moves.exportTask('m', TASK)
+    const exported = await A.moves.exportTask('m', TASK)
     const size = exported.transfers[0].bytes
     expect(A.moves.read('m', 'c1', size, 10)).toBe('')
     expect(() => A.moves.read('nope', 'c1', 0, 10)).toThrow(/Unknown session export/)
-    expect(() => A.moves.exportTask('../escape', TASK)).toThrow(/Invalid move id/)
+    await expect(A.moves.exportTask('../escape', TASK)).rejects.toThrow(/Invalid move id/)
     A.moves.discard('m')
     expect(() => A.moves.read('m', 'c1', 0, 10)).toThrow(/Unknown session export/)
   })
 
-  test('forgetting a task’s sessions removes its chats and ledger, not another task’s, and leaves no tombstone', () => {
+  test('forgetting a task’s sessions removes its chats and ledger, not another task’s, and leaves no tombstone', async () => {
     const A = computer('hub-a')
     const B = computer('hub-b')
     chat(A, 'mine', ['one', 'two'])
@@ -244,7 +244,7 @@ describe('a task’s sessions leaving a computer', () => {
       epoch: 1
     })
     A.store.append('other', 1, { kind: 'assistant-text', messageId: 'o', text: 'not yours' }, 1)
-    const exported = A.moves.exportTask('m', TASK)
+    const exported = await A.moves.exportTask('m', TASK)
     carry(A, B, 'm', exported)
 
     expect(A.moves.forgetTask(TASK)).toEqual(['tab-mine'])
@@ -264,7 +264,7 @@ describe('a task’s sessions leaving a computer', () => {
     })
     // Not a deletion: the task is not tombstoned here, so its sessions can come back.
     expect(A.store.taskLifecycle(TASK).state).toBe('active')
-    carry(B, A, 'back', B.moves.exportTask('back', TASK))
+    carry(B, A, 'back', await B.moves.exportTask('back', TASK))
     expect(events(A, 'mine')).toEqual(['one', 'two'])
     // Repeating the forget changes nothing.
     expect(A.moves.forgetTask('nothing-here')).toEqual([])
