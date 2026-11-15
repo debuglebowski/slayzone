@@ -1,7 +1,11 @@
 import { defaultChatTransport, type ChatTransport } from './chat-transport-manager'
 import type { IpcMainLike } from '../pty-host'
 import type { SlayzoneDb } from '@slayzone/platform'
-import type { ChatCreateOpts } from '@slayzone/terminal-contracts'
+import type {
+  ChatBlobChunk,
+  ChatCreateOpts,
+  ChatHistoryPageBudget
+} from '@slayzone/terminal-contracts'
 import { assertHubLocalExecEnabled } from '@slayzone/platform/hub-switch-refusal'
 import { getPtyHostBridge } from '../pty-host'
 import {
@@ -642,6 +646,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     recordCodexPlanDecision,
     respawn,
     getReplay,
+    getReplayPage,
     openTimeline,
     timelinePages,
     searchTimeline,
@@ -673,6 +678,7 @@ export function createChatOps(opts: ChatHandlerOpts) {
     switchTabConversation,
     getEventBufferSince,
     readEventsSince,
+    readEventPage,
     getSessionInfo,
     getSessionTerminalState,
     isTurnOpen,
@@ -804,15 +810,16 @@ export function createChatOps(opts: ChatHandlerOpts) {
       if (opts.onStateChange) opts.onStateChange(sessionId, newState, oldState)
       else notifyGlobalStateListeners(sessionId, newState, oldState)
     },
-    // The tabs' saved history: the transport loads it (after any previous
-    // instance of the tab finished writing) and writes it insert-only, in order.
+    // The tabs' saved history: the transport reads it back a page at a time (after
+    // any previous instance of the tab finished writing) and writes it insert-only.
     eventStore: {
       nextSeq: data.getNextSeqForTab?.bind(data),
-      load: (tabId) => data.loadChatEvents(tabId),
       insertSync: data.persistChatEventSync?.bind(data),
+      prepare: data.prepareChatEvent?.bind(data),
       insert: (tabId, seq, event, at) => data.persistChatEvent(tabId, seq, event, at),
-      readRange: (tabId, afterSeq, beforeSeq) =>
-        data.loadChatEventsRange(tabId, afterSeq, beforeSeq)
+      readPage: (tabId, afterSeq, beforeSeq, budget) =>
+        data.loadChatEventsPage(tabId, afterSeq, beforeSeq, budget),
+      tailStart: (tabId, count) => data.chatEventsTailStart(tabId, count)
     },
     lookupUserMessages: (taskId, ids) =>
       data.loadUserMessageContent?.(taskId, ids) ?? Promise.resolve(new Map()),
@@ -944,6 +951,23 @@ export function createChatOps(opts: ChatHandlerOpts) {
      * the blocks still streaming right now (live-only, never saved).
      */
     getReplay: (tabId: string, afterSeq: number) => getReplay(tabId, afterSeq),
+
+    /**
+     * One bounded page of {@link getReplay} (`hasMore`: read on after its last event;
+     * the last page carries the live part). Every caller that can, reads this.
+     */
+    getReplayPage: (tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) =>
+      getReplayPage(tabId, afterSeq, budget),
+
+    /**
+     * One chunk of an image / file a saved event references (`chat-blobs`): saved
+     * history carries references, clients load the bytes as they show them.
+     */
+    readBlob: async (tabId: string, sha256: string, offset: number): Promise<ChatBlobChunk> => {
+      if (!data.readChatEventBlob)
+        throw new Error('Chat attachments of saved events are unavailable here')
+      return data.readChatEventBlob(tabId, sha256, offset)
+    },
 
     /**
      * Open a tab paged (its projection's snapshot: state + newest rows + page
@@ -1466,6 +1490,10 @@ export function createChatOps(opts: ChatHandlerOpts) {
 
     // The whole saved history after `afterSeq` (not just the in-memory cache).
     getBufferSince: (tabId: string, afterSeq: number) => readEventsSince(tabId, afterSeq),
+
+    /** One bounded page of {@link getBufferSince} (`hasMore`: read on after its last event). */
+    getEventPage: (tabId: string, afterSeq: number, budget?: ChatHistoryPageBudget) =>
+      readEventPage(tabId, afterSeq, budget),
 
     /**
      * The tab's live session. With `mode`, null unless that session runs this

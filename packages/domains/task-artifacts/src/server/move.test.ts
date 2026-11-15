@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { clearMoveStaging } from './move-files'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -147,4 +156,14 @@ test('refuses moves that would split or misplace entries', async () => {
   } finally {
     raw.close()
   }
+})
+
+test('transfer staging cleanup cannot escape into hub blobs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-staging-guard-'))
+  roots.push(root)
+  mkdirSync(join(root, 'blobs'))
+  const canary = join(root, 'blobs', 'canary')
+  writeFileSync(canary, 'preserve')
+  expect(() => clearMoveStaging(root, '../blobs')).toThrow()
+  expect(readFileSync(canary, 'utf8')).toBe('preserve')
 })

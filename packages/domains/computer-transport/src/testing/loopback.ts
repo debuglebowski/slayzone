@@ -83,9 +83,11 @@ export async function startLoopbackHub(
   // With an external `server` (e.g. a pre-started https server) ws never
   // emits 'listening' — only self-listening servers must be awaited.
   const external = serverOptions.server !== undefined || serverOptions.noServer === true
+  // Like the hub: the ws receive limit IS the gateway's frame limit.
+  const limits = { maxPayload: gateway.maxFrameBytes }
   const wss = external
-    ? new WebSocketServer(serverOptions)
-    : new WebSocketServer({ host: '127.0.0.1', port: 0, ...serverOptions })
+    ? new WebSocketServer({ ...limits, ...serverOptions })
+    : new WebSocketServer({ host: '127.0.0.1', port: 0, ...limits, ...serverOptions })
   if (!external) {
     await new Promise<void>((resolve, reject) => {
       wss.once('listening', resolve)

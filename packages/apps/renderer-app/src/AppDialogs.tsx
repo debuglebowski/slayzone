@@ -66,6 +66,9 @@ const CreateProjectDialog = lazy(() =>
 const ProjectSettingsDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.ProjectSettingsDialog }))
 )
+const RelocateProjectDialog = lazy(() =>
+  import('@slayzone/projects/client').then((m) => ({ default: m.ScopedRelocateProjectDialog }))
+)
 const DeleteProjectDialog = lazy(() =>
   import('@slayzone/projects/client').then((m) => ({ default: m.DeleteProjectDialog }))
 )
@@ -186,7 +189,9 @@ export function AppDialogs({
     (s) => s.projectSettingsOnboardingProvider
   )
   const deletingProject = useDialogStore((s) => s.deletingProject)
+  const projectTransferMode = useDialogStore((s) => s.projectTransferMode)
   const movingProjectToHub = useDialogStore((s) => s.movingProjectToHub)
+  const relocatingProject = useDialogStore((s) => s.relocatingProject)
   const groupSettingsTarget = useDialogStore((s) => s.groupSettingsTarget)
 
   // ── Search palette (Cmd+K) ────────────────────────────────────────────────
@@ -478,11 +483,22 @@ export function AppDialogs({
         </Suspense>
       )}
 
+      {relocatingProject && (
+        <Suspense fallback={null}>
+          <RelocateProjectDialog
+            project={relocatingProject}
+            onClose={() => useDialogStore.getState().closeRelocateProject()}
+            onUpdated={handleProjectUpdated}
+          />
+        </Suspense>
+      )}
+
       {/* Move a project to another hub. Sidebar context-menu → openMoveProjectToHub(p).
           The move then runs in the background (TaskMovesPanel). */}
       {shouldMount('moveProjectToHub', !!movingProjectToHub) && (
         <Suspense fallback={null}>
           <MoveProjectToHubDialog
+            initialMode={projectTransferMode}
             project={movingProjectToHub}
             open={!!movingProjectToHub}
             onOpenChange={(open) => {

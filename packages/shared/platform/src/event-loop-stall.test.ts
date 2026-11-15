@@ -19,7 +19,27 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type EventLoopStall, startEventLoopStallDetector } from './event-loop-stall'
+import {
+  type EventLoopStall,
+  startEventLoopStallDetector,
+  parseStallProcesses
+} from './event-loop-stall'
+
+test('process samples bound top CPU entries and exclude their arguments', () => {
+  const sample = parseStallProcesses(
+    '10 1 01:00 125.5 /Applications/Spotify.app/Contents/MacOS/Spotify --token secret\n' +
+      '11 42 00:10 4.0 /usr/bin/git status\n' +
+      '12 42 00:00 9.0 /bin/ps -A\n',
+    42,
+    12
+  )
+  expect(sample.topCpu).toEqual([
+    { pid: 10, cpuPct: 125.5, command: 'Spotify' },
+    { pid: 11, cpuPct: 4, command: 'git' }
+  ])
+  expect(JSON.stringify(sample.topCpu)).not.toMatch(/secret|token|status/)
+  expect(sample.processes).toEqual([{ pid: 11, elapsed: '00:10', command: '/usr/bin/git status' }])
+})
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

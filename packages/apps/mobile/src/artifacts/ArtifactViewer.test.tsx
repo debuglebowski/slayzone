@@ -167,6 +167,17 @@ describe('ArtifactViewer picks the renderer desktop does', () => {
     expect(pageOf('artifact-page-pdf').source).toEqual({ uri: 'file:///cache/a1/spec.pdf' })
   })
 
+  it('video: no player on the phone, so it says so and offers Share; nothing is read up front', async () => {
+    const hub = fakeArtifactsHub({ artifacts: [artifactRow('a1', 'clip.mp4')] })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-video')
+    // The note's own Share, beside the header's.
+    expect(screen.getAllByRole('button', { name: 'Share' })).toHaveLength(2)
+    // A video is often large: neither its text nor its file is fetched until Share.
+    expect(hub.callsTo('artifacts.readContent')).toHaveLength(0)
+    expect(download).not.toHaveBeenCalled()
+  })
+
   it("a file that isn't text, in a text kind: says so and offers Share", async () => {
     const hub = fakeArtifactsHub({
       artifacts: [artifactRow('a1', 'archive.zip')],

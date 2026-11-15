@@ -11,6 +11,7 @@ const reads = new Set([
   'listArtifactsByTask',
   'getArtifact',
   'readArtifactContent',
+  'readArtifactText',
   'getArtifactMtime',
   'listArtifactVersions',
   'readArtifactVersion',

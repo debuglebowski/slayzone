@@ -388,6 +388,7 @@ export type RenderMode =
   | 'mermaid-preview'
   | 'image'
   | 'pdf'
+  | 'video'
 
 /** Maps file extensions → default render mode. Unlisted/no extension defaults to 'markdown'. */
 export const EXTENSION_RENDER_MODES: Record<string, RenderMode> = {
@@ -423,6 +424,12 @@ export const EXTENSION_RENDER_MODES: Record<string, RenderMode> = {
 
   // PDF
   '.pdf': 'pdf',
+
+  // Video — Chromium's native <video> player; a codec it can't decode is reported in the viewer
+  '.mp4': 'video',
+  '.m4v': 'video',
+  '.mov': 'video',
+  '.webm': 'video',
 
   // Code — programming languages
   '.ts': 'code',
@@ -523,12 +530,13 @@ export const RENDER_MODE_INFO: Record<RenderMode, { label: string }> = {
   'svg-preview': { label: 'SVG Preview' },
   'mermaid-preview': { label: 'Mermaid Preview' },
   image: { label: 'Image' },
-  pdf: { label: 'PDF' }
+  pdf: { label: 'PDF' },
+  video: { label: 'Video' }
 }
 
 /** Whether a render mode represents a binary (non-text) artifact. */
 export function isBinaryRenderMode(mode: RenderMode): boolean {
-  return mode === 'image' || mode === 'pdf'
+  return mode === 'image' || mode === 'pdf' || mode === 'video'
 }
 
 /** Render modes that support "Download as PDF" conversion. */
@@ -560,11 +568,11 @@ export function canExportAsHtml(mode: RenderMode): boolean {
  * pan-zoom canvas with wheel zoom and fit/full buttons (`MediaView`), so a
  * second zoom control over them would fight the fit-to-host transform. They
  * still qualify in split/raw view, where the visible surface is the CodeMirror
- * source pane. PDF is excluded outright — Chromium's embedded viewer owns its
- * own zoom UI.
+ * source pane. PDF and video are excluded outright — Chromium's embedded PDF
+ * viewer owns its own zoom UI, and the native video player its fullscreen.
  */
 export function hasZoomableSurface(mode: RenderMode, viewMode: string | null): boolean {
-  if (mode === 'pdf' || mode === 'image') return false
+  if (mode === 'pdf' || mode === 'image' || mode === 'video') return false
   if (mode === 'svg-preview' || mode === 'mermaid-preview') return viewMode !== 'preview'
   return true
 }

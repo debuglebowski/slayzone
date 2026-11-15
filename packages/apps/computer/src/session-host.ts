@@ -22,7 +22,10 @@ import {
 } from '@slayzone/computer-runtime'
 import { HubDialer, type HubDialerOptions } from '@slayzone/computer-transport/client'
 import { COMPUTER_VERSION, startComputer } from './main'
-import { COMPUTER_PROTOCOL_VERSION } from '@slayzone/computer-transport/shared'
+import {
+  COMPUTER_FRAME_MAX_BYTES,
+  COMPUTER_PROTOCOL_VERSION
+} from '@slayzone/computer-transport/shared'
 import { COMPUTER_BUILD_ID } from './build-identity'
 import { effectiveHubUrls, hostConfigurationKey, type ComputerConfig } from './config'
 import { adoptLoginShellPath } from './login-shell-path'
@@ -409,7 +412,8 @@ export async function startSessionHost(
     let authenticated = false
     const timer = setTimeout(() => socket.destroy(), 5000)
     const peer = socketPeer(socket, {
-      maxFrameBytes: () => (authenticated ? 100 * 1024 * 1024 : 8192),
+      maxFrameBytes: () => (authenticated ? COMPUTER_FRAME_MAX_BYTES : 8192),
+      onFrameTooLarge: (info) => log('local frame over the frame limit refused', { ...info }),
       request: async (method, raw) => {
         const params = (raw ?? {}) as Record<string, unknown>
         if (method === 'auth' && !auth) {

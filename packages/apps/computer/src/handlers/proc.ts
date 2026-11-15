@@ -106,6 +106,7 @@ const REAP_ESCALATE_MS = 2_000
 const WRITE_ID_MEMORY = 256
 
 interface ProcSession {
+  cwd: string
   taskId?: string
   erased?: boolean
   revokeCli?: () => void
@@ -135,8 +136,12 @@ interface QueuedProcSpawn {
 }
 
 export interface ProcHandlers {
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
+  hasTaskWork(taskId: string): boolean
   stopTask(taskId: string): Promise<void>
   hasWork(): boolean
+  /** Pids of this hub's live processes (stall reports name only a hub's own). */
+  ownedPids(): number[]
   handlers: HubMethodTable
   /** Kill every live process (called on computer shutdown). */
   disposeAll(): void
@@ -278,6 +283,7 @@ export function createProcHandlers(
   }
 
   function startProc(params: ProcSpawnParams, slot: AdmissionSlot | null): { pid: number | null } {
+    ctx.assertWorkAllowed?.()
     const taskId = params.taskId ?? params.env?.SLAYZONE_TASK_ID
     if (taskId) options.assertTaskActive?.(taskId)
     if (params.spawnId !== undefined) {
@@ -350,6 +356,7 @@ export function createProcHandlers(
     }
     const buffer = new RingBuffer(MAX_BUFFER_SIZE)
     const session: ProcSession = {
+      cwd,
       taskId,
       revokeCli: capability?.revoke,
       child,
@@ -669,7 +676,14 @@ export function createProcHandlers(
         }
       tombstones.forgetTask(taskId)
     },
+    hasTaskWork: (taskId: string) =>
+      [...procs.values(), ...queued.values()].some((s) => s.taskId === taskId),
+    hasFolderWork: (contains) => [...procs.values()].some((session) => contains(session.cwd)),
     hasWork: () => procs.size > 0 || queued.size > 0,
+    ownedPids: () =>
+      [...procs.values()]
+        .map((session) => session.child.pid)
+        .filter((pid): pid is number => typeof pid === 'number'),
     handlers,
     disposeAll,
     orphansReaped,

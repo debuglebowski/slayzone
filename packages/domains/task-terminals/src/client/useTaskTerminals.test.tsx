@@ -61,7 +61,8 @@ const tab = (id: string, groupId: string, isMain = false, position = 0): Termina
   isMain,
   position,
   createdAt: '2026-01-01',
-  agentState: 'new'
+  agentState: 'new',
+  chatFontSize: null
 })
 const MAIN = tab(TASK, TASK, true, 0)
 

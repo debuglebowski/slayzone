@@ -59,7 +59,12 @@ vi.mock('@slayzone/transport/client', () => {
     settings: { get: q(async () => null), set: { mutationOptions: () => ({}) } }
   }
   const trpcClient = {}
-  return { useTRPC: () => trpc, useTRPCClient: () => trpcClient, useSubscription: () => undefined }
+  return {
+    useHubId: () => null,
+    useTRPC: () => trpc,
+    useTRPCClient: () => trpcClient,
+    useSubscription: () => undefined
+  }
 })
 vi.mock('@tanstack/react-query', () => {
   const mutation = { mutate: () => {}, mutateAsync: async () => undefined }

@@ -507,6 +507,18 @@ describe('direct listener: chat', () => {
     ).rejects.toThrow(/no capability/)
   })
 
+  it('a replay read with a page budget is one bounded page (getReplayPage); without, the whole replay', async () => {
+    const { store, listener, chat } = await setup()
+    const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })
+    const { trpc } = client(listener, token)
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: 41, page: { maxBytes: 1024 } })
+    await trpc.chat.getReplay.query({ tabId: 't1', afterSeq: 41 })
+    expect(chat.reads).toEqual([
+      { tabId: 't1', epoch: 3, method: 'getReplayPage', args: ['t1', 41, { maxBytes: 1024 }] },
+      { tabId: 't1', epoch: 3, method: 'getReplay', args: ['t1', 41] }
+    ])
+  })
+
   it('streams the tab’s events and errors when the conversation moves (epoch)', async () => {
     const { store, listener, chat } = await setup()
     const { token } = grant(store, { chat: { tabId: 't1', epoch: 3 } })

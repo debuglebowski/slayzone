@@ -129,3 +129,28 @@ test('legacy watchdog notice gives an unlabeled process exit its known cause', (
   ])
   expect(rows.at(-1)?.text).toBe('interrupted by watchdog')
 })
+
+test('a stored image (out-of-line reference) prints as a compact label, never as JSON', () => {
+  const ref = {
+    $chatBlob: { v: 1, sha256: 'a'.repeat(64), mediaType: 'image/png', size: 120 * 1024 }
+  }
+  const rows = chatTranscriptFromEvents(
+    [
+      user('u1', 'look'),
+      tool('t1', 'mcp__shots__take', {
+        image: { type: 'image', data: ref, mimeType: 'image/png' }
+      }),
+      {
+        kind: 'tool-result',
+        toolUseId: 't1',
+        isError: false,
+        rawContent: { type: 'image', data: ref, mimeType: 'image/png' },
+        structured: null
+      } as AgentEvent
+    ],
+    { verbose: true }
+  )
+  const text = rows.find((r) => r.role === 'tool')!.text
+  expect(text).toContain('[image/png · 120 KB]')
+  expect(text).not.toContain('$chatBlob')
+})

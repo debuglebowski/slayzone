@@ -9,12 +9,18 @@ import {
   type RefObject
 } from 'react'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
-import { chatViaDirect, noteDirectChatEvent, noteDirectChatLink } from './chat-direct'
+import {
+  chatViaDirect,
+  noteDirectChatEvent,
+  noteDirectChatLink,
+  readReplayPages
+} from './chat-direct'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC, useTRPCClient } from './trpc'
 import { safeRandomUUID, useStableCallback } from '@slayzone/ui'
 import type {
   AgentEvent,
+  ChatBlobChunk,
   PermissionDecision,
   RewindFilesPreview,
   RewindResult,
@@ -67,6 +73,11 @@ interface OpenedPaged {
 
 export interface UseChatSessionResult {
   state: ChatTimelineState
+  /**
+   * One chunk of an image / file a saved event references (`chat-blobs`), read over
+   * the tab's direct link or the hub. Stable identity.
+   */
+  readBlob: (sha256: string, offset: number) => Promise<ChatBlobChunk>
   /** The rows; `undefined` = not loaded here (paged history). */
   timeline: TimelineRows
   inFlight: boolean
@@ -176,6 +187,8 @@ export interface UseChatSessionResult {
 }
 
 export interface UseChatSessionOpts {
+  /** Renderer restoration admission holds its slot until these reads really settle. */
+  trackRestore?: <T>(work: Promise<T>) => Promise<T>
   tabId: string
   taskId: string
   mode: string
@@ -279,8 +292,19 @@ async function hydrateAndReplay({
         tabId: target.tabId,
         version: TIMELINE_PROJECTION_VERSION
       })
-    } catch {
-      // A hub without paged history (or none answering): the full replay.
+    } catch (error) {
+      const code = (error as { data?: { code?: string } } | null)?.data?.code
+      const message = error instanceof Error ? error.message : ''
+      // Only an older hub lacking the procedure needs a full replay. A timeout,
+      // denied read or unavailable computer must not amplify into loading all history.
+      if (
+        code !== 'NOT_IMPLEMENTED' &&
+        !(
+          code === 'NOT_FOUND' &&
+          /no procedure found|no ["']?query["']?-procedure|procedure.*not found/i.test(message)
+        )
+      )
+        throw error
     }
     if (gen !== genRef.current) return
     if (opened.kind === 'paged') {
@@ -295,12 +319,10 @@ async function hydrateAndReplay({
       onError(null)
       return
     }
-    // Saved history + what is streaming right now, in one snapshot.
-    const replay = await reads.getReplay({
-      tabId: target.tabId,
-      afterSeq: -1
-    })
-    if (gen !== genRef.current) return
+    // Saved history + what is streaming right now, read in bounded pages (the last
+    // carries what streams), applied below in one piece.
+    const replay = await readReplayPages(reads, target.tabId, -1, () => gen !== genRef.current)
+    if (!replay || gen !== genRef.current) return
     openFull()
     if (loadedOnceRef.current) dispatch({ type: 'reset' })
     // The whole history in ONE reducer batch (one render, linear time), with the
@@ -331,6 +353,37 @@ async function hydrateAndReplay({
       onHydrated()
     }
   }
+}
+
+type PagesAnswer =
+  | { expired: true }
+  | {
+      expired: false
+      pages: Array<{ page: number; from: number; rows: unknown[] }>
+      omitted?: number[]
+    }
+
+/**
+ * `timelinePages` for every page asked: an answer carries at most a byte budget of
+ * rows and names the pages it left out (`omitted`), which are asked for again at
+ * once. `expired` as soon as one answer is.
+ */
+async function timelinePagesAll(
+  io: Pick<ChatIo, 'timelinePages'>,
+  input: { tabId: string; pages: number[]; asOfSeq: number; epoch: number }
+): Promise<PagesAnswer> {
+  const pages: Array<{ page: number; from: number; rows: unknown[] }> = []
+  for (let wanted = input.pages; wanted.length > 0; ) {
+    const res = (await io.timelinePages({ ...input, pages: wanted })) as PagesAnswer
+    if (res.expired) return res
+    pages.push(...res.pages)
+    const asked = wanted
+    const again = (res.omitted ?? []).filter((page) => asked.includes(page))
+    // An answer with no page and nothing left out has nothing more to give.
+    if (res.pages.length === 0) break
+    wanted = again
+  }
+  return { expired: false, pages }
 }
 
 /** Pages asked for in one `timelinePages` request, at most. */
@@ -368,6 +421,7 @@ function cancelFrame(id: number): void {
  * 5. On unmount: unsubscribe only. Session persists (main keeps buffer). Tab close triggers chat:remove via useTaskTerminals.
  */
 export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
+  const trackRestore = opts.trackRestore
   const trpc = useTRPC()
   const trpcClient = useTRPCClient()
   const queryClient = useQueryClient()
@@ -375,7 +429,9 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // reads, the event stream and simple commands go there; the hub otherwise.
   const { lease: directChat, lost: directChatLost } = useDirectLease(
     trpcClient,
-    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null
+    opts.tabId ? { kind: 'chat', tabId: opts.tabId, taskId: opts.taskId } : null,
+    undefined,
+    trackRestore
   )
   const chatIo = chatViaDirect(trpcClient, directChat?.client ?? null, directChatLost)
   // Fixed identities for the hydrate effect: they read the CURRENT path when called,
@@ -385,6 +441,10 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   )
   const getReplayRead = useStableCallback((input: Parameters<typeof chatIo.getReplay>[0]) =>
     chatIo.getReplay(input)
+  )
+  const readBlob = useStableCallback(
+    (sha256: string, offset: number) =>
+      chatIo.readBlob({ tabId: opts.tabId, sha256, offset }) as Promise<ChatBlobChunk>
   )
   // Whether the provider starts turns by itself decides what reads as working.
   const [state, dispatch] = useReducer(reducer, opts.mode, (mode: string) =>
@@ -579,7 +639,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
   // are not in it yet). Rows that moved since they were asked for: open again.
   const requestPages = useStableCallback(
     (wanted: number[], gen: number, epoch: number, asOfSeq: number): void => {
-      chatIo.timelinePages({ tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
+      timelinePagesAll(chatIo, { tabId: opts.tabId, pages: wanted, asOfSeq, epoch }).then(
         (res) => {
           for (const page of wanted) loadingPagesRef.current.delete(page)
           if (gen !== genRef.current) return
@@ -839,7 +899,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       trpcClient
     }
 
-    void hydrateAndReplay({
+    const work = hydrateAndReplay({
       trpcClient,
       reads: { openTimeline: openTimelineRead, getReplay: getReplayRead },
       target: {
@@ -867,6 +927,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       onHydrateError: setHydrateError,
       onHydrated: () => setLoadedInputs(inputs)
     })
+    void (trackRestore ? trackRestore(work) : work)
 
     return () => {
       // Bump the generation so the subscriptions + any in-flight async work for
@@ -874,6 +935,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
       genRef.current = gen + 1
     }
   }, [
+    trackRestore,
     opts.tabId,
     opts.taskId,
     opts.mode,
@@ -1059,6 +1121,7 @@ export function useChatSession(opts: UseChatSessionOpts): UseChatSessionResult {
 
   return {
     state,
+    readBlob,
     timeline: state.timeline,
     // A user's turn, or one the agent started by itself (TUI parity).
     inFlight: isTurnOpen(state),

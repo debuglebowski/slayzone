@@ -5,6 +5,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { HubToComputerMethods } from '@slayzone/computer-transport/shared'
@@ -76,6 +77,25 @@ describe('agentConfig.fs', () => {
   it('refuses an unknown op', async () => {
     await expect(call({ op: 'chmod', path: join(root, 'a') })).rejects.toThrow()
   })
+
+  it('hashes a bounded batch locally, preserving missing files and fresh edits', async () => {
+    const path = join(root, 'SKILL.md')
+    const missing = join(root, 'missing.md')
+    writeFileSync(path, 'first')
+    const digest = (s: string) => createHash('sha256').update(s).digest('hex')
+    expect(await call({ op: 'hashFiles', paths: [path, missing] })).toEqual({
+      result: [
+        { path, hash: digest('first') },
+        { path: missing, hash: null }
+      ]
+    })
+    writeFileSync(path, 'second')
+    expect(await call({ op: 'hashFiles', paths: [path] })).toEqual({
+      result: [{ path, hash: digest('second') }]
+    })
+    await expect(call({ op: 'hashFiles', paths: Array(129).fill(path) })).rejects.toThrow()
+    await expect(call({ op: 'hashFiles', paths: [path, '/etc/hosts'] })).rejects.toThrow(/outside/)
+  })
 })
 
 describe('agentConfig.fs under a path scope (§9 Phase 7c)', () => {
@@ -101,6 +121,9 @@ describe('agentConfig.fs under a path scope (§9 Phase 7c)', () => {
       await expect(
         call({ op: 'readFile', path: join(mine, '..', 'other', 'CLAUDE.md') })
       ).rejects.toThrow(/outside the folders of project p1/)
+      await expect(call({ op: 'hashFiles', paths: [join(other, 'CLAUDE.md')] })).rejects.toThrow(
+        /outside the folders of project p1/
+      )
     })
     expect(readFileSync(join(mine, 'CLAUDE.md'), 'utf8')).toBe('ok')
   })

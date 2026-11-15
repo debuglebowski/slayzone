@@ -1,3 +1,4 @@
+import { registerTransferRoutes } from './transfers'
 import type { Express } from 'express'
 import type { RestApiDeps } from './types'
 import { withAdminGate } from './admin-routes'
@@ -43,6 +44,7 @@ import { registerPanelsCrudRoutes } from './panels/crud'
 import { registerAutomationsCrudRoutes } from './automations/crud'
 import { registerArtifactsListRoute } from './artifacts/list'
 import { registerArtifactsContentRoutes } from './artifacts/content'
+import { registerFilesRawRoute } from './files/raw'
 import { registerArtifactsCrudRoutes } from './artifacts/crud'
 import { registerArtifactsSearchRoute } from './artifacts/search'
 import { registerArtifactsVersionsRoutes } from './artifacts/versions'
@@ -88,6 +90,8 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   // then the owner guard (T-18): a `user` route touches only the caller's content.
   // Then the move lock: a write to a task moving to another hub is refused (409).
   const app = withMoveLockGate(withOwnerGate(withAdminGate(rawApp), deps.db), deps.db)
+
+  registerTransferRoutes(app, deps)
 
   // Notify
   registerNotifyRoute(app, deps)
@@ -160,6 +164,10 @@ export function registerRestApi(rawApp: Express, deps: RestApiDeps): void {
   registerArtifactsContentRoutes(app, deps)
   registerArtifactsVersionsRoutes(app, deps)
   registerArtifactsCrudRoutes(app, deps)
+
+  // Workspace files: raw bytes from the computer that owns the workspace (previews
+  // the desktop's slz-file:// handler cannot read from its own disk).
+  registerFilesRawRoute(app, deps)
 
   // Automations
   registerAutomationsRunRoute(app, deps)

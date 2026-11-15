@@ -134,6 +134,20 @@ function testing() {
   if (!port) throw new Error('Test computer storage unavailable')
   return port
 }
+
+/**
+ * Read one bounded page of history (a byte / event budget; the server clamps it to
+ * its maxima). Absent: an older client asking for the whole read.
+ */
+type ChatOpsOf = ReturnType<typeof getChatDeps>['ops']
+
+const historyPageInput = z
+  .object({
+    maxBytes: z.number().int().positive().optional(),
+    maxEvents: z.number().int().positive().optional()
+  })
+  .optional()
+
 export const chatRouter = router({
   testSeedEvents: publicProcedure
     .input(
@@ -274,6 +288,23 @@ export const chatRouter = router({
           input.archiveId,
           input.conversationId,
           input.ref
+        )
+      ),
+    // One chunk of an image / file the archived events reference (export, viewer).
+    blob: publicProcedure
+      .input(
+        archiveConversation.extend({
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          offset: z.number().int().nonnegative()
+        })
+      )
+      .query(({ input }) =>
+        computer().archiveBlob(
+          input.computerId,
+          input.archiveId,
+          input.conversationId,
+          input.sha256,
+          input.offset
         )
       )
   }),
@@ -455,13 +486,46 @@ export const chatRouter = router({
     .input(z.object({ tabId: z.string() }))
     .mutation(({ input }) => ops().remove(input.tabId)),
   reset: publicProcedure.input(chatCreateOpts).mutation(({ input }) => ops().reset(input)),
+  // Saved events after `afterSeq`. With `page`: ONE bounded page (`ChatEventPage`,
+  // `hasMore`: read on); without (older clients): all of them, assembled from pages.
   getBufferSince: publicProcedure
-    .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
-    .query(({ input }) => ops().getBufferSince(input.tabId, input.afterSeq)),
+    .input(z.object({ tabId: z.string(), afterSeq: z.number(), page: historyPageInput }))
+    .query(
+      async ({
+        input
+      }): Promise<
+        | Awaited<ReturnType<ChatOpsOf['getBufferSince']>>
+        | Awaited<ReturnType<ChatOpsOf['getEventPage']>>
+      > =>
+        input.page
+          ? ops().getEventPage(input.tabId, input.afterSeq, input.page)
+          : ops().getBufferSince(input.tabId, input.afterSeq)
+    ),
   // Saved events + what is streaming right now, in one snapshot (reload mid-reply).
+  // With `page`: ONE bounded page (`ChatReplayPage`; the last carries the live part).
   getReplay: publicProcedure
-    .input(z.object({ tabId: z.string(), afterSeq: z.number() }))
-    .query(({ input }) => ops().getReplay(input.tabId, input.afterSeq)),
+    .input(z.object({ tabId: z.string(), afterSeq: z.number(), page: historyPageInput }))
+    .query(
+      async ({
+        input
+      }): Promise<
+        | Awaited<ReturnType<ChatOpsOf['getReplay']>>
+        | Awaited<ReturnType<ChatOpsOf['getReplayPage']>>
+      > =>
+        input.page
+          ? ops().getReplayPage(input.tabId, input.afterSeq, input.page)
+          : ops().getReplay(input.tabId, input.afterSeq)
+    ),
+  // One chunk of an image / file a saved event references (loaded as it is shown).
+  readBlob: publicProcedure
+    .input(
+      z.object({
+        tabId: z.string(),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        offset: z.number().int().nonnegative()
+      })
+    )
+    .query(({ input }) => ops().readBlob(input.tabId, input.sha256, input.offset)),
   // Paged history: open from the hub's timeline projection (`full`: use getReplay),
   // rows of older pages as of the client's newest event, pages that may hold a query.
   openTimeline: publicProcedure

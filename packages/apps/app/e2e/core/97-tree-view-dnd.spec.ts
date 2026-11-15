@@ -325,6 +325,7 @@ test.describe('TreeView drag and drop', () => {
       treeOrderBy: 'manual',
       treeOrderDir: 'asc',
       treeGroupTemporary: true,
+      treeGroupBlocked: false,
       treeShowEmptyGroups: false
     })
     // Anchor open tab keeps the project in TreeView's "active" set.
@@ -355,6 +356,94 @@ test.describe('TreeView drag and drop', () => {
     await expect(taskRow(mainWindow, rootA)).toBeVisible({ timeout: 5_000 })
     await expect(taskRow(mainWindow, rootB)).toBeVisible()
     await expect(taskRow(mainWindow, rootC)).toBeVisible()
+  })
+
+  test('only projects scroll while the tree toolbar stays fixed', async ({ mainWindow }) => {
+    const size = await mainWindow.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    try {
+      await mainWindow.setViewportSize({ width: size.width, height: 360 })
+      await patchStore(mainWindow, { treeShowAllSubtasks: true, treeShowEmptyGroups: true })
+      const scroller = mainWindow.getByTestId('tree-projects-scroll')
+      await expect(scroller).toBeVisible()
+      await expect
+        .poll(() => scroller.evaluate((el) => el.scrollHeight > el.clientHeight))
+        .toBe(true)
+      const toolbar = mainWindow.getByRole('button', { name: 'View settings', exact: true })
+      const before = await toolbar.boundingBox()
+      const projectBefore = await taskRow(mainWindow, rootA).boundingBox()
+      const box = await scroller.boundingBox()
+      expect(box).not.toBeNull()
+      await mainWindow.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+      await mainWindow.mouse.wheel(0, 500)
+      await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+      await expect(toolbar).toBeVisible()
+      expect((await toolbar.boundingBox())?.y).toBe(before?.y)
+      expect((await taskRow(mainWindow, rootA).boundingBox())!.y).toBeLessThan(projectBefore!.y)
+    } finally {
+      await mainWindow.setViewportSize(size)
+    }
+  })
+
+  test('blocked grouping toggles without changing task status or priority', async ({
+    mainWindow
+  }) => {
+    test.setTimeout(60_000)
+    await mainWindow.evaluate(
+      async (ids) => {
+        await window.getTrpcVanillaClient().task.updateMany.mutate({
+          ids,
+          updates: { isBlocked: true }
+        })
+      },
+      [rootB, rootC]
+    )
+    try {
+      await patchStore(mainWindow, { treeShowBlocked: true })
+      await seed(mainWindow).refreshData()
+      await mainWindow.getByRole('button', { name: 'View settings', exact: true }).click()
+      await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
+      await mainWindow.keyboard.press('Escape')
+      const header = mainWindow.locator(
+        `[data-sidebar-tree-item="header"][data-project-id="${projectId}"][data-group-key="__blocked__"]`
+      )
+      await expect(header).toHaveText('Blocked')
+      const blockedBox = await header.boundingBox()
+      expect((await taskRow(mainWindow, rootB).boundingBox())!.y).toBeGreaterThan(blockedBox!.y)
+      const source = await taskRow(mainWindow, rootB).boundingBox()
+      await dragFromTo(
+        mainWindow,
+        { x: source!.x + source!.width / 2, y: source!.y + source!.height / 2 },
+        rowDropPoint(mainWindow, rootC, { yOffset: -4, yFrac: 1 })
+      )
+      await expect
+        .poll(async () => {
+          const b = await getTaskById(mainWindow, rootB)
+          const c = await getTaskById(mainWindow, rootC)
+          return b!.order > c!.order
+        })
+        .toBe(true)
+      for (const id of [rootB, rootC]) {
+        const task = await getTaskById(mainWindow, id)
+        expect(task?.status).toBe('in_progress')
+        expect(task?.priority).toBe(3)
+      }
+      await mainWindow.getByRole('button', { name: 'View settings', exact: true }).click()
+      await mainWindow.getByRole('switch', { name: 'Group blocked tasks', exact: true }).click()
+      await mainWindow.keyboard.press('Escape')
+      await expect(header).toHaveCount(0)
+      await expect(taskRow(mainWindow, rootB)).toBeVisible()
+    } finally {
+      await mainWindow.evaluate(
+        async (ids) => {
+          await window.getTrpcVanillaClient().task.updateMany.mutate({
+            ids,
+            updates: { isBlocked: false }
+          })
+        },
+        [rootB, rootC]
+      )
+      await patchStore(mainWindow, { treeGroupBlocked: false, treeShowBlocked: false })
+    }
   })
 
   test('drag root past sibling reorders within in_progress group', async ({ mainWindow }) => {

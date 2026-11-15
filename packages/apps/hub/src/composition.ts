@@ -110,6 +110,7 @@ import {
   showItemInFolder as nativeShowItemInFolder
 } from './shell-native'
 import type { SlayzoneDb } from '@slayzone/platform'
+import { createComputerSessionOwners } from './computer-session-owners'
 import {
   checkCliInstalled,
   checkCliInstalledAtTarget,
@@ -372,6 +373,7 @@ import {
   webSessionCookieSecure
 } from './web-sessions.js'
 import { attachAgentHookRelayConsumer, computerOwnerOf } from './agent-hook-relay-consumer.js'
+import { attachComputerStallConsumer } from './computer-stall-consumer.js'
 import { countRunningWork, createNewWorkGuard } from './computer-new-work.js'
 import {
   DEFAULT_LOCAL_COMPUTER_NAME,
@@ -1142,9 +1144,15 @@ export function composeServer(opts: {
       }
     },
     connected: (id) => (execGateway?.listUsableComputers() ?? []).some((c) => c.computerId === id),
+    recovering: (id) =>
+      execGateway?.listComputers().some((c) => c.computerId === id && c.recovering === true) ??
+      false,
     chatRuntimeReady: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatRuntimeReady !==
       false,
+    chatHistoryPages: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)?.chatHistoryPages ===
+      true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),
@@ -2191,15 +2199,19 @@ export function composeServer(opts: {
         listener({ computerId: p.computer.computerId, connected: true })
       const down = (p: { computerId: string }): void =>
         listener({ computerId: p.computerId, connected: false })
+      const liveness = (p: { computerId: string; usable: boolean; recovering: boolean }): void =>
+        listener({ ...p, connected: true })
       gateway.events.on('computer-connected', up)
       gateway.events.on('computer-disconnected', down)
       // The watchdog's own event — this is what covers a socket that is open but
       // silent, which no client-side timer could observe.
       gateway.events.on('computer-lost', down)
+      gateway.events.on('computer-liveness', liveness)
       return () => {
         gateway.events.off('computer-connected', up)
         gateway.events.off('computer-disconnected', down)
         gateway.events.off('computer-lost', down)
+        gateway.events.off('computer-liveness', liveness)
       }
     }
   })
@@ -2298,6 +2310,19 @@ export function composeServer(opts: {
         computerDataHandoff.flushTask(taskId, computerId, [TASK_PATH_KIND])
     })
     const computerGateway = createHubComputerGateway({
+      diagnostic: (event, payload) =>
+        recordDiagnosticEvent({
+          // A refused oversized frame is a request that failed for the user.
+          level:
+            event === 'computer.request_slow' ||
+            event === 'computer.frame_too_large' ||
+            event === 'computer.reply_too_large'
+              ? 'warn'
+              : 'info',
+          source: 'server',
+          event,
+          payload
+        }),
       // THE owner check (G2): every hub→computer request, whatever routed it, is
       // refused on a computer its caller does not own. The hub's own work passes.
       authorizeRequest: createComputerRequestAuthorizer(placement.gate),
@@ -2375,6 +2400,10 @@ export function composeServer(opts: {
     // agent-hook-relay-consumer.ts.
     attachAgentHookRelayConsumer(computerGateway, restDeps, terminalStateBridge)
 
+    // A computer's own main-thread stalls (computer/stall-report.ts) → the hub
+    // diagnostic `computer.event_loop_stall`, beside this hub's own.
+    attachComputerStallConsumer(computerGateway)
+
     // Route ALL OS-level exec (pty / chat agents / processes) to a computer. There
     // is no in-process fallback: an unresolved computer raises
     // NoComputerAvailableError so "which machine ran this?" is never an invisible
@@ -2384,11 +2413,16 @@ export function composeServer(opts: {
     // spawn-time lookups and these exec backends resolve IDENTICALLY. Any spec
     // arriving with a null computerId still gets the connected default here.
     execGateway = computerGateway
+    // What the hub's database proves about a computer session nothing in this run
+    // tracks (a previous run's): a reconnect ends one only on that proof — its
+    // task or tab gone, its process row deleted — never for being unknown.
+    const sessionOwners = createComputerSessionOwners(db)
     setPtyBackend(
       createRoutingPtyBackend({
         gateway: computerGateway,
         resolveComputerId: (spec) => resolveExecComputer(spec.computerId),
-        gate: placement.gate
+        gate: placement.gate,
+        ownerGone: sessionOwners.terminal
       })
     )
     // Warm agents are the COMPUTER's processes, so they outlive a hub or sidecar
@@ -2467,7 +2501,8 @@ export function composeServer(opts: {
         gateway: computerGateway,
         resolveComputerId: (spec) => spec.computerId,
         // Runs adopted after a hub restart are the manager's: a reconnect keeps them.
-        keepUntracked: isAdoptedOnComputer
+        keepUntracked: isAdoptedOnComputer,
+        ownerGone: sessionOwners.process
       })
     )
     setProcessComputerResolver(async ({ taskId, projectId }) => {
@@ -2621,6 +2656,10 @@ export function composeServer(opts: {
     // ones on an explicit computer or the caller's own — each fs call one
     // agentConfig.fs.
     setAiConfigFsRouting({
+      supportsHashFiles: (id) =>
+        computerGateway
+          .listComputers()
+          .some((c) => c.computerId === id && c.aiConfigHashFiles === true),
       computerForProject: ({ taskId, projectId }) =>
         placement.forTarget(taskId ? { taskId } : projectId ? { projectId } : {}),
       computerForCaller: (computerId) => placement.forTarget(computerId ? { computerId } : {}),
@@ -2814,6 +2853,15 @@ export function composeServer(opts: {
       db,
       localComputerId: deterministicLocalComputerId(localComputerName),
       ops: {
+        relocateProject: async (computerId, projectId, sourcePath, path, mode) => {
+          const result = await computerGateway.request(
+            computerId,
+            HubToComputerMethods.projectRelocate,
+            { projectId, sourcePath, path, mode },
+            120_000
+          )
+          return projectListResultSchema.shape.projects.element.pick({ path: true }).parse(result)
+        },
         listRoots: (computerId) => workspaceFs.listRoots(computerId),
         setAllowedRoots: (computerId, roots) => workspaceFs.setAllowedRoots(computerId, roots),
         pathExists: (computerId, path) => workspaceFs.pathExists(computerId, path),
@@ -2895,6 +2943,8 @@ export function composeServer(opts: {
       return placement.forTarget({ computerId: localComputerId }).catch(() => null)
     }
     setProjectFolderHost({
+      relocateFolder: (computerId, projectId, sourcePath, path, mode) =>
+        projectSync.relocateFolder(computerId, projectId, sourcePath, path, mode),
       computerForNewProject: async () =>
         (await placement.forCaller()) ?? (await registeredLocalComputer()),
       computerForProject: async (projectId) =>

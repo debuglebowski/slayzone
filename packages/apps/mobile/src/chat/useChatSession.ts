@@ -10,7 +10,7 @@
  *    again on every reconnect) starts a load, so no event can slip between the load's
  *    snapshot and the subscription:
  *      - first: `chat.hydrate` (loads the persisted history into a skeleton on the
- *        hub; spawns nothing), then `chat.getReplay` from -1;
+ *        hub; spawns nothing), then `chat.getReplay` from -1, a bounded page per read;
  *      - after a reconnect: `chat.getReplay` after the newest applied event (catch-up),
  *        or a full load when a reply was streaming (its fragments cannot be merged) or
  *        the hub's log went backwards.
@@ -32,7 +32,11 @@ import {
   isTurnOpen,
   reducer
 } from '@slayzone/terminal/reducer'
-import { chatViaDirect } from '@slayzone/terminal/chat-direct'
+import {
+  chatViaDirect,
+  readReplayPages,
+  type WholeChatReplay
+} from '@slayzone/terminal/chat-direct'
 import { SessionReadyGate } from '@slayzone/terminal/chat-session-ready'
 import { useDirectLease, useSubscription } from '@slayzone/transport/client'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -187,9 +191,10 @@ export function useChatSession(target: ChatTarget): ChatSessionApi {
             }
           }
         }
-        let replay: Awaited<ReturnType<typeof trpcClient.chat.getReplay.query>>
+        let replay: WholeChatReplay
         try {
-          replay = await chatIo.getReplay({ tabId, afterSeq: ticket.afterSeq })
+          // A bounded page per read; the whole replay is applied at once below.
+          replay = (await readReplayPages(chatIo, tabId, ticket.afterSeq))!
         } catch (err) {
           if (sync.failLoad(ticket) === 'done') {
             setLoadError(message(err))

@@ -1,3 +1,4 @@
+import { useChatRestorationTracker } from './chat-restoration'
 import { useCallback, useEffect, useState } from 'react'
 import { useTRPCClient } from '../trpc'
 import { readChatInfo } from './chat-info-read'
@@ -81,6 +82,7 @@ async function applyChatEffort(
  */
 export function useChatEffort({ taskId, mode, tabId, cwd, settingsGeneration }: UseChatEffortOpts) {
   const trpcClient = useTRPCClient()
+  const trackRestoration = useChatRestorationTracker()
   const [chatEffort, setChatEffortState] = useState<ChatEffortValue>(DEFAULT_CHAT_EFFORT)
   const [effortChanging, setEffortChanging] = useState(false)
 
@@ -91,7 +93,9 @@ export function useChatEffort({ taskId, mode, tabId, cwd, settingsGeneration }: 
       generation: number,
       isCancelled: () => boolean
     ) => {
-      void hydrateChatEffort(trpcClient, ids, generation, isCancelled, setChatEffortState)
+      void trackRestoration(
+        hydrateChatEffort(trpcClient, ids, generation, isCancelled, setChatEffortState)
+      )
     }
   )
 

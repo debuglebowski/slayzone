@@ -54,6 +54,7 @@ import {
 import {
   extensionBadge,
   isFileKind,
+  isShareOnlyKind,
   looksBinary,
   type ViewerKind,
   viewerKindOf
@@ -98,6 +99,7 @@ type Body =
   | { kind: 'page'; page: DocumentPage }
   | { kind: 'image'; uri: string }
   | { kind: 'binary' }
+  | { kind: 'video' }
   | { kind: 'loading' }
   | { kind: 'error'; message: string; retry: () => void }
 
@@ -119,6 +121,7 @@ function LoadedArtifact({
 
   const kind = viewerKindOf(artifact)
   const fileKind = isFileKind(kind)
+  const shareOnly = isShareOnlyKind(kind)
   const [showHistory, setShowHistory] = useState(false)
   const [view, setView] = useState<'preview' | 'source'>(
     artifact.view_mode === 'raw' ? 'source' : 'preview'
@@ -140,7 +143,7 @@ function LoadedArtifact({
     version === null ? null : (versions.data?.find((v) => v.version_num === version) ?? null)
   const versionReady = version === null || selected !== null
 
-  const text = useArtifactText(artifact.id, selected, !fileKind && versionReady)
+  const text = useArtifactText(artifact.id, selected, !fileKind && !shareOnly && versionReady)
   const file = useArtifactFile(target, artifact, selected, contentTick, fileKind && versionReady)
   const isText = text.data !== undefined && !looksBinary(text.data)
   const needsMermaid = useMemo(
@@ -176,6 +179,8 @@ function LoadedArtifact({
             retry: versions.retry
           }
         : { kind: 'loading' }
+  } else if (shareOnly) {
+    body = { kind: 'video' }
   } else if (fileKind) {
     body = file.error
       ? { kind: 'error', message: file.error, retry: file.retry }
@@ -418,6 +423,15 @@ function ArtifactBody({
         <Center>
           <Text style={styles.note} testID="artifact-binary">
             This file isn't text, so it can't be shown here. Share it to open it in another app.
+          </Text>
+          <HeaderButton label="Share" onPress={onShare} />
+        </Center>
+      )
+    case 'video':
+      return (
+        <Center>
+          <Text style={styles.note} testID="artifact-video">
+            Videos can't be played in the app yet. Share it to open it in another app.
           </Text>
           <HeaderButton label="Share" onPress={onShare} />
         </Center>

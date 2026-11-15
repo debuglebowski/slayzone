@@ -38,6 +38,7 @@
 
 import { z } from 'zod'
 import { directAddressSchema } from './direct'
+import { FRAME_TOO_LARGE_CODE } from './frame-limit'
 import { RpcError } from './rpc'
 
 /**
@@ -116,8 +117,20 @@ export const ComputerTransportErrorCodes = {
    * not a policy refusal: the user picks the project's folder on this computer
    * (or the hub delivers it), then the same spawn works.
    */
-  projectNotPlaced: -32007
+  projectNotPlaced: -32007,
+  /**
+   * A frame would exceed the receiver's limit (`COMPUTER_FRAME_MAX_BYTES`, ./frame-limit),
+   * so it was never sent: the caller's request (refused locally) or the peer's reply
+   * (answered with this error instead). Not transient. `data`: `{ method, bytes, limitBytes }`
+   * (`bytes: null` = too large to serialize at all).
+   */
+  frameTooLarge: FRAME_TOO_LARGE_CODE
 } as const
+
+/** Is `err` a frame-limit refusal (an `RpcError` with `frameTooLarge`)? */
+export function isFrameTooLargeError(err: unknown): err is RpcError {
+  return err instanceof RpcError && err.code === ComputerTransportErrorCodes.frameTooLarge
+}
 
 /** The error a computer raises when asked to start a project's agent with no folder for it. */
 export function projectNotPlacedError(projectId: string): RpcError {
@@ -217,6 +230,14 @@ const hostIdField = z.string().min(1).optional()
 /** First-contact authentication: exchange a join token for credentials. */
 export const enrollParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports `agentConfig.fs` hash batches. Absent = legacy reads. */
+  aiConfigHashFiles: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   joinToken: z.string().min(1),
   /** Human-readable computer name (e.g. hostname). */
@@ -255,6 +276,14 @@ export type EnrollResult = z.infer<typeof enrollResultSchema>
 /** Reconnect authentication with previously minted credentials. */
 export const helloParamsSchema = z.object({
   chatRuntimeReady: z.boolean().optional(),
+  /** Current handler supports hash batches; enrollment tags never prove live support. */
+  aiConfigHashFiles: z.boolean().optional(),
+  /**
+   * Whether this computer answers chat history in bounded pages (chat-runtime
+   * `getEventPage` / `getReplayPage`). Absent = an older computer: the hub asks it
+   * for the whole reads it knows. Additive; no protocol bump.
+   */
+  chatHistoryPages: z.boolean().optional(),
   connectorGeneration: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   /** Running release after an upgrade; older computers omit it. */
   version: z.string().min(1).max(100).optional(),
@@ -407,13 +436,63 @@ export const chatDirectWritePayloadSchema = z.object({
 })
 export type ChatDirectWritePayload = z.infer<typeof chatDirectWritePayloadSchema>
 
+/**
+ * `ComputerEventParams.name` for a stall of the computer's own main thread
+ * (`@slayzone/platform/event-loop-stall`), reported once it runs again. A frozen
+ * computer misses hub heartbeats and is dropped; on 2026-11-14 such stalls were
+ * only inferable from gaps in its request log. Diagnostic only: the hub records it
+ * (`computer.event_loop_stall`). A generic `event`, so an older hub ignores it.
+ */
+export const COMPUTER_EVENT_LOOP_STALL_EVENT_NAME = 'event-loop-stall'
+
+/** Cut, not rejected: an oversized sample must not drop the measurement. */
+const cutArray = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  z.array(item).transform((items) => items.slice(0, max))
+const stallProcessSchema = z.object({
+  pid: z.number().int(),
+  elapsed: bounded(32),
+  /** Executable name only — never arguments (a shell's `-c` carries an agent's prompt). */
+  command: bounded(64)
+})
+const stallTopCpuProcessSchema = z.object({
+  pid: z.number().int(),
+  cpuPct: z.number(),
+  command: bounded(64)
+})
+
+/** Payload of {@link COMPUTER_EVENT_LOOP_STALL_EVENT_NAME}: the sampler's `EventLoopStall`,
+ *  bounded, with process commands reduced to executable names. */
+export const computerEventLoopStallPayloadSchema = z.object({
+  startedAt: z.number(),
+  durationMs: z.number().nonnegative(),
+  mainThreadCpuMs: z.number().nullable(),
+  processCpuMs: z.number(),
+  gcMs: z.number(),
+  machineCpuBusyPct: z.number().nullable(),
+  stacks: cutArray(z.object({ atMs: z.number(), frames: cutArray(bounded(512), 20) }), 5),
+  children: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallProcessSchema, 64) }),
+    5
+  ),
+  topCpu: cutArray(
+    z.object({ atMs: z.number(), processes: cutArray(stallTopCpuProcessSchema, 5) }),
+    5
+  ).optional(),
+  /** Earlier reports the computer could not deliver (hub away, outbox full). */
+  dropped: z.number().int().nonnegative().optional()
+})
+export type ComputerEventLoopStallPayload = z.infer<typeof computerEventLoopStallPayloadSchema>
+
 export const ptyInputPayloadSchema = z.object({
   sessionId: z.string().min(1),
   spawnId: z.string().min(1).optional(),
   /** The submitted line (Enter bytes included), or null when nothing was submitted. */
   submitted: z.string().max(70_000).nullable(),
   esc: z.boolean(),
-  statusCommand: z.boolean()
+  statusCommand: z.boolean(),
+  /** The write carried ^C / ^D (the user may be ending the agent). Absent = no, or an
+   *  older computer. */
+  interrupt: z.boolean().optional()
 })
 export type PtyInputPayload = z.infer<typeof ptyInputPayloadSchema>
 
@@ -654,6 +733,8 @@ export const HubToComputerMethods = {
   // imports directly rather than reimplementing.
   fsReadDir: 'fs.readDir',
   fsReadFile: 'fs.readFile',
+  /** One raw slice of a file (base64) — the hub streams previews from these. */
+  fsReadBytes: 'fs.readBytes',
   fsWriteFile: 'fs.writeFile',
   fsCreateFile: 'fs.createFile',
   fsCreateDir: 'fs.createDir',
@@ -692,6 +773,7 @@ export const HubToComputerMethods = {
   // disk; the hub knows only which computer. See `project.resolvePath` below.
   projectResolvePath: 'project.resolvePath',
   projectSetPath: 'project.setPath',
+  projectRelocate: 'project.relocate',
   projectForgetPath: 'project.forgetPath',
   projectList: 'project.list',
   ping: 'ping',
@@ -1326,6 +1408,12 @@ export const projectSetPathParamsSchema = z.object({
 })
 export type ProjectSetPathParams = z.infer<typeof projectSetPathParamsSchema>
 
+export const projectRelocateParamsSchema = projectSetPathParamsSchema.extend({
+  sourcePath: z.string(),
+  mode: z.enum(['move', 'update']).default('move')
+})
+export type ProjectRelocateParams = z.infer<typeof projectRelocateParamsSchema>
+
 export const projectSetPathResultSchema = z.object({
   /** The realpath-resolved path actually recorded. */
   path: z.string()
@@ -1558,6 +1646,7 @@ export type ExecRunResult = z.infer<typeof execRunResultSchema>
  */
 const agentConfigPath = z.string().min(1)
 export const agentConfigFsParamsSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('hashFiles'), paths: z.array(agentConfigPath).min(1).max(128) }),
   z.object({ op: z.literal('homedir') }),
   z.object({ op: z.literal('exists'), path: agentConfigPath }),
   z.object({ op: z.literal('readFile'), path: agentConfigPath }),
@@ -1836,6 +1925,46 @@ export const fsReadFileResultSchema = z.object({
   sizeBytes: z.number().optional()
 })
 export type FsReadFileResult = z.infer<typeof fsReadFileResultSchema>
+
+/**
+ * Largest slice one `fs.readBytes` returns: 256 KiB raw, ~342 KiB base64 per frame.
+ * Mirrors file-editor's `WORKSPACE_READ_BYTES_MAX_CHUNK` (this package cannot import
+ * it); `exec-proxies.test.ts` pins the two equal.
+ */
+export const FS_READ_BYTES_MAX_CHUNK = 256 * 1024
+
+/**
+ * `fs.readBytes`: `length` bytes at `offset` of `filePath` (RELATIVE to `rootPath`),
+ * read through one fd — never the whole file. Same jail as `fs.readFile`. A computer
+ * older than this frame answers "method not found", which the gateway turns into
+ * `ComputerUpdatePendingError` (hub-gateway.ts).
+ */
+export const fsReadBytesParamsSchema = z.object({
+  rootPath: z.string().min(1),
+  filePath: z.string().min(1),
+  offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  length: z.number().int().min(1).max(FS_READ_BYTES_MAX_CHUNK)
+})
+export type FsReadBytesParams = z.infer<typeof fsReadBytesParamsSchema>
+
+export const fsReadBytesResultSchema = z.object({
+  /** The slice, base64. Empty at/after the end of the file. */
+  data: z.string(),
+  /** Size of the WHOLE file — a caller detects a file that changed between slices. */
+  size: z.number().int().nonnegative(),
+  mtimeMs: z.number(),
+  /** The slice reaches the end of the file. */
+  eof: z.boolean()
+})
+export type FsReadBytesResult = z.infer<typeof fsReadBytesResultSchema>
+
+/**
+ * `data` of an `fs.*` error that is the filesystem's own answer (`ENOENT`, `EISDIR`,
+ * …) rather than a refusal, so the hub can tell "no such file" from a fault without
+ * parsing the message. Set by `fs.readBytes`.
+ */
+export const fsErrnoErrorDataSchema = z.object({ errno: z.string().min(1).max(32) })
+export type FsErrnoErrorData = z.infer<typeof fsErrnoErrorDataSchema>
 
 export const fsWriteFileParamsSchema = z.object({
   rootPath: z.string().min(1),

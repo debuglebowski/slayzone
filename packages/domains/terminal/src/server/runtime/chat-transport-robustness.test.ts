@@ -143,7 +143,6 @@ function harness(
     },
     broadcastStateChange: () => {},
     eventStore: {
-      load: async () => [],
       insert: async (_tab, seq, event) => {
         if (seen.has(seq)) {
           h.clashes++
@@ -153,8 +152,7 @@ function harness(
         h.rows.push({ seq, event })
         return 'inserted'
       },
-      readRange: async (_tab, after, before) =>
-        h.rows.filter((r) => r.seq > after && r.seq < before).sort((a, b) => a.seq - b.seq)
+      ...mgr.memoryChatEventReads(() => [...h.rows].sort((a, b) => a.seq - b.seq))
     },
     ...(opts.alive ? { isProcessAlive: opts.alive } : {}),
     ...(opts.timings ? { watchdogTimings: opts.timings } : {}),

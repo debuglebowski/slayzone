@@ -47,12 +47,14 @@ export function TreeDisplaySettings() {
   const treeOrderBy = useTabStore((s) => s.treeOrderBy)
   const treeOrderDir = useTabStore((s) => s.treeOrderDir)
   const treeGroupTemporary = useTabStore((s) => s.treeGroupTemporary)
+  const treeGroupBlocked = useTabStore((s) => s.treeGroupBlocked)
   const treeGroupPinned = useTabStore((s) => s.treeGroupPinned)
   const treeShowEmptyGroups = useTabStore((s) => s.treeShowEmptyGroups)
   const setTreeGroupBy = useTabStore((s) => s.setTreeGroupBy)
   const setTreeOrderBy = useTabStore((s) => s.setTreeOrderBy)
   const setTreeOrderDir = useTabStore((s) => s.setTreeOrderDir)
   const setTreeGroupTemporary = useTabStore((s) => s.setTreeGroupTemporary)
+  const setTreeGroupBlocked = useTabStore((s) => s.setTreeGroupBlocked)
   const setTreeGroupPinned = useTabStore((s) => s.setTreeGroupPinned)
   const setTreeShowEmptyGroups = useTabStore((s) => s.setTreeShowEmptyGroups)
   const setTreeShowStatus = useTabStore((s) => s.setTreeShowStatus)
@@ -168,6 +170,13 @@ export function TreeDisplaySettings() {
               hint="Show pinned tasks in their own section at the top"
               checked={treeGroupPinned}
               onChange={setTreeGroupPinned}
+            />
+            <Row
+              id="tree-group-blocked"
+              label="Group blocked tasks"
+              hint="Show blocked tasks in their own section"
+              checked={treeGroupBlocked}
+              onChange={setTreeGroupBlocked}
             />
             <Row
               id="tree-group-temporary"

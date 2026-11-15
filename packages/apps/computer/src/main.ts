@@ -47,6 +47,7 @@ import {
 } from '@slayzone/computer-transport/shared'
 import { hubAddrFromUrl } from '@slayzone/platform/hub-addr'
 import { DESKTOP_COMPUTER_CAPABILITY } from '@slayzone/platform/computer-identity'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { getComputerConfigFilePath } from '@slayzone/platform/slayzone-config'
 import { DEFAULT_DIRECT_LISTEN_ADDRESS, effectiveHubUrls, type ComputerConfig } from './config'
 import {
@@ -81,13 +82,27 @@ import { createSpawnAdmission, type SpawnAdmission } from './spawn-admission'
 import { COMPUTER_LOG_DIR_NAME } from './file-log'
 import { createComputerConfigHandlers, reloadLocalRootsFromFile } from './handlers/computer-config'
 import { createProjectPathStore, type ProjectPathStore } from './project-paths'
+import { isWithinDirectory } from './project-relocation'
 import type { HandlerContext, HubMethodTable, ComputerDialer, ComputerLog } from './handlers/types'
 import { forEachIsolatedSync, isStorageFatal } from '@slayzone/platform/isolation'
+import {
+  startEventLoopStallDetector,
+  type EventLoopStallDetector,
+  type EventLoopStallDetectorOptions
+} from '@slayzone/platform/event-loop-stall'
+import { createStallReporter } from './stall-report'
 
 /** Running package release, advertised on enrollment and reconnect. */
 declare const __SLAYZONE_COMPUTER_VERSION__: string | undefined
 export const COMPUTER_VERSION =
   typeof __SLAYZONE_COMPUTER_VERSION__ === 'string' ? __SLAYZONE_COMPUTER_VERSION__ : '0.0.0'
+
+// All hub connections share this computer's disk. A relocation must also fence
+// starts and detect processes belonging to another connected hub.
+const relocationHosts = new Set<{
+  assertAvailable(): void
+  hasFolderWork(contains: (cwd: string) => boolean): boolean
+}>()
 
 export interface ComputerRuntimeDeps {
   log?: ComputerLog
@@ -124,6 +139,11 @@ export interface ComputerRuntimeDeps {
    * listener attached here misses none of its events.
    */
   onConnection?: (connection: HubConnectionInfo) => void
+  /**
+   * Start the main-thread stall sampler (tests inject a fake). Default: the hub's own
+   * `startEventLoopStallDetector`. Each stall is logged and reported to every hub.
+   */
+  startStallDetector?: (options: EventLoopStallDetectorOptions) => EventLoopStallDetector
 }
 
 /** A hub the computer serves IN ADDITION to its primary, added while it runs. */
@@ -298,6 +318,8 @@ export interface HubRequestDispatch {
   setAgentHookUrl(url: string): void
   /** The hub connection dropped: abandon work whose reply can no longer be delivered. */
   hubDisconnected(reason: string): void
+  /** Pids of the processes this hub's work runs (ptys, processes, chat agents). */
+  ownedPids(): number[]
   /** This hub's terminals, as direct-link clients reach them (docs/direct-link.md). */
   directPty: DirectPtyService
   /** This hub's chat, as direct-link clients reach it. */
@@ -372,6 +394,35 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       }
     }
   })
+  const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
+    createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
+      assertIdle: (projectId) => {
+        chat.assertProjectIdle(projectId)
+        const roots = chat.scopeBounds({ kind: 'project', projectId }).roots
+        const contains = (cwd: string) => roots.some((root) => isWithinDirectory(cwd, root))
+        if (
+          [...relocationHosts].some((host) => host.hasFolderWork(contains)) ||
+          chat
+            .projectTaskIds(projectId)
+            .some((id) => pty.hasTaskWork(id) || proc.hasTaskWork(id) || chat.hasTaskWork(id))
+        )
+          throw new Error(
+            'Stop this project’s running terminals, agents and processes before relocating it.'
+          )
+      },
+      remap: chat.relocateProjectPaths
+    })
+  const relocationHost = {
+    assertAvailable: () => {
+      if (deps.getProjectPaths?.()) assertRelocationAvailable()
+    },
+    hasFolderWork: (contains: (cwd: string) => boolean) =>
+      pty.hasFolderWork(contains) || proc.hasFolderWork(contains) || chat.hasFolderWork(contains)
+  }
+  relocationHosts.add(relocationHost)
+  ctx.assertWorkAllowed = () => {
+    for (const host of relocationHosts) host.assertAvailable()
+  }
 
   const shutdownHandler = async (params: unknown): Promise<{ ok: true }> => {
     const parsed = computerShutdownParamsSchema.safeParse(params ?? {})
@@ -406,7 +457,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     ...createGhHandlers(ctx),
     ...createSlayHandlers(ctx),
     ...createClaudeSessionHandlers(ctx, deps.getProjectPaths ?? (() => null)),
-    ...createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null))
+    ...projectHandlers
   }
 
   const directGrantHandlers = deps.directGrants
@@ -448,6 +499,19 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     HubToComputerMethods.ptySpawn,
     HubToComputerMethods.ptyWarmSpawn,
     HubToComputerMethods.procSpawn
+  ])
+
+  // Existing processes and direct-link grants don't touch the relocated folder.
+  // Keep their controls available, including when recovery needs user intervention.
+  const relocationControls = new Set([
+    ...[...ptyMethods].filter((method) => !SCOPED_SPAWNS.has(method)),
+    HubToComputerMethods.procList,
+    HubToComputerMethods.procStats,
+    HubToComputerMethods.procWrite,
+    HubToComputerMethods.procKill,
+    HubToComputerMethods.procPrioritize,
+    HubToComputerMethods.ping,
+    HubToComputerMethods.computerShutdown
   ])
 
   /** A `proc.spawn` the hub declared a global background process (see its `global` field). */
@@ -552,9 +616,16 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
       // folder lists) inside the task's folders too, from the same map.
       if (
         deps.projectPathsReady &&
-        (scope || SCOPED_SPAWNS.has(method) || method === HubToComputerMethods.chatRequest)
+        (scope ||
+          SCOPED_SPAWNS.has(method) ||
+          method === HubToComputerMethods.chatRequest ||
+          method.startsWith('project.'))
       )
         await deps.projectPathsReady
+      if (deps.getProjectPaths?.() && !relocationControls.has(method)) {
+        await recoverRelocation()
+        ctx.assertWorkAllowed?.()
+      }
       const result = await entry(params)
       record('ok')
       return result
@@ -577,6 +648,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   }
 
   const dispose = async (): Promise<void> => {
+    relocationHosts.delete(relocationHost)
     pty.disposeAll()
     proc.disposeAll()
     fs.disposeAll()
@@ -613,7 +685,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     setAgentHookUrl,
     hubDisconnected,
     captureAgentHook: chat.captureHook,
-    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork()
+    isIdle: () => inFlight === 0 && !pty.hasWork() && !proc.hasWork() && !chat.hasWork(),
+    ownedPids: () => [...pty.ownedPids(), ...proc.ownedPids(), ...chat.ownedPids()]
   }
 }
 
@@ -627,6 +700,13 @@ export function startComputer(
       // Logging is opt-in — with no sink, computer lifecycle diagnostics are discarded.
     })
 
+  // This process's own freezes (a frozen computer misses heartbeats and is dropped
+  // by its hubs): logged and reported to every hub — see stall-report.ts.
+  const stallReporter = createStallReporter({ log })
+  const stallDetector = (deps.startStallDetector ?? startEventLoopStallDetector)({
+    onStall: (stall) => stallReporter.report(stall)
+  })
+
   // `startComputer` is synchronous, and resolving the host id is file I/O. Rather
   // than make the whole entrypoint async, the identity object is MUTABLE and the
   // dialer reads `hostId` when it builds an enroll/hello frame — not when the
@@ -639,7 +719,8 @@ export function startComputer(
     name: config.name,
     platform: `${process.platform}-${process.arch}`,
     version: COMPUTER_VERSION,
-    capabilities: config.capabilities
+    aiConfigHashFiles: true,
+    capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own
   // identity object — the same machine otherwise, host id included. One made before
@@ -913,6 +994,11 @@ export function startComputer(
     dialer.events.on('connected', ({ computerId, mode }) =>
       log('connected to hub', { hubUrl, computerId, mode })
     )
+    // This hub sees its own processes; the primary also machine-wide CPU.
+    const detachStallReports = stallReporter.attach(dialer, {
+      primary: isPrimary,
+      ownedPids: () => dispatch.ownedPids()
+    })
     dialer.events.on('disconnected', ({ reason }) => {
       void cliRelayReady.then(
         (relay) => relay.disconnect(),
@@ -988,6 +1074,7 @@ export function startComputer(
         )
         const agentHookServer = await agentHookReady
         if (agentHookServer) await agentHookServer.close()
+        detachStallReports()
         await dialer.stop()
         secondaryIdentities.delete(hubIdentity)
       }
@@ -1159,6 +1246,7 @@ export function startComputer(
       await directListener?.close()
       rtcAnswerer?.close()
       directGrants.close()
+      stallDetector.stop()
     }
   }
   return handle

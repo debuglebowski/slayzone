@@ -1,14 +1,15 @@
 import type { Express } from 'express'
 import type {
   AgentEvent,
+  ChatEventPage,
   ChatSavedSummary,
   PermissionRequestEvent
 } from '@slayzone/terminal-contracts'
-import { reducer } from '@slayzone/terminal/reducer'
 import { transcriptRows } from '@slayzone/terminal/chat-transcript'
+import { ChatHistoryExpired, type ChatHistoryView } from '@slayzone/terminal/chat-history'
 import { describeChatPrompt } from '@slayzone/task-terminals/prompt-answers'
 import type { RestApiDeps } from '../types'
-import { chatHandler, promptContext, reducedHistory } from './_chat'
+import { chatHandler, promptContext, withChatTabHistory } from './_chat'
 
 /** How long a saved event's full copy may lag its summary before it is read back. */
 const SAVED_READ_BACK_MS = 250
@@ -26,19 +27,24 @@ const intParam = (v: unknown): number | undefined => {
  *   `event: state`  the session's state changed ({state})
  *   `event: exit`   the agent process exited
  * Without `since`, starts after the newest row (only what happens next); with
- * `since=-1`, replays the whole conversation first.
+ * `since=-1`, replays the whole conversation first. The history is read in bounded
+ * pages: the projection's snapshot, older rows only when `since` asks for them.
  */
 export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
   app.get(
     '/api/chat/:id/follow',
     chatHandler(deps, async ({ chat, target, req, res }) => {
       const verbose = req.query.verbose === '1' || req.query.verbose === 'true'
-      const history = await reducedHistory(chat, target)
-      let state = history.state
+      let history: ChatHistoryView = await withChatTabHistory(chat, target, async (view) => {
+        const since = intParam(req.query.since)
+        // Only the rows the replay starts from (none without `since`).
+        if (since !== undefined) await view.loadRows(since + 1, view.state.timeline.length)
+        return view
+      })
       let lastSeq = history.lastSeq
-      let lastRow = intParam(req.query.since) ?? state.timeline.length - 1
+      let lastRow = intParam(req.query.since) ?? history.state.timeline.length - 1
       const ctx = await promptContext(chat, target)
-      const seenPrompts = new Set(state.prompts.map((p) => p.requestId))
+      const seenPrompts = new Set(history.state.prompts.map((p) => p.requestId))
 
       res.setHeader('Content-Type', 'text/event-stream')
       res.setHeader('Cache-Control', 'no-cache')
@@ -48,6 +54,7 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 
       const flushRows = () => {
+        const state = history.state
         for (const row of transcriptRows(state, { since: lastRow, verbose })) send('row', row)
         // Rows are emitted once: a row that is still being filled (a tool awaiting
         // its result) is not re-sent.
@@ -70,16 +77,44 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
       let resync: ReturnType<typeof setTimeout> | null = null
       let closed = false
 
+      // Everything the stream sends goes through ONE ordered chain: folding an event
+      // in may need an older row (a late tool result), loaded first, and a state or
+      // exit after it must not overtake its rows.
+      let chain: Promise<void> = Promise.resolve()
+      const inOrder = (step: () => void | Promise<void>) => {
+        chain = chain
+          .then(async () => {
+            if (!closed) await step()
+          })
+          .catch((err: unknown) => {
+            console.error('[chat follow] the stream failed:', err)
+            res.end()
+          })
+      }
+      /** Fold one saved event in; the projection moved on meanwhile: open it again, go on. */
+      const fold = async (entry: { seq: number; event: AgentEvent; at?: number }) => {
+        try {
+          await history.apply([entry])
+        } catch (err) {
+          if (!(err instanceof ChatHistoryExpired)) throw err
+          // The reopened history holds every saved event up to now (this one too, or
+          // it is folded in below). Rows already sent are not sent again (`lastRow`).
+          history = await withChatTabHistory(chat, target, async (view) => view)
+          await history.apply([entry])
+        }
+      }
       const show = (event: AgentEvent, seq: number, at?: number) => {
         if (seq <= lastSeq) return
         lastSeq = seq
         summaryOnly.delete(seq)
-        state = reducer(state, { type: 'event', event, at, seq })
-        flushRows()
-        if (event.kind === 'permission-request' && !seenPrompts.has(event.requestId)) {
-          seenPrompts.add(event.requestId)
-          send('prompt', describeChatPrompt(event as PermissionRequestEvent, ctx))
-        }
+        inOrder(async () => {
+          await fold({ seq, event, ...(at !== undefined ? { at } : {}) })
+          flushRows()
+          if (event.kind === 'permission-request' && !seenPrompts.has(event.requestId)) {
+            seenPrompts.add(event.requestId)
+            send('prompt', describeChatPrompt(event as PermissionRequestEvent, ctx))
+          }
+        })
       }
       const gapBefore = (seq: number) => [...summaryOnly].some((s) => s > lastSeq && s < seq)
       const drainHeld = () => {
@@ -99,17 +134,18 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
       }
       const readBack = async () => {
         if (closed || (summaryOnly.size === 0 && held.size === 0)) return
-        const missed = (await deps.ops.getBufferSince(target.tabId, lastSeq)) as Array<{
-          seq: number
-          event: AgentEvent
-          at?: number
-        }>
-        if (closed) return
-        // The saved history is complete and in order: no gap inside it.
-        for (const e of missed) {
-          held.delete(e.seq)
-          show(e.event, e.seq, e.at)
+        // The saved history after `lastSeq`, a bounded page at a time; complete and
+        // in order: no gap inside it.
+        for (let more = true; more && !closed; ) {
+          const page = (await deps.ops.getEventPage(target.tabId, lastSeq)) as ChatEventPage
+          if (closed) return
+          for (const e of page.events) {
+            held.delete(e.seq)
+            show(e.event as AgentEvent, e.seq, e.at)
+          }
+          more = page.hasMore && page.events.length > 0
         }
+        if (closed) return
         for (const seq of [...summaryOnly]) if (seq <= lastSeq) summaryOnly.delete(seq)
         drainHeld()
         if (summaryOnly.size > 0 || held.size > 0) scheduleReadBack()
@@ -141,13 +177,13 @@ export function registerChatFollowRoute(app: Express, deps: RestApiDeps): void {
         scheduleReadBack()
       }
       const onExit = (tabId: string) => {
-        if (tabId === target.tabId) send('exit', {})
+        if (tabId === target.tabId) inOrder(() => void send('exit', {}))
       }
       events.on('event', onEvent)
       events.on('saved', onSaved)
       events.on('exit', onExit)
       const offState = chat.onStateChange((sessionId, s) => {
-        if (sessionId === target.sessionId) send('state', { state: s })
+        if (sessionId === target.sessionId) inOrder(() => void send('state', { state: s }))
       })
       const keepAlive = setInterval(() => res.write(': keep-alive\n\n'), 15_000)
       res.on('close', () => {

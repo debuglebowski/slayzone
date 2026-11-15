@@ -17,7 +17,12 @@
  * failure stops persisting for the tab (the next open rebuilds); it never
  * stops the chat.
  */
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import {
+  CHAT_HISTORY_PAGE_MAX_BYTES,
+  jsonByteLength,
+  utf8Length,
+  type AgentEvent
+} from '@slayzone/terminal-contracts'
 import {
   initialState,
   reducer,
@@ -60,6 +65,27 @@ export interface TimelineProjectionStore {
   discard(): Promise<void>
 }
 
+/**
+ * A tab's saved events as the projection reads them on open: `lastSeq` (its
+ * newest event, -1: none) and the events after a seq, a page at a time (the caller
+ * lets the event loop run between pages). An array is one in memory (tests).
+ */
+export interface TimelineHistorySource {
+  lastSeq: number
+  pages(afterSeq: number): AsyncIterable<readonly BufferedEvent[]>
+}
+
+/** An in-memory history as a {@link TimelineHistorySource}. */
+export function historyOfEvents(history: readonly BufferedEvent[]): TimelineHistorySource {
+  return {
+    lastSeq: history.length > 0 ? history[history.length - 1].seq : -1,
+    async *pages(afterSeq) {
+      const after = history.filter((b) => b.seq > afterSeq)
+      if (after.length > 0) yield after
+    }
+  }
+}
+
 /** What a client opens a paged session from. */
 export interface TimelineOpen {
   version: string
@@ -74,9 +100,17 @@ export interface TimelineOpen {
   summaries: TimelinePageSummary[]
 }
 
-/** Rows of pages as of an earlier seq, or `expired` (rows moved / too old: open again). */
+/**
+ * Rows of pages as of an earlier seq, or `expired` (rows moved / too old: open
+ * again). One answer carries at most a page budget of rows (the first page always
+ * fits): `omitted` lists the pages asked for that did not fit — ask again.
+ */
 export type TimelinePagesResult =
-  | { expired: false; pages: Array<{ page: number; from: number; rows: TimelineItem[] }> }
+  | {
+      expired: false
+      pages: Array<{ page: number; from: number; rows: TimelineItem[] }>
+      omitted?: number[]
+    }
   | { expired: true }
 
 interface CheckpointData {
@@ -110,52 +144,84 @@ export class TimelineProjection {
   private peakResident = 0
   /** The stored checkpoint was deleted by a write ahead of it (none stored yet since). */
   private checkpointDropped = false
+  /** Opened to rebuild (`begin`), until `finish`. */
+  private rebuilding = false
 
   private constructor(
     private readonly store: TimelineProjectionStore,
     private readonly agentStartedTurns: boolean,
-    private readonly onError: (what: string, err: unknown) => void
+    private readonly onError: (what: string, err: unknown) => void,
+    /** Bytes of rows one `pagesAsOf` answer carries, at most (the first page always fits). */
+    private readonly pageBudgetBytes: number
   ) {
     this.state = initialState({ agentStartedTurns })
   }
 
   /**
    * The projection of a tab whose saved events are `history` (all of them, in
-   * seq order): from its checkpoint when one fits, else rebuilt.
+   * seq order): from its checkpoint when one fits (only the events after it are
+   * read), else rebuilt — page by page, never the whole history in memory.
    */
   static async open(opts: {
     store: TimelineProjectionStore
-    history: readonly BufferedEvent[]
+    history: readonly BufferedEvent[] | TimelineHistorySource
     agentStartedTurns: boolean
     onError?: (what: string, err: unknown) => void
+    /** Defaults to {@link CHAT_HISTORY_PAGE_MAX_BYTES}. */
+    pageBudgetBytes?: number
   }): Promise<TimelineProjection> {
+    const history = 'pages' in opts.history ? opts.history : historyOfEvents(opts.history)
+    const { projection, from } = await TimelineProjection.begin({
+      ...opts,
+      lastSeq: history.lastSeq
+    })
+    for await (const page of history.pages(from)) await projection.feed(page)
+    await projection.finish()
+    return projection
+  }
+
+  /**
+   * Open in steps, for a caller that reads the history anyway (a hydrate): the
+   * projection from its checkpoint when one fits a history whose newest event is
+   * `lastSeq`, else ready to rebuild. Then `feed` it the saved events after `from`
+   * (more are skipped), in seq order, and `finish`.
+   */
+  static async begin(opts: {
+    store: TimelineProjectionStore
+    lastSeq: number
+    agentStartedTurns: boolean
+    onError?: (what: string, err: unknown) => void
+    pageBudgetBytes?: number
+  }): Promise<{ projection: TimelineProjection; from: number }> {
     const p = new TimelineProjection(
       opts.store,
       opts.agentStartedTurns,
-      opts.onError ?? ((what, err) => console.error(`[chat-timeline] ${what}:`, err))
+      opts.onError ?? ((what, err) => console.error(`[chat-timeline] ${what}:`, err)),
+      opts.pageBudgetBytes ?? CHAT_HISTORY_PAGE_MAX_BYTES
     )
-    await p.init(opts.history)
-    return p
+    if (await p.restore(opts.lastSeq)) return { projection: p, from: p.seq }
+    // Rebuild: every event, every page written again.
+    p.rebuilding = true
+    p.state = initialState({ agentStartedTurns: p.agentStartedTurns })
+    p.seq = -1
+    p.sealed = 0
+    p.summaries = []
+    p.dropFrom = 0
+    if (opts.lastSeq < 0) p.checkpointDirty = true
+    return { projection: p, from: -1 }
   }
 
-  private async init(history: readonly BufferedEvent[]): Promise<void> {
-    const lastSeq = history.length > 0 ? history[history.length - 1].seq : -1
-    if (await this.restore(lastSeq)) {
-      const after = history.filter((b) => b.seq > this.seq)
-      await this.applyRun(after)
-      // Pages went out along the way (the checkpoint with them): store one again.
-      if (this.checkpointDropped) await this.flush()
-      return
-    }
-    // Rebuild: every event, every page written again.
-    this.state = initialState({ agentStartedTurns: this.agentStartedTurns })
-    this.seq = -1
-    this.sealed = 0
-    this.summaries = []
-    this.dropFrom = 0
-    if (history.length === 0) this.checkpointDirty = true
-    await this.applyRun(history)
-    await this.flush()
+  /** Saved events of the history being opened, in seq order (those already folded in are skipped). */
+  async feed(entries: readonly BufferedEvent[]): Promise<void> {
+    const fresh = entries.filter((b) => b.seq > this.seq)
+    if (fresh.length > 0) await this.applyRun(fresh)
+  }
+
+  /** The opening is done: a rebuild writes everything out; a restore stores a checkpoint again if pages went out. */
+  async finish(): Promise<void> {
+    // Pages went out along the way (the checkpoint with them): store one again.
+    if (this.rebuilding || this.checkpointDropped) await this.flush()
+    this.rebuilding = false
   }
 
   /**
@@ -270,13 +336,29 @@ export class TimelineProjection {
       }
       const wanted = pages.filter((p) => p >= 0 && p < this.sealed)
       const out: Array<{ page: number; from: number; rows: TimelineItem[] }> = []
+      const omitted: number[] = []
+      let bytes = 0
       try {
         for (const page of wanted) {
+          if (omitted.length > 0) {
+            omitted.push(page)
+            continue
+          }
           // In memory, or as stored (a page leaves memory only once stored: current).
-          const rows = this.resident.includes(page)
-            ? this.pageRows(page)
-            : await this.readPage(page)
-          out.push({ page, from: page * TIMELINE_PAGE_ROWS, rows })
+          const resident = this.resident.includes(page)
+          const rows = resident ? this.pageRows(page) : null
+          const stored = resident ? null : await this.readStoredPage(page)
+          const size = rows ? jsonByteLength(rows) : utf8Length(stored!)
+          if (out.length > 0 && bytes + size > this.pageBudgetBytes) {
+            omitted.push(page)
+            continue
+          }
+          bytes += size
+          out.push({
+            page,
+            from: page * TIMELINE_PAGE_ROWS,
+            rows: rows ?? (JSON.parse(stored!) as TimelineItem[])
+          })
         }
       } catch (err) {
         // The client opens again (from the events: this one is no longer served).
@@ -289,7 +371,7 @@ export class TimelineProjection {
         const hit = out.find((p) => u.row >= p.from && u.row < p.from + p.rows.length)
         if (hit) hit.rows[u.row - hit.from] = u.prev
       }
-      return { expired: false, pages: out }
+      return { expired: false, pages: out, ...(omitted.length > 0 ? { omitted } : {}) }
     })
   }
 
@@ -460,9 +542,14 @@ export class TimelineProjection {
   }
 
   private async readPage(page: number): Promise<TimelineItem[]> {
+    return JSON.parse(await this.readStoredPage(page)) as TimelineItem[]
+  }
+
+  /** A stored page's rows, as stored (JSON). */
+  private async readStoredPage(page: number): Promise<string> {
     const [got] = await this.store.loadPages([page])
     if (!got) throw new Error(`timeline page ${page} is missing`)
-    return JSON.parse(got.rows) as TimelineItem[]
+    return got.rows
   }
 
   /** Unload clean sealed pages past the resident budget (least recently used first). */

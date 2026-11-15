@@ -267,7 +267,8 @@ export const ev = {
   },
   toolResult(opts: {
     toolUseId: string
-    content: string
+    /** Text, or content blocks as the CLI passes them (`text`, `image` with base64 `source`, …). */
+    content: string | unknown[]
     isError?: boolean
     /** `tool_use_result`: the CLI's per-tool structured result (diffs etc.). */
     structured?: unknown

@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { AI_CONFIG_HASH_CAPABILITY } from '@slayzone/ai-config/config-fs'
 import { join } from 'node:path'
 import {
   HubDialer,
@@ -13,6 +14,7 @@ import {
   RpcError
 } from '@slayzone/computer-transport/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { EventLoopStall } from '@slayzone/platform/event-loop-stall'
 import type { ComputerConfig } from './config'
 import type { ComputerDialer } from './handlers/types'
 import { createHubRequestHandler, startComputer, watchPrimaryHubExitCode } from './main'
@@ -587,8 +589,17 @@ describe('startComputer runtime secondary hubs', () => {
       expect(b.options.identity.platform).toBe(of(PRIMARY)[0].options.identity.platform)
       // Marked as a desktop's own computer joined there, so that hub never prefers it
       // over a computer its user already had; the primary reports exactly its own.
-      expect(b.options.identity.capabilities).toEqual([...testConfig.capabilities, 'desktop'])
-      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual(testConfig.capabilities)
+      expect(b.options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY,
+        'desktop'
+      ])
+      expect(of(PRIMARY)[0].options.identity.capabilities).toEqual([
+        ...testConfig.capabilities,
+        AI_CONFIG_HASH_CAPABILITY
+      ])
+      expect(b.options.identity.aiConfigHashFiles).toBe(true)
+      expect(of(PRIMARY)[0].options.identity.aiConfigHashFiles).toBe(true)
       // A spent token is recovered by asking the parent for a fresh one, per hub.
       expect(await b.options.refreshJoinToken!()).toBe(`fresh-for-${B}`)
       // The primary is wired exactly as before: no refresh hook, its own token.
@@ -785,5 +796,60 @@ describe('startComputer runtime secondary hubs', () => {
     } finally {
       await handle.stop()
     }
+  })
+})
+
+describe('startComputer event-loop stalls', () => {
+  it('runs the stall sampler, reports each stall to the hub, and stops it on stop', async () => {
+    let onStall: ((stall: EventLoopStall) => void) | undefined
+    let stopped = 0
+    const sent: Array<{ method: string; params: unknown }> = []
+    const lines: string[] = []
+    const handle = startComputer(testConfig, {
+      credentialStore: memoryStore(),
+      stateDir: tempState(),
+      log: (message) => lines.push(message),
+      startStallDetector: (opts) => {
+        onStall = opts.onStall
+        return { stop: () => stopped++ }
+      },
+      createDialer: () =>
+        ({
+          events: { on: () => () => undefined },
+          computerId: null,
+          start: () => undefined,
+          stop: async () => undefined,
+          notify: (method: string, params?: unknown) => {
+            sent.push({ method, params })
+            return true
+          }
+        }) as never
+    })
+    try {
+      expect(onStall).toBeDefined()
+      onStall!({
+        startedAt: 1,
+        durationMs: 3_000,
+        mainThreadCpuMs: 2_900,
+        processCpuMs: 2_950,
+        gcMs: 0,
+        machineCpuBusyPct: null,
+        stacks: [],
+        children: []
+      })
+      expect(sent).toEqual([
+        {
+          method: 'event',
+          params: {
+            name: 'event-loop-stall',
+            payload: expect.objectContaining({ durationMs: 3_000 })
+          }
+        }
+      ])
+      expect(lines.some((l) => l.includes('event loop stall'))).toBe(true)
+    } finally {
+      await handle.stop()
+    }
+    expect(stopped).toBe(1)
   })
 })

@@ -88,6 +88,8 @@ import {
   fsPathExistsResultSchema,
   fsReadDirResultSchema,
   fsReadFileResultSchema,
+  fsReadBytesResultSchema,
+  fsErrnoErrorDataSchema,
   fsSearchFilesResultSchema,
   gitGetCurrentBranchResultSchema,
   gitIsGitRepoResultSchema,
@@ -117,6 +119,13 @@ import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { runAsSecurityActor } from '@slayzone/platform/security-log'
 import { currentPathScope, runInPathScope } from '@slayzone/platform/path-scope'
 import { ComputerUpdatePendingError, type HubComputerGateway } from './hub-gateway'
+import {
+  joinDetachController,
+  toSessionList,
+  type DetachableEntry,
+  type OwnerGoneProbe
+} from './detach-controller'
+export type { OwnerGoneProbe } from './detach-controller'
 
 // ===========================================================================
 // Gateway surface
@@ -409,518 +418,8 @@ export type ComputerWork = {
 export type ComputerWorkGate = (computerId: string, work: ComputerWork) => Promise<void>
 
 // ===========================================================================
-// Detach / reattach across a dropped computer connection
+// Detach / reattach across a dropped computer connection: ./detach-controller.ts
 // ===========================================================================
-
-/**
- * How long the hub keeps tracking sessions on a computer it cannot reach.
- *
- * This is NOT a claim that the computer is dead when it expires — the hub cannot
- * know that, and a timer is not evidence. It bounds the hub's own bookkeeping:
- * without it, a computer that never returns leaks its entries forever and every
- * task it owned hangs in "reconnecting" with nothing able to resolve it.
- *
- * Long enough to cover a lunch-break lid close, short enough not to hoard dead
- * state. A reconnect inside the window resolves each session for real (see
- * {@link createDetachController}), so this only ever fires when nothing better
- * was available.
- */
-const DETACH_GRACE_MS = 10 * 60_000
-
-/** The entry shape the detach controller needs, common to pty and proc. */
-interface DetachableEntry {
-  computerId: string
-  sessionId: string
-  disposed: boolean
-  /** Computer unreachable: outcome unknown, still tracked, NOT finalized. */
-  detached: boolean
-  /** The spawn attempt this entry belongs to — the idempotency key it was sent with. */
-  spawnId?: string
-  /**
-   * Set while the spawn ITSELF has an unknown outcome: its reply was lost to a
-   * dropped connection, so the computer may or may not be running it. Settled on
-   * reconnect exactly like a detached session — by asking the computer.
-   */
-  pendingSpawn?: PendingSpawn
-}
-
-interface PendingSpawn {
-  /** Re-issue the identical request. Same `spawnId`, so a duplicate is harmless. */
-  resend: () => void
-  /**
-   * The computer holds (or held) this attempt: settle the spawn with its pid.
-   * `listedBySpawnId` — the computer named the attempt by its key, i.e. it is new
-   * enough to have honoured everything the request asked of it.
-   */
-  confirm: (pid: number | null, listedBySpawnId: boolean) => void
-}
-
-/** A live session as the computer reports it in `pty.list` / `proc.list`. */
-interface ListedSession {
-  pid?: number
-  spawnId?: string
-  /** The computer runs output detection for it (`pty.list` only). */
-  detection?: boolean
-  /** What it has detected so far (`pty.list` only). */
-  detected?: PtyDetectedSnapshot
-}
-
-/** A session the computer reaped and remembers (a tombstone). */
-interface ListedExit extends ListedSession {
-  exitCode: number | null
-  signal: string | null
-  reason?: string
-}
-
-/** The computer's own account of what it holds, keyed by session id. */
-interface ComputerSessionList {
-  live: Map<string, ListedSession>
-  /** Empty for a computer too old to keep tombstones. */
-  exited: Map<string, ListedExit>
-}
-
-/**
- * Is a listed process this entry's spawn ATTEMPT, not merely the same session id?
- *
- * Session ids repeat — an agent tab reuses its id on every restart — so an older
- * process can be listed under the id a newer spawn is waiting on. An unknown key on
- * either side (an older computer, or an entry that never had one) counts as a
- * match: presence is then the strongest evidence available, as it always was.
- */
-function sameAttempt(entry: DetachableEntry, listed: ListedSession): boolean {
-  return (
-    entry.spawnId === undefined || listed.spawnId === undefined || entry.spawnId === listed.spawnId
-  )
-}
-
-/** Build {@link ComputerSessionList} from a parsed `pty.list` / `proc.list` reply. */
-function toSessionList(parsed: {
-  sessions: Array<{
-    sessionId: string
-    pid?: number
-    spawnId?: string
-    detection?: boolean
-    detected?: PtyDetectedSnapshot
-  }>
-  exited?: Array<{
-    sessionId: string
-    pid?: number
-    spawnId?: string
-    exitCode: number | null
-    signal: string | null
-    reason?: string
-  }>
-}): ComputerSessionList {
-  return {
-    live: new Map(
-      parsed.sessions.map((s) => [
-        s.sessionId,
-        {
-          pid: s.pid,
-          spawnId: s.spawnId,
-          ...(s.detection ? { detection: true } : {}),
-          ...(s.detected ? { detected: s.detected } : {})
-        }
-      ])
-    ),
-    exited: new Map((parsed.exited ?? []).map((e) => [e.sessionId, e]))
-  }
-}
-
-interface DetachControllerOptions<E extends DetachableEntry> {
-  gateway: RoutingGateway
-  /** The backend's live session map (keyed by `sessionKey`). */
-  sessions: Map<string, E>
-  /** `pty` / `proc` — diagnostics and log text only. */
-  kind: string
-  /** Hub→computer method listing the sessions the computer still holds. */
-  listMethod: string
-  /** Hub→computer method ending one session, for orphans the hub no longer tracks. */
-  killMethod: string
-  /** Parse that reply; `null` when it does not parse. */
-  parseList: (raw: unknown) => ComputerSessionList | null
-  /** Report a session as ended, with the reason the hub let go of it. */
-  finalize: (entry: E, reason: string) => void
-  /** Computer confirmed this session is still alive: resume delivery + backfill. */
-  resume: (entry: E, listed: ListedSession) => void
-  /** Computer reaped this session while the hub was away: deliver its tail + real exit. */
-  settleExited: (entry: E, exit: ListedExit) => void
-  /** The computer went away with this session live: its outcome is now unknown. */
-  onDetach?: (entry: E) => void
-  /**
-   * A session this backend does not track but its owner still holds (a run the
-   * process manager adopted after a hub restart): never swept as a stray.
-   */
-  keepUntracked?: (computerId: string, sessionId: string) => boolean
-}
-
-/**
- * Keeps sessions alive across a dropped computer connection, and resolves each
- * one against the computer itself on reconnect.
- *
- * ── Why this exists ─────────────────────────────────────────────────────────
- * Both routing backends used to wire `computer-lost` / `computer-disconnected`
- * straight to a disposal that finalized every session on the computer. Since the
- * handle seam coerces a null exit code to 1, one dropped socket surfaced as N
- * independent "Process exited with code 1" — while the computer and every agent
- * on it were still running (the computer only kills ptys on its OWN shutdown).
- * Closing a laptop lid did exactly this: the heartbeat watchdog fired on wake
- * having never observed the window it was judging.
- *
- * ── The rule ────────────────────────────────────────────────────────────────
- * Silence is not evidence. A quiet socket cannot distinguish crashed from
- * partitioned from asleep, so a disconnect resolves NOTHING — it only moves
- * sessions to `detached`. Every session is then closed out by a decisive signal:
- *
- *   - reconnect, SAME epoch, present in the computer's list → still alive, resume
- *   - reconnect, SAME epoch, ABSENT from the list        → really did exit
- *   - reconnect, DIFFERENT (or unknown) epoch            → fresh process, gone
- *   - grace expired, no reconnect                        → hub stops tracking
- *
- * Only the last is time-based, and it is deliberately a statement about the hub
- * ("I am no longer tracking this"), not about the world ("your agent died").
- *
- * ── One controller per (gateway, kind), not per backend ─────────────────────
- * `createRoutingChatBackend` builds a FRESH `createRoutingProcessBackend` for
- * every agent it spawns. A controller per backend would therefore add a listener
- * set to the shared gateway on every spawn — unbounded growth over a session —
- * and fire one `proc.list` per agent on every reconnect. So callers JOIN the
- * controller for their (gateway, kind) and contribute a participant; the gateway
- * listeners and the reconnect round-trip are wired exactly once.
- */
-interface DetachParticipant {
-  sessions: Map<string, DetachableEntry>
-  finalize: (entry: DetachableEntry, reason: string) => void
-  resume: (entry: DetachableEntry, listed: ListedSession) => void
-  settleExited: (entry: DetachableEntry, exit: ListedExit) => void
-  onDetach?: (entry: DetachableEntry) => void
-  keepUntracked?: (computerId: string, sessionId: string) => boolean
-  /** Has this participant ever held a session? Gates pruning — see `prune`. */
-  everUsed?: boolean
-}
-
-/** Mark ONE entry's outcome unknown and bound the wait — see `DetachController.detach`. */
-type DetachEntry = (entry: DetachableEntry) => void
-
-interface DetachController {
-  join: (participant: DetachParticipant) => void
-  /**
-   * Mark one entry detached outside a computer-wide disconnect: a spawn whose
-   * request was refused for want of a socket. The computer-wide detach already
-   * covers every entry it can see; this covers one registered after it.
-   */
-  detach: DetachEntry
-}
-
-/** Live controllers, keyed by gateway then by kind. Weak so a discarded hub's go too. */
-const detachControllers = new WeakMap<RoutingGateway, Map<string, DetachController>>()
-
-function joinDetachController<E extends DetachableEntry>(
-  options: DetachControllerOptions<E>
-): DetachEntry {
-  const { gateway, sessions, kind, finalize, resume, settleExited, onDetach, keepUntracked } =
-    options
-  const participant = {
-    sessions,
-    finalize,
-    resume,
-    settleExited,
-    onDetach,
-    keepUntracked
-  } as unknown as DetachParticipant
-
-  let byKind = detachControllers.get(gateway)
-  if (!byKind) {
-    byKind = new Map()
-    detachControllers.set(gateway, byKind)
-  }
-  const existing = byKind.get(kind)
-  if (existing) {
-    existing.join(participant)
-    return existing.detach
-  }
-  const controller = createDetachController(options)
-  byKind.set(kind, controller)
-  controller.join(participant)
-  return controller.detach
-}
-
-function createDetachController<E extends DetachableEntry>(
-  options: DetachControllerOptions<E>
-): DetachController {
-  const { gateway, kind, listMethod, killMethod, parseList } = options
-  const participants: DetachParticipant[] = []
-  /**
-   * Epoch seen on each computer's LAST connect — the baseline a reconnect is
-   * compared against. Seeded from the roster because a controller can be built
-   * after the computer already connected (chat), and a missing baseline is
-   * indistinguishable from a restart, which would finalize live sessions.
-   */
-  const epochByComputer = new Map<string, string | undefined>(
-    gateway.listComputers().map((r) => [r.computerId, r.epoch] as const)
-  )
-  const graceTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-  /** An entry together with the participant that owns (and can finalize) it. */
-  interface Owned {
-    entry: DetachableEntry
-    owner: DetachParticipant
-  }
-
-  /**
-   * Drop participants that have finished. The chat backend builds a fresh
-   * process backend per agent spawn, so without this the controller accumulates
-   * one empty `sessions` Map (and its closures) per agent for the life of the
-   * hub. Gated on `everUsed` so a backend that has not spawned yet survives.
-   */
-  function prune(): void {
-    for (let i = participants.length - 1; i >= 0; i--) {
-      const p = participants[i]!
-      if (p.sessions.size > 0) {
-        p.everUsed = true
-      } else if (p.everUsed) {
-        participants.splice(i, 1)
-      }
-    }
-  }
-
-  const liveEntries = (computerId: string): Owned[] =>
-    participants.flatMap((owner) =>
-      [...owner.sessions.values()]
-        .filter((e) => e.computerId === computerId && !e.disposed)
-        .map((entry) => ({ entry, owner }))
-    )
-
-  function clearGrace(computerId: string): void {
-    const timer = graceTimers.get(computerId)
-    if (!timer) return
-    clearTimeout(timer)
-    graceTimers.delete(computerId)
-  }
-
-  function armGrace(computerId: string): void {
-    clearGrace(computerId)
-    const timer = setTimeout(() => {
-      graceTimers.delete(computerId)
-      const stranded = liveEntries(computerId).filter((o) => o.entry.detached)
-      if (stranded.length === 0) return
-      for (const o of stranded) o.owner.finalize(o.entry, 'reattach-timeout')
-      record('computer.sessions_dropped', 'error', stranded, computerId, {
-        message:
-          `Computer unreachable for ${String(Math.round(DETACH_GRACE_MS / 60_000))} minutes — ` +
-          `${String(stranded.length)} ${kind} session(s) dropped. The hub has stopped tracking ` +
-          'them; any process still running on the computer is no longer attached to a task.'
-      })
-    }, DETACH_GRACE_MS)
-    timer.unref?.()
-    graceTimers.set(computerId, timer)
-  }
-
-  function record(
-    event: string,
-    level: 'info' | 'error',
-    entries: Owned[],
-    computerId: string,
-    extra: { message: string; [k: string]: unknown }
-  ): void {
-    const { message, ...rest } = extra
-    try {
-      recordDiagnosticEvent({
-        level,
-        source: 'pty',
-        event,
-        message,
-        payload: {
-          computerId,
-          kind,
-          sessionCount: entries.length,
-          sessionIds: entries.map((o) => o.entry.sessionId),
-          ...rest
-        }
-      })
-    } catch {
-      /* diagnostics unavailable — the state transition must still complete */
-    }
-  }
-
-  function detachComputer(computerId: string, reason: string): void {
-    prune()
-    const fresh = liveEntries(computerId).filter((o) => !o.entry.detached)
-    for (const o of fresh) {
-      o.entry.detached = true
-      o.owner.onDetach?.(o.entry)
-    }
-    if (liveEntries(computerId).some((o) => o.entry.detached)) armGrace(computerId)
-    if (fresh.length === 0) return
-    // INFO, not error: nothing has gone wrong yet. Recorded because it is the
-    // one place that knows the blast radius, and because the reattach that
-    // follows is only legible next to it.
-    record('computer.sessions_detached', 'info', fresh, computerId, {
-      reason,
-      message:
-        `Computer connection lost (${reason}) — ${String(fresh.length)} ${kind} session(s) ` +
-        'detached, awaiting reattach. Nothing has been killed.'
-    })
-  }
-
-  async function reattachComputer(computerId: string, epoch: string | undefined): Promise<void> {
-    prune()
-    const previousEpoch = epochByComputer.get(computerId)
-    epochByComputer.set(computerId, epoch)
-    let detached = liveEntries(computerId).filter((o) => o.entry.detached)
-    // First contact with this computer: nothing was ever detached, and the sweep
-    // below has no baseline to sweep against.
-    if (previousEpoch === undefined && detached.length === 0) return
-    clearGrace(computerId)
-
-    // First contact, yet spawns are waiting: they were sent while this hub had never
-    // reached the computer (a restarted app opening its task before the computer's
-    // first hello). No earlier process of it can hold them, so this is no
-    // "reconnected as a different process" — start them now, the same attempt.
-    if (previousEpoch === undefined) {
-      const waiting = detached.filter((o) => o.entry.pendingSpawn && !o.entry.disposed)
-      for (const o of waiting) {
-        o.entry.detached = false
-        o.entry.pendingSpawn?.resend()
-      }
-      if (waiting.length > 0) {
-        record('computer.sessions_resent', 'info', waiting, computerId, {
-          message:
-            `Computer connected for the first time — ${String(waiting.length)} ${kind} ` +
-            'session(s) waiting for it are starting now.'
-        })
-      }
-      detached = detached.filter((o) => !waiting.includes(o))
-      if (detached.length === 0) return
-    }
-
-    // A missing epoch on EITHER side proves nothing — an old computer that cannot
-    // report one, or a hub that never saw the pre-disconnect value. Absence is
-    // not a match: fall back to the conservative pre-epoch outcome rather than
-    // reattaching to a process whose identity is unverified.
-    if (epoch === undefined || previousEpoch === undefined || epoch !== previousEpoch) {
-      if (detached.length === 0) return
-      for (const o of detached) o.owner.finalize(o.entry, 'computer-restarted')
-      record('computer.sessions_disposed', 'error', detached, computerId, {
-        previousEpoch: previousEpoch ?? null,
-        epoch: epoch ?? null,
-        message:
-          `Computer reconnected as a different process — ${String(detached.length)} ${kind} ` +
-          'session(s) it was running are gone with the old one.'
-      })
-      return
-    }
-
-    // Same process. It is the authority on what it still holds; the hub's
-    // registry is only a belief about that.
-    let listed: ComputerSessionList | null = null
-    try {
-      listed = parseList(await gateway.request(computerId, listMethod, {}))
-    } catch {
-      listed = null
-    }
-    if (listed === null) {
-      // Unanswerable right now. Leave everything detached and re-arm: a later
-      // reconnect can still resolve it, and the grace timer bounds the wait.
-      armGrace(computerId)
-      return
-    }
-
-    // Re-read rather than reuse the snapshot: the list was an await, and an entry
-    // closed meanwhile (disposed) must not be resumed or re-spawned.
-    const stillDetached = detached.filter((o) => !o.entry.disposed && o.entry.detached)
-    const resumed: Owned[] = []
-    const exited: Owned[] = []
-    const resent: Owned[] = []
-    const ended: Owned[] = []
-    for (const o of stillDetached) {
-      const running = listed.live.get(o.entry.sessionId)
-      if (running && sameAttempt(o.entry, running)) {
-        o.owner.resume(o.entry, running)
-        resumed.push(o)
-        continue
-      }
-      const reaped = listed.exited.get(o.entry.sessionId)
-      if (reaped && sameAttempt(o.entry, reaped)) {
-        o.owner.settleExited(o.entry, reaped)
-        exited.push(o)
-        continue
-      }
-      const pending = o.entry.pendingSpawn
-      if (pending) {
-        // Neither running nor reaped: the request never reached the computer. Send
-        // it again — the same attempt, so a copy that did land is answered with
-        // the process it already started rather than a second agent.
-        o.entry.detached = false
-        pending.resend()
-        resent.push(o)
-        continue
-      }
-      o.owner.finalize(o.entry, 'exited-while-detached')
-      ended.push(o)
-    }
-    // Sessions the computer holds that the hub no longer tracks — e.g. dropped by
-    // an earlier grace expiry, or closed while the computer was unreachable.
-    // Nothing will ever attach to them again, so end them here rather than
-    // leaving an agent running against no task.
-    //
-    // "Tracked" means tracked as THIS attempt: a session id can be held by an
-    // older attempt's process that nothing owns. Exception: an id whose spawn was
-    // just re-sent is never swept — the computer replaces the old process with the
-    // new one, and a kill for that id would land after the spawn and end it.
-    const tracked = liveEntries(computerId)
-    for (const [sessionId, running] of listed.live) {
-      const owned = tracked.some(
-        (o) =>
-          o.entry.sessionId === sessionId &&
-          (o.entry.pendingSpawn !== undefined || sameAttempt(o.entry, running))
-      )
-      if (owned) continue
-      // Held by its owner outside this backend (an adopted run): not a stray.
-      if (participants.some((p) => p.keepUntracked?.(computerId, sessionId))) continue
-      void gateway.request(computerId, killMethod, { sessionId }).catch(noop)
-    }
-    if (resumed.length > 0) {
-      record('computer.sessions_reattached', 'info', resumed, computerId, {
-        message: `Computer reconnected — ${String(resumed.length)} ${kind} session(s) reattached.`
-      })
-    }
-    if (exited.length > 0) {
-      // INFO: these ended on their own, and the computer kept their real exits.
-      record('computer.sessions_exited_while_detached', 'info', exited, computerId, {
-        message: `${String(exited.length)} ${kind} session(s) exited while the computer was unreachable; exits reported by the computer.`
-      })
-    }
-    if (resent.length > 0) {
-      record('computer.spawns_resent', 'info', resent, computerId, {
-        message: `${String(resent.length)} ${kind} spawn(s) lost with the connection were sent again.`
-      })
-    }
-    if (ended.length > 0) {
-      record('computer.sessions_disposed', 'error', ended, computerId, {
-        message: `${String(ended.length)} ${kind} session(s) exited while the computer was unreachable.`
-      })
-    }
-  }
-
-  gateway.events.on('computer-lost', (p) => detachComputer(p.computerId, 'computer-lost'))
-  gateway.events.on('computer-disconnected', (p) =>
-    detachComputer(p.computerId, 'computer-disconnected')
-  )
-  gateway.events.on('computer-connected', (p) => {
-    void reattachComputer(p.computer.computerId, p.computer.epoch)
-  })
-
-  return {
-    join: (participant) => participants.push(participant),
-    detach: (entry) => {
-      entry.detached = true
-      // Bound the wait like any detached session — but never RESTART a running
-      // window, which would let a flapping connection postpone it forever.
-      if (!graceTimers.has(entry.computerId)) armGrace(entry.computerId)
-    }
-  }
-}
 
 // ===========================================================================
 // Routing pty backend
@@ -933,6 +432,12 @@ export interface RoutingPtyBackendOptions {
   resolveComputerId: (spec: PtySpawnSpec) => string | null
   /** Asked before a spawn (for its task) and an adopt (for its session). */
   gate?: ComputerWorkGate
+  /**
+   * For a terminal session the computer runs that this backend does not track (a
+   * previous hub run's): does the hub's database prove its owner gone — task
+   * deleted, archived or done, tab closed? A reconnect ends it only then.
+   */
+  ownerGone?: OwnerGoneProbe
 }
 
 interface PtyEntry extends DetachableEntry, SeqGapState {
@@ -965,7 +470,7 @@ interface PtyEntry extends DetachableEntry, SeqGapState {
    * The computer went unreachable while this session was live: its outcome is
    * UNKNOWN, not decided. Still tracked, never finalized — resolved on
    * reconnect against the computer's own session list. See
-   * {@link createDetachController}.
+   * {@link joinDetachController} (detach-controller.ts).
    */
   detached: boolean
   /**
@@ -1138,6 +643,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     // and settling it either way makes pty-manager overwrite the exit with a
     // synthetic -1 ("refused" / "confirmed without a pid").
     entry.pendingSpawn = undefined
+    entry.spawnInFlight = false
     if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
     if (entry.lastSeq >= 0) {
       if (lastSeqs.size > 10_000) lastSeqs.clear()
@@ -1214,10 +720,11 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
     if (!signalIsNew(signal, entry.detectFromSeq)) return
     entry.signalEmitter.emit(signal)
   })
-  const detach = joinDetachController<PtyEntry>({
+  const membership = joinDetachController<PtyEntry>({
     gateway,
     sessions,
     kind: 'terminal',
+    ...(options.ownerGone ? { ownerGone: options.ownerGone } : {}),
     listMethod: HubToComputerMethods.ptyList,
     killMethod: HubToComputerMethods.ptyKill,
     parseList: (raw) => {
@@ -1429,9 +936,10 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       kill: (signal?: string): void => {
         if (entry.detached) {
           // Unreachable: the kill cannot be delivered, and the session must not be
-          // resumed or re-spawned on reconnect either. So stop tracking it — the
-          // reconnect sweep then ends the computer's copy as an orphan. Emits
+          // resumed or re-spawned on reconnect either. So stop tracking it, recorded
+          // as given up on — the reconnect sweep then ends the computer's copy. Emits
           // nothing: the caller ending it already owns reporting that.
+          membership.abandon(entry, 'closed-while-detached')
           entry.disposed = true
           entry.pendingSpawn = undefined
           if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
@@ -1587,6 +1095,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       }
       const { entry, handle, setPid } = register(computerId, sessionId, processName, true)
       entry.spawnId = warmId
+      entry.spawnInFlight = true
       if (detection) entry.preAckSignals = []
       entry.relay = relay
       lastSpawnIds.set(sessionKey(computerId, sessionId), warmId)
@@ -1599,6 +1108,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           ...(relay !== undefined ? { relay } : {})
         })
         const parsed = ptyWarmAdoptResultSchema.parse(res)
+        entry.spawnInFlight = false
         setPid(parsed.pid)
         // Seed BEFORE unsealing: everything the agent emitted while warm is
         // delivered first, then whatever queued up during the round-trip drains
@@ -1627,6 +1137,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         drain(entry)
         return handle
       } catch (err) {
+        // The computer may have rekeyed the warm session before the reply was lost:
+        // recorded as given up on, so a reconnect that lists it ends it.
+        membership.abandon(entry, 'adopt-failed')
         finalize(entry, null, null, 'adopt-failed', errorMessage(err))
         throw err
       }
@@ -1671,6 +1184,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // `spawnIdField` in frames.ts.
         const spawnId = randomUUID()
         entry.spawnId = spawnId
+        entry.spawnInFlight = true
         lastSpawnIds.set(key, spawnId)
         entry.relay = spec.relay
         if (spec.detection) entry.preAckSignals = []
@@ -1741,6 +1255,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         const whenSpawned = new Promise<PtySpawnConfirmation>((resolve, reject) => {
           const confirm = (spawnedPid: number | null, ownsStartupDeadline: boolean): void => {
             entry.pendingSpawn = undefined
+            entry.spawnInFlight = false
             // Started: nothing left to move up the admission queue.
             entry.prioritize = undefined
             setPid(spawnedPid)
@@ -1783,7 +1298,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
                   }
                   // A disconnect already detached every entry it could see; this
                   // one was sent after it, to a computer with no socket.
-                  if (!entry.detached) detach(entry)
+                  if (!entry.detached) membership.detach(entry)
                   return
                 }
                 // The computer refused the spawn: finalize (which emits the exit
@@ -1889,6 +1404,12 @@ export interface RoutingProcessBackendOptions {
    * stray sweep leaves them alone.
    */
   keepUntracked?: (computerId: string, sessionId: string) => boolean
+  /**
+   * For a run the computer holds that this backend does not track (a previous hub
+   * run's, not adopted): does the hub's database prove its owner gone — its process
+   * row deleted? A reconnect ends it only then.
+   */
+  ownerGone?: OwnerGoneProbe
 }
 
 interface ProcEntry extends DetachableEntry, SeqGapState {
@@ -1904,7 +1425,7 @@ interface ProcEntry extends DetachableEntry, SeqGapState {
   /** `lastSeq` the in-flight/last backfill was issued for; `null` = never. */
   backfilledAt: number | null
   disposed: boolean
-  /** Computer unreachable, outcome unknown — see {@link createDetachController}. */
+  /** Computer unreachable, outcome unknown — see {@link joinDetachController} (detach-controller.ts). */
   detached: boolean
   dataEmitter: BufferingEmitter<{ chunk: string; stream: 'stdout' | 'stderr' }>
   /** stdout lost for good, in order with `dataEmitter` (emitted just before the frame after it). */
@@ -1990,6 +1511,12 @@ const unconfirmedWrites = new Set<string>()
 function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
   backend: ProcessBackend
   spawnRouted(spec: ProcSpawnSpec, params?: Record<string, unknown>): RoutedProc
+  /**
+   * The channel's owner is done with it: leave the detach controller (runs still
+   * live count as given up on). Every channel today lives as long as its gateway,
+   * so nothing calls this yet — it is the explicit end a per-owner channel needs.
+   */
+  dispose(): void
 } {
   const { gateway, resolveComputerId } = options
   const sessions = new Map<string, ProcEntry>()
@@ -2003,6 +1530,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     if (entry.disposed) return
     entry.disposed = true
     entry.pendingSpawn = undefined
+    entry.spawnInFlight = false
     // A replaced entry is no longer the map's; never delete its successor.
     if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
     if (outcome) entry.outcome = outcome
@@ -2113,10 +1641,11 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
         : undefined
     )
   })
-  const detach = joinDetachController<ProcEntry>({
+  const membership = joinDetachController<ProcEntry>({
     gateway,
     sessions,
     kind: 'process',
+    ...(options.ownerGone ? { ownerGone: options.ownerGone } : {}),
     listMethod: HubToComputerMethods.procList,
     killMethod: HubToComputerMethods.procKill,
     ...(options.keepUntracked ? { keepUntracked: options.keepUntracked } : {}),
@@ -2257,8 +1786,9 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
       kill: (signal?: string): Promise<boolean> => {
         if (entry.detached) {
           // Same rule as the pty handle: undeliverable now, and must not be
-          // resumed or re-spawned later — stop tracking, the reconnect sweep
-          // ends the computer's copy as an orphan.
+          // resumed or re-spawned later — stop tracking, recorded as given up on;
+          // the reconnect sweep ends the computer's copy.
+          membership.abandon(entry, 'closed-while-detached')
           entry.disposed = true
           entry.pendingSpawn = undefined
           if (sessions.get(entry.key) === entry) sessions.delete(entry.key)
@@ -2322,6 +1852,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
     }
     const setSpawnedPid = (next: number | null): void => {
       entry.pendingSpawn = undefined
+      entry.spawnInFlight = false
       // `pid` is nullable on the wire (immediate spawn failure); the handle
       // exposes `number | undefined`, so map null → undefined.
       pid = next ?? undefined
@@ -2345,7 +1876,10 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
         (res) => {
           const parsed = procSpawnResultSchema.safeParse(res)
           if (parsed.success) setSpawnedPid(parsed.data.pid)
-          else entry.pendingSpawn = undefined
+          else {
+            entry.pendingSpawn = undefined
+            entry.spawnInFlight = false
+          }
         },
         (err: unknown) => {
           if (entry.disposed) return
@@ -2354,7 +1888,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
               resend: attempt,
               confirm: (listedPid) => setSpawnedPid(listedPid)
             }
-            if (!entry.detached) detach(entry)
+            if (!entry.detached) membership.detach(entry)
             return
           }
           finalize(entry, null, 'spawn-failed', {
@@ -2365,6 +1899,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
         }
       )
     }
+    entry.spawnInFlight = true
     attempt()
 
     return handle
@@ -2372,6 +1907,7 @@ function createRoutingProcessChannel(options: RoutingProcessBackendOptions): {
 
   return {
     spawnRouted,
+    dispose: () => membership.leave(),
     backend: {
       spawn: (spec: ProcSpawnSpec): ProcHandle => spawnRouted(spec),
       // Crash-reap (process-manager.ts's reapStaleIfNeeded) is a local-backend-only
@@ -2895,6 +2431,24 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       )
     },
 
+    async readBytes(computerId, rootPath, filePath, offset, length) {
+      if (computerId == null) return local.readBytes(rootPath, filePath, offset, length)
+      const res = await req(
+        computerId,
+        HubToComputerMethods.fsReadBytes,
+        { rootPath, filePath, offset, length },
+        fsReadBytesResultSchema
+      ).catch((err: unknown) => {
+        throw asFsErrnoError(err)
+      })
+      return {
+        bytes: Buffer.from(res.data, 'base64'),
+        size: res.size,
+        mtimeMs: res.mtimeMs,
+        eof: res.eof
+      }
+    },
+
     async writeFile(computerId, rootPath, filePath, content) {
       if (computerId == null) return local.writeFile(rootPath, filePath, content)
       await req(
@@ -3078,6 +2632,18 @@ export function createRemoteFsAdapters(options: RemoteFsAdaptersOptions): Worksp
       return stop
     }
   }
+}
+
+/**
+ * The computer's own fs answer (`data.errno`, see `fsErrnoErrorDataSchema`) as the
+ * error an in-process read throws — `code: 'ENOENT'` etc. — so callers handle routed
+ * and local reads alike. Anything else (a refusal, a lost connection) passes as is.
+ */
+function asFsErrnoError(err: unknown): unknown {
+  if (!(err instanceof RpcError)) return err
+  const data = fsErrnoErrorDataSchema.safeParse(err.data)
+  if (!data.success) return err
+  return Object.assign(new Error(err.message), { code: data.data.errno })
 }
 
 /** A computer's answer that it has no `pty.relay` (see {@link ComputerUpdatePendingError}). */

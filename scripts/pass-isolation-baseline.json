@@ -33,11 +33,9 @@
     "syncAll#6",
     "syncAll#7"
   ],
-  "packages/domains/chat-runtime/src/server/attachments.ts": [
-    "collectStaging#1",
-    "collectGarbage#1"
-  ],
+  "packages/domains/chat-runtime/src/server/attachments.ts": ["collectGarbage#1"],
   "packages/domains/chat-runtime/src/server/backups.ts": ["collectAbandonedStaging#1"],
+  "packages/domains/chat-runtime/src/server/blob-store.ts": ["collectStaging#1"],
   "packages/domains/chat-runtime/src/server/hub-folders.ts": [
     "sync#1",
     "sync#2",

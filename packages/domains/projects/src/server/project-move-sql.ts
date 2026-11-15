@@ -14,7 +14,7 @@ const UNFINISHED = "('running', 'paused', 'failed')"
  */
 export const projectNotInTransitSql = (alias: string): string => `NOT EXISTS (
   SELECT 1 FROM task_moves pm
-   WHERE pm.scope = 'project' AND pm.project_id = ${alias}.id AND pm.status IN ${UNFINISHED}
+   WHERE (pm.direction = 'in' OR pm.mode = 'move') AND pm.scope = 'project' AND pm.project_id = ${alias}.id AND pm.status IN ${UNFINISHED}
      AND (pm.direction = 'in' OR pm.step = 'release'))`
 
 /**
@@ -23,4 +23,4 @@ export const projectNotInTransitSql = (alias: string): string => `NOT EXISTS (
  */
 export const projectMovingSql = (projectIdExpr: string): string => `EXISTS (
   SELECT 1 FROM task_moves pm
-   WHERE pm.scope = 'project' AND pm.project_id = ${projectIdExpr} AND pm.status IN ${UNFINISHED})`
+   WHERE (pm.direction = 'in' OR pm.mode = 'move') AND pm.scope = 'project' AND pm.project_id = ${projectIdExpr} AND pm.status IN ${UNFINISHED})`

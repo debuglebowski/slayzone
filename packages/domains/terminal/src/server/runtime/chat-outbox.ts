@@ -109,6 +109,28 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * What {@link ChatOutbox.restore} needs from a saved history, folded in event by
+ * event (a long history is fed a page at a time): each message's latest content
+ * and its last confirmed delivery state, in first-seen order.
+ */
+export class OutboxRestoreScan {
+  readonly messages = new Map<string, { message: OutgoingUserMessage; state: OutboxState }>()
+
+  add(event: AgentEvent): void {
+    // Imported history was answered long ago, never by this tab's outbox.
+    if (event.kind === 'user-message' && event.id && !event.history) {
+      this.messages.set(event.id, {
+        message: { id: event.id, content: event.content ?? [{ type: 'text', text: event.text }] },
+        state: 'queued'
+      })
+    } else if (event.kind === 'user-message-delivery') {
+      const known = this.messages.get(event.id)
+      if (known && event.state !== 'sending') known.state = event.state
+    }
+  }
+}
+
 export class ChatOutbox {
   private readonly entries = new Map<string, Entry>()
   /** FIFO of ids not yet written (queued). */
@@ -354,22 +376,17 @@ export class ChatOutbox {
   /**
    * Rebuild from a tab's saved history after a restart: a message whose last
    * state was never confirmed did not survive the restart — fail it (Retry).
+   * `history`: the events themselves, or an {@link OutboxRestoreScan} fed with
+   * them a page at a time.
    */
-  restore(events: Iterable<AgentEvent>): void {
-    const last = new Map<string, { message: OutgoingUserMessage; state: OutboxState }>()
-    for (const event of events) {
-      // Imported history was answered long ago, never by this tab's outbox.
-      if (event.kind === 'user-message' && event.id && !event.history) {
-        last.set(event.id, {
-          message: { id: event.id, content: event.content ?? [{ type: 'text', text: event.text }] },
-          state: 'queued'
-        })
-      } else if (event.kind === 'user-message-delivery') {
-        const known = last.get(event.id)
-        if (known && event.state !== 'sending') known.state = event.state
-      }
+  restore(history: Iterable<AgentEvent> | OutboxRestoreScan): void {
+    let scan: OutboxRestoreScan
+    if (history instanceof OutboxRestoreScan) scan = history
+    else {
+      scan = new OutboxRestoreScan()
+      for (const event of history) scan.add(event)
     }
-    for (const [id, { message: msg, state }] of last) {
+    for (const [id, { message: msg, state }] of scan.messages) {
       if (this.entries.has(id)) continue
       const entry: Entry = {
         message: msg,

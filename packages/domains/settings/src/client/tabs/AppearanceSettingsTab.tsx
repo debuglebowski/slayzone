@@ -100,6 +100,7 @@ export function AppearanceSettingsTab({
   const [notesShowToolbar, setNotesShowToolbar] = useState(false)
   const [notesSpellcheck, setNotesSpellcheck] = useState(true)
   const [chatWidth, setChatWidth] = useState<'narrow' | 'wide'>('narrow')
+  const [chatFontSize, setChatFontSize] = useState('13')
 
   // Each new settings snapshot re-seeds the controls (which local edits override in
   // between) — adjusted while rendering.
@@ -121,6 +122,8 @@ export function AppearanceSettingsTab({
       setNotesShowToolbar(all['notes_show_toolbar'] === '1')
       setNotesSpellcheck(all['notes_spellcheck'] !== '0')
       setChatWidth(all['chat_width'] === 'wide' ? 'wide' : 'narrow')
+      // Unset follows the terminal's size (what chats used before their own).
+      setChatFontSize(all['chat_font_size'] || all['terminal_font_size'] || '13')
     }
   }
 
@@ -383,6 +386,32 @@ export function AppearanceSettingsTab({
               <SelectContent position="popper" side="bottom" className="max-h-none">
                 <SelectItem value="narrow">Default</SelectItem>
                 <SelectItem value="wide">Full width</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-4">
+            <SettingLabel tip="Default text size in agent chats. A chat can use its own size from the font size button in its tab bar.">
+              Font size
+            </SettingLabel>
+            <Select
+              value={chatFontSize}
+              onValueChange={(v) => {
+                setChatFontSize(v)
+                setSettingMutation.mutate({ key: 'chat_font_size', value: v })
+              }}
+            >
+              <SelectTrigger className="w-24" data-testid="settings-chat-font-size">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" side="bottom" className="max-h-none">
+                {/* A size saved from a chat's own control may sit outside the list. */}
+                {[...new Set([10, 11, 12, 13, 14, 15, 16, 18, 20, Number(chatFontSize)])]
+                  .sort((a, b) => a - b)
+                  .map((s) => (
+                    <SelectItem key={s} value={String(s)}>
+                      {s}px
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

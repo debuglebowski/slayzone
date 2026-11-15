@@ -9,6 +9,8 @@ import {
 } from '../fixtures/electron'
 import type { Locator, Page } from '@playwright/test'
 import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 /**
  * The artifacts store re-reads the row it just wrote, so its create mutations are
@@ -621,6 +623,56 @@ test.describe('Artifacts panel', () => {
     await artifactRow(mainWindow, 'zoom-skip.svg').click()
     await expect(zoom).toHaveCount(0)
   })
+
+  // The whole chain: hub content route (byte ranges) → main's slz-file handler → the
+  // renderer's <video>, once per container the video mode claims. Each fixture is a 2s
+  // clip (H.264 in mp4/mov with the index AFTER the media data, VP9 in webm); a
+  // non-empty `seekable` means the player could range-read the file.
+  for (const title of ['clip.mp4', 'clip.mov', 'clip.webm']) {
+    test(`video artifact plays in a native player and seeks (${title})`, async ({ mainWindow }) => {
+      const s = seed(mainWindow)
+      const artifact = requireSeeded(
+        await s.createArtifact({ taskId, title, content: '' }),
+        `artifact ${title}`
+      )
+      const filePath = await mainWindow.evaluate(
+        (id) => window.getTrpcVanillaClient().artifacts.getFilePath.query({ id }),
+        artifact.id
+      )
+      fs.copyFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'media', title),
+        filePath as string
+      )
+      await s.refreshData()
+
+      await openArtifactsPanel(mainWindow)
+      await artifactRow(mainWindow, title).click()
+      const panel = artifactsPanel(mainWindow)
+      const video = panel.locator('[data-testid="artifact-video"]')
+      await expect(video).toBeVisible({ timeout: 5_000 })
+
+      // HAVE_METADATA: the file was found, decoded and its index read.
+      await expect
+        .poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 10_000 })
+        .toBeGreaterThanOrEqual(1)
+      expect(await video.evaluate((v: HTMLVideoElement) => v.duration)).toBeCloseTo(2, 0)
+      expect(
+        await video.evaluate((v: HTMLVideoElement) => (v.seekable.length ? v.seekable.end(0) : 0))
+      ).toBeGreaterThan(1.5)
+
+      const landed = await video.evaluate(
+        (v: HTMLVideoElement) =>
+          new Promise<number>((resolve) => {
+            v.addEventListener('seeked', () => resolve(v.currentTime), { once: true })
+            v.currentTime = 1.5
+          })
+      )
+      expect(landed).toBeCloseTo(1.5, 0)
+      await expect(panel.locator('[data-testid="artifact-video-error"]')).toHaveCount(0)
+      // The player owns its surface: no document zoom over it.
+      await expect(panel.locator('[data-testid="artifact-zoom"]')).toHaveCount(0)
+    })
+  }
 
   test('SVG preview fit/full controls sit on an opaque popover surface', async ({ mainWindow }) => {
     const s = seed(mainWindow)

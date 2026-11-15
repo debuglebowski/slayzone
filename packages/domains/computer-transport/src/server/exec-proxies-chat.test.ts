@@ -12,6 +12,7 @@ vi.mock('@slayzone/diagnostics/server', () => ({
 
 import { ComputerTransportErrorCodes, RpcError, TypedEventEmitter } from '../shared'
 import { createRoutingChatBackend, type RoutingGateway } from './exec-proxies'
+import { detachControllerStats } from './detach-controller'
 import type { ComputerDescriptor, ComputerGatewayEvents } from './hub-gateway'
 import type { ChatProcHandle, ChatSpawnSpec } from '@slayzone/terminal/server'
 
@@ -298,6 +299,53 @@ describe('routed chat frames', () => {
     const after1 = count()
     for (let i = 1; i < 20; i++) handles.push(await backend.spawn(spec({ sessionId: `s:${i}` })))
     expect(count()).toBe(after1)
+  })
+
+  // The detach controller used to infer "this participant is finished" from an empty
+  // session map — written for a backend per agent, it dropped the one long-lived
+  // backend instead (crash 2026-11-14). Membership is explicit now; growth must
+  // still be bounded however many agents come and go.
+  it('agents spawning and exiting by the hundred keep ONE detach participant', async () => {
+    const gateway = new Gateway()
+    gateway.on('proc.spawn', () => ({ pid: 7 }))
+    gateway.on('proc.list', () => ({ sessions: [], exited: [] }))
+    const backend = backendFor(gateway)
+    const connected = (epoch: string) =>
+      gateway.events.emit('computer-connected', {
+        computer: {
+          computerId: 'computer-1',
+          authMode: 'hello',
+          directAddress: null,
+          peerLoopback: false,
+          directRtc: false,
+          connectedAt: 0,
+          lastSeenAt: 0,
+          epoch
+        }
+      })
+    connected('epoch-a')
+    for (let i = 0; i < 200; i++) {
+      await backend.spawn(spec({ sessionId: `s:${i}` }))
+      gateway.events.emit('proc.exit', {
+        computerId: 'computer-1',
+        sessionId: `s:${i}`,
+        spawnId: gateway.of('proc.spawn')[i]!.params.spawnId as string,
+        exitCode: 0
+      } as never)
+      if (i % 50 === 0) {
+        gateway.events.emit('computer-lost', {
+          computerId: 'computer-1',
+          reason: 'heartbeat-timeout'
+        })
+        connected('epoch-a')
+      }
+    }
+    await tick()
+    expect(detachControllerStats(gateway)).toEqual([
+      { kind: 'process', participants: 1, abandonedRecords: 0 }
+    ])
+    // One list per reconnect, however many agents ran: one controller.
+    expect(gateway.of('proc.list')).toHaveLength(4)
   })
 })
 

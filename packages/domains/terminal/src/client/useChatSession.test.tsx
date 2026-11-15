@@ -285,6 +285,7 @@ const texts = (r: { current: ReturnType<typeof useChatSession> }): string[] =>
   r.current.timeline.flatMap((it) => (it?.kind === 'user-text' ? [it.text] : []))
 
 afterEach(() => {
+  vi.restoreAllMocks()
   cleanup()
   queryClient.clear()
   hub = null
@@ -297,6 +298,31 @@ afterEach(() => {
   sendFails = null
   directLease = null
   directSub = null
+})
+
+describe('paged-history failures', () => {
+  it('shows a transient paging failure without requesting a full replay', async () => {
+    vi.spyOn(client.chat.openTimeline, 'query').mockRejectedValue(new Error('computer unavailable'))
+    const replay = vi.spyOn(client.chat.getReplay, 'query')
+    const { result } = setup()
+    await act(async () => {
+      loads[0].hydrate.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(replay).not.toHaveBeenCalled()
+    expect(result.current.loadError).toBe('computer unavailable')
+    expect(result.current.hydrating).toBe(false)
+  })
+
+  it('retains full replay for an older hub without the paging procedure', async () => {
+    vi.spyOn(client.chat.openTimeline, 'query').mockRejectedValue(
+      Object.assign(new Error('No procedure found'), { data: { code: 'NOT_FOUND' } })
+    )
+    const { result } = setup()
+    await finishLoad(0, HISTORY)
+    expect(result.current.loadError).toBeNull()
+    expect(texts(result)).toEqual(['one', 'two'])
+  })
 })
 
 // M1: switching to the direct link is make-before-break. The hub stream stays on until
@@ -940,6 +966,27 @@ describe('paged history (opened from the hub projection)', () => {
     expect(r.current.timeline.slice(0, 2 * PAGE).every((it) => it === undefined)).toBe(true)
   })
 
+  it('pages an answer left out (over its byte budget) are asked for again at once', async () => {
+    const h = fakeHub(all, all.length - 1)
+    const pagesOf = h.pages
+    // The computer answers at most two pages per request; the rest are `omitted`.
+    h.pages = async (input) => {
+      const got = (await pagesOf(input)) as {
+        expired: false
+        pages: Array<{ page: number }>
+      }
+      return { ...got, pages: got.pages.slice(0, 2), omitted: input.pages.slice(2) }
+    }
+    hub = h
+    const { result: r } = setup()
+    await openPaged(0)
+    const paging = r.current.paging!
+    act(() => r.current.loadPages(Array.from({ length: paging.sealed }, (_, p) => p)))
+    await settle()
+    expect(meaning(r.current.state)).toEqual(meaning(stateAt(all, all.length - 1)))
+    expect(h.calls.pages.length).toBeGreaterThan(Math.ceil(paging.sealed / 32))
+  })
+
   it('a live event that needs an old row waits for its page, then applies — as a full replay would', async () => {
     const head = all.slice(0, 200)
     const firstTool = stateAt(all, 199).timeline.findIndex((it) => it?.kind === 'tool')
@@ -1070,5 +1117,56 @@ describe('manual/reconnect reload', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ id, delivery: 'delivered' })
     expect(rows[0]).not.toMatchObject({ optimistic: true })
+  })
+})
+
+// 2026-11-14: one whole-history answer (202 MB) closed the computer's socket. A full
+// replay (no usable projection) is read in bounded pages, and applied once.
+describe('full replay in bounded pages', () => {
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0))
+    })
+  const many: Buffered = Array.from({ length: 30 }, (_, seq) => ({
+    seq,
+    event: userMsg(`m${seq}`)
+  }))
+
+  it('reads every page, carries on after the last event of each, applies the whole history in one batch', async () => {
+    const asked: Array<{ afterSeq: number; page?: unknown }> = []
+    vi.spyOn(client.chat.getReplay, 'query').mockImplementation(((input: {
+      afterSeq: number
+      page?: unknown
+    }) => {
+      asked.push(input)
+      const rest = many.filter((e) => e.seq > input.afterSeq)
+      const events = rest.slice(0, 7)
+      const hasMore = rest.length > 7
+      return Promise.resolve(
+        hasMore ? { events, hasMore } : { events, hasMore, live: saved(many).live }
+      )
+    }) as never)
+    const { result } = setup()
+    await act(async () => {
+      loads[0].hydrate.resolve()
+    })
+    await settle()
+    expect(asked.map((a) => a.afterSeq)).toEqual([-1, 6, 13, 20, 27])
+    for (const a of asked) expect(a.page).toBeDefined()
+    expect(texts(result)).toEqual(many.map((e) => (e.event as { text: string }).text))
+    expect(result.current.hydrating).toBe(false)
+    // One reducer batch for the whole history (one render), as before paging.
+    const batches = [...reducerActions].filter(
+      (a) => a.type === 'events' && (a.events?.length ?? 0) > 0
+    )
+    expect(batches.some((a) => a.events!.length === many.length)).toBe(true)
+  })
+
+  it('an older hub answers the whole replay at once (no hasMore): that is the only page', async () => {
+    const replay = vi.spyOn(client.chat.getReplay, 'query')
+    const { result } = setup()
+    await finishLoad(0, HISTORY)
+    expect(replay).toHaveBeenCalledTimes(1)
+    expect(texts(result)).toEqual(['one', 'two'])
   })
 })

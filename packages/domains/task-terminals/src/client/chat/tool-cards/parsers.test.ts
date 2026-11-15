@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest'
 import { webFetchView, webSearchView } from './web-results'
 import { mcpResultBlocks, parseMcpToolName } from './mcp'
 import { codeViewDiff, notebookEditDiff, textChangeDiff } from './file-diffs'
-import { readImageSrc } from './read-image'
+import { readImageSource } from './read-image'
 
 describe('webSearchView', () => {
   const structured = {
@@ -228,20 +228,36 @@ describe('file diffs', () => {
   })
 })
 
-describe('readImageSrc', () => {
+describe('readImageSource', () => {
   const block = { type: 'image', source: { type: 'base64', data: 'AAA', media_type: 'image/png' } }
+  const body = { v: 1 as const, sha256: 'a'.repeat(64), mediaType: 'image/png', size: 3 }
 
   test('image block in the tool result → data URL', () => {
-    expect(readImageSrc([block], null)).toBe('data:image/png;base64,AAA')
+    expect(readImageSource([block], null)).toEqual({ src: 'data:image/png;base64,AAA' })
   })
 
   test('no image block → the structured file (Claude Code `toolUseResult`)', () => {
-    expect(readImageSrc(null, { type: 'image', file: { base64: 'BBB', type: 'image/jpeg' } })).toBe(
-      'data:image/jpeg;base64,BBB'
-    )
+    expect(
+      readImageSource(null, { type: 'image', file: { base64: 'BBB', type: 'image/jpeg' } })
+    ).toEqual({ src: 'data:image/jpeg;base64,BBB' })
+  })
+
+  test('bytes stored out-of-line → their reference (block or structured file)', () => {
+    const ref = { $chatBlob: body }
+    expect(
+      readImageSource(
+        [{ type: 'image', source: { type: 'base64', data: ref, media_type: 'image/png' } }],
+        null
+      )
+    ).toEqual({ ref: body })
+    expect(
+      readImageSource(null, { type: 'image', file: { base64: ref, type: 'image/png' } })
+    ).toEqual({
+      ref: body
+    })
   })
 
   test('a text read has no image', () => {
-    expect(readImageSrc('1\thello', { type: 'text', file: { content: 'hello' } })).toBe(null)
+    expect(readImageSource('1\thello', { type: 'text', file: { content: 'hello' } })).toBe(null)
   })
 })

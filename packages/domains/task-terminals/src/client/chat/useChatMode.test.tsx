@@ -3,7 +3,7 @@
 // hydration (live session > DB cache), drift sync from the subprocess's permission
 // mode, and the serialized one-IPC-at-a-time setMode loop with revert on failure.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -54,6 +54,7 @@ vi.mock('@slayzone/ui', async () => ({
 }))
 
 import { useChatMode } from './useChatMode'
+import { ChatRestorationBoundary } from './chat-restoration'
 
 interface Props {
   taskId: string
@@ -93,6 +94,48 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('useChatMode hydration', () => {
+  it('keeps a restoration slot until a delayed eligibility read settles, including after unmount', async () => {
+    const work = Array.from({ length: 3 }, () => deferred<Capability>())
+    m.getAutoEligibility.mockImplementation(
+      () => work[m.getAutoEligibility.mock.calls.length - 1]!.promise
+    )
+    function Chat({ id }: { id: number }) {
+      useChatMode({ ...base, taskId: 'task' + id, tabId: 'tab' + id })
+      return <span>{id}</span>
+    }
+    const tree = (hideFirst: boolean) => (
+      <>
+        {work.map((_, id) =>
+          hideFirst && id === 0 ? null : (
+            <ChatRestorationBoundary
+              key={id}
+              client={m.client}
+              taskId={'task' + id}
+              tabId={'tab' + id}
+              active={false}
+            >
+              <Chat id={id} />
+            </ChatRestorationBoundary>
+          )
+        )}
+      </>
+    )
+    try {
+      const view = render(tree(false))
+      await flush()
+      view.rerender(tree(true))
+      await flush()
+      expect(m.getAutoEligibility).toHaveBeenCalledTimes(2)
+      await act(async () => work[0]!.resolve({ eligible: true, optedIn: true }))
+      await waitFor(() => expect(m.getAutoEligibility).toHaveBeenCalledTimes(3))
+    } finally {
+      cleanup()
+      await act(async () => {
+        for (const item of work) item.resolve({ eligible: true, optedIn: true })
+      })
+    }
+  })
+
   it('defaults to auto-accept with auto mode hidden before any IPC lands', () => {
     m.getInfo.mockReturnValue(pending())
     m.getAutoEligibility.mockReturnValue(pending())

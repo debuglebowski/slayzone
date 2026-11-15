@@ -56,6 +56,8 @@ export interface TaskBranchCtx {
   blockedBadgeTaskIds: ReadonlySet<string>
   treeCrossOutDone: boolean
   treeGroupBy: 'none' | 'status' | 'priority'
+  treeGroupBlocked: boolean
+  blockedTaskIds?: Set<string>
   treeGroupPinned: boolean
   onTaskClick?: (taskId: string) => void
   onRowSelectClick: (event: ReactMouseEvent<HTMLButtonElement>, taskId: string) => void

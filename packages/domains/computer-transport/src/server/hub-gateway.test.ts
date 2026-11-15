@@ -134,6 +134,29 @@ describe('enrollment', () => {
 })
 
 describe('reconnect auth (hello)', () => {
+  it('learns file-hash support on upgrade without re-enrolling the computer', async () => {
+    const hub = await startHub()
+    const store = createMemoryCredentialStore()
+    const first = makeDialer(hub.url, { credentialStore: store })
+    first.start()
+    await first.events.once('connected')
+    await first.stop()
+
+    const upgraded = makeDialer(hub.url, {
+      credentialStore: store,
+      identity: { ...IDENTITY, aiConfigHashFiles: true }
+    })
+    upgraded.start()
+    expect((await upgraded.events.once('connected')).mode).toBe('hello')
+    expect(hub.gateway.listComputers()[0]).toMatchObject({
+      computerId: 'computer-1',
+      aiConfigHashFiles: true
+    })
+    expect(hub.auth.enrollCalls).toHaveLength(1)
+    // The enrollment predates this feature. Its stored tags are not a live claim.
+    expect(hub.auth.enrollCalls[0]!.capabilities).not.toContain('agentConfig.hashFiles')
+  })
+
   it('a dialer with stored credentials reconnects via hello', async () => {
     const hub = await startHub()
     const store = createMemoryCredentialStore()
@@ -674,6 +697,66 @@ describe('heartbeat-loss detection (hub side)', () => {
     const hub = await startHub()
     expect(hub.gateway.isComputerUsable('never-enrolled')).toBe(false)
     expect(hub.gateway.listUsableComputers()).toEqual([])
+  })
+
+  it('confirms liveness after a hub freeze and publishes recovery without reconnecting', async () => {
+    vi.useFakeTimers()
+    const hub = await startHub({ heartbeatTimeoutMs: 45_000 })
+    const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 })
+    dialer.start()
+    await dialer.events.once('connected')
+    let reconnects = 0
+    hub.gateway.events.on('computer-connected', () => reconnects++)
+
+    vi.setSystemTime(Date.now() + 60_000)
+    expect(hub.gateway.isComputerUsable('computer-1')).toBe(false)
+    expect(hub.gateway.listComputers()[0]).toMatchObject({ recovering: true })
+    const recovered = hub.gateway.events.once('computer-liveness')
+    // A loopback probe is real I/O: let it answer without spending the fake budget.
+    const event = await recovered
+    expect(event).toMatchObject({ computerId: 'computer-1', usable: true })
+    expect(hub.gateway.isComputerUsable('computer-1')).toBe(true)
+    expect(hub.gateway.listComputers()[0].recovering).toBe(false)
+    expect(reconnects).toBe(0)
+  })
+
+  it.each(['status read', 'peer reply'])(
+    'does not publish recovery after a short freeze within the heartbeat window (%s first)',
+    async (first) => {
+      vi.useFakeTimers()
+      const hub = await startHub({ heartbeatTimeoutMs: 45_000 })
+      const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 })
+      dialer.start()
+      await dialer.events.once('connected')
+      const changed = vi.fn()
+      hub.gateway.events.on('computer-liveness', changed)
+
+      vi.setSystemTime(Date.now() + 4_000)
+      if (first === 'status read') expect(hub.gateway.isComputerUsable('computer-1')).toBe(true)
+      await hub.gateway.request('computer-1', HubToComputerMethods.ping, {})
+      expect(hub.gateway.isComputerUsable('computer-1')).toBe(true)
+      expect(changed).not.toHaveBeenCalled()
+    }
+  )
+
+  it('still reaps a silent computer after a freeze even when status is read repeatedly', async () => {
+    vi.useFakeTimers()
+    const hub = await startHub({ heartbeatTimeoutMs: 5_000 })
+    const dialer = makeDialer(hub.url, { heartbeatIntervalMs: 0 })
+    // Simulate a peer whose socket stays open but which cannot answer even a probe.
+    vi.spyOn(
+      dialer as unknown as { handleHubRequest(...args: unknown[]): void },
+      'handleHubRequest'
+    ).mockImplementation(() => undefined)
+    dialer.start()
+    await dialer.events.once('connected')
+    vi.setSystemTime(Date.now() + 60_000)
+    expect(hub.gateway.isComputerUsable('computer-1')).toBe(false)
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(hub.gateway.isComputerUsable('computer-1')).toBe(false)
+    }
+    expect(hub.gateway.listComputers()).toEqual([])
   })
 
   it('a heartbeating computer stays usable, not just listed', async () => {

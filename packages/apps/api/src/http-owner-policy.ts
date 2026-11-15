@@ -89,6 +89,7 @@ const ref =
     match,
     ...(except ? { except } : {})
   })
+const taskMove = ref('taskMove', 'exact')
 const task = ref('task', 'exact')
 const taskPrefix = ref('task', 'prefix')
 const projectExact = ref('project', 'exact')
@@ -279,8 +280,33 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/browser/type': checked(task('body.taskId')),
   'GET /api/browser/url': checked(task('query.taskId')),
 
+  // ── workspace files (fileEditor.readFile's marks: the scope task / project and the
+  // computer it may name) ──
+  'GET /api/files/raw': checked(
+    task('query.taskId'),
+    projectExact('query.projectId'),
+    computer('query.computerId')
+  ),
+
   // ── app ──
   'POST /api/close-task/:id': checked(task('params.id')),
+  'POST /api/tasks/:id/move': {
+    ...checked(taskPrefix('params.id')),
+    checkedInHandler:
+      'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
+  },
+  'POST /api/tasks/:id/copy': {
+    ...checked(taskPrefix('params.id')),
+    checkedInHandler:
+      'resolveProjectRef checks local target ownership; the app checks cross-hub targets'
+  },
+  'POST /api/projects/:id/move': checked(projectRef('params.id')),
+  'POST /api/projects/:id/copy': checked(projectRef('params.id')),
+  'GET /api/task-moves': listed(dataRows('id', 'taskMove')),
+  'GET /api/task-moves/:id': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/pause': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/resume': checked(taskMove('params.id')),
+  'POST /api/task-moves/:id/cancel': checked(taskMove('params.id')),
   'POST /api/open-task/:id': checked(taskPrefix('params.id')),
   'POST /api/notify': none(SIGNAL),
   'GET /api/computers': none(COMPUTER),

@@ -107,9 +107,12 @@ export async function handleChatTesting(
         for (const [index, event] of req.events.entries()) {
           const seq = req.fromSeq + index
           if (!Number.isSafeInteger(seq)) throw new Error('Invalid test event sequence')
+          // Raw, as an agent produced it: stored the way every saved event is.
+          const stored = r.storage.extractEventBlobs(event as AgentEvent)
           if (
-            r.storage.appendAt(id, epoch, seq, event as AgentEvent, Date.now()) === 'clash' &&
-            JSON.stringify(r.storage.read(id, seq - 1, seq + 1)[0]?.event) !== JSON.stringify(event)
+            r.storage.appendAt(id, epoch, seq, stored, Date.now()) === 'clash' &&
+            JSON.stringify(r.storage.read(id, seq - 1, seq + 1)[0]?.event) !==
+              JSON.stringify(stored)
           )
             throw new Error('Test event sequence conflict')
         }

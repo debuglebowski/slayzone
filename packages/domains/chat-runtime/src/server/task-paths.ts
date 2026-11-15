@@ -22,7 +22,7 @@ import {
   taskPathsRequestSchema,
   taskPathValueSchema
 } from '../shared/task-paths'
-import { isAbsolute, relative } from 'node:path'
+import { isAbsolute, relative, join, sep } from 'node:path'
 import type { ChatStorage } from './storage'
 import type { DataImportKind } from './task-data'
 
@@ -55,6 +55,47 @@ export function taskPathsStore(storage: ChatStorage) {
   const select = (taskId: string) =>
     db.prepare('SELECT * FROM task_paths WHERE task_id=?').get(taskId) as Row | undefined
   return {
+    projectTaskIds(projectId: string): string[] {
+      return (
+        db.prepare('SELECT task_id FROM task_paths WHERE project_id=?').all(projectId) as Array<{
+          task_id: string
+        }>
+      ).map((r) => r.task_id)
+    },
+    /** Relocate only roots physically inside the moved folder; sibling worktrees stay. */
+    relocateProject(projectId: string, source: string, target: string): void {
+      const remap = (path: string | null): string | null => {
+        if (path === null) return null
+        const suffix = relative(source, path)
+        return suffix === '' ||
+          (!isAbsolute(suffix) && suffix !== '..' && !suffix.startsWith(`..${sep}`))
+          ? join(target, suffix)
+          : path
+      }
+      db.transaction(() => {
+        const rows = db
+          .prepare('SELECT * FROM task_paths WHERE project_id=?')
+          .all(projectId) as Row[]
+        const update = db.prepare(
+          'UPDATE task_paths SET worktree_path=?, base_dir=?, updated_at=? WHERE task_id=?'
+        )
+        for (const row of rows)
+          update.run(
+            remap(row.worktree_path),
+            remap(row.base_dir),
+            Math.max(row.updated_at, Date.now()),
+            row.task_id
+          )
+        const releases = db
+          .prepare('SELECT task_id, worktree_path FROM task_path_releases WHERE project_id=?')
+          .all(projectId) as Array<{ task_id: string; worktree_path: string }>
+        for (const row of releases)
+          db.prepare('UPDATE task_path_releases SET worktree_path=? WHERE task_id=?').run(
+            remap(row.worktree_path),
+            row.task_id
+          )
+      })()
+    },
     get(taskId: string): TaskPathRow | null {
       const r = select(taskId)
       return r ? toRow(r) : null

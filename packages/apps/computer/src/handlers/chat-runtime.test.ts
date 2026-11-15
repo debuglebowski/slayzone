@@ -411,3 +411,72 @@ test('a storage-only owner (task content / artifact store) opens without any fol
     })
   ).rejects.toThrow(/no folder on this computer/)
 })
+
+test('archive.blob: a restored archive serves an image only to the conversation that references it, in bounded chunks', async () => {
+  const { h } = setup()
+  await h.request({ kind: 'bootstrap', value: bootstrap })
+  await h.request({
+    kind: 'bootstrap',
+    value: {
+      ...bootstrap,
+      identity: { id: 'other', taskId: 'task2', tabId: 'tab2', mode: 'claude-chat', epoch: 1 }
+    }
+  })
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(700 * 1024, 7)])
+  const sha = (await import('node:crypto')).createHash('sha256').update(png).digest('hex')
+  try {
+    vi.stubEnv('PLAYWRIGHT', '1')
+    await h.request({
+      kind: 'test.seedEvents',
+      route: { id: 'store', epoch: 1 },
+      fromSeq: 0,
+      events: [
+        {
+          kind: 'tool-result',
+          toolUseId: 't',
+          isError: false,
+          rawContent: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') }
+            }
+          ],
+          structured: null
+        }
+      ]
+    })
+  } finally {
+    vi.unstubAllEnvs()
+  }
+  const backupId = '00000000-0000-4000-8000-000000000001',
+    archiveId = '00000000-0000-4000-8000-000000000002'
+  await h.request({ kind: 'backup.create', id: backupId })
+  await h.request({ kind: 'backup.restore', backupId, archiveId })
+  const read = (conversationId: string, offset: number) =>
+    h.request({ kind: 'archive.blob', archiveId, conversationId, sha256: sha, offset }) as Promise<{
+      mediaType: string
+      size: number
+      offset: number
+      data: string
+    }>
+  const parts: Buffer[] = []
+  for (let offset = 0; offset < png.length; ) {
+    const chunk = await read('store', offset)
+    expect(chunk).toMatchObject({ mediaType: 'image/png', size: png.length, offset })
+    const bytes = Buffer.from(chunk.data, 'base64')
+    expect(bytes.length).toBeLessThanOrEqual(512 * 1024)
+    parts.push(bytes)
+    offset += bytes.length
+  }
+  expect(Buffer.concat(parts)).toEqual(png)
+  await expect(read('other', 0)).rejects.toThrow(/not part of this archive conversation/i)
+  await expect(
+    h.request({
+      kind: 'archive.blob',
+      archiveId,
+      conversationId: 'store',
+      sha256: '../x',
+      offset: 0
+    })
+  ).rejects.toThrow()
+})

@@ -528,7 +528,8 @@ export function seedDemo(now: number): DemoSeed {
     isMain: true,
     position: 0,
     createdAt: hubTime(now, 60 * 3),
-    agentState
+    agentState,
+    chatFontSize: null
   })
   const tabs = [
     mainTab(I.search, 'codex', 'running'),

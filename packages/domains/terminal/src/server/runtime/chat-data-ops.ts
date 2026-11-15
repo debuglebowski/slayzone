@@ -8,11 +8,12 @@ import { recordedProjectRoot, resolveTaskComputerId } from '@slayzone/computers/
 import type { RecordConversationInput, TaskSessionStore } from './task-session-store'
 import {
   persistChatEvent,
-  loadChatEvents,
-  loadChatEventsRange,
+  loadChatEventsPage,
+  chatEventsTailStart,
   getNextSeqForTab,
   clearChatEventsForTab,
-  type BufferedEvent
+  type ChatPageBudget,
+  type StoredEventPage
 } from '../chat-events-store'
 import { clearChatQueue } from '../chat-queue-store'
 import {
@@ -34,7 +35,7 @@ import {
   getAutocompleteUsage,
   type UsageMap
 } from '../autocomplete-usage-store'
-import type { AgentEvent } from '@slayzone/terminal-contracts'
+import type { AgentEvent, ChatBlobChunk } from '@slayzone/terminal-contracts'
 import type { ChatCollaborationMode } from '@slayzone/terminal-contracts'
 import type { ChatModelInfo, CliCommandDetails, CliCommandList } from '@slayzone/terminal-contracts'
 import {
@@ -152,11 +153,27 @@ export interface ChatDataOps {
     event: AgentEvent,
     at: number
   ): 'inserted' | 'clash'
-  loadChatEvents(tabId: string): Promise<BufferedEvent[]>
+  /** One bounded page of the saved events with `afterSeq < seq < beforeSeq` (`ChatEventPersistence.readPage`). */
+  loadChatEventsPage(
+    tabId: string,
+    afterSeq: number,
+    beforeSeq: number,
+    budget: ChatPageBudget
+  ): Promise<StoredEventPage>
+  /** Seq of the `count`-th newest saved event; null when there are fewer (`ChatEventPersistence.tailStart`). */
+  chatEventsTailStart(tabId: string, count: number): Promise<number | null>
+  /**
+   * RAW event → the form `persistChatEventSync` / `persistChatEvent` take (binary
+   * payloads moved to the blob store, references in place). Absent: saved as is.
+   */
+  prepareChatEvent?(tabId: string, event: AgentEvent): AgentEvent
+  /**
+   * One bounded chunk of an out-of-line payload the tab's conversation pins (a blob
+   * of another conversation is refused). Absent: no blob store here.
+   */
+  readChatEventBlob?(tabId: string, sha256: string, offset: number): ChatBlobChunk
   /** Original artifact references across this task’s tabs and forks, including reset tabs. */
   loadUserMessageContent?(taskId: string, ids: string[]): Promise<Map<string, UserContentBlock[]>>
-  /** Saved events with `afterSeq < seq < beforeSeq` (history older than the in-memory cache). */
-  loadChatEventsRange(tabId: string, afterSeq: number, beforeSeq: number): Promise<BufferedEvent[]>
   getNextSeqForTab(tabId: string): Promise<number>
   /** The tab's saved events — and the timeline projection derived from them. */
   clearChatEventsForTab(tabId: string): Promise<void>
@@ -431,7 +448,9 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       return persistChatEvent(db, tabId, seq, event, at)
     },
 
-    loadChatEvents: (tabId) => loadChatEvents(db, tabId),
+    loadChatEventsPage: (tabId, afterSeq, beforeSeq, budget) =>
+      loadChatEventsPage(db, tabId, afterSeq, beforeSeq, budget),
+    chatEventsTailStart: (tabId, count) => chatEventsTailStart(db, tabId, count),
     loadUserMessageContent: async (taskId, ids) => {
       const result = new Map<string, UserContentBlock[]>()
       if (ids.length === 0 || !(await legacyChatTables(db))) return result
@@ -448,8 +467,6 @@ export function createDbChatDataOps(db: SlayzoneDb, taskStore: TaskSessionStore)
       }
       return result
     },
-    loadChatEventsRange: (tabId, afterSeq, beforeSeq) =>
-      loadChatEventsRange(db, tabId, afterSeq, beforeSeq),
 
     getNextSeqForTab: (tabId) => getNextSeqForTab(db, tabId),
 

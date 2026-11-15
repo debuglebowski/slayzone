@@ -121,6 +121,13 @@ const permissions = z.object({
     })
   ])
 })
+/** A history page budget (`ChatHistoryPageBudget`); the computer clamps it to its maxima. */
+const pageBudget = z
+  .object({
+    maxBytes: z.number().int().positive().optional(),
+    maxEvents: z.number().int().positive().optional()
+  })
+  .strict()
 const tab = z.tuple([id]),
   /** A queued message's id and the tab holding it. */
   queueItem = z.tuple([id, id]),
@@ -195,7 +202,15 @@ export const chatOperationSchemas = {
   kill: tab,
   remove: tab,
   getReplay: z.tuple([id, z.number().int()]),
+  /** One chunk of an out-of-line event payload the tab's conversation pins (`chat-blobs`). */
+  readBlob: z.tuple([id, z.string().regex(/^[a-f0-9]{64}$/), z.number().int().nonnegative()]),
   getBufferSince: z.tuple([id, z.number().int()]),
+  /**
+   * One bounded page of `getReplay` / `getBufferSince` (`ChatReplayPage` /
+   * `ChatEventPage`). Only a computer that advertised `chatHistoryPages` knows them.
+   */
+  getReplayPage: z.tuple([id, z.number().int(), pageBudget.optional()]),
+  getEventPage: z.tuple([id, z.number().int(), pageBudget.optional()]),
   getInfo: z.tuple([id, z.string().optional()]),
   getTurnStatus: tab,
   openTimeline: z.tuple([id, z.string()]),
@@ -290,7 +305,10 @@ export type ChatQueueOperation = keyof typeof chatQueueOperationSchemas
 export const CHAT_READ_OPERATIONS = new Set<ChatOperation>([
   'supports',
   'getReplay',
+  'readBlob',
   'getBufferSince',
+  'getReplayPage',
+  'getEventPage',
   'getInfo',
   'getTurnStatus',
   'openTimeline',

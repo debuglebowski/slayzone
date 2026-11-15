@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import { useChatRestorationPending } from './chat-restoration'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useHubId, useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
@@ -65,6 +66,7 @@ export function useChatQueue(
   const storage = useMemo(() => createQueuedSubmissionJournal(hubId, tabId), [hubId, tabId])
 
   const listQuery = useQuery(trpc.chat.queue.list.queryOptions({ tabId }, { enabled: !!tabId }))
+  useChatRestorationPending(listQuery.isFetching)
 
   // Refetch on any queue mutation for this tab (push, remove, clear, drain).
   // Server fan-out is global; filter by tabId in onData.

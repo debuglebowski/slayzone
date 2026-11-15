@@ -175,6 +175,20 @@ describe('tool cards', () => {
     expect(toolBody(bash)).toEqual({ type: 'text', text: '$ echo hi\nhi' })
   })
 
+  it('prints a stored image in a tool input as a compact label, never its reference JSON', () => {
+    const ref = { $chatBlob: { v: 1, sha256: 'a'.repeat(64), mediaType: 'image/png', size: 2048 } }
+    const body = toolBody(
+      inv({
+        name: 'mcp__srv__upload',
+        input: { image: { type: 'image', data: ref, mimeType: 'image/png' } }
+      })
+    )
+    expect(body).toMatchObject({ type: 'text' })
+    const text = (body as { text: string }).text
+    expect(text).toContain('[image/png · 2 KB]')
+    expect(text).not.toContain('$chatBlob')
+  })
+
   it("formats a job's age like desktop's banner", () => {
     expect(formatAge(42_000)).toBe('42s')
     expect(formatAge(3 * 60_000)).toBe('3m')

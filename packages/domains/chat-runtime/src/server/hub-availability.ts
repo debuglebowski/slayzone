@@ -33,6 +33,7 @@ export function createChatAvailability(opts: {
   ownership: ChatOwnershipStore
   resolveComputer(taskId: string): Promise<string | null>
   connected(computerId: string): boolean
+  recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
   /** The conversation's history generation (see {@link chatHistoryGeneration}). */
   historyGeneration?(computerId: string, conversationId: string, epoch: number): string
@@ -96,6 +97,7 @@ export function createChatAvailability(opts: {
       return {
         state: 'offline',
         computer,
+        ...(opts.recovering?.(computer.id) ? { recovering: true } : {}),
         ...(holder && held ? { heldBy: { id: holder, name: held.name } } : {})
       }
     }

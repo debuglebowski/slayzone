@@ -132,7 +132,10 @@ export function createComputerChatServices(opts: {
   resolveComputer(taskId: string): Promise<string | null>
   resolveAvailabilityComputer?(taskId: string): Promise<string | null>
   connected?(computerId: string): boolean
+  recovering?(computerId: string): boolean
   chatRuntimeReady?(computerId: string): boolean
+  /** Whether the computer answers chat history in bounded pages (its `chatHistoryPages`). */
+  chatHistoryPages?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**
@@ -936,6 +939,8 @@ export function createComputerChatServices(opts: {
               'continueInTerminal',
               'getInfo',
               'getReplay',
+              'getReplayPage',
+              'readBlob',
               'openTimeline',
               'timelinePages',
               'searchTimeline',
@@ -1039,6 +1044,14 @@ export function createComputerChatServices(opts: {
         conversationId,
         ref
       }) as ReturnType<ChatComputerOps['archiveAttachment']>,
+    archiveBlob: (pc, archiveId, conversationId, sha256, offset) =>
+      computerRequest(pc, {
+        kind: 'archive.blob',
+        archiveId,
+        conversationId,
+        sha256,
+        offset
+      }) as ReturnType<ChatComputerOps['archiveBlob']>,
     archiveFile: (pc, archiveId, conversationId, artifactId, contentHash) =>
       computerRequest(pc, {
         kind: 'archive.file',
@@ -1381,6 +1394,7 @@ export function createComputerChatServices(opts: {
       ownership,
       resolveComputer: opts.resolveAvailabilityComputer ?? opts.resolveComputer,
       connected: opts.connected ?? (() => false),
+      recovering: opts.recovering,
       chatRuntimeReady: opts.chatRuntimeReady,
       hasLiveTask: opts.hasLiveTask,
       gate: opts.gate,

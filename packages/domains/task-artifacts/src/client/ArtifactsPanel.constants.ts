@@ -1,4 +1,4 @@
-import { FileText, Code, Globe, Image, GitBranch, Monitor, Moon, Sun } from 'lucide-react'
+import { FileText, Code, Film, Globe, Image, GitBranch, Monitor, Moon, Sun } from 'lucide-react'
 import type { RenderMode } from '@slayzone/task-contracts'
 
 export const INDENT_PX = 20
@@ -54,5 +54,6 @@ export const RENDER_MODE_ICONS: Record<RenderMode, typeof FileText> = {
   'svg-preview': Image,
   'mermaid-preview': GitBranch,
   image: Image,
-  pdf: FileText
+  pdf: FileText,
+  video: Film
 }

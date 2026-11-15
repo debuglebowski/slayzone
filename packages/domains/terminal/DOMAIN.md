@@ -14,6 +14,25 @@ is mid-reply (state `running`), its own included, unless `--force`. Messages sen
 during a turn queue until it ends; only explicit steering adds them to the running
 turn.
 
+### Agent exits: resume, recovery shell, or end
+
+When a terminal agent's process exits, `decideUnexpectedExit`
+(`pty-exit-strategy.ts`) decides. An agent that died MID-SESSION without anyone
+asking — non-zero code or a signal, ≥10 s after its first output, no `killPty` /
+hibernation / quit on record, no transport reason (`exited-while-detached`, …), no
+exit 130 or ^C/^D typed ≤10 s before — is resumed on its current conversation, in
+place: the same session continues (`createPty` continuation: scrollback and seq
+carry over, an info line marks the restart, the terminal sees no exit), and
+`pty.auto_resumed` is recorded. At that moment the tab shows `starting` and the
+info line, the dead process's agent tree is dropped (`replacing`), and input typed
+before the new process exists is held for it (never typed into a recovery shell).
+A resume its computer refuses to start falls back to the recovery shell. Only providers with a `resumeCommand` that resumes
+faithfully (the hibernation set) and a known conversation id. At most once per
+session per 5 min; a second death in that window gets the recovery shell plus
+`pty.auto_resume_rate_limited`. Everything else is unchanged: a start failure gets
+the interactive recovery shell, a stale resume its overlay, a requested kill ends.
+Regression: 2026-11-14, the hub's stray sweep SIGHUP'd 31 live agents (exit 129).
+
 ### Codex silence and cancellation provenance
 
 The running watchdog checks Codex with a bounded `thread/read` before treating
@@ -66,6 +85,22 @@ provider conversation + row key. Content, not hub metadata: no migration, no
 open), moved with the conversation, purged by retention. `pinMessage` refuses a pin for a
 conversation other than the one hydrated (the view is behind a Reset / switch). Agent
 tokens may list them, never change them.
+
+### Chat history reads are bounded pages
+
+No read answers or parses a whole conversation at once (chats reach hundreds of
+MB). `ChatEventLog.readPage` returns one page — at most
+`CHAT_HISTORY_PAGE_MAX_BYTES` (4 MiB) / `_EVENTS` (2,000), one event always fits —
+reading stored sizes from record headers (`octet_length`) before loading only that
+page's rows; `pages()` yields to the event loop between pages. Hydrate seeds the
+cache from the store's tail and folds what it needs from the whole history
+(outbox restore, fork re-arm, unfinished turn) in one paged pass; the projection
+opens from its checkpoint and reads only the events after it. Clients and the hub
+read `getEventPage` / `getReplayPage` (tRPC: `getBufferSince` / `getReplay` with
+`page`); whole reads stay for older callers, assembled from pages. Hub routes read
+the reduced history through `@slayzone/terminal/chat-history` (projection snapshot,
+older rows on demand). `timelinePages` answers within the same byte budget and
+names what it left out (`omitted`).
 
 ### Chat side questions (`/btw`)
 
@@ -341,3 +376,12 @@ const handleTerminalReady = useCallback((api) => {
 
 The hub keeps each pty session's terminal size (spawn size, then every successful `resizePty`, clamped as the pty got it): `getPtySize`, `pty.attach` → `size`, and the `resize` event → `pty.onResize`. Read-only: nothing changes how a session is sized. It exists for a client that shows a session WITHOUT sizing it — the phone renders at the size the desktop set, scaled to its screen, because two clients resizing one terminal fight (each SIGWINCH re-lays out the agent's TUI for the other).
 
+
+### 2026-11 Bounded chat history reads
+
+A whole-history `getBufferSince(-1)` (202 MB) closed the computer's hub socket
+(1009) and stalled the computer (heartbeat timeouts), and every reconnect then
+killed live agents. Every read that returns saved events or timeline rows is a
+page with a cursor; whole reads remain only for older hubs and clients, built from
+pages. Computers advertise `chatHistoryPages` (hello/enroll, additive); the hub
+asks an older computer for its whole read and answers it as the last page.

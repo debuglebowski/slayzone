@@ -20,6 +20,7 @@ describe('no computer: the default workspace fs', () => {
   const fs = getWorkspaceDeps().fs
   const calls: Array<[string, () => unknown]> = [
     ['readFile', () => fs.readFile(null, '/', 'etc/hosts')],
+    ['readBytes', () => fs.readBytes(null, '/', 'etc/hosts', 0, 16)],
     ['writeFile', () => fs.writeFile(null, '/tmp', 'x', 'y')],
     ['listDir', () => fs.listDir(null, '/')],
     ['pathExists', () => fs.pathExists(null, '/')],

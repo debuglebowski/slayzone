@@ -1,3 +1,4 @@
+import { hasTransferDestination } from './commands/transfers'
 declare const __APP_VERSION__: string
 
 // (Removed: a filter that suppressed the `node:sqlite` ExperimentalWarning on
@@ -26,6 +27,7 @@ import { computerCommand } from './commands/computer'
 import { updateCommand } from './commands/update'
 
 const program = new Command()
+  .enablePositionalOptions()
   .name('slay')
   .description('SlayZone CLI')
   .version(__APP_VERSION__)
@@ -104,6 +106,7 @@ program.addCommand(hubCommand())
 program.addCommand(computerCommand())
 program.addCommand(updateCommand())
 
+program.enablePositionalOptions(hasTransferDestination(process.argv.slice(2)))
 program.parseAsync(process.argv).catch((err) => {
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(1)

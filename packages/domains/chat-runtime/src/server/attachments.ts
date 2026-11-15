@@ -1,18 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-  openSync,
-  closeSync,
-  fsyncSync,
-  unlinkSync,
-  readdirSync
-} from 'node:fs'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { lstatSync, unlinkSync } from 'node:fs'
 import {
   attachmentSizeError,
   sniffAttachment,
@@ -23,7 +10,6 @@ import type { ChatStorage } from './storage'
 import type { createLocalChatData } from './local-data'
 
 const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-const activeUploads = new Set<string>()
 /** An `attachment` record value: the ref plus its owning task (storage-only scope). */
 type StoredAttachment = ChatAttachment & { taskId?: string }
 /** Storage record → wire ref. Explicit pick, so no storage-only field leaks onto the wire. */
@@ -35,74 +21,12 @@ export function createLocalAttachments(
   store: ChatStorage,
   local: ReturnType<typeof createLocalChatData>
 ) {
-  const dir = join(store.dir, 'blobs')
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // The store's content-addressed blob dir (shared with event blobs).
+  const { dir, readBlob, writeBlob, collectStaging } = store.blobs
   // Repair pre-fix imported references before retention or GC can remove the
   // original conversation's last pin. New writes pin atomically in storage.
   store.repairAttachmentPins()
-  function collectStaging() {
-    for (const name of readdirSync(dir)) {
-      if (!/^\.upload-(?:\d+-)?[a-f0-9-]{36}$/.test(name)) continue
-      const path = join(dir, name)
-      if (activeUploads.has(path)) continue
-      const pid = /^\.upload-(\d+)-/.exec(name)?.[1]
-      if (pid && Number(pid) !== process.pid) {
-        try {
-          process.kill(Number(pid), 0)
-          continue
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
-        }
-      }
-      if (lstatSync(path).isFile()) unlinkSync(path)
-    }
-  }
   collectStaging()
-  function blobPath(hash: string) {
-    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Invalid attachment hash')
-    return join(dir, hash)
-  }
-  function readBlob(hash: string): Uint8Array {
-    const path = blobPath(hash)
-    if (!lstatSync(path).isFile()) throw new Error('Attachment is not a regular file')
-    const bytes = readFileSync(path)
-    if (hashOf(bytes) !== hash) throw new Error('Attachment hash integrity failure')
-    return bytes
-  }
-  function writeBlob(hash: string, bytes: Uint8Array) {
-    const path = blobPath(hash)
-    if (existsSync(path)) {
-      try {
-        readBlob(hash)
-        return
-      } catch {
-        /* Verified caller bytes repair a corrupt local copy. */
-      }
-    }
-    const temp = join(dir, `.upload-${process.pid}-${randomUUID()}`)
-    activeUploads.add(temp)
-    try {
-      const fd = openSync(temp, 'wx', 0o600)
-      try {
-        writeFileSync(fd, bytes)
-        fsyncSync(fd)
-      } finally {
-        closeSync(fd)
-      }
-      renameSync(temp, path)
-      if (process.platform !== 'win32') {
-        const parent = openSync(dir, 'r')
-        try {
-          fsyncSync(parent)
-        } finally {
-          closeSync(parent)
-        }
-      }
-    } finally {
-      activeUploads.delete(temp)
-      if (existsSync(temp)) unlinkSync(temp)
-    }
-  }
   const reader: ChatAttachmentReader = {
     read: async (ref) => {
       const records = store.findRecords('attachment').map((r) => r.value as ChatAttachment)
@@ -201,13 +125,16 @@ export function createLocalAttachments(
       return store.transaction(() => {
         collectStaging()
         if (store.hasBlobLeases()) return { removed: 0 }
-        const referenced = new Set(
-          store.findRecords('attachment').map((r) => (r.value as ChatAttachment).contentHash)
-        )
+        // Alive while pinned: by an attachment (user upload) or an event blob
+        // (out-of-line payload of a saved event), in a conversation not deleted.
+        const referenced = new Set([
+          ...store.findRecords('attachment').map((r) => (r.value as ChatAttachment).contentHash),
+          ...store.eventBlobHashes()
+        ])
         let removed = 0
-        for (const name of readdirSync(dir))
-          if (/^[a-f0-9]{64}$/.test(name) && !referenced.has(name)) {
-            const path = blobPath(name)
+        for (const name of store.blobs.list())
+          if (!referenced.has(name)) {
+            const path = store.blobs.blobPath(name)
             if (lstatSync(path).isFile()) {
               unlinkSync(path)
               removed++

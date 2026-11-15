@@ -24,7 +24,7 @@ import {
   crashReporter,
   nativeImage
 } from 'electron'
-import { join, extname, normalize, sep, resolve } from 'path'
+import { join, sep, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { homedir, hostname } from 'os'
 import { randomUUID } from 'node:crypto'
@@ -104,6 +104,7 @@ import { checkHubSession } from '@slayzone/hub-auth/client'
 import { nodeHubTransport } from '@slayzone/hub-auth/client-node'
 import type { HubEntry, LocalComputerStatus } from '@slayzone/types'
 import { setHubTokenCipher, createHubTokenStore, getAllHubTokens } from './hub-tokens'
+import { createSlzFileHandler } from './slz-file-handler'
 import {
   BLOCKED_EXTERNAL_PROTOCOLS,
   isBlockedExternalProtocolUrl,
@@ -265,9 +266,7 @@ import {
   getManualInstallHint,
   getSupervisedRoot,
   SIDECAR_FIXED_PORT,
-  SLZ_FILE_HOST,
-  fileUrlToSlzFileUrl,
-  injectForcedHtmlTheme
+  fileUrlToSlzFileUrl
 } from '@slayzone/platform'
 import { initStorageDir, getStorageDir, resolveLegacyStateDir } from './data-paths'
 import { StorageImportError } from './copy-utils'
@@ -3023,88 +3022,30 @@ app
     _chromiumVersion = rawUa.match(/Chrome\/(\d+)/)?.[1] || '142'
     browserSession.setUserAgent(_chromeUa)
 
-    // Serve local files via slz-file:// (Chromium blocks file:// in webviews and cross-origin renderers)
-    const userHome = homedir()
-    const slzFileHandler = async (request: Request) => {
-      // URLs are constructed via @slayzone/platform's toSlzFileUrl, which
-      // fills the authority slot with SLZ_FILE_HOST so Chromium's standard-URL
-      // canonicalizer can't move the first path segment into the host
-      // (lowercasing + Unicode-mangling it).
-      const parsed = new URL(request.url)
-      if (parsed.hostname !== SLZ_FILE_HOST) {
-        return new Response('Forbidden', { status: 403 })
-      }
-      const filePath = normalize(decodeURIComponent(parsed.pathname))
-
-      // Block path traversal outside user home directory.
-      if (!filePath.startsWith(userHome + sep)) {
-        return new Response(
-          `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Forbidden</title>
-<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
-div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
-</head><body><div><h1>Access denied</h1><p>Path outside home directory</p></div></body></html>`,
-          { status: 200, headers: { 'content-type': 'text/html' } }
-        )
-      }
-      const mimeTypes: Record<string, string> = {
-        '.html': 'text/html',
-        '.htm': 'text/html',
-        '.css': 'text/css',
-        '.js': 'text/javascript',
-        '.mjs': 'text/javascript',
-        '.json': 'application/json',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.svg': 'image/svg+xml',
-        '.ico': 'image/x-icon',
-        '.webp': 'image/webp',
-        '.avif': 'image/avif',
-        '.bmp': 'image/bmp',
-        '.woff': 'font/woff',
-        '.woff2': 'font/woff2',
-        '.ttf': 'font/ttf',
-        '.pdf': 'application/pdf',
-        '.xml': 'application/xml',
-        '.txt': 'text/plain'
-      }
-      try {
-        const data = await fsp.readFile(filePath)
-        const contentType = mimeTypes[extname(filePath).toLowerCase()] || 'application/octet-stream'
-
-        // Per-artifact forced theme (task-artifacts HTML preview): the iframe
-        // is sandboxed cross-origin with no webContents handle to insertCSS
-        // into, so the override is injected as text here instead, gated on an
-        // explicit `theme` param only html preview requests ever send — every
-        // other slz-file:// consumer (images, PDFs, browser tabs, plain files)
-        // gets the untouched buffer below, unchanged. Doing it at parse time
-        // also means the document is never painted in the wrong scheme first.
-        const theme = parsed.searchParams.get('theme')
-        if (contentType === 'text/html' && (theme === 'dark' || theme === 'light')) {
-          const doctored = injectForcedHtmlTheme(data.toString('utf-8'), theme)
-          return new Response(doctored, {
-            headers: { 'content-type': contentType, 'cache-control': 'no-cache' }
-          })
+    // Serve files via slz-file:// (Chromium blocks file:// in webviews and
+    // cross-origin renderers). Local paths come off this disk; source URLs (a file
+    // on a hub or one of its computers) are fetched from that hub — see
+    // slz-file-handler.ts.
+    const slzFileHandler = createSlzFileHandler({
+      homeDir: homedir(),
+      resolveHub: async (hubId) => {
+        const cfg = readBootConfig(getClientStateRoot(), getLegacyClientStateRoot())
+        const hub = resolveHubRegistry(cfg).find((h) => h.id === hubId)
+        if (!hub) return null
+        const token = await createHubTokenStore(
+          getClientStateRoot(),
+          getLegacyClientStateRoot()
+        ).get(hubId)
+        if (hub.id === LOCAL_HUB_ID && !isRemoteMode) {
+          const handle = await sidecarHandlePromise
+          await handle.waitForReady()
+          const port = handle.getPort()
+          return port ? { origin: `http://127.0.0.1:${port}`, token } : null
         }
-
-        return new Response(data, {
-          headers: {
-            'content-type': contentType,
-            'cache-control': 'no-cache'
-          }
-        })
-      } catch {
-        const escaped = filePath.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
-        return new Response(
-          `<!DOCTYPE html><html><head><meta charset="utf-8"><title>File not found</title>
-<style>body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#1a1a1a;color:#888}
-div{text-align:center}h1{font-size:14px;font-weight:500;color:#aaa}p{font-size:12px;margin:8px 0 0;word-break:break-all;max-width:400px}</style>
-</head><body><div><h1>File not found</h1><p>${escaped}</p></div></body></html>`,
-          { status: 200, headers: { 'content-type': 'text/html' } }
-        )
+        const normalized = hub.url ? normalizeRemoteUrl(hub.url) : null
+        return normalized ? { origin: toHubOrigin(normalized), token } : null
       }
-    }
+    })
     const webPanelSession = session.fromPartition('persist:web-panels')
     webPanelSession.setUserAgent(_chromeUa)
 

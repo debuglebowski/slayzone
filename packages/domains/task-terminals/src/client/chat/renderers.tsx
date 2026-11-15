@@ -3,6 +3,7 @@ import { useContext, useDeferredValue, useEffect, useId, useMemo, useState } fro
 import {
   CODEX_AGENT_TOOL_PREFIX,
   apiRetryReason,
+  chatBlobJsonReplacer,
   formatRetrySpan,
   stripAnsi
 } from '@slayzone/terminal-contracts'
@@ -39,7 +40,8 @@ import {
   type ToolInvocation
 } from '@slayzone/terminal/client'
 import { claudeEditResultToFileDiff } from './claude-patch-to-filediff'
-import { readImageSrc } from './tool-cards/read-image'
+import { readImageSource } from './tool-cards/read-image'
+import { ChatImagePending, useChatImage } from './tool-cards/chat-images'
 import { AttachmentHoverPreview } from './attachments/AttachmentHoverPreview'
 import { ImageLightbox, ImageOpenButton } from './attachments/ImageLightbox'
 import { FilesChangedRow } from './files-changed/FilesChangedRow'
@@ -622,9 +624,13 @@ export function ToolCallRead({ invocation, timestamp }: ToolProps) {
   const structured = invocation.result?.structured as {
     file?: { content?: string; numLines?: number }
   } | null
-  const imageSrc = invocation.result
-    ? readImageSrc(invocation.result.rawContent, invocation.result.structured)
-    : null
+  // Inline at once; stored out-of-line once its bytes are loaded.
+  const image = useChatImage(
+    invocation.result
+      ? readImageSource(invocation.result.rawContent, invocation.result.structured)
+      : null
+  )
+  const imageSrc = image.src
   const [fullSrc, setFullSrc] = useState<string | null>(null)
   const pathText = input?.file_path
     ? `${shortenPath(input.file_path)}${input.limit ? ` · L${input.offset ?? 1}–${(input.offset ?? 1) + input.limit - 1}` : ''}`
@@ -646,7 +652,11 @@ export function ToolCallRead({ invocation, timestamp }: ToolProps) {
       timestamp={timestamp}
       summary={summary}
     >
-      {imageSrc ? (
+      {image.status === 'loading' || image.status === 'error' ? (
+        <div className="p-3">
+          <ChatImagePending image={image} alt={imageName} />
+        </div>
+      ) : imageSrc ? (
         <div className="p-3">
           <ImageOpenButton
             name={imageName}
@@ -929,9 +939,14 @@ function CodexFinalPlan({ item }: { item: Extract<TimelineItem, { kind: 'codex-p
 export function ToolCallGeneric({ invocation, timestamp }: ToolProps) {
   // A blocked call's "result" is the hook's reason: the block line shows it.
   const result = invocation.blockedBy ? null : invocation.result?.rawContent
+  // Stored images print as a compact label (`[image/png · 120 KB]`), never as JSON.
   const resultText =
-    typeof result === 'string' ? result : result != null ? JSON.stringify(result, null, 2) : ''
-  const inputPreview = JSON.stringify(invocation.input).slice(0, 80)
+    typeof result === 'string'
+      ? result
+      : result != null
+        ? JSON.stringify(result, chatBlobJsonReplacer, 2)
+        : ''
+  const inputPreview = JSON.stringify(invocation.input, chatBlobJsonReplacer).slice(0, 80)
   return (
     <ToolShell
       icon={<HelpCircle className="size-3" />}
@@ -944,7 +959,7 @@ export function ToolCallGeneric({ invocation, timestamp }: ToolProps) {
         <div>
           <div className="text-muted-foreground/70 mb-1">Input</div>
           <pre className="whitespace-pre-wrap bg-muted/30 p-2 rounded">
-            {JSON.stringify(invocation.input, null, 2)}
+            {JSON.stringify(invocation.input, chatBlobJsonReplacer, 2)}
           </pre>
         </div>
         {resultText && (

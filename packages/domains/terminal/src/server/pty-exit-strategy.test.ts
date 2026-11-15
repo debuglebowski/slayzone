@@ -6,7 +6,13 @@ import {
   shouldShellFallback,
   buildRecoveryMessage,
   decideRecoveryAdoption,
-  shouldArmHubStartupDeadline
+  shouldArmHubStartupDeadline,
+  decideUnexpectedExit,
+  buildAutoResumeMessage,
+  AUTO_RESUME_MIN_UPTIME_MS,
+  AUTO_RESUME_WINDOW_MS,
+  USER_INTERRUPT_GRACE_MS,
+  type UnexpectedExitContext
 } from './pty-exit-strategy.js'
 
 const base = {
@@ -155,5 +161,114 @@ describe('shouldArmHubStartupDeadline', () => {
 
   test('a confirmation that says nothing about the deadline is treated as not owned', () => {
     expect(shouldArmHubStartupDeadline({})).toBe(true)
+  })
+})
+
+// --- decideUnexpectedExit (auto-resume of an agent that died mid-session) ---
+
+describe('decideUnexpectedExit', () => {
+  const NOW = 1_000_000
+  // An agent that printed 10 min ago and was killed behind SlayZone's back (the
+  // 2026-11-14 stray sweep: SIGHUP → claude exits 129).
+  const died: UnexpectedExitContext = {
+    exitCode: 129,
+    hasPostSpawnCommand: true,
+    usedShellFallback: false,
+    isStale: false,
+    hasResumeCommand: true,
+    resumeEligibleMode: true,
+    conversationId: 'conv-1',
+    killRequested: false,
+    shuttingDown: false,
+    hibernating: false,
+    firstOutputAt: NOW - 600_000,
+    lastInterruptInputAt: null,
+    lastAutoResumeAt: null,
+    now: NOW
+  }
+  const skip = (why: string) => ({ action: 'none', why })
+
+  test('unexpected death past startup → resume', () => {
+    expect(decideUnexpectedExit(died)).toEqual({ action: 'resume' })
+  })
+  test('signal death with exit code 0 → resume', () => {
+    expect(decideUnexpectedExit({ ...died, exitCode: 0, signal: 9 })).toEqual({ action: 'resume' })
+  })
+  test('clean exit (0, no signal) → nothing to recover', () => {
+    expect(decideUnexpectedExit({ ...died, exitCode: 0 })).toEqual(skip('clean-exit'))
+    expect(decideUnexpectedExit({ ...died, exitCode: 0, signal: 0 })).toEqual(skip('clean-exit'))
+  })
+  test('death SlayZone asked for (close, restart, hibernate, task done, quit) → no resume', () => {
+    expect(decideUnexpectedExit({ ...died, killRequested: true })).toEqual(skip('requested'))
+    expect(decideUnexpectedExit({ ...died, shuttingDown: true })).toEqual(skip('requested'))
+    expect(decideUnexpectedExit({ ...died, hibernating: true })).toEqual(skip('requested'))
+  })
+  test('exit carrying a transport reason keeps its overlay', () => {
+    for (const reason of [
+      'exited-while-detached',
+      'reattach-timeout',
+      'computer-restarted',
+      'startup-timeout'
+    ])
+      expect(decideUnexpectedExit({ ...died, reason })).toEqual(skip('transport'))
+  })
+  test('user interrupt: exit 130, or ^C/^D shortly before → no resume', () => {
+    expect(decideUnexpectedExit({ ...died, exitCode: 130 })).toEqual(skip('user-interrupt'))
+    expect(
+      decideUnexpectedExit({ ...died, lastInterruptInputAt: NOW - USER_INTERRUPT_GRACE_MS + 1 })
+    ).toEqual(skip('user-interrupt'))
+    // An old ^C does not explain a death now.
+    expect(
+      decideUnexpectedExit({ ...died, lastInterruptInputAt: NOW - USER_INTERRUPT_GRACE_MS - 1 })
+    ).toEqual({ action: 'resume' })
+  })
+  test('start failures keep the shell fallback: no output, or died soon after it', () => {
+    expect(decideUnexpectedExit({ ...died, firstOutputAt: null })).toEqual(skip('startup'))
+    expect(
+      decideUnexpectedExit({ ...died, firstOutputAt: NOW - AUTO_RESUME_MIN_UPTIME_MS + 1 })
+    ).toEqual(skip('startup'))
+    expect(
+      decideUnexpectedExit({ ...died, firstOutputAt: NOW - AUTO_RESUME_MIN_UPTIME_MS })
+    ).toEqual({ action: 'resume' })
+  })
+  test('stale / in-use resume keeps its overlay', () => {
+    expect(decideUnexpectedExit({ ...died, isStale: true })).toEqual(skip('stale'))
+  })
+  test('not an agent, or already the recovery shell → today', () => {
+    expect(decideUnexpectedExit({ ...died, hasPostSpawnCommand: false })).toEqual(skip('not-agent'))
+    expect(decideUnexpectedExit({ ...died, usedShellFallback: true })).toEqual(
+      skip('recovery-shell')
+    )
+  })
+  test('provider cannot resume → today', () => {
+    expect(decideUnexpectedExit({ ...died, hasResumeCommand: false })).toEqual(skip('no-resume'))
+    expect(decideUnexpectedExit({ ...died, resumeEligibleMode: false })).toEqual(skip('no-resume'))
+    expect(decideUnexpectedExit({ ...died, conversationId: null })).toEqual(skip('no-conversation'))
+  })
+  test('at most one auto-resume per window, then the shell', () => {
+    expect(
+      decideUnexpectedExit({ ...died, lastAutoResumeAt: NOW - AUTO_RESUME_WINDOW_MS + 1 })
+    ).toEqual({ action: 'rate-limited' })
+    expect(
+      decideUnexpectedExit({ ...died, lastAutoResumeAt: NOW - AUTO_RESUME_WINDOW_MS })
+    ).toEqual({ action: 'resume' })
+  })
+  test('rate limit only applies to deaths that would resume', () => {
+    expect(decideUnexpectedExit({ ...died, killRequested: true, lastAutoResumeAt: NOW })).toEqual(
+      skip('requested')
+    )
+  })
+})
+
+describe('buildAutoResumeMessage', () => {
+  test('names the agent, the code and what happened', () => {
+    const m = buildAutoResumeMessage('claude-code', 129)
+    expect(m).toContain('[SlayZone] claude-code exited unexpectedly (code 129)')
+    expect(m).toContain('resuming conversation')
+    expect(m.startsWith('\r\n')).toBe(true)
+    expect(m.endsWith('\r\n')).toBe(true)
+  })
+  test('names the signal when there is one', () => {
+    expect(buildAutoResumeMessage('codex', 0, 1)).toContain('(signal 1)')
   })
 })

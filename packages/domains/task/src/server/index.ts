@@ -92,7 +92,9 @@ export {
   deleteSession,
   relinquishSession,
   resetConversation,
-  switchConversation
+  switchConversation,
+  whyTaskAgentsEnded,
+  type TaskAgentsEndedReason
 } from './ops'
 export type {
   CreateImportedTaskInput,
@@ -139,3 +141,8 @@ export { handleAttentionTransition } from './attention'
 // the healer/resolver seams `createPty` calls are never left null. Both only
 // forward to the agent's computer (its session ledger decides, robustness plan §9).
 export { registerConversationHealer, registerConversationResolver } from './conversation-healer'
+
+export { requestTaskMoveRunner } from './ops/task-moves'
+export { copySnapshotRoot } from './copy-snapshot-files'
+
+export * as taskMoveOps from './ops/task-moves'

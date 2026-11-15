@@ -390,7 +390,14 @@ function SortableTaskRow(props: TaskRowProps): ReactNode {
   const dragData: TaskRowDragData = {
     kind: 'task',
     projectId: task.project_id,
-    groupValue: rowGroupValue(task, ctx.treeGroupBy, ctx.treeGroupPinned, ctx.pinnedSet),
+    groupValue: rowGroupValue(
+      task,
+      ctx.treeGroupBy,
+      ctx.treeGroupPinned,
+      ctx.pinnedSet,
+      ctx.treeGroupBlocked,
+      ctx.blockedTaskIds
+    ),
     parentId: task.parent_id ?? null
   }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({

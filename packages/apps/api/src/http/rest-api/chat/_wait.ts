@@ -2,12 +2,16 @@
  * Wait until a chat tab's turn settles — the chat twin of `/api/pty/:id/wait`.
  * Chat has no "awaiting prompt" state (a parked turn reads `idle`), so the
  * outcome is computed from the computer's turn status, the queue, and — for
- * `answered` — the sent message's delivery events. Re-evaluated on every chat
- * event, state change and queue change for the tab, plus a slow safety poll.
+ * `answered` — the sent message's delivery: its row in the saved history (read
+ * once, in bounded pages), then the live summaries of every saved event.
+ * Re-evaluated on every chat event, state change and queue change for the tab,
+ * plus a slow safety poll; none of them reads the history again, except the poll,
+ * rarely, while the delivery is still unknown.
  */
-import type { AgentEvent, ChatSavedSummary, ChatTurnStatus } from '@slayzone/terminal-contracts'
+import type { ChatSavedSummary, ChatTurnStatus } from '@slayzone/terminal-contracts'
+import { chatHistoryDelivery } from '@slayzone/terminal/chat-history'
 import type { ChatAccess } from '../types'
-import { turnStatus, type ChatTarget } from './_chat'
+import { turnStatus, withChatTabHistory, type ChatTarget } from './_chat'
 
 export type ChatWaitUntil = 'idle' | 'prompt' | 'answered'
 export type ChatWaitOutcome = 'idle' | 'prompt' | 'answered' | 'dead' | 'error' | 'timeout'
@@ -21,24 +25,20 @@ export interface ChatWaitResult {
 }
 
 const SAFETY_POLL_MS = 5000
+/** How often the safety poll may read the saved history again while the delivery is unknown. */
+const SAVED_REREAD_MS = 30_000
 
 type Delivery = { state: string; error?: string }
 
-/** The latest delivery state the saved history records for `messageId`. */
+/** The delivery state the saved history records for `messageId` (its row; bounded reads). */
 async function savedDelivery(
   chat: ChatAccess,
   target: ChatTarget,
   messageId: string
 ): Promise<Delivery | null> {
-  const events = (await Promise.resolve(chat.deps().ops.getBufferSince(target.tabId, -1)).catch(
-    () => []
-  )) as Array<{ event: AgentEvent }>
-  let last: Delivery | null = null
-  for (const { event } of events) {
-    if (event.kind === 'user-message-delivery' && event.id === messageId)
-      last = { state: event.state, ...(event.error ? { error: event.error } : {}) }
-  }
-  return last
+  return withChatTabHistory(chat, target, (history) =>
+    chatHistoryDelivery(history, messageId)
+  ).catch(() => null)
 }
 
 async function queuedCount(chat: ChatAccess, target: ChatTarget): Promise<number> {
@@ -58,6 +58,8 @@ export function waitForChat(
     let dirty = false
     // Delivery of the awaited message, from live events (saved history covers the past).
     let delivery: Delivery | null = null
+    /** When the saved history was last read for it (null: not yet). */
+    let savedReadAt: number | null = null
 
     const cleanups: Array<() => void> = []
     const finish = (result: ChatWaitResult | Error) => {
@@ -68,7 +70,7 @@ export function waitForChat(
       else resolve(result)
     }
 
-    const evaluate = async (): Promise<ChatWaitResult | null> => {
+    const evaluate = async (fromPoll: boolean): Promise<ChatWaitResult | null> => {
       const [status, queued] = await Promise.all([
         turnStatus(chat, target),
         queuedCount(chat, target)
@@ -78,7 +80,18 @@ export function waitForChat(
         return { outcome: 'prompt', status, queued }
       if (opts.until === 'prompt') return null
       if (opts.until === 'answered' && opts.messageId) {
-        const d = delivery ?? (await savedDelivery(chat, target, opts.messageId))
+        // The saved history once; again only from the safety poll, rarely (a summary
+        // lost to a reconnect) — never on each event or state change.
+        if (
+          !delivery &&
+          (savedReadAt === null || (fromPoll && Date.now() - savedReadAt >= SAVED_REREAD_MS))
+        ) {
+          savedReadAt = Date.now()
+          const saved = await savedDelivery(chat, target, opts.messageId)
+          // A live summary that came in meanwhile is newer.
+          delivery ??= saved
+        }
+        const d = delivery
         if (d?.state === 'answered') return { outcome: 'answered', status, queued }
         if (d?.state === 'failed' || d?.state === 'cancelled')
           return {
@@ -96,14 +109,14 @@ export function waitForChat(
       return { outcome: 'idle', status, queued }
     }
 
-    const check = () => {
+    const check = (fromPoll = false) => {
       if (settled) return
       if (running) {
         dirty = true
         return
       }
       running = true
-      evaluate().then(
+      evaluate(fromPoll).then(
         (result) => {
           running = false
           if (result) finish(result)
@@ -147,7 +160,7 @@ export function waitForChat(
         if (sessionId === target.sessionId) check()
       })
     )
-    const poll = setInterval(check, SAFETY_POLL_MS)
+    const poll = setInterval(() => check(true), SAFETY_POLL_MS)
     const timer = setTimeout(() => {
       Promise.all([turnStatus(chat, target).catch(() => null), queuedCount(chat, target)]).then(
         ([status, queued]) => finish({ outcome: 'timeout', status, queued }),

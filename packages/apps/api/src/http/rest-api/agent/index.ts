@@ -12,16 +12,17 @@
  *   POST interrupt  chat: stop the turn; pty: Ctrl-C
  */
 import type { Express, Request, Response } from 'express'
-import { formatChatTranscript, transcriptRows } from '@slayzone/terminal/chat-transcript'
+import { formatChatTranscript } from '@slayzone/terminal/chat-transcript'
+import { chatHistoryTranscript } from '@slayzone/terminal/chat-history'
 import type { ChatAccess, PtyAccess, RestApiDeps } from '../types'
 import { NOT_AVAILABLE_STANDALONE } from '../types'
 import { isResolveFailure, resolveByIdPrefix } from '../resolve'
 import {
   chatOpts,
   ChatRouteError,
-  reducedHistory,
   sendChatError,
   turnStatus,
+  withChatTabHistory,
   type ChatTarget
 } from '../chat/_chat'
 import { waitForChat } from '../chat/_wait'
@@ -215,11 +216,12 @@ export function registerAgentRoutes(app: Express, deps: RestApiDeps): void {
     agentHandler(deps, async (agent, req, res) => {
       const last = intParam(req.query.last)
       if (agent.kind === 'chat') {
-        const { state } = await reducedHistory(agent.chat, agent.target)
-        const rows = transcriptRows(state, {
-          last,
-          verbose: req.query.verbose === '1' || req.query.verbose === 'true'
-        })
+        const rows = await withChatTabHistory(agent.chat, agent.target, (history) =>
+          chatHistoryTranscript(history, {
+            last,
+            verbose: req.query.verbose === '1' || req.query.verbose === 'true'
+          })
+        )
         res.type('text/plain').send(formatChatTranscript(rows))
         return
       }

@@ -38,6 +38,7 @@ import { ChatViewContext, type ChatViewState } from '../ChatViewContext'
 import { renderTimelineItem, renderTool } from '../renderers'
 import { ToolInActivityContext, ToolShell } from './card-shell'
 import { RowUiStateContext, RowUiStateStore, TimelineRowKeyContext } from '../row-ui-state'
+import { ChatBlobReaderContext, clearChatImageCache, type ChatBlobReader } from './chat-images'
 
 const onOpenFile = vi.fn()
 const onOpenUrl = vi.fn()
@@ -542,5 +543,142 @@ describe('Read card: image', () => {
       )
     )
     expect(screen.queryByRole('button', { name: /full size/ })).toBeNull()
+  })
+})
+
+describe('images stored out-of-line (chat blob references)', () => {
+  // Bytes of a 3-chunk "image" and its sha256 (computed below with WebCrypto).
+  const bytes = new Uint8Array(Array.from({ length: 2500 }, (_, i) => i % 251))
+  const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u))
+  let sha = ''
+  beforeEach(async () => {
+    clearChatImageCache()
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+    sha = Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')
+  })
+  const ref = () => ({
+    $chatBlob: { v: 1, sha256: sha, mediaType: 'image/png', size: bytes.length }
+  })
+  /** A reader serving `bytes` in 1000-byte chunks, as the computer pages them. */
+  const reader = (tamper = false) =>
+    vi.fn<ChatBlobReader>(async (hash, offset) => {
+      expect(hash).toBe(sha)
+      const chunk = bytes.slice(offset, offset + 1000)
+      if (tamper && offset === 0) chunk[0] ^= 1
+      return { mediaType: 'image/png', size: bytes.length, offset, data: b64(chunk) }
+    })
+  const withReader = (read: ChatBlobReader | null, invocation: ToolInvocation) =>
+    render(
+      <TooltipProvider>
+        <ChatBlobReaderContext.Provider value={read}>
+          <View>{renderTool(invocation, 0)}</View>
+        </ChatBlobReaderContext.Provider>
+      </TooltipProvider>
+    )
+
+  it('an MCP image loads its bytes (paged) and shows them, after a loading state', async () => {
+    const read = reader()
+    const { container } = withReader(
+      read,
+      inv(
+        'mcp__srv__tool',
+        {},
+        { rawContent: [{ type: 'image', data: ref(), mimeType: 'image/png' }], structured: null }
+      )
+    )
+    openCard(/tool/)
+    expect(screen.getByTestId('chat-image-loading')).toBeTruthy()
+    const img = await screen.findByAltText('Tool output')
+    expect(img.getAttribute('src')).toBe(`data:image/png;base64,${b64(bytes)}`)
+    expect(read.mock.calls.map((c) => c[1])).toEqual([0, 1000, 2000])
+    expect(container.querySelector('[data-testid="chat-image-loading"]')).toBeNull()
+  })
+
+  it('a Read of an image (both copies referenced) opens full size from the loaded bytes', async () => {
+    withReader(
+      reader(),
+      inv(
+        'Read',
+        { file_path: '/tmp/shot.png' },
+        {
+          rawContent: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: ref() } }
+          ],
+          structured: { type: 'image', file: { base64: ref(), type: 'image/png' } }
+        }
+      )
+    )
+    openCard(/Read/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open shot.png full size' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByAltText('shot.png').getAttribute('src')).toBe(
+      `data:image/png;base64,${b64(bytes)}`
+    )
+  })
+
+  it('bytes that do not match their hash, a failed read, or no reader: "Image unavailable"', async () => {
+    for (const read of [
+      reader(true),
+      vi.fn<ChatBlobReader>(async () => {
+        throw new Error('offline')
+      }),
+      null
+    ]) {
+      clearChatImageCache()
+      withReader(
+        read,
+        inv(
+          'mcp__srv__tool',
+          {},
+          { rawContent: [{ type: 'image', data: ref(), mimeType: 'image/png' }], structured: null }
+        )
+      )
+      openCard(/tool/)
+      expect(await screen.findByText('Image unavailable')).toBeTruthy()
+      expect(screen.queryByAltText('Tool output')).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('tool inputs holding a stored image print it as a compact label (MCP and generic cards)', () => {
+    for (const name of ['mcp__srv__upload', 'OtherTool']) {
+      show(
+        inv(
+          name,
+          { image: { type: 'image', data: ref(), mimeType: 'image/png' } },
+          { rawContent: 'ok', structured: null }
+        )
+      )
+      openCard(name.startsWith('mcp') ? /upload/ : /OtherTool/)
+      expect(document.body.textContent).toContain('[image/png · 2 KB]')
+      expect(document.body.textContent).not.toContain('$chatBlob')
+      cleanup()
+    }
+  })
+
+  it('an MCP block of another kind holding a stored payload prints it as a compact label', () => {
+    show(
+      inv(
+        'mcp__srv__tool',
+        {},
+        { rawContent: [{ type: 'video', data: ref(), mimeType: 'video/mp4' }], structured: null }
+      )
+    )
+    openCard(/tool/)
+    expect(document.body.textContent).toContain('[image/png · 2 KB]')
+    expect(document.body.textContent).not.toContain('$chatBlob')
+  })
+
+  it('a generic card prints a reference as a compact label, never its JSON', () => {
+    show(
+      inv(
+        'SomeTool',
+        {},
+        { rawContent: [{ type: 'image', data: ref(), mimeType: 'image/png' }], structured: null }
+      )
+    )
+    openCard(/SomeTool/)
+    expect(document.body.textContent).toContain('[image/png · 2 KB]')
+    expect(document.body.textContent).not.toContain('$chatBlob')
   })
 })

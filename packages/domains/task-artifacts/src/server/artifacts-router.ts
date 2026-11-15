@@ -50,7 +50,8 @@ const renderMode = z.enum([
   'svg-preview',
   'mermaid-preview',
   'image',
-  'pdf'
+  'pdf',
+  'video'
 ]) satisfies z.ZodType<RenderMode>
 const createArtifactInput = z.object({
   taskId: z.string(),
@@ -346,6 +347,11 @@ export const artifactsRouter = router({
           }
         : null
     }),
+
+  /** The in-app editor's read: the text, or why it is not shown as text (binary / too large). */
+  readText: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ ctx, input }) => store(ctx.dataRoot).readArtifactText(ctx.db, input.id)),
 
   getFilePath: publicProcedure
     .input(z.object({ id: z.string() }))

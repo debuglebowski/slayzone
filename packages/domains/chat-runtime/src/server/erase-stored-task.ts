@@ -92,7 +92,9 @@ export function prepareStoredTaskErasure(db: Database.Database, taskId: string):
           ...previous.attachments,
           ...strings(
             db,
-            `SELECT json_extract(value,'$.contentHash') AS hash FROM records WHERE kind='attachment' AND conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`,
+            // User attachments and event blobs (out-of-line payloads of saved events).
+            `SELECT CASE kind WHEN 'attachment' THEN json_extract(value,'$.contentHash') ELSE id END AS hash
+              FROM records WHERE kind IN ('attachment','event-blob') AND conversation_id IN(SELECT id FROM conversations WHERE task_id=?)`,
             taskId
           )
         ])
@@ -187,9 +189,10 @@ export function finishStoredTaskErasure(db: Database.Database, root: string, tas
       if (
         !db
           .prepare(
-            "SELECT 1 FROM records WHERE kind='attachment' AND json_extract(value,'$.contentHash')=? LIMIT 1"
+            `SELECT 1 FROM records WHERE (kind='attachment' AND json_extract(value,'$.contentHash')=?)
+              OR (kind='event-blob' AND id=?) LIMIT 1`
           )
-          .get(hash)
+          .get(hash, hash)
       )
         erase(join(root, 'blobs', hash))
     }

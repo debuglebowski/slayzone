@@ -1,5 +1,6 @@
 import type { AgentEvent } from './agent-events'
 import type { ChatAttachment } from './chat-attachments'
+import type { ChatBlobChunk } from './chat-blobs'
 export interface ComputerChatBackup {
   id: string
   createdAt: number
@@ -93,6 +94,14 @@ export interface ChatComputerOps {
     conversationId: string,
     ref: ChatAttachment
   ): Promise<{ data: string }>
+  /** One chunk of an image / file an archived conversation's events reference (`chat-blobs`). */
+  archiveBlob(
+    computerId: string,
+    archiveId: string,
+    conversationId: string,
+    sha256: string,
+    offset: number
+  ): Promise<ChatBlobChunk>
   archiveFile(
     computerId: string,
     archiveId: string,
@@ -145,6 +154,8 @@ export interface ChatAvailability {
    */
   reason?: string
   waitingForAgents?: boolean
+  /** Socket survived a hub freeze; liveness is being confirmed, not known offline. */
+  recovering?: boolean
   /**
    * `offline` only: a connected computer reported holding this chat — possibly the
    * offline one enrolled again under a new id (`computers.replace` moves its work).
@@ -164,6 +175,11 @@ export function chatAvailabilityMessage(
     case 'preparing':
       return null
     case 'offline':
+      if (status.recovering)
+        return {
+          title: `Reconnecting to ${name}`,
+          detail: 'Confirming the computer connection. Your agents may still be running.'
+        }
       if (status.heldBy)
         return {
           title: `${name} is offline`,

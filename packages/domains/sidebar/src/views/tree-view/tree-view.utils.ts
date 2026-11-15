@@ -6,7 +6,7 @@ import {
   type DragMoveEvent
 } from '@dnd-kit/core'
 import type { Task } from '@slayzone/task-contracts'
-import { NONE_GROUP_KEY, PINNED_GROUP_KEY } from '../treeGrouping'
+import { BLOCKED_GROUP_KEY, NONE_GROUP_KEY, PINNED_GROUP_KEY } from '../treeGrouping'
 import { pointerYFromEvent, resolveDropMode, type DropInput } from '../projectDrop'
 import type { ProjectDragData, ProjectGroupDragData, ProjDropMode } from './tree-view.types'
 
@@ -86,9 +86,12 @@ export function rowGroupValue(
   task: Task,
   groupBy: 'none' | 'status' | 'priority',
   groupPinned: boolean,
-  pinnedSet: Set<string>
+  pinnedSet: Set<string>,
+  groupBlocked = false,
+  blockedIds?: ReadonlySet<string>
 ): string {
   if (groupPinned && pinnedSet.has(task.id)) return PINNED_GROUP_KEY
+  if (groupBlocked && (task.is_blocked || blockedIds?.has(task.id))) return BLOCKED_GROUP_KEY
   if (groupBy === 'none') return NONE_GROUP_KEY
   if (groupBy === 'priority') return `p${typeof task.priority === 'number' ? task.priority : 5}`
   return task.status
