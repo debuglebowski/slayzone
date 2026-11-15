@@ -59,7 +59,8 @@ export const tabsShim = {
       isMain: true,
       position: 0,
       createdAt: nowIso(),
-      agentState: 'stopped'
+      agentState: 'stopped',
+      chatFontSize: null
     }
     replaceList(taskId, [...existing, tab])
     return tab
@@ -81,7 +82,8 @@ export const tabsShim = {
       isMain: false,
       position: existing.length,
       createdAt: nowIso(),
-      agentState: 'stopped'
+      agentState: 'stopped',
+      chatFontSize: null
     }
     replaceList(input.taskId, [...existing, tab])
     return tab
@@ -100,7 +102,8 @@ export const tabsShim = {
       isMain: false,
       position: listFor(found.task).length,
       createdAt: nowIso(),
-      agentState: 'stopped'
+      agentState: 'stopped',
+      chatFontSize: null
     }
     replaceList(found.task, [...listFor(found.task), newTab])
     return newTab
@@ -123,7 +126,8 @@ export const tabsShim = {
       ...found.tab,
       label: input.label !== undefined ? input.label : found.tab.label,
       mode: input.mode ?? found.tab.mode,
-      position: input.position ?? found.tab.position
+      position: input.position ?? found.tab.position,
+      chatFontSize: input.chatFontSize !== undefined ? input.chatFontSize : found.tab.chatFontSize
     }
     const list = listFor(found.task).map((t) => (t.id === input.id ? updated : t))
     replaceList(found.task, list)

@@ -5793,6 +5793,13 @@ export const migrations: Migration[] = [
             AND (direction = 'in' OR mode = 'move');
       `)
     }
+  },
+  {
+    // A chat tab's own font size; NULL follows the `chat_font_size` setting.
+    version: 219,
+    up: (db) => {
+      db.exec('ALTER TABLE terminal_tabs ADD COLUMN chat_font_size INTEGER')
+    }
   }
 ]
 

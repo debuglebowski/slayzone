@@ -176,7 +176,8 @@ describe('agents (phase 1)', () => {
         isMain: true,
         position: 0,
         createdAt: '',
-        agentState: 'running'
+        agentState: 'running',
+        chatFontSize: null
       })
     ).toBe('Codex')
     expect(stripOscReplies('a\x1b]11;rgb:0/0/0\x07b')).toBe('ab')

@@ -274,7 +274,8 @@ export function openDemoHub(options: DemoHubOptions = {}): DemoHub {
       isMain: true,
       position: 0,
       createdAt: hubTime(Date.now()),
-      agentState: 'new'
+      agentState: 'new',
+      chatFontSize: null
     })
     emit('taskTerminals.onChanged', { taskId })
   }

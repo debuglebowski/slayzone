@@ -24,7 +24,8 @@ test('chat composers render on the first commit without a second lazy-loading bo
     isMain: true,
     position: 0,
     createdAt: '2026-11-03',
-    agentState: 'new'
+    agentState: 'new',
+    chatFontSize: null
   }
   render(
     <TerminalSplitGroup

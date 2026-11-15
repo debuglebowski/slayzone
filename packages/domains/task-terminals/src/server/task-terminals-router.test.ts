@@ -68,6 +68,16 @@ test('task-terminals router: update label set/clear, mode, null for missing', as
   expect(await caller.update({ id: 'nope' })).toBeNull()
 })
 
+test('task-terminals router: per-chat font size defaults to null, sets, survives other updates, clears', async () => {
+  const tab = await caller.create({ taskId, mode: 'claude-chat' })
+  expect(tab.chatFontSize).toBeNull()
+  expect((await caller.update({ id: tab.id, chatFontSize: 17 }))!.chatFontSize).toBe(17)
+  // An update that names other fields keeps the override.
+  expect((await caller.update({ id: tab.id, label: 'Chat' }))!.chatFontSize).toBe(17)
+  expect((await caller.list({ taskId })).find((t) => t.id === tab.id)!.chatFontSize).toBe(17)
+  expect((await caller.update({ id: tab.id, chatFontSize: null }))!.chatFontSize).toBeNull()
+})
+
 test('task-terminals router: a deleted tab is announced, so its computer forgets its output', async () => {
   // QA 2026-11-06 → task 5decc957: a terminal's saved output must go with its tab,
   // including a tab deleted after a restart (no live process to kill).

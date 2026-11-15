@@ -16,6 +16,8 @@ interface UseTaskTerminalsResult {
   closeTab: (tabId: string) => Promise<boolean>
   movePane: (tabId: string, targetGroupId: string | null) => Promise<void>
   renameTab: (tabId: string, label: string | null) => Promise<void>
+  /** A chat tab's own font size, px; null follows the `chat_font_size` setting. */
+  setChatFontSize: (tabId: string, size: number | null) => Promise<void>
   getSessionId: (tabId: string) => string
 }
 
@@ -234,6 +236,26 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
     [updateTerminal]
   )
 
+  const setChatFontSize = useCallback(
+    async (tabId: string, size: number | null): Promise<void> => {
+      // Optimistic: the size applies at once; the server's row confirms it, and a
+      // failed save puts the previous size back.
+      const previous = tabs.find((t) => t.id === tabId)?.chatFontSize ?? null
+      const apply = (value: number | null) =>
+        setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, chatFontSize: value } : t)))
+      apply(size)
+      const updated = await updateTerminal({ id: tabId, chatFontSize: size }).catch(
+        (err: unknown) => {
+          console.error('[useTaskTerminals] Failed to save chat font size:', err)
+          apply(previous)
+          return null
+        }
+      )
+      if (updated) apply(updated.chatFontSize)
+    },
+    [tabs, updateTerminal]
+  )
+
   const getSessionId = useCallback(
     (tabId: string): string => {
       return `${taskId}:${tabId}`
@@ -251,6 +273,7 @@ export function useTaskTerminals(taskId: string, defaultMode: AgentId): UseTaskT
     closeTab,
     movePane,
     renameTab,
+    setChatFontSize,
     getSessionId
   }
 }

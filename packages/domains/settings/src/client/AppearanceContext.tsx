@@ -76,8 +76,10 @@ function parseAppearance(all: Record<string, string>): AppearanceSettings {
   // Until AppearanceProvider's one-shot migration lands, the legacy key stands in.
   const readabilityValue = notesReadability || legacyNotesLineSpacing
   const d = appearanceDefaults
+  const terminalFontSize = termSize ? parseInt(termSize, 10) : d.terminalFontSize
+  const chatSize = get('chat_font_size')
   const settings: AppearanceSettings = {
-    terminalFontSize: termSize ? parseInt(termSize, 10) : d.terminalFontSize,
+    terminalFontSize,
     editorFontSize: editorSize ? parseInt(editorSize, 10) : d.editorFontSize,
     reduceMotion: reduceMotion === '1',
     colorTintsEnabled: colorTints !== '0',
@@ -105,6 +107,8 @@ function parseAppearance(all: Record<string, string>): AppearanceSettings {
     notesCheckedHighlight: notesCheckedHighlight === '1',
     notesShowToolbar: notesShowToolbar === '1',
     notesSpellcheck: notesSpellcheck !== '0',
+    // Chats used the terminal's size before they had their own: unset keeps that.
+    chatFontSize: chatSize ? parseInt(chatSize, 10) : terminalFontSize,
     chatWidth: chatWidth === 'wide' ? 'wide' : 'narrow',
     chatThreadsWidth: clampChatThreadsWidth(
       Number(get('chat_threads_width') ?? d.chatThreadsWidth)

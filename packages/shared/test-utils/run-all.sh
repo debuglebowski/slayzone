@@ -1490,6 +1490,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task-terminals/src/client/chat/useChatDisplay.test.tsx \
   packages/domains/task-terminals/src/client/chat/tool-activity.test.ts \
   packages/domains/task-terminals/src/client/chat/chat-ui-components.test.tsx \
+  packages/domains/task-terminals/src/client/chat/ChatFontSizeControl.test.tsx \
   packages/domains/task-terminals/src/client/chat/conversation-actions.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatLifecycle.test.tsx \
   packages/domains/task-terminals/src/client/chat/useChatMode.test.tsx \
