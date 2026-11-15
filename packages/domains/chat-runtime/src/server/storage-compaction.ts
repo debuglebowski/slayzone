@@ -12,8 +12,11 @@
  *   1. capture — TEMP triggers on every main table record each changed primary key
  *      (`temp.compaction_dirty`); connection-local, so a crash or the swap drops them.
  *      Installed BEFORE the copy's snapshot: every later change is captured.
- *   2. copy    — a worker runs `VACUUM INTO` (incremental auto-vacuum) on its own
- *      read-only connection: the main thread only polls the copy's size (progress).
+ *   2. copy    — a worker builds a fresh copy (incremental auto-vacuum, the live schema
+ *      without its triggers) from its own read-only connection, table by table in
+ *      key order, in throttled batches (fsync + pause every few MiB): the disk never
+ *      queues much of our data ahead of a live commit. (`VACUUM INTO` was one
+ *      unthrottleable burst: a live commit waited 4.7 s behind it.)
  *   3. rounds  — drained keys go to the worker, which copies each key's current row;
  *      until what is left fits the window budget (keys, bytes), else "busy" (failed,
  *      live untouched). The hold is never stretched to make it fit.
@@ -29,7 +32,7 @@
  * deleted, live untouched) by cancel, close, or `abort` — content erasure aborts it:
  * the copy was taken from a snapshot that still held the erased content.
  */
-import { existsSync, rmSync, statSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -54,6 +57,7 @@ const MAX_PK = 4
 
 export type StorageCompactionHook =
   | 'worker-started'
+  | 'copy-synced'
   | 'copied'
   | 'budget'
   | 'round'
@@ -88,6 +92,15 @@ export interface StorageCompactionOptions {
   finalBytes?: number
   /** Catch-up rounds before giving up ("busy"). Default 20. */
   maxRounds?: number
+  /**
+   * The copy's write throttle: rows go in transactions of `copyBatchBytes`; every
+   * `copySyncBytes` the copy is fsynced and the worker pauses `copyPauseMs`, so the
+   * disk never holds more than that of our unwritten data ahead of a live commit.
+   * Defaults 4 MiB / 16 MiB / 25 ms.
+   */
+  copyBatchBytes?: number
+  copySyncBytes?: number
+  copyPauseMs?: number
   sleep?(ms: number): Promise<void>
   now?(): number
   /** Test hook at each step (fault and crash injection). */
@@ -107,6 +120,8 @@ interface TableInfo {
   name: string
   cols: string[]
   pk: string[]
+  /** Copied in primary-key order (no rowid to page by). */
+  withoutRowid: boolean
 }
 type Key = [string, ...unknown[]]
 
@@ -139,6 +154,9 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
   const finalKeys = opts.finalKeys ?? 256
   const finalBytes = opts.finalBytes ?? 4 * MiB
   const maxRounds = opts.maxRounds ?? 20
+  const copyBatchBytes = opts.copyBatchBytes ?? 4 * MiB
+  const copySyncBytes = opts.copySyncBytes ?? 16 * MiB
+  const copyPauseMs = opts.copyPauseMs ?? 25
   const reclaimThreshold = opts.reclaimThresholdBytes ?? 64 * MiB
   const rebuildOffer = opts.rebuildOfferBytes ?? 256 * MiB
   const freeBytes = opts.freeBytes ?? (() => freeDiskBytes(store.dir))
@@ -164,7 +182,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
   let running: Promise<void> | null = null
   let stop: { reason: string; phase: 'cancelled' } | null = null
   // Settles when the current job is told to stop: awaits on the worker race it, so a
-  // stop never waits for an uninterruptible VACUUM INTO.
+  // stop never waits for the worker's current step.
   let stopSignal = deferred()
   let reclaimTimer: ReturnType<typeof setInterval> | null = null
   let firstCheck: ReturnType<typeof setTimeout> | null = null
@@ -306,10 +324,10 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     return (
       db
         .prepare(
-          "SELECT name FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
+          "SELECT name, sql FROM main.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
         )
-        .all() as Array<{ name: string }>
-    ).map(({ name }) => {
+        .all() as Array<{ name: string; sql: string }>
+    ).map(({ name, sql }) => {
       const info = db.pragma(`main.table_info(${ident(name)})`) as Array<{
         name: string
         pk: number
@@ -319,7 +337,9 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         .sort((a, b) => a.pk - b.pk)
         .map((c) => c.name)
       if (pk.length > MAX_PK) throw new Error(`Table ${name} has too wide a primary key to compact`)
-      return { name, cols: info.map((c) => c.name), pk }
+      const withoutRowid = /\bWITHOUT\s+ROWID\b/i.test(sql)
+      if (withoutRowid && !pk.length) throw new Error(`Table ${name} has no key to copy by`)
+      return { name, cols: info.map((c) => c.name), pk, withoutRowid }
     })
   }
   function installCapture(tables: TableInfo[]): string[] {
@@ -478,17 +498,29 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     ready: Promise<Array<{ name: string; sql: string }>>
     copy(tables: TableInfo[], keys: Key[]): Promise<void>
     finish(check: boolean): Promise<string>
-    /** Inside a long native call (VACUUM INTO, quick_check): it cannot stop before returning. */
+    /** Inside a long native call (quick_check): it cannot stop before returning. */
     busyNative(): boolean
     /** Ends the thread; settles when it has exited. */
     terminate(): Promise<void>
   }
   /** The worker; `onExit` runs when its thread really ended (the copy is then free). */
-  function spawnWorker(mode: 'build' | 'resume', out: string, onExit: () => void): WorkerHandle {
+  function spawnWorker(
+    mode: 'build' | 'resume',
+    out: string,
+    tables: TableInfo[],
+    on: { exit(): void; progress(bytes: number): void }
+  ): WorkerHandle {
     const registration = store.maintenance.registerSecondary(READER)
     const worker = new Worker(COMPACTION_WORKER_SOURCE, {
       eval: true,
-      workerData: { modulePath: sqliteModulePath(), live: store.path, out, mode }
+      workerData: {
+        modulePath: sqliteModulePath(),
+        live: store.path,
+        out,
+        mode,
+        tables,
+        throttle: { batchBytes: copyBatchBytes, syncBytes: copySyncBytes, pauseMs: copyPauseMs }
+      }
     })
     let waiting: { resolve(m: WorkerMessage): void; reject(e: Error): void } | null = null
     let failure: Error | null = null
@@ -513,6 +545,10 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
       } else w?.resolve(m)
     }
     worker.on('message', (m: WorkerMessage) => {
+      if (m.t === 'progress') {
+        on.progress(m.bytes)
+        return
+      }
       if (m.t === 'error') {
         end()
         settle(new Error(m.message))
@@ -528,7 +564,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     worker.on('exit', () => {
       end()
       if (waiting) settle(new Error('The compaction worker stopped'))
-      onExit()
+      on.exit()
       markExited()
     })
     const next = () =>
@@ -557,10 +593,10 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         const m = await reply
         return m.t === 'finished' ? m.check : 'no reply'
       },
-      busyNative: () => state === 'building' || state === 'finishing',
+      busyNative: () => state === 'finishing',
       terminate() {
-        // A native VACUUM INTO cannot be interrupted: the thread ends when it returns.
-        // Only its read-only connection and its own copy are involved.
+        // Ends at the next JS boundary (between copy batches; quick_check runs to its
+        // end). Only its read-only connection and its own copy are involved.
         void worker.terminate().catch(() => undefined)
         return exited
       }
@@ -592,21 +628,25 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     }
     const spawn = (mode: 'build' | 'resume') => {
       workerAlive = true
-      return spawnWorker(mode, out, () => {
-        workerAlive = false
-        if (abandoned) discard()
+      return spawnWorker(mode, out, list, {
+        exit() {
+          workerAlive = false
+          if (abandoned) discard()
+        },
+        progress(bytes) {
+          if (current.phase === 'copying')
+            current.progress = Math.max(
+              0.01,
+              Math.min(0.85, (0.85 * bytes) / Math.max(1, liveBytes))
+            )
+          hook('copy-synced')
+        }
       })
     }
-    const progressTimer = setInterval(() => {
-      if (current.phase === 'copying' && existsSync(out))
-        current.progress = Math.min(0.85, (0.85 * statSync(out).size) / Math.max(1, liveBytes))
-    }, 250)
-    progressTimer.unref?.()
     try {
       worker = spawn('build')
       hook('worker-started')
       triggers = await until(worker.ready)
-      clearInterval(progressTimer)
       hook('copied')
       checkStop()
       Object.assign(current, { phase: 'catching-up', progress: 0.85 })
@@ -681,17 +721,16 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
         return holdMs
       }
     } finally {
-      clearInterval(progressTimer)
       if (worker) {
         const exit = worker.terminate()
         // Between messages it exits at once: wait, so the copy is gone when the job
-        // settles. Inside VACUUM INTO / quick_check it cannot: its exit removes it.
+        // settles. Inside quick_check it cannot: its exit removes it.
         if (!worker.busyNative()) await exit
       }
       if (!swapped) {
         abandoned = true
         dropCapture(capture)
-        // A worker still inside VACUUM INTO may create or hold the copy: its exit
+        // A worker still inside quick_check holds the copy: its exit
         // removes it then (and boot removes any `compact-*` left by a kill).
         if (!workerAlive) discard()
       }
@@ -748,6 +787,7 @@ export type StorageCompaction = ReturnType<typeof createStorageCompaction>
 type WorkerMessage =
   | { t: 'ready'; triggers: Array<{ name: string; sql: string }> }
   | { t: 'copied' }
+  | { t: 'progress'; bytes: number }
   | { t: 'finished'; check: string }
   | { t: 'error'; message: string }
 

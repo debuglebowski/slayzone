@@ -93,7 +93,9 @@ pages the backfill frees (and `db.backup` copies them) until the user compacts i
 
 Storage compaction (`storage-compaction.ts`), opt-in: a REBUILD (store at auto_vacuum
 NONE, after the backfill finished, with ~live-data size free on disk) copies the store
-with `VACUUM INTO` (incremental auto-vacuum) in a worker on a read-only connection;
+in a worker on a read-only connection (fresh file, incremental auto-vacuum, the live
+schema without triggers, tables copied in key order in throttled batches: fsync and
+a pause every 16 MiB, so a live commit never queues behind a write burst);
 TEMP triggers capture every changed primary key meanwhile; catch-up rounds replay
 them in the worker until the rest fits a small budget; one synchronous window replays
 the rest, restores the copy's triggers, checks the schema and swaps the file in
@@ -198,9 +200,13 @@ dropped, or restored when it is the only copy).
   restarting the runtime (that would end live chat sessions), and four services keep
   the `compose` handle for their lifetime — so the handle forwards to the current
   connection instead of every caller being rewritten. No schema bump.
-- 2026-11-15 (fu-2): compaction = VACUUM INTO + captured delta + swap, once; then
+- 2026-11-15 (fu-2): compaction = throttled batched copy + captured delta + swap,
+  once; then
   incremental auto-vacuum. In-place VACUUM held the write lock 5.2 s on a 4 GB store
   (a write failed); switching a NONE store to incremental needs that rebuild anyway.
   Capture is TEMP triggers (connection-local: nothing persists after a crash or the
   swap) keyed by primary key (VACUUM may renumber rowids); replay is delete + insert
   with the copy's own triggers dropped, so derived rows are copied, never re-derived.
+- 2026-11-15 (fu-2, S2b): no `VACUUM INTO`. It is one native call that writes the
+  whole store at once; the OS then flushes gigabytes and a live FULL commit waited
+  4.7 s behind them (bench). The batched copy bounds our unsynced bytes instead.

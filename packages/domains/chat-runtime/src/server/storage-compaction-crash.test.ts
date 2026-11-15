@@ -21,6 +21,7 @@ afterEach(() => {
 
 const POINTS = [
   'worker-started',
+  'copy-synced',
   'copied',
   'round',
   'window',

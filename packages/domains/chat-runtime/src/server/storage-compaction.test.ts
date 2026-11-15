@@ -229,6 +229,30 @@ describe('rebuild', () => {
     expect(worst).toBeLessThan(1000)
   })
 
+  test('the copy is written in throttled batches: fsync and a pause every few MiB, progress shown', async () => {
+    const { store } = seeded(8, 16)
+    const progress: number[] = []
+    let syncs = 0
+    const c = compaction(store, {
+      copyBatchBytes: 256 * 1024,
+      copySyncBytes: 1024 * 1024,
+      copyPauseMs: 1,
+      onPhase: (phase) => {
+        if (phase === 'copy-synced') {
+          syncs++
+          progress.push(c.status().job?.progress ?? -1)
+        }
+      }
+    })
+    c.start()
+    await c.idle()
+    expect(c.status().job?.phase).toBe('done')
+    // ~8 MiB live → at least 6 synced batches of 1 MiB
+    expect(syncs).toBeGreaterThanOrEqual(6)
+    expect(progress.at(-1)).toBeGreaterThan(progress[0])
+    expect(progress.every((p) => p > 0 && p <= 0.85)).toBe(true)
+  })
+
   test('waits while a backup lease or a secondary connection is held, then swaps', async () => {
     const { store } = seeded()
     const lease = store.acquireBlobLease('backup-1', 60_000)
