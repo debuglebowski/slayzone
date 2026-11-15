@@ -38,6 +38,11 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import type { WithAmbientTarget } from '@slayzone/trpc-server'
 import { gitOpsContract, type GitOpName } from '../shared/git-ops-contract'
 import { executeGitOp, unwatchGitCheckout, watchGitCheckout } from './git-op-routing'
+import {
+  listIgnoredTreeRouted,
+  matchIgnoredTreeRouted,
+  openIgnoredTreeRouted
+} from './ignored-tree-routing'
 import { getWorktreesRouterDeps } from './worktrees-router-deps'
 import { inPathScopeOf, PathScopeRequiredError } from '@slayzone/platform/path-scope'
 
@@ -308,6 +313,15 @@ export const worktreesRouter = router({
     .input(obj({ projectId: s.optional() }))
     .query(({ ctx, input }) => resolveCopyBehavior(ctx.db, input.projectId)),
   getIgnoredFileTree: gitQuery('getIgnoredFileTree'),
+  openIgnoredTree: publicProcedure
+    .input(gitOpsContract.openIgnoredTree.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => openIgnoredTreeRouted(input, ctx.db)),
+  listIgnoredTree: publicProcedure
+    .input(gitOpsContract.listIgnoredTree.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => listIgnoredTreeRouted(input, ctx.db)),
+  matchIgnoredTree: publicProcedure
+    .input(gitOpsContract.matchIgnoredTree.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => matchIgnoredTreeRouted(input, ctx.db)),
   copyIgnoredFiles: gitMutation('copyIgnoredFiles'),
   getResolvedCommitDag: gitQuery('getResolvedCommitDag'),
   getResolvedForkGraph: gitQuery('getResolvedForkGraph'),

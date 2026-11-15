@@ -210,3 +210,84 @@ export function execGit(args: string[], options: { cwd: string }): Promise<strin
 export function execGitFileList(args: string[], options: { cwd: string }): Promise<string[]> {
   return execGit([...args, '-z'], options).then((out) => out.split('\0').filter(Boolean))
 }
+
+/**
+ * `git <args> -z` whose NUL-delimited output is handed to `onPath` entry by entry as
+ * it streams — never joined into one string (a repo's ignored files can run to
+ * hundreds of MB). Each read chunk is parsed on its own tick, so a long listing
+ * never holds the event loop. Rejects like {@link execGit} on a non-zero exit.
+ */
+export function streamGitPaths(
+  args: string[],
+  options: { cwd: string },
+  onPath: (path: string) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const fullArgs = [...args, '-z']
+    const label = `git ${fullArgs.join(' ')}`
+    const startedAt = Date.now()
+    const child = hubSpawn('git', fullArgs, {
+      cwd: options.cwd,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let pending: Buffer = Buffer.alloc(0)
+    let count = 0
+    const stderr: string[] = []
+    child.stdout.on('data', (chunk: Buffer) => {
+      let buf = pending.length ? Buffer.concat([pending, chunk]) : chunk
+      let at = buf.indexOf(0)
+      while (at !== -1) {
+        if (at > 0) {
+          onPath(buf.toString('utf8', 0, at))
+          count++
+        }
+        buf = buf.subarray(at + 1)
+        at = buf.indexOf(0)
+      }
+      // Copy the tail: a subarray would pin the whole chunk.
+      pending = Buffer.from(buf)
+    })
+    child.stderr.on('data', (data: Buffer) => stderr.push(data.toString()))
+    child.on('error', (err) => {
+      gitDiagnostic({
+        level: 'error',
+        source: 'git',
+        event: 'git.spawn_failed',
+        message: `could not start git: ${err.message}`,
+        payload: { command: label, cwd: options.cwd, durationMs: Date.now() - startedAt }
+      })
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (pending.length) onPath(pending.toString('utf8'))
+      const ok = code === 0
+      const stderrStr = stderr.join('')
+      gitDiagnostic({
+        level: ok ? 'info' : 'error',
+        source: 'git',
+        event: ok ? 'git.command' : 'git.command_failed',
+        message: ok ? label : stderrStr.trim() || `command failed: ${label}`,
+        payload: {
+          command: label,
+          cwd: options.cwd,
+          durationMs: Date.now() - startedAt,
+          success: ok,
+          exitCode: code,
+          entries: count,
+          ...(!ok && { stderr: trimOutput(stderrStr) })
+        }
+      })
+      if (ok) resolve()
+      else {
+        const error = new Error(stderrStr.trim() || `git command failed: ${label}`) as Error & {
+          status: number | null
+          stderr: string
+        }
+        error.status = code
+        error.stderr = stderrStr
+        reject(error)
+      }
+    })
+  })
+}

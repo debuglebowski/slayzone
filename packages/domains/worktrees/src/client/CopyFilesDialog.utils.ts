@@ -1,129 +1,132 @@
-import type { IgnoredFileNode } from '../shared/types'
+import type { IgnoredEntry } from '../shared/types'
 
 export type NodeState = 'checked' | 'indeterminate' | 'unchecked'
 
-export function globToRegex(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '\0')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\0/g, '.*')
-  return new RegExp(`^${escaped}$`)
-}
-
 /**
- * Resolve preset globs against the ignored-file tree.
+ * The dialog's selection: ROOTS — a file, or a directory meaning its whole
+ * subtree — each with its file count. Invariant: no ancestor and descendant
+ * appear together (kept by {@link toggleSelection}; the server's preset match
+ * answers roots that way too). It is what `copyIgnoredFiles` gets (`paths`).
  *
- * Returns a set of "selection roots" — paths whose subtree should be copied.
- *
- * Invariant: no ancestor and descendant appear together. Once a directory is
- * matched (via a multi-segment glob), descendants are never added separately
- * even when they would also match a basename glob. The single-pass walk carries
- * an `ancestorMatched` flag down so basename matches inside an already-matched
- * directory collapse into the ancestor's subtree copy.
- *
- * - Single-segment globs (`.env*`, `*.md`) match a file's basename at any depth.
- * - Multi-segment globs (`docs/**`) match the top-level dir by first segment only.
+ * Everything a row shows follows from the roots alone, so the tree can load
+ * lazily: nothing here needs a directory's unloaded children.
  */
-export function filterTreeByGlobs(nodes: IgnoredFileNode[], globs: string[]): Set<string> {
-  if (globs.length === 0) return new Set(nodes.map((n) => n.path))
+export type Selection = ReadonlyMap<string, number>
 
-  const basenameMatchers: RegExp[] = []
-  const dirPrefixes: string[] = []
-  for (const glob of globs) {
-    const firstSlash = glob.indexOf('/')
-    if (firstSlash === -1) basenameMatchers.push(globToRegex(glob))
-    else dirPrefixes.push(glob.slice(0, firstSlash))
-  }
-
-  const matched = new Set<string>()
-  const walk = (node: IgnoredFileNode, depth: number, ancestorMatched: boolean): void => {
-    // Dir globs match top-level only (depth 0). Basename globs match files at any depth
-    // — but skip when an ancestor is already matched, otherwise a parent dir + descendant
-    // file would both end up as selection roots, violating the no-overlap invariant.
-    const selfDirMatch =
-      !ancestorMatched && depth === 0 && node.isDirectory && dirPrefixes.includes(node.name)
-    if (selfDirMatch) matched.add(node.path)
-    const nowMatched = ancestorMatched || selfDirMatch
-    if (!nowMatched && !node.isDirectory && basenameMatchers.some((re) => re.test(node.name))) {
-      matched.add(node.path)
-    }
-    for (const c of node.children) walk(c, depth + 1, nowMatched)
-  }
-  for (const n of nodes) walk(n, 0, false)
-  return matched
+/** A selection, sorted for range lookups ("roots under `dir/`"). */
+export interface SelectionIndex {
+  readonly roots: Selection
+  readonly keys: readonly string[]
+  /** prefix[i] = sum of the counts of keys[0..i). */
+  readonly prefix: readonly number[]
+  /** Files selected in all. */
+  readonly total: number
 }
 
-/**
- * Compute per-node checkbox state + the total number of files covered.
- * Selection model: `selected` is a set of "selection roots" — either a file path
- * or a dir path meaning the whole subtree is copied. Invariant: no ancestor and
- * descendant appear together (enforced by `filterTreeByGlobs` and `toggle`).
- */
-export function computeStates(
-  tree: IgnoredFileNode[],
-  selected: Set<string>
-): {
-  states: Map<string, NodeState>
-  selectedCounts: Map<string, number>
-  selectedFileCount: number
-} {
-  const states = new Map<string, NodeState>()
-  const selectedCounts = new Map<string, number>()
-  let selectedFileCount = 0
-
-  const walk = (
-    node: IgnoredFileNode,
-    ancestorSelected: boolean
-  ): { state: NodeState; count: number } => {
-    const inherited = ancestorSelected || selected.has(node.path)
-    if (!node.isDirectory) {
-      const st: NodeState = inherited ? 'checked' : 'unchecked'
-      states.set(node.path, st)
-      const count = inherited ? 1 : 0
-      selectedCounts.set(node.path, count)
-      if (inherited) selectedFileCount += 1
-      return { state: st, count }
-    }
-    let total = 0
-    let anyChecked = false
-    let anyUnchecked = false
-    let anyIndeterminate = false
-    for (const c of node.children) {
-      const r = walk(c, inherited)
-      total += r.count
-      if (r.state === 'checked') anyChecked = true
-      else if (r.state === 'unchecked') anyUnchecked = true
-      else anyIndeterminate = true
-    }
-    let st: NodeState
-    if (inherited) st = 'checked'
-    else if (anyIndeterminate || (anyChecked && anyUnchecked)) st = 'indeterminate'
-    else if (anyChecked) st = 'checked'
-    else st = 'unchecked'
-    states.set(node.path, st)
-    selectedCounts.set(node.path, total)
-    return { state: st, count: total }
-  }
-
-  for (const n of tree) walk(n, false)
-  return { states, selectedCounts, selectedFileCount }
+export function indexSelection(roots: Selection): SelectionIndex {
+  const keys = [...roots.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  const prefix = [0]
+  for (const k of keys) prefix.push(prefix[prefix.length - 1] + (roots.get(k) ?? 0))
+  return { roots, keys, prefix, total: prefix[prefix.length - 1] }
 }
 
-/** Return chain of nodes from top-level ancestor down to the target (inclusive). */
-export function findChain(tree: IgnoredFileNode[], targetPath: string): IgnoredFileNode[] | null {
-  for (const node of tree) {
-    if (node.path === targetPath) return [node]
-    if (targetPath.startsWith(node.path + '/')) {
-      const sub = findChain(node.children, targetPath)
-      if (sub) return [node, ...sub]
-    }
+function lowerBound(keys: readonly string[], value: string): number {
+  let a = 0
+  let b = keys.length
+  while (a < b) {
+    const mid = (a + b) >>> 1
+    if (keys[mid] < value) a = mid + 1
+    else b = mid
+  }
+  return a
+}
+
+/** Files selected by roots strictly below `dir`. */
+function countBelow(idx: SelectionIndex, dir: string): number {
+  const prefix = `${dir}/`
+  const lo = lowerBound(idx.keys, prefix)
+  // Roots below `dir/` are contiguous in sorted order: find where they end.
+  let hi = lo
+  let b = idx.keys.length
+  while (hi < b) {
+    const mid = (hi + b) >>> 1
+    if (idx.keys[mid].startsWith(prefix)) hi = mid + 1
+    else b = mid
+  }
+  return idx.prefix[hi] - idx.prefix[lo]
+}
+
+/** The root that selects `path` — itself or an ancestor — or null. */
+export function ancestorRootOf(roots: Selection, path: string): string | null {
+  if (roots.has(path)) return path
+  for (let at = path.lastIndexOf('/'); at > 0; at = path.lastIndexOf('/', at - 1)) {
+    const ancestor = path.slice(0, at)
+    if (roots.has(ancestor)) return ancestor
   }
   return null
 }
 
-export function removeSubtree(node: IgnoredFileNode, set: Set<string>): void {
-  set.delete(node.path)
-  for (const c of node.children) removeSubtree(c, set)
+/** A row's checkbox: checked under a root, or once roots cover all its files. */
+export function stateOf(idx: SelectionIndex, entry: IgnoredEntry): NodeState {
+  if (ancestorRootOf(idx.roots, entry.path) !== null) return 'checked'
+  if (!entry.isDirectory) return 'unchecked'
+  const below = countBelow(idx, entry.path)
+  if (below === 0) return 'unchecked'
+  return below >= entry.fileCount ? 'checked' : 'indeterminate'
+}
+
+/** Files of `entry` that are selected. */
+export function selectedCountOf(idx: SelectionIndex, entry: IgnoredEntry): number {
+  if (ancestorRootOf(idx.roots, entry.path) !== null) return entry.fileCount
+  return entry.isDirectory ? countBelow(idx, entry.path) : 0
+}
+
+/** The directories from `root` down to `target`'s parent (the ones an uncheck splits). */
+export function chainDirs(root: string, target: string): string[] {
+  const dirs = [root]
+  for (let at = target.indexOf('/', root.length + 1); at !== -1; at = target.indexOf('/', at + 1))
+    dirs.push(target.slice(0, at))
+  return dirs
+}
+
+/** Remove `path` and every root below it. */
+export function removeSubtree(roots: Map<string, number>, path: string): void {
+  roots.delete(path)
+  const prefix = `${path}/`
+  for (const key of [...roots.keys()]) if (key.startsWith(prefix)) roots.delete(key)
+}
+
+/**
+ * The selection after clicking `entry`'s checkbox (its current `state`):
+ *  - not checked → `entry` becomes the one root of its subtree;
+ *  - checked → `entry`'s subtree leaves the selection. When an ANCESTOR root held
+ *    it, that root is split: every sibling along the way to `entry` stays
+ *    selected. That needs those directories' complete child lists —
+ *    `childrenOf(dir)` must answer every child of each {@link chainDirs} entry
+ *    (the dialog loads them all first).
+ */
+export function toggleSelection(
+  roots: Selection,
+  entry: IgnoredEntry,
+  state: NodeState,
+  childrenOf: (dir: string) => readonly IgnoredEntry[]
+): Map<string, number> {
+  const next = new Map(roots)
+  if (state !== 'checked') {
+    removeSubtree(next, entry.path)
+    next.set(entry.path, entry.fileCount)
+    return next
+  }
+  const holder = ancestorRootOf(roots, entry.path)
+  if (holder !== null && holder !== entry.path) {
+    next.delete(holder)
+    const chain = chainDirs(holder, entry.path)
+    for (let i = 0; i < chain.length; i++) {
+      const onPath = i + 1 < chain.length ? chain[i + 1] : entry.path
+      for (const child of childrenOf(chain[i]))
+        if (child.path !== onPath) next.set(child.path, child.fileCount)
+    }
+  }
+  removeSubtree(next, entry.path)
+  return next
 }

@@ -61,6 +61,28 @@ describe('git.op', () => {
     expect(await call({ op: 'stageAll', input: { path: dir } })).toEqual({ result: null })
   })
 
+  it('the copy dialog’s lazy tree: open, then pages by id, bound to the judged repo', async () => {
+    writeFileSync(join(dir, '.gitignore'), 'cache/\n')
+    execFileSync('mkdir', ['-p', join(dir, 'cache', 'sub')])
+    writeFileSync(join(dir, 'cache', 'sub', 'x.bin'), 'x')
+    const opened = (await call({ op: 'openIgnoredTree', input: { repoPath: dir } })) as {
+      result: { treeId: string; totalFiles: number; root: { items: Array<{ path: string }> } }
+    }
+    expect(opened.result.totalFiles).toBe(1)
+    expect(opened.result.root.items.map((e) => e.path)).toEqual(['cache'])
+    const page = (await call({
+      op: 'listIgnoredTree',
+      input: { repoPath: dir, treeId: opened.result.treeId, dir: 'cache/sub', cursor: null }
+    })) as { result: { items: Array<{ path: string }>; nextCursor: string | null } }
+    expect(page.result).toMatchObject({ items: [{ path: 'cache/sub/x.bin' }], nextCursor: null })
+    await expect(
+      call({
+        op: 'listIgnoredTree',
+        input: { repoPath: '/etc', treeId: opened.result.treeId, dir: '', cursor: null }
+      })
+    ).rejects.toThrow(/outside/)
+  })
+
   it('refuses a path outside its folders', async () => {
     await expect(call({ op: 'getCurrentBranch', input: { path: '/etc' } })).rejects.toThrow(
       /outside/

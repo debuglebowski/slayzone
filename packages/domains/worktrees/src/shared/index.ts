@@ -10,3 +10,4 @@ export {
   assignWorktreeColors,
   assignNewWorktreeColors
 } from './worktree-color'
+export { globToRegex, IGNORED_TREE_EXPIRED, isIgnoredTreeExpired } from './ignored-tree'

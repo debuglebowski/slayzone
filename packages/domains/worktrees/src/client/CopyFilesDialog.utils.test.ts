@@ -1,164 +1,139 @@
 /**
- * Tests for CopyFilesDialog.utils.ts
+ * The copy dialog's selection over a LAZY tree: the selection is a set of roots
+ * (a file, or a directory = its whole subtree) each with its file count, so any
+ * loaded row's checkbox state and counts follow from the roots alone — no whole
+ * tree on the client. Same states as before: a root or anything under one is
+ * checked; a directory with roots below it is indeterminate, or checked once they
+ * cover all of its files.
  */
 import { expect, test } from 'vitest'
-import type { IgnoredFileNode } from '../shared/types'
+import type { IgnoredEntry } from '../shared/types'
 import {
-  filterTreeByGlobs,
-  computeStates,
-  findChain,
+  ancestorRootOf,
+  chainDirs,
+  indexSelection,
   removeSubtree,
-  globToRegex
+  selectedCountOf,
+  stateOf,
+  toggleSelection
 } from './CopyFilesDialog.utils'
 
-function file(name: string, parent: string, size = 10): IgnoredFileNode {
-  return {
-    name,
-    path: parent ? `${parent}/${name}` : name,
-    isDirectory: false,
-    size,
-    fileCount: 1,
-    children: []
-  }
+const f = (path: string): IgnoredEntry => ({
+  name: path.split('/').pop()!,
+  path,
+  isDirectory: false,
+  size: 0,
+  fileCount: 1
+})
+const d = (path: string, fileCount: number): IgnoredEntry => ({
+  name: path.split('/').pop()!,
+  path,
+  isDirectory: true,
+  size: 0,
+  fileCount
+})
+const sel = (...roots: Array<[string, number]>) => new Map(roots)
+
+// Tree:  docs/ (a.md, b.md)   a/ (b/ (x, y))   .env
+const DOCS = d('docs', 2)
+const A = d('a', 2)
+const AB = d('a/b', 2)
+const CHILDREN: Record<string, IgnoredEntry[]> = {
+  '': [DOCS, A, f('.env')],
+  docs: [f('docs/a.md'), f('docs/b.md')],
+  a: [AB],
+  'a/b': [f('a/b/x'), f('a/b/y')]
 }
-function dir(name: string, parent: string, children: IgnoredFileNode[]): IgnoredFileNode {
-  const fileCount = children.reduce((acc, c) => acc + c.fileCount, 0)
-  return {
-    name,
-    path: parent ? `${parent}/${name}` : name,
-    isDirectory: true,
-    size: 0,
-    fileCount,
-    children
-  }
-}
-function sortedSet(s: Set<string>): string[] {
-  return [...s].sort()
-}
+const childrenOf = (dir: string) => CHILDREN[dir] ?? []
 
-// --- globToRegex -----------------------------------------------------------
-
-test('globToRegex — literal matches', () => {
-  expect(globToRegex('.env').test('.env')).toBe(true)
-  expect(globToRegex('.env').test('.env.local')).toBe(false)
+test('a root selects its whole subtree', () => {
+  const idx = indexSelection(sel(['docs', 2]))
+  expect(stateOf(idx, DOCS)).toBe('checked')
+  expect(stateOf(idx, f('docs/a.md'))).toBe('checked')
+  expect(selectedCountOf(idx, DOCS)).toBe(2)
+  expect(idx.total).toBe(2)
 })
 
-test('globToRegex — single-star matches non-slash', () => {
-  expect(globToRegex('.env*').test('.env')).toBe(true)
-  expect(globToRegex('.env*').test('.env.local')).toBe(true)
-  expect(globToRegex('*.md').test('README.md')).toBe(true)
-  expect(globToRegex('*.md').test('docs/README.md')).toBe(false)
+test('roots below a directory make it indeterminate, with their count', () => {
+  const idx = indexSelection(sel(['docs/a.md', 1]))
+  expect(stateOf(idx, DOCS)).toBe('indeterminate')
+  expect(stateOf(idx, f('docs/a.md'))).toBe('checked')
+  expect(stateOf(idx, f('docs/b.md'))).toBe('unchecked')
+  expect(selectedCountOf(idx, DOCS)).toBe(1)
+  expect(idx.total).toBe(1)
 })
 
-test('globToRegex — double-star matches across slashes', () => {
-  expect(globToRegex('docs/**').test('docs/a/b')).toBe(true)
+test('roots covering all of a directory’s files check it', () => {
+  const idx = indexSelection(sel(['docs/a.md', 1], ['docs/b.md', 1]))
+  expect(stateOf(idx, DOCS)).toBe('checked')
 })
 
-// --- filterTreeByGlobs -----------------------------------------------------
-
-test('filterTreeByGlobs — empty globs returns top-level paths', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs')]), file('.env', '')]
-  expect(sortedSet(filterTreeByGlobs(tree, []))).toEqual(['.env', 'docs'])
+test('an empty selection: all unchecked, total 0', () => {
+  const idx = indexSelection(sel())
+  expect(stateOf(idx, DOCS)).toBe('unchecked')
+  expect(idx.total).toBe(0)
 })
 
-test('filterTreeByGlobs — basename glob matches at any depth', () => {
-  const tree = [file('.env', ''), dir('apps', '', [dir('web', 'apps', [file('.env', 'apps/web')])])]
-  expect(sortedSet(filterTreeByGlobs(tree, ['.env*']))).toEqual(['.env', 'apps/web/.env'])
+test('indeterminate propagates up through nested directories', () => {
+  const idx = indexSelection(sel(['a/b/x', 1]))
+  expect(stateOf(idx, AB)).toBe('indeterminate')
+  expect(stateOf(idx, A)).toBe('indeterminate')
+  expect(selectedCountOf(idx, A)).toBe(1)
 })
 
-test('filterTreeByGlobs — dir glob matches top-level only', () => {
-  const tree = [
-    dir('docs', '', [file('a.md', 'docs')]),
-    dir('apps', '', [dir('docs', 'apps', [file('b.md', 'apps/docs')])])
-  ]
-  expect(sortedSet(filterTreeByGlobs(tree, ['docs/**']))).toEqual(['docs'])
+test('a prefix sibling is never counted under a directory (`a` vs `a-b`)', () => {
+  const idx = indexSelection(sel(['a-b/z', 1], ['ab', 1]))
+  expect(stateOf(idx, A)).toBe('unchecked')
+  expect(selectedCountOf(idx, A)).toBe(0)
 })
 
-test('filterTreeByGlobs — invariant: ancestor selection collapses descendant basename matches', () => {
-  // Regression: previously {docs, docs/.env} both ended up in selected.
-  const tree = [
-    dir('docs', '', [file('.env', 'docs'), file('README.md', 'docs')]),
-    file('.env', '')
-  ]
-  expect(sortedSet(filterTreeByGlobs(tree, ['docs/**', '.env*', '*.md']))).toEqual(['.env', 'docs'])
+test('ancestorRootOf finds the root holding a path (itself or an ancestor)', () => {
+  const s = sel(['a', 2])
+  expect(ancestorRootOf(s, 'a/b/x')).toBe('a')
+  expect(ancestorRootOf(s, 'a')).toBe('a')
+  expect(ancestorRootOf(s, 'docs')).toBeNull()
 })
 
-test('filterTreeByGlobs — basename matches when no ancestor matched', () => {
-  const tree = [
-    dir('apps', '', [file('.env', 'apps'), file('readme.md', 'apps')]),
-    file('.env', '')
-  ]
-  expect(sortedSet(filterTreeByGlobs(tree, ['docs/**', '.env*']))).toEqual(['.env', 'apps/.env'])
+test('chainDirs: the directories from a root down to the target’s parent', () => {
+  expect(chainDirs('a', 'a/b/x')).toEqual(['a', 'a/b'])
+  expect(chainDirs('a/b', 'a/b/x')).toEqual(['a/b'])
 })
 
-// --- computeStates ---------------------------------------------------------
-
-test('computeStates — ancestor selected propagates to descendants', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs'), file('b.md', 'docs')])]
-  const { states, selectedFileCount } = computeStates(tree, new Set(['docs']))
-  expect(states.get('docs')).toBe('checked')
-  expect(states.get('docs/a.md')).toBe('checked')
-  expect(states.get('docs/b.md')).toBe('checked')
-  expect(selectedFileCount).toBe(2)
+test('removeSubtree removes a path and every root below it, nothing else', () => {
+  const s = sel(['docs', 2], ['docs/a.md', 1], ['docs/sub/z', 1], ['docs-x', 1], ['other', 1])
+  removeSubtree(s, 'docs')
+  expect([...s.keys()].sort()).toEqual(['docs-x', 'other'])
 })
 
-test('computeStates — partial child selection → parent indeterminate', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs'), file('b.md', 'docs')])]
-  const { states, selectedCounts, selectedFileCount } = computeStates(tree, new Set(['docs/a.md']))
-  expect(states.get('docs')).toBe('indeterminate')
-  expect(states.get('docs/a.md')).toBe('checked')
-  expect(states.get('docs/b.md')).toBe('unchecked')
-  expect(selectedCounts.get('docs')).toBe(1)
-  expect(selectedFileCount).toBe(1)
+test('checking an unchecked or indeterminate row makes it the one root of its subtree', () => {
+  const next = toggleSelection(sel(['docs/a.md', 1]), DOCS, 'indeterminate', childrenOf)
+  expect([...next]).toEqual([['docs', 2]])
+  expect([...toggleSelection(sel(), f('.env'), 'unchecked', childrenOf)]).toEqual([['.env', 1]])
 })
 
-test('computeStates — all children checked individually → parent checked', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs'), file('b.md', 'docs')])]
-  const { states } = computeStates(tree, new Set(['docs/a.md', 'docs/b.md']))
-  expect(states.get('docs')).toBe('checked')
+test('unchecking inside a selected directory keeps every sibling along the way', () => {
+  const next = toggleSelection(sel(['a', 2]), f('a/b/x'), 'checked', childrenOf)
+  expect([...next].sort()).toEqual([['a/b/y', 1]])
+  // Other roots are untouched.
+  const other = toggleSelection(
+    sel(['docs', 2], ['.env', 1]),
+    f('docs/a.md'),
+    'checked',
+    childrenOf
+  )
+  expect([...other].sort()).toEqual([
+    ['.env', 1],
+    ['docs/b.md', 1]
+  ])
 })
 
-test('computeStates — empty selection → all unchecked, count 0', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs')])]
-  const { states, selectedFileCount } = computeStates(tree, new Set())
-  expect(states.get('docs')).toBe('unchecked')
-  expect(selectedFileCount).toBe(0)
+test('unchecking a root removes it and its subtree', () => {
+  expect([...toggleSelection(sel(['docs', 2], ['.env', 1]), DOCS, 'checked', childrenOf)]).toEqual([
+    ['.env', 1]
+  ])
 })
 
-test('computeStates — mixed indeterminate child propagates upward', () => {
-  const tree = [dir('a', '', [dir('b', 'a', [file('x', 'a/b'), file('y', 'a/b')])])]
-  const { states } = computeStates(tree, new Set(['a/b/x']))
-  expect(states.get('a/b')).toBe('indeterminate')
-  expect(states.get('a')).toBe('indeterminate')
+test('unchecking a directory checked only by covering roots removes them', () => {
+  const s = sel(['docs/a.md', 1], ['docs/b.md', 1])
+  expect([...toggleSelection(s, DOCS, 'checked', childrenOf)]).toEqual([])
 })
-
-// --- findChain -------------------------------------------------------------
-
-test('findChain — top-level node returns single-element chain', () => {
-  const tree = [dir('docs', '', [file('a.md', 'docs')])]
-  const chain = findChain(tree, 'docs')
-  expect(chain?.length).toBe(1)
-  expect(chain?.[0].path).toBe('docs')
-})
-
-test('findChain — nested target returns full chain', () => {
-  const tree = [dir('a', '', [dir('b', 'a', [file('c', 'a/b')])])]
-  const chain = findChain(tree, 'a/b/c')
-  expect(chain?.map((n) => n.path).join(',')).toBe('a,a/b,a/b/c')
-})
-
-test('findChain — missing target returns null', () => {
-  const tree = [file('.env', '')]
-  expect(findChain(tree, 'nope')).toBe(null)
-})
-
-// --- removeSubtree ---------------------------------------------------------
-
-test('removeSubtree — removes node and all descendants from set', () => {
-  const docs = dir('docs', '', [file('a.md', 'docs'), dir('sub', 'docs', [file('z', 'docs/sub')])])
-  const set = new Set(['docs', 'docs/a.md', 'docs/sub', 'docs/sub/z', 'other'])
-  removeSubtree(docs, set)
-  expect(sortedSet(set)).toEqual(['other'])
-})
-
-// --- summary ---------------------------------------------------------------

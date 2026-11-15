@@ -51,3 +51,21 @@ worktree_parent_branch TEXT DEFAULT NULL
 
 - Uses: none
 - Used by: task (GitPanel in TaskDetailPage)
+
+## Decision Log
+
+**2026-11-15: Copy dialog's ignored-file tree is lazy and paged (FU1 S6)**
+`getIgnoredFileTree` sent one node per ignored file (all of `node_modules`) in one
+computer reply, which could exceed the 100 MiB frame limit and stall the computer
+while it was built. The dialog now opens an index of the ignored files on the
+computer (`openIgnoredTree`: one streamed `git ls-files`, held as a sorted path
+array under a random id, idle-expiring, LRU 4). `listIgnoredTree` answers one
+folder's children page by page, and `matchIgnoredTree` answers a preset's selection
+roots page by page (`@slayzone/platform/bounded-reads`, ≤1000 items / 4 MiB per page).
+Counts and preset rules are unchanged: exact descendant counts, and basename globs
+match at any depth, including inside `node_modules`. The client selection is a set
+of roots plus their counts, so row states need no unloaded folders. Unchecking
+inside a selected folder loads that chain's folders completely first. Older
+computers (no `boundedReads`): the hub fetches the whole tree once and serves the
+same pages from a hub-held index (`hub:` ids, bound to scope + repo).
+`getIgnoredFileTree` stays for older callers.

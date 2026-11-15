@@ -9,6 +9,8 @@
  */
 import { gitOpsContract, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
 import * as git from './git-worktree'
+import { scanIgnoredIndex } from './ignored-scan'
+import { ignoredTrees } from './ignored-trees'
 
 type Opts = Parameters<typeof git.getWorkingDiff>[1]
 type FileDiffOpts = Parameters<typeof git.getFileDiff>[3]
@@ -87,6 +89,10 @@ export const gitOpImpls = {
   resolveChildBranches: (i: GitOpInput<'resolveChildBranches'>) =>
     git.resolveChildBranches(i.path, i.baseBranch),
   getIgnoredFileTree: (i: GitOpInput<'getIgnoredFileTree'>) => git.getIgnoredFileTree(i.repoPath),
+  openIgnoredTree: (i: GitOpInput<'openIgnoredTree'>) =>
+    ignoredTrees.open(i.repoPath, scanIgnoredIndex),
+  listIgnoredTree: async (i: GitOpInput<'listIgnoredTree'>) => ignoredTrees.list(i),
+  matchIgnoredTree: async (i: GitOpInput<'matchIgnoredTree'>) => ignoredTrees.match(i),
   copyIgnoredFiles: (i: GitOpInput<'copyIgnoredFiles'>) =>
     git.copyIgnoredFiles(
       i.repoPath,

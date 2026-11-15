@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Loader2, Folder, File, ChevronRight } from 'lucide-react'
@@ -14,19 +14,23 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
-  useDepsChanged
+  SelectValue
 } from '@slayzone/ui'
 import { cn } from '@slayzone/ui'
-import type { IgnoredFileNode, WorktreeCopyPreset } from '../shared/types'
+import type { IgnoredEntry, WorktreeCopyPreset } from '../shared/types'
 import { DEFAULT_COPY_PRESETS } from '../shared/types'
 import {
-  type NodeState,
-  filterTreeByGlobs,
-  computeStates,
-  findChain,
-  removeSubtree
+  ancestorRootOf,
+  chainDirs,
+  indexSelection,
+  type Selection,
+  type SelectionIndex,
+  selectedCountOf,
+  stateOf,
+  toggleSelection
 } from './CopyFilesDialog.utils'
+import type { IgnoredDir } from './ignored-tree-loader'
+import { useIgnoredTree } from './useIgnoredTree'
 
 export type CopyChoice = { mode: 'none' } | { mode: 'custom'; paths: string[] }
 
@@ -37,11 +41,7 @@ interface CopyFilesDialogProps {
   onConfirm: (choice: CopyChoice) => void
 }
 
-// The tree while there is none (dialog closed, scan not loaded, scan failed). One
-// shared instance: `tree` is a dep of the preset→selection sync, and a fresh `[]` per
-// render made a failed scan (no data, `treeLoaded` true) re-run that sync
-// → setSelected → re-render → new `[]` → … an infinite update loop.
-const NO_TREE: IgnoredFileNode[] = []
+const NO_SELECTION: Selection = new Map()
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -51,28 +51,68 @@ function formatBytes(bytes: number): string {
   return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`
 }
 
-function NodeRow({
-  node,
-  depth,
-  states,
-  selectedCounts,
-  expanded,
-  onToggle,
-  onToggleExpand
-}: {
-  node: IgnoredFileNode
-  depth: number
-  states: Map<string, NodeState>
-  selectedCounts: Map<string, number>
+interface TreeProps {
+  dirs: ReadonlyMap<string, IgnoredDir>
+  selection: SelectionIndex
   expanded: Set<string>
-  onToggle: (path: string) => void
+  onToggle: (entry: IgnoredEntry) => void
   onToggleExpand: (path: string) => void
+  onLoadMore: (dir: string) => void
+}
+
+/** The rows after a folder's loaded children: loading, a way to the next page, or a retry. */
+function DirFooter({
+  dir,
+  state,
+  depth,
+  onLoadMore
+}: {
+  dir: string
+  state: IgnoredDir | undefined
+  depth: number
+  onLoadMore: (dir: string) => void
 }) {
-  const state = states.get(node.path) ?? 'unchecked'
-  const isExpanded = expanded.has(node.path)
+  const pad = { paddingLeft: `${depth * 16 + 8 + 22}px` }
+  if (!state || (state.loading && state.items.length === 0))
+    return (
+      <div className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground" style={pad}>
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading…
+      </div>
+    )
+  if (state.failed)
+    return (
+      <button
+        type="button"
+        className="py-1 text-xs text-muted-foreground hover:text-foreground"
+        style={pad}
+        onClick={() => onLoadMore(dir)}
+      >
+        Could not load. Retry
+      </button>
+    )
+  if (state.nextCursor !== null)
+    return (
+      <button
+        type="button"
+        className="py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+        style={pad}
+        disabled={state.loading}
+        onClick={() => onLoadMore(dir)}
+      >
+        Load more
+      </button>
+    )
+  return null
+}
+
+function NodeRow({ node, depth, ...tree }: TreeProps & { node: IgnoredEntry; depth: number }) {
+  const state = stateOf(tree.selection, node)
+  const isExpanded = tree.expanded.has(node.path)
   const checked: boolean | 'indeterminate' =
     state === 'checked' ? true : state === 'indeterminate' ? 'indeterminate' : false
-  const selectedCount = selectedCounts.get(node.path) ?? 0
+  const selectedCount = selectedCountOf(tree.selection, node)
+  const children = node.isDirectory && isExpanded ? tree.dirs.get(node.path) : undefined
 
   return (
     <>
@@ -80,11 +120,11 @@ function NodeRow({
         className="flex items-center gap-2 py-1 rounded hover:bg-muted transition-colors"
         style={{ paddingLeft: `${depth * 16 + 8}px`, paddingRight: 8 }}
       >
-        <Checkbox checked={checked} onCheckedChange={() => onToggle(node.path)} />
+        <Checkbox checked={checked} onCheckedChange={() => tree.onToggle(node)} />
         {node.isDirectory ? (
           <button
             type="button"
-            onClick={() => onToggleExpand(node.path)}
+            onClick={() => tree.onToggleExpand(node.path)}
             className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
           >
             <ChevronRight
@@ -115,20 +155,19 @@ function NodeRow({
           </span>
         )}
       </div>
-      {node.isDirectory &&
-        isExpanded &&
-        node.children.map((child) => (
-          <NodeRow
-            key={child.path}
-            node={child}
+      {node.isDirectory && isExpanded && (
+        <>
+          {children?.items.map((child) => (
+            <NodeRow key={child.path} node={child} depth={depth + 1} {...tree} />
+          ))}
+          <DirFooter
+            dir={node.path}
+            state={children}
             depth={depth + 1}
-            states={states}
-            selectedCounts={selectedCounts}
-            expanded={expanded}
-            onToggle={onToggle}
-            onToggleExpand={onToggleExpand}
+            onLoadMore={tree.onLoadMore}
           />
-        ))}
+        </>
+      )}
     </>
   )
 }
@@ -137,28 +176,32 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
   const trpc = useTRPC()
   const [presets, setPresets] = useState<WorktreeCopyPreset[]>([])
   const [selectedPresetId, setSelectedPresetId] = useState<string>('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Selection>(NO_SELECTION)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // Bumped by every selection change; an async selection (a preset's match, an
+  // uncheck that first loads folders) applies only if nothing changed meanwhile.
+  const generation = useRef(0)
 
-  // Presets settings + ignored-file tree. Both gated on `open` so they refetch
-  // each time the dialog opens (mirrors the old reset-then-load effect).
+  // Presets settings + the ignored-file index. Both follow `open`: a fresh index
+  // (a new scan) each time the dialog opens, as the whole-tree query refetched.
   const presetsQuery = useQuery(
     trpc.settings.get.queryOptions({ key: 'worktree_copy_presets' }, { enabled: open })
   )
-  const treeQuery = useQuery(
-    trpc.worktrees.getIgnoredFileTree.queryOptions({ repoPath }, { enabled: open })
-  )
-  const tree: IgnoredFileNode[] = open ? (treeQuery.data ?? NO_TREE) : NO_TREE
-  const loading = open && treeQuery.isFetching
-  const treeLoaded = open && (treeQuery.isSuccess || treeQuery.isError)
+  const { loader, snapshot } = useIgnoredTree(repoPath, open)
+  const loading = open && snapshot.status === 'loading'
+  const ready = open && snapshot.status === 'ready'
+  const root = snapshot.dirs.get('')
 
-  // Reset transient selection/expansion + apply preset list on open. Both run while
-  // rendering whenever their inputs change (null = not yet synced, so the first
-  // render syncs too), so no commit shows the previous open's state.
-  const [expandedResetForOpen, setExpandedResetForOpen] = useState<boolean | null>(null)
-  if (expandedResetForOpen !== open) {
-    setExpandedResetForOpen(open)
-    if (open) setExpanded(new Set())
+  // Reset transient selection/expansion on open. Runs while rendering whenever
+  // `open` changes (null = not yet synced, so the first render syncs too), so no
+  // commit shows the previous open's state.
+  const [resetForOpen, setResetForOpen] = useState<boolean | null>(null)
+  if (resetForOpen !== open) {
+    setResetForOpen(open)
+    if (open) {
+      setExpanded(new Set())
+      setSelected(NO_SELECTION)
+    }
   }
 
   const presetsInput = {
@@ -188,95 +231,115 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
     }
   }
 
-  // The selection follows the selected preset: re-applied while rendering on mount and
-  // whenever the preset, the preset list or the scanned tree changes (a manual toggle
-  // switches to 'custom', which matches no preset), so no commit shows the previous
-  // selection against a new scan. Every dep is stable between renders (`tree` falls
-  // back to the shared NO_TREE), so this settles.
-  if (useDepsChanged([selectedPresetId, treeLoaded, tree, presets], true)) {
-    const preset = treeLoaded ? presets.find((p) => p.id === selectedPresetId) : undefined
-    if (preset) setSelected(filterTreeByGlobs(tree, preset.pathGlobs))
-  }
-
-  const { states, selectedCounts, selectedFileCount } = useMemo(
-    () => computeStates(tree, selected),
-    [tree, selected]
-  )
-
-  const toggle = useCallback(
-    (path: string) => {
-      const state = states.get(path) ?? 'unchecked'
-      setSelected((prev) => {
-        const chain = findChain(tree, path)
-        if (!chain) return prev
-        const leaf = chain[chain.length - 1]
-        const next = new Set(prev)
-
-        if (state === 'checked') {
-          // Uncheck — if an ancestor holds the selection, expand it along the chain
-          // so that siblings along the way stay selected but the target's subtree doesn't.
-          let ancestorIdx = -1
-          for (let i = 0; i < chain.length; i++) {
-            if (next.has(chain[i].path)) {
-              ancestorIdx = i
-              break
-            }
-          }
-          if (ancestorIdx >= 0 && ancestorIdx < chain.length - 1) {
-            next.delete(chain[ancestorIdx].path)
-            for (let i = ancestorIdx; i < chain.length - 1; i++) {
-              const cur = chain[i]
-              const nextInPath = chain[i + 1]
-              for (const child of cur.children) {
-                if (child.path !== nextInPath.path) next.add(child.path)
-              }
-            }
-          }
-          removeSubtree(leaf, next)
-        } else {
-          // Check (from unchecked or indeterminate)
-          removeSubtree(leaf, next)
-          next.add(leaf.path)
-        }
-
-        return next
+  // The selection follows the selected preset: matched by the index (every ignored
+  // file, at any depth) whenever the preset, the preset list or the index changes.
+  // A manual toggle switches to 'custom', which matches no preset.
+  useEffect(() => {
+    const preset = ready ? presets.find((p) => p.id === selectedPresetId) : undefined
+    if (!preset || !loader) return
+    // A newer change (another preset, a manual toggle) wins over this match.
+    const gen = ++generation.current
+    loader
+      .match(preset.pathGlobs)
+      .then((roots) => {
+        if (generation.current === gen)
+          setSelected(new Map(roots.map((r) => [r.path, r.fileCount])))
       })
-      setSelectedPresetId('custom')
-    },
-    [tree, states]
-  )
+      .catch(() => {
+        /* the index went away (closed, host gone): keep the selection */
+      })
+  }, [selectedPresetId, presets, loader, ready])
+
+  // An expanded folder with nothing loaded (just expanded, or the index was
+  // reopened after it expired) loads its first page.
+  useEffect(() => {
+    if (!loader || !ready) return
+    for (const dir of expanded) if (!snapshot.dirs.has(dir)) void loader.loadMore(dir)
+  }, [expanded, snapshot, loader, ready])
+
+  const selection = useMemo(() => indexSelection(selected), [selected])
+
+  const toggle = (entry: IgnoredEntry): void => {
+    if (!loader) return
+    const state = stateOf(selection, entry)
+    const gen = ++generation.current
+    setSelectedPresetId('custom')
+    const holder = state === 'checked' ? ancestorRootOf(selected, entry.path) : null
+    const apply = () =>
+      setSelected((prev) => toggleSelection(prev, entry, state, (dir) => loader.childrenOf(dir)))
+    if (holder === null || holder === entry.path) {
+      apply()
+      return
+    }
+    // Unchecking inside a selected folder keeps every sibling along the way: load
+    // those folders completely first.
+    Promise.all(chainDirs(holder, entry.path).map((dir) => loader.loadAll(dir)))
+      .then(() => {
+        if (generation.current === gen) apply()
+      })
+      .catch(() => {
+        /* a folder could not load: the selection stays as it was */
+      })
+  }
 
   const allTopSelected =
-    tree.length > 0 && tree.every((n) => (states.get(n.path) ?? 'unchecked') === 'checked')
+    !!root &&
+    root.items.length > 0 &&
+    root.nextCursor === null &&
+    root.items.every((n) => stateOf(selection, n) === 'checked')
 
-  const toggleAll = () => {
-    if (allTopSelected) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(tree.map((n) => n.path)))
-    }
+  const toggleAll = (): void => {
+    const gen = ++generation.current
     setSelectedPresetId('custom')
+    if (allTopSelected || !loader) {
+      setSelected(NO_SELECTION)
+      return
+    }
+    loader
+      .loadAll('')
+      .then((items) => {
+        if (generation.current === gen)
+          setSelected(new Map(items.map((e) => [e.path, e.fileCount])))
+      })
+      .catch(() => {
+        /* the root could not load completely: keep the selection */
+      })
   }
 
-  const toggleExpand = useCallback((path: string) => {
+  const toggleExpand = (path: string): void => {
     setExpanded((prev) => {
       const next = new Set(prev)
       if (next.has(path)) next.delete(path)
       else next.add(path)
       return next
     })
-  }, [])
+  }
+
+  const loadMore = (dir: string): void => {
+    void loader?.loadMore(dir)
+  }
+
+  const selectedFileCount = selection.total
 
   const handleConfirm = () => {
     if (selectedFileCount === 0) {
       onConfirm({ mode: 'none' })
     } else {
-      onConfirm({ mode: 'custom', paths: [...selected] })
+      onConfirm({ mode: 'custom', paths: [...selected.keys()] })
     }
   }
 
   const handleSkip = () => {
     onConfirm({ mode: 'none' })
+  }
+
+  const tree: TreeProps = {
+    dirs: snapshot.dirs,
+    selection,
+    expanded,
+    onToggle: toggle,
+    onToggleExpand: toggleExpand,
+    onLoadMore: loadMore
   }
 
   return (
@@ -312,7 +375,7 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Scanning ignored files…</span>
             </div>
-          ) : tree.length === 0 ? (
+          ) : !ready || snapshot.totalFiles === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
               No ignored files found.
             </p>
@@ -331,18 +394,12 @@ export function CopyFilesDialog({ open, onOpenChange, repoPath, onConfirm }: Cop
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border py-1 max-h-[40vh]">
-                {tree.map((node) => (
-                  <NodeRow
-                    key={node.path}
-                    node={node}
-                    depth={0}
-                    states={states}
-                    selectedCounts={selectedCounts}
-                    expanded={expanded}
-                    onToggle={toggle}
-                    onToggleExpand={toggleExpand}
-                  />
+                {root?.items.map((node) => (
+                  <NodeRow key={node.path} node={node} depth={0} {...tree} />
                 ))}
+                {root && root.nextCursor !== null && (
+                  <DirFooter dir="" state={root} depth={-1} onLoadMore={loadMore} />
+                )}
               </div>
             </div>
           )}

@@ -34,7 +34,16 @@ export interface GitOpTransport {
    *  {@link deliverGitWatchEvent}. */
   watchStart(computerId: string, params: { watchId: string; worktreePath: string }): Promise<void>
   watchStop(computerId: string, params: { watchId: string }): Promise<void>
+  /**
+   * Whether `computerId` answers an additive op family — `boundedReads`: the paged
+   * git ops (`openIgnoredTree`, …). Absent or false = an older computer: the hub
+   * uses the whole-value op it knows instead.
+   */
+  supports?(computerId: string, feature: GitComputerFeature): boolean
 }
+
+/** Op families a computer advertises in its handshake. */
+export type GitComputerFeature = 'boundedReads'
 
 let transport: GitOpTransport | null = null
 
@@ -181,6 +190,16 @@ export function gitWatchComputerGone(computerId: string): void {
       ...watch.owner
     })
   }
+}
+
+/** Whether the computer `target` routes to advertises `feature` (false with none). */
+export async function gitComputerSupports(
+  target: WorktreesComputerTarget | undefined,
+  feature: GitComputerFeature
+): Promise<boolean> {
+  if (!transport?.supports || (!target?.taskId && !target?.projectId)) return false
+  const computerId = await computerFor(target as GitScope)
+  return computerId != null && transport.supports(computerId, feature)
 }
 
 /**

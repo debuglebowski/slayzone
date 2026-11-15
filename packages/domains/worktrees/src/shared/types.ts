@@ -1,3 +1,4 @@
+import type { Page } from '@slayzone/platform/bounded-reads'
 export interface CreateWorktreeOpts {
   repoPath: string
   targetPath: string
@@ -38,6 +39,33 @@ export interface IgnoredFileNode {
   /** Number of descendant files */
   fileCount: number
   children: IgnoredFileNode[]
+}
+
+/**
+ * One entry of the copy dialog's lazy ignored-file tree: a file, or a directory
+ * with the number of ignored files under it (its children load on expand, page by
+ * page). `size` is set for root-level files only (0 otherwise), as before.
+ */
+export interface IgnoredEntry {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+  fileCount: number
+}
+
+/** A preset's selection root: a file, or a directory whose whole subtree is selected. */
+export interface IgnoredMatch {
+  path: string
+  isDirectory: boolean
+  fileCount: number
+}
+
+/** `openIgnoredTree`: the index's id, its total, and the root's first page. */
+export interface IgnoredTreeOpen {
+  treeId: string
+  totalFiles: number
+  root: Page<IgnoredEntry>
 }
 
 // --- Copy presets ---

@@ -2622,6 +2622,12 @@ export function composeServer(opts: {
     // router resolves it like the workspace fs, owner-gated with login).
     const gateGitOp = createGitOpGate(placement.gate, () => currentSecurityContext()?.actor ?? null)
     setGitOpTransport({
+      // Additive op families a computer advertised in this connection's handshake.
+      supports: (computerId, feature) =>
+        feature === 'boundedReads' &&
+        computerGateway
+          .listComputers()
+          .some((c) => c.computerId === computerId && c.boundedReads === true),
       request: async (computerId, params, timeoutMs, target) => {
         // A caller's op is gated as what it works on; the hub's own reads pass.
         await gateGitOp(computerId, target)

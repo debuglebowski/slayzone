@@ -119,6 +119,23 @@ export const gitOpsContract = {
   getCommitDag: op(z.object({ path: s, limit: n, branches: z.array(s).optional() }), ['path']),
   resolveChildBranches: op(z.object({ path: s, baseBranch: s }), ['path']),
   getIgnoredFileTree: op(repo, ['repoPath']),
+  // The copy dialog's lazy tree (bounded pages; `boundedReads` computers only — the
+  // hub answers older ones from `getIgnoredFileTree`). `dir` names a node of the
+  // index, never a path the op touches.
+  openIgnoredTree: op(repo, ['repoPath']),
+  listIgnoredTree: op(
+    z.object({ repoPath: s, treeId: s.max(200), dir: s.max(4096), cursor: s.max(32).nullable() }),
+    ['repoPath']
+  ),
+  matchIgnoredTree: op(
+    z.object({
+      repoPath: s,
+      treeId: s.max(200),
+      globs: z.array(s.max(1000)).max(200),
+      cursor: s.max(32).nullable()
+    }),
+    ['repoPath']
+  ),
   copyIgnoredFiles: op(
     z.object({
       repoPath: s,

@@ -9,6 +9,8 @@ import {
   statSync
 } from 'fs'
 import { cp, stat, mkdir } from 'fs/promises'
+import { globToRegex } from '../shared/ignored-tree'
+import { isAlwaysExcluded } from './ignored-index'
 import path from 'path'
 import type {
   ConflictFileContent,
@@ -399,15 +401,6 @@ export function initSubmodulesSync(worktreePath: string): WorktreeSubmoduleResul
   return { ran: true, success, output, reason: success ? undefined : 'failed' }
 }
 
-/** OS/editor artifacts that should never be copied to worktrees. */
-const ALWAYS_EXCLUDED = new Set(['.DS_Store', 'Thumbs.db', 'Desktop.ini'])
-const ALWAYS_EXCLUDED_EXTENSIONS = ['.swp', '.swo']
-function isAlwaysExcluded(name: string): boolean {
-  if (ALWAYS_EXCLUDED.has(name)) return true
-  if (name.endsWith('~')) return true
-  return ALWAYS_EXCLUDED_EXTENSIONS.some((ext) => name.endsWith(ext))
-}
-
 /** Build a tree of all git-ignored files. One git call, grouped server-side. */
 export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileNode[]> {
   try {
@@ -488,16 +481,6 @@ export async function getIgnoredFileTree(repoPath: string): Promise<IgnoredFileN
   } catch {
     return []
   }
-}
-
-function globToRegex(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '\0')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\0/g, '.*')
-  return new RegExp(`^${escaped}$`)
 }
 
 async function getIgnoredTopLevelEntries(repoPath: string): Promise<string[] | null> {
