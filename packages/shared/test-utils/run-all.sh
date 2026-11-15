@@ -1498,6 +1498,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerChatStorage.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
   packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \

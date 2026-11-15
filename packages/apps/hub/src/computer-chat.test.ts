@@ -170,6 +170,73 @@ test('first chat read migrates legacy history then all writes stay on its comput
   }
 })
 
+test('storage compaction: an older computer is unsupported without being asked; a current one answers', async () => {
+  const h = await createTestHarness(),
+    dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-storage-'))
+  const pc = createFixtureChatRuntime({
+    taskFolder: () => dir,
+    stateDir: dir,
+    hubScope: 'hub',
+    computerId: () => 'pc',
+    getProjectPaths: () => null,
+    ctx: {
+      config: {
+        hubUrl: 'ws://hub/computers',
+        name: 'test',
+        allowedRoots: [realpathSync(tmpdir())],
+        capabilities: ['proc']
+      },
+      dialer: { notify: () => true },
+      log: () => {}
+    }
+  })
+  try {
+    const requests: Array<{ kind?: string }> = []
+    let supports = false
+    const services = createComputerChatServices({
+      db: h.slayDb,
+      legacyData: {
+        ...createDbChatDataOps(h.slayDb, taskSessionStore),
+        buildMcpEnv: async () => ({})
+      },
+      attachments: { read: async () => new Uint8Array() },
+      request: (_pc, request) => {
+        requests.push(request as { kind?: string })
+        return pc.request(JSON.parse(JSON.stringify(request)))
+      },
+      resolveComputer: async () => 'pc',
+      defaultComputer: async () => 'pc',
+      admitComputer: async () => undefined,
+      chatStorageCompaction: () => supports,
+      hasLiveTask: async () => false
+    })
+    const storageRequests = () => requests.filter((r) => String(r.kind).startsWith('storage.'))
+    expect(await services.computers.storageStatus('pc')).toEqual({ supported: false })
+    await expect(services.computers.compactStorage('pc')).rejects.toThrow(/update this computer/i)
+    await expect(services.computers.cancelStorageCompaction('pc')).rejects.toThrow(
+      /update this computer/i
+    )
+    expect(storageRequests()).toEqual([])
+
+    supports = true
+    expect(await services.computers.storageStatus('pc')).toMatchObject({
+      supported: true,
+      autoVacuum: 'none'
+    })
+    await expect(services.computers.compactStorage('pc')).rejects.toThrow(/backfill/i)
+    await services.computers.cancelStorageCompaction('pc')
+    expect(storageRequests().map((r) => r.kind)).toEqual([
+      'storage.status',
+      'storage.compact',
+      'storage.cancel'
+    ])
+  } finally {
+    await pc.close()
+    h.cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('durable ownership gates reject legacy writes and retention deletes during copying', async () => {
   const h = await createTestHarness()
   try {

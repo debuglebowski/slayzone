@@ -1169,6 +1169,9 @@ export function composeServer(opts: {
     chatTimelineRowSlices: (id) =>
       (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
         ?.chatTimelineRowSlices === true,
+    chatStorageCompaction: (id) =>
+      (execGateway?.listComputers() ?? []).find((c) => c.computerId === id)
+        ?.chatStorageCompaction === true,
     defaultComputer: () => placement.forCaller(),
     gate: async (computerId, taskId) => placement.gate?.(computerId, { kind: 'task', id: taskId }),
     onTasksChanged: (taskId) => notifyTasksChanged({ taskIds: [taskId] }),

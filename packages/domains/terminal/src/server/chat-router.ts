@@ -161,6 +161,9 @@ export const chatRouter = router({
       await testing().seedEvents(input.tabId, input.fromSeq, input.events)
       return { ok: true }
     }),
+  testStorageSlack: publicProcedure
+    .input(z.object({ tabId: z.string().min(1), megabytes: z.number().int().min(1).max(1024) }))
+    .mutation(({ input }) => testing().storageSlack(input.tabId, input.megabytes)),
   testReadEvents: publicProcedure
     .input(
       z.object({
@@ -236,6 +239,18 @@ export const chatRouter = router({
         })
       )
       .mutation(({ input }) => computer().configureBackups(input.computerId, input.settings))
+  }),
+  // A computer's chat store on disk and its compaction (fu-2).
+  storage: router({
+    status: publicProcedure
+      .input(backupTarget)
+      .query(({ input }) => computer().storageStatus(input.computerId)),
+    compact: publicProcedure
+      .input(backupTarget)
+      .mutation(({ input }) => computer().compactStorage(input.computerId)),
+    cancel: publicProcedure
+      .input(backupTarget)
+      .mutation(({ input }) => computer().cancelStorageCompaction(input.computerId))
   }),
   archives: router({
     file: publicProcedure

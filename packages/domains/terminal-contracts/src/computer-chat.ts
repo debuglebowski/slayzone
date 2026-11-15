@@ -134,6 +134,11 @@ export interface ChatComputerOps {
   ): Promise<ComputerChatArchive>
   backupSettings(computerId: string): Promise<ComputerChatBackupPolicy>
   configureBackups(computerId: string, settings: ComputerChatBackupPolicy): Promise<void>
+  /** The computer's chat store on disk and its compaction; `{supported:false}` = an older computer. */
+  storageStatus(computerId: string): Promise<ComputerChatStorageStatus>
+  /** Start a compaction (rebuild, or reclaim on an incremental store); refused with a reason. */
+  compactStorage(computerId: string): Promise<ComputerChatStorageJob>
+  cancelStorageCompaction(computerId: string): Promise<void>
   listArchives(computerId: string): Promise<ComputerChatArchive[]>
   archiveConversations(computerId: string, archiveId: string): Promise<ArchivedChatConversation[]>
   archiveRead(

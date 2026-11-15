@@ -37,6 +37,7 @@ import {
 } from '@slayzone/terminal-contracts'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { collectArchivedConversation } from './archive-export'
+import { ComputerChatStorage } from './ComputerChatStorage'
 
 function download(data: Blob, name: string) {
   const url = URL.createObjectURL(data),
@@ -133,6 +134,7 @@ function ComputerBackupList({ computerId, usable }: { computerId: string; usable
           {error.message}
         </p>
       )}
+      <ComputerChatStorage computerId={computerId} />
       <Button
         variant="outline"
         disabled={create.isPending}

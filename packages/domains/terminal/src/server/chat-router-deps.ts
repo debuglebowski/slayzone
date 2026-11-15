@@ -69,6 +69,8 @@ export type ChatDeps = {
     ): Promise<void>
     /** A tab's (task, mode) configuration as its computer holds it — the only copy. */
     providerConfig(tabId: string): Promise<Record<string, unknown>>
+    /** Free about `megabytes` of pages in the tab's chat store (storage-compaction e2e). */
+    storageSlack(tabId: string, megabytes: number): Promise<unknown>
   }
   ops: AsyncCapable<ReturnType<typeof createChatOps>>
   queueOps: AsyncCapable<ReturnType<typeof createChatQueueOps>>

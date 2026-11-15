@@ -140,6 +140,8 @@ export function createComputerChatServices(opts: {
   promptSummariesAll?(computerId: string): boolean
   /** Whether the computer slices timeline pages by rows (its `chatTimelineRowSlices`). */
   chatTimelineRowSlices?(computerId: string): boolean
+  /** Whether the computer compacts its chat store on request (its `chatStorageCompaction`). */
+  chatStorageCompaction?(computerId: string): boolean
   defaultComputer(): Promise<string | null>
   gate?(computerId: string, taskId: string): Promise<void>
   /**
@@ -991,6 +993,10 @@ export function createComputerChatServices(opts: {
       await opts.beforeInvoke?.(owner, method, args)
     }
   })
+  function requireStorageCompaction(computerId: string) {
+    if (!opts.chatStorageCompaction?.(computerId))
+      throw new Error('Update this computer to reclaim its chat storage')
+  }
   async function computerRequest(computerId: string, body: unknown) {
     if (!opts.admitComputer) throw new Error('Computer backup access is not configured')
     await opts.admitComputer(computerId)
@@ -1033,6 +1039,23 @@ export function createComputerChatServices(opts: {
       >,
     configureBackups: async (pc, settings) => {
       await computerRequest(pc, { kind: 'backup.configure', settings })
+    },
+    // An older computer knows no storage requests: never asked, reported unsupported.
+    storageStatus: async (pc) =>
+      opts.chatStorageCompaction?.(pc)
+        ? ((await computerRequest(pc, { kind: 'storage.status' })) as Awaited<
+            ReturnType<ChatComputerOps['storageStatus']>
+          >)
+        : { supported: false },
+    compactStorage: async (pc) => {
+      requireStorageCompaction(pc)
+      return (await computerRequest(pc, { kind: 'storage.compact' })) as Awaited<
+        ReturnType<ChatComputerOps['compactStorage']>
+      >
+    },
+    cancelStorageCompaction: async (pc) => {
+      requireStorageCompaction(pc)
+      await computerRequest(pc, { kind: 'storage.cancel' })
     },
     listArchives: (pc) =>
       computerRequest(pc, { kind: 'archive.list' }) as ReturnType<ChatComputerOps['listArchives']>,
@@ -1091,6 +1114,15 @@ export function createComputerChatServices(opts: {
           route: { id: owner.id, epoch: owner.epoch },
           fromSeq,
           events
+        })
+      },
+      async storageSlack(tabId, megabytes) {
+        if (process.env.PLAYWRIGHT !== '1') throw new Error('test-only handler unavailable')
+        const owner = await relay.ensureTab(tabId)
+        return request(owner.computerId!, {
+          kind: 'test.storageSlack',
+          route: { id: owner.id, epoch: owner.epoch },
+          megabytes
         })
       },
       async readEvents(tabId, afterSeq, limit) {

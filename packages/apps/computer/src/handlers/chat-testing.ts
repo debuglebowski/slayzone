@@ -38,6 +38,11 @@ export const chatTestRequestSchema = z.discriminatedUnion('kind', [
       .max(1000)
   }),
   z.object({
+    kind: z.literal('test.storageSlack'),
+    route: chatRouteSchema,
+    megabytes: z.number().int().min(1).max(1024)
+  }),
+  z.object({
     kind: z.literal('test.watchdog'),
     timings: z
       .object({
@@ -98,6 +103,41 @@ export async function handleChatTesting(
           })
       })
       return { ok: true }
+    }
+    if (req.kind === 'test.storageSlack') {
+      // Free pages for the storage-compaction e2e: about `megabytes` of filler rows
+      // saved, then deleted (no live chat); then the image backfill run to its end, as
+      // a rebuild waits for it.
+      if (r.transport.getSessionInfo(owner.identity.tabId)?.pid)
+        throw new Error('Cannot seed a live chat')
+      const from = r.storage.nextSeq(id),
+        rows = req.megabytes * 10,
+        filler = 'f'.repeat(100_000)
+      // 10 MB per transaction, the event loop runs between them.
+      for (let start = 0; start < rows; start += 100) {
+        r.storage.transaction(() => {
+          for (let i = start; i < Math.min(rows, start + 100); i++)
+            r.storage.appendAt(
+              id,
+              epoch,
+              from + i,
+              { kind: 'assistant-text', messageId: `slack-${i}`, text: filler },
+              Date.now()
+            )
+        })
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+      for (let start = 0; start < rows; start += 100) {
+        r.storage.compose((db) =>
+          db
+            .prepare('DELETE FROM events WHERE conversation_id=? AND seq>=? AND seq<?')
+            .run(id, from + start, from + start + 100)
+        )
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+      r.storage.checkpoint()
+      await r.blobBackfill.runNow()
+      return r.compaction.status()
     }
     if (req.kind === 'test.seedEvents') {
       if (r.transport.getSessionInfo(owner.identity.tabId)?.pid)

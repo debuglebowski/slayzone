@@ -198,6 +198,10 @@ const requestSchema = z.discriminatedUnion('kind', [
     archiveId: z.string().uuid()
   }),
   z.object({ kind: z.literal('backup.settings') }),
+  // Chat store compaction (fu-2): exact shapes, nothing else accepted.
+  z.object({ kind: z.literal('storage.status') }).strict(),
+  z.object({ kind: z.literal('storage.compact') }).strict(),
+  z.object({ kind: z.literal('storage.cancel') }).strict(),
   z.object({
     kind: z.literal('backup.configure'),
     settings: z.object({
@@ -857,6 +861,13 @@ export function createChatRuntimeHandlers(opts: {
         return r.backups.restore(req.backupId, req.archiveId)
       case 'backup.settings':
         return r.backups.settings()
+      case 'storage.status':
+        return r.compaction.status()
+      case 'storage.compact':
+        return r.compaction.start()
+      case 'storage.cancel':
+        r.compaction.cancel()
+        return null
       case 'retention.configure':
         r.retention.configure(req.days)
         return { days: r.retention.days }

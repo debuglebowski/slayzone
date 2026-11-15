@@ -361,7 +361,9 @@ export class HubDialer {
       // Only that runtime's identity proves which chat requests it implements.
       chatHistoryPages: this.opts.identity.chatHistoryPages === true,
       chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
-      promptSummariesAll: this.opts.identity.promptSummariesAll === true
+      promptSummariesAll: this.opts.identity.promptSummariesAll === true,
+      // ...and compacts its chat store on request.
+      chatStorageCompaction: true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -409,7 +411,8 @@ export class HubDialer {
             directNotAfter: true,
             chatHistoryPages: this.opts.identity.chatHistoryPages === true,
             promptSummariesAll: this.opts.identity.promptSummariesAll === true,
-            chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true
+            chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
+            chatStorageCompaction: true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

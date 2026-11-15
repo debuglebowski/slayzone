@@ -133,6 +133,10 @@ describe('chat router', () => {
         },
         seedPrompts: async (...args) => {
           got.push(args)
+        },
+        storageSlack: async (...args) => {
+          got.push(args)
+          return null
         }
       }
     })
@@ -151,17 +155,22 @@ describe('chat router', () => {
       await expect(caller.testSeedPrompts({ taskId: 'task', prompts: [] })).rejects.toThrow(
         /test-only/i
       )
+      await expect(caller.testStorageSlack({ tabId: 't', megabytes: 1 })).rejects.toThrow(
+        /test-only/i
+      )
       expect(got).toEqual([])
       process.env.PLAYWRIGHT = '1'
       await caller.testSeedEvents({ tabId: 't', fromSeq: 0, events: [] })
       await caller.testReadEvents({ tabId: 't', afterSeq: -1, limit: 10 })
       await caller.testProjection({ tabId: 't', action: 'read' })
       await caller.testSeedPrompts({ taskId: 'task', prompts: [] })
+      await caller.testStorageSlack({ tabId: 't', megabytes: 1 })
       expect(got).toEqual([
         ['t', 0, []],
         ['t', -1, 10],
         ['t', 'read'],
-        ['task', []]
+        ['task', []],
+        ['t', 1]
       ])
     } finally {
       setChatDeps(previous)

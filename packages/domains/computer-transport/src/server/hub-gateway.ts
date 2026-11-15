@@ -110,6 +110,8 @@ export interface ComputerDescriptor {
   promptSummariesAll?: boolean
   /** Whether it slices a timeline page by rows (`startRow`), from this connection's frame. Absent = no. */
   chatTimelineRowSlices?: boolean
+  /** Whether it compacts its chat store on request, from this connection's frame. Absent = no. */
+  chatStorageCompaction?: boolean
   connectedAt: number
   lastSeenAt: number
   /** Socket survived a hub freeze; waiting for fresh traffic or a liveness probe. */
@@ -809,6 +811,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatHistoryPages: parsed.data.chatHistoryPages === true,
       promptSummariesAll: parsed.data.promptSummariesAll === true,
       chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
+      chatStorageCompaction: parsed.data.chatStorageCompaction === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }
@@ -977,6 +980,7 @@ export function createHubComputerGateway(options: HubComputerGatewayOptions): Hu
       chatHistoryPages: parsed.data.chatHistoryPages === true,
       promptSummariesAll: parsed.data.promptSummariesAll === true,
       chatTimelineRowSlices: parsed.data.chatTimelineRowSlices === true,
+      chatStorageCompaction: parsed.data.chatStorageCompaction === true,
       connectedAt: Date.now(),
       lastSeenAt: Date.now()
     }

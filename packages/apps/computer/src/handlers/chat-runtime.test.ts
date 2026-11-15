@@ -543,3 +543,20 @@ test('computer handler uses the bundled projection worker and survives its start
     }
   }
 })
+
+test('storage compaction: status, refused start with its reason, cancel, malformed input', async () => {
+  const { h } = setup()
+  const status = (await h.request({ kind: 'storage.status' })) as Record<string, unknown>
+  expect(status).toMatchObject({
+    supported: true,
+    autoVacuum: 'none',
+    backfillDone: false,
+    job: null,
+    last: null
+  })
+  expect(typeof status.fileBytes).toBe('number')
+  // A fresh store's image backfill has not run yet: a rebuild waits for it.
+  await expect(h.request({ kind: 'storage.compact' })).rejects.toThrow(/backfill/i)
+  expect(await h.request({ kind: 'storage.cancel' })).toBeNull()
+  await expect(h.request({ kind: 'storage.compact', force: true })).rejects.toThrow()
+})
