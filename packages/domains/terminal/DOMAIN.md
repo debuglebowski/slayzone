@@ -33,6 +33,13 @@ session per 5 min; a second death in that window gets the recovery shell plus
 the interactive recovery shell, a stale resume its overlay, a requested kill ends.
 Regression: 2026-11-14, the hub's stray sweep SIGHUP'd 31 live agents (exit 129).
 
+An exit SlayZone asked for (`exitWasRequested`: `killPty` — close, replace, task
+done, hand-off — app quit, hibernation) always just ends the session: no recovery
+shell, no fast-exit retry, no resume, whatever the code. The code alone cannot tell:
+a computer-routed kill reports a null code, mapped to 1. A recovery shell still in
+flight when the kill comes is dropped (`decideRecoveryAdoption`). Recorded as
+`pty.exit_requested` when the code alone would have given a recovery shell.
+
 ### Hub restart: adopt, else surface
 
 Hub processes restart (Restart local hub, a crashed sidecar, a standalone hub, a

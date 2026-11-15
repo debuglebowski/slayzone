@@ -72,6 +72,7 @@ import {
 } from '@slayzone/platform'
 import {
   shouldShellFallback,
+  exitWasRequested,
   buildRecoveryMessage,
   buildAutoResumeMessage,
   decideRecoveryAdoption,
@@ -2434,7 +2435,8 @@ async function createPtyImpl(
       const verdict = decideRecoveryAdoption({
         finalized: !!carried.exited || !!carried.killRequested,
         sessionReplaced: sessions.get(sessionId) !== carried,
-        isShuttingDown
+        isShuttingDown,
+        killRequested: !!carried.killRequested
       })
       if (verdict.action === 'discard') {
         try {
@@ -3245,8 +3247,17 @@ async function createPtyImpl(
           // The owner's deadline fired: record it exactly as the hub's own would,
           // then let the ordinary exit path below decide on a recovery shell.
           if (lastExitReason === 'startup-timeout') recordStartupTimeout('computer')
+          // SlayZone asked for this exit (close, replace, task done, hand-off, quit,
+          // hibernation): it ends the session — no retry, no recovery shell, no resume,
+          // whatever the code says (a computer-routed kill reports a null code, as 1).
+          const requested = exitWasRequested({
+            killRequested: !!session.killRequested,
+            shuttingDown: isShuttingDown,
+            hibernating: hibernatingSessions.has(sessionId)
+          })
 
           const canAsyncFallback =
+            !requested &&
             computerId == null && // remote sessions never use the local shell fallback
             canRetryInteractiveOnly &&
             !usedFallback &&
@@ -3346,7 +3357,8 @@ async function createPtyImpl(
             hasPostSpawnCommand: runsAgent,
             resuming,
             usedShellFallback,
-            isStale: isStaleResume || isResumeConflict
+            isStale: isStaleResume || isResumeConflict,
+            requested
           }
 
           // The existing recovery: a recovery shell where one applies, else the exit.
@@ -3365,6 +3377,16 @@ async function createPtyImpl(
             // synchronous onExit callback. Hence the async continuation below —
             // everything after the spawn (buffer/seq bookkeeping, handler
             // re-attachment, title polling) is shared, so the two paths cannot drift.
+            if (requested && shouldShellFallback({ ...exitCtx, requested: false }))
+              recordDiagnosticEvent({
+                level: 'info',
+                source: 'pty',
+                event: 'pty.exit_requested',
+                sessionId,
+                taskId: taskIdFromSessionId(sessionId),
+                message: `${agentId} exited with code ${String(exitCode)} after SlayZone ended it; no recovery shell`,
+                payload: { exitCode, mode: agentId, computerId }
+              })
             if (shouldShellFallback(exitCtx)) {
               const shellOnlyArgs = transport ? [...transport.args] : [...spawnConfig.args]
               const previousArgs = [...usedArgs]
@@ -3458,7 +3480,8 @@ async function createPtyImpl(
                     const verdict = decideRecoveryAdoption({
                       finalized,
                       sessionReplaced: sessions.get(sessionId) !== session,
-                      isShuttingDown
+                      isShuttingDown,
+                      killRequested: !!session.killRequested
                     })
                     if (verdict.action === 'discard') {
                       try {

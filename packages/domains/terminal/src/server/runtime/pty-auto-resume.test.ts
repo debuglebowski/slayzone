@@ -69,8 +69,12 @@ interface Backend {
   refuse: Set<number>
 }
 
-/** A routing-style backend: every spawn resolves to a handle the test drives. */
-function fakeBackend(sync = false): Backend {
+/**
+ * A routing-style backend: every spawn resolves to a handle the test drives.
+ * `remoteKill`: a kill is reported the way a computer-routed handle reports it — the
+ * computer's null exit code mapped to 1 (exec-proxies), no signal.
+ */
+function fakeBackend(sync = false, opts: { remoteKill?: boolean } = {}): Backend {
   const b: Backend = { specs: [], handles: [], hold: null, refuse: new Set() }
   const make = (): unknown => {
     let dataCb: ((d: string) => void) | undefined
@@ -103,8 +107,10 @@ function fakeBackend(sync = false): Backend {
       kill: () => {
         if (h.killed) return
         h.killed = true
-        // What node-pty reports for a SIGKILL: code 0, signal 9.
-        queueMicrotask(() => exitCb?.({ exitCode: 0, signal: 9 }))
+        // What node-pty reports for a SIGKILL: code 0, signal 9; a routed handle: code 1.
+        queueMicrotask(() =>
+          exitCb?.(opts.remoteKill ? { exitCode: 1 } : { exitCode: 0, signal: 9 })
+        )
       },
       resize: () => undefined
     }
@@ -223,6 +229,55 @@ test('a kill SlayZone asked for is never resumed', async () => {
   await settle()
   expect(b.specs).toHaveLength(1)
   expect(events('pty.auto_resumed')).toEqual([])
+})
+
+test('a remote kill (null code → 1) ends the session: no recovery shell', async () => {
+  // Regression: the recovery shell judged only the exit code, and a routed kill
+  // reports 1 — closing an agent's tab spawned a shell into it.
+  const b = fakeBackend(false, { remoteKill: true })
+  const sid = await openAgent()
+  b.handles[0].print('claude ready\r\n')
+  skew += 11_000
+  killPty(sid)
+  await until(() => exits.length === 1)
+  await settle()
+  expect(b.specs).toHaveLength(1)
+  expect(events('pty.shell_fallback')).toEqual([])
+  expect(events('pty.auto_resumed')).toEqual([])
+  expect(exits).toEqual([{ id: sid, code: 1 }])
+  expect(hasPty(sid)).toBe(false)
+})
+
+test('a remote kill before any output (start window) ends the session too', async () => {
+  const b = fakeBackend(false, { remoteKill: true })
+  const sid = await openAgent()
+  killPty(sid)
+  await until(() => exits.length === 1)
+  await settle()
+  expect(b.specs).toHaveLength(1)
+  expect(events('pty.shell_fallback')).toEqual([])
+})
+
+test('a kill while the recovery shell is starting: the shell is dropped, one exit', async () => {
+  const b = fakeBackend(false, { remoteKill: true })
+  const sid = await openAgent()
+  let release!: () => void
+  b.hold = new Promise<void>((r) => {
+    release = r
+  })
+  // A genuine start failure: the recovery shell is on its way...
+  b.handles[0].exit({ exitCode: 1 })
+  await until(() => b.specs.length === 2)
+  // ...when the user closes the tab.
+  killPty(sid)
+  b.hold = null
+  release()
+  await until(() => b.handles.length === 2)
+  await settle()
+  expect(b.handles[1].killed).toBe(true)
+  expect(b.specs).toHaveLength(2)
+  expect(events('pty.shell_fallback')).toEqual([])
+  expect(exits.filter((e) => e.id === sid)).toHaveLength(1)
 })
 
 test('a start failure keeps the recovery shell', async () => {
