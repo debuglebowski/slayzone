@@ -377,6 +377,18 @@ describe('adopting a live session (hub restart)', () => {
     pty.disposeAll()
   })
 
+  it('taking a session over never resizes it, whatever size the spawn carried', async () => {
+    const { children, pty } = setupMany()
+    await pty.handlers['pty.spawn'](spawnAs('run-1', 'claude-code'))
+    await pty.handlers['pty.spawn'](
+      spawnAs('run-2', 'claude-code', { adoptLive: { mode: 'claude-code' }, cols: 200, rows: 50 })
+    )
+    pty.handlers['pty.adopt']({ sessionId: 'task:tab', spawnId: 'run-3', fromSpawnId: 'run-2' })
+    expect(children).toHaveLength(1)
+    expect(children[0]!.proc.resize).not.toHaveBeenCalled()
+    pty.disposeAll()
+  })
+
   it('a different mode is not taken over: replaced as before, and the reply says so', async () => {
     const { children, pty } = setupMany()
     await pty.handlers['pty.spawn'](spawnAs('run-1', 'codex'))

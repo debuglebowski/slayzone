@@ -95,6 +95,8 @@ let renderingHubId = 'local'
 
 // The domain's typed view (`../trpc`) re-exports the runtime; point it at this mock.
 vi.mock('./HubUsersSection', () => ({ HubUsersSection: () => null }))
+// Its own suite (ComputerUnattachedSessions.test.tsx) covers it; this fake tRPC has no `pty`.
+vi.mock('./ComputerUnattachedSessions', () => ({ ComputerUnattachedSessions: () => null }))
 
 vi.mock('../trpc', async () => await import('@slayzone/transport/client'))
 vi.mock('@slayzone/transport/client', () => ({

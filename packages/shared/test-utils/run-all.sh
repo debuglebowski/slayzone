@@ -754,6 +754,8 @@ run_harness packages/domains/usage-analytics/src/server/collector.test.ts
 run_harness packages/domains/usage-analytics/src/server/parser-ids.test.ts
 run_harness packages/domains/usage-analytics/src/server/codex-usage-attribution.test.ts
 run_harness packages/apps/api/src/http/rest-api/pty/follow.test.ts
+# Sessions a previous hub run left running: listed with the reason, attached again or stopped.
+run_harness packages/apps/api/src/http/rest-api/pty/unattached.test.ts
 run_harness packages/domains/automations/src/server/engine-switch.test.ts
 
 # Terminal — SGR stripping + WebGL renderer lifecycle
@@ -1172,6 +1174,8 @@ run_harness packages/apps/cli/test/chat-rest.test.ts
 # Shell completions are generated from the command tree (nothing to keep in sync by hand).
 run_harness packages/apps/cli/src/commands/completions.test.ts
 run_harness packages/apps/cli/src/commands/transfers.test.ts
+# `slay pty`: unattached sessions in `list`, `unattached`, `attach`, `kill` (its --json unchanged).
+run_harness packages/apps/cli/src/commands/pty.test.ts
 run_harness packages/apps/api/src/http/rest-api/transfers.test.ts
 # Wave-3.5 CLI artifact commands routed through REST — metadata AND content
 # (read/create/upload/delete/download), incl. a no-local-database suite.
@@ -1435,6 +1439,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/apps/hub/src/fd-watch.test.ts \
   packages/domains/settings/src/client/tabs/HubCard.test.tsx \
   packages/domains/settings/src/client/tabs/ComputerFaults.test.tsx \
+  packages/domains/settings/src/client/tabs/ComputerUnattachedSessions.test.tsx \
   packages/domains/settings/src/client/HubIssueBanners.test.tsx \
   packages/domains/settings/src/client/tabs/direct-link-status.test.ts \
   packages/domains/projects/src/client/ProjectLockScreen.test.tsx \

@@ -12,6 +12,48 @@ interface PtyInfo {
   lastOutputTime: number
 }
 
+/** A session a computer still runs from a previous hub run, not attached to its tab. */
+interface UnattachedInfo {
+  computerId: string
+  sessionId: string
+  taskId: string | null
+  tabId: string | null
+  pid?: number
+  mode?: string
+  startedAt?: number
+  status: 'adopting' | 'unattached'
+  reason?: string
+  detail?: string
+}
+
+const unattachedPath = (u: UnattachedInfo): string =>
+  `/api/pty/unattached/${encodeURIComponent(u.computerId)}/${encodeURIComponent(u.sessionId)}`
+
+/** The one unattached session `idPrefix` names; null when none does. Exits on ambiguity. */
+function findUnattached(list: UnattachedInfo[], idPrefix: string): UnattachedInfo | null {
+  const matches = list.filter((u) => u.sessionId.startsWith(idPrefix))
+  if (matches.length > 1) {
+    console.error(
+      `Ambiguous id prefix "${idPrefix}". Matches: ${matches.map((u) => u.sessionId).join(', ')}`
+    )
+    process.exit(1)
+  }
+  return matches[0] ?? null
+}
+
+function printUnattached(list: UnattachedInfo[]): void {
+  const now = Date.now()
+  console.log('Not attached — running on a computer since before the hub restarted (left running):')
+  for (const u of list) {
+    const age = u.startedAt ? formatAge(now - u.startedAt) : '?'
+    const why = u.status === 'adopting' ? 'attaching…' : (u.reason ?? 'unknown')
+    console.log(
+      `  ${u.sessionId.padEnd(24)}  ${(u.mode ?? '?').padEnd(14)}  ${u.computerId}  pid ${String(u.pid ?? '?')}  ${age}  ${why}${u.detail ? ` (${u.detail})` : ''}`
+    )
+  }
+  console.log('  Attach to its tab: slay pty attach <id>   Stop it: slay pty kill <id>')
+}
+
 function resolveSession(sessions: PtyInfo[], idPrefix: string): PtyInfo {
   const matches = sessions.filter((s) => s.sessionId.startsWith(idPrefix))
   if (matches.length === 0) {
@@ -79,9 +121,14 @@ export function ptyCommand(): Command {
         console.log(JSON.stringify(sessions, null, 2))
         return
       }
+      // An older hub has no such route: nothing to show then.
+      const unattached = await apiGet<UnattachedInfo[]>('/api/pty/unattached').catch(
+        () => [] as UnattachedInfo[]
+      )
 
       if (sessions.length === 0) {
         console.log('No PTY sessions.')
+        if (unattached.length > 0) printUnattached(unattached)
         return
       }
 
@@ -106,6 +153,44 @@ export function ptyCommand(): Command {
         const age = formatAge(now - s.createdAt)
         console.log(`${id}  ${task}  ${title}  ${mode}  ${state}  ${age}`)
       }
+      if (unattached.length > 0) {
+        console.log('')
+        printUnattached(unattached)
+      }
+    })
+
+  // slay pty unattached
+  cmd
+    .command('unattached')
+    .description(
+      'List terminal sessions a computer still runs from before the hub restarted that are not attached to their tab'
+    )
+    .option('--json', 'Output as JSON')
+    .action(async (opts) => {
+      const unattached = await apiGet<UnattachedInfo[]>('/api/pty/unattached')
+      if (opts.json) {
+        console.log(JSON.stringify(unattached, null, 2))
+        return
+      }
+      if (unattached.length === 0) {
+        console.log('No unattached sessions.')
+        return
+      }
+      printUnattached(unattached)
+    })
+
+  // slay pty attach <id>
+  cmd
+    .command('attach <id>')
+    .description('Attach an unattached session to its tab again (id prefix supported)')
+    .action(async (idPrefix: string) => {
+      const target = findUnattached(await apiGet<UnattachedInfo[]>('/api/pty/unattached'), idPrefix)
+      if (!target) {
+        console.error(`No unattached session: ${idPrefix}`)
+        process.exit(1)
+      }
+      await apiPost<{ ok: boolean }>(`${unattachedPath(target)}/attach`, {})
+      console.log(`Attached: ${target.sessionId}`)
     })
 
   // slay pty buffer <id>
@@ -326,9 +411,22 @@ export function ptyCommand(): Command {
   // slay pty kill <id>
   cmd
     .command('kill <id>')
-    .description('Kill a PTY session (id prefix supported)')
+    .description('Kill a PTY session, or stop an unattached one (id prefix supported)')
     .action(async (idPrefix) => {
       const sessions = await apiGet<PtyInfo[]>('/api/pty')
+      // Not an attached session: an unattached one (left running since before the hub
+      // restarted) is stopped instead.
+      if (!sessions.some((s) => s.sessionId.startsWith(idPrefix))) {
+        const target = findUnattached(
+          await apiGet<UnattachedInfo[]>('/api/pty/unattached').catch(() => []),
+          idPrefix
+        )
+        if (target) {
+          await apiDelete<{ ok: boolean }>(unattachedPath(target))
+          console.log(`Stopped: ${target.sessionId}`)
+          return
+        }
+      }
       const session = resolveSession(sessions, idPrefix)
       await apiDelete<{ ok: boolean }>(`/api/pty/${encodedId(session.sessionId)}`)
       console.log(`Killed: ${session.sessionId}`)

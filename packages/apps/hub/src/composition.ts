@@ -235,6 +235,7 @@ import {
   getPtyDirectTarget,
   onPtyInputSubmit,
   setUnattachedLaunchResolver,
+  getPtyDeps,
   type AgentLifecycleEventMap,
   type PtySessionWindow
 } from '@slayzone/terminal/hub'
@@ -2139,7 +2140,12 @@ export function composeServer(opts: {
       subscribeToPtyData,
       subscribeToStateChange,
       onSessionChange,
-      getState
+      getState,
+      listUnattached: () => getPtyDeps().ops.unattachedList(),
+      attachUnattached: (computerId, sessionId) =>
+        getPtyDeps().ops.unattachedAttach(computerId, sessionId),
+      killUnattached: (computerId, sessionId) =>
+        getPtyDeps().ops.unattachedKill(computerId, sessionId)
     },
     // CLI completion guard: PTYs + chats (every computer) of the task mid-reply.
     taskAgents: {

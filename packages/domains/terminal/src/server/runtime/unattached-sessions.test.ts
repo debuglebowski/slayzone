@@ -204,10 +204,10 @@ test('attach again: retried on request, adopted once it can be', async () => {
     ])
   )
   fail = false
-  await expect(h.registry.attach('task-1:tab-1')).resolves.toEqual({ ok: true })
+  await expect(h.registry.attach('pc', 'task-1:tab-1')).resolves.toEqual({ ok: true })
   expect(h.created).toHaveLength(1)
   expect(h.registry.list()).toEqual([])
-  await expect(h.registry.attach('task-1:tab-1')).resolves.toMatchObject({ ok: false })
+  await expect(h.registry.attach('pc', 'task-1:tab-1')).resolves.toMatchObject({ ok: false })
 })
 
 test('stop: ends exactly that attempt, and records who asked', async () => {
@@ -215,13 +215,13 @@ test('stop: ends exactly that attempt, and records who asked', async () => {
   h.resolver(async () => ({ ok: false, reason: 'task-elsewhere' }))
   h.registry.start()
   await vi.waitFor(() => expect(h.registry.list()).toHaveLength(1))
-  await expect(h.registry.kill('task-1:tab-1')).resolves.toEqual({ ok: true })
+  await expect(h.registry.kill('pc', 'task-1:tab-1')).resolves.toEqual({ ok: true })
   expect(h.killed).toEqual([['pc', 'task-1:tab-1', 'run-1']])
   expect(h.registry.list()).toEqual([])
   expect(diag.find((d) => d.event === 'pty.orphan_killed')).toMatchObject({
     payload: { computerId: 'pc', sessionId: 'task-1:tab-1', spawnId: 'run-1' }
   })
-  await expect(h.registry.kill('task-1:tab-1')).resolves.toMatchObject({ ok: false })
+  await expect(h.registry.kill('pc', 'task-1:tab-1')).resolves.toMatchObject({ ok: false })
 })
 
 test('a session the computer no longer lists leaves the registry', async () => {

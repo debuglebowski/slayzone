@@ -127,6 +127,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     onReady,
     onFirstInput,
     onRetry,
+    onRemount,
     onOpenUrl,
     onOpenFile
   },
@@ -1369,6 +1370,55 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   const showDeadOverlay =
     ptyState === 'dead' && !isInitializing && deadExitCode !== null && mode !== 'terminal'
+  // Dead with NO exit: the hub holds no session for this tab (it restarted and has
+  // not attached it, or an exit went unseen). Never a terminal that looks alive —
+  // plain shells included. Attach offered when the computer still runs this tab's
+  // session from before the restart (terminal unattached-sessions).
+  const showNotAttached =
+    ptyState === 'dead' &&
+    !isInitializing &&
+    deadExitCode === null &&
+    !initError &&
+    !computerOffline
+  const [unattachedHere, setUnattachedHere] = useState<{ computerId: string } | null>(null)
+  const [attaching, setAttaching] = useState(false)
+  useSubscription(
+    trpc.pty.onUnattachedChange.subscriptionOptions(undefined, {
+      enabled: showNotAttached,
+      onData: (list) => {
+        const here = list.find((s) => s.sessionId === sessionId && s.status === 'unattached')
+        setUnattachedHere(here ? { computerId: here.computerId } : null)
+      }
+    })
+  )
+  const remountPane = onRemount ?? onRetry
+  const handleNotAttachedRestart = useStableCallback(() => {
+    // An explicit restart: the session still running from before ends first —
+    // otherwise the new start would take it over instead of restarting.
+    const stopFirst = unattachedHere
+      ? trpcClient.pty.unattachedKill
+          .mutate({ computerId: unattachedHere.computerId, sessionId })
+          .then(
+            () => undefined,
+            () => undefined
+          )
+      : Promise.resolve()
+    void stopFirst.then(() => remountPane?.())
+  })
+  const handleNotAttachedAttach = useStableCallback(() => {
+    if (!unattachedHere) return
+    setAttaching(true)
+    void trpcClient.pty.unattachedAttach
+      .mutate({ computerId: unattachedHere.computerId, sessionId })
+      .then(
+        (result) => {
+          setAttaching(false)
+          // Attached: remount to show it (scrollback replayed from its computer).
+          if (result.ok) remountPane?.()
+        },
+        () => setAttaching(false)
+      )
+  })
 
   // Stale-session case (issue #90): the CLI's stored conversation id was
   // auto-cleaned by the provider, so `--resume` failed. Show a friendly,
@@ -1430,6 +1480,26 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           />
         )}
         {computerOffline && !showDeadOverlay && <TerminalComputerOffline />}
+        {showNotAttached && remountPane && (
+          <TerminalDeadOverlay
+            isStaleSession={false}
+            providerLabel={providerLabel}
+            deadCrashOutput={null}
+            deadExitCode={null}
+            deadExitReason={null}
+            deadExitDetail={null}
+            onStartFresh={handleStartFresh}
+            onRetryClick={handleRetry}
+            onDoctor={() => void handleDoctor()}
+            doctorLoading={doctorLoading}
+            doctorResults={doctorResults}
+            notAttached={{
+              onRestart: handleNotAttachedRestart,
+              ...(unattachedHere ? { onAttach: handleNotAttachedAttach } : {}),
+              attaching
+            }}
+          />
+        )}
         {showDeadOverlay && (
           <TerminalDeadOverlay
             isStaleSession={isStaleSession}

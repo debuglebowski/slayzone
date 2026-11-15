@@ -425,8 +425,10 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   unattached.start()
   onPtyBackendChange(() => unattached.start())
   const unattachedList = () => unattached.list()
-  const unattachedAttach = (sessionId: string) => unattached.attach(sessionId)
-  const unattachedKill = (sessionId: string) => unattached.kill(sessionId)
+  const unattachedAttach = (computerId: string, sessionId: string) =>
+    unattached.attach(computerId, sessionId)
+  const unattachedKill = (computerId: string, sessionId: string) =>
+    unattached.kill(computerId, sessionId)
   const onUnattachedChange = (cb: () => void) => unattached.onChange(cb)
 
   const ptyTestExecutionContext = (context: ExecutionContext) => testExecutionContext(context)

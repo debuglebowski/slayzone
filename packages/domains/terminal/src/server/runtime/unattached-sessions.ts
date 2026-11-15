@@ -90,9 +90,12 @@ export interface UnattachedSessions {
   stop(): void
   list(): UnattachedSession[]
   /** Try to adopt it again (the user's "Attach"). */
-  attach(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string; detail?: string }>
+  attach(
+    computerId: string,
+    sessionId: string
+  ): Promise<{ ok: true } | { ok: false; reason: string; detail?: string }>
   /** End it — exactly the attempt listed (the user's "Stop"). */
-  kill(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>
+  kill(computerId: string, sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>
   onChange(cb: () => void): () => void
 }
 
@@ -277,9 +280,8 @@ export function createUnattachedSessions(deps: {
     if (dirty) changed()
   }
 
-  function find(sessionId: string): UnattachedSession | undefined {
-    return [...entries.values()].find((e) => e.sessionId === sessionId)
-  }
+  const find = (computerId: string, sessionId: string): UnattachedSession | undefined =>
+    entries.get(keyOf({ computerId, sessionId }))
 
   return {
     start() {
@@ -302,8 +304,8 @@ export function createUnattachedSessions(deps: {
       [...entries.values()]
         .map((e) => ({ ...e }))
         .sort((a, b) => a.sessionId.localeCompare(b.sessionId)),
-    async attach(sessionId) {
-      const entry = find(sessionId)
+    async attach(computerId, sessionId) {
+      const entry = find(computerId, sessionId)
       if (!entry) return { ok: false, reason: 'not-found' }
       if (entry.status === 'adopting') return { ok: false, reason: 'adopting' }
       entry.status = 'adopting'
@@ -318,8 +320,8 @@ export function createUnattachedSessions(deps: {
         ...(entry.detail ? { detail: entry.detail } : {})
       }
     },
-    async kill(sessionId) {
-      const entry = find(sessionId)
+    async kill(computerId, sessionId) {
+      const entry = find(computerId, sessionId)
       if (!entry) return { ok: false, reason: 'not-found' }
       const backend = deps.backend()
       if (!entry.spawnId || !backend.killUntracked) return { ok: false, reason: 'no-attempt-key' }

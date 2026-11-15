@@ -8,7 +8,7 @@ import type {
   PtyInfo
 } from '@slayzone/terminal-contracts'
 import type { TasksChange } from '@slayzone/task-contracts'
-import type { AgentLifecycleEventMap } from '@slayzone/terminal/server'
+import type { AgentLifecycleEventMap, UnattachedSession } from '@slayzone/terminal/server'
 import type { MenuEventMap } from '../../app-deps'
 import type { PrincipalRole } from '@slayzone/trpc-server'
 import type { FindJoinTokenAccount, TakeoverCandidate } from '@slayzone/computers/server'
@@ -109,6 +109,17 @@ export interface PtyAccess {
   subscribeToStateChange: (sessionId: string, cb: (state: TerminalState) => void) => () => void
   onSessionChange: (cb: () => void) => () => void
   getState: (sessionId: string) => TerminalState | null
+  /** Sessions a computer still runs from a previous hub run that are not attached
+   *  (terminal unattached-sessions), with the reason. */
+  listUnattached: () => Promise<UnattachedSession[]> | UnattachedSession[]
+  attachUnattached: (
+    computerId: string,
+    sessionId: string
+  ) => Promise<{ ok: true } | { ok: false; reason: string; detail?: string }>
+  killUnattached: (
+    computerId: string,
+    sessionId: string
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 /** A task's agents as the CLI completion guard sees them (PTYs + chats, every

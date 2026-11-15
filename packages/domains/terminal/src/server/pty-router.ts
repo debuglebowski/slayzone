@@ -168,6 +168,30 @@ export const ptyRouter = router({
       }
     }),
   list: publicProcedure.query(() => ops().ptyList()),
+  /**
+   * Terminal sessions a computer still runs from a previous hub run that could not
+   * be adopted into their tabs (runtime/unattached-sessions), with the reason — and
+   * the user's two actions on one: attach it again, or stop it.
+   */
+  unattachedList: publicProcedure.query(() => ops().unattachedList()),
+  unattachedAttach: publicProcedure
+    .input(z.object({ computerId: z.string().min(1), sessionId: z.string().min(1) }))
+    .mutation(({ input }) => ops().unattachedAttach(input.computerId, input.sessionId)),
+  unattachedKill: publicProcedure
+    .input(z.object({ computerId: z.string().min(1), sessionId: z.string().min(1) }))
+    .mutation(({ input }) => ops().unattachedKill(input.computerId, input.sessionId)),
+  /**
+   * The unattached list: the current snapshot on subscribe, then one per change
+   * (each subscriber's cut is owner-filtered, so another user's change shows as
+   * nothing).
+   */
+  onUnattachedChange: publicProcedure.subscription(() =>
+    observable<ReturnType<ReturnType<typeof getPtyDeps>['ops']['unattachedList']>>((emit) => {
+      emit.next(ops().unattachedList())
+      return ops().onUnattachedChange(() => emit.next(ops().unattachedList()))
+    })
+  ),
+
   chatList: publicProcedure.query(() => ops().chatList()),
   getState: publicProcedure
     .input(z.object({ sessionId: z.string() }))

@@ -22,6 +22,7 @@ import {
   hasPty,
   killPty,
   resetAutoResumeForTests,
+  resizePty,
   setConversationResolver,
   setDatabase,
   writePty
@@ -68,6 +69,7 @@ interface FakeHandle {
   exit(e: Exit): void
   killed: boolean
   written: string[]
+  resized: Array<[number, number]>
 }
 interface Backend {
   specs: PtySpawnSpec[]
@@ -100,7 +102,8 @@ function fakeBackend(): Backend {
       print: (d) => dataCb?.(d),
       exit: (e) => exitCb?.(e),
       killed: false,
-      written: []
+      written: [],
+      resized: []
     }
     b.handles.push(h)
     return {
@@ -124,7 +127,9 @@ function fakeBackend(): Backend {
         h.killed = true
         queueMicrotask(() => exitCb?.({ exitCode: 0, signal: 9 }))
       },
-      resize: () => undefined
+      resize: (cols: number, rows: number) => {
+        h.resized.push([cols, rows])
+      }
     }
   }
   setPtyBackend({
@@ -316,4 +321,26 @@ test('a plain shell tab is adopted the same way, and its exit just ends it', asy
   b.handles[0]!.exit({ exitCode: 1 })
   await until(() => exits.some((e) => e.id === sid))
   expect(b.specs).toEqual([]) // no recovery shell, no resume: a shell that ended
+})
+
+// The hub has no size for a session it adopts on its own (no tab is on screen), and
+// a running agent's TUI is laid out for the size it has: adopting must never resize
+// it (an 80x24 placeholder would garble it). Only a client's own resize may.
+test('adoption never resizes the running process; a client resize does', async () => {
+  const b = fakeBackend()
+  const attachedSid = nextSessionId()
+  expect(
+    (await createPty(agentOpts(attachedSid, { attach: { computerId: 'pc', spawnId: 'run-1' } })))
+      .success
+  ).toBe(true)
+  opened.push(attachedSid)
+  b.spawnAnswer = attached()
+  const startedSid = nextSessionId()
+  expect((await createPty(agentOpts(startedSid, { cols: 200, rows: 50 }))).success).toBe(true)
+  opened.push(startedSid)
+  await settle()
+  expect(b.handles.map((h) => h.resized)).toEqual([[], []])
+
+  expect(resizePty(attachedSid, 120, 40)).toBe(true)
+  expect(b.handles[0]!.resized).toEqual([[120, 40]])
 })

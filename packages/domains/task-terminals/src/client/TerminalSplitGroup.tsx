@@ -32,6 +32,8 @@ interface PaneProps {
   }) => void
   onFirstInput?: () => void
   onRetry?: () => void
+  /** Remount this pane (the "Session not attached" overlay's Restart / Attach). */
+  onRemount?: () => void
   // Context menu callbacks
   onSplit?: () => void
   onNewGroup?: () => void
@@ -202,6 +204,7 @@ export const TerminalSplitGroup = forwardRef<TerminalSplitGroupHandle, TerminalS
           onReady={pane.onReady}
           onFirstInput={pane.onFirstInput}
           onRetry={pane.onRetry}
+          onRemount={pane.onRemount}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
           {...(shouldGate

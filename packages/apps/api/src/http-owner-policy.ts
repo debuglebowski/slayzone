@@ -358,6 +358,10 @@ export const REST_OWNER_POLICY: Record<string, HttpOwnerRule> = {
   'POST /api/pty/:id/write': checked(session('params.id')),
   'POST /api/pty/respawn': checked(task('body.taskId')),
   'POST /api/pty/start': checked(task('body.taskId')),
+  // A previous hub run's sessions still running on a computer: its owner's.
+  'GET /api/pty/unattached': listed(bareRows(byField('computerId', 'computer'))),
+  'POST /api/pty/unattached/:computerId/:sessionId/attach': checked(computer('params.computerId')),
+  'DELETE /api/pty/unattached/:computerId/:sessionId': checked(computer('params.computerId')),
 
   // ── chat (a task's chat tab: task by prefix, optional other tab of it) ──
   'GET /api/chat/:id/status': checked(taskPrefix('params.id'), tab('query.tab')),

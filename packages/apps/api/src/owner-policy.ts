@@ -1149,6 +1149,12 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'pty.clearBuffer': checked(session('sessionId')),
   'pty.getBufferSince': checked(session('sessionId')),
   'pty.list': listed(rows('sessionId', 'session')),
+  // A previous hub run's sessions still running on a computer: the computer's owner's.
+  // (A session that maps to no task has no other owner path.)
+  'pty.unattachedList': listed(rows('computerId', 'computer')),
+  'pty.unattachedAttach': checked(computer('computerId')),
+  'pty.unattachedKill': checked(computer('computerId')),
+  'pty.onUnattachedChange': streamed(snapshotRows('computerId', 'computer')),
   'pty.chatList': listed(rows('sessionId', 'session')),
   'pty.getState': checked(session('sessionId')),
   'pty.sessionList': listed(rows('sessionId', 'session')),
