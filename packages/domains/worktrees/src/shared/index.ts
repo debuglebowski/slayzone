@@ -11,3 +11,12 @@ export {
   assignNewWorktreeColors
 } from './worktree-color'
 export { globToRegex, IGNORED_TREE_EXPIRED, isIgnoredTreeExpired } from './ignored-tree'
+export {
+  GIT_TEXT_EXPIRED,
+  isGitTextExpired,
+  type GitDiffDeferred,
+  type GitDiffTextOpts,
+  type GitFileDiffsPage,
+  type GitTextPage,
+  type GitTextSource
+} from './git-text'

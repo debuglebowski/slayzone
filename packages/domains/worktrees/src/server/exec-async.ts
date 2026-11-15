@@ -1,5 +1,6 @@
 // eslint-disable-next-line no-restricted-imports -- KNOWN DEBT: hubSpawnSync runs worktree setup scripts + submodule update synchronously and can block the hub for minutes; convert callers to hubSpawn.
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
+import { createWriteStream } from 'fs'
 import { basename } from 'path'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/record'
 import type { DiagnosticEvent, DiagnosticSource } from '@slayzone/diagnostics/shared'
@@ -290,4 +291,190 @@ export function streamGitPaths(
       }
     })
   })
+}
+
+interface StreamOptions {
+  cwd: string
+  /** Exit codes that are a normal answer (default `[0]`), as {@link execAsync}. */
+  okExitCodes?: readonly number[]
+}
+
+/** A non-ok exit, shaped like {@link execGit}'s error. */
+function gitFailure(label: string, code: number | null, stderr: string): Error {
+  const error = new Error(stderr.trim() || `git command failed: ${label}`) as Error & {
+    status: number | null
+    stderr: string
+  }
+  error.status = code
+  error.stderr = stderr
+  return error
+}
+
+/**
+ * Run `command args`, handing stdout to `onData` chunk by chunk. `onData` returning
+ * false stops it: the process is killed, the rest of its output ignored, and the
+ * run counts as answered (`stopped`). A non-ok exit of a run that was not stopped
+ * rejects like {@link execGit}. Logged like {@link execAsync}.
+ */
+function streamCommand(
+  command: string,
+  args: string[],
+  opts: StreamOptions,
+  onData: (chunk: Buffer) => boolean
+): Promise<{ stopped: boolean; bytes: number; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const label = `${command} ${args.join(' ')}`
+    const startedAt = Date.now()
+    const child = hubSpawn(command, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let stopped = false
+    let bytes = 0
+    const stderr: string[] = []
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stopped) return
+      bytes += chunk.length
+      if (!onData(chunk)) {
+        stopped = true
+        child.kill('SIGTERM')
+      }
+    })
+    child.stderr.on('data', (data: Buffer) => stderr.push(data.toString()))
+    child.on('error', (err) => {
+      gitDiagnostic({
+        level: 'error',
+        source: 'git',
+        event: 'git.spawn_failed',
+        message: `could not start ${command}: ${err.message}`,
+        payload: { command: label, cwd: opts.cwd, durationMs: Date.now() - startedAt }
+      })
+      reject(err)
+    })
+    child.on('close', (code) => {
+      const ok = stopped || (code !== null && (opts.okExitCodes ?? [0]).includes(code))
+      const stderrStr = stderr.join('')
+      gitDiagnostic({
+        level: ok ? 'info' : 'error',
+        source: 'git',
+        event: ok ? 'git.command' : 'git.command_failed',
+        message: ok ? label : stderrStr.trim() || `command failed: ${label}`,
+        payload: {
+          command: label,
+          cwd: opts.cwd,
+          durationMs: Date.now() - startedAt,
+          success: ok,
+          exitCode: code,
+          bytes,
+          ...(stopped && { stoppedAtBudget: true }),
+          ...(!ok && { stderr: trimOutput(stderrStr) })
+        }
+      })
+      if (ok) resolve({ stopped, bytes, code })
+      else reject(gitFailure(label, code, stderrStr))
+    })
+  })
+}
+
+/**
+ * `command args`'s whole output if it is at most `maxBytes` (UTF-8 bytes), else
+ * `complete: false` — the process is stopped as soon as it passes the budget, so a
+ * huge output is never held.
+ */
+export async function readCommandCapped(
+  command: string,
+  args: string[],
+  opts: StreamOptions & { maxBytes: number }
+): Promise<{ complete: true; text: string; code: number | null } | { complete: false }> {
+  const chunks: Buffer[] = []
+  let total = 0
+  const { stopped, code } = await streamCommand(command, args, opts, (chunk) => {
+    total += chunk.length
+    if (total > opts.maxBytes) return false
+    chunks.push(chunk)
+    return true
+  })
+  if (stopped) return { complete: false }
+  return { complete: true, text: Buffer.concat(chunks).toString('utf8'), code }
+}
+
+/** Line starts that open one file's section of a patch. */
+const FILE_HEADERS = ['diff --git ', 'diff --cc ', 'diff --combined '].map((h) => Buffer.from(h))
+
+/**
+ * `git <args>`'s patch, WHOLE FILES ONLY, up to `maxBytes`: the files whose
+ * sections fit (in git's order), and how many. `complete`: the whole patch fit.
+ * Past the budget git is stopped; a first file larger than the budget gives an
+ * empty text (0 files) — the caller reads such a file on its own, page by page.
+ */
+export async function readGitPatchFiles(
+  args: string[],
+  opts: StreamOptions & { maxBytes: number }
+): Promise<{ text: string; files: number; complete: boolean }> {
+  const chunks: Buffer[] = []
+  let total = 0
+  const { stopped } = await streamCommand('git', args, opts, (chunk) => {
+    total += chunk.length
+    chunks.push(chunk)
+    return total <= opts.maxBytes
+  })
+  const all = Buffer.concat(chunks)
+  const starts = fileSectionStarts(all)
+  if (!stopped) return { text: all.toString('utf8'), files: starts.length, complete: true }
+  // The last section that STARTS within the budget ends where the next one starts:
+  // every section before that start fits.
+  let cut = 0
+  let files = 0
+  for (let k = 0; k < starts.length && starts[k] <= opts.maxBytes; k++) {
+    cut = starts[k]
+    files = k
+  }
+  return { text: all.subarray(0, cut).toString('utf8'), files, complete: false }
+}
+
+/** Byte offsets where a file's section of a patch starts (a header at a line start). */
+function fileSectionStarts(patch: Buffer): number[] {
+  const starts: number[] = []
+  for (let i = 0; i < patch.length; i = patch.indexOf(10, i) + 1 || patch.length) {
+    if (patch[i] !== 100 /* d */) continue
+    if (FILE_HEADERS.some((h) => patch.subarray(i, i + h.length).equals(h))) starts.push(i)
+  }
+  return starts
+}
+
+/**
+ * `command args`'s whole output written to `file` (streamed, with back-pressure:
+ * never held in memory). Resolves with its size.
+ */
+export function spoolCommand(
+  command: string,
+  args: string[],
+  opts: StreamOptions,
+  file: string
+): Promise<number> {
+  const out = createWriteStream(file, { mode: 0o600 })
+  let pending = Promise.resolve()
+  const run = streamCommand(command, args, opts, (chunk) => {
+    pending = pending.then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          out.write(chunk, (err) => (err ? reject(err) : resolve()))
+        })
+    )
+    return true
+  })
+  return run.then(
+    async ({ bytes }) => {
+      await pending
+      await new Promise<void>((resolve, reject) =>
+        out.end((err?: Error | null) => (err ? reject(err) : resolve()))
+      )
+      return bytes
+    },
+    async (err) => {
+      out.destroy()
+      throw err
+    }
+  )
 }

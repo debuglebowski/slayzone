@@ -259,6 +259,40 @@ describe('git-diff-store refcount + sharing', () => {
     h.unmount()
   })
 
+  it('asks for a paged (bounded) snapshot', async () => {
+    const h = mount('/tmp/repo')
+    await flushMicrotasks()
+    expect(gitStub.getWorkingDiff.mock.calls[0]).toEqual([
+      null,
+      '/tmp/repo',
+      expect.objectContaining({ paged: true })
+    ])
+    h.unmount()
+  })
+
+  it('a deferred file that changed (new fingerprint) is a new snapshot, the same patches or not', async () => {
+    const withDeferred = (fingerprint: string): GitDiffSnapshot => ({
+      ...makeSnapshot('patch-A'),
+      deferred: { unstaged: ['big.txt'], staged: [], renamedFrom: {}, fingerprint }
+    })
+    gitStub.getWorkingDiff.mockResolvedValueOnce(withDeferred('f1'))
+    gitStub.getWorkingDiff.mockResolvedValueOnce(withDeferred('f1'))
+    gitStub.getWorkingDiff.mockResolvedValueOnce(withDeferred('f2'))
+    const h = mount('/tmp/repo', { pollIntervalMs: 1000 })
+    await flushMicrotasks()
+    const s1 = h.result.current.snapshot
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(h.result.current.snapshot).toBe(s1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(h.result.current.snapshot).not.toBe(s1)
+    expect(h.result.current.snapshot?.deferred?.fingerprint).toBe('f2')
+    h.unmount()
+  })
+
   it('polls at the minimum interval across subscribers', async () => {
     gitStub.getWorkingDiff.mockResolvedValue(makeSnapshot(''))
 

@@ -69,3 +69,24 @@ inside a selected folder loads that chain's folders completely first. Older
 computers (no `boundedReads`): the hub fetches the whole tree once and serves the
 same pages from a hub-held index (`hub:` ids, bound to scope + repo).
 `getIgnoredFileTree` stays for older callers.
+
+**2026-11-15: Git diffs are bounded and paged (FU1 S5)**
+The working diff, per-file diffs, untracked previews and stash diffs used to be
+one whole string per reply (`-U99999` and unlimited stdout). Large changes then
+exceeded the 100 MiB frame limit and stalled the computer.
+- **Snapshot.** With `opts.paged` (the renderer always sends it; older computers
+  ignore it), each side carries whole files up to 4 MiB, cut between file
+  sections. `deferred` names the rest, and its fingerprint (worktree stat / index
+  `--raw`) changes when any deferred file changes. Files are mapped by count: the
+  k-th section is the k-th `--name-status` entry with the same flags, because
+  headers quote paths and `-w` drops the same files from both. Renames keep their
+  old path.
+- **Deferred files.** They come in budgeted batches (`getFileDiffsPage`, 8
+  concurrent gits, rename pathspec paired).
+- **Large files.** A file over budget is read by `readGitText`: git runs once,
+  spooled to a temp file, and is served in line-cut pages (5 min idle, 1 GiB LRU,
+  `GIT_TEXT_EXPIRED` restarts the read). The panel shows the first page plus
+  "Load rest of diff (X MB)".
+- **Untracked files.** `getUntrackedFileDiffs` gains `paged` (`$paged` answer).
+- **Stash diffs.** They read through `readGitText` too.
+- **Older computers.** The hub serves `readGitText` from the whole-text ops.

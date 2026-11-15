@@ -1355,6 +1355,8 @@ export const TRPC_OWNER_POLICY: Record<string, OwnerRule> = {
   'worktrees.getFileDiff': checked(...TARGET),
   'worktrees.getUntrackedFileDiff': checked(...TARGET),
   'worktrees.getUntrackedFileDiffs': checked(...TARGET),
+  'worktrees.getFileDiffsPage': checked(...TARGET),
+  'worktrees.readGitText': checked(...TARGET),
   'worktrees.getConflictContent': checked(...TARGET),
   'worktrees.writeResolvedFile': checked(...TARGET),
   'worktrees.commitFiles': checked(...TARGET),

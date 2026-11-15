@@ -1,4 +1,5 @@
 import type { Page } from '@slayzone/platform/bounded-reads'
+import type { GitDiffDeferred } from './git-text'
 export interface CreateWorktreeOpts {
   repoPath: string
   targetPath: string
@@ -403,4 +404,9 @@ export interface GitDiffSnapshot {
   stagedPatch: string
   generatedAt: string
   isGitRepo: boolean
+  /**
+   * A paged snapshot (`opts.paged`) over its byte budget: the files whose patches
+   * it left out. Absent = the patches are whole (always, from an older computer).
+   */
+  deferred?: GitDiffDeferred
 }

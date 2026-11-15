@@ -83,6 +83,27 @@ describe('git.op', () => {
     ).rejects.toThrow(/outside/)
   })
 
+  it('bounded diffs: a paged text and a file batch, repo-relative paths kept inside the repo', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'two\n')
+    const page = (await call({
+      op: 'readGitText',
+      input: { repoPath: dir, kind: 'fileDiff', filePath: 'a.txt', staged: false, cursor: null }
+    })) as { result: { text: string; cursor: string | null } }
+    expect(page.result.text).toContain('+two')
+    expect(page.result.cursor).toBeNull()
+    const batch = (await call({
+      op: 'getFileDiffsPage',
+      input: { repoPath: dir, kind: 'unstaged', filePaths: ['a.txt'] }
+    })) as { result: { diffs: Record<string, string> } }
+    expect(batch.result.diffs['a.txt']).toContain('+two')
+    await expect(
+      call({
+        op: 'readGitText',
+        input: { repoPath: dir, kind: 'fileDiff', filePath: '../x', staged: false, cursor: null }
+      })
+    ).rejects.toThrow(/inside the repository/)
+  })
+
   it('refuses a path outside its folders', async () => {
     await expect(call({ op: 'getCurrentBranch', input: { path: '/etc' } })).rejects.toThrow(
       /outside/

@@ -1,0 +1,300 @@
+/**
+ * Bounded git diffs (FU1 S5). A diff of any size reaches the panel without one
+ * reply ever carrying it whole:
+ *  - the working-diff snapshot (`paged`) carries each side's patch up to a byte
+ *    budget, cut between files; the files left out are listed (`deferred`) with a
+ *    fingerprint that changes when any of them changes;
+ *  - deferred files come in budgeted batches (`getFileDiffsPage`); a file whose own
+ *    patch is over the budget is listed `large`;
+ *  - a large file (or a stash) is read page by page (`readGitText`): git's output
+ *    is spooled to disk once and served in line-cut pages.
+ * Every piece, put back together, equals the whole answer of the old ops.
+ */
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { PAGE_MAX_BYTES, utf8ByteLength } from '@slayzone/platform/bounded-reads'
+import {
+  getFileDiff,
+  getFileDiffsPage,
+  getStashDiff,
+  getUntrackedFileDiff,
+  getUntrackedFileDiffs,
+  getWorkingDiff
+} from './git-worktree'
+import { GIT_TEXT_EXPIRED, GitTextSpool, readGitText } from './git-text-spool'
+
+const KB = 1024
+const env = {
+  ...process.env,
+  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_KEY_0: 'commit.gpgsign',
+  GIT_CONFIG_VALUE_0: 'false',
+  GIT_AUTHOR_NAME: 'T',
+  GIT_AUTHOR_EMAIL: 't@t',
+  GIT_COMMITTER_NAME: 'T',
+  GIT_COMMITTER_EMAIL: 't@t'
+}
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env }).toString()
+
+/** `bytes` of text in lines tagged with `tag` (so every line changes when the tag does). */
+const content = (tag: string, bytes: number) => {
+  const line = `${tag} ${'x'.repeat(60)}\n`
+  return line.repeat(Math.ceil(bytes / line.length))
+}
+
+/** A patch split at its file headers. */
+const filesOf = (patch: string) => patch.split(/(?=^diff --git )/m).filter(Boolean)
+
+let repo: string
+beforeAll(() => {
+  repo = mkdtempSync(join(tmpdir(), 'paged-diffs-'))
+  git(repo, 'init', '-q', '-b', 'main')
+  for (const f of ['a.txt', 'b.txt', 'c.txt', 'big.txt', 'staged1.txt', 'staged2.txt'])
+    writeFileSync(join(repo, f), content(`old-${f}`, 40 * KB))
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-qm', 'base')
+})
+afterAll(() => rmSync(repo, { recursive: true, force: true }))
+
+describe('the working-diff snapshot, paged', () => {
+  const opts = { contextLines: '3', paged: true, maxPatchBytes: 100 * KB }
+
+  it('carries whole files up to the budget; deferred lists the rest; pieces equal the whole', async () => {
+    for (const f of ['a.txt', 'b.txt', 'c.txt'])
+      writeFileSync(join(repo, f), content(`new-${f}`, 40 * KB))
+    const whole = await getWorkingDiff(repo, { contextLines: '3' })
+    const paged = await getWorkingDiff(repo, opts)
+    expect(whole.deferred).toBeUndefined()
+    expect(utf8ByteLength(paged.unstagedPatch)).toBeLessThanOrEqual(100 * KB)
+    expect(filesOf(paged.unstagedPatch).length).toBeGreaterThanOrEqual(1)
+    expect(paged.deferred?.unstaged.length).toBeGreaterThan(0)
+    expect(paged.deferred?.staged).toEqual([])
+    // Lists are whole either way.
+    expect(paged.unstagedFiles).toEqual(whole.unstagedFiles)
+
+    const rest = await getFileDiffsPage(repo, {
+      kind: 'unstaged',
+      filePaths: paged.deferred!.unstaged,
+      opts: { contextLines: '3' }
+    })
+    expect(rest.deferred).toEqual([])
+    const pieces = paged.unstagedPatch + paged.deferred!.unstaged.map((f) => rest.diffs[f]).join('')
+    expect(pieces).toBe(whole.unstagedPatch)
+  })
+
+  it('a batch stops at the budget (≥ 1 file) and defers the rest', async () => {
+    const page = await getFileDiffsPage(repo, {
+      kind: 'unstaged',
+      filePaths: ['a.txt', 'b.txt', 'c.txt'],
+      opts: { contextLines: '3' },
+      maxBytes: 100 * KB
+    })
+    expect(Object.keys(page.diffs).length).toBeGreaterThanOrEqual(1)
+    expect(Object.keys(page.diffs).length + page.deferred.length).toBe(3)
+    expect(page.diffs['a.txt']).toBe(await getFileDiff(repo, 'a.txt', false, { contextLines: '3' }))
+  })
+
+  it('a file over the budget alone is deferred by the snapshot and `large` in a batch', async () => {
+    writeFileSync(join(repo, 'big.txt'), content('new-big', 300 * KB))
+    const paged = await getWorkingDiff(repo, opts)
+    expect(paged.deferred?.unstaged).toContain('big.txt')
+    const page = await getFileDiffsPage(repo, {
+      kind: 'unstaged',
+      filePaths: ['big.txt', 'c.txt'],
+      opts: { contextLines: '3' },
+      maxBytes: 100 * KB
+    })
+    expect(page.large).toEqual(['big.txt'])
+    expect(page.diffs['big.txt']).toBeUndefined()
+  })
+
+  it('the fingerprint changes when a deferred file changes, even with the same line counts', async () => {
+    const before = await getWorkingDiff(repo, opts)
+    // Same number of lines, other text: numstat would not see it.
+    writeFileSync(join(repo, 'big.txt'), content('NEW-BIG', 300 * KB))
+    const after = await getWorkingDiff(repo, opts)
+    expect(after.deferred?.fingerprint).not.toBe(before.deferred?.fingerprint)
+    const again = await getWorkingDiff(repo, opts)
+    expect(again.deferred?.fingerprint).toBe(after.deferred?.fingerprint)
+  })
+
+  it('the staged side, and -w (names taken with the same flags as the patch)', async () => {
+    for (const f of ['staged1.txt', 'staged2.txt']) {
+      writeFileSync(join(repo, f), content(`staged-${f}`, 80 * KB))
+      git(repo, 'add', f)
+    }
+    const whole = await getWorkingDiff(repo, { contextLines: '3', ignoreWhitespace: true })
+    const paged = await getWorkingDiff(repo, {
+      ...opts,
+      ignoreWhitespace: true,
+      maxPatchBytes: 90 * KB
+    })
+    expect(paged.deferred?.staged.length).toBeGreaterThan(0)
+    const rest = await getFileDiffsPage(repo, {
+      kind: 'staged',
+      filePaths: paged.deferred!.staged,
+      opts: { contextLines: '3', ignoreWhitespace: true }
+    })
+    expect(paged.stagedPatch + paged.deferred!.staged.map((f) => rest.diffs[f]).join('')).toBe(
+      whole.stagedPatch
+    )
+    git(repo, 'reset', '-q')
+  })
+
+  it('a deferred rename stays a rename (its old path travels with it)', async () => {
+    const r = mkdtempSync(join(tmpdir(), 'paged-diffs-rename-'))
+    try {
+      git(r, 'init', '-q', '-b', 'main')
+      writeFileSync(join(r, 'a.txt'), content('a', 40 * KB))
+      writeFileSync(join(r, 'b.txt'), content('b', 40 * KB))
+      git(r, 'add', '-A')
+      git(r, 'commit', '-qm', 'base')
+      writeFileSync(join(r, 'a.txt'), content('a2', 40 * KB))
+      git(r, 'mv', 'b.txt', 'zz-renamed.txt')
+      git(r, 'add', '-A')
+      const whole = await getWorkingDiff(r, { contextLines: '3' })
+      const paged = await getWorkingDiff(r, { ...opts, maxPatchBytes: 10 * KB })
+      expect(paged.deferred?.staged).toContain('zz-renamed.txt')
+      expect(paged.deferred?.renamedFrom['zz-renamed.txt']).toBe('b.txt')
+      const files = paged.deferred!.staged
+      const rest = await getFileDiffsPage(r, {
+        kind: 'staged',
+        filePaths: files,
+        fromPaths: files.map((f) => paged.deferred!.renamedFrom[f] ?? ''),
+        opts: { contextLines: '3' }
+      })
+      expect(rest.diffs['zz-renamed.txt']).toContain('rename from b.txt')
+      expect(paged.stagedPatch + files.map((f) => rest.diffs[f]).join('')).toBe(whole.stagedPatch)
+    } finally {
+      rmSync(r, { recursive: true, force: true })
+    }
+  })
+
+  it('range mode (two shas) pages too, and its pieces equal the whole', async () => {
+    const from = git(repo, 'rev-parse', 'HEAD').trim()
+    git(repo, 'add', 'a.txt', 'b.txt', 'c.txt')
+    git(repo, 'commit', '-qm', 'abc')
+    const to = git(repo, 'rev-parse', 'HEAD').trim()
+    const whole = await getWorkingDiff(repo, { contextLines: '3', fromSha: from, toSha: to })
+    const paged = await getWorkingDiff(repo, { ...opts, fromSha: from, toSha: to })
+    expect(paged.deferred?.unstaged.length).toBeGreaterThan(0)
+    const rest = await getFileDiffsPage(repo, {
+      kind: 'range',
+      filePaths: paged.deferred!.unstaged,
+      opts: { contextLines: '3' },
+      fromSha: from,
+      toSha: to
+    })
+    expect(paged.unstagedPatch + paged.deferred!.unstaged.map((f) => rest.diffs[f]).join('')).toBe(
+      whole.unstagedPatch
+    )
+  })
+
+  it('under the budget nothing is deferred (the snapshot is the whole answer)', async () => {
+    const small = await getWorkingDiff(repo, { contextLines: '3', paged: true })
+    expect(small.deferred).toBeUndefined()
+  })
+})
+
+describe('untracked files, paged', () => {
+  it('a batch answers within the budget; deferred and large name the rest', async () => {
+    for (const n of [1, 2, 3]) writeFileSync(join(repo, `u${n}.txt`), content(`u${n}`, 60 * KB))
+    writeFileSync(join(repo, 'huge.log'), content('huge', 300 * KB))
+    const page = await getUntrackedFileDiffs(repo, ['huge.log', 'u1.txt', 'u2.txt', 'u3.txt'], {
+      paged: true,
+      maxBytes: 100 * KB
+    })
+    expect(page.$paged).toBe(true)
+    expect(page.large).toEqual(['huge.log'])
+    expect(page.diffs['u1.txt']).toBe(await getUntrackedFileDiff(repo, 'u1.txt'))
+    expect(Object.keys(page.diffs).length + page.deferred.length).toBe(3)
+    // Without `paged`: the whole record, as before.
+    const whole = (await getUntrackedFileDiffs(repo, ['u1.txt'])) as Record<string, string>
+    expect(whole['u1.txt']).toBe(page.diffs['u1.txt'])
+  })
+})
+
+describe('readGitText: a large text read page by page', () => {
+  const read = async (spool: GitTextSpool, source: Parameters<typeof readGitText>[2]) => {
+    let text = ''
+    let pages = 0
+    let total = -1
+    for (let cursor: string | null = null; ; ) {
+      const page = await readGitText(spool, repo, source, cursor, { maxBytes: 64 * KB })
+      expect(utf8ByteLength(page.text)).toBeLessThanOrEqual(64 * KB)
+      text += page.text
+      total = page.totalBytes
+      pages++
+      if (!page.cursor) break
+      cursor = page.cursor
+    }
+    return { text, pages, total }
+  }
+
+  it('a file diff: pages concatenate to the whole, cut at line ends', async () => {
+    const spool = new GitTextSpool()
+    const whole = await getFileDiff(repo, 'big.txt', false, { contextLines: '3' })
+    const got = await read(spool, {
+      kind: 'fileDiff',
+      filePath: 'big.txt',
+      staged: false,
+      opts: { contextLines: '3' }
+    })
+    expect(got.pages).toBeGreaterThan(2)
+    expect(got.text).toBe(whole)
+    expect(got.total).toBe(utf8ByteLength(whole))
+  })
+
+  it('an untracked file and a stash', async () => {
+    const spool = new GitTextSpool()
+    expect((await read(spool, { kind: 'untrackedDiff', filePath: 'huge.log' })).text).toBe(
+      await getUntrackedFileDiff(repo, 'huge.log')
+    )
+    git(repo, 'stash', 'push', '-q', '-u')
+    expect((await read(spool, { kind: 'stashDiff', index: 0 })).text).toBe(
+      await getStashDiff(repo, 0)
+    )
+    git(repo, 'stash', 'pop', '-q')
+  })
+
+  it('a small answer is one page with no cursor and leaves no spool', async () => {
+    const spool = new GitTextSpool()
+    const page = await readGitText(
+      spool,
+      repo,
+      { kind: 'fileDiff', filePath: 'c.txt', staged: false },
+      null
+    )
+    expect(page.cursor).toBeNull()
+    expect(spool.size).toBe(0)
+    expect(PAGE_MAX_BYTES).toBeGreaterThan(utf8ByteLength(page.text))
+  })
+
+  it('an expired or foreign cursor fails with GIT_TEXT_EXPIRED; the store is bounded', async () => {
+    let now = 0
+    const spool = new GitTextSpool({ now: () => now, idleMs: 1000, maxBytes: 400 * KB })
+    const src = { kind: 'fileDiff' as const, filePath: 'big.txt', staged: false }
+    const first = await readGitText(spool, repo, src, null, { maxBytes: 64 * KB })
+    expect(first.cursor).not.toBeNull()
+    await expect(
+      readGitText(spool, '/elsewhere', src, first.cursor, { maxBytes: 64 * KB })
+    ).rejects.toThrow(GIT_TEXT_EXPIRED)
+    now += 1001
+    await expect(
+      readGitText(spool, repo, src, first.cursor, { maxBytes: 64 * KB })
+    ).rejects.toThrow(GIT_TEXT_EXPIRED)
+    expect(spool.size).toBe(0)
+    // Over the disk bound the oldest spool goes first.
+    const a = await readGitText(spool, repo, src, null, { maxBytes: 64 * KB })
+    const b = await readGitText(spool, repo, src, null, { maxBytes: 64 * KB })
+    await expect(readGitText(spool, repo, src, a.cursor, { maxBytes: 64 * KB })).rejects.toThrow(
+      GIT_TEXT_EXPIRED
+    )
+    expect(
+      (await readGitText(spool, repo, src, b.cursor, { maxBytes: 64 * KB })).text.length
+    ).toBeGreaterThan(0)
+  })
+})

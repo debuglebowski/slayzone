@@ -1,4 +1,7 @@
+import { createHash } from 'crypto'
 import { platform } from 'os'
+import { PAGE_MAX_BYTES } from '@slayzone/platform/bounded-reads'
+import type { GitDiffDeferred, GitDiffTextOpts, GitFileDiffsPage } from '../shared/git-text'
 import {
   existsSync,
   readFileSync,
@@ -47,7 +50,9 @@ import {
   hubSpawn,
   hubSpawnSync,
   trimOutput,
-  gitDiagnostic as recordDiagnosticEvent
+  gitDiagnostic as recordDiagnosticEvent,
+  readCommandCapped,
+  readGitPatchFiles
 } from './exec-async'
 
 /**
@@ -961,7 +966,36 @@ const UNTRACKED_DIFF_CONCURRENCY = 8
 export async function getUntrackedFileDiffs(
   repoPath: string,
   filePaths: string[]
-): Promise<Record<string, string>> {
+): Promise<Record<string, string>>
+export async function getUntrackedFileDiffs(
+  repoPath: string,
+  filePaths: string[],
+  opts: { paged: true; maxBytes?: number }
+): Promise<{ $paged: true } & GitFileDiffsPage>
+export async function getUntrackedFileDiffs(
+  repoPath: string,
+  filePaths: string[],
+  opts?: { paged?: boolean; maxBytes?: number }
+): Promise<Record<string, string> | ({ $paged: true } & GitFileDiffsPage)>
+/**
+ * With `paged`: one budgeted batch (`getFileDiffsPage`), marked `$paged` (a whole
+ * answer is a record of strings, so `$paged: true` never occurs in one) — what an
+ * older computer, which drops the unknown `paged`, never sends.
+ */
+export async function getUntrackedFileDiffs(
+  repoPath: string,
+  filePaths: string[],
+  opts?: { paged?: boolean; maxBytes?: number }
+): Promise<Record<string, string> | ({ $paged: true } & GitFileDiffsPage)> {
+  if (opts?.paged)
+    return {
+      $paged: true,
+      ...(await getFileDiffsPage(repoPath, {
+        kind: 'untracked',
+        filePaths,
+        maxBytes: opts.maxBytes
+      }))
+    }
   const result: Record<string, string> = {}
   const queue = filePaths.filter(Boolean)
   const worker = async (): Promise<void> => {
@@ -985,13 +1019,7 @@ export async function getFileDiff(
   staged: boolean,
   opts?: { contextLines?: string; ignoreWhitespace?: boolean }
 ): Promise<string> {
-  const extraFlags: string[] = ['--no-ext-diff']
-  if (opts?.contextLines === 'all') {
-    extraFlags.push('-U99999')
-  } else if (opts?.contextLines && ['0', '3', '5'].includes(opts.contextLines)) {
-    extraFlags.push(`-U${opts.contextLines}`)
-  }
-  if (opts?.ignoreWhitespace) extraFlags.push('-w')
+  const extraFlags: string[] = ['--no-ext-diff', ...diffDisplayFlags(opts)]
 
   const diffCmd = staged
     ? ['diff', '--cached', ...extraFlags, '--', filePath]
@@ -1002,23 +1030,24 @@ export async function getFileDiff(
 
 export async function getWorkingDiff(
   repoPath: string,
-  opts?: { contextLines?: string; ignoreWhitespace?: boolean; fromSha?: string; toSha?: string }
+  opts?: {
+    contextLines?: string
+    ignoreWhitespace?: boolean
+    fromSha?: string
+    toSha?: string
+    /** Cut each side's patch at {@link DIFF_PAGE_BYTES} between files; list the rest (`deferred`). */
+    paged?: boolean
+    /** A smaller budget than {@link DIFF_PAGE_BYTES} (never a larger one). */
+    maxPatchBytes?: number
+  }
 ): Promise<GitDiffSnapshot> {
   await execGit(['rev-parse', '--git-dir'], { cwd: repoPath }).catch(() => {
     throw new Error(`Not a git repository: ${repoPath}`)
   })
 
   // Build extra flags from diff settings
-  const extraFlags: string[] = []
-  const validContextLines = ['0', '3', '5']
-  if (opts?.contextLines === 'all') {
-    extraFlags.push('-U99999')
-  } else if (opts?.contextLines && validContextLines.includes(opts.contextLines)) {
-    extraFlags.push(`-U${opts.contextLines}`)
-  }
-  if (opts?.ignoreWhitespace) {
-    extraFlags.push('-w')
-  }
+  const extraFlags = diffDisplayFlags(opts)
+  if (opts?.paged) return getWorkingDiffPaged(repoPath, extraFlags, opts)
 
   // Range mode: diff two snapshot SHAs. Used by Turns feature to scope the diff
   // to a single agent turn. Everything reported as "unstaged" since the
@@ -1062,6 +1091,265 @@ export async function getWorkingDiff(
     generatedAt: new Date().toISOString(),
     isGitRepo: true
   }
+}
+
+/** Byte budget of one side of a paged snapshot's patch, and of one batch of file patches. */
+export const DIFF_PAGE_BYTES = PAGE_MAX_BYTES
+
+function budgetOf(maxBytes: number | undefined): number {
+  return Math.max(1, Math.min(maxBytes ?? DIFF_PAGE_BYTES, DIFF_PAGE_BYTES))
+}
+
+/** `-U…` / `-w` for a diff's display options, as the panel sends them. */
+function diffDisplayFlags(opts?: GitDiffTextOpts): string[] {
+  const flags: string[] = []
+  if (opts?.contextLines === 'all') flags.push('-U99999')
+  else if (opts?.contextLines && ['0', '3', '5'].includes(opts.contextLines))
+    flags.push(`-U${opts.contextLines}`)
+  if (opts?.ignoreWhitespace) flags.push('-w')
+  return flags
+}
+
+/**
+ * The files of a diff, in git's order — the order of the patch's file sections —
+ * with a renamed/copied file's old path. Same args as the patch (so `-w` drops the
+ * same files), as `--name-status -z`.
+ */
+async function diffNames(
+  repoPath: string,
+  patchArgs: string[]
+): Promise<Array<{ path: string; from?: string }>> {
+  const tokens = await execGitFileList(['diff', '--name-status', ...patchArgs.slice(1)], {
+    cwd: repoPath
+  })
+  const out: Array<{ path: string; from?: string }> = []
+  for (let i = 0; i < tokens.length; ) {
+    const status = tokens[i]
+    if (status.startsWith('R') || status.startsWith('C')) {
+      out.push({ from: tokens[i + 1], path: tokens[i + 2] })
+      i += 3
+    } else {
+      out.push({ path: tokens[i + 1] })
+      i += 2
+    }
+  }
+  return out
+}
+
+/** One side of a paged snapshot: whole files up to the budget, the rest named. */
+async function pagedSide(
+  repoPath: string,
+  patchArgs: string[],
+  maxBytes: number
+): Promise<{ patch: string; deferred: Array<{ path: string; from?: string }> }> {
+  const page = await readGitPatchFiles(patchArgs, { cwd: repoPath, maxBytes })
+  if (page.complete) return { patch: page.text, deferred: [] }
+  const names = await diffNames(repoPath, patchArgs)
+  // The k-th file section is the k-th name (one diff queue, one order).
+  return { patch: page.text, deferred: names.slice(page.files) }
+}
+
+/** Changes when any deferred file's content does: the worktree file's size+mtime
+ *  (unstaged), the index blobs (staged). Range diffs are immutable: ''. */
+async function deferredFingerprint(
+  repoPath: string,
+  unstaged: string[],
+  stagedDeferred: boolean
+): Promise<string> {
+  const hash = createHash('sha256')
+  for (const f of unstaged) {
+    const st = await stat(path.join(repoPath, f)).catch(() => null)
+    hash.update(`${f}\0${st ? `${st.size}:${st.mtimeMs}` : 'gone'}\0`)
+  }
+  if (stagedDeferred)
+    hash.update(await execGit(['diff', '--cached', '--raw', '-z'], { cwd: repoPath }))
+  return hash.digest('hex')
+}
+
+async function getWorkingDiffPaged(
+  repoPath: string,
+  flags: string[],
+  opts: { fromSha?: string; toSha?: string; maxPatchBytes?: number }
+): Promise<GitDiffSnapshot> {
+  const maxBytes = budgetOf(opts.maxPatchBytes)
+  const toDeferred = (
+    unstaged: Array<{ path: string; from?: string }>,
+    staged: Array<{ path: string; from?: string }>,
+    fingerprint: string
+  ): GitDiffDeferred | undefined => {
+    if (unstaged.length === 0 && staged.length === 0) return undefined
+    const renamedFrom: Record<string, string> = {}
+    for (const n of [...unstaged, ...staged]) if (n.from) renamedFrom[n.path] = n.from
+    return {
+      unstaged: unstaged.map((n) => n.path),
+      staged: staged.map((n) => n.path),
+      renamedFrom,
+      fingerprint
+    }
+  }
+  if (opts.fromSha && opts.toSha) {
+    const [files, side] = await Promise.all([
+      execGitFileList(['diff', '--name-only', opts.fromSha, opts.toSha], { cwd: repoPath }),
+      pagedSide(repoPath, ['diff', '--no-ext-diff', ...flags, opts.fromSha, opts.toSha], maxBytes)
+    ])
+    const deferred = toDeferred(side.deferred, [], '')
+    return {
+      targetPath: repoPath,
+      files: files.sort(),
+      stagedFiles: [],
+      unstagedFiles: files.sort(),
+      untrackedFiles: [],
+      unstagedPatch: side.patch,
+      stagedPatch: '',
+      generatedAt: new Date().toISOString(),
+      isGitRepo: true,
+      ...(deferred && { deferred })
+    }
+  }
+  const [unstagedFiles, stagedFiles, untrackedFiles, unstaged, staged] = await Promise.all([
+    execGitFileList(['diff', '--name-only'], { cwd: repoPath }),
+    execGitFileList(['diff', '--cached', '--name-only'], { cwd: repoPath }),
+    execGitFileList(['ls-files', '--others', '--exclude-standard'], { cwd: repoPath }),
+    pagedSide(repoPath, ['diff', '--no-ext-diff', ...flags], maxBytes),
+    pagedSide(repoPath, ['diff', '--cached', '--no-ext-diff', ...flags], maxBytes)
+  ])
+  const deferred = toDeferred(
+    unstaged.deferred,
+    staged.deferred,
+    unstaged.deferred.length || staged.deferred.length
+      ? await deferredFingerprint(
+          repoPath,
+          unstaged.deferred.map((n) => n.path),
+          staged.deferred.length > 0
+        )
+      : ''
+  )
+  return {
+    targetPath: repoPath,
+    files: [...new Set([...unstagedFiles, ...stagedFiles, ...untrackedFiles])].sort(),
+    stagedFiles: stagedFiles.sort(),
+    unstagedFiles: unstagedFiles.sort(),
+    untrackedFiles: untrackedFiles.sort(),
+    unstagedPatch: unstaged.patch,
+    stagedPatch: staged.patch,
+    generatedAt: new Date().toISOString(),
+    isGitRepo: true,
+    ...(deferred && { deferred })
+  }
+}
+
+/** A single file's diff command, as `getFileDiff` / `getUntrackedFileDiff` run it. */
+export function fileDiffCommand(q: {
+  kind: 'unstaged' | 'staged' | 'untracked' | 'range'
+  filePath: string
+  fromPath?: string
+  opts?: GitDiffTextOpts
+  fromSha?: string
+  toSha?: string
+}): { args: string[]; okExitCodes: number[] } {
+  if (q.kind === 'untracked') {
+    const devNull = platform() === 'win32' ? 'NUL' : '/dev/null'
+    return {
+      args: ['diff', '--no-index', '--no-ext-diff', '--', devNull, q.filePath],
+      okExitCodes: [0, 1]
+    }
+  }
+  // A rename's old path joins the pathspec so git pairs them as in the whole diff.
+  const paths = q.fromPath ? [q.fromPath, q.filePath] : [q.filePath]
+  const flags = ['--no-ext-diff', ...diffDisplayFlags(q.opts)]
+  if (q.kind === 'range') {
+    if (!q.fromSha || !q.toSha) throw new Error('a range diff needs fromSha and toSha')
+    return { args: ['diff', ...flags, q.fromSha, q.toSha, '--', ...paths], okExitCodes: [0] }
+  }
+  return {
+    args:
+      q.kind === 'staged'
+        ? ['diff', '--cached', ...flags, '--', ...paths]
+        : ['diff', ...flags, '--', ...paths],
+    okExitCodes: [0]
+  }
+}
+
+/** Concurrent gits for one batch of file patches. */
+const FILE_DIFFS_CONCURRENCY = 8
+
+/**
+ * Patches of `filePaths`, one git each, as a budgeted batch: files in order while
+ * they fit (at least one); a file whose own patch is over the budget is `large`
+ * (read it page by page); the rest `deferred` (ask again). A file that cannot be
+ * read (gone meanwhile) is left out, as the whole-batch op does.
+ */
+export async function getFileDiffsPage(
+  repoPath: string,
+  q: {
+    kind: 'unstaged' | 'staged' | 'untracked' | 'range'
+    filePaths: string[]
+    /** Per file, a rename's old path ('' / absent = none). */
+    fromPaths?: string[]
+    opts?: GitDiffTextOpts
+    fromSha?: string
+    toSha?: string
+    maxBytes?: number
+  }
+): Promise<GitFileDiffsPage> {
+  const budget = budgetOf(q.maxBytes)
+  type Got = { kind: 'text'; text: string } | { kind: 'large' } | { kind: 'gone' }
+  const got: Array<Got | undefined> = []
+  let done = 0
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < q.filePaths.length && done < budget) {
+      const i = next++
+      const filePath = q.filePaths[i]
+      const { args, okExitCodes } = fileDiffCommand({
+        kind: q.kind,
+        filePath,
+        fromPath: q.fromPaths?.[i] || undefined,
+        opts: q.opts,
+        fromSha: q.fromSha,
+        toSha: q.toSha
+      })
+      const r = await readCommandCapped('git', args, {
+        cwd: repoPath,
+        okExitCodes,
+        maxBytes: budget
+      }).catch(() => null)
+      if (!r) got[i] = { kind: 'gone' }
+      else if (!r.complete) got[i] = { kind: 'large' }
+      // `--no-index` exit 1 with no patch = the file could not be read.
+      else if (q.kind === 'untracked' && r.code !== 0 && !r.text) got[i] = { kind: 'gone' }
+      else {
+        got[i] = { kind: 'text', text: r.text }
+        done += Buffer.byteLength(r.text)
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(FILE_DIFFS_CONCURRENCY, q.filePaths.length) }, worker)
+  )
+
+  const page: GitFileDiffsPage = { diffs: {}, deferred: [], large: [] }
+  let bytes = 0
+  let taken = 0
+  let full = false
+  q.filePaths.forEach((filePath, i) => {
+    const g = got[i]
+    if (g?.kind === 'large') page.large.push(filePath)
+    else if (g?.kind === 'gone') return
+    else if (!g || full) page.deferred.push(filePath)
+    else {
+      const size = Buffer.byteLength(g.text)
+      if (taken > 0 && bytes + size > budget) {
+        full = true
+        page.deferred.push(filePath)
+        return
+      }
+      page.diffs[filePath] = g.text
+      bytes += size
+      taken++
+    }
+  })
+  return page
 }
 
 export async function getConflictContent(

@@ -48,6 +48,7 @@ import { FileListItem, HorizontalResizeHandle } from './GitDiffPanel.components'
 import { useGitDiffCollapse } from './useGitDiffCollapse'
 import { useGitDiffTurns } from './useGitDiffTurns'
 import { useGitDiffData } from './useGitDiffData'
+import { DiffRestButton } from './DiffRestButton'
 import { useGitDiffFolders } from './useGitDiffFolders'
 import { useGitDiffSelection } from './useGitDiffSelection'
 import { useGitDiffFlow } from './useGitDiffFlow'
@@ -102,6 +103,9 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
     stagedTree,
     unstagedTree,
     getDiffForEntry,
+    isDiffPending,
+    getDiffRest,
+    loadDiffRest,
     hasAnyChanges
   } = useGitDiffData(targetPath, {
     visible,
@@ -132,6 +136,10 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
   // Single-file selection for non-continuous-flow mode.
   const { selectedFile, handleSelectFile, handleKeyDown, selectedItemRef, selectedDiff } =
     useGitDiffSelection({ flatEntries, visibleFlatEntries, diffContinuousFlow, getDiffForEntry })
+
+  const selectedEntry = selectedFile
+    ? flatEntries.find((f) => f.path === selectedFile.path && f.source === selectedFile.source)
+    : undefined
 
   // Continuous-flow virtualized diff list + sticky headers.
   const {
@@ -742,6 +750,10 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                                 wrap={diffWrap}
                                 contextLines={diffContextLines}
                               />
+                              <DiffRestButton
+                                rest={getDiffRest(entry)}
+                                onLoad={() => void loadDiffRest(entry)}
+                              />
                             </div>
                           </div>
                         )
@@ -768,9 +780,7 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                 {selectedFile && !selectedDiff && (
                   <div className="flex-1 flex items-center justify-center p-6">
                     <p className="text-xs text-muted-foreground">
-                      {flatEntries.find(
-                        (f) => f.path === selectedFile.path && f.source === selectedFile.source
-                      )?.status === '?'
+                      {selectedEntry && isDiffPending(selectedEntry)
                         ? 'Loading...'
                         : 'No diff content'}
                     </p>
@@ -784,6 +794,12 @@ export const GitDiffPanel = forwardRef<GitDiffPanelHandle, GitDiffPanelProps>(fu
                       wrap={diffWrap}
                       contextLines={diffContextLines}
                     />
+                    {selectedEntry && (
+                      <DiffRestButton
+                        rest={getDiffRest(selectedEntry)}
+                        onLoad={() => void loadDiffRest(selectedEntry)}
+                      />
+                    )}
                   </div>
                 )}
               </>

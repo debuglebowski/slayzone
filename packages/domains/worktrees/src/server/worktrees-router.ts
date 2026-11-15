@@ -38,6 +38,7 @@ import { router, publicProcedure, hubLocalProcedure } from '@slayzone/trpc-serve
 import type { WithAmbientTarget } from '@slayzone/trpc-server'
 import { gitOpsContract, type GitOpName } from '../shared/git-ops-contract'
 import { executeGitOp, unwatchGitCheckout, watchGitCheckout } from './git-op-routing'
+import { readGitTextRouted } from './git-text-routing'
 import {
   listIgnoredTreeRouted,
   matchIgnoredTreeRouted,
@@ -263,6 +264,12 @@ export const worktreesRouter = router({
   getFileDiff: gitQuery('getFileDiff'),
   getUntrackedFileDiff: gitQuery('getUntrackedFileDiff'),
   getUntrackedFileDiffs: gitQuery('getUntrackedFileDiffs'),
+  // Bounded diffs: deferred files in budgeted batches (only after a paged snapshot,
+  // i.e. a `boundedReads` computer), and one large text page by page.
+  getFileDiffsPage: gitQuery('getFileDiffsPage'),
+  readGitText: publicProcedure
+    .input(gitOpsContract.readGitText.input.extend({ target: gitTarget }))
+    .query(({ ctx, input }) => readGitTextRouted(input, ctx.db)),
   getConflictContent: gitQuery('getConflictContent'),
   writeResolvedFile: gitMutation('writeResolvedFile'),
   commitFiles: gitMutation('commitFiles'),

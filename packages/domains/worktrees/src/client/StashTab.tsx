@@ -1,13 +1,14 @@
 import { useState, useMemo, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useTaskFolders, worktreeOrProject } from './task-folders'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTRPC } from './trpc'
 import { Archive, FileText } from 'lucide-react'
 import { cn, PulseGrid, useStablePoll } from '@slayzone/ui'
 import type { StashEntry } from '../shared/types'
 import { useGitPanelContext } from './git-panel-context'
-import { parseUnifiedDiff, type FileDiff } from '@slayzone/diff-view'
 import { DiffView } from '@slayzone/diff-view'
+import { DiffRestButton } from './DiffRestButton'
+import { usePagedStashDiff } from './usePagedStashDiff'
 
 interface StashTabProps {
   visible: boolean
@@ -91,17 +92,14 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
     [stashes, selectedIndex]
   )
 
-  const diffQuery = useQuery(
-    trpc.worktrees.getStashDiff.queryOptions(
-      { repoPath: repoPath ?? '', index: selected?.index ?? -1 },
-      { enabled: !!repoPath && selected !== null }
-    )
-  )
-  const diff: FileDiff[] = useMemo(
-    () => (diffQuery.data ? parseUnifiedDiff(diffQuery.data) : []),
-    [diffQuery.data]
-  )
-  const diffLoading = !!repoPath && selected !== null && diffQuery.isFetching
+  // Bounded: the stash's patch page by page; a large one shows its first page and
+  // loads the rest on request.
+  const {
+    files: diff,
+    loading: diffLoading,
+    rest: diffRest,
+    loadRest: loadDiffRest
+  } = usePagedStashDiff(repoPath ?? null, selected?.index ?? null)
 
   if (!repoPath) {
     return (
@@ -177,15 +175,18 @@ export const StashTab = forwardRef<StashTabHandle, StashTabProps>(function Stash
               ) : diff.length === 0 ? (
                 <div className="p-4 text-muted-foreground">No changes</div>
               ) : (
-                diff.map((fd) => (
-                  <div key={fd.path} className="border-b">
-                    <div className="px-4 py-1.5 bg-muted/30 text-[11px] flex items-center gap-2">
-                      <FileText className="h-3 w-3" />
-                      <span className="truncate">{fd.path}</span>
+                <>
+                  {diff.map((fd) => (
+                    <div key={fd.path} className="border-b">
+                      <div className="px-4 py-1.5 bg-muted/30 text-[11px] flex items-center gap-2">
+                        <FileText className="h-3 w-3" />
+                        <span className="truncate">{fd.path}</span>
+                      </div>
+                      <DiffView diff={fd} />
                     </div>
-                    <DiffView diff={fd} />
-                  </div>
-                ))
+                  ))}
+                  <DiffRestButton rest={diffRest} onLoad={() => void loadDiffRest()} />
+                </>
               )}
             </div>
           </>

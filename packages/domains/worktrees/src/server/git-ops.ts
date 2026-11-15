@@ -9,6 +9,8 @@
  */
 import { gitOpsContract, type GitOpInput, type GitOpName } from '../shared/git-ops-contract'
 import * as git from './git-worktree'
+import { gitTextSpools, readGitText } from './git-text-spool'
+import { gitTextSourceOf } from '../shared/git-text'
 import { scanIgnoredIndex } from './ignored-scan'
 import { ignoredTrees } from './ignored-trees'
 
@@ -40,7 +42,18 @@ export const gitOpImpls = {
   getUntrackedFileDiff: (i: GitOpInput<'getUntrackedFileDiff'>) =>
     git.getUntrackedFileDiff(i.repoPath, i.filePath),
   getUntrackedFileDiffs: (i: GitOpInput<'getUntrackedFileDiffs'>) =>
-    git.getUntrackedFileDiffs(i.repoPath, i.filePaths),
+    git.getUntrackedFileDiffs(i.repoPath, i.filePaths, i.paged ? { paged: true } : undefined),
+  getFileDiffsPage: (i: GitOpInput<'getFileDiffsPage'>) =>
+    git.getFileDiffsPage(i.repoPath, {
+      kind: i.kind,
+      filePaths: i.filePaths,
+      fromPaths: i.fromPaths,
+      opts: i.opts,
+      fromSha: i.fromSha,
+      toSha: i.toSha
+    }),
+  readGitText: (i: GitOpInput<'readGitText'>) =>
+    readGitText(gitTextSpools, i.repoPath, gitTextSourceOf(i), i.cursor),
   getConflictContent: (i: GitOpInput<'getConflictContent'>) =>
     git.getConflictContent(i.repoPath, i.filePath),
   writeResolvedFile: async (i: GitOpInput<'writeResolvedFile'>) =>

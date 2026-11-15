@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { useTRPC } from './trpc'
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef } from 'react'
 import { buildFileTree } from '@slayzone/ui'
 import { parseUnifiedDiff } from '@slayzone/diff-view'
 import type { FileDiff as FileDiffType } from '@slayzone/diff-view'
 import { useGitDiffSnapshot, type GitDiffContextLines } from './git-diff-store'
 import type { FileEntry } from './GitDiffPanel.types'
+import { useDiffTexts } from './useDiffTexts'
 import { deriveStatus, getEntryPath } from './GitDiffPanel.utils'
+
+/** An entry's key among the loaded per-file patches (`diff-text-loader`). */
+function textKeyOf(entry: FileEntry): string {
+  if (entry.status === '?') return `?:${entry.path}`
+  return entry.source === 'staged' ? `s:${entry.path}` : `u:${entry.path}`
+}
 
 interface UseGitDiffDataOptions {
   visible: boolean
@@ -36,10 +41,6 @@ export function useGitDiffData(
     onSnapshotChange
   }: UseGitDiffDataOptions
 ) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const [untrackedDiffs, setUntrackedDiffs] = useState<Map<string, FileDiffType>>(new Map())
-
   // Shared snapshot: identity-stable across panels hitting the same worktree,
   // refcounted timer, in-store snapshotsEqual short-circuit. contextLines is
   // part of the store key so toggling the display setting triggers a re-fetch
@@ -130,63 +131,60 @@ export function useGitDiffData(
     return map
   }, [unstagedFileDiffs, stagedFileDiffs])
 
+  // The per-file patches not in the snapshot's own text: the files a paged snapshot
+  // deferred (budgeted batches; a large one by its first page, the rest on request)
+  // and the untracked files' preview (each new file fetched once, in batches).
+  const { loader: diffTexts, texts } = useDiffTexts(
+    targetPath,
+    { contextLines, ignoreWhitespace, fromSha, toSha },
+    snapshot
+  )
+
   const getDiffForEntry = useCallback(
     (entry: FileEntry): FileDiffType | undefined => {
       const key = entry.source === 'staged' ? `s:${entry.path}` : `u:${entry.path}`
-      return (
-        allDiffsMap.get(key) ?? (entry.status === '?' ? untrackedDiffs.get(entry.path) : undefined)
-      )
+      const inSnapshot = allDiffsMap.get(key)
+      if (inSnapshot) return inSnapshot
+      const loaded = texts.get(textKeyOf(entry))
+      // parseUnifiedDiff's LRU (keyed by the text) keeps identities stable.
+      return loaded?.text ? parseUnifiedDiff(loaded.text)[0] : undefined
     },
-    [allDiffsMap, untrackedDiffs]
+    [allDiffsMap, texts]
   )
 
-  // Eagerly fetch diffs for untracked files (for counts + preview)
-  const prevUntrackedRef = useRef<string[]>([])
-  useEffect(() => {
-    if (!snapshot || !targetPath) return
-    const curr = snapshot.untrackedFiles
-    const prev = prevUntrackedRef.current
-    prevUntrackedRef.current = curr
+  /** A file whose diff is still on its way (deferred or untracked, not loaded yet). */
+  const isDiffPending = useCallback(
+    (entry: FileEntry): boolean => {
+      if (getDiffForEntry(entry)) return false
+      const t = texts.get(textKeyOf(entry))
+      if (t) return t.loading
+      if (entry.status === '?') return true
+      const d = snapshot?.deferred
+      return !!d && (entry.source === 'staged' ? d.staged : d.unstaged).includes(entry.path)
+    },
+    [getDiffForEntry, texts, snapshot]
+  )
 
-    const currSet = new Set(curr)
-    const prevSet = new Set(prev)
+  /** More of a large file's diff to load (its size), or null. */
+  const getDiffRest = useCallback(
+    (entry: FileEntry): { remainingBytes: number; loading: boolean; failed: boolean } | null => {
+      const t = texts.get(textKeyOf(entry))
+      return t?.rest
+        ? { remainingBytes: t.rest.remainingBytes, loading: t.loading, failed: t.failed }
+        : null
+    },
+    [texts]
+  )
 
-    const removed = prev.filter((f) => !currSet.has(f))
-    if (removed.length > 0) {
-      setUntrackedDiffs((old) => {
-        const next = new Map(old)
-        for (const f of removed) next.delete(f)
-        return next
-      })
-    }
-
-    // All new files in ONE call (server caps concurrent gits), not one RPC + git each.
-    const added = curr.filter((f) => !prevSet.has(f))
-    if (added.length === 0) return
-    queryClient
-      .fetchQuery(
-        trpc.worktrees.getUntrackedFileDiffs.queryOptions({
-          repoPath: targetPath,
-          filePaths: added
-        })
-      )
-      .then((patches) => {
-        const parsedByPath: Array<[string, FileDiffType]> = []
-        for (const [filePath, patch] of Object.entries(patches)) {
-          const parsed = parseUnifiedDiff(patch)
-          if (parsed.length > 0) parsedByPath.push([filePath, parsed[0]])
-        }
-        if (parsedByPath.length === 0) return
-        setUntrackedDiffs((old) => {
-          const next = new Map(old)
-          for (const [filePath, diff] of parsedByPath) next.set(filePath, diff)
-          return next
-        })
-      })
-      .catch(() => {
-        // ignore — a file left out is binary or inaccessible; the rest just show no preview
-      })
-  }, [snapshot, targetPath, queryClient, trpc])
+  const loadDiffRest = useCallback(
+    (entry: FileEntry): Promise<void> =>
+      diffTexts
+        ? diffTexts.loadRest(textKeyOf(entry)).catch(() => {
+            /* the entry shows the failure (`failed`) */
+          })
+        : Promise.resolve(),
+    [diffTexts]
+  )
 
   const hasAnyChanges =
     !!snapshot &&
@@ -208,6 +206,9 @@ export function useGitDiffData(
     stagedTree,
     unstagedTree,
     getDiffForEntry,
+    isDiffPending,
+    getDiffRest,
+    loadDiffRest,
     hasAnyChanges
   }
 }

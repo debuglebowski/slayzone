@@ -70,6 +70,7 @@ interface StoreTransport {
       ignoreWhitespace: boolean
       fromSha?: string
       toSha?: string
+      paged?: boolean
     }
   ) => Promise<GitDiffSnapshot>
   watchStart: (scope: GitStoreScope, worktreePath: string) => Promise<void>
@@ -269,8 +270,19 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   return true
 }
 
+function deferredEqual(a: GitDiffSnapshot['deferred'], b: GitDiffSnapshot['deferred']): boolean {
+  if (!a || !b) return a === b
+  return (
+    a.fingerprint === b.fingerprint &&
+    arraysEqual(a.unstaged, b.unstaged) &&
+    arraysEqual(a.staged, b.staged) &&
+    JSON.stringify(a.renamedFrom) === JSON.stringify(b.renamedFrom)
+  )
+}
+
 function snapshotsEqual(a: GitDiffSnapshot, b: GitDiffSnapshot): boolean {
   return (
+    deferredEqual(a.deferred, b.deferred) &&
     a.unstagedPatch === b.unstagedPatch &&
     a.stagedPatch === b.stagedPatch &&
     arraysEqual(a.unstagedFiles, b.unstagedFiles) &&
@@ -337,7 +349,10 @@ async function runFetch(entry: StoreEntry): Promise<void> {
     const next = await transport.getWorkingDiff(entry.scope, entry.targetPath, {
       contextLines: entry.contextLines,
       ignoreWhitespace: entry.ignoreWhitespace,
-      ...range
+      ...range,
+      // Bounded: each side's patch up to a budget, the rest listed (`deferred`) and
+      // loaded per file (useDiffTexts). An older computer ignores it: whole patches.
+      paged: true
     })
     // If this entry was torn down or a newer fetch superseded us, drop result.
     if (entries.get(entry.key) !== entry || entry.fetchSeq !== seq) return

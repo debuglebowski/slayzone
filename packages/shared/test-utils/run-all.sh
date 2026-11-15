@@ -738,6 +738,8 @@ run_harness packages/domains/worktrees/src/server/merge-ai-routing.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-index.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-trees.test.ts
 run_harness packages/domains/worktrees/src/server/ignored-tree-routing.test.ts
+run_harness packages/domains/worktrees/src/server/paged-diffs.test.ts
+run_harness packages/domains/worktrees/src/server/git-text-routing.test.ts
 # agent-turns suite: async-DB rot fixed (awaits added; snapshotWorktree return adapted
 # to {snapshotSha,headSha}). A broken suite counts as FAIL; a known-red one is
 # skip_suite'd with a reason.
@@ -1412,6 +1414,7 @@ run_harness packages/domains/terminal-contracts/src/osc.test.ts
 run_harness packages/domains/terminal-contracts/src/terminal-state-labels.test.ts
 run_harness packages/domains/worktrees/src/client/CopyFilesDialog.utils.test.ts
 run_harness packages/domains/worktrees/src/client/ignored-tree-loader.test.ts
+run_harness packages/domains/worktrees/src/client/diff-text-loader.test.ts
 run_harness packages/shared/diff-view/src/parse-diff.test.ts
 run_harness packages/domains/file-editor/src/client/long-lines.test.ts
 run_harness packages/domains/worktrees/src/client/utils.test.ts
@@ -1651,6 +1654,8 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \
   packages/domains/terminal/src/client/useAgents.test.tsx \
   packages/domains/worktrees/src/client/CopyFilesDialog.test.tsx \
+  packages/domains/worktrees/src/client/DiffRestButton.test.tsx \
+  packages/domains/worktrees/src/client/usePagedStashDiff.test.tsx \
   packages/domains/worktrees/src/client/WorktreesTab.test.tsx \
   packages/domains/worktrees/src/client/useBranchGraph.test.tsx \
   packages/domains/worktrees/src/client/ConflictPhaseContent.test.tsx \

@@ -40,6 +40,10 @@ function op<I extends z.ZodObject>(
 }
 
 const at = z.object({ path: s })
+/** A diff's display options (as `getFileDiff`'s `opts` carries them). */
+const diffTextOpts = z.object({ contextLines: s.max(8).optional(), ignoreWhitespace: b.optional() })
+/** A commit id: hex only, so it can never be taken for an option. */
+const sha = s.regex(/^[0-9a-fA-F]{4,64}$/)
 const repo = z.object({ repoPath: s })
 
 export const gitOpsContract = {
@@ -73,9 +77,43 @@ export const gitOpsContract = {
   ),
   getUntrackedFileDiff: op(z.object({ repoPath: s, filePath: s }), ['repoPath'], ['filePath']),
   getUntrackedFileDiffs: op(
-    z.object({ repoPath: s, filePaths: z.array(s) }),
+    // `paged`: a budgeted batch marked `$paged` (an older computer drops the key and
+    // answers the whole record).
+    z.object({ repoPath: s, filePaths: z.array(s), paged: b.optional() }),
     ['repoPath'],
     ['filePaths']
+  ),
+  // Bounded diffs (`boundedReads` computers): the files a paged working-diff snapshot
+  // deferred, in budgeted batches; `fromPaths[i]` = a rename's old path ('' = none).
+  getFileDiffsPage: op(
+    z.object({
+      repoPath: s,
+      kind: z.enum(['unstaged', 'staged', 'untracked', 'range']),
+      filePaths: z.array(s).max(10_000),
+      fromPaths: z.array(s).max(10_000).optional(),
+      opts: diffTextOpts.optional(),
+      fromSha: sha.optional(),
+      toSha: sha.optional()
+    }),
+    ['repoPath'],
+    ['filePaths', 'fromPaths']
+  ),
+  // One large git text, page by page (`cursor` null = the first page).
+  readGitText: op(
+    z.object({
+      repoPath: s,
+      kind: z.enum(['fileDiff', 'rangeFileDiff', 'untrackedDiff', 'stashDiff']),
+      filePath: s.optional(),
+      fromPath: s.optional(),
+      staged: b.optional(),
+      index: z.number().int().nonnegative().optional(),
+      fromSha: sha.optional(),
+      toSha: sha.optional(),
+      opts: diffTextOpts.optional(),
+      cursor: s.max(100).nullable()
+    }),
+    ['repoPath'],
+    ['filePath', 'fromPath']
   ),
   getConflictContent: op(z.object({ repoPath: s, filePath: s }), ['repoPath'], ['filePath']),
   writeResolvedFile: op(
