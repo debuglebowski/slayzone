@@ -1,5 +1,5 @@
 diff --git a/dist/wsLink-Bm5LKL6z.mjs b/dist/wsLink-Bm5LKL6z.mjs
-index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..4988487ae110aa31abc3d10007f22b8a75ac2ef7 100644
+index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..7b9cfb84ae467ef393395c50c9f56d15d6689c7b 100644
 --- a/dist/wsLink-Bm5LKL6z.mjs
 +++ b/dist/wsLink-Bm5LKL6z.mjs
 @@ -457,6 +457,21 @@ var WsClient = class {
@@ -24,35 +24,110 @@ index 38b0b6556afe539bd05824c7cbe14b6e11bc9d1c..4988487ae110aa31abc3d10007f22b8a
  	}
  	/**
  	* Closes the WebSocket connection and stops managing requests.
-@@ -528,13 +543,23 @@ var WsClient = class {
- 			error: TRPCClientError.from(closedError)
- 		});
+@@ -464,6 +479,7 @@ var WsClient = class {
+ 	*/
+ 	async close() {
+ 		this.allowReconnect = false;
++		this.wakeReconnect();
+ 		this.inactivityTimeout.stop();
+ 		const requestsToAwait = [];
+ 		for (const request of this.requestManager.getRequests()) if (request.message.method === "subscription") request.callbacks.complete();
+@@ -521,7 +537,25 @@ var WsClient = class {
+ 	get connection() {
+ 		return backwardCompatibility(this.activeConnection);
+ 	}
++	/** slayzone patch (FU6): wake only the existing serialized retry loop. */
++	wakeReconnect() {
++		this.reconnectWake?.();
++	}
++	waitForReconnect(attemptIndex) {
++		return new Promise((resolve) => {
++			const done = () => {
++				clearTimeout(timer);
++				this.reconnectWake = null;
++				resolve();
++			};
++			const timer = setTimeout(done, this.reconnectRetryDelay(attemptIndex));
++			this.reconnectWake = done;
++		});
++	}
+ 	reconnect(closedError) {
++		if (!this.allowReconnect) return;
++		// Latest socket requiring replacement, even while an older retry loop sleeps.
++		this.reconnectFrom = this.activeConnection.ws;
+ 		this.connectionState.next({
+ 			type: "state",
+ 			state: "connecting",
+@@ -530,11 +564,21 @@ var WsClient = class {
  		if (this.reconnecting) return;
-+		// slayzone patch (FU6): the socket this reconnect is replacing. A DIFFERENT socket
-+		// that is open when the loop wakes was reopened meanwhile (a query reconnected):
-+		// the loop's job is done, and closing it would fail every call in flight on it.
-+		const startedWith = this.activeConnection.ws;
  		const tryReconnect = async (attemptIndex) => {
  			try {
- 				await sleep(this.reconnectRetryDelay(attemptIndex));
+-				await sleep(this.reconnectRetryDelay(attemptIndex));
++				await this.waitForReconnect(attemptIndex);
  				if (this.allowReconnect) {
 -					await this.activeConnection.close();
 -					await this.activeConnection.open();
 -					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					const conn = this.activeConnection;
-+					const reopenedMeanwhile = conn.isOpen() && conn.ws !== startedWith;
-+					// An attempt already in flight (a query's) is joined, not closed.
-+					if (reopenedMeanwhile) {} else if (conn.openPromise) await conn.open();
-+					else {
-+						await conn.close();
-+						await conn.open();
++					const reopenedMeanwhile = conn.isOpen() && conn.ws !== this.reconnectFrom;
++					// Join a query's attempt; preserve a socket that already satisfied the intent.
++					if (!reopenedMeanwhile) {
++						if (conn.openPromise) await conn.open();
++						else {
++							await conn.close();
++							if (this.allowReconnect) await conn.open();
++						}
 +					}
-+					this.resendPendingOnce();
++					// A new server reconnect can arrive while open() is completing.
++					if (this.allowReconnect && conn.ws === this.reconnectFrom) return tryReconnect(0);
++					if (this.allowReconnect) this.resendPendingOnce();
  				}
  				this.reconnecting = null;
  			} catch (_unused) {
+@@ -544,7 +588,9 @@ var WsClient = class {
+ 		this.reconnecting = tryReconnect(0);
+ 	}
+ 	setupWebSocketListeners(ws) {
++		// Superseded sockets must never mutate current state, requests or replay cursors.
+ 		const handleCloseOrError = (cause) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			const reqs = this.requestManager.getPendingRequests();
+ 			for (const { message, callbacks } of reqs) {
+ 				if (message.method === "subscription") continue;
+@@ -556,6 +602,7 @@ var WsClient = class {
+ 			}
+ 		};
+ 		ws.addEventListener("open", () => {
++			if (ws !== this.activeConnection.ws) return;
+ 			run(async () => {
+ 				var _this$callbacks$onOpe, _this$callbacks;
+ 				if (this.lazyMode) this.inactivityTimeout.start();
+@@ -571,6 +618,7 @@ var WsClient = class {
+ 			});
+ 		});
+ 		ws.addEventListener("message", ({ data }) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			this.inactivityTimeout.reset();
+ 			if (["PING", "PONG"].includes(data)) return;
+ 			const incomingMessage = this.encoder.decode(data);
+@@ -581,6 +629,7 @@ var WsClient = class {
+ 			this.handleResponseMessage(incomingMessage);
+ 		});
+ 		ws.addEventListener("close", (event) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			var _this$callbacks$onClo, _this$callbacks2;
+ 			handleCloseOrError(event);
+ 			(_this$callbacks$onClo = (_this$callbacks2 = this.callbacks).onClose) === null || _this$callbacks$onClo === void 0 || _this$callbacks$onClo.call(_this$callbacks2, event);
+@@ -590,6 +639,7 @@ var WsClient = class {
+ 			}));
+ 		});
+ 		ws.addEventListener("error", (event) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			var _this$callbacks$onErr, _this$callbacks3;
+ 			handleCloseOrError(event);
+ 			(_this$callbacks$onErr = (_this$callbacks3 = this.callbacks).onError) === null || _this$callbacks$onErr === void 0 || _this$callbacks$onErr.call(_this$callbacks3, event);
 diff --git a/dist/wsLink-CKAsNP9P.cjs b/dist/wsLink-CKAsNP9P.cjs
-index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..4baab57f5c7ec9026d6479d6e00d96c9d67f816d 100644
+index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..e368384931dcb46572ba1b5b2ce535f7e575d8e8 100644
 --- a/dist/wsLink-CKAsNP9P.cjs
 +++ b/dist/wsLink-CKAsNP9P.cjs
 @@ -457,6 +457,21 @@ var WsClient = class {
@@ -77,30 +152,131 @@ index 15a840a39ad40dd4b8aafe97773a1a15b16ef731..4baab57f5c7ec9026d6479d6e00d96c9
  	}
  	/**
  	* Closes the WebSocket connection and stops managing requests.
-@@ -528,13 +543,23 @@ var WsClient = class {
- 			error: require_TRPCClientError.TRPCClientError.from(closedError)
- 		});
+@@ -464,6 +479,7 @@ var WsClient = class {
+ 	*/
+ 	async close() {
+ 		this.allowReconnect = false;
++		this.wakeReconnect();
+ 		this.inactivityTimeout.stop();
+ 		const requestsToAwait = [];
+ 		for (const request of this.requestManager.getRequests()) if (request.message.method === "subscription") request.callbacks.complete();
+@@ -521,7 +537,25 @@ var WsClient = class {
+ 	get connection() {
+ 		return backwardCompatibility(this.activeConnection);
+ 	}
++	/** slayzone patch (FU6): wake only the existing serialized retry loop. */
++	wakeReconnect() {
++		this.reconnectWake?.();
++	}
++	waitForReconnect(attemptIndex) {
++		return new Promise((resolve) => {
++			const done = () => {
++				clearTimeout(timer);
++				this.reconnectWake = null;
++				resolve();
++			};
++			const timer = setTimeout(done, this.reconnectRetryDelay(attemptIndex));
++			this.reconnectWake = done;
++		});
++	}
+ 	reconnect(closedError) {
++		if (!this.allowReconnect) return;
++		// Latest socket requiring replacement, even while an older retry loop sleeps.
++		this.reconnectFrom = this.activeConnection.ws;
+ 		this.connectionState.next({
+ 			type: "state",
+ 			state: "connecting",
+@@ -530,11 +564,21 @@ var WsClient = class {
  		if (this.reconnecting) return;
-+		// slayzone patch (FU6): the socket this reconnect is replacing. A DIFFERENT socket
-+		// that is open when the loop wakes was reopened meanwhile (a query reconnected):
-+		// the loop's job is done, and closing it would fail every call in flight on it.
-+		const startedWith = this.activeConnection.ws;
  		const tryReconnect = async (attemptIndex) => {
  			try {
- 				await (0, _trpc_server_unstable_core_do_not_import.sleep)(this.reconnectRetryDelay(attemptIndex));
+-				await (0, _trpc_server_unstable_core_do_not_import.sleep)(this.reconnectRetryDelay(attemptIndex));
++				await this.waitForReconnect(attemptIndex);
  				if (this.allowReconnect) {
 -					await this.activeConnection.close();
 -					await this.activeConnection.open();
 -					if (this.requestManager.hasPendingRequests()) this.send(this.requestManager.getPendingRequests().map(({ message }) => message));
 +					const conn = this.activeConnection;
-+					const reopenedMeanwhile = conn.isOpen() && conn.ws !== startedWith;
-+					// An attempt already in flight (a query's) is joined, not closed.
-+					if (reopenedMeanwhile) {} else if (conn.openPromise) await conn.open();
-+					else {
-+						await conn.close();
-+						await conn.open();
++					const reopenedMeanwhile = conn.isOpen() && conn.ws !== this.reconnectFrom;
++					// Join a query's attempt; preserve a socket that already satisfied the intent.
++					if (!reopenedMeanwhile) {
++						if (conn.openPromise) await conn.open();
++						else {
++							await conn.close();
++							if (this.allowReconnect) await conn.open();
++						}
 +					}
-+					this.resendPendingOnce();
++					// A new server reconnect can arrive while open() is completing.
++					if (this.allowReconnect && conn.ws === this.reconnectFrom) return tryReconnect(0);
++					if (this.allowReconnect) this.resendPendingOnce();
  				}
  				this.reconnecting = null;
  			} catch (_unused) {
+@@ -544,7 +588,9 @@ var WsClient = class {
+ 		this.reconnecting = tryReconnect(0);
+ 	}
+ 	setupWebSocketListeners(ws) {
++		// Superseded sockets must never mutate current state, requests or replay cursors.
+ 		const handleCloseOrError = (cause) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			const reqs = this.requestManager.getPendingRequests();
+ 			for (const { message, callbacks } of reqs) {
+ 				if (message.method === "subscription") continue;
+@@ -556,6 +602,7 @@ var WsClient = class {
+ 			}
+ 		};
+ 		ws.addEventListener("open", () => {
++			if (ws !== this.activeConnection.ws) return;
+ 			(0, _trpc_server_unstable_core_do_not_import.run)(async () => {
+ 				var _this$callbacks$onOpe, _this$callbacks;
+ 				if (this.lazyMode) this.inactivityTimeout.start();
+@@ -571,6 +618,7 @@ var WsClient = class {
+ 			});
+ 		});
+ 		ws.addEventListener("message", ({ data }) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			this.inactivityTimeout.reset();
+ 			if (["PING", "PONG"].includes(data)) return;
+ 			const incomingMessage = this.encoder.decode(data);
+@@ -581,6 +629,7 @@ var WsClient = class {
+ 			this.handleResponseMessage(incomingMessage);
+ 		});
+ 		ws.addEventListener("close", (event) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			var _this$callbacks$onClo, _this$callbacks2;
+ 			handleCloseOrError(event);
+ 			(_this$callbacks$onClo = (_this$callbacks2 = this.callbacks).onClose) === null || _this$callbacks$onClo === void 0 || _this$callbacks$onClo.call(_this$callbacks2, event);
+@@ -590,6 +639,7 @@ var WsClient = class {
+ 			}));
+ 		});
+ 		ws.addEventListener("error", (event) => {
++			if (ws !== this.activeConnection.ws) return;
+ 			var _this$callbacks$onErr, _this$callbacks3;
+ 			handleCloseOrError(event);
+ 			(_this$callbacks$onErr = (_this$callbacks3 = this.callbacks).onError) === null || _this$callbacks$onErr === void 0 || _this$callbacks$onErr.call(_this$callbacks3, event);
+diff --git a/dist/wsLink-DoiyfDgJ.d.cts b/dist/wsLink-DoiyfDgJ.d.cts
+index 64f6ff2a15d836b7137065ee2558fb692d3113c1..67924e88e5ee4c4398d96cdef3f8d1a6dbdf7c66 100644
+--- a/dist/wsLink-DoiyfDgJ.d.cts
++++ b/dist/wsLink-DoiyfDgJ.d.cts
+@@ -117,6 +117,8 @@ declare class WsClient {
+    * the connection state accordingly.
+    */
+   private open;
++  /** SlayZone: wake an existing retry wait without starting a second loop. */
++  wakeReconnect(): void;
+   /**
+    * Closes the WebSocket connection and stops managing requests.
+    * Ensures all outgoing and pending requests are properly finalized.
+diff --git a/dist/wsLink-U8pJ7LD2.d.mts b/dist/wsLink-U8pJ7LD2.d.mts
+index 642b6b88f6fc7bebd4635034bf30a933e4678552..da60a571d8dda079b2d41b5bebd230a27af07041 100644
+--- a/dist/wsLink-U8pJ7LD2.d.mts
++++ b/dist/wsLink-U8pJ7LD2.d.mts
+@@ -117,6 +117,8 @@ declare class WsClient {
+    * the connection state accordingly.
+    */
+   private open;
++  /** SlayZone: wake an existing retry wait without starting a second loop. */
++  wakeReconnect(): void;
+   /**
+    * Closes the WebSocket connection and stops managing requests.
+    * Ensures all outgoing and pending requests are properly finalized.

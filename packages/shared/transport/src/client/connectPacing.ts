@@ -36,7 +36,8 @@
  *
  * A STUCK SOCKET GIVEN UP WHILE THE HUB ANSWERS (connectHandshake.ts →
  * `noteHubAnswered`): the next attempt is immediate — loop delay 0, no probe —
- * once. The watchdog's doubling grace keeps those rare.
+ * once. runtime.ts also wakes an already-sleeping retry loop; a new delay alone
+ * cannot cancel its existing wait. The watchdog's doubling grace keeps these rare.
  *
  * Untouched: the first connect, the first reconnect after a drop, every
  * scheduled loop attempt, and every client when no probe is installed (the
