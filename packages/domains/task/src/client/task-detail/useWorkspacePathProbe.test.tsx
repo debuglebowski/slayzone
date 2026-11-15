@@ -2,7 +2,7 @@
 /**
  * FU5 (computer stalls, request fan-out): every task tab stays mounted, and each one
  * re-asked its computer "does the project folder still exist?" on EVERY window focus —
- * with 60 open tabs, 60 `fs.pathExists` per focus (6,905 in 12 h of the dev request
+ * with 60 open tabs, 60 `fs.pathExists` per focus (6,905 in 16.2 h of the dev request
  * log, bursts of 300 per 10 s). Only the visible tab asks now; a hidden one asks the
  * moment it is shown, so what you see is as fresh as before.
  */
