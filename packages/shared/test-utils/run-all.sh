@@ -974,6 +974,7 @@ run_harness packages/domains/chat-runtime/src/server/hub-folders.test.ts
 run_harness packages/domains/chat-runtime/src/server/storage.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-records.test.ts
 run_harness packages/domains/chat-runtime/src/server/timeline-storage-bounded.test.ts
+run_harness packages/domains/chat-runtime/src/server/chat-db-swap.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-runtime.test.ts
 run_harness packages/domains/chat-runtime/src/server/attachments.test.ts
 # Event blobs: tool-result base64 moved to the blob store, pinned, GC/retention/erasure/backups.

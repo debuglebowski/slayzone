@@ -149,6 +149,18 @@ prepared sources read the bounded fallback without writing an index. Hot summari
 never parse page bodies; search scans metadata in byte-bounded turns as well. Worker
 metadata callbacks retain the same owner fence, and actual page reads stay encoded.
 
+Connection lifecycle: the store owns ONE read-write connection (`openChatConnection`:
+WAL, synchronous FULL, secure_delete, `journal_size_limit` 64 MiB). `compose` hands out
+a stable handle (`chat-db-handle`) that always reaches the current connection, so
+services may keep it; SQL functions and connection pragmas set through it are
+re-applied after a swap. Statements and `transaction()` wrappers must not be kept
+across a swap (they fail loudly). Any OTHER connection on the live file (a read-only
+export reader, the compaction reader) must be registered for its lifetime with
+`storage.maintenance.registerSecondary(label)`: the swap (`maintenance.swapIn`) is
+refused while one is open; a WAL surviving the close is the backstop. An interrupted
+swap is finished at boot (`chat.sqlite.compact-*` removed, `chat.sqlite.pre-compact`
+dropped, or restored when it is the only copy).
+
 ## Decisions
 
 - 2026-11-02: Dedicated per-hub SQLite schema, WAL and synchronous FULL. No hub
@@ -172,3 +184,7 @@ metadata callbacks retain the same owner fence, and actual page reads stay encod
   keeps them exact, so downgrade stays possible; a `json_valid` guard means the index
   can never refuse an event write. Backfill done = no uncovered conversation left (no
   done flag to go stale after a backup restore).
+- 2026-11-15 (fu-2): swappable connection. Compaction must replace the file without
+  restarting the runtime (that would end live chat sessions), and four services keep
+  the `compose` handle for their lifetime — so the handle forwards to the current
+  connection instead of every caller being rewritten. No schema bump.

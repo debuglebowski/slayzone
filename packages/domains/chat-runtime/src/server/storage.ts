@@ -1,8 +1,25 @@
 import { isDeepStrictEqual } from 'node:util'
 import Database from 'better-sqlite3'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, mkdirSync, readFileSync, lstatSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { createSwappableDb } from './chat-db-handle'
 import {
   createSyncFaultLedger,
   ITEM_FAULTS_DDL,
@@ -325,16 +342,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
   chmodSync(dir, 0o700)
   const path = join(dir, 'chat.sqlite')
   const blobs = createBlobStore(join(dir, 'blobs'))
-  const db = new Database(path)
-  chmodSync(path, 0o600)
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = FULL')
-  db.pragma('foreign_keys = ON')
-  db.pragma('busy_timeout = 5000')
-  db.pragma('secure_delete = ON')
+  recoverInterruptedSwap(dir, path)
+  // The store's one connection, behind a handle that survives a swap (chat-db-handle).
+  const connection = createSwappableDb(openChatConnection(path))
+  const db = connection.db
   const schema = db.pragma('user_version', { simple: true }) as number
   if (schema > CHAT_STORAGE_SCHEMA_VERSION) {
-    db.close()
+    connection.current().close()
     throw new Error('Chat storage was created by a newer version')
   }
   let redactedSideAnswers = 0
@@ -1026,7 +1040,7 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     close() {
       if (!closed) {
         for (const reader of [...exportReaders]) reader.close()
-        db.close()
+        connection.current().close()
         closed = true
       }
     },
@@ -2493,6 +2507,208 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       db.pragma('wal_checkpoint(TRUNCATE)')
     }
   }
-  return api
+  /**
+   * Connection lifecycle for storage maintenance (compaction): the live file's size,
+   * other connections on it, and the swap that replaces it. See DOMAIN.md.
+   */
+  const secondaries = new Map<symbol, string>()
+  const maintenance = {
+    /** Page-level size of the live file: O(1) pragmas and a stat. */
+    fileStats(): ChatStoreFileStats {
+      const pragma = (name: string) => db.pragma(name, { simple: true }) as number
+      const size = (file: string) => (existsSync(file) ? statSync(file).size : 0)
+      return {
+        pageSize: pragma('page_size'),
+        pageCount: pragma('page_count'),
+        freePages: pragma('freelist_count'),
+        autoVacuum: pragma('auto_vacuum') as 0 | 1 | 2,
+        fileBytes: size(path),
+        walBytes: size(`${path}-wal`)
+      }
+    },
+    /** A fresh path for a compacted copy (removed at boot if a run never swaps it in). */
+    tempPath(): string {
+      return join(dir, `${COMPACT_PREFIX}${process.pid}-${randomUUID()}`)
+    },
+    /**
+     * Every OTHER connection on the live file (a read-only export reader, a compaction
+     * reader) registers for its lifetime: the swap never runs while one is open.
+     */
+    registerSecondary(label: string): { release(): void } {
+      const token = Symbol(label)
+      secondaries.set(token, label)
+      return { release: () => void secondaries.delete(token) }
+    },
+    secondaryConnections(): string[] {
+      return [...secondaries.values()]
+    },
+    /**
+     * Replace the live file with `compacted` (a finished, settled copy of THIS store in
+     * its directory), synchronously: no write can interleave, writes that arrive wait on
+     * the event loop and land in the new file. Order: verify the copy → close the live
+     * connection (refused while busy) → no WAL may survive the close (an unregistered
+     * connection would leave one: applied to the new file it would corrupt it) → link
+     * the live file to `.pre-compact` → rename the copy over it → reopen; any failure
+     * after the close puts the old file back. Boot recovery: `recoverInterruptedSwap`.
+     * `phase`: test hook at each step (crash injection).
+     */
+    swapIn(
+      compacted: string,
+      opts: { phase?(step: ChatSwapPhase): void } = {}
+    ): { holdMs: number } {
+      if (closed) throw new Error('Chat storage is closed')
+      const started = performance.now()
+      if (dirname(compacted) !== dir || !basename(compacted).startsWith(COMPACT_PREFIX))
+        throw new Error('Swap source must be a compaction file of this store')
+      if (secondaries.size)
+        throw new ChatStorageSwapRefused(
+          `a secondary connection is open (${[...secondaries.values()].join(', ')})`,
+          true
+        )
+      const discard = (reason: string): never => {
+        rmCompaction(compacted)
+        throw new ChatStorageSwapRefused(reason, false)
+      }
+      if (existsSync(`${compacted}-journal`) || existsSync(`${compacted}-wal`))
+        discard('the compacted copy is not settled')
+      const version = db.pragma('user_version', { simple: true }) as number
+      const candidate = describeStoreFile(compacted)
+      if (candidate.storeId !== storeId) discard('the compacted copy has another store identity')
+      if (candidate.version !== version) discard('the compacted copy has another schema version')
+      opts.phase?.('verified')
+      const old = connection.current()
+      try {
+        old.close()
+      } catch (error) {
+        throw new ChatStorageSwapRefused(
+          `the live connection is busy (${error instanceof Error ? error.message : String(error)})`,
+          true
+        )
+      }
+      opts.phase?.('closed')
+      const reopenOld = () => connection.replace(openChatConnection(path))
+      if (existsSync(`${path}-wal`)) {
+        reopenOld()
+        discard('the live WAL is still in use by an unregistered connection')
+      }
+      rmSync(`${path}-shm`, { force: true })
+      const pre = join(dir, PRE_COMPACT)
+      rmSync(pre, { force: true })
+      linkSync(path, pre)
+      opts.phase?.('linked')
+      renameSync(compacted, path)
+      syncDirSync(dir)
+      opts.phase?.('renamed')
+      let next: Database.Database | undefined
+      try {
+        next = openChatConnection(path)
+        const opened = describeConnection(next)
+        if (opened.storeId !== storeId || opened.version !== version)
+          throw new Error('the swapped-in file does not match this store')
+      } catch (error) {
+        next?.close()
+        renameSync(pre, path)
+        syncDirSync(dir)
+        reopenOld()
+        throw error
+      }
+      connection.replace(next)
+      unlinkSync(pre)
+      syncDirSync(dir)
+      return { holdMs: performance.now() - started }
+    }
+  }
+  return Object.assign(api, { maintenance })
+}
+
+/** Name prefix of compacted copies in a store dir (`<prefix><pid>-<uuid>`). */
+const COMPACT_PREFIX = 'chat.sqlite.compact-'
+/** The live file's second name while a swap renames over it. */
+const PRE_COMPACT = 'chat.sqlite.pre-compact'
+/** WAL file kept at most this size after a checkpoint (it never shrank: 612 MB seen). */
+export const CHAT_WAL_SIZE_LIMIT = 64 * 1024 * 1024
+
+export interface ChatStoreFileStats {
+  pageSize: number
+  pageCount: number
+  freePages: number
+  /** 0 none, 1 full, 2 incremental. */
+  autoVacuum: 0 | 1 | 2
+  fileBytes: number
+  walBytes: number
+}
+export type ChatSwapPhase = 'verified' | 'closed' | 'linked' | 'renamed'
+
+/** A swap was not done. `transient`: the copy is kept; try again later. */
+export class ChatStorageSwapRefused extends Error {
+  constructor(
+    reason: string,
+    readonly transient: boolean
+  ) {
+    super(`Chat storage swap refused: ${reason}`)
+    this.name = 'ChatStorageSwapRefused'
+  }
+}
+
+/** The store's one connection: the same settings at boot and after a swap. */
+export function openChatConnection(path: string): Database.Database {
+  const db = new Database(path)
+  try {
+    chmodSync(path, 0o600)
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = FULL')
+    db.pragma('foreign_keys = ON')
+    db.pragma('busy_timeout = 5000')
+    db.pragma('secure_delete = ON')
+    db.pragma(`journal_size_limit = ${CHAT_WAL_SIZE_LIMIT}`)
+  } catch (error) {
+    db.close()
+    throw error
+  }
+  return db
+}
+
+function describeConnection(db: Database.Database) {
+  const row = db.prepare('SELECT store_id FROM store_identity WHERE id=1').get() as
+    | { store_id: string }
+    | undefined
+  return { storeId: row?.store_id, version: db.pragma('user_version', { simple: true }) as number }
+}
+function describeStoreFile(file: string) {
+  const db = new Database(file, { readonly: true, fileMustExist: true })
+  try {
+    return describeConnection(db)
+  } catch {
+    return { storeId: undefined, version: -1 }
+  } finally {
+    db.close()
+  }
+}
+function rmCompaction(file: string) {
+  for (const suffix of ['', '-journal', '-wal', '-shm']) rmSync(`${file}${suffix}`, { force: true })
+}
+function syncDirSync(dir: string) {
+  if (process.platform === 'win32') return
+  const fd = openSync(dir, 'r')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
+/**
+ * Before opening: finish what an interrupted swap left. A compacted copy never swapped
+ * in is garbage; `.pre-compact` is the old file's second name (the live name holds
+ * either the old file or the verified copy, both valid) — unless a kill left only it.
+ */
+function recoverInterruptedSwap(dir: string, path: string) {
+  const pre = join(dir, PRE_COMPACT)
+  if (!existsSync(path) && existsSync(pre)) {
+    renameSync(pre, path)
+    syncDirSync(dir)
+  }
+  for (const name of readdirSync(dir))
+    if (name.startsWith(COMPACT_PREFIX) || name === PRE_COMPACT)
+      rmSync(join(dir, name), { force: true })
 }
 export type ChatStorage = ReturnType<typeof openChatStorage>
