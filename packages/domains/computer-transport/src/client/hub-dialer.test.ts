@@ -297,6 +297,44 @@ describe('computer protocol v3 (T-27)', () => {
     await helloSeen(2)
     expect(seen[1].directAddress).toBe('127.0.0.1:5000')
   })
+
+  it.each(['enroll', 'hello'] as const)(
+    '%s advertises only the chat capabilities implemented by its runtime identity',
+    async (mode) => {
+      const features = ['chatHistoryPages', 'chatTimelineRowSlices', 'promptSummariesAll'] as const
+      // A retained host can omit all three, explicitly disable them, or implement
+      // each independently of the connector release and the other capabilities.
+      const runtimes: Array<Partial<Record<(typeof features)[number], boolean>>> = [
+        {},
+        Object.fromEntries(features.map((feature) => [feature, false])),
+        ...features.map((feature) => ({ [feature]: true })),
+        Object.fromEntries(features.map((feature) => [feature, true]))
+      ]
+      for (const runtime of runtimes) {
+        let advertised: Record<string, unknown> | undefined
+        const port = await rawHub((frame) => {
+          advertised = frame.params as Record<string, unknown>
+          return {
+            result: { computerId: 'c-1', apiKey: 'k-1', protocolVersion: COMPUTER_PROTOCOL_VERSION }
+          }
+        })
+        const dialer = makeDialer(`ws://127.0.0.1:${port}`, {
+          identity: { ...IDENTITY, ...runtime },
+          credentialStore: createMemoryCredentialStore(
+            mode === 'hello' ? { computerId: 'c-1', apiKey: 'k-1' } : undefined
+          )
+        })
+        const connected = dialer.events.once('connected')
+        dialer.start()
+        expect((await connected).mode).toBe(mode)
+        for (const feature of features)
+          expect(advertised?.[feature], `${feature} from ${JSON.stringify(runtime)}`).toBe(
+            runtime[feature] === true
+          )
+        await dialer.stop()
+      }
+    }
+  )
 })
 
 describe('malformed frames from the hub', () => {

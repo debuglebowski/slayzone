@@ -486,7 +486,12 @@ test('archive.blob: a restored archive serves an image only to the conversation 
 test('computer handler uses the bundled projection worker and survives its startup failure', async () => {
   const source = (
     await build({
-      entryPoints: ['packages/domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'],
+      entryPoints: [
+        join(
+          import.meta.dirname,
+          '../../../../domains/terminal/src/server/runtime/chat-timeline-worker-entry.ts'
+        )
+      ],
       bundle: true,
       platform: 'node',
       format: 'cjs',
