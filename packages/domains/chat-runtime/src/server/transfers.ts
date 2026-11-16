@@ -24,7 +24,7 @@ import { historyReadTurns } from '@slayzone/terminal/history-turns'
 import type { ChatExportReader, ChatStorage } from './storage'
 export const TRANSFER_CHUNK_BYTES = 256 * 1024
 /**
- * Bytes of lines one step of a streamed export writes at most (one event always):
+ * Bytes of lines one step of a streamed export writes at most (one row always):
  * the event loop runs between steps (`historyReadTurns`).
  */
 export const EXPORT_STEP_BYTES = 4 * 1024 * 1024
@@ -99,8 +99,8 @@ export async function writeExportTransfer(
       migrationId: reader.migrationId,
       identity: reader.identity,
       events: reader.eventCount,
-      records: reader.records.length,
-      receipts: reader.receipts.length
+      records: reader.recordCount,
+      receipts: reader.receiptCount
     },
     opts
   )
@@ -108,39 +108,95 @@ export async function writeExportTransfer(
   const fd = openSync(temp, 'w', 0o600)
   const hash = createHash('sha256')
   let bytes = 0
-  const write = (line: string): number => {
-    const buffer = Buffer.from(line + '\n')
+  const write = (buffer: Buffer): void => {
     for (let at = 0; at < buffer.length; ) at += writeSync(fd, buffer, at)
     hash.update(buffer)
     bytes += buffer.length
-    return buffer.length
   }
-  try {
-    write(JSON.stringify(header))
-    const job = historyReadTurns.job()
-    let page: ReturnType<ChatExportReader['eventPage']> = { events: [], more: true }
-    let at = 0,
-      after = -1,
-      events = 0
+  const job = historyReadTurns.job()
+  async function section<T>(
+    kind: 'event' | 'record' | 'receipt',
+    expected: number,
+    page: () => { rows: T[]; more: boolean },
+    value: (row: T) => unknown
+  ) {
+    let rows: T[] = [],
+      at = 0,
+      more = true,
+      count = 0
+    let pending: Buffer | undefined
     for (let done = false; !done; )
       done = await job.step(() => {
-        for (let stepBytes = 0; stepBytes < EXPORT_STEP_BYTES; ) {
-          if (at >= page.events.length) {
-            if (!page.more) return true
-            page = reader.eventPage(after)
-            at = 0
-            if (page.events.length === 0) return true
+        // At most one stored page is loaded/parsed in a turn, even for tiny rows.
+        if (at === rows.length) {
+          if (!more) return true
+          const next = page()
+          rows = next.rows
+          more = next.more
+          at = 0
+          if (rows.length === 0) {
+            if (more) throw new Error(`Transfer integrity: empty ${kind} page`)
+            return true
           }
-          const e = page.events[at++]
-          after = e.seq
-          events++
-          stepBytes += write(transferLine('event', { ...e, event: reader.resolve(e.event) }))
         }
-        return false
+        let stepBytes = 0
+        while (at < rows.length) {
+          const buffer = pending ?? Buffer.from(transferLine(kind, value(rows[at])) + '\n')
+          // Size the actual wire bytes before writing. Keep a resolved/encoded row
+          // for the next turn rather than resolving an image or encoding it twice.
+          if (stepBytes > 0 && stepBytes + buffer.length > EXPORT_STEP_BYTES) {
+            pending = buffer
+            break
+          }
+          pending = undefined
+          write(buffer)
+          stepBytes += buffer.length
+          at++
+          count++
+          if (stepBytes >= EXPORT_STEP_BYTES) break
+        }
+        return !more && at === rows.length
       })
-    if (events !== reader.eventCount) throw new Error('Transfer integrity: event count changed')
-    for (const value of reader.records) write(transferLine('record', value))
-    for (const value of reader.receipts) write(transferLine('receipt', value))
+    if (count !== expected) throw new Error(`Transfer integrity: ${kind} count changed`)
+  }
+  try {
+    await job.step(() => write(Buffer.from(JSON.stringify(header) + '\n')))
+    let afterSeq = -1
+    await section(
+      'event',
+      reader.eventCount,
+      () => {
+        const page = reader.eventPage(afterSeq)
+        const last = page.events.at(-1)
+        if (last) afterSeq = last.seq
+        return { rows: page.events, more: page.more }
+      },
+      (event) => ({ ...event, event: reader.resolve(event.event) })
+    )
+    let afterRecord: Parameters<ChatExportReader['recordPage']>[0]
+    await section(
+      'record',
+      reader.recordCount,
+      () => {
+        const page = reader.recordPage(afterRecord)
+        const last = page.records.at(-1)
+        if (last) afterRecord = { kind: last.kind, id: last.id }
+        return { rows: page.records, more: page.more }
+      },
+      (record) => record
+    )
+    let afterReceipt: string | undefined
+    await section(
+      'receipt',
+      reader.receiptCount,
+      () => {
+        const page = reader.receiptPage(afterReceipt)
+        const last = page.receipts.at(-1)
+        if (last) afterReceipt = last.id
+        return { rows: page.receipts, more: page.more }
+      },
+      (receipt) => receipt
+    )
     fsyncSync(fd)
   } catch (error) {
     closeSync(fd)

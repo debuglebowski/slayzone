@@ -79,6 +79,16 @@ line encoder). Readers are short-lived (closed in `finally`, and by `store.close
 file (compaction) must wait until no export reader is open — an open reader keeps
 reading the file it opened.
 
+Export initialization reads only ownership and counts, never record/receipt bodies.
+`timeline` and `event-blob` records are excluded in SQL before loading values (also
+for the synchronous compatibility export). Retained records and receipts use
+keyset pages in their original `(kind,id)` / `id` order: at most 4 MiB stored bytes
+or 2,000 rows, with one oversized row always allowed. Each scheduled turn loads
+at most one page and writes at most 4 MiB of encoded lines (one whole row always).
+Reader construction, failure and close share connection/lease/timer cleanup;
+renewal starts only after construction succeeds. Each reader owns a unique lease,
+so closing an overlapping export cannot release another snapshot's blob protection.
+
 Timeline projection records (`kind='timeline'`, derived from the events) are never
 decoded to drop a page range: drops are SQL on ids. Compatibility summary and search
 APIs use JSON paths without loading whole pages; worker reads stay encoded as above.

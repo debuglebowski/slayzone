@@ -95,11 +95,14 @@ export interface ChatExportReader {
   readonly migrationId: string
   /** Saved events in the snapshot. */
   readonly eventCount: number
-  /** Records the export carries (derived ones left out), as `exportConversation`. */
-  readonly records: ChatRecord[]
-  readonly receipts: CommandReceipt[]
+  /** Counts only: no retained or derived body is loaded while the source is frozen. */
+  readonly recordCount: number
+  readonly receiptCount: number
   /** One history page (stored form) after `afterSeq`; `more`: pages follow. */
   eventPage(afterSeq: number): { events: StoredChatEvent[]; more: boolean }
+  /** Retained records in `(kind,id)` order; excluded kinds never load their bodies. */
+  recordPage(after?: Pick<ChatRecord, 'kind' | 'id'>): { records: ChatRecord[]; more: boolean }
+  receiptPage(afterId?: string): { receipts: CommandReceipt[]; more: boolean }
   /** A stored event's raw form (images back inline, hash-verified). */
   resolve(event: AgentEvent): AgentEvent
   /** End the snapshot, release its blob lease. Idempotent. */
@@ -614,6 +617,13 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
       .get(id, count - 1) as { seq: number } | undefined
     return r?.seq ?? null
   }
+  type RecordRow = { kind: ChatRecord['kind']; id: string; value: string; saved_at: number }
+  const decodeRecord = (r: RecordRow): ChatRecord => ({
+    kind: r.kind,
+    id: r.id,
+    value: JSON.parse(r.value),
+    at: r.saved_at
+  })
   function records(
     id: string,
     kind?: ChatRecord['kind'],
@@ -626,13 +636,8 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
             (kind ? ' AND kind=?' : '') +
             ' ORDER BY kind,id'
         )
-        .all(id, ...(kind ? [kind] : [])) as Array<{
-        kind: ChatRecord['kind']
-        id: string
-        value: string
-        saved_at: number
-      }>
-    ).map((r) => ({ kind: r.kind, id: r.id, value: JSON.parse(r.value), at: r.saved_at }))
+        .all(id, ...(kind ? [kind] : [])) as RecordRow[]
+    ).map(decodeRecord)
   }
   function indexQueueMessage(id: string, record: Pick<ChatRecord, 'kind' | 'id' | 'value'>) {
     if (record.kind !== 'settings' || !record.id.startsWith('queue-message:')) return
@@ -675,10 +680,72 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
     ).map(decodeReceipt)
   }
   /** What a migration export carries of a conversation's records: derived ones left out. */
+  const exportRecordWhere = "conversation_id=? AND kind NOT IN ('event-blob','timeline')"
   function exportRecords(id: string, on: Database.Database = db): ChatRecord[] {
-    return records(id, undefined, on).filter(
-      (r) => r.kind !== 'event-blob' && r.kind !== 'timeline'
-    )
+    return (
+      on
+        .prepare(`SELECT kind,id,value,saved_at FROM records
+      WHERE ${exportRecordWhere} ORDER BY kind,id`)
+        .all(id) as RecordRow[]
+    ).map(decodeRecord)
+  }
+  /** Cut header-only candidates before loading a body; one oversized row always fits. */
+  function exportThrough<T extends { bytes: number }>(
+    headers: Iterable<T>,
+    budget: Required<ChatHistoryPageBudget>
+  ): { through: T | undefined; more: boolean } {
+    let n = 0,
+      bytes = 0
+    let through: T | undefined
+    for (const header of headers) {
+      if (n > 0 && (n >= budget.maxEvents || bytes + header.bytes > budget.maxBytes))
+        return { through, more: true }
+      through = header
+      bytes += header.bytes
+      n++
+    }
+    return { through, more: false }
+  }
+  function exportRecordPage(
+    id: string,
+    on: Database.Database,
+    after?: Pick<ChatRecord, 'kind' | 'id'>
+  ) {
+    const budget = clampChatHistoryPageBudget()
+    const where = exportRecordWhere + (after ? ' AND (kind,id)>(?,?)' : '')
+    const params = [id, ...(after ? [after.kind, after.id] : [])]
+    const headers = on
+      .prepare(`SELECT kind,id,octet_length(value)+octet_length(kind)+octet_length(id) AS bytes FROM records
+      WHERE ${where} ORDER BY kind,id LIMIT ?`)
+      .iterate(...params, budget.maxEvents + 1) as Iterable<{
+      kind: ChatRecord['kind']
+      id: string
+      bytes: number
+    }>
+    const { through, more } = exportThrough(headers, budget)
+    if (!through) return { records: [], more: false }
+    const found = on
+      .prepare(`SELECT kind,id,value,saved_at FROM records
+      WHERE ${where} AND (kind,id)<=(?,?) ORDER BY kind,id`)
+      .all(...params, through.kind, through.id) as RecordRow[]
+    return { records: found.map(decodeRecord), more }
+  }
+  function exportReceiptPage(id: string, on: Database.Database, afterId?: string) {
+    const budget = clampChatHistoryPageBudget()
+    const where = 'conversation_id=?' + (afterId !== undefined ? ' AND id>?' : '')
+    const params = [id, ...(afterId !== undefined ? [afterId] : [])]
+    const headers = on
+      .prepare(`SELECT id,octet_length(result)+octet_length(id)+octet_length(hash)
+        +octet_length(state)+COALESCE(octet_length(method),0) AS bytes FROM receipts
+      WHERE ${where} ORDER BY id LIMIT ?`)
+      .iterate(...params, budget.maxEvents + 1) as Iterable<{ id: string; bytes: number }>
+    const { through, more } = exportThrough(headers, budget)
+    if (!through) return { receipts: [], more: false }
+    const found = on
+      .prepare(`SELECT ${receiptColumns} FROM receipts
+      WHERE ${where} AND id<=? ORDER BY id`)
+      .all(...params, through.id) as ReceiptRow[]
+    return { receipts: found.map(decodeReceipt), more }
   }
   /** Open export read snapshots (`openExportReader`), closed with the store. */
   const exportReaders = new Set<ChatExportReader>()
@@ -1692,7 +1759,26 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
      */
     openExportReader(id: string, epoch: number, migrationId: string): ChatExportReader {
       const conn = new Database(path, { readonly: true, fileMustExist: true })
-      let owner: OwnerRow
+      let lease: { release(): void } | undefined
+      let renew: ReturnType<typeof setInterval> | undefined
+      let reader: ChatExportReader | undefined
+      let open = true
+      const live = () => {
+        if (!open) throw new Error('Export reader closed')
+      }
+      const close = () => {
+        if (!open) return
+        open = false
+        if (renew) clearInterval(renew)
+        if (reader) exportReaders.delete(reader)
+        // Closing rolls back this read-only transaction. Release the lease even
+        // if connection cleanup fails; initialization uses this same path.
+        try {
+          conn.close()
+        } finally {
+          if (!closed) lease?.release()
+        }
+      }
       try {
         conn.pragma('busy_timeout = 5000')
         // The snapshot starts with the transaction's first read.
@@ -1702,62 +1788,63 @@ export function openChatStorage(opts: { stateDir: string; hubScope: string }) {
         if (r.epoch !== epoch) throw new Error('Stale ownership epoch')
         if (r.state !== 'frozen' || r.migration_id !== migrationId)
           throw new Error('Migration must freeze source first')
-        owner = r
+        const leaseId = `export:${migrationId}:${id}:${randomUUID()}`
+        lease = api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+        reader = {
+          identity: identity(r),
+          migrationId,
+          eventCount: (
+            conn.prepare('SELECT COUNT(*) AS n FROM events WHERE conversation_id=?').get(id) as {
+              n: number
+            }
+          ).n,
+          recordCount: (
+            conn
+              .prepare(`SELECT COUNT(*) AS n FROM records WHERE ${exportRecordWhere}`)
+              .get(id) as { n: number }
+          ).n,
+          receiptCount: (
+            conn.prepare('SELECT COUNT(*) AS n FROM receipts WHERE conversation_id=?').get(id) as {
+              n: number
+            }
+          ).n,
+          eventPage(afterSeq) {
+            live()
+            const bounds = pageBounds(
+              id,
+              afterSeq,
+              Number.MAX_SAFE_INTEGER,
+              clampChatHistoryPageBudget(),
+              conn
+            )
+            if (bounds.through === null) return { events: [], more: false }
+            return { events: read(id, afterSeq, bounds.through + 1, conn), more: bounds.more }
+          },
+          recordPage(after) {
+            live()
+            return exportRecordPage(id, conn, after)
+          },
+          receiptPage(afterId) {
+            live()
+            return exportReceiptPage(id, conn, afterId)
+          },
+          resolve(event) {
+            live()
+            return resolveEventBlobs(event)
+          },
+          close
+        }
+        exportReaders.add(reader)
+        // No renewal or registry entry can outlive a failed construction.
+        renew = setInterval(() => {
+          if (open && !closed) api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
+        }, EXPORT_LEASE_MS / 3)
+        renew.unref?.()
+        return reader
       } catch (error) {
-        conn.close()
+        close()
         throw error
       }
-      const leaseId = `export:${migrationId}:${id}`
-      const lease = api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
-      const renew = setInterval(() => {
-        if (!closed) api.acquireBlobLease(leaseId, EXPORT_LEASE_MS)
-      }, EXPORT_LEASE_MS / 3)
-      renew.unref?.()
-      let open = true
-      const live = () => {
-        if (!open) throw new Error('Export reader closed')
-      }
-      const reader: ChatExportReader = {
-        identity: identity(owner),
-        migrationId,
-        eventCount: (
-          conn.prepare('SELECT COUNT(*) AS n FROM events WHERE conversation_id=?').get(id) as {
-            n: number
-          }
-        ).n,
-        records: exportRecords(id, conn),
-        receipts: receipts(id, conn),
-        eventPage(afterSeq) {
-          live()
-          const bounds = pageBounds(
-            id,
-            afterSeq,
-            Number.MAX_SAFE_INTEGER,
-            clampChatHistoryPageBudget(),
-            conn
-          )
-          if (bounds.through === null) return { events: [], more: false }
-          return { events: read(id, afterSeq, bounds.through + 1, conn), more: bounds.more }
-        },
-        resolve(event) {
-          live()
-          return resolveEventBlobs(event)
-        },
-        close() {
-          if (!open) return
-          open = false
-          clearInterval(renew)
-          exportReaders.delete(reader)
-          try {
-            conn.exec('COMMIT')
-          } finally {
-            conn.close()
-            if (!closed) lease.release()
-          }
-        }
-      }
-      exportReaders.add(reader)
-      return reader
     },
     /** An export's read snapshot is open (`openExportReader`): a store file swap waits. */
     hasExportReaders(): boolean {
