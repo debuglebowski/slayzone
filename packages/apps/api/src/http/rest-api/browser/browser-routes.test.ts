@@ -290,3 +290,60 @@ describe("an untrusted caller never touches the user's own browser (review 4 par
     expect(mine.body.tabs.map((t) => t.id)).toEqual(['own', 'iso'])
   })
 })
+
+describe('the user’s stored tabs are refused even when not live (review 5)', () => {
+  const stored = (tabs: Array<{ id: string; isolated?: boolean }>) =>
+    JSON.stringify({
+      tabs: tabs.map((t) => ({ url: 'https://bank.test/', title: 'T', ...t })),
+      activeTabId: null
+    })
+  test('naming a stored own tab with the panel closed: 403 up front, the panel is not opened', async () => {
+    reset()
+    dbTabs = stored([{ id: 'own' }])
+    const res = await h.request<{ error?: string }>('POST', '/api/browser/eval', {
+      taskId: 't1',
+      tabId: 'own',
+      code: '1',
+      panel: 'visible'
+    })
+    expect(res.status).toBe(403)
+    expect(res.body.error).toMatch(/user's own browser/)
+    expect(opened).toEqual([])
+  })
+  test('no tab named, panel closed: reuses the stored isolated tab instead of making another', async () => {
+    reset()
+    dbTabs = stored([{ id: 'own' }, { id: 'iso-old', isolated: true }])
+    await h.request('POST', '/api/browser/eval', { taskId: 't1', code: '1', panel: 'visible' })
+    expect(opened.at(-1)).toMatchObject({ tabId: 'iso-old', isolated: false })
+  })
+  test('no stored isolated tab: asks for a new one', async () => {
+    reset()
+    dbTabs = stored([{ id: 'own' }])
+    await h.request('POST', '/api/browser/eval', { taskId: 't1', code: '1', panel: 'visible' })
+    expect(opened.at(-1)).toMatchObject({ tabId: undefined, isolated: true })
+  })
+  test('the local agent may still open the user’s stored tab', async () => {
+    reset()
+    origin = 'hub-machine'
+    dbTabs = stored([{ id: 'own' }])
+    await h.request('POST', '/api/browser/eval', {
+      taskId: 't1',
+      tabId: 'own',
+      code: '1',
+      panel: 'visible'
+    })
+    expect(opened.at(-1)).toMatchObject({ tabId: 'own' })
+  })
+})
+
+test('no up-to-date desktop: the error says so, and to update it (review 5)', async () => {
+  reset()
+  capable = false
+  const res = await h.request<{ error?: string }>('POST', '/api/browser/eval', {
+    taskId: 't1',
+    code: '1'
+  })
+  expect(res.status).toBe(503)
+  expect(res.body.error).toMatch(/up-to-date/)
+  expect(res.body.error).toMatch(/update/i)
+})

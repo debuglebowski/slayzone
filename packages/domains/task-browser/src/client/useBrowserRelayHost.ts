@@ -23,8 +23,8 @@ import { useTRPC, useTRPCClient } from './trpc'
  */
 export interface BrowserRelayHostHandle {
   /** A tab's view registered on this device's host. `isolated`: it lives in an
-   *  untrusted session (an isolated tab, or any tab of a remote hub), not the user's
-   *  own browser — the only tabs an untrusted caller may use. */
+   *  isolated partition (opened for an untrusted caller), never with the user's own
+   *  logins — the only tabs an untrusted caller may use. */
   tabLive: (tabId: string, isolated: boolean) => void
   tabGone: (tabId: string) => void
   setActiveTab: (tabId: string | null) => void
@@ -189,8 +189,7 @@ export interface RelayPanelContext {
   taskId: string
   /** Tabs this panel has live on this device. */
   liveTabIds: ReadonlySet<string>
-  /** The live tabs in an untrusted session (isolated tabs; every tab of a remote hub):
-   *  the only ones an untrusted caller may use. */
+  /** The live tabs in an isolated partition: the only ones an untrusted caller may use. */
   isolatedTabIds: ReadonlySet<string>
   activeTabId: string | null
   /** The hub this panel talks to is this device's own local hub. */

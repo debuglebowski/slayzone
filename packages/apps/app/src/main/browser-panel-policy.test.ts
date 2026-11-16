@@ -18,6 +18,7 @@ import {
   PanelNetworkPolicy,
   panelMarkerNeeded,
   untrustedOpRefusal,
+  untrustedPermissionAllowed,
   type PanelRequest
 } from './browser-panel-policy'
 
@@ -204,5 +205,41 @@ describe('the panel marker header goes only where a hub may listen (review 3 LOW
     ]) {
       expect(panelMarkerNeeded(url, hubs)).toBe(false)
     }
+  })
+})
+
+describe('untrusted sessions: permissions are deny-by-default (review 5 HIGH)', () => {
+  test('nothing sensitive is granted', () => {
+    for (const p of [
+      'media',
+      'clipboard-read',
+      'clipboard-sanitized-write',
+      'midi',
+      'midiSysex',
+      'geolocation',
+      'notifications',
+      'display-capture',
+      'fullscreen',
+      'pointerLock',
+      'keyboardLock',
+      'idle-detection',
+      'window-management',
+      'storage-access',
+      'top-level-storage-access',
+      'fileSystem',
+      'hid',
+      'serial',
+      'usb',
+      'bluetooth',
+      'openExternal',
+      'speaker-selection',
+      'unknown',
+      'some-future-permission'
+    ]) {
+      expect(untrustedPermissionAllowed(p), p).toBe(false)
+    }
+  })
+  test('only the harmless allow-list passes', () => {
+    expect(untrustedPermissionAllowed('mediaKeySystem')).toBe(true)
   })
 })

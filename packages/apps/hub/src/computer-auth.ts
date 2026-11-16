@@ -222,6 +222,14 @@ export function createComputerAuthAdapters(deps: ComputerAuthAdapterDeps): Compu
     // accumulating an orphan per boot. Every other name is a REMOTE computer and
     // keeps the fresh-uuid INSERT path — a disconnected remote laptop is never
     // touched or deduped.
+    //
+    // RESIDUAL (known, accepted for now): the browser relay treats a caller relayed by
+    // this deterministic local computer as `hub-machine` (trusted with the user's own
+    // browser, hub composition `callerOf`). The local computer is recognised by NAME
+    // here, and the name is the enrolling machine's claim. Today that cannot be abused:
+    // the desktop's hub is loopback-only and join tokens are minted over loopback, so
+    // only this machine can enroll. A reachable desktop hub would need a proof bound to
+    // this machine (not its name) before granting that trust.
     const isLocal = localComputerName !== undefined && params.name === localComputerName
     const computerId = isLocal ? deterministicLocalComputerId(params.name) : randomUUID()
 

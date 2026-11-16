@@ -9,7 +9,15 @@ import {
   type BrowserWindow
 } from 'electron'
 import { join } from 'path'
-import { ISOLATED_BROWSER_PARTITION, LOCAL_BROWSER_PARTITION } from '@slayzone/task-browser/shared'
+import {
+  isIsolatedPartition,
+  LOCAL_BROWSER_PARTITION,
+  WEB_PANEL_PARTITION
+} from '@slayzone/task-browser/shared'
+
+/** The user's own browser and the web panels: the only trusted panel sessions. */
+const isTrustedPanelPartition = (partition: string): boolean =>
+  partition === LOCAL_BROWSER_PARTITION || partition === WEB_PANEL_PARTITION
 
 /** Extensions are installed on the user's own browser session only. */
 const usesExtensions = (entry: { partition: string }): boolean =>
@@ -1008,7 +1016,7 @@ export class BrowserViewManager {
           background: false,
           taskId: entry.taskId,
           // A tab opened from an isolated tab stays isolated.
-          isolated: entry.partition === ISOLATED_BROWSER_PARTITION
+          isolated: isIsolatedPartition(entry.partition)
         }
         browserViewEvents.emit('event', newTabEvent)
         return true
@@ -1170,7 +1178,7 @@ export class BrowserViewManager {
       background: false,
       taskId: sourceEntry.taskId,
       tabId,
-      isolated: sourceEntry.partition === ISOLATED_BROWSER_PARTITION
+      isolated: isIsolatedPartition(sourceEntry.partition)
     })
     const entry = await created
     const win = this.windowFor(entry)
@@ -1399,7 +1407,7 @@ export class BrowserViewManager {
               background: details.disposition === 'background-tab',
               taskId: entry.taskId,
               // A tab a page in an isolated tab opens stays isolated.
-              isolated: entry.partition === ISOLATED_BROWSER_PARTITION
+              isolated: isIsolatedPartition(entry.partition)
             })
           }
           return { action: 'deny' }
@@ -1409,6 +1417,20 @@ export class BrowserViewManager {
           details.features &&
           /^https?:\/\//i.test(details.url)
         ) {
+          // A page in an untrusted session (a remote hub's, an isolated tab) never gets
+          // a top-level window of its own — address-bar-less, ideal for a fake sign-in.
+          // It becomes another tab of the same kind instead.
+          if (!isTrustedPanelPartition(entry.partition)) {
+            send({
+              viewId,
+              type: 'new-tab-request',
+              url: details.url,
+              background: false,
+              taskId: entry.taskId,
+              isolated: isIsolatedPartition(entry.partition)
+            })
+            return { action: 'deny' }
+          }
           return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
         }
         return { action: 'deny' }

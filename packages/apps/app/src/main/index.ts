@@ -73,12 +73,17 @@ import {
 } from './browser-registry'
 import { registerBrowserHostIpc, type BrowserHostImpl } from './browser-host-ipc'
 import { linkBridgeAllowed, UserGestureTracker, type LinkBridgeKind } from './panel-link-bridge'
-import { PanelNetworkPolicy, panelMarkerNeeded } from './browser-panel-policy'
+import {
+  PanelNetworkPolicy,
+  panelMarkerNeeded,
+  untrustedPermissionAllowed
+} from './browser-panel-policy'
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import {
   LOCAL_BROWSER_PARTITION,
   WEB_PANEL_PARTITION,
   isBrowserPanelPartition,
+  isIsolatedPartition,
   type BrowserViewEvent
 } from '@slayzone/task-browser/shared'
 import {
@@ -803,6 +808,8 @@ let ensurePanelPartition: ((partition: string) => Electron.Session) | null = nul
 /** User acts (input events main received) per web contents: the panel page's link
  *  bridge acts only on one (panel-link-bridge.ts). */
 const panelGestures = new UserGestureTracker()
+/** Whether a session is an untrusted panel session (set at boot). */
+let isUntrustedPanelSession: (s: Electron.Session) => boolean = () => false
 /** Hostnames of every registered remote hub (for the panel marker), re-read at most every 10 s. */
 let hubHostsCache: { at: number; hosts: Set<string> } | null = null
 function registeredHubHosts(): Set<string> {
@@ -3028,9 +3035,13 @@ app
           : ((resolveIn as Electron.Session | undefined) ?? browserSession)
       return (await sess.resolveHost(host)).endpoints.map((e) => e.address)
     })
-    /** Sessions where every tab is untrusted: each remote hub's partition. */
+    /** Sessions under the untrusted policy: each remote hub's partition and every
+     *  isolated partition. */
     const untrustedPanelSessions = new WeakSet<Electron.Session>()
-    setBrowserNetworkPolicy(browserNetworkPolicy, (wc) => untrustedPanelSessions.has(wc.session))
+    /** The isolated partitions' sessions: the only ones an untrusted caller drives. */
+    const isolatedPanelSessions = new WeakSet<Electron.Session>()
+    setBrowserNetworkPolicy(browserNetworkPolicy, (wc) => isolatedPanelSessions.has(wc.session))
+    isUntrustedPanelSession = (s) => untrustedPanelSessions.has(s)
 
     const shouldCancelLoopbackHandoffRequest = (
       details: Electron.OnBeforeRequestListenerDetails
@@ -3196,14 +3207,19 @@ app
       if (configuredPanelPartitions.has(partition)) return sess
       configuredPanelPartitions.add(partition)
       untrustedPanelSessions.add(sess)
+      if (isIsolatedPartition(partition)) isolatedPanelSessions.add(sess)
+      // No download from an untrusted page: it would put a Save dialog in front of the
+      // user with no gesture, again and again.
+      sess.on('will-download', (event) => event.preventDefault())
       sess.setUserAgent(_chromeUa)
       sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
       sess.webRequest.onBeforeRequest(panelBeforeRequest(true, sess))
-      sess.setPermissionRequestHandler((wc, permission, callback) => {
-        if (permission === 'openExternal') return callback(false)
-        panelPermissionRequest(wc, permission, callback)
-      })
-      sess.setPermissionCheckHandler((_wc, permission) => permission !== 'openExternal')
+      // Deny by default: nothing sensitive (camera/mic, clipboard, MIDI, devices, …)
+      // for a page a remote hub or an agent elsewhere loads (browser-panel-policy.ts).
+      sess.setPermissionRequestHandler((_wc, permission, callback) =>
+        callback(untrustedPermissionAllowed(permission))
+      )
+      sess.setPermissionCheckHandler((_wc, permission) => untrustedPermissionAllowed(permission))
       sess.setDevicePermissionHandler(() => false)
       return sess
     }
@@ -4884,6 +4900,8 @@ app.on('web-contents-created', (_, wc) => {
   if (wc.getType() === 'webview') {
     wc.setWindowOpenHandler((details) => {
       if (webviewDesktopHandoffPolicy.has(wc.id)) return { action: 'deny' }
+      // An untrusted session's page never gets a top-level window of its own.
+      if (isUntrustedPanelSession(wc.session)) return { action: 'deny' }
       if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
         return {
           action: 'allow',

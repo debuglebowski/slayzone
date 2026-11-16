@@ -32,6 +32,8 @@ import os from 'os'
 import path from 'path'
 
 const ISOLATED = 'browser-tabs-isolated'
+/** A public address (no DNS), served by a fixture handler in the isolated session. */
+const PUBLIC_PAGE = 'https://93.184.216.34/'
 const OWN = 'persist:browser-tabs'
 
 test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
@@ -153,14 +155,30 @@ test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
     }))
     expect(cookies).toEqual({ isolated: 0, own: 1 })
 
-    // A view that never navigated has no document to run script in: give it one
-    // (test setup — this suite has no public web server to send it to).
-    await electronApp.evaluate(async ({ session, webContents }) => {
-      const iso = session.fromPartition('browser-tabs-isolated')
-      for (const wc of webContents.getAllWebContents()) {
-        if (wc.session === iso) await wc.loadURL('about:blank')
-      }
+    // A public web page for it, without a network: the isolated session answers https
+    // to a public IP literal with a fixture (test setup only). The load itself goes the
+    // real untrusted way — `slay browser navigate`, the session policy, the resolver.
+    await electronApp.evaluate(({ session }) => {
+      session.fromPartition('browser-tabs-isolated').protocol.handle('https', (req) =>
+        req.url.endsWith('/download')
+          ? new Response('x', {
+              headers: {
+                'content-type': 'application/octet-stream',
+                'content-disposition': 'attachment; filename=x.bin'
+              }
+            })
+          : new Response('<!doctype html><title>public</title><body>public</body>', {
+              headers: { 'content-type': 'text/html' }
+            })
+      )
     })
+    const nav = await api(
+      'POST',
+      '/api/browser/navigate',
+      { tabId: isoTab, url: PUBLIC_PAGE, panel: 'hidden' },
+      'elsewhere'
+    )
+    expect(nav.status, JSON.stringify(nav.body)).toBe(200)
 
     // The caller only sees its isolated tab, and with no tab named reaches it.
     const listed = await api<{ tabs: Array<{ id: string }> }>(
@@ -177,7 +195,7 @@ test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
       'elsewhere'
     )
     expect(where.status, JSON.stringify(where.body)).toBe(200)
-    expect(where.body.result).toBe('about:blank')
+    expect(where.body.result).toBe(PUBLIC_PAGE)
 
     // This machine's addresses are out of reach from its page (the hub included).
     const reach = await api<{ result?: unknown }>(
@@ -190,6 +208,72 @@ test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
       'elsewhere'
     )
     expect(reach.body.result).toBe('blocked')
+
+    // No sensitive permission without a prompt (review 5 HIGH): camera/mic, MIDI SysEx,
+    // clipboard read, and the permission state the page can query, all denied.
+    const perms = await api<{ result?: unknown }>(
+      'POST',
+      '/api/browser/eval',
+      {
+        tabId: isoTab,
+        code: `Promise.all([
+          navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(() => 'granted', (e) => e.name),
+          navigator.requestMIDIAccess({ sysex: true }).then(() => 'granted', (e) => e.name),
+          ...['camera', 'microphone', 'clipboard-read', 'geolocation', 'midi', 'notifications'].map((name) =>
+            navigator.permissions.query({ name }).then((s) => name + ':' + s.state, () => name + ':error')
+          )
+        ])`
+      },
+      'elsewhere'
+    )
+    expect(perms.status, JSON.stringify(perms.body)).toBe(200)
+    const [media, midi, ...states] = perms.body.result as string[]
+    expect(media).not.toBe('granted')
+    expect(midi).not.toBe('granted')
+    for (const s of states) expect(s).toMatch(/:(denied|error)$/)
+
+    // Its page cannot open an address-bar-less window, nor start a download
+    // (review 5 LOW): a popup becomes another isolated tab; a download is cancelled.
+    const windowsBefore = await electronApp.evaluate(
+      ({ BrowserWindow }) => BrowserWindow.getAllWindows().length
+    )
+    const popup = await api(
+      'POST',
+      '/api/browser/eval',
+      {
+        tabId: isoTab,
+        code: `(() => {
+          window.open('https://example.com/popup', 'pop', 'width=300,height=300')
+          return 1
+        })()`
+      },
+      'elsewhere'
+    )
+    expect(popup.status, JSON.stringify(popup.body)).toBe(200)
+    await expect(mainWindow.getByTestId('browser-tab-isolated-badge')).toHaveCount(2)
+    expect(
+      await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+    ).toBe(windowsBefore)
+    // A download from an untrusted page is cancelled by its session (no Save dialog);
+    // the user's own browser downloads as before. (Offline, no page here can produce a
+    // real download — the policy allows public hosts only — so the session's own
+    // handlers are asked directly.)
+    const downloads = await electronApp.evaluate(({ session }) => {
+      const cancels = (partition: string): boolean => {
+        let prevented = false
+        session
+          .fromPartition(partition)
+          .emit(
+            'will-download',
+            { preventDefault: () => (prevented = true) },
+            { getFilename: () => 'x.bin', getURL: () => 'https://93.184.216.34/x.bin' },
+            null
+          )
+        return prevented
+      }
+      return { isolated: cancels('browser-tabs-isolated'), own: cancels('persist:browser-tabs') }
+    })
+    expect(downloads).toEqual({ isolated: true, own: false })
   })
 
   test('a tab its page opens stays isolated', async ({ mainWindow }) => {
@@ -206,7 +290,7 @@ test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
       'open-link-in-new-tab'
     )
     expect(handled).toBe(true)
-    await expect(mainWindow.getByTestId('browser-tab-isolated-badge')).toHaveCount(2)
+    await expect(mainWindow.getByTestId('browser-tab-isolated-badge')).toHaveCount(3)
     await expect
       .poll(async () => {
         const parts: string[] = []
@@ -215,7 +299,7 @@ test.describe('Browser: an agent elsewhere gets an isolated browser', () => {
         }
         return parts.filter((p) => p === ISOLATED).length
       })
-      .toBe(2)
+      .toBe(3)
   })
 
   test('the user’s own local agent keeps every tab, as on main', async () => {

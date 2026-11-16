@@ -519,6 +519,8 @@ export function TabBar({
         <Tooltip>
           <TooltipTrigger asChild>
             <div
+              data-testid="home-tab"
+              data-active={activeIndex === homeIndex && activeView !== 'context' ? 'true' : 'false'}
               className={cn(
                 'ml-1 flex items-center gap-1.5 h-7 px-3 rounded-md cursor-pointer transition-colors select-none flex-shrink-0 window-no-drag',
                 'hover:bg-accent/80 dark:hover:bg-accent/50',

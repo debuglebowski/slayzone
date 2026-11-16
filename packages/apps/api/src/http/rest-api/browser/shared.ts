@@ -24,7 +24,7 @@ export const NO_ISOLATED_TAB =
 
 /** No client that can host the browser panel is connected for the caller. */
 export const NO_DESKTOP =
-  'No SlayZone desktop app is connected to this hub for you; the browser panel runs in the desktop app. Open the task there.'
+  'No up-to-date SlayZone desktop app is connected to this hub for you; the browser panel runs in the desktop app. Open the task there (update the app if it is already open: an older one cannot host the browser for this hub).'
 
 /**
  * Refuse (403) a URL the desktop would refuse from this caller, so `slay browser`
@@ -73,6 +73,28 @@ export function isTrustedLocal(browser: BrowserAccess, caller: BrowserCaller): b
   return browser.isDesktopLocalHub && caller.origin === 'hub-machine'
 }
 
+/** The task's stored browser tabs (`tasks.browser_tabs`), live or not. */
+async function storedTabs(
+  deps: RestApiDeps,
+  taskId: string
+): Promise<Array<{ id: string; isolated?: boolean }>> {
+  const row = (await deps.db.prepare('SELECT browser_tabs FROM tasks WHERE id = ?').get(taskId)) as
+    | { browser_tabs: string | null }
+    | undefined
+  if (!row?.browser_tabs) return []
+  try {
+    const parsed = JSON.parse(row.browser_tabs) as { tabs?: unknown }
+    return Array.isArray(parsed.tabs)
+      ? parsed.tabs.filter(
+          (t): t is { id: string; isolated?: boolean } =>
+            !!t && typeof (t as { id?: unknown }).id === 'string'
+        )
+      : []
+  } catch {
+    return []
+  }
+}
+
 /** 501s + returns null when the host has no WCV browser (standalone server). */
 export function requireBrowser(deps: RestApiDeps, res: Response): BrowserAccess | null {
   if (!deps.browser) {
@@ -108,9 +130,14 @@ export async function ensureBrowserTab(
   if (url && refuseTarget(browser, req, url, res)) return null
   const caller = browser.callerOf(req)
   const trusted = isTrustedLocal(browser, caller)
-  if (tabId && !trusted && (await browser.isUsersOwnTab(caller, taskId, tabId))) {
-    res.status(403).json({ error: ownTabRefusal(tabId) })
-    return null
+  // The task's stored tabs say which are isolated even when none is live (panel closed).
+  const stored = trusted ? [] : await storedTabs(deps, taskId)
+  if (tabId && !trusted) {
+    const named = stored.find((t) => t.id === tabId)
+    if ((named && !named.isolated) || (await browser.isUsersOwnTab(caller, taskId, tabId))) {
+      res.status(403).json({ error: ownTabRefusal(tabId) })
+      return null
+    }
   }
   if (await browser.hasBrowserTab(caller, taskId, tabId)) {
     return {
@@ -126,21 +153,23 @@ export async function ensureBrowserTab(
   if (panel === 'visible') {
     // Only the trusted local agent's URL opens with the panel; anyone else's loads
     // through the relay once the tab is live (`autoOpened: false` → the caller loads it).
-    // An untrusted caller with no tab named gets a NEW isolated tab to work in.
+    // An untrusted caller with no tab named works in its newest stored isolated tab,
+    // or, with none, in a NEW one.
     const openWith = url && trusted ? url : undefined
+    const target = tabId ?? (trusted ? undefined : stored.filter((t) => t.isolated).at(-1)?.id)
     deps.menu?.emit('browser-ensure-panel-open', {
       taskId,
       url: openWith,
-      tabId,
+      tabId: target,
       origin: caller.origin,
       principal: caller.principal,
-      isolated: !trusted && !tabId
+      isolated: !trusted && !target
     })
-    deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, openWith, tabId) // slice 5: drop legacy send
+    deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, openWith, target) // slice 5: drop legacy send
     try {
-      await browser.waitForBrowserRegistration(caller, taskId, { tabId })
+      await browser.waitForBrowserRegistration(caller, taskId, { tabId: target })
       return {
-        tabId: await browser.getResolvedBrowserTabId(caller, taskId, tabId),
+        tabId: await browser.getResolvedBrowserTabId(caller, taskId, target),
         autoOpened: !!openWith
       }
     } catch (err) {

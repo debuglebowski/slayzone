@@ -38,7 +38,10 @@ const browser: BrowserAccess = {
 
 const app = express()
 app.use(express.json())
-registerBrowserScreenshotRoute(app, { browser } as unknown as RestApiDeps)
+registerBrowserScreenshotRoute(app, {
+  browser,
+  db: { prepare: () => ({ get: async () => undefined }) }
+} as unknown as RestApiDeps)
 const h = await mountRestApp(app)
 afterAll(() => h.close())
 

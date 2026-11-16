@@ -3,7 +3,7 @@ import { callBrowserHost, getBrowserHost } from './browser-host'
 import { takeUntrustedLoad } from './hub-supplied-loads'
 import { useBrowserRelayHostHandle } from './useBrowserRelayHost'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
-import { isUsersOwnPartition, LOCAL_BROWSER_PARTITION, type BrowserTabTheme } from '../shared'
+import { isIsolatedPartition, LOCAL_BROWSER_PARTITION, type BrowserTabTheme } from '../shared'
 
 /** The reactive part of a tab's handle: which view it owns and how to drive it. */
 export interface BrowserTabView {
@@ -131,7 +131,7 @@ export const BrowserTabPlaceholder = forwardRef<
         }
         live = true
         // No partition = main's default, the user's own browser.
-        relayHost?.tabLive(tabId, !isUsersOwnPartition(partition ?? LOCAL_BROWSER_PARTITION))
+        relayHost?.tabLive(tabId, isIsolatedPartition(partition ?? LOCAL_BROWSER_PARTITION))
       })
       .catch((err: unknown) => console.warn('[browser] tab registration failed:', err))
     return () => {

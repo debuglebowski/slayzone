@@ -20,8 +20,8 @@ interface TaskEntry {
 const registry = new Map<string, TaskEntry>()
 
 let policy: PanelNetworkPolicy | null = null
-/** Whether a web contents lives in an untrusted session: an isolated tab's partition,
- *  or a remote hub's. Never the user's own browser. */
+/** Whether a web contents lives in an ISOLATED partition's session (the local hub's,
+ *  or a remote hub's agent tabs'). Never the user's own browser on any hub. */
 let isUntrustedSession: (wc: Electron.WebContents) => boolean = () => false
 
 /** The session-level policy untrusted relayed ops run under (set once at boot). */
@@ -109,8 +109,8 @@ function requireWc(taskId: string, tabId: string | null): Electron.WebContents {
 
 /**
  * An untrusted caller (anyone but this device's own local agent) acts ONLY on a tab in
- * an untrusted session — an isolated tab, or a remote hub's — never in the user's own
- * browser. Decided by the session the tab's web contents lives in, so no history,
+ * an isolated partition — never in the user's own browser, on the local hub or on a
+ * remote one. Decided by the session the tab's web contents lives in, so no history,
  * popup or worker can change it.
  */
 function refuseUnlessIsolated(wc: Electron.WebContents, opts: RelayedTabOpts | undefined): void {

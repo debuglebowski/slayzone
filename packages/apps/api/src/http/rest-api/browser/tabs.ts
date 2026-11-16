@@ -49,11 +49,9 @@ export function registerBrowserTabsRoute(app: Express, deps: RestApiDeps): void 
       live.set(t.tabId, { isolated: !!t.isolated })
       if (t.active) liveActive = t.tabId
     }
-    // On the desktop's own hub only its local agent sees the user's own tabs; anyone
-    // else, the isolated ones. (A remote hub's tabs are all isolated from the user's
-    // own browser: their own partition.)
-    const isolatedOf = (t: BrowserTabRow): boolean =>
-      !browser.isDesktopLocalHub || !!t.isolated || !!live.get(t.id)?.isolated
+    // Only the desktop's own local agent sees the user's own tabs; anyone else (an
+    // agent elsewhere, any caller of a remote hub) the isolated ones.
+    const isolatedOf = (t: BrowserTabRow): boolean => !!t.isolated || !!live.get(t.id)?.isolated
     const visible = isTrustedLocal(browser, caller) ? () => true : isolatedOf
 
     const dbTabs = (parsed?.tabs ?? []).filter(visible)

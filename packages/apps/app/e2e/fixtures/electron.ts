@@ -1436,14 +1436,19 @@ export async function clickSettings(page: Page) {
   await opened(5_000)
 }
 
-/** Navigate to home tab (div with lucide house/home icon, no title attr) */
+/**
+ * Navigate to the home tab, and wait until it IS the active tab. (It used to check
+ * `isVisible({ timeout })` — which never waits, the timeout is ignored — and then do
+ * nothing, so a slow paint silently left the previous tab active.)
+ */
 export async function goHome(page: Page) {
-  const icon = page.locator('.lucide-house, .lucide-home').first()
-  if (await icon.isVisible({ timeout: 500 }).catch(() => false)) {
-    await icon.click({ timeout: 2_000 }).catch(async () => {
-      await icon.click({ force: true, timeout: 2_000 }).catch(() => {})
-    })
-  }
+  const home = page.getByTestId('home-tab').first()
+  await expect(async () => {
+    if ((await home.getAttribute('data-active', { timeout: 2_000 })) !== 'true') {
+      await home.click({ timeout: 2_000 })
+    }
+    await expect(home).toHaveAttribute('data-active', 'true', { timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
 }
 
 /**

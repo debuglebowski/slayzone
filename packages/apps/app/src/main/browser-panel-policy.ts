@@ -26,14 +26,28 @@ const DOCUMENT = new Set(['mainFrame', 'subFrame'])
 
 /**
  * Why an op may not run on a tab, or null. An untrusted caller (anyone but this
- * device's own local agent) acts only on a tab in an UNTRUSTED SESSION — an isolated
- * tab's partition or a remote hub's — never in the user's own browser. The session
- * is fixed when the tab's web contents is made, so nothing a page does (history,
- * popups, `_blank`, workers) changes the answer.
+ * device's own local agent) acts only on a tab in an ISOLATED partition's session —
+ * never in the user's own browser, on the local hub or a remote one. The session is
+ * fixed when the tab's web contents is made, so nothing a page does (history, popups,
+ * `_blank`, workers) changes the answer.
  */
-export function untrustedOpRefusal(untrustedOp: boolean, untrustedSession: boolean): string | null {
-  if (!untrustedOp || untrustedSession) return null
+export function untrustedOpRefusal(untrustedOp: boolean, isolatedSession: boolean): string | null {
+  if (!untrustedOp || isolatedSession) return null
   return "That tab is the user's own browser (their logins and local pages). An agent on another computer or on a remote hub may only use isolated tabs, which have their own empty browser: open one with `slay browser new`."
+}
+
+/**
+ * What an UNTRUSTED session's pages may be granted (request AND check handler):
+ * deny by default. Its pages are a remote hub's or an agent elsewhere's, so nothing
+ * that reaches the user or this machine — camera/mic, screen, clipboard (read or
+ * write: pasting into a terminal), MIDI, location, notifications, devices, fullscreen
+ * or pointer/keyboard lock (fake UI), storage access, opening other apps. Only
+ * playback of protected media, which touches none of that.
+ */
+const UNTRUSTED_ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set(['mediaKeySystem'])
+
+export function untrustedPermissionAllowed(permission: string): boolean {
+  return UNTRUSTED_ALLOWED_PERMISSIONS.has(permission)
 }
 
 /**

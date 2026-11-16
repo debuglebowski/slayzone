@@ -1773,9 +1773,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       if (tabId) {
         // CLI targeted an existing tab — open panel and switch to that tab.
         // The navigate route will load `url` into the targeted tab's webContents.
+        // Anyone but the user's own local agent may only bring up an isolated tab.
         handlePanelToggle('browser', true)
         const tabs = browserTabsRef.current
-        if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
+        const target = tabs.tabs.find((t) => t.id === tabId)
+        if (
+          target &&
+          (target.isolated || callerIsTrustedLocal(origin)) &&
+          tabs.activeTabId !== tabId
+        ) {
           handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
         }
       } else if (load?.untrusted || isolated) {

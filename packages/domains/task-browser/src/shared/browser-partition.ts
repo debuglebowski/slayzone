@@ -18,6 +18,8 @@ export const WEB_PANEL_PARTITION = 'persist:web-panels'
  */
 export const ISOLATED_BROWSER_PARTITION = 'browser-tabs-isolated'
 const REMOTE_PREFIX = 'persist:browser-tabs-hub-'
+const ISOLATED_REMOTE_PREFIX = 'browser-tabs-isolated-hub-'
+const ISOLATED_REMOTE_RE = /^browser-tabs-isolated-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/
 
 /** FNV-1a 32-bit, hex: stable across runs, distinct for hub ids that only differ in punctuation. */
 function fnv1a(s: string): string {
@@ -42,14 +44,24 @@ export function browserPartitionForHub(hubId: string, hubIsLocal: boolean): stri
 }
 
 /**
- * One tab's partition: an isolated tab of the local hub browses in the isolated
- * partition; every other tab in its hub's (`browserPartitionForHub`). A remote hub's
- * partition is already isolated from the user's own browser.
+ * One tab's partition: an ISOLATED tab (opened for an untrusted caller) browses in an
+ * in-memory isolated partition — the local hub's one, or its remote hub's own — and
+ * every other tab in its hub's (`browserPartitionForHub`).
  */
 export function browserPartitionForTab(hubPartition: string, tab: { isolated?: boolean }): string {
-  return tab.isolated && hubPartition === LOCAL_BROWSER_PARTITION
-    ? ISOLATED_BROWSER_PARTITION
-    : hubPartition
+  if (!tab.isolated) return hubPartition
+  if (hubPartition === LOCAL_BROWSER_PARTITION) return ISOLATED_BROWSER_PARTITION
+  // A remote hub's agent tab: in memory, apart from the user's own tabs on that hub
+  // (and their logins) and from every other hub's agents.
+  if (hubPartition.startsWith(REMOTE_PREFIX)) {
+    return `${ISOLATED_REMOTE_PREFIX}${hubPartition.slice(REMOTE_PREFIX.length)}`
+  }
+  return hubPartition
+}
+
+/** An isolated partition: the only kind an untrusted caller may drive a tab in. */
+export function isIsolatedPartition(p: string): boolean {
+  return p === ISOLATED_BROWSER_PARTITION || ISOLATED_REMOTE_RE.test(p)
 }
 
 /** The user's own browser (their logins, local files): only trusted callers reach it. */
@@ -60,6 +72,6 @@ export function isUsersOwnPartition(p: string): boolean {
 /** A partition a browser panel / web panel may use. */
 export function isBrowserPanelPartition(p: string): boolean {
   if (p === LOCAL_BROWSER_PARTITION || p === WEB_PANEL_PARTITION) return true
-  if (p === ISOLATED_BROWSER_PARTITION) return true
+  if (isIsolatedPartition(p)) return true
   return /^persist:browser-tabs-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/.test(p)
 }
