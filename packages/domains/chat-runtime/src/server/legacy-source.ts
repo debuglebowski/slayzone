@@ -43,6 +43,7 @@ type Item = { kind: 'event'; value: StoredChatEvent } | { kind: 'record'; value:
 export interface LegacyChatDiagnostics {
   freeze(taskId: string): Promise<number>
   records(taskId: string, cutoff: number): AsyncIterable<ChatRecord>
+  /** Retried after a committed source cleanup: idempotent for the same cutoff. */
   cleanup(taskId: string, cutoff: number): Promise<void>
   tasks(): Promise<string[]>
   hasTask?(taskId: string): Promise<boolean>

@@ -63,6 +63,17 @@ generation. Existing unavailable-owner recovery can reseed at a new fenced epoch
 and re-export; copying/verified generations without such recovery stay deferred
 for managed recovery/support. No ad hoc ownership reset or new baseline format.
 
+Authorized source cleanup stores `cleanup_owner` in that ledger in the **same
+immediate transaction** as its deletes, pin release and compaction-generation
+update. It binds the exact owner/task/tab/mode, destination, epoch, token and
+manifest hash. A pending retry with that marker checks for source/pin reappearance,
+then skips those already-committed mutations. Checkpoint, diagnostics at the frozen
+cutoff, blob collection and ownership completion can retry idempotently; a failed
+post-step does not make the authorized empty source a repaired/stale generation.
+Marker-write failure rolls back the entire cleanup. Mismatched/blocked proofs,
+deleted tasks and unexpected source data still fail closed. Old ledger layouts
+gain the nullable marker column; an absent marker is never inferred from emptiness.
+
 Binary payloads of saved events (tool-result screenshots and files, base64 ≥ 1 KiB)
 are stored once in the content-addressed `blobs/` dir; the event keeps a typed
 reference in place (`chat-blobs`, terminal-contracts). Each conversation pins the

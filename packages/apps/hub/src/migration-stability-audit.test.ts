@@ -36,7 +36,8 @@ async function fixture(
   unsealed = false,
   registered = true,
   diagnostics?: LegacyChatDiagnostics,
-  realArtifacts = false
+  realArtifacts = false,
+  collectReleasedAttachments?: () => Promise<unknown>
 ) {
   const h = await createTestHarness()
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'chat-migration-audit-'))
@@ -163,7 +164,7 @@ async function fixture(
     readAttachment: async (_owner, ref) =>
       ref.contentHash === hash(editedBytes) ? editedBytes : originalBytes,
     readPinnedAttachment: pinnedReader,
-    collectReleasedAttachments: pinnedReader?.collectGarbage
+    collectReleasedAttachments: collectReleasedAttachments ?? pinnedReader?.collectGarbage
   })
   return {
     h,
@@ -460,6 +461,351 @@ function sourceHistory(f: Awaited<ReturnType<typeof fixture>>) {
       .all()
   }
 }
+
+function cleanupCounters(db: Database.Database) {
+  return db.prepare('SELECT name,n FROM audit_cleanup_effects ORDER BY name').all()
+}
+function observeCleanup(db: Database.Database) {
+  db.exec(`CREATE TABLE audit_cleanup_effects(name TEXT PRIMARY KEY,n INTEGER NOT NULL);
+    INSERT INTO audit_cleanup_effects VALUES('events',0),('pins',0),('diagnostics',0);
+    CREATE TRIGGER audit_event_delete AFTER DELETE ON chat_events BEGIN
+      UPDATE audit_cleanup_effects SET n=n+1 WHERE name='events'; END;
+    CREATE TRIGGER audit_pin_delete AFTER DELETE ON artifact_blob_pins WHEN OLD.scope='legacy-chat-migration' BEGIN
+      UPDATE audit_cleanup_effects SET n=n+1 WHERE name='pins'; END;
+    CREATE TABLE audit_diagnostics(task_id TEXT PRIMARY KEY,message TEXT,at INTEGER);
+    INSERT INTO audit_diagnostics VALUES('task','diagnostic source',1);
+    CREATE TRIGGER audit_diagnostic_update AFTER UPDATE ON audit_diagnostics WHEN OLD.message<>NEW.message BEGIN
+      UPDATE audit_cleanup_effects SET n=n+1 WHERE name='diagnostics'; END;`)
+}
+function cleanupDiagnostics(db: () => Database.Database, fail = false): LegacyChatDiagnostics {
+  return {
+    freeze: async () => 1,
+    async *records() {
+      yield { kind: 'settings', id: 'audit-diagnostic', value: 'diagnostic source', at: 1 }
+    },
+    tasks: async () =>
+      (
+        db().prepare("SELECT task_id FROM audit_diagnostics WHERE message<>''").all() as {
+          task_id: string
+        }[]
+      ).map((r) => r.task_id),
+    cleanup: async (taskId, cutoff) => {
+      db()
+        .prepare(
+          "UPDATE audit_diagnostics SET message='' WHERE task_id=? AND at<=? AND message<>''"
+        )
+        .run(taskId, cutoff)
+      if (fail) {
+        fail = false
+        throw new Error('diagnostics post-cleanup failure')
+      }
+    }
+  }
+}
+
+test.each(['checkpoint-busy', 'diagnostics', 'gc', 'completion-update', 'interrupted'] as const)(
+  'authorized source cleanup resumes through restart/normal relay after %s failure',
+  async (fault) => {
+    let raw: Database.Database | undefined
+    const diagnostics = cleanupDiagnostics(() => raw!, fault === 'diagnostics')
+    let failGc = fault === 'gc'
+    const f = await fixture(false, true, diagnostics, false, async () => {
+      raw!.prepare('DELETE FROM artifact_blob_gc_pending').run()
+      if (failGc) {
+        failGc = false
+        throw new Error('GC post-cleanup failure')
+      }
+    })
+    raw = f.h.db
+    let restored: Database.Database | undefined
+    const restores: Array<() => void> = []
+    try {
+      observeCleanup(raw)
+      const expected = raw
+        .prepare("SELECT event FROM chat_events WHERE tab_id='tab' ORDER BY seq")
+        .all() as { event: string }[]
+      if (fault === 'checkpoint-busy') {
+        const get = f.h.slayDb.get.bind(f.h.slayDb)
+        let fail = true
+        const spy = vi.spyOn(f.h.slayDb, 'get').mockImplementation(async (sql, params) => {
+          if (sql === 'PRAGMA wal_checkpoint(TRUNCATE)' && fail) {
+            fail = false
+            return { busy: 1 }
+          }
+          return get(sql, params)
+        })
+        restores.push(() => spy.mockRestore())
+      }
+      if (fault === 'completion-update')
+        raw.exec(`CREATE TRIGGER fail_cleanup_completion BEFORE UPDATE ON chat_ownership
+          WHEN OLD.cleanup_pending=1 AND NEW.cleanup_pending=0 BEGIN SELECT RAISE(ABORT,'native cleanup completion failure'); END`)
+      const migration =
+        fault === 'interrupted'
+          ? createChatMigration({
+              ownership: f.ownership,
+              request: f.request,
+              source: {
+                ...f.source,
+                cleanup: async (owner) => {
+                  await f.source.cleanup(owner)
+                  throw new Error('hub interrupted before cleanup completion')
+                }
+              }
+            })
+          : f.migration()
+      await expect(migration.ensure('store', 'pc')).rejects.toThrow(
+        fault === 'checkpoint-busy'
+          ? /checkpoint.*busy/i
+          : fault === 'diagnostics'
+            ? 'diagnostics post-cleanup failure'
+            : fault === 'gc'
+              ? 'GC post-cleanup failure'
+              : fault === 'completion-update'
+                ? 'native cleanup completion failure'
+                : 'hub interrupted before cleanup completion'
+      )
+      for (const restore of restores.splice(0)) restore()
+      if (fault === 'completion-update') raw.exec('DROP TRIGGER fail_cleanup_completion')
+      expect(await f.ownership.get('store')).toMatchObject({
+        state: 'active',
+        epoch: 2,
+        cleanupPending: true
+      })
+      expect(raw.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()).toEqual(
+        { n: 0 }
+      )
+      const effects = cleanupCounters(raw)
+      expect(effects).toContainEqual({ name: 'events', n: 1 })
+      expect(effects).toContainEqual({ name: 'pins', n: 1 })
+      const generation = raw
+        .prepare("SELECT value FROM settings WHERE key='computer_chat_compaction_generation'")
+        .get()
+      const localBefore = openChatStorage({ stateDir: f.dir, hubScope: 'audit' })
+      try {
+        expect(localBefore.read('store', -1).map((e) => JSON.stringify(e.event))).toEqual(
+          expected.map((e) => e.event)
+        )
+      } finally {
+        localBefore.close()
+      }
+      // Persist/reopen the actual hub DB; no closure or in-memory retry state
+      // can stand in for a committed cleanup marker.
+      const snapshot = join(f.dir, 'restart-hub.sqlite')
+      await raw.backup(snapshot)
+      restored = new Database(snapshot)
+      const db = createSlayzoneDbAdapter(restored)
+      const restartedRaw = restored
+      await f.restart()
+      let collected = 0
+      const pinnedReader = Object.assign(async () => originalBytes, {
+        collectGarbage: async () => {
+          collected++
+          restartedRaw.prepare('DELETE FROM artifact_blob_gc_pending').run()
+          return { deletedBlobs: 0, deferred: false }
+        }
+      })
+      const services = createComputerChatServices({
+        db,
+        legacyData: { ...createDbChatDataOps(db, taskSessionStore), buildMcpEnv: async () => ({}) },
+        attachments: { read: async () => originalBytes, readForMigration: pinnedReader },
+        diagnostics: cleanupDiagnostics(() => restartedRaw),
+        request: f.request,
+        resolveComputer: async () => 'pc',
+        defaultComputer: async () => 'pc',
+        hasLiveTask: async () => false
+      })
+      // A real ordinary chat request must resume pending cleanup, not get stuck
+      // behind a newly written unsafe-generation fault.
+      await expect(services.relay.ops.getTabState('tab')).resolves.toMatchObject({
+        draft: { text: 'preserved draft' }
+      })
+      const owner = await createChatOwnershipStore(db).get('store')
+      expect(owner).toMatchObject({ state: 'active', epoch: 2, cleanupPending: false })
+      expect(collected).toBe(1)
+      expect(
+        cleanupCounters(restored).filter((e) => (e as { name: string }).name !== 'diagnostics')
+      ).toEqual(effects.filter((e) => (e as { name: string }).name !== 'diagnostics'))
+      expect(
+        restored.prepare("SELECT n FROM audit_cleanup_effects WHERE name='diagnostics'").get()
+      ).toEqual({ n: 1 })
+      expect(
+        restored
+          .prepare("SELECT value FROM settings WHERE key='computer_chat_compaction_generation'")
+          .get()
+      ).toEqual(generation)
+      expect(
+        restored
+          .prepare(
+            "SELECT block_reason FROM chat_legacy_migration_safety WHERE conversation_id='store'"
+          )
+          .get()
+      ).toEqual({ block_reason: null })
+      const localAfter = openChatStorage({ stateDir: f.dir, hubScope: 'audit' })
+      try {
+        expect(localAfter.read('store', -1).map((e) => JSON.stringify(e.event))).toEqual(
+          expected.map((e) => e.event)
+        )
+      } finally {
+        localAfter.close()
+      }
+      await expect(services.relay.ops.getTabState('tab')).resolves.toMatchObject({
+        draft: { text: 'preserved draft' }
+      })
+    } finally {
+      for (const restore of restores) restore()
+      restored?.close()
+      await f.close()
+    }
+  }
+)
+
+test('cleanup marker write failure rolls back source deletes, pin release and generation update', async () => {
+  const f = await fixture()
+  try {
+    observeCleanup(f.h.db)
+    await f.source.assertSafe!((await f.ownership.get('store'))!)
+    f.h.db.exec(`CREATE TRIGGER fail_cleanup_marker BEFORE UPDATE OF cleanup_owner ON chat_legacy_migration_safety
+      BEGIN SELECT RAISE(ABORT,'cleanup marker write failure'); END`)
+    await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+      'cleanup marker write failure'
+    )
+    expect(await f.ownership.get('store')).toMatchObject({ state: 'active', cleanupPending: true })
+    expect(
+      f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+    ).toEqual({ n: 1 })
+    expect(
+      f.h.db
+        .prepare("SELECT count(*) AS n FROM artifact_blob_pins WHERE scope='legacy-chat-migration'")
+        .get()
+    ).toEqual({ n: 1 })
+    expect(cleanupCounters(f.h.db)).toEqual([
+      { name: 'diagnostics', n: 0 },
+      { name: 'events', n: 0 },
+      { name: 'pins', n: 0 }
+    ])
+    expect(
+      f.h.db
+        .prepare("SELECT value FROM settings WHERE key='computer_chat_compaction_generation'")
+        .get()
+    ).toBeUndefined()
+    f.h.db.exec('DROP TRIGGER fail_cleanup_marker')
+    await expect(f.migration().ensure('store', 'pc')).resolves.toMatchObject({
+      cleanupPending: false
+    })
+    expect(cleanupCounters(f.h.db)).toContainEqual({ name: 'events', n: 1 })
+  } finally {
+    await f.close()
+  }
+})
+
+test.each(['epoch', 'migration', 'proof', 'owner', 'task-deleted', 'source-reappearance'] as const)(
+  'authorized cleanup marker cannot bypass %s validation',
+  async (change) => {
+    const f = await fixture()
+    try {
+      observeCleanup(f.h.db)
+      f.h.db.exec(`CREATE TRIGGER pause_after_cleanup BEFORE UPDATE ON chat_ownership
+        WHEN OLD.cleanup_pending=1 AND NEW.cleanup_pending=0 BEGIN SELECT RAISE(ABORT,'pause after cleanup'); END`)
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow('pause after cleanup')
+      f.h.db.exec('DROP TRIGGER pause_after_cleanup')
+      const owner = (await f.ownership.get('store'))!
+      const marker = f.h.db
+        .prepare(
+          "SELECT cleanup_owner FROM chat_legacy_migration_safety WHERE conversation_id='store'"
+        )
+        .get() as { cleanup_owner: string }
+      expect(marker.cleanup_owner).toEqual(expect.any(String))
+      const before = cleanupCounters(f.h.db)
+      const generation = f.h.db
+        .prepare("SELECT value FROM settings WHERE key='computer_chat_compaction_generation'")
+        .get()
+      if (change === 'epoch')
+        f.h.db.exec(
+          "UPDATE chat_legacy_migration_safety SET source_epoch=source_epoch+1 WHERE conversation_id='store'"
+        )
+      else if (change === 'migration')
+        f.h.db.exec(
+          "UPDATE chat_legacy_migration_safety SET migration_id='wrong-generation' WHERE conversation_id='store'"
+        )
+      else if (change === 'proof')
+        f.h.db
+          .prepare(
+            "UPDATE chat_legacy_migration_safety SET proof_hash=? WHERE conversation_id='store'"
+          )
+          .run('b'.repeat(64))
+      else if (change === 'owner')
+        f.h.db
+          .prepare(
+            "UPDATE chat_legacy_migration_safety SET cleanup_owner=? WHERE conversation_id='store'"
+          )
+          .run(JSON.stringify({ ...JSON.parse(marker.cleanup_owner), taskId: 'wrong-owner' }))
+      else if (change === 'task-deleted')
+        f.h.db.exec(
+          "INSERT INTO chat_task_lifecycle(task_id,state,revision) VALUES('task','deleted',1) ON CONFLICT(task_id) DO UPDATE SET state='deleted'"
+        )
+      else restoreGuardedSource(f)
+      await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+        change === 'task-deleted' ? /ownership|deleted/i : guardedHistory
+      )
+      await expect(f.source.cleanup(owner)).rejects.toThrow(
+        change === 'task-deleted' ? /ownership|deleted/i : guardedHistory
+      )
+      expect(cleanupCounters(f.h.db)).toEqual(before)
+      expect(
+        f.h.db
+          .prepare("SELECT value FROM settings WHERE key='computer_chat_compaction_generation'")
+          .get()
+      ).toEqual(generation)
+      expect(await f.ownership.get('store')).toMatchObject({ cleanupPending: true })
+      if (change === 'source-reappearance')
+        expect(
+          f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+        ).toEqual({ n: 1 })
+    } finally {
+      await f.close()
+    }
+  }
+)
+
+test('S6 safety receipts upgrade without inferring cleanup or losing their captured source proof', async () => {
+  const f = await fixture()
+  try {
+    f.failReply('transfer.finish')
+    await expect(f.migration().ensure('store', 'pc')).rejects.toThrow(
+      'Lost reply after transfer.finish'
+    )
+    const before = f.h.db
+      .prepare(
+        "SELECT proof_hash,source_seq FROM chat_legacy_migration_safety WHERE conversation_id='store'"
+      )
+      .get()
+    // Persisted S6 layout: a receipt exists, but no authorized-delete marker.
+    f.h.db.exec('ALTER TABLE chat_legacy_migration_safety DROP COLUMN cleanup_owner')
+    expect(
+      f.h.db.prepare("SELECT count(*) AS n FROM chat_events WHERE tab_id='tab'").get()
+    ).toEqual({ n: 1 })
+    await f.restart()
+    await expect(f.migration().ensure('store', 'pc')).resolves.toMatchObject({
+      cleanupPending: false
+    })
+    expect(
+      f.h.db
+        .prepare(
+          "SELECT proof_hash,source_seq FROM chat_legacy_migration_safety WHERE conversation_id='store'"
+        )
+        .get()
+    ).toEqual(before)
+    expect(
+      f.h.db
+        .prepare(
+          "SELECT cleanup_owner FROM chat_legacy_migration_safety WHERE conversation_id='store'"
+        )
+        .get()
+    ).toEqual({ cleanup_owner: expect.any(String) })
+  } finally {
+    await f.close()
+  }
+})
 test.each(['checkpoint-only', 'unknown-body', 'checkpoint-ahead'] as const)(
   '%s legacy history is deferred from headers without selecting or parsing bodies',
   async (kind) => {
