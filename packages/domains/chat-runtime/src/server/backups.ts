@@ -295,6 +295,7 @@ export function createChatBackups(
       if (!lstatSync(pre).isFile() || lstatSync(pre).isSymbolicLink())
         throw new Error('Unknown archive recovery file')
       renameSync(pre, file)
+      // isolation: fatal — These sidecars belong to one recovered SQLite database; a partial rename must refuse opening the archive.
       for (const suffix of ['-wal', '-shm', '-journal'])
         if (existsSync(`${pre}${suffix}`)) renameSync(`${pre}${suffix}`, `${file}${suffix}`)
     }
@@ -1192,6 +1193,7 @@ export function createChatBackups(
             (entry) => entry.pass === ARCHIVE_QUARANTINE_PASS
           )
           eraseQuarantinedForTask(store.dir, taskId)
+          // isolation: fatal — All parent syncs complete this task's erasure durability fence; any failure must refuse acknowledgement.
           for (const parent of new Set(
             quarantinedArchives.map((entry) => resolve(entry.payloadPath, '../..'))
           ))

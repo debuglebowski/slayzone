@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixture'
 import { createComputerChatServices } from './computer-chat'
@@ -31,6 +31,7 @@ import {
   until
 } from '../../../domains/terminal/src/server/runtime/chat-transport-testkit'
 import { createComputerChatRuntime } from '../../../domains/chat-runtime/src/server/computer-runtime'
+import * as onlineRuntime from '../../../domains/chat-runtime/src/server/computer-online-runtime'
 
 // Third independent audit. All stores, homes and links are disposable. These
 // tests call production services and parsers; provider starts are forbidden.
@@ -776,19 +777,65 @@ test('control: reset clears events, queue and timeline, fences late old-child ou
 })
 
 test('control: permanent deletion fences an accepted but not-yet-executed draft write across restart', async () => {
-  const f = await rpcFixture()
+  let entered!: () => void, release!: () => void
+  const admitted = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const execution = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let held = false,
+    executed = false
+  const actualOpen = onlineRuntime.openComputerChatRuntime
+  const opening = vi
+    .spyOn(onlineRuntime, 'openComputerChatRuntime')
+    .mockImplementation(async (opts) => {
+      const r = await actualOpen(opts)
+      const invoke = r.invoke.bind(r)
+      r.invoke = async (input) => {
+        const call = input as { method?: string; operationId?: string }
+        if (!held && call.method === 'saveTabDraft' && call.operationId === 'late-save') {
+          held = true
+          entered()
+          // The real handler admitted this RPC, but its runtime operation has not
+          // executed. Request order alone does not establish that boundary after
+          // async owner migration; already executing work may drain before delete.
+          await execution
+          executed = true
+        }
+        return invoke(input)
+      }
+      return r
+    })
+  let f: Awaited<ReturnType<typeof rpcFixture>> | undefined
+  let writing: Promise<unknown> | undefined
   try {
-    const writing = f.invoke(
+    f = await rpcFixture()
+    // Passing control: work that actually finishes before deletion may succeed;
+    // its persisted draft and receipt must still be purged by the same deletion.
+    await expect(
+      f.invoke(
+        'saveTabDraft',
+        ['root', { text: 'committed before deletion', attachments: [] }],
+        'early-save'
+      )
+    ).resolves.toMatchObject({ rev: 1 })
+    writing = f.invoke(
       'saveTabDraft',
       ['root', { text: 'accepted just before deletion', attachments: [] }],
       'late-save'
     )
+    void writing.catch(() => undefined)
+    await admitted
     const deleting = f.request({
       kind: 'task.lifecycle',
       taskId: 'task',
       state: 'deleted',
       revision: 2
     })
+    await expect(deleting).resolves.toMatchObject({ state: 'deleted' })
+    expect(executed).toBe(false)
+    release()
     const result = await Promise.allSettled([writing, deleting])
     expect(result[0].status).toBe('rejected')
     expect(result[1]).toMatchObject({ status: 'fulfilled', value: { state: 'deleted' } })
@@ -807,7 +854,13 @@ test('control: permanent deletion fences an accepted but not-yet-executed draft 
     ).rejects.toThrow(/epoch|deleted/i)
     expect(f.starts).toEqual([])
   } finally {
-    await f.close()
+    release()
+    await writing?.catch(() => undefined)
+    try {
+      await f?.close()
+    } finally {
+      opening.mockRestore()
+    }
   }
 })
 
