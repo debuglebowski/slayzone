@@ -226,7 +226,7 @@ test('legacy draft attachment keeps current bytes when a pinned older version sh
       .prepare("INSERT INTO chat_tab_state(tab_id,draft_attachments,updated_at) VALUES('tab',?,2)")
       .run(JSON.stringify([ref]))
     const owners = createChatOwnershipStore(h.slayDb)
-    const owner = await owners.register({
+    await owners.register({
       id: 'owner',
       taskId: 'task',
       tabId: 'tab',
@@ -243,13 +243,13 @@ test('legacy draft attachment keeps current bytes when a pinned older version sh
       }),
       readAttachment: async (o, r) => (r.contentHash === hash(older) ? older : current)
     })
-    await owners.beginMigration('owner', {
+    const migrating = await owners.beginMigration('owner', {
       expectedComputerId: null,
       expectedEpoch: 1,
       migrationId: 'move',
       destinationComputerId: 'pc'
     })
-    const exp = await source.open(owner, 'move'),
+    const exp = await source.open(migrating, 'move'),
       begin = target.transfers.begin(exp.manifest)
     let offset = 0
     for await (const chunk of exp.chunks(0)) {

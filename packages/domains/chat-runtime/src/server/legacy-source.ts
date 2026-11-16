@@ -25,6 +25,15 @@ import {
   LEGACY_CHAT_BLOB_PIN_SCOPE,
   type MigrationAttachmentScope
 } from './migration-attachment-txns'
+import type { LegacyHistoryIssue } from './migration-history-txns'
+import type {} from './migration-history-txns'
+
+function assertReplayable(issue: LegacyHistoryIssue | null): void {
+  if (issue)
+    throw new Error(
+      `[LEGACY_CHAT_HISTORY_UNREPLAYABLE] Migration deferred: legacy timeline records cannot be proven replayable from stored events (${issue}). Original history and attachments retained on this hub. Validate or restore source events from a verified backup before retrying; contact support if recovery is needed.`
+    )
+}
 
 const timestamp = (value: string) =>
   Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : value + 'Z')
@@ -488,6 +497,9 @@ export function createLegacyChatSource(opts: {
   }
   const source: ChatMigrationSource = {
     quiesce: opts.quiesce,
+    async assertSafe(owner) {
+      assertReplayable(await db.namedTxn('chat-migration:check-source-history', { owner }))
+    },
     async pinAttachments(owner, refs) {
       if (!refs.length) return
       const scope = await migrationAttachmentScope(db, owner)
@@ -540,6 +552,7 @@ export function createLegacyChatSource(opts: {
     },
     async open(owner, migrationId) {
       if (owner.computerId) throw new Error('Legacy source cannot export computer-owned history')
+      await source.assertSafe!(owner)
       let metadata = (await opts.freezeMetadata?.(owner, migrationId)) ?? null
       if (!metadata) {
         const candidate: ChatRecord[] = []
@@ -793,7 +806,7 @@ export function createLegacyChatSource(opts: {
         sql: "INSERT INTO settings(key,value) VALUES('computer_chat_compaction_generation','2') ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(settings.value AS INTEGER)+1 AS TEXT)",
         params: []
       })
-      await db.batchTxn(ops)
+      assertReplayable(await db.namedTxn('chat-migration:cleanup-source', { owner, ops }))
       const checkpoint = await db.get<{ busy: number }>('PRAGMA wal_checkpoint(TRUNCATE)')
       if (checkpoint?.busy) throw new Error('Hub cleanup checkpoint is busy; retry cleanup')
       if (opts.diagnostics && diagnosticsCutoff !== null)

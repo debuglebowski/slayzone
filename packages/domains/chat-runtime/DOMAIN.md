@@ -37,6 +37,20 @@ First creation reserves hub metadata before bootstrap and activates only after
 the computer acknowledges durable storage. Missing committed history is isolated
 as unavailable; recovery never fabricates empty replacement history.
 
+Legacy hub migration fails closed when timeline records exist without events or
+a checkpoint's sequence exceeds the newest stored event. Fixed-count indexed
+header probes select no page/checkpoint JSON. Unknown/expired residue (including
+a checkpoint with no pages) stays in place; migration does not infer intentional
+expiry or restore it into current history. `LEGACY_CHAT_HISTORY_UNREPLAYABLE`
+reports the retained source and recovery steps; background migration records a
+retryable fault. Fresh, prepared/verified and activation-ACK retries check before
+proceeding. Cleanup rechecks the captured owner/epoch/migration and history in the
+same write transaction as its deletes; an already-activated owner keeps cleanup
+pending when preservation cannot be proved. Event-backed caches remain derived.
+These guards do not prove complete partial-event coverage: a high maximum seq
+does not establish replayability. Immutable historical recovery and coverage/
+retention compatibility remain separate work; no baseline format is introduced.
+
 Binary payloads of saved events (tool-result screenshots and files, base64 ≥ 1 KiB)
 are stored once in the content-addressed `blobs/` dir; the event keeps a typed
 reference in place (`chat-blobs`, terminal-contracts). Each conversation pins the
