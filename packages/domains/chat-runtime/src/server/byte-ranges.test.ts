@@ -188,29 +188,30 @@ describe('archived files and attachments, live attachments', () => {
     const a = await upload(r, BIG)
     const backup = await r.backups.create('manual')
     const archive = await r.backups.restore(backup.id)
-    const files = r.backups
-      .records(archive.id, 'c')
-      .records.filter((row) => row.kind === 'artifact-version')
+    const files = (await r.backups.records(archive.id, 'c')).records
+      .filter((row) => row.kind === 'artifact-version')
       .map((row) => row.value as { artifactId: string; contentHash: string })
     const file = files.find((f) => f.artifactId === a.id)!
 
     const fileBytes = await collectByteRanges(async (offset, length) =>
       r.backups.fileRange(archive.id, 'c', file.artifactId, file.contentHash, offset, length)
     )
-    const whole = r.backups.file(archive.id, 'c', file.artifactId, file.contentHash)
+    const whole = await r.backups.file(archive.id, 'c', file.artifactId, file.contentHash)
     expect(Buffer.from(fileBytes).equals(whole.data)).toBe(true)
-    expect(r.backups.fileRange(archive.id, 'c', file.artifactId, file.contentHash, 0, 1).name).toBe(
-      whole.name
-    )
-    expect(() =>
+    expect(
+      (await r.backups.fileRange(archive.id, 'c', file.artifactId, file.contentHash, 0, 1)).name
+    ).toBe(whole.name)
+    await expect(
       r.backups.fileRange(archive.id, 'other', file.artifactId, file.contentHash, 0, 1)
-    ).toThrow(/belong/i)
+    ).rejects.toThrow(/belong/i)
 
     const attachmentBytes = await collectByteRanges(async (offset, length) =>
       r.backups.attachmentRange(archive.id, 'c', ref, offset, length)
     )
     expect(
-      Buffer.from(attachmentBytes).equals(Buffer.from(r.backups.attachment(archive.id, 'c', ref)))
+      Buffer.from(attachmentBytes).equals(
+        Buffer.from(await r.backups.attachment(archive.id, 'c', ref))
+      )
     ).toBe(true)
 
     const live = await collectByteRanges(async (offset, length) =>

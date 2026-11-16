@@ -1399,13 +1399,10 @@ export function createChatBackups(
       .map((r) => JSON.parse(r.value) as ChatAttachment)
       .filter(
         (r) =>
-          r.artifactId === ref.artifactId &&
-          (!ref.contentHash || r.contentHash === ref.contentHash)
+          r.artifactId === ref.artifactId && (!ref.contentHash || r.contentHash === ref.contentHash)
       )
     if (!ref.contentHash && new Set(matching.map((ref) => ref.contentHash)).size > 1)
-      throw new Error(
-        'Archive attachment version is ambiguous; select an explicit saved version'
-      )
+      throw new Error('Archive attachment version is ambiguous; select an explicit saved version')
     const record = matching[0]
     if (!record?.contentHash)
       throw new Error('Attachment does not belong to this archive conversation')
@@ -1423,9 +1420,7 @@ export function createChatBackups(
   ) {
     if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Invalid archive file hash')
     const hasWorking = !!db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'"
-      )
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_working_files'")
       .get()
     const row = db
       .prepare(`SELECT a.title AS name,v.size FROM task_artifacts a

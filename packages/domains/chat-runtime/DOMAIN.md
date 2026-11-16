@@ -511,7 +511,7 @@ fresh whole-FU2 review remain required.
   - **Integrity:** the etag is the content hash, and the hub verifies sha256 over what it assembles.
   - **Hub side:** `computer-artifacts` and `computer-chat` use the ranges when the computer advertised `boundedReads`. The hub computes `diffArtifactVersions` itself from two ranged reads with the same function (`diffVersionContents`). REST streams ranges via `openArtifactReader`. The whole reads remain for older hubs.
 
-- **Canonical-owner integration (FU1 backend rebase, partial replay).** The online
+- **Canonical-owner integration (FU1 completed parent replay).** The online
   host still opens `openComputerChatRuntime`; native artifact, attachment and archive
   work belongs to its existing canonical worker. B5 publication retains its mutation
   lane, private data-only API, receipt/outbox, FULL fence and physical lease barriers
@@ -520,15 +520,14 @@ fresh whole-FU2 review remain required.
   retain `{ data, size, version }` generation pinning and existing verification-cache
   behavior. Their APIs are not replaced by whole-file downloads. Peer client exports
   stay client-side; removed hub export endpoints stay removed.
-  This content merge does not complete online ranged-read wiring. The additive
-  host `bytes.read` validation must be consolidated into the canonical request schema,
-  and `attachments.range`, `backups.fileRange` and `backups.attachmentRange` need the
-  existing closed named-owner registry entries after replay. Later captured-source
-  lifetime methods must also use that data-only owner seam; no native handles or
-  closures cross threads. Final public-invoke/staging integration and semantic tests
-  remain required; the partial replay is not H2 acceptance.
+  Canonical `computer-request.ts` owns `bytes.read` validation; `attachments.range`,
+  `backups.fileRange` and `backups.attachmentRange` use the existing closed named-owner
+  registry. Source resolution and complete archive range reads stay worker-local;
+  no native handles or closures cross threads. Final public invokes use the actual
+  upload manager and B5 publication seam described below. Completed-tree tests do
+  not replace final current-main composition and independent acceptance.
 
-- **S8 archive admission with FU1 ranges (parent rebase, partial replay).** Archive
+- **S8 archive admission with FU1 ranges (completed parent replay).** Archive
   file/attachment source ports retain the parent's Promise-returning per-archive
   admission. Legacy whole reads and bounded range reads share worker-local source
   resolvers; ownership lookup and the complete body read run inside the same
@@ -543,8 +542,8 @@ fresh whole-FU2 review remain required.
   serialized erasure/rewrite/manifest/index, retained snapshots and native-copy
   lifetime exclusions remain authoritative. Later async actions must likewise
   preserve the native registration through all awaited work and post-await
-  database checks. Closed port registration, remaining async caller adaptation
-  and final completed-tree checks remain later integration work.
+  database checks. Async archive callers await their admitted operations, including
+  errors; native lifetime and privacy tests cover the completed parent integration.
 
 - **Fallback text verification (FU1 r2 H1):** when `content` has no working copy, the first range verifies the complete immutable version with async 256 KiB reads and event-loop yields. Only the requested prefix is retained, on the same descriptor used for verification; corrupt/unreadable content answers empty text. Route/epoch, lifecycle revision and artifact task membership revalidate after I/O. Active range work drains before task erasure receipts and storage close. Desktop/mobile `artifacts.readContent` share this path; a present working copy remains the preferred source.
 
@@ -597,5 +596,6 @@ fresh whole-FU2 review remain required.
     uses the same B5 writer; production uses only the canonical online worker.
   - **Integration boundary:** S19 has actual public manager/compiled-owner/native
     fence, failure, replacement, lifecycle, erase, close and compaction-swap tests.
-    Root still integrates final FU2/S8/current-main and conducts independent R6 review;
+    Root still composes remaining FU2 FS/control/metadata and current-main changes,
+    then conducts independent R6 review;
     this worktree checkpoint is not whole-candidate DONE/SHIP.

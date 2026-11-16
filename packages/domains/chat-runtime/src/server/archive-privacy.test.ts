@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
@@ -185,6 +185,128 @@ test.each([false, true])(
     }
   }
 )
+
+test('archive erasure retains native ownership through async upload cleanup and post-await DB checks', async () => {
+  let rewrites = 0
+  let connection: Database.Database | undefined
+  const r = runtime((spec) => {
+    if (spec.mode === 'file') {
+      expect(connection?.open).toBe(false)
+      rewrites++
+    }
+    return startCompactionWorker(spec)
+  })
+  const backup = await r.backups.create()
+  const archive = await r.backups.restore(backup.id)
+  const path = join(r.backups.archiveDir, archive.id)
+  const label = `chat archive ${archive.id}`
+  const uploads = join(
+    path,
+    'uploads',
+    'owned',
+    createHash('sha256').update(JSON.stringify('alice')).digest('hex')
+  )
+  const before = readFileSync(join(path, 'manifest.json'))
+  let release!: () => void
+  const hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let entered = false,
+    resumed = false,
+    checked = 0
+  const prepare = Database.prototype.prepare
+  vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (
+    this: Database.Database,
+    sql: string
+  ) {
+    if (this.name === join(path, 'chat.sqlite')) {
+      if (!resumed) connection = this
+      if (resumed && /^SELECT 1 FROM (events|records|receipts) WHERE/.test(sql)) {
+        expect(this.open).toBe(true)
+        expect(r.storage.maintenance.secondaryConnections()).toContain(label)
+        checked++
+      }
+    }
+    return prepare.call(this, sql)
+  })
+  const remove = fs.promises.rm.bind(fs.promises)
+  vi.spyOn(fs.promises, 'rm').mockImplementation(async (target, options) => {
+    if (String(target) === uploads) {
+      entered = true
+      await hold
+      resumed = true
+    }
+    return remove(target, options)
+  })
+  syncBuiltinESMExports()
+  let erased = false,
+    read = false,
+    closed = false,
+    erasureError: unknown
+  const erasing = r.backups.eraseTask('alice').then(() => {
+    erased = true
+  })
+  void erasing.catch((error) => {
+    erasureError = error
+  })
+  const work: Promise<unknown>[] = [erasing]
+  try {
+    await vi.waitFor(
+      () => {
+        expect(erasureError).toBeUndefined()
+        expect(entered).toBe(true)
+      },
+      { timeout: 2000 }
+    )
+    expect(connection?.open).toBe(true)
+    expect(r.storage.maintenance.secondaryConnections()).toContain(label)
+    let closeFailure: unknown
+    try {
+      r.storage.maintenance.closeSecondaries(label)
+    } catch (error) {
+      closeFailure = error
+    }
+    expect(closeFailure).toBeInstanceOf(AggregateError)
+    expect((closeFailure as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: 'Archive connection is still in use' })
+    ])
+    expect(connection?.open).toBe(true)
+    expect(checked).toBe(0)
+    expect(rewrites).toBe(0)
+    expect(readFileSync(join(path, 'manifest.json'))).toEqual(before)
+    const reading = r.backups.read(archive.id, 'alice').then((value) => {
+      read = true
+      return value
+    })
+    const retained = r.backups.read(archive.id, 'carol')
+    const closing = r.backups.close().then(() => {
+      closed = true
+    })
+    work.push(reading, retained, closing)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect({ erased, read, closed }).toEqual({ erased: false, read: false, closed: false })
+    release()
+    await Promise.all(work)
+    expect((await reading).events).toEqual([])
+    expect((await retained).events).toHaveLength(1)
+    expect(checked).toBe(3)
+    expect(rewrites).toBe(1)
+    expect(connection?.open).toBe(false)
+    expect(r.storage.maintenance.secondaryConnections()).toEqual([])
+    expect(readFileSync(join(path, 'manifest.json'))).not.toEqual(before)
+    expect(
+      files(path).some((file) => readFileSync(file).includes(Buffer.from('alice secret')))
+    ).toBe(false)
+    expect(
+      readFileSync(join(r.backups.dir, backup.id, 'chat.sqlite')).includes(
+        Buffer.from('alice secret')
+      )
+    ).toBe(true)
+  } finally {
+    release()
+    await Promise.allSettled(work)
+  }
+})
 
 test('failed unpublished restore remains owned through native close failure; erasure cannot skip its staging copy', async () => {
   const r = runtime()
