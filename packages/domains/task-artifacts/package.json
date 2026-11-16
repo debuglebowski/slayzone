@@ -55,7 +55,7 @@
     "@slayzone/react-compiler-config": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "fflate": "^0.8.2",
     "vitest": "^5.0.5"
   }
