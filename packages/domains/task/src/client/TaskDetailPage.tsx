@@ -1706,10 +1706,15 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
 
   // Open a dev server URL in the browser panel (used by both auto-open and toast)
   const openDevServerInBrowser = useCallback(
-    (url: string, tabId?: string) => {
+    (url: string, tabId?: string, isolated?: boolean) => {
       handlePanelToggle('browser', true)
       const id = tabId ?? `tab-${safeRandomUUID().slice(0, 8)}`
-      const newTab = { id, url, title: url === 'about:blank' ? 'New Tab' : url }
+      const newTab = {
+        id,
+        url,
+        title: url === 'about:blank' ? 'New Tab' : url,
+        ...(isolated ? { isolated: true } : {})
+      }
       if (browserOpenRef.current) {
         handleBrowserTabsChange({ tabs: [...browserTabs.tabs, newTab], activeTabId: newTab.id })
       } else {
@@ -1733,8 +1738,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   // THIS device, by the same rule as a relayed navigation: web pages only — no local
   // file, no address on this computer or its private network — except for an agent on
   // this very machine through this device's own local hub (main's behaviour). Anyone
-  // else's URL opens a blank tab, then loads as an untrusted host load: the name is
-  // resolved first, and the tab stays under the untrusted policy (`planHubSuppliedUrl`).
+  // else gets an ISOLATED tab (its own empty browser, never the user's): it opens blank,
+  // then the URL loads as an untrusted host load, name resolved first
+  // (`planHubSuppliedUrl`).
+  const callerIsTrustedLocal = (origin: 'hub-machine' | 'elsewhere' | undefined): boolean =>
+    origin === 'hub-machine' &&
+    hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local')
   const planHubUrl = (
     url: string | null | undefined,
     origin: 'hub-machine' | 'elsewhere' | undefined
@@ -1750,12 +1759,14 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       taskId,
       url: rawUrl,
       tabId,
-      origin
+      origin,
+      isolated
     }: {
       taskId: string
       url?: string | null
       tabId?: string | null
       origin?: 'hub-machine' | 'elsewhere'
+      isolated?: boolean
     }) => {
       if (!task || taskId !== task.id) return
       const load = planHubUrl(rawUrl, origin)
@@ -1767,10 +1778,12 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
         if (tabs.tabs.some((t) => t.id === tabId) && tabs.activeTabId !== tabId) {
           handleBrowserTabsChange({ ...tabs, activeTabId: tabId })
         }
-      } else if (load?.untrusted) {
+      } else if (load?.untrusted || isolated) {
+        // Anyone but the user's own local agent works in a NEW isolated tab (the hub
+        // asks for one when such a caller has none; an untrusted URL always gets one).
         const newTabId = `tab-${safeRandomUUID().slice(0, 8)}`
-        queueUntrustedLoad(task.id, newTabId, load.url)
-        openDevServerInBrowser('about:blank', newTabId)
+        if (load?.untrusted) queueUntrustedLoad(task.id, newTabId, load.url)
+        openDevServerInBrowser('about:blank', newTabId, true)
       } else if (load) {
         openDevServerInBrowser(load.url)
       } else {
@@ -1792,22 +1805,26 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
       tabId,
       url,
       background,
-      origin
+      origin,
+      isolated
     }: {
       taskId: string
       tabId: string
       url?: string | null
       background?: boolean
       origin?: 'hub-machine' | 'elsewhere'
+      isolated?: boolean
     }) => {
       if (!task || taskId !== task.id) return
       handlePanelToggle('browser', true)
       const load = planHubUrl(url, origin)
       const tabUrl = load && !load.untrusted ? load.url : 'about:blank'
+      // Anyone but the user's own local agent gets an isolated tab, whatever the hub says.
       const newTab = {
         id: tabId,
         url: tabUrl,
-        title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl
+        title: tabUrl === 'about:blank' ? 'New Tab' : tabUrl,
+        ...(isolated || !callerIsTrustedLocal(origin) ? { isolated: true } : {})
       }
       const current = browserTabsRef.current
       if (current.tabs.some((t) => t.id === tabId)) return

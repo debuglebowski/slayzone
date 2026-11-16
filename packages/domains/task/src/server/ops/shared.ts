@@ -1273,7 +1273,8 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
     // when the renderer writes back tabs via generic updates (URL/title from
     // did-navigate, etc.). Those flags have dedicated write paths
     // (`markTabAgentTouched` in REST, `setTabLockedOp` in IPC) and must not
-    // be clobbered by stale renderer state.
+    // be clobbered by stale renderer state. `isolated` is fixed at creation: an
+    // existing tab never moves between the user's own browser and the isolated one.
     const merged = data.browserTabs
       ? await (async () => {
           if (!data.browserTabs) return null
@@ -1281,7 +1282,12 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
             'SELECT browser_tabs FROM tasks WHERE id = ?',
             [data.id]
           )
-          let existingTabs: { id: string; agentTouched?: boolean; locked?: boolean }[] = []
+          let existingTabs: {
+            id: string
+            agentTouched?: boolean
+            locked?: boolean
+            isolated?: boolean
+          }[] = []
           if (existingRow?.browser_tabs) {
             try {
               const parsed = JSON.parse(existingRow.browser_tabs) as { tabs?: typeof existingTabs }
@@ -1296,10 +1302,12 @@ export async function updateTask(db: SlayzoneDb, data: UpdateTaskInput): Promise
             tabs: data.browserTabs.tabs.map((t) => {
               const prev = existingById.get(t.id)
               if (!prev) return t
+              const { isolated: _incoming, ...rest } = t as typeof t & { isolated?: boolean }
               return {
-                ...t,
+                ...rest,
                 ...(prev.agentTouched !== undefined ? { agentTouched: prev.agentTouched } : {}),
-                ...(prev.locked !== undefined ? { locked: prev.locked } : {})
+                ...(prev.locked !== undefined ? { locked: prev.locked } : {}),
+                ...(prev.isolated ? { isolated: true } : {})
               }
             })
           }

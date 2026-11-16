@@ -25,6 +25,7 @@ const browser: BrowserAccess = {
   getResolvedBrowserTabId: async (_caller, _taskId, tabId) => tabId ?? 'tab-a',
   listBrowserTabs: async () => [{ tabId: 'tab-a', active: true }],
   hasBrowserTab: async () => true,
+  isUsersOwnTab: async () => false,
   waitForBrowserRegistration: async () => {},
   execJs: async () => null,
   loadUrl: async () => {},

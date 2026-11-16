@@ -13,6 +13,15 @@ export interface BrowserTabResult {
   autoOpened: boolean
 }
 
+/** An untrusted caller named one of the user's own tabs. */
+export function ownTabRefusal(tabId: string): string {
+  return `Tab '${tabId}' is the user's own browser (their logins and local pages). An agent on another computer or on a remote hub may only use isolated tabs, which have their own empty browser: open one with \`slay browser new\`.`
+}
+
+/** An untrusted caller, no isolated tab open. */
+export const NO_ISOLATED_TAB =
+  "No isolated browser tab is open for this task. An agent on another computer or on a remote hub may only use isolated tabs (their own empty browser, never the user's): open one with `slay browser new`, or pass --panel visible."
+
 /** No client that can host the browser panel is connected for the caller. */
 export const NO_DESKTOP =
   'No SlayZone desktop app is connected to this hub for you; the browser panel runs in the desktop app. Open the task there.'
@@ -98,6 +107,11 @@ export async function ensureBrowserTab(
   }
   if (url && refuseTarget(browser, req, url, res)) return null
   const caller = browser.callerOf(req)
+  const trusted = isTrustedLocal(browser, caller)
+  if (tabId && !trusted && (await browser.isUsersOwnTab(caller, taskId, tabId))) {
+    res.status(403).json({ error: ownTabRefusal(tabId) })
+    return null
+  }
   if (await browser.hasBrowserTab(caller, taskId, tabId)) {
     return {
       tabId: await browser.getResolvedBrowserTabId(caller, taskId, tabId),
@@ -112,13 +126,15 @@ export async function ensureBrowserTab(
   if (panel === 'visible') {
     // Only the trusted local agent's URL opens with the panel; anyone else's loads
     // through the relay once the tab is live (`autoOpened: false` → the caller loads it).
-    const openWith = url && isTrustedLocal(browser, caller) ? url : undefined
+    // An untrusted caller with no tab named gets a NEW isolated tab to work in.
+    const openWith = url && trusted ? url : undefined
     deps.menu?.emit('browser-ensure-panel-open', {
       taskId,
       url: openWith,
       tabId,
       origin: caller.origin,
-      principal: caller.principal
+      principal: caller.principal,
+      isolated: !trusted && !tabId
     })
     deps.legacyBroadcast?.('browser:ensure-panel-open', taskId, openWith, tabId) // slice 5: drop legacy send
     try {
@@ -133,11 +149,13 @@ export async function ensureBrowserTab(
     }
   }
 
-  const tabs = await browser.listBrowserTabs(caller, taskId)
+  const tabs = (await browser.listBrowserTabs(caller, taskId)).filter((t) => trusted || t.isolated)
   res.status(404).json({
     error: tabId
       ? `Browser tab '${tabId}' not found for task ${taskId}.`
-      : 'Browser panel not found. Is the browser panel open on this task?',
+      : trusted
+        ? 'Browser panel not found. Is the browser panel open on this task?'
+        : NO_ISOLATED_TAB,
     tabs
   })
   return null

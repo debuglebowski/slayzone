@@ -1712,6 +1712,12 @@ export function composeServer(opts: {
   // channel `slay browser` (the REST browser routes) rides to reach it. Same on a
   // local and a remote hub — no desktop bridge involved.
   const browserRelay = new BrowserRelay()
+  // Which tabs a `slay browser` caller may use: all, for the desktop's own local agent
+  // (its own hub, this machine); the ISOLATED tabs only for anyone else — never the
+  // user's own browser (their logins, files, local network). Mirrors the REST routes'
+  // `isTrustedLocal` and the client's `trustedLocal`.
+  const scopeOf = (caller: { origin: 'hub-machine' | 'elsewhere' }): 'any' | 'isolated' =>
+    supervised && caller.origin === 'hub-machine' ? 'any' : 'isolated'
   const browserEngagement = new EventEmitter()
   setBrowserRelayRouterDeps({
     relay: browserRelay,
@@ -2008,7 +2014,9 @@ export function composeServer(opts: {
       ? { raiseMainWindow: () => void bridge.appDeps.appRaiseMainWindow() }
       : undefined,
     // Browser routes run HERE, where the `tasks.browser_tabs` row they read and write
-    // lives; each operation on a live tab is relayed to the client that owns it.
+    // lives; each operation on a live tab is relayed to the client that owns it. Only
+    // the desktop's own local agent may use the user's own tabs; everyone else sees
+    // the isolated ones only (task-browser `BrowserRelayScope`).
     browser: {
       isDesktopLocalHub: supervised,
       hasCapableClient: (caller) => browserRelay.hasClient(caller.principal),
@@ -2037,21 +2045,34 @@ export function composeServer(opts: {
         }
       },
       getResolvedBrowserTabId: async (caller, taskId, tabId) =>
-        browserRelay.getResolvedTabId(caller.principal, taskId, tabId),
+        browserRelay.getResolvedTabId(caller.principal, taskId, tabId, scopeOf(caller)),
       listBrowserTabs: async (caller, taskId) => browserRelay.listTabs(caller.principal, taskId),
       hasBrowserTab: async (caller, taskId, tabId) =>
-        browserRelay.hasTab(caller.principal, taskId, tabId),
+        browserRelay.hasTab(caller.principal, taskId, tabId, scopeOf(caller)),
+      isUsersOwnTab: async (caller, taskId, tabId) =>
+        browserRelay.isUsersOwnTab(caller.principal, taskId, tabId),
       waitForBrowserRegistration: (caller, taskId, opts) =>
-        browserRelay.waitForRegistration(caller.principal, taskId, opts),
+        browserRelay.waitForRegistration(caller.principal, taskId, {
+          ...opts,
+          scope: scopeOf(caller)
+        }),
       execJs: (caller, taskId, tabId, code) =>
-        browserRelay.run(caller.principal, taskId, tabId, { op: 'execJs', code }, caller.origin),
+        browserRelay.run(
+          caller.principal,
+          taskId,
+          tabId,
+          { op: 'execJs', code },
+          caller.origin,
+          scopeOf(caller)
+        ),
       loadUrl: async (caller, taskId, tabId, url) => {
         await browserRelay.run(
           caller.principal,
           taskId,
           tabId,
           { op: 'loadUrl', url },
-          caller.origin
+          caller.origin,
+          scopeOf(caller)
         )
       },
       getUrl: async (caller, taskId, tabId) => {
@@ -2060,7 +2081,8 @@ export function composeServer(opts: {
           taskId,
           tabId,
           { op: 'getUrl' },
-          caller.origin
+          caller.origin,
+          scopeOf(caller)
         )
         return typeof url === 'string' ? url : null
       },
@@ -2072,7 +2094,8 @@ export function composeServer(opts: {
           taskId,
           tabId,
           { op: 'capturePng' },
-          caller.origin
+          caller.origin,
+          scopeOf(caller)
         )) as { pngBase64?: unknown } | null
         const b64 = typeof reply?.pngBase64 === 'string' ? reply.pngBase64 : ''
         return b64 ? new Uint8Array(Buffer.from(b64, 'base64')) : null

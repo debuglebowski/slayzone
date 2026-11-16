@@ -1,5 +1,5 @@
 import { RotateCw } from 'lucide-react'
-import type { BrowserTabsState } from '../shared'
+import { browserPartitionForTab, type BrowserTabsState } from '../shared'
 import {
   BrowserTabPlaceholder,
   type BrowserTabPlaceholderHandle,
@@ -44,6 +44,7 @@ export function BrowserViewport({
   onTabViewChange
 }: BrowserViewportProps) {
   // The local hub's tasks keep `persist:browser-tabs`; a remote hub's get its own jar.
+  // An isolated tab (opened for an agent elsewhere) browses in the isolated partition.
   const partition = useBrowserPartition()
   // Tab URLs stored in a REMOTE hub's row (written by that hub, a template or an
   // agent) load only if they are web pages — the same scheme rule as a relayed
@@ -62,7 +63,7 @@ export function BrowserViewport({
           tabId={tab.id}
           taskId={taskId || ''}
           url={initialUrl(tab.url)}
-          partition={partition}
+          partition={browserPartitionForTab(partition, tab)}
           visible={tab.id === tabs.activeTabId && !extensionsManagerOpen}
           hidden={!!loadError || extensionsManagerOpen || !hasLoadedRealPage}
           offScreen={isActive === false}

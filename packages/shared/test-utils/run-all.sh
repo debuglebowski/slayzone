@@ -1297,6 +1297,7 @@ run_harness packages/domains/task/src/server/ops/chat-flag-seeding.test.ts
 run_harness packages/domains/task/src/server/ops/chat-starting-values.test.ts
 run_harness packages/domains/task/src/server/ops/task-paths-delegate.test.ts
 run_harness packages/domains/task/src/server/ops/artifacts-sidebar.test.ts
+run_harness packages/domains/task/src/server/ops/browser-tab-isolated.test.ts
 run_harness packages/domains/task/src/server/ops/load-board-rows-position.test.ts
 # A task's main-agent spawn props + cwd (worktree > base dir > bound child repo > root),
 # shared by the desktop task page and the hub's task.startMainAgent.

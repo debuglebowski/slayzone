@@ -79,14 +79,18 @@ export function registerBrowserNewTabRoute(app: Express, deps: RestApiDeps): voi
 
     // Only the trusted local agent's URL opens with the tab; anyone else's tab opens
     // blank and the URL loads through the relay (name resolved first; refusal reported).
-    const openWith = url && isTrustedLocal(browser, caller) ? url : undefined
+    // Anyone but the desktop's own local agent gets an ISOLATED tab: its own empty
+    // browser, never the user's logins, files or local network.
+    const trusted = isTrustedLocal(browser, caller)
+    const openWith = url && trusted ? url : undefined
     deps.menu?.emit('browser-create-tab', {
       taskId,
       tabId,
       url: openWith,
       background,
       origin: caller.origin,
-      principal: caller.principal
+      principal: caller.principal,
+      isolated: !trusted
     })
     deps.legacyBroadcast?.('browser:create-tab', { taskId, tabId, url: openWith, background }) // slice 5: drop legacy send
 

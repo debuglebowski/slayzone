@@ -17,11 +17,14 @@ import type { MenuEventMap } from '../../../app-deps.js'
 import { registerBrowserNavigateRoute } from './navigate.js'
 import { registerBrowserNewTabRoute } from './new-tab.js'
 import { registerBrowserEvalRoute } from './eval.js'
+import { registerBrowserTabsRoute } from './tabs.js'
 
 let origin: 'hub-machine' | 'elsewhere' = 'elsewhere'
 let principal: string | null = null
 let capable = true
 let hasTab = false
+let ownTabs = new Set<string>()
+let liveTabs: Array<{ tabId: string; active?: boolean; isolated?: boolean }> = []
 const loaded: Array<{ caller: unknown; taskId: string; tabId: string | null; url: string }> = []
 let loadError: Error | null = null
 const browser: BrowserAccess = {
@@ -29,8 +32,9 @@ const browser: BrowserAccess = {
   isDesktopLocalHub: true,
   hasCapableClient: () => capable,
   getResolvedBrowserTabId: async (_c, _t, tabId) => tabId ?? 'tab-a',
-  listBrowserTabs: async () => [],
+  listBrowserTabs: async () => liveTabs,
   hasBrowserTab: async () => hasTab,
+  isUsersOwnTab: async (_c, _t, tabId) => ownTabs.has(tabId),
   waitForBrowserRegistration: async () => {},
   execJs: async () => 'ran',
   loadUrl: async (caller, taskId, tabId, url) => {
@@ -45,8 +49,9 @@ const opened: unknown[] = []
 const created: unknown[] = []
 menu.on('browser-ensure-panel-open', (p) => opened.push(p))
 menu.on('browser-create-tab', (p) => created.push(p))
+let dbTabs: string | null = null
 const db = {
-  prepare: () => ({ get: async () => ({ 1: 1, browser_tabs: null }), run: async () => {} })
+  prepare: () => ({ get: async () => ({ 1: 1, browser_tabs: dbTabs }), run: async () => {} })
 }
 
 const app = express()
@@ -55,6 +60,7 @@ const deps = { browser, menu, db, notifyRenderer: () => {} } as unknown as RestA
 registerBrowserNavigateRoute(app, deps)
 registerBrowserNewTabRoute(app, deps)
 registerBrowserEvalRoute(app, deps)
+registerBrowserTabsRoute(app, deps)
 const h = await mountRestApp(app)
 afterAll(() => h.close())
 
@@ -67,6 +73,9 @@ const reset = () => {
   created.length = 0
   loaded.length = 0
   loadError = null
+  ownTabs = new Set()
+  liveTabs = []
+  dbTabs = null
 }
 
 describe('targets the desktop refuses are refused with a clear message', () => {
@@ -111,7 +120,8 @@ describe('targets the desktop refuses are refused with a clear message', () => {
         url: 'file:///tmp/fixture.html',
         tabId: undefined,
         origin: 'hub-machine',
-        principal: null
+        principal: null,
+        isolated: false
       }
     ])
   })
@@ -198,5 +208,85 @@ describe("an untrusted caller's URL reaches the desktop only through the DNS-che
     })
     expect(opened.at(-1)).toMatchObject({ url: 'http://localhost:3000/' })
     expect(loaded).toEqual([])
+  })
+})
+
+describe("an untrusted caller never touches the user's own browser (review 4 part B)", () => {
+  test("naming one of the user's own tabs: 403 saying why, for every op; nothing runs", async () => {
+    reset()
+    ownTabs = new Set(['own'])
+    hasTab = true
+    for (const [path, body] of [
+      ['/api/browser/eval', { code: 'document.cookie' }],
+      ['/api/browser/navigate', { url: 'https://a.test/' }]
+    ] as const) {
+      const res = await h.request<{ error?: string }>('POST', path, {
+        taskId: 't1',
+        tabId: 'own',
+        ...body
+      })
+      expect(res.status, path).toBe(403)
+      expect(res.body.error).toMatch(/user's own browser.*isolated tabs/)
+    }
+    expect(loaded).toEqual([])
+  })
+  test("the desktop's own local agent may use them, as on main", async () => {
+    reset()
+    origin = 'hub-machine'
+    ownTabs = new Set(['own'])
+    hasTab = true
+    const res = await h.request('POST', '/api/browser/eval', {
+      taskId: 't1',
+      tabId: 'own',
+      code: '1'
+    })
+    expect(res.status).toBe(200)
+  })
+  test('new tabs and auto-opened tabs for an untrusted caller are isolated', async () => {
+    reset()
+    await h.request('POST', '/api/browser/tabs', { taskId: 't1', url: 'https://a.test/' })
+    expect(created.at(-1)).toMatchObject({ isolated: true })
+    await h.request('POST', '/api/browser/navigate', { taskId: 't1', url: 'https://a.test/' })
+    expect(opened.at(-1)).toMatchObject({ isolated: true })
+    reset()
+    origin = 'hub-machine'
+    await h.request('POST', '/api/browser/tabs', { taskId: 't1', url: 'https://a.test/' })
+    expect(created.at(-1)).toMatchObject({ isolated: false })
+  })
+  test('with no isolated tab open (hidden panel): says to open one, lists only isolated tabs', async () => {
+    reset()
+    liveTabs = [
+      { tabId: 'own', active: true, isolated: false },
+      { tabId: 'iso', isolated: true }
+    ]
+    const res = await h.request<{ error?: string; tabs?: unknown[] }>('POST', '/api/browser/eval', {
+      taskId: 't1',
+      code: '1',
+      panel: 'hidden'
+    })
+    expect(res.status).toBe(404)
+    expect(res.body.error).toMatch(/isolated/)
+    expect(res.body.tabs).toEqual([{ tabId: 'iso', isolated: true }])
+  })
+  test('the tab list shows an untrusted caller only isolated tabs', async () => {
+    reset()
+    dbTabs = JSON.stringify({
+      tabs: [
+        { id: 'own', url: 'https://bank.test/', title: 'Bank' },
+        { id: 'iso', url: 'about:blank', title: 'New Tab', isolated: true }
+      ],
+      activeTabId: 'own'
+    })
+    const res = await h.request<{ tabs: Array<{ id: string }> }>(
+      'GET',
+      '/api/browser/tabs?taskId=t1'
+    )
+    expect(res.body.tabs.map((t) => t.id)).toEqual(['iso'])
+    origin = 'hub-machine'
+    const mine = await h.request<{ tabs: Array<{ id: string }> }>(
+      'GET',
+      '/api/browser/tabs?taskId=t1'
+    )
+    expect(mine.body.tabs.map((t) => t.id)).toEqual(['own', 'iso'])
   })
 })

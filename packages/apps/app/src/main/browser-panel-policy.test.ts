@@ -4,17 +4,22 @@
  * bypass — a scheme nobody listed, an address in a form nobody parsed, a subresource
  * nobody tracked — cannot exist.
  *
- *  - UNTRUSTED: every tab in a remote hub's partition, and any tab an `elsewhere`
- *    caller drives: http/https to PUBLIC addresses (name, every IP form, DNS), plus
- *    about:blank and inert data:/blob: subresources. Nothing else — no file:,
- *    slz-file:, extension or custom scheme.
- *  - TRUSTED (the user's own local-partition tabs): as before, except that a local file
- *    (slz-file:) is never a subresource of a web page.
- *  - Reads by an untrusted caller only of a document loaded under the untrusted policy
- *    (provenance, not taint).
+ *  - UNTRUSTED SESSION: the isolated partition (tabs opened for an agent on another
+ *    computer) and every remote hub's partition: http/https to PUBLIC addresses (name,
+ *    every IP form, DNS), plus about:blank and inert data:/blob: subresources — from
+ *    any frame, popup or worker of the session. Nothing else — no file:, slz-file:,
+ *    extension or custom scheme.
+ *  - The user's own browser: as before, except that a local file (slz-file:) is never
+ *    a subresource of a web page. An untrusted caller never acts in it at all
+ *    (`untrustedOpRefusal`), whatever the tab's history (review 4 HIGH 1, MEDIUM 2).
  */
 import { describe, expect, test } from 'vitest'
-import { PanelNetworkPolicy, panelMarkerNeeded, type PanelRequest } from './browser-panel-policy'
+import {
+  PanelNetworkPolicy,
+  panelMarkerNeeded,
+  untrustedOpRefusal,
+  type PanelRequest
+} from './browser-panel-policy'
 
 const dns: Record<string, string[]> = {
   'public.test': ['93.184.216.34'],
@@ -105,33 +110,31 @@ describe('untrusted: a remote hub’s partition', () => {
   }
 })
 
-describe('untrusted: a local-partition tab an elsewhere caller drives', () => {
-  test('is policed like a remote partition until the user navigates it', async () => {
-    const p = policy()
-    expect(await p.decide(req('http://127.0.0.1:51100/', { resourceType: 'xhr' }), local)).toBe(
-      'allow'
-    )
-    p.markUntrusted(7)
-    expect(await p.decide(req('http://127.0.0.1:51100/', { resourceType: 'xhr' }), local)).toBe(
+describe('a request with no web contents (service / shared worker) is judged by its session', () => {
+  test('in an untrusted session: blocked to this machine, resolved in that session', async () => {
+    const seen: unknown[] = []
+    const p = new PanelNetworkPolicy(async (host, _wc, resolveIn) => {
+      seen.push(resolveIn)
+      return lookup(host)
+    })
+    const worker = { webContentsId: null, resourceType: 'xhr' }
+    expect(await p.decide(req('http://127.0.0.1:51100/', worker), remote)).toBe('block')
+    expect(await p.decide(req('http://rebind.test/', worker), { ...remote, resolveIn: 'S' })).toBe(
       'block'
     )
-    expect(await p.decide(req('slz-file:///Users/u/x', { resourceType: 'mainFrame' }), local)).toBe(
-      'block'
-    )
-    p.clearUntrusted(7)
-    expect(await p.decide(req('http://127.0.0.1:51100/', { resourceType: 'xhr' }), local)).toBe(
-      'allow'
-    )
+    expect(seen).toEqual(['S'])
+    expect(await p.decide(req('slz-file:///Users/u/x', worker), remote)).toBe('block')
   })
-  test('other tabs are not affected', async () => {
-    const p = policy()
-    p.markUntrusted(7)
-    expect(
-      await p.decide(
-        req('http://localhost:3000/', { webContentsId: 8, resourceType: 'mainFrame' }),
-        local
-      )
-    ).toBe('allow')
+})
+
+describe('untrustedOpRefusal: an untrusted caller never acts in the user’s own browser', () => {
+  test('refused in the user’s own session, whatever the tab did before', () => {
+    expect(untrustedOpRefusal(true, false)).toMatch(/user's own browser.*isolated tabs/)
+  })
+  test('allowed in an untrusted session; a trusted caller anywhere', () => {
+    expect(untrustedOpRefusal(true, true)).toBeNull()
+    expect(untrustedOpRefusal(false, false)).toBeNull()
+    expect(untrustedOpRefusal(false, true)).toBeNull()
   })
 })
 
@@ -166,36 +169,6 @@ describe('trusted: the user’s own local-partition tab', () => {
     expect(
       await policy().decide(req('http://localhost:3000/', { resourceType: 'mainFrame' }), local)
     ).toBe('allow')
-  })
-})
-
-describe('provenance: what an untrusted caller may read', () => {
-  test('a remote partition’s documents are always policy documents', () => {
-    expect(policy().isPolicyDocument(7, true)).toBe(true)
-  })
-  test('local partition: only a document loaded while the tab was untrusted', () => {
-    const p = policy()
-    p.navigationStarted(7)
-    p.committed(7)
-    expect(p.isPolicyDocument(7, false)).toBe(false) // the user's own page
-    p.markUntrusted(7)
-    expect(p.isPolicyDocument(7, false)).toBe(false) // still the user's page
-    p.navigationStarted(7)
-    p.committed(7)
-    expect(p.isPolicyDocument(7, false)).toBe(true) // loaded under the policy
-    p.clearUntrusted(7) // the user navigates
-    p.navigationStarted(7)
-    p.committed(7)
-    expect(p.isPolicyDocument(7, false)).toBe(false)
-  })
-  test('forget drops everything', () => {
-    const p = policy()
-    p.markUntrusted(7)
-    p.navigationStarted(7)
-    p.committed(7)
-    p.forget(7)
-    expect(p.isUntrusted(7)).toBe(false)
-    expect(p.isPolicyDocument(7, false)).toBe(false)
   })
 })
 

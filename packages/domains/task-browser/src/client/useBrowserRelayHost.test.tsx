@@ -53,7 +53,7 @@ function start() {
   const h = renderHook(() => useBrowserRelayHost('t'))
   act(() => {
     onData!({ type: 'hello', hostId: 'h1' })
-    h.result.current.tabLive('x')
+    h.result.current.tabLive('x', true)
     h.result.current.setActiveTab('x')
   })
   act(() => {
@@ -84,4 +84,20 @@ it('stops at the op deadline even without a cancel', async () => {
   await act(() => vi.advanceTimersByTimeAsync(5 * 60_000))
   // execJs deadline 15 s → at most one beat (at 10 s).
   expect(progress.mock.calls.length).toBeLessThanOrEqual(1)
+})
+
+it('reports which live tabs are isolated (the only ones an untrusted caller may use)', () => {
+  const h = renderHook(() => useBrowserRelayHost('t'))
+  sync.mockClear()
+  act(() => {
+    onData!({ type: 'hello', hostId: 'h1' })
+    h.result.current.tabLive('own', false)
+    h.result.current.tabLive('iso', true)
+  })
+  expect(sync.mock.calls.at(-1)?.[0]).toMatchObject({
+    tabIds: ['own', 'iso'],
+    isolatedTabIds: ['iso']
+  })
+  act(() => h.result.current.tabGone('iso'))
+  expect(sync.mock.calls.at(-1)?.[0]).toMatchObject({ tabIds: ['own'], isolatedTabIds: [] })
 })

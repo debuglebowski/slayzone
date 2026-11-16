@@ -9,6 +9,11 @@ import {
   type BrowserWindow
 } from 'electron'
 import { join } from 'path'
+import { ISOLATED_BROWSER_PARTITION, LOCAL_BROWSER_PARTITION } from '@slayzone/task-browser/shared'
+
+/** Extensions are installed on the user's own browser session only. */
+const usesExtensions = (entry: { partition: string }): boolean =>
+  entry.partition === LOCAL_BROWSER_PARTITION
 import { EventEmitter } from 'node:events'
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
 import { menuEvents } from './menu-events'
@@ -270,8 +275,10 @@ export class BrowserViewManager {
     this.applySpoofing(view.webContents, entry)
     this.applyVisualZoomLimits(view.webContents)
 
-    // Register tab with Chrome extension system (browser tabs only)
-    if (kind !== 'web-panel' && this.chromeExtensions && win) {
+    // Register tab with Chrome extension system: browser tabs of the user's own
+    // browser only — extensions live on that session, and the extension system throws
+    // for a web contents of any other (an isolated tab, a remote hub's partition).
+    if (kind !== 'web-panel' && usesExtensions(entry) && this.chromeExtensions && win) {
       this.chromeExtensions.addTab(view.webContents, win)
       this.chromeExtensions.selectTab(view.webContents)
     }
@@ -295,6 +302,7 @@ export class BrowserViewManager {
     // Unregister from Chrome extension system before destroying (browser tabs only)
     if (
       entry.kind !== 'web-panel' &&
+      usesExtensions(entry) &&
       this.chromeExtensions &&
       !entry.view.webContents.isDestroyed()
     ) {
@@ -357,7 +365,7 @@ export class BrowserViewManager {
     if (visible) {
       entry.lastUsed = Date.now()
       // Notify extension system of active tab change (browser tabs only)
-      if (entry.kind !== 'web-panel' && this.chromeExtensions) {
+      if (entry.kind !== 'web-panel' && usesExtensions(entry) && this.chromeExtensions) {
         this.chromeExtensions.selectTab(entry.view.webContents)
       }
     }
@@ -998,7 +1006,9 @@ export class BrowserViewManager {
           type: 'new-tab-request' as const,
           url: normalizedInput.linkURL,
           background: false,
-          taskId: entry.taskId
+          taskId: entry.taskId,
+          // A tab opened from an isolated tab stays isolated.
+          isolated: entry.partition === ISOLATED_BROWSER_PARTITION
         }
         browserViewEvents.emit('event', newTabEvent)
         return true
@@ -1159,7 +1169,8 @@ export class BrowserViewManager {
       url: details.url || 'about:blank',
       background: false,
       taskId: sourceEntry.taskId,
-      tabId
+      tabId,
+      isolated: sourceEntry.partition === ISOLATED_BROWSER_PARTITION
     })
     const entry = await created
     const win = this.windowFor(entry)
@@ -1386,7 +1397,9 @@ export class BrowserViewManager {
               type: 'new-tab-request',
               url: details.url,
               background: details.disposition === 'background-tab',
-              taskId: entry.taskId
+              taskId: entry.taskId,
+              // A tab a page in an isolated tab opens stays isolated.
+              isolated: entry.partition === ISOLATED_BROWSER_PARTITION
             })
           }
           return { action: 'deny' }

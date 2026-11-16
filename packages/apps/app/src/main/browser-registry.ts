@@ -1,6 +1,6 @@
 import { webContents } from 'electron'
 import type { RelayedTabOpts } from '@slayzone/task-browser/shared'
-import type { PanelNetworkPolicy } from './browser-panel-policy'
+import { untrustedOpRefusal, type PanelNetworkPolicy } from './browser-panel-policy'
 
 /**
  * This client's (taskId, tabId) → live tab registry.
@@ -20,9 +20,9 @@ interface TaskEntry {
 const registry = new Map<string, TaskEntry>()
 
 let policy: PanelNetworkPolicy | null = null
-/** Whether a web contents lives in an untrusted (remote hub) session. */
+/** Whether a web contents lives in an untrusted session: an isolated tab's partition,
+ *  or a remote hub's. Never the user's own browser. */
 let isUntrustedSession: (wc: Electron.WebContents) => boolean = () => false
-const watchedContents = new Set<number>()
 
 /** The session-level policy untrusted relayed ops run under (set once at boot). */
 export function setBrowserNetworkPolicy(
@@ -31,21 +31,6 @@ export function setBrowserNetworkPolicy(
 ): void {
   policy = next
   isUntrustedSession = untrustedSession
-}
-
-/** Track a tab's main-frame navigations for document provenance (once per web contents). */
-function watchForPolicy(wc: Electron.WebContents): void {
-  if (watchedContents.has(wc.id)) return
-  watchedContents.add(wc.id)
-  const id = wc.id
-  wc.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) policy?.navigationStarted(id)
-  })
-  wc.on('did-navigate', () => policy?.committed(id))
-  wc.once('destroyed', () => {
-    watchedContents.delete(id)
-    policy?.forget(id)
-  })
 }
 
 function getOrCreateEntry(taskId: string): TaskEntry {
@@ -78,7 +63,6 @@ export function registerBrowserTab(taskId: string, tabId: string, webContentsId:
   entry.tabs.set(tabId, webContentsId)
   const wc = webContents.fromId(webContentsId)
   if (wc) {
-    watchForPolicy(wc)
     wc.once('destroyed', () => {
       const e = registry.get(taskId)
       if (!e) return
@@ -123,20 +107,15 @@ function requireWc(taskId: string, tabId: string | null): Electron.WebContents {
   return wc
 }
 
-const NOT_POLICY_DOCUMENT =
-  'This tab shows a page opened on this computer, not by `slay browser`; it can only be read from this computer. Navigate the tab with `slay browser navigate` first.'
-
 /**
- * An untrusted caller reads only a document loaded under the untrusted session policy
- * (browser-panel-policy.ts) — one that cannot contain anything that policy refuses.
+ * An untrusted caller (anyone but this device's own local agent) acts ONLY on a tab in
+ * an untrusted session — an isolated tab, or a remote hub's — never in the user's own
+ * browser. Decided by the session the tab's web contents lives in, so no history,
+ * popup or worker can change it.
  */
-function refuseUnlessPolicyDocument(
-  wc: Electron.WebContents,
-  opts: RelayedTabOpts | undefined
-): void {
-  if (!opts?.untrusted) return
-  if (!policy) throw new Error(NOT_POLICY_DOCUMENT)
-  if (!policy.isPolicyDocument(wc.id, isUntrustedSession(wc))) throw new Error(NOT_POLICY_DOCUMENT)
+function refuseUnlessIsolated(wc: Electron.WebContents, opts: RelayedTabOpts | undefined): void {
+  const refusal = untrustedOpRefusal(!!opts?.untrusted, isUntrustedSession(wc))
+  if (refusal) throw new Error(refusal)
 }
 
 function refuseTooLarge(bytes: number, opts: RelayedTabOpts | undefined): void {
@@ -157,7 +136,7 @@ export async function browserExecJs(
   const wc = requireWc(taskId, tabId)
   const frame = wc.mainFrame
   if (!frame) throw new Error('No main frame')
-  refuseUnlessPolicyDocument(wc, opts)
+  refuseUnlessIsolated(wc, opts)
   const result = await frame.executeJavaScript(code)
   // Measured here, where the value is produced — before it is copied to the renderer
   // and serialized for the hub. Stops counting at the limit.
@@ -174,12 +153,11 @@ export async function browserLoadUrl(
   opts?: RelayedTabOpts
 ): Promise<void> {
   const wc = requireWc(taskId, tabId)
+  refuseUnlessIsolated(wc, opts)
   if (opts?.untrusted) {
     if (!policy) throw new Error('The browser is not ready.')
+    // Says why up front; the session policy refuses the same, and every request after.
     await policy.checkTarget(url, wc.id)
-    // From here every request of this tab — this load, its redirects, its page's own
-    // requests — is decided by the untrusted session policy, until the user navigates.
-    policy.markUntrusted(wc.id)
   }
   await wc.loadURL(url)
 }
@@ -191,7 +169,7 @@ export async function browserGetUrl(
 ): Promise<string | null> {
   const wc = resolveWc(taskId, tabId ?? undefined)
   if (!wc) return null
-  refuseUnlessPolicyDocument(wc, opts)
+  refuseUnlessIsolated(wc, opts)
   return wc.getURL()
 }
 
@@ -202,7 +180,7 @@ export async function browserCapturePng(
   opts?: RelayedTabOpts
 ): Promise<Uint8Array | null> {
   const wc = requireWc(taskId, tabId)
-  refuseUnlessPolicyDocument(wc, opts)
+  refuseUnlessIsolated(wc, opts)
   const image = await wc.capturePage()
   if (image.isEmpty()) return null
   const png = image.toPNG()

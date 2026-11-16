@@ -323,6 +323,8 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
       url?: string
       background?: boolean
       tabId?: string
+      /** Opened from an isolated tab: the new tab is isolated too. */
+      isolated?: boolean
     }
     if (event.taskId !== taskId) return
     if (event.type === 'select-tab-request' && event.tabId) {
@@ -335,12 +337,18 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
     }
     if (event.type !== 'new-tab-request') return
     const tabUrl = event.url as string
+    const isolated = event.isolated === true
     if (event.background) {
-      const newTab: BrowserTab = { id: generateTabId(), url: tabUrl, title: tabUrl }
+      const newTab: BrowserTab = {
+        id: generateTabId(),
+        url: tabUrl,
+        title: tabUrl,
+        ...(isolated ? { isolated: true } : {})
+      }
       const t = tabsRef.current
       commitTabsUpdate({ tabs: [...t.tabs, newTab], activeTabId: t.activeTabId })
     } else {
-      createNewTab(tabUrl, event.tabId)
+      createNewTab(tabUrl, event.tabId, { isolated })
     }
   }
   useBrowserHostEvent('event', handleNewTabRequest, !!taskId)
@@ -615,6 +623,7 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
             config={multiDeviceConfig}
             layout={multiDeviceLayout}
             url={activeTab?.url || 'about:blank'}
+            isolated={!!activeTab?.isolated}
             isResizing={isResizing}
             reloadTrigger={reloadTrigger}
             forceReloadTrigger={forceReloadTrigger}

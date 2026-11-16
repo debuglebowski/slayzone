@@ -113,9 +113,11 @@ describe('runRelayRequest', () => {
     return Promise.resolve(undefined)
   }
   const host = () => getBrowserHost()!
+  // A remote hub's panel: every tab is in that hub's (untrusted) partition.
   const panel = {
     taskId: 't',
     liveTabIds: new Set(['x', 'y']),
+    isolatedTabIds: new Set(['x', 'y']),
     activeTabId: 'x',
     hubIsLocal: false
   }
@@ -128,6 +130,66 @@ describe('runRelayRequest', () => {
     evalResult = 42
     invoke.mockImplementation(route)
   }
+
+  describe('an untrusted caller uses isolated tabs only (review 4 part B)', () => {
+    // The local hub: 'own' is the user's own browser, 'iso' an isolated tab.
+    const mine = {
+      taskId: 't',
+      liveTabIds: new Set(['own', 'iso']),
+      isolatedTabIds: new Set(['iso']),
+      activeTabId: 'own',
+      hubIsLocal: true
+    }
+    const elsewhere = { requestId: 'r', taskId: 't', origin: 'elsewhere' as const }
+    it("naming the user's own tab is refused for every op, saying why", async () => {
+      for (const op of [
+        { op: 'execJs', code: 'document.cookie' },
+        { op: 'loadUrl', url: 'https://a.test/' },
+        { op: 'getUrl' },
+        { op: 'capturePng' }
+      ]) {
+        reset()
+        await expect(
+          runRelayRequest(host(), { ...elsewhere, tabId: 'own', ...op } as never, mine)
+        ).rejects.toThrow(/user's own browser.*isolated tabs/)
+        expect(ran.filter(([m]) => m.startsWith('tabs.'))).toEqual([])
+      }
+    })
+    it('naming no tab goes to an isolated tab, never the active own one', async () => {
+      reset()
+      await runRelayRequest(host(), { ...elsewhere, tabId: null, op: 'getUrl' } as never, mine)
+      expect(sent('tabs.getUrl').at(-1)?.[1]).toEqual(['t', 'iso', expect.anything()])
+    })
+    it('with no isolated tab open, nothing is reached', async () => {
+      reset()
+      await expect(
+        runRelayRequest(host(), { ...elsewhere, tabId: null, op: 'getUrl' } as never, {
+          ...mine,
+          isolatedTabIds: new Set<string>()
+        })
+      ).rejects.toThrow(/not open here/)
+      expect(ran).toEqual([])
+    })
+    it("the user's own local agent keeps every tab, as on main", async () => {
+      reset()
+      await runRelayRequest(
+        host(),
+        { ...elsewhere, origin: 'hub-machine', tabId: 'own', op: 'getUrl' } as never,
+        mine
+      )
+      expect(sent('tabs.getUrl')).toHaveLength(1)
+    })
+    it("a hub claiming hub-machine is no local agent unless it is this device's own hub", async () => {
+      reset()
+      await expect(
+        runRelayRequest(
+          host(),
+          { ...elsewhere, origin: 'hub-machine', tabId: 'own', op: 'getUrl' } as never,
+          { ...mine, hubIsLocal: false }
+        )
+      ).rejects.toThrow(/user's own browser/)
+    })
+  })
 
   it('runs each op on the resolved tab', async () => {
     reset()
@@ -262,7 +324,7 @@ describe('runRelayRequest', () => {
         runRelayRequest(
           host(),
           { ...req, tabId: null, op: 'getUrl' },
-          { ...panel, activeTabId: null }
+          { ...panel, activeTabId: null, isolatedTabIds: new Set<string>() }
         )
       ).rejects.toThrow(/not open here/)
       expect(ran).toEqual([])

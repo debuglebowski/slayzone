@@ -800,7 +800,6 @@ let mainWindow: BrowserWindow | null = null
 const browserViewManager = new BrowserViewManager()
 /** Set once the panel sessions are configured (whenReady); validates + sets up a partition. */
 let ensurePanelPartition: ((partition: string) => Electron.Session) | null = null
-let browserNetworkPolicyRef: PanelNetworkPolicy | null = null
 /** User acts (input events main received) per web contents: the panel page's link
  *  bridge acts only on one (panel-link-bridge.ts). */
 const panelGestures = new UserGestureTracker()
@@ -3020,15 +3019,18 @@ app
     // The session-level request policy of every panel session (browser-panel-policy.ts).
     // Hostnames resolve through the tab session's own Chromium resolver: the host cache
     // the connection then uses.
-    const browserNetworkPolicy = new PanelNetworkPolicy(async (host, wcId) => {
+    const browserNetworkPolicy = new PanelNetworkPolicy(async (host, wcId, resolveIn) => {
       const wc = wcId != null ? webContents.fromId(wcId) : undefined
-      const sess = wc && !wc.isDestroyed() ? wc.session : browserSession
+      // A worker's request has no web contents: resolve in the session it came from.
+      const sess =
+        wc && !wc.isDestroyed()
+          ? wc.session
+          : ((resolveIn as Electron.Session | undefined) ?? browserSession)
       return (await sess.resolveHost(host)).endpoints.map((e) => e.address)
     })
     /** Sessions where every tab is untrusted: each remote hub's partition. */
     const untrustedPanelSessions = new WeakSet<Electron.Session>()
     setBrowserNetworkPolicy(browserNetworkPolicy, (wc) => untrustedPanelSessions.has(wc.session))
-    browserNetworkPolicyRef = browserNetworkPolicy
 
     const shouldCancelLoopbackHandoffRequest = (
       details: Electron.OnBeforeRequestListenerDetails
@@ -3058,7 +3060,7 @@ app
     // EVERY request of a panel session goes through the session-level policy first; only
     // what it allows reaches the trusted handling below.
     const panelBeforeRequest =
-      (untrustedSession: boolean) =>
+      (untrustedSession: boolean, sess: Electron.Session) =>
       (
         details: Electron.OnBeforeRequestListenerDetails,
         callback: (response: Electron.CallbackResponse) => void
@@ -3073,7 +3075,7 @@ app
               webContentsId: wcId,
               topUrl: wc && !wc.isDestroyed() ? wc.getURL() : ''
             },
-            { untrustedSession }
+            { untrustedSession, resolveIn: sess }
           )
           .then(
             (decision) => {
@@ -3088,8 +3090,8 @@ app
             () => callback({ cancel: true })
           )
       }
-    browserSession.webRequest.onBeforeRequest(panelBeforeRequest(false))
-    webPanelSession.webRequest.onBeforeRequest(panelBeforeRequest(false))
+    browserSession.webRequest.onBeforeRequest(panelBeforeRequest(false, browserSession))
+    webPanelSession.webRequest.onBeforeRequest(panelBeforeRequest(false, webPanelSession))
 
     browserSession.protocol.handle('slz-file', slzFileHandler)
     webPanelSession.protocol.handle('slz-file', slzFileHandler)
@@ -3174,9 +3176,11 @@ app
 
     browserSession.setDevicePermissionHandler(panelDevicePermission)
 
-    // A remote hub's tasks browse in that hub's OWN partition (task-browser
-    // browser-partition.ts), the first time a view or webview asks. EVERY tab there is
-    // untrusted (the remote hub and its agents drive it): the session-level policy
+    // A remote hub's tasks browse in that hub's OWN partition, and the local hub's
+    // isolated tabs (opened for an agent on another computer) in the in-memory isolated
+    // partition (task-browser browser-partition.ts), set up the first time a view or
+    // webview asks. EVERY tab there is untrusted (the remote hub, or the agent
+    // elsewhere, drives it): the session-level policy
     // allows public http(s) only, and the session gets NO app protocol at all — no
     // slz-file:, no file:, no extension or blocking handlers (external app launches are
     // refused by permission instead). Extensions stay on the local partition.
@@ -3194,7 +3198,7 @@ app
       untrustedPanelSessions.add(sess)
       sess.setUserAgent(_chromeUa)
       sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
-      sess.webRequest.onBeforeRequest(panelBeforeRequest(true))
+      sess.webRequest.onBeforeRequest(panelBeforeRequest(true, sess))
       sess.setPermissionRequestHandler((wc, permission, callback) => {
         if (permission === 'openExternal') return callback(false)
         panelPermissionRequest(wc, permission, callback)
@@ -3432,10 +3436,6 @@ app
     // The browser panel's client-local host: this app's renderers drive the web views
     // here directly (never through the hub), in local AND remote-hub mode. Registered
     // before any window loads so a renderer's subscribe is never dropped.
-    const userNavigated = (viewId: string): void => {
-      const wcId = browserViewManager.getWebContentsId(viewId)
-      if (wcId != null) browserNetworkPolicyRef?.clearUntrusted(wcId)
-    }
     const browserHostImpl: BrowserHostImpl = {
       'view.create': (_s, opts) => browserViewManager.createView(opts),
       'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
@@ -3452,24 +3452,10 @@ app
       'view.showAll': () => browserViewManager.showAll(),
       'view.setHandoffPolicy': (_s, viewId, policy) =>
         browserViewManager.setHandoffPolicy(viewId, policy),
-      // The user navigating a tab makes it theirs again (an untrusted caller's
-      // restriction ends — browser-private-network-guard.ts).
-      'view.navigate': (_s, viewId, url) => {
-        userNavigated(viewId)
-        return browserViewManager.navigate(viewId, url)
-      },
-      'view.goBack': (_s, viewId) => {
-        userNavigated(viewId)
-        return browserViewManager.goBack(viewId)
-      },
-      'view.goForward': (_s, viewId) => {
-        userNavigated(viewId)
-        return browserViewManager.goForward(viewId)
-      },
-      'view.reload': (_s, viewId, ignoreCache) => {
-        userNavigated(viewId)
-        return browserViewManager.reload(viewId, ignoreCache)
-      },
+      'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
+      'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
+      'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
+      'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
       'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
       'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
       'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
@@ -4214,8 +4200,7 @@ app
     const linkBridgeCall = (kind: LinkBridgeKind, sender: Electron.WebContents): boolean =>
       linkBridgeAllowed(kind, sender.id, {
         gestures: panelGestures,
-        untrusted:
-          browserNetworkPolicy.isUntrusted(sender.id) || untrustedPanelSessions.has(sender.session)
+        untrusted: untrustedPanelSessions.has(sender.session)
       })
     ipcMain.on(
       'browser:request-create-task-from-link',

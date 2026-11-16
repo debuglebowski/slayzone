@@ -33,6 +33,7 @@ import {
   type BrowserRelayFrame,
   type BrowserRelayOp,
   type BrowserRelayReply,
+  type BrowserRelayScope,
   type BrowserRelayTabsState,
   type BrowserRequestOrigin
 } from '../shared'
@@ -50,6 +51,8 @@ interface Host {
   clientKey: string
   send: (frame: BrowserRelayFrame) => void
   tabIds: Set<string>
+  /** The isolated tabs among `tabIds` (see `BrowserRelayTabsState`). */
+  isolatedTabIds: Set<string>
   activeTabId: string | null
   /** When it came online — the tie-break among hosts nobody used. */
   attachedSeq: number
@@ -68,6 +71,7 @@ interface PendingRequest {
 interface Waiter {
   principalKey: string | null
   tabId?: string
+  scope: BrowserRelayScope
   resolve: () => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -83,6 +87,7 @@ export interface BrowserRelayOptions {
 export interface BrowserRelayTabInfo {
   tabId: string
   active: boolean
+  isolated: boolean
 }
 
 export class BrowserRelay {
@@ -118,6 +123,7 @@ export class BrowserRelay {
       clientKey: input.clientKey,
       send: input.send,
       tabIds: new Set(),
+      isolatedTabIds: new Set(),
       activeTabId: null,
       attachedSeq: ++this.attachClock,
       pending: new Set()
@@ -131,6 +137,7 @@ export class BrowserRelay {
   sync(principalKey: string | null, state: BrowserRelayTabsState): void {
     const host = this.requireHost(principalKey, state.hostId)
     host.tabIds = new Set(state.tabIds)
+    host.isolatedTabIds = new Set((state.isolatedTabIds ?? []).filter((t) => host.tabIds.has(t)))
     host.activeTabId = state.activeTabId
     this.settleWaiters(host.taskId)
   }
@@ -201,35 +208,63 @@ export class BrowserRelay {
   // for, null on a hub without login) and only ever sees that principal's hosts: once
   // a task can be shared, one user's `slay browser` must never run in another user's
   // desktop browser.
+  //
+  // `scope: 'isolated'` (an untrusted caller) sees ONLY isolated tabs: with no tab id
+  // it resolves to the owner's active tab if isolated, else its newest isolated tab —
+  // never to one of the user's own tabs.
 
-  /** Explicit tab when given, else the owner's active tab. */
-  getResolvedTabId(principalKey: string | null, taskId: string, tabId?: string): string | null {
+  /** Explicit tab when given, else the owner's active tab (in scope). */
+  getResolvedTabId(
+    principalKey: string | null,
+    taskId: string,
+    tabId?: string,
+    scope: BrowserRelayScope = 'any'
+  ): string | null {
     if (tabId) return tabId
-    return this.ownerForActive(principalKey, taskId)?.activeTabId ?? null
+    const host = this.resolveHost(principalKey, taskId, undefined, scope)
+    return host ? defaultTabOf(host, scope) : null
   }
 
   /** The owner's tabs (the most recently used host that has any). */
   listTabs(principalKey: string | null, taskId: string): BrowserRelayTabInfo[] {
     const owner = this.hostsFor(principalKey, taskId).find((h) => h.tabIds.size > 0)
     if (!owner) return []
-    return [...owner.tabIds].map((id) => ({ tabId: id, active: owner.activeTabId === id }))
+    return [...owner.tabIds].map((id) => ({
+      tabId: id,
+      active: owner.activeTabId === id,
+      isolated: owner.isolatedTabIds.has(id)
+    }))
   }
 
-  /** True when a live tab is registered — the "is the panel open?" probe. */
-  hasTab(principalKey: string | null, taskId: string, tabId?: string): boolean {
-    return this.resolveHost(principalKey, taskId, tabId) !== null
+  /** True when a live tab (in scope) is registered — the "is the panel open?" probe. */
+  hasTab(
+    principalKey: string | null,
+    taskId: string,
+    tabId?: string,
+    scope: BrowserRelayScope = 'any'
+  ): boolean {
+    return this.resolveHost(principalKey, taskId, tabId, scope) !== null
+  }
+
+  /** A live tab of the requester's that is NOT isolated: the user's own browser. */
+  isUsersOwnTab(principalKey: string | null, taskId: string, tabId: string): boolean {
+    return this.hostsFor(principalKey, taskId).some(
+      (h) => h.tabIds.has(tabId) && !h.isolatedTabIds.has(tabId)
+    )
   }
 
   waitForRegistration(
     principalKey: string | null,
     taskId: string,
-    opts: { tabId?: string; timeoutMs?: number } = {}
+    opts: { tabId?: string; timeoutMs?: number; scope?: BrowserRelayScope } = {}
   ): Promise<void> {
-    if (this.hasTab(principalKey, taskId, opts.tabId)) return Promise.resolve()
+    const scope = opts.scope ?? 'any'
+    if (this.hasTab(principalKey, taskId, opts.tabId, scope)) return Promise.resolve()
     return new Promise<void>((resolve, reject) => {
       const waiter: Waiter = {
         principalKey,
         tabId: opts.tabId,
+        scope,
         resolve,
         reject,
         timer: setTimeout(() => {
@@ -249,9 +284,10 @@ export class BrowserRelay {
     taskId: string,
     tabId: string | null,
     op: BrowserRelayOp,
-    origin: BrowserRequestOrigin
+    origin: BrowserRequestOrigin,
+    scope: BrowserRelayScope = 'any'
   ): Promise<unknown> {
-    const host = this.resolveHost(principalKey, taskId, tabId ?? undefined)
+    const host = this.resolveHost(principalKey, taskId, tabId ?? undefined, scope)
     if (!host) {
       return Promise.reject(
         new Error(
@@ -259,7 +295,7 @@ export class BrowserRelay {
         )
       )
     }
-    const targetTabId = tabId ?? host.activeTabId
+    const targetTabId = tabId ?? defaultTabOf(host, scope)
     const requestId = randomUUID()
     return new Promise<unknown>((resolve, reject) => {
       // Two limits: SILENCE (re-armed by each progress report — a slow page load is
@@ -358,8 +394,16 @@ export class BrowserRelay {
   private resolveHost(
     principalKey: string | null,
     taskId: string,
-    tabId: string | undefined
+    tabId: string | undefined,
+    scope: BrowserRelayScope = 'any'
   ): Host | null {
+    if (scope === 'isolated') {
+      return (
+        this.hostsFor(principalKey, taskId).find((h) =>
+          tabId ? h.isolatedTabIds.has(tabId) : h.isolatedTabIds.size > 0
+        ) ?? null
+      )
+    }
     if (!tabId) return this.ownerForActive(principalKey, taskId)
     return this.hostsFor(principalKey, taskId).find((h) => h.tabIds.has(tabId)) ?? null
   }
@@ -369,7 +413,7 @@ export class BrowserRelay {
     if (!list) return
     const remaining: Waiter[] = []
     for (const w of list) {
-      if (this.hasTab(w.principalKey, taskId, w.tabId)) {
+      if (this.hasTab(w.principalKey, taskId, w.tabId, w.scope)) {
         clearTimeout(w.timer)
         w.resolve()
       } else {
@@ -387,6 +431,16 @@ export class BrowserRelay {
     if (next.length) this.waiters.set(taskId, next)
     else this.waiters.delete(taskId)
   }
+}
+
+/** The tab a request with no tab id runs on: the active tab, or for an isolated scope
+ *  the active tab if isolated, else the newest isolated one. */
+function defaultTabOf(host: Host, scope: BrowserRelayScope): string | null {
+  if (scope === 'any') return host.activeTabId
+  if (host.activeTabId !== null && host.isolatedTabIds.has(host.activeTabId)) {
+    return host.activeTabId
+  }
+  return [...host.isolatedTabIds].at(-1) ?? null
 }
 
 const lastUseKey = (principalKey: string | null, clientKey: string, taskId: string): string =>

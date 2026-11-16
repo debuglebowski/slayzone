@@ -36,6 +36,13 @@ export interface BrowserTab {
   agentTouched?: boolean
   /** Persisted user-facing lock state. Driven by user toggle + auto-lock on agentTouched transition. */
   locked?: boolean
+  /**
+   * An ISOLATED tab: opened for a caller that is not the user's own local agent (an
+   * agent on another computer). It browses in its own empty, non-persistent browser
+   * (`browserPartitionForTab`) — never the user's logins, files or local network —
+   * and is the only kind of tab such a caller may use. Fixed at creation.
+   */
+  isolated?: boolean
 }
 
 export interface BrowserTabsState {

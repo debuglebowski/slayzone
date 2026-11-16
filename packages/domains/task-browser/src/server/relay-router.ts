@@ -67,7 +67,8 @@ export const appBrowserRelayRouter = router({
       z.object({
         hostId: id,
         tabIds: z.array(id).max(500),
-        activeTabId: id.nullable()
+        activeTabId: id.nullable(),
+        isolatedTabIds: z.array(id).max(500).optional()
       })
     )
     .mutation(({ input, ctx }) => onHost(() => relayDeps().relay.sync(principalKey(ctx), input))),

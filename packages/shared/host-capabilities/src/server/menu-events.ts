@@ -46,6 +46,8 @@ export type MenuEventMap = {
       tabId?: string
       origin?: 'hub-machine' | 'elsewhere'
       principal?: string | null
+      /** Open a NEW isolated tab (an untrusted caller named no tab). */
+      isolated?: boolean
     }
   ]
   'browser-create-tab': [
@@ -56,6 +58,8 @@ export type MenuEventMap = {
       background?: boolean
       origin?: 'hub-machine' | 'elsewhere'
       principal?: string | null
+      /** Create it isolated: its own empty browser (any caller but the local agent). */
+      isolated?: boolean
     }
   ]
   'browser-agent-touched': [payload: { taskId: string; tabId: string }]

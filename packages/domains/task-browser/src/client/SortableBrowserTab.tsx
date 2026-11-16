@@ -90,6 +90,15 @@ export function SortableBrowserTab({
       {isLocked && (
         <Lock aria-label="Browser controlled by agent" className="size-3 shrink-0 text-amber-500" />
       )}
+      {tab.isolated && (
+        <span
+          data-testid="browser-tab-isolated-badge"
+          title="Isolated browser for a remote agent: its own empty browser, with none of your logins, files or local network. Don't sign in here."
+          className="shrink-0 rounded border border-border bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          Isolated — remote agent
+        </span>
+      )}
       {isEditing ? (
         <input
           ref={inputRef}

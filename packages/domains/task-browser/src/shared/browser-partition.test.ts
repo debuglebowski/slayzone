@@ -1,8 +1,11 @@
 import { expect, test } from 'vitest'
 import {
+  ISOLATED_BROWSER_PARTITION,
   LOCAL_BROWSER_PARTITION,
   browserPartitionForHub,
-  isBrowserPanelPartition
+  browserPartitionForTab,
+  isBrowserPanelPartition,
+  isUsersOwnPartition
 } from './browser-partition'
 
 test('the local hub keeps the existing partition (users keep their logins)', () => {
@@ -35,4 +38,19 @@ test('main accepts only browser-panel partitions', () => {
   ]) {
     expect(isBrowserPanelPartition(p)).toBe(false)
   }
+})
+
+test("an isolated tab of the local hub never browses in the user's own partition", () => {
+  expect(browserPartitionForTab(LOCAL_BROWSER_PARTITION, { isolated: true })).toBe(
+    ISOLATED_BROWSER_PARTITION
+  )
+  expect(browserPartitionForTab(LOCAL_BROWSER_PARTITION, {})).toBe(LOCAL_BROWSER_PARTITION)
+  // In memory only: empty at every start, nothing of the user's.
+  expect(ISOLATED_BROWSER_PARTITION.startsWith('persist:')).toBe(false)
+  expect(isUsersOwnPartition(ISOLATED_BROWSER_PARTITION)).toBe(false)
+  expect(isBrowserPanelPartition(ISOLATED_BROWSER_PARTITION)).toBe(true)
+  // A remote hub's tabs keep its own (already isolated) partition.
+  const remote = browserPartitionForHub('hub:https://a.example.com', false)
+  expect(browserPartitionForTab(remote, { isolated: true })).toBe(remote)
+  expect(isUsersOwnPartition(remote)).toBe(false)
 })

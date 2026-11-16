@@ -227,9 +227,13 @@ export interface BrowserAccess {
   listBrowserTabs: (
     caller: BrowserCaller,
     taskId: string
-  ) => Promise<Array<{ tabId: string; active?: boolean }>>
-  /** True when a live tab is registered — the "is the panel open?" probe. */
+  ) => Promise<Array<{ tabId: string; active?: boolean; isolated?: boolean }>>
+  /** True when a live tab the caller may use is registered — the "is the panel open?"
+   *  probe. An untrusted caller (see `isTrustedLocal`) may use isolated tabs only. */
   hasBrowserTab: (caller: BrowserCaller, taskId: string, tabId?: string) => Promise<boolean>
+  /** A live tab of the caller's user that is NOT isolated: the user's own browser
+   *  (their logins, local pages). Only a trusted local caller may use one. */
+  isUsersOwnTab: (caller: BrowserCaller, taskId: string, tabId: string) => Promise<boolean>
   /** Resolves once a tab registers; rejects on timeout. */
   waitForBrowserRegistration: (
     caller: BrowserCaller,

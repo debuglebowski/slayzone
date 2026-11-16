@@ -9,7 +9,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel
 } from '@slayzone/ui'
-import type { DeviceSlot, DeviceEmulation, GridLayout, MultiDeviceConfig } from '../shared'
+import {
+  browserPartitionForTab,
+  type DeviceSlot,
+  type DeviceEmulation,
+  type GridLayout,
+  type MultiDeviceConfig
+} from '../shared'
 import { presetsForSlot } from './device-presets'
 import { DeviceWebview, type DeviceLayout } from './DeviceWebview'
 import { useBrowserPartition } from './useHubIsLocal'
@@ -31,6 +37,8 @@ interface MultiDeviceGridProps {
   config: MultiDeviceConfig
   layout: GridLayout
   url: string
+  /** The tab is isolated: its devices browse in the isolated partition too. */
+  isolated?: boolean
   isResizing?: boolean
   reloadTrigger?: number
   forceReloadTrigger?: number
@@ -41,6 +49,7 @@ interface DeviceColumnProps {
   slot: DeviceSlot
   preset: DeviceEmulation
   url: string
+  isolated?: boolean
   isResizing: boolean
   reloadTrigger?: number
   forceReloadTrigger?: number
@@ -52,6 +61,7 @@ function DeviceColumn({
   slot,
   preset,
   url,
+  isolated,
   isResizing,
   reloadTrigger,
   forceReloadTrigger,
@@ -78,7 +88,7 @@ function DeviceColumn({
     onPresetChange?.({ name: 'Custom', width: w, height: h, deviceScaleFactor: 1, mobile: false })
   }
 
-  const partition = useBrowserPartition()
+  const partition = browserPartitionForTab(useBrowserPartition(), { isolated })
   const labelTop = layout ? layout.topOffset + layout.scaledHeight + 12 : 0
 
   return (
@@ -176,6 +186,7 @@ export function MultiDeviceGrid({
   config,
   layout,
   url,
+  isolated,
   isResizing,
   reloadTrigger,
   forceReloadTrigger,
@@ -297,6 +308,7 @@ export function MultiDeviceGrid({
             slot={slot}
             preset={config[slot].preset}
             url={url}
+            isolated={isolated}
             isResizing={(isResizing ?? false) || dragging}
             reloadTrigger={reloadTrigger}
             forceReloadTrigger={forceReloadTrigger}

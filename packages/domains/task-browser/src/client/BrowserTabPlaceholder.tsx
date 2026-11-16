@@ -3,7 +3,7 @@ import { callBrowserHost, getBrowserHost } from './browser-host'
 import { takeUntrustedLoad } from './hub-supplied-loads'
 import { useBrowserRelayHostHandle } from './useBrowserRelayHost'
 import { useBrowserView, type BrowserViewState } from './useBrowserView'
-import type { BrowserTabTheme } from '../shared'
+import { isUsersOwnPartition, LOCAL_BROWSER_PARTITION, type BrowserTabTheme } from '../shared'
 
 /** The reactive part of a tab's handle: which view it owns and how to drive it. */
 export interface BrowserTabView {
@@ -121,9 +121,8 @@ export const BrowserTabPlaceholder = forwardRef<
         await host.call('tabs.register', taskId, tabId, wcId)
         if (cancelled) return
         // A hub-supplied URL from anyone but the user's own local agent: the tab was
-        // created blank; load it now as an untrusted load (name resolved, then the
-        // tab stays under the untrusted policy). Not awaited: registration is not
-        // held up by a page load.
+        // created isolated and blank; load it now as an untrusted load (the name is
+        // resolved first). Not awaited: registration is not held up by a page load.
         const untrustedUrl = takeUntrustedLoad(taskId, tabId)
         if (untrustedUrl) {
           host
@@ -131,7 +130,8 @@ export const BrowserTabPlaceholder = forwardRef<
             .catch((err: unknown) => console.warn('[browser] hub-supplied URL refused:', err))
         }
         live = true
-        relayHost?.tabLive(tabId)
+        // No partition = main's default, the user's own browser.
+        relayHost?.tabLive(tabId, !isUsersOwnPartition(partition ?? LOCAL_BROWSER_PARTITION))
       })
       .catch((err: unknown) => console.warn('[browser] tab registration failed:', err))
     return () => {
@@ -139,7 +139,7 @@ export const BrowserTabPlaceholder = forwardRef<
       if (live) relayHost?.tabGone(tabId)
       callBrowserHost('tabs.unregister', taskId, tabId)
     }
-  }, [taskId, tabId, viewId, relayHost])
+  }, [taskId, tabId, viewId, relayHost, partition])
 
   useEffect(() => {
     if (!viewId) return

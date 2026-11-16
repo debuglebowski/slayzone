@@ -22,8 +22,10 @@ import { useTRPC, useTRPCClient } from './trpc'
  * every change and on every (re)connect (a reconnect is a new host id).
  */
 export interface BrowserRelayHostHandle {
-  /** A tab's view registered on this device's host. */
-  tabLive: (tabId: string) => void
+  /** A tab's view registered on this device's host. `isolated`: it lives in an
+   *  untrusted session (an isolated tab, or any tab of a remote hub), not the user's
+   *  own browser — the only tabs an untrusted caller may use. */
+  tabLive: (tabId: string, isolated: boolean) => void
   tabGone: (tabId: string) => void
   setActiveTab: (tabId: string | null) => void
   /** The user worked in this panel's chrome (tab bar, address bar, …): this client
@@ -55,13 +57,19 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
   /** requestId → stop its progress heartbeat. */
   const heartbeatsRef = useRef(new Map<string, () => void>())
   const tabsRef = useRef(new Set<string>())
+  const isolatedRef = useRef(new Set<string>())
   const activeRef = useRef<string | null>(null)
 
   const sync = useStableCallback(() => {
     const hostId = hostIdRef.current
     if (!hostId) return
     trpcClient.app.browserRelay.sync
-      .mutate({ hostId, tabIds: [...tabsRef.current], activeTabId: activeRef.current })
+      .mutate({
+        hostId,
+        tabIds: [...tabsRef.current],
+        activeTabId: activeRef.current,
+        isolatedTabIds: [...isolatedRef.current]
+      })
       .catch((err: unknown) => console.warn('[browser-relay] sync failed:', err))
   })
 
@@ -106,6 +114,7 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
     runRelayRequest(host, req, {
       taskId,
       liveTabIds: tabsRef.current,
+      isolatedTabIds: isolatedRef.current,
       activeTabId: activeRef.current,
       hubIsLocal
     })
@@ -152,11 +161,14 @@ export function useBrowserRelayHost(taskId: string | undefined): BrowserRelayHos
       })
   })
 
-  const tabLive = useStableCallback((tabId: string) => {
+  const tabLive = useStableCallback((tabId: string, isolated: boolean) => {
     tabsRef.current.add(tabId)
+    if (isolated) isolatedRef.current.add(tabId)
+    else isolatedRef.current.delete(tabId)
     sync()
   })
   const tabGone = useStableCallback((tabId: string) => {
+    isolatedRef.current.delete(tabId)
     if (!tabsRef.current.delete(tabId)) return
     sync()
   })
@@ -177,6 +189,9 @@ export interface RelayPanelContext {
   taskId: string
   /** Tabs this panel has live on this device. */
   liveTabIds: ReadonlySet<string>
+  /** The live tabs in an untrusted session (isolated tabs; every tab of a remote hub):
+   *  the only ones an untrusted caller may use. */
+  isolatedTabIds: ReadonlySet<string>
   activeTabId: string | null
   /** The hub this panel talks to is this device's own local hub. */
   hubIsLocal: boolean
@@ -189,6 +204,9 @@ const MAX_URL = 8192
 const WEB_SCHEMES = new Set(['http:', 'https:'])
 
 class RelayRefusal extends Error {}
+
+const OWN_TAB_REFUSAL =
+  "That tab is the user's own browser (their logins and local pages). An agent on another computer or on a remote hub may only use isolated tabs, which have their own empty browser: open one with `slay browser new`."
 
 const isId = (v: unknown): v is string =>
   typeof v === 'string' && v.length > 0 && v.length <= MAX_ID
@@ -220,9 +238,19 @@ export async function runRelayRequest(
   if (r.taskId !== panel.taskId) {
     throw new RelayRefusal('That task is not open here.')
   }
-  const tabId = (r.tabId as string | null) ?? panel.activeTabId
+  // An untrusted caller (anyone but this device's own local agent) uses ISOLATED tabs
+  // only — never the user's own browser. With no tab named: the active tab if
+  // isolated, else the newest isolated one. Electron main enforces it again per tab.
+  const tabId =
+    (r.tabId as string | null) ??
+    (trustedLocal || (panel.activeTabId !== null && panel.isolatedTabIds.has(panel.activeTabId))
+      ? panel.activeTabId
+      : ([...panel.isolatedTabIds].at(-1) ?? null))
   if (!tabId || !panel.liveTabIds.has(tabId)) {
     throw new RelayRefusal('That browser tab is not open here.')
+  }
+  if (!trustedLocal && !panel.isolatedTabIds.has(tabId)) {
+    throw new RelayRefusal(OWN_TAB_REFUSAL)
   }
   const taskId = panel.taskId
 

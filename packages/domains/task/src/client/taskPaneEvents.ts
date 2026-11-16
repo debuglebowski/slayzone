@@ -20,6 +20,7 @@ export interface TaskPaneEventPayloads {
     url?: string | null
     tabId?: string | null
     origin?: 'hub-machine' | 'elsewhere'
+    isolated?: boolean
   }
   'browser-create-tab': {
     taskId: string
@@ -27,6 +28,7 @@ export interface TaskPaneEventPayloads {
     url?: string | null
     background?: boolean
     origin?: 'hub-machine' | 'elsewhere'
+    isolated?: boolean
   }
   'open-artifact': { taskId: string; artifactId: string }
   'respawn-suggested': { taskId: string }

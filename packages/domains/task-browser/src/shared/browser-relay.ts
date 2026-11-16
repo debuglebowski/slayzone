@@ -66,4 +66,14 @@ export interface BrowserRelayTabsState {
   hostId: string
   tabIds: string[]
   activeTabId: string | null
+  /**
+   * The ISOLATED tabs among `tabIds`: those an untrusted caller (an agent elsewhere,
+   * a remote hub) may use. Each lives in its own empty cookie jar under the untrusted
+   * session policy, never the user's own (`browserPartitionForTab`). Absent (an older
+   * client) = none.
+   */
+  isolatedTabIds?: string[]
 }
+
+/** Which tabs a query may see: every tab (a trusted local caller) or the isolated ones. */
+export type BrowserRelayScope = 'any' | 'isolated'

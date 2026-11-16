@@ -37,12 +37,16 @@ export type {
   BrowserRelayRequest,
   BrowserRelayFrame,
   BrowserRelayReply,
-  BrowserRelayTabsState
+  BrowserRelayTabsState,
+  BrowserRelayScope
 } from './browser-relay'
 export { BROWSER_RELAY_MAX_RESULT_BYTES, BROWSER_RELAY_OP_DEADLINE_MS } from './browser-relay'
 export {
   LOCAL_BROWSER_PARTITION,
   WEB_PANEL_PARTITION,
+  ISOLATED_BROWSER_PARTITION,
   browserPartitionForHub,
-  isBrowserPanelPartition
+  browserPartitionForTab,
+  isBrowserPanelPartition,
+  isUsersOwnPartition
 } from './browser-partition'

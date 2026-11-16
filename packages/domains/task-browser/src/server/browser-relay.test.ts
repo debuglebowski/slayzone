@@ -43,8 +43,8 @@ test('no host → no tab; sync registers tabs and the active one', () => {
   expect(relay.getResolvedTabId(null, 't1')).toBe('y')
   expect(relay.getResolvedTabId(null, 't1', 'x')).toBe('x')
   expect(relay.listTabs(null, 't1')).toEqual([
-    { tabId: 'x', active: false },
-    { tabId: 'y', active: true }
+    { tabId: 'x', active: false, isolated: false },
+    { tabId: 'y', active: true, isolated: false }
   ])
   expect(relay.hasTab(null, 't2')).toBe(false)
 })
@@ -377,7 +377,7 @@ test('a request only ever reaches the REQUESTER’s own hosts (review 4: task sh
   expect(alice.requests()).toHaveLength(1)
   expect(bob.requests()).toHaveLength(0)
   expect(relay.hasTab('alice', 't1', 'y')).toBe(false)
-  expect(relay.listTabs('alice', 't1')).toEqual([{ tabId: 'x', active: true }])
+  expect(relay.listTabs('alice', 't1')).toEqual([{ tabId: 'x', active: true, isolated: false }])
   expect(relay.getResolvedTabId('alice', 't1')).toBe('x')
   expect(relay.hasTab('carol', 't1')).toBe(false)
   await expect(relay.run('carol', 't1', null, { op: 'getUrl' }, 'elsewhere')).rejects.toThrow(
@@ -398,4 +398,71 @@ test('waiting for a tab only counts the requester’s own hosts', async () => {
   } finally {
     vi.useRealTimers()
   }
+})
+
+test("an isolated scope (untrusted caller) never resolves to one of the user's own tabs", async () => {
+  const relay = new BrowserRelay()
+  const a = host(relay, 't1')
+  // The user's own tab is active; no isolated tab yet.
+  relay.sync(null, { hostId: a.hostId, tabIds: ['own'], activeTabId: 'own' })
+  expect(relay.hasTab(null, 't1', undefined, 'isolated')).toBe(false)
+  expect(relay.hasTab(null, 't1', 'own', 'isolated')).toBe(false)
+  expect(relay.getResolvedTabId(null, 't1', undefined, 'isolated')).toBeNull()
+  expect(relay.isUsersOwnTab(null, 't1', 'own')).toBe(true)
+  await expect(
+    relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere', 'isolated')
+  ).rejects.toThrow(/not available/)
+  await expect(
+    relay.run(null, 't1', 'own', { op: 'getUrl' }, 'elsewhere', 'isolated')
+  ).rejects.toThrow(/not available/)
+  expect(a.requests()).toEqual([])
+
+  // An isolated tab opens (not active): a no-id request goes to IT, not the active one.
+  relay.sync(null, {
+    hostId: a.hostId,
+    tabIds: ['own', 'iso'],
+    activeTabId: 'own',
+    isolatedTabIds: ['iso']
+  })
+  expect(relay.getResolvedTabId(null, 't1', undefined, 'isolated')).toBe('iso')
+  expect(relay.getResolvedTabId(null, 't1')).toBe('own')
+  expect(relay.isUsersOwnTab(null, 't1', 'iso')).toBe(false)
+  void relay.run(null, 't1', null, { op: 'getUrl' }, 'elsewhere', 'isolated').catch(() => {})
+  expect(a.requests().at(-1)?.tabId).toBe('iso')
+  expect(relay.listTabs(null, 't1')).toEqual([
+    { tabId: 'own', active: true, isolated: false },
+    { tabId: 'iso', active: false, isolated: true }
+  ])
+})
+
+test('an isolated id the client did not report as a live tab is ignored', () => {
+  const relay = new BrowserRelay()
+  const a = host(relay, 't1')
+  relay.sync(null, {
+    hostId: a.hostId,
+    tabIds: ['own'],
+    activeTabId: 'own',
+    isolatedTabIds: ['ghost']
+  })
+  expect(relay.hasTab(null, 't1', undefined, 'isolated')).toBe(false)
+})
+
+test('waiting in the isolated scope settles only when an isolated tab registers', async () => {
+  const relay = new BrowserRelay()
+  const a = host(relay, 't1')
+  let settled = false
+  const wait = relay
+    .waitForRegistration(null, 't1', { scope: 'isolated', timeoutMs: 1_000 })
+    .then(() => (settled = true))
+  relay.sync(null, { hostId: a.hostId, tabIds: ['own'], activeTabId: 'own' })
+  await Promise.resolve()
+  expect(settled).toBe(false)
+  relay.sync(null, {
+    hostId: a.hostId,
+    tabIds: ['own', 'iso'],
+    activeTabId: 'own',
+    isolatedTabIds: ['iso']
+  })
+  await wait
+  expect(settled).toBe(true)
 })
