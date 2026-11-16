@@ -69,7 +69,7 @@ it('replaces connector while idle terminal and running job keep their PIDs', asy
       sessionId: 'job',
       projectId: 'p1',
       command: process.execPath,
-      // The spawn boundary deliberately strips inherited Electron launch flags.
+      // The proc spawn boundary deliberately strips inherited Electron launch flags.
       // This fixture explicitly runs its Electron executable as a Node child.
       env: { ELECTRON_RUN_AS_NODE: '1' },
       args: [

@@ -7,10 +7,12 @@
  * reads, as before. REST can stream the ranges (`openArtifactReader`).
  */
 import { randomBytes } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import express from 'express'
 import { mkdtempSync, realpathSync, rmSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestHarness } from '../../../shared/test-utils/ipc-harness'
 import { createDbChatDataOps } from '@slayzone/terminal/server'
 import {
@@ -25,13 +27,16 @@ import { createFixtureChatRuntime } from '../../computer/src/project-scope.fixtu
 import { createComputerChatServices } from './computer-chat'
 import { openArtifactReaderOf } from '@slayzone/task-artifacts/server'
 import { createComputerArtifactStorage } from './computer-artifacts'
+import { registerArtifactsContentRoutes } from '../../api/src/http/rest-api/artifacts/content'
+import { getArtifactsDataRoot } from '../../api/src/http/rest-api/artifacts/shared'
+import { mountRestApp } from '../../../shared/test-utils/rest-harness'
 
 const BIG = randomBytes(BYTE_RANGE_MAX_CHUNK * 2 + 321)
 let h: Awaited<ReturnType<typeof createTestHarness>>
 let dir: string
 let pc: ReturnType<typeof createFixtureChatRuntime>
-const seen: Array<{ method: string; bytes: number }> = []
-let bounded = true
+const seen: Array<{ method: string; bytes: number; length?: number }> = []
+let bounded: boolean | undefined = true
 let stores: {
   ranged: ReturnType<typeof createComputerArtifactStorage>
   whole: ReturnType<typeof createComputerArtifactStorage>
@@ -67,9 +72,13 @@ beforeAll(async () => {
     .run()
   const request = async (_pc: string, p: unknown) => {
     const result = await pc.request(p)
-    const v = (p as { kind?: string; value?: { method?: string } }).value
+    const v = (p as { kind?: string; value?: { method?: string; args?: unknown[] } }).value
     if ((p as { kind?: string }).kind === 'artifact.invoke' && v?.method)
-      seen.push({ method: v.method, bytes: Buffer.byteLength(JSON.stringify(result ?? null)) })
+      seen.push({
+        method: v.method,
+        bytes: Buffer.byteLength(JSON.stringify(result ?? null)),
+        ...(v.method === 'readRange' ? { length: Number(v.args?.[3]) } : {})
+      })
     return result
   }
   const chat = createComputerChatServices({
@@ -90,7 +99,7 @@ beforeAll(async () => {
       local: createArtifactStore(join(dir, 'hub')),
       chat,
       request,
-      boundedReads: () => bounded
+      boundedReads: () => bounded === true
     })
   stores = { ranged: make(), whole: make() }
   const a = await stores.whole.uploadArtifactBlob(h.slayDb, {
@@ -225,3 +234,198 @@ describe('a bounded computer: every byte read in ranges', () => {
     }
   })
 })
+
+// Real HTTP -> real hub storage -> native computer invocation; no fake reader in this suite.
+async function withHttp(run: (url: string) => Promise<void>, trapWholeBuffers = false) {
+  const dataRoot = getArtifactsDataRoot(),
+    previous = getArtifactStorage(dataRoot)
+  const scope = new AsyncLocalStorage<boolean>()
+  const app = express()
+  app.use((_req, _res, next) => scope.run(true, next))
+  setArtifactStorage(dataRoot, stores.ranged)
+  registerArtifactsContentRoutes(app, { db: h.slayDb, notifyRenderer: () => undefined })
+  const rest = await mountRestApp(app)
+  if (trapWholeBuffers) {
+    const concat = Buffer.concat,
+      alloc = Buffer.alloc
+    vi.spyOn(Buffer, 'concat').mockImplementation((list, length) => {
+      if (
+        scope.getStore() &&
+        (length ?? list.reduce((n, part) => n + part.length, 0)) > BYTE_RANGE_MAX_CHUNK
+      )
+        throw new Error('server assembled whole artifact')
+      return concat(list, length)
+    })
+    vi.spyOn(Buffer, 'alloc').mockImplementation(((size: number, ...args: unknown[]) => {
+      if (scope.getStore() && size > BYTE_RANGE_MAX_CHUNK)
+        throw new Error('server allocated whole artifact')
+      return Reflect.apply(alloc, Buffer, [size, ...args])
+    }) as typeof Buffer.alloc)
+  }
+  try {
+    await run(rest.url)
+  } finally {
+    vi.restoreAllMocks()
+    await rest.close()
+    setArtifactStorage(dataRoot, previous)
+    bounded = true
+  }
+}
+const walkFiles = (root: string): string[] =>
+  readdirSync(root, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walkFiles(join(root, e.name)) : [join(root, e.name)]
+  )
+
+it.each([true, false, undefined])(
+  'native computer REST Range matrix (boundedReads=%s)',
+  async (advertised) => {
+    const bytes = Buffer.alloc(BYTE_RANGE_MAX_CHUNK * 2 + 33).map((_, i) => i % 251)
+    Buffer.from('é😀\0\r\n').copy(bytes, BYTE_RANGE_MAX_CHUNK - 3)
+    bounded = true
+    const artifact = await stores.ranged.uploadArtifactBlob(h.slayDb, {
+      taskId: 't',
+      title: `é"x-${String(advertised)}.bin`,
+      bytes,
+      chatTabId: 'tab',
+      operationId: crypto.randomUUID()
+    })
+    bounded = advertised
+    const cases: Array<[string | undefined, number, number, number]> = [
+      [undefined, 200, 0, bytes.length],
+      ['bytes=2-8', 206, 2, 9],
+      [
+        `bytes=${BYTE_RANGE_MAX_CHUNK - 3}-${BYTE_RANGE_MAX_CHUNK + 7}`,
+        206,
+        BYTE_RANGE_MAX_CHUNK - 3,
+        BYTE_RANGE_MAX_CHUNK + 8
+      ],
+      ['bytes=9-', 206, 9, bytes.length],
+      ['bytes=-7', 206, bytes.length - 7, bytes.length],
+      [`bytes=${bytes.length - 2}-99999999`, 206, bytes.length - 2, bytes.length],
+      [`bytes=${bytes.length - 1}-`, 206, bytes.length - 1, bytes.length],
+      ['bytes=8-3', 200, 0, bytes.length],
+      ['bytes=0-1,3-4', 200, 0, bytes.length],
+      ['items=0-1', 200, 0, bytes.length],
+      [`bytes=${bytes.length}-`, 416, 0, 0],
+      ['bytes=-0', 416, 0, 0]
+    ]
+    await withHttp(async (url) => {
+      for (const [range, status, start, end] of cases) {
+        seen.length = 0
+        const response = await fetch(`${url}/api/artifacts/${artifact!.id}/content`, {
+          headers: range ? { Range: range } : {}
+        })
+        const body = Buffer.from(await response.arrayBuffer())
+        expect(response.status, range).toBe(status)
+        expect(response.headers.get('accept-ranges')).toBe('bytes')
+        if (status === 416) {
+          expect(response.headers.get('content-range')).toBe(`bytes */${bytes.length}`)
+          expect(JSON.parse(body.toString()).code).toBe('RANGE_NOT_SATISFIABLE')
+        } else {
+          expect(response.headers.get('content-length')).toBe(String(end - start))
+          expect(response.headers.get('content-range')).toBe(
+            status === 206 ? `bytes ${start}-${end - 1}/${bytes.length}` : null
+          )
+          expect(response.headers.get('content-disposition')).toBe(
+            `attachment; filename="__x-${String(advertised)}.bin"; filename*=UTF-8''%C3%A9%22x-${String(advertised)}.bin`
+          )
+          expect(body).toEqual(bytes.subarray(start, end))
+        }
+        if (advertised === true) {
+          expect(seen.map((call) => call.method)).not.toContain('readBytes')
+          const ranges = seen.filter((call) => call.method === 'readRange')
+          expect(ranges.length).toBeGreaterThan(0)
+          if (status === 416) expect(ranges).toHaveLength(1)
+          expect(ranges.every((call) => call.length! <= BYTE_RANGE_MAX_CHUNK)).toBe(true)
+          expect(bounded256k(ranges)).toBe(true)
+        } else expect(seen.map((call) => call.method)).toContain('readBytes')
+      }
+    }, advertised === true)
+  }
+)
+
+it('native staged artifact beyond the former inline limit streams exact HTTP bytes without a whole-buffer server fallback', async () => {
+  const bytes = Buffer.alloc(12 * 1024 * 1024 + 17).map((_, i) => i % 251)
+  Buffer.from('😀é\0\r\n').copy(bytes, BYTE_RANGE_MAX_CHUNK - 2)
+  bounded = true
+  const artifact = await stores.ranged.uploadArtifactBlob(h.slayDb, {
+    taskId: 't',
+    title: 'large.bin',
+    bytes,
+    chatTabId: 'tab',
+    operationId: crypto.randomUUID()
+  })
+  await withHttp(async (url) => {
+    for (const range of [
+      undefined,
+      `bytes=${BYTE_RANGE_MAX_CHUNK - 3}-${BYTE_RANGE_MAX_CHUNK + 7}`
+    ]) {
+      seen.length = 0
+      const response = await fetch(`${url}/api/artifacts/${artifact!.id}/content`, {
+        headers: range ? { Range: range } : {}
+      })
+      expect(response.status).toBe(range ? 206 : 200)
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(
+        range ? bytes.subarray(BYTE_RANGE_MAX_CHUNK - 3, BYTE_RANGE_MAX_CHUNK + 8) : bytes
+      )
+      expect(seen.map((call) => call.method)).not.toContain('readBytes')
+      const ranges = seen.filter((call) => call.method === 'readRange')
+      expect(ranges.length).toBe(Math.ceil(bytes.length / BYTE_RANGE_MAX_CHUNK))
+      expect(ranges.every((call) => call.length! <= BYTE_RANGE_MAX_CHUNK)).toBe(true)
+      expect(bounded256k(ranges)).toBe(true)
+    }
+  }, true)
+})
+
+it.each(['corrupt-unselected-tail', 'truncate'] as const)(
+  'native immutable %s cannot complete a successful prefix Range',
+  async (failure) => {
+    const bytes = Buffer.alloc(BYTE_RANGE_MAX_CHUNK * 2 + 101, 0x5a)
+    bounded = true
+    const artifact = await stores.ranged.uploadArtifactBlob(h.slayDb, {
+      taskId: 't',
+      title: 'integrity.bin',
+      bytes,
+      chatTabId: 'tab',
+      operationId: crypto.randomUUID()
+    })
+    const version = await stores.ranged.getCurrentArtifactVersion(h.slayDb, {
+      artifactId: artifact!.id
+    })
+    const files = walkFiles(join(dir, 'pc'))
+    const working = files.find(
+      (p) => p.includes('/artifacts/') && p.split('/').pop()!.startsWith(artifact!.id)
+    )!
+    const blob = files.find(
+      (p) => p.includes('/blobs/') && p.endsWith(version!.content_hash.slice(2))
+    )!
+    unlinkSync(working)
+    if (failure === 'truncate') writeFileSync(blob, bytes.subarray(0, bytes.length - 1))
+    else {
+      const bad = Buffer.from(bytes)
+      bad[bad.length - 1] ^= 0xff
+      writeFileSync(blob, bad)
+    }
+    try {
+      await withHttp(async (url) => {
+        const accepted = await fetch(`${url}/api/artifacts/${artifact!.id}/content`, {
+          headers: { Range: 'bytes=0-2' }
+        })
+          .then(
+            async (response) =>
+              response.status === 206 && (await response.arrayBuffer()).byteLength === 3
+          )
+          .catch(() => false)
+        expect(accepted).toBe(false)
+        writeFileSync(blob, bytes)
+        const intact = await fetch(`${url}/api/artifacts/${artifact!.id}/content`, {
+          headers: { Range: 'bytes=0-2' }
+        })
+        expect(intact.status).toBe(206)
+        expect(Buffer.from(await intact.arrayBuffer())).toEqual(bytes.subarray(0, 3))
+      }, true)
+    } finally {
+      writeFileSync(blob, bytes)
+    }
+  }
+)
