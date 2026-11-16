@@ -39,9 +39,13 @@
  * once. runtime.ts also wakes an already-sleeping retry loop; a new delay alone
  * cannot cancel its existing wait. The watchdog's doubling grace keeps these rare.
  *
- * Untouched: the first connect, the first reconnect after a drop, every
- * scheduled loop attempt, and every client when no probe is installed (the
- * Chromium fork and the web shell install none → byte-identical).
+ * A HARD-DEADLINE ABORT also expedites one replacement, without health evidence.
+ * Its retry hint survives a query that the probe defers without granting a socket;
+ * that query must not take the serialized loop's reserved replacement with it.
+ *
+ * Ordinary connects retain their behaviour: first connect, first reconnect after
+ * a drop, scheduled attempts, and unprobed clients. Only a watchdog-aborted
+ * handshake expedites its replacement, including in the fork and web shell.
  */
 
 import type { ConnectTrace } from './connectTrace'
@@ -97,6 +101,11 @@ export interface ConnectPacer {
    * next delay is 0 and the next attempt is not probed again.
    */
   noteHubAnswered: () => void
+  /**
+   * A handshake exhausted its hard deadline. Expedite one retry, without asserting
+   * reachability or granting an off-schedule query permission to skip its probe.
+   */
+  noteHandshakeTimedOut: () => void
 }
 
 export function createConnectPacer(
@@ -117,7 +126,7 @@ export function createConnectPacer(
   let opened = false
   /** When the reconnect loop's next attempt is due. */
   let nextScheduledAt = 0
-  /** `noteHubAnswered`: the loop's next delay is 0 (consumed by `retryDelayMs`). */
+  /** A watchdog abort: next loop delay is 0, or consumed when url grants an attempt. */
   let retryNow = false
   /** `noteHubAnswered`: the next attempt skips the probe (consumed by `url`). */
   let hubAnswered = false
@@ -132,10 +141,7 @@ export function createConnectPacer(
     url: async () => {
       const probe = getProbe()
       const skipProbe = hubAnswered
-      // Whoever makes the next attempt used the hint; a later loop tick must not
-      // take a stale "retry now" from it.
       hubAnswered = false
-      retryNow = false
       const offSchedule = failing && now() < nextScheduledAt - SCHEDULE_SLACK_MS
       const attempt = trace?.begin(!offSchedule)
       if (probe && offSchedule && !skipProbe) {
@@ -155,6 +161,9 @@ export function createConnectPacer(
           throw new HubConnectDeferredError(wsUrl)
         }
       }
+      // Only a granted attempt consumes urgency. A probe-deferred query created no
+      // socket and must leave the loop's reserved replacement available.
+      retryNow = false
       opened = false
       return wsUrl
     },
@@ -168,6 +177,9 @@ export function createConnectPacer(
     noteHubAnswered: () => {
       retryNow = true
       hubAnswered = true
+    },
+    noteHandshakeTimedOut: () => {
+      retryNow = true
     }
   }
 }

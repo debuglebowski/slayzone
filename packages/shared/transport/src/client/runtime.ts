@@ -80,12 +80,11 @@ export function createTrpcWsClient(opts: CreateTrpcClientOpts) {
     probe: getHubConnectProbe,
     trace,
     onAbort: (reason) => {
-      if (reason === 'hedge') {
-        pacer.noteHubAnswered()
-        // A query can fail its handshake while the retry loop is still sleeping.
-        // Its next delay hint alone cannot release that already-running wait.
-        wsClient.wakeReconnect()
-      }
+      if (reason === 'hedge') pacer.noteHubAnswered()
+      else pacer.noteHandshakeTimedOut()
+      // Either abort can end a query's handshake while the loop is still sleeping.
+      // Only a hedge carries health evidence; both release the same serialized wait.
+      wsClient.wakeReconnect()
     },
     ...opts.handshakeTiming
   })

@@ -15,8 +15,11 @@ The tRPC client: links, the boot singleton, multi-hub federation (`FederationPro
   window, removing one relaunches), so this only fires in the mobile app.
 - `connectHandshake.ts` bounds stuck handshakes. A successful health probe releases
   the existing retry wait through the patched client's `wakeReconnect()`; the pacer
-  supplies the immediate retry hint. Hedge grace still doubles, and unreachable hubs
-  retain their normal backoff. The `@trpc/client` pnpm patch also tracks the latest
+  supplies the immediate retry hint. A hard deadline also releases that wait for one
+  replacement, including without a probe; it grants no health-based probe bypass.
+  A probe-deferred query preserves the retry hint because it created no socket.
+  Hedge grace still doubles, and a failed replacement resumes normal backoff.
+  The `@trpc/client` pnpm patch also tracks the latest
   socket requiring replacement, ignores superseded socket callbacks, and replays
   subscriptions once per connection. Recheck both module formats with
   `src/client/wsReconnect.test.ts` when updating tRPC; installs must apply the patch.

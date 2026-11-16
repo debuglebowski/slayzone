@@ -226,6 +226,30 @@ describe('connect pacing for an unreachable hub', () => {
     expect(probe).toHaveBeenCalledTimes(1)
   })
 
+  it('a hard deadline expedites one retry without claiming health or losing it to a deferred query', async () => {
+    const probe = vi.fn(async (_url: string) => false)
+    const { pacer, clock, t0 } = await pacerInFailureStreak(probe)
+    clock.set(t0 + 300)
+    pacer.noteHandshakeTimedOut()
+
+    // Timeout is not evidence that the hub answered. A query that wins the race
+    // still consults the installed probe, and cannot consume the reserved retry
+    // by being deferred without creating a socket.
+    await expect(pacer.url()).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(pacer.retryDelayMs(5)).toBe(0)
+    expect(await pacer.url()).toBe(WS_URL)
+    expect(probe).toHaveBeenCalledTimes(1)
+
+    // Only that replacement was expedited; neither failure streak nor retry index
+    // was reset. A failed replacement restores normal pacing and probe gating.
+    pacer.onCloseOrError()
+    expect(pacer.retryDelayMs(6)).toBe(30_000)
+    clock.set(t0 + 600)
+    await expect(pacer.url()).rejects.toBeInstanceOf(HubConnectDeferredError)
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
+
   it('a real client: first connect unprobed, probe "down" opens no socket, probe "up" reconnects before the next backoff tick', async () => {
     let accepting = false
     let handshakes = 0

@@ -31,7 +31,8 @@ import type { ConnectTrace } from './connectTrace'
  *    connects, never a steady stream of failed ones — those failures are exactly what
  *    that throttle counts (connectPacing.ts).
  *  - HARD DEADLINE. Past it the socket is closed whatever the probe says, and with no
- *    probe installed (Chromium fork, web shell) this is the only bound.
+ *    probe installed (Chromium fork, web shell) this is the only bound. The runtime
+ *    expedites one serialized replacement without asserting that the hub is healthy.
  *
  * Applied through @trpc/client's public `WebSocket` option: a constructor that makes
  * a real socket of the CURRENT global `WebSocket` and watches it. Nothing about the

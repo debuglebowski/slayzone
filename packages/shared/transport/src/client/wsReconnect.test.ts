@@ -6,6 +6,7 @@ import { initTRPC } from '@trpc/server'
 import { wireSuperjson } from '@slayzone/trpc-server/wire'
 import { connectDeadlineLink } from './connectDeadlineLink'
 import { setHubConnectProbe } from './connectPacing'
+import { _resetHubConnectTraces, getHubConnectTrace } from './connectTrace'
 import { createTrpcWsClient } from './runtime'
 
 const require = createRequire(import.meta.url)
@@ -120,43 +121,75 @@ afterEach(async () => {
     await closed
   }
   setHubConnectProbe(null)
+  _resetHubConnectTraces()
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
-it('one query during established 16s backoff recovers after a held handshake, with default deadlines', async () => {
-  vi.useFakeTimers()
-  const net = network()
-  vi.stubGlobal('WebSocket', net.WebSocket)
-  let up = false
-  setHubConnectProbe(async () => up)
-  net.accept(false)
-  const { client: runtimeClient, wsClient } = createTrpcWsClient({
-    url: 'ws://127.0.0.1:12345/trpc'
-  })
-  const client = runtimeClient as unknown as TRPCClient<typeof router>
-  clients.push(wsClient)
-  // Initial + loop attempts at 0, 2, 6, 14s. The loop is now sleeping until 30s.
-  await advance(14_500)
-  expect(net.sockets).toHaveLength(5)
-  net.accept(true)
-  up = true
-  net.holdUpgrade()
-  let result: unknown
-  // Exactly ONE operation. No polling query supplies a replacement open().
-  void client.ping.query().then(
-    (value) => {
-      result = value
-    },
-    (error: unknown) => {
-      result = error
+it.each([
+  { scenario: 'health hedge', probeInstalled: true, replacementUp: true, waitMs: 1100 },
+  { scenario: 'no-probe deadline', probeInstalled: false, replacementUp: true, waitMs: 10_100 },
+  {
+    scenario: 'no-probe deadline then refused replacement',
+    probeInstalled: false,
+    replacementUp: false,
+    waitMs: 10_100
+  }
+])(
+  'one query during established 16s backoff: $scenario, default deadlines',
+  async ({ probeInstalled, replacementUp, waitMs }) => {
+    vi.useFakeTimers()
+    const net = network()
+    vi.stubGlobal('WebSocket', net.WebSocket)
+    let up = false
+    setHubConnectProbe(probeInstalled ? async () => up : null)
+    net.accept(false)
+    const { client: runtimeClient, wsClient } = createTrpcWsClient({
+      url: 'ws://127.0.0.1:12345/trpc'
+    })
+    const client = runtimeClient as unknown as TRPCClient<typeof router>
+    clients.push(wsClient)
+    // Initial + loop attempts at 0, 2, 6, 14s. The loop is now sleeping until 30s.
+    await advance(14_500)
+    expect(net.sockets).toHaveLength(5)
+    net.accept(true)
+    up = true
+    net.holdUpgrade()
+    let result: unknown
+    // Exactly ONE operation. No polling query supplies a replacement open().
+    void client.ping.query().then(
+      (value) => {
+        result = value
+      },
+      (error: unknown) => {
+        result = error
+      }
+    )
+    // Let the single query create its held socket, then decide whether its replacement
+    // can connect. No later operation is allowed to supply another open().
+    await advance()
+    net.accept(replacementUp)
+    await advance(waitMs)
+    expect(net.sockets).toHaveLength(7)
+    const trace = getHubConnectTrace('ws://127.0.0.1:12345/trpc')
+    expect(trace[5].outcome).toBe(probeInstalled ? 'hedge' : 'deadline')
+    if (!probeInstalled) expect(trace.every((attempt) => attempt.probe === null)).toBe(true)
+    if (replacementUp) {
+      expect(result).toBe('pong')
+      expect(wsClient.connectionState.get().state).toBe('pending')
+    } else {
+      // A refused replacement resumes the existing 30s retry schedule. The operation
+      // expires normally because the hub is down; its expiry must not create sockets.
+      expect(result).toBeUndefined()
+      await advance(29_000)
+      expect(result).toBeInstanceOf(Error)
+      expect(net.sockets).toHaveLength(7)
+      await advance(1000)
+      expect(net.sockets).toHaveLength(8)
+      expect(wsClient.connectionState.get().state).toBe('connecting')
     }
-  )
-  await advance(1100)
-  expect(result).toBe('pong')
-  expect(net.sockets).toHaveLength(7)
-  expect(wsClient.connectionState.get().state).toBe('pending')
-})
+  }
+)
 
 describe.each([
   ['ESM', { createTRPCClient, createWSClient, wsLink }],
