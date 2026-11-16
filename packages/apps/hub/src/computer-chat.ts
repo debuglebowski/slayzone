@@ -1,5 +1,5 @@
 import { type ByteRangePage, collectByteRanges } from '@slayzone/platform/bounded-reads'
-import { uploadBytesFor } from './computer-uploads'
+import { withUploadedBytes } from './computer-uploads'
 import { CHAT_READ_OPERATIONS, type ChatOperation } from '@slayzone/chat-runtime/shared'
 import type { ChatDeps } from '@slayzone/terminal/server'
 import { createHash, randomUUID } from 'node:crypto'
@@ -617,6 +617,15 @@ export function createComputerChatServices(opts: {
   async function sealAttachments(owner: HubChatOwnership, method: string, args: unknown[]) {
     const route = { id: owner.id, epoch: owner.epoch },
       pc = owner.computerId!
+    const operation =
+      method === 'send'
+        ? (args[1] as { id?: string })?.id
+        : method === 'push'
+          ? (args[3] as { id?: string })?.id
+          : method === 'update'
+            ? (args[2] as string)
+            : undefined
+    const transfer = operation ?? randomUUID()
     async function seal(ref: ChatAttachment): Promise<ChatAttachment> {
       if (ref.contentHash) {
         const existing = (await request(pc, { kind: 'attachment.has', route, ref })) as {
@@ -647,16 +656,27 @@ export function createComputerChatServices(opts: {
         throw new Error('Attachment version is missing')
       const pinned = { ...ref, contentHash: hash },
         bytes = await opts.attachments.read(pinned)
-      return request(pc, {
-        kind: 'attachment.put',
-        route,
-        ref: pinned,
-        ...(await uploadBytesFor({
+      return withUploadedBytes(
+        {
+          computerId: pc,
           bounded: opts.boundedReads?.(pc) === true,
           send: (body) => request(pc, body),
-          source: bytes
-        }))
-      }) as Promise<ChatAttachment>
+          source: bytes,
+          owner: {
+            route,
+            operationId: createHash('sha256')
+              .update(JSON.stringify([transfer, ref.artifactId, hash]))
+              .digest('hex')
+          }
+        },
+        (bytes) =>
+          request(pc, {
+            kind: 'attachment.put',
+            route,
+            ref: pinned,
+            ...bytes
+          })
+      ) as Promise<ChatAttachment>
     }
     async function content(blocks: UserContentBlock[] | undefined) {
       if (blocks)
@@ -676,12 +696,17 @@ export function createComputerChatServices(opts: {
     ownership,
     source,
     request,
-    attachmentBytes: (pc, bytes) =>
-      uploadBytesFor({
-        bounded: opts.boundedReads?.(pc) === true,
-        send: (body) => request(pc, body),
-        source: bytes
-      })
+    putAttachment: (pc, route, ref, bytes, operationId) =>
+      withUploadedBytes(
+        {
+          computerId: pc,
+          bounded: opts.boundedReads?.(pc) === true,
+          send: (body) => request(pc, body),
+          source: bytes,
+          owner: { route, operationId }
+        },
+        (bytes) => request(pc, { kind: 'attachment.put', route, ref, ...bytes })
+      )
   })
   /**
    * Is the hub still the source of this task's legacy chat history (its unmigrated
@@ -1443,18 +1468,27 @@ export function createComputerChatServices(opts: {
       async putAttachment(input) {
         const pc = await moveComputerOf(input.taskId)
         const route = { id: input.conversationId, epoch: input.epoch }
-        await computerRequest(pc, {
-          kind: 'attachment.put',
-          route,
-          ref: input.ref,
-          ...(opts.boundedReads?.(pc)
-            ? await uploadBytesFor({
-                bounded: true,
-                send: (body) => computerRequest(pc, body),
-                source: Buffer.from(input.data, 'base64')
-              })
-            : { data: input.data })
-        })
+        await withUploadedBytes(
+          {
+            computerId: pc,
+            bounded: opts.boundedReads?.(pc) === true,
+            send: (body) => computerRequest(pc, body),
+            source: Buffer.from(input.data, 'base64'),
+            owner: {
+              route,
+              operationId: createHash('sha256')
+                .update(JSON.stringify(['session-move', route, input.ref]))
+                .digest('hex')
+            }
+          },
+          (bytes) =>
+            computerRequest(pc, {
+              kind: 'attachment.put',
+              route,
+              ref: input.ref,
+              ...bytes
+            })
+        )
       },
       async activate(input) {
         const pc = await moveComputerOf(input.taskId)

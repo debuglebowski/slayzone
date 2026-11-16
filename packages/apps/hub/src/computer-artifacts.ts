@@ -18,7 +18,7 @@ import {
 import type { TaskArtifact, ArtifactFolder } from '@slayzone/task-contracts'
 import type { HubChatOwnership, ChatComputerRequest } from '@slayzone/chat-runtime/hub'
 import type { createComputerChatServices } from './computer-chat'
-import { uploadBytesFor } from './computer-uploads'
+import { withUploadedBytes } from './computer-uploads'
 
 const reads = new Set([
   'listArtifactsByTask',
@@ -379,23 +379,29 @@ export function createComputerArtifactStorage(opts: {
       folderId = folder.id
     }
     const pc = owner.computerId!
-    return call(
-      owner,
-      'uploadArtifactBlob',
-      [
-        {
-          taskId: data.taskId,
-          title: data.title,
-          folderId,
-          // Staged in chunks to a computer that takes them, else inline (FU1 S3).
-          ...(await uploadBytesFor({
-            bounded: opts.boundedReads?.(pc) === true,
-            send: (body) => chat.lifecycle.request(pc, body as never),
-            source: data.bytes
-          }))
-        }
-      ],
-      operationId
+    return withUploadedBytes(
+      {
+        computerId: pc,
+        bounded: opts.boundedReads?.(pc) === true,
+        send: (body) => chat.lifecycle.request(pc, body as never),
+        source: data.bytes,
+        owner: { route: { id: owner.id, epoch: owner.epoch }, operationId }
+      },
+      (bytes) =>
+        call(
+          owner,
+          'uploadArtifactBlob',
+          [
+            {
+              taskId: data.taskId,
+              title: data.title,
+              folderId,
+              // Staged in chunks to a computer that takes them, else inline (FU1 S3).
+              ...bytes
+            }
+          ],
+          operationId
+        )
     ) as Promise<TaskArtifact | null>
   }
   /**
@@ -743,19 +749,31 @@ export function createComputerArtifactStorage(opts: {
         }
         if (key === 'writeArtifactContent') {
           const pc = owner.computerId!
-          return call(owner, 'writeArtifactContent', [
+          const operationId = randomUUID()
+          return withUploadedBytes(
             {
-              ...first,
-              sourcePath: undefined,
-              bytes: undefined,
-              // A file is staged range by range, never read whole (FU1 S3).
-              ...(await uploadBytesFor({
-                bounded: opts.boundedReads?.(pc) === true,
-                send: (body) => chat.lifecycle.request(pc, body as never),
-                source: first.bytes ?? { path: first.sourcePath }
-              }))
-            }
-          ])
+              computerId: pc,
+              bounded: opts.boundedReads?.(pc) === true,
+              send: (body) => chat.lifecycle.request(pc, body as never),
+              source: first.bytes ?? { path: first.sourcePath },
+              owner: { route: { id: owner.id, epoch: owner.epoch }, operationId }
+            },
+            (bytes) =>
+              call(
+                owner,
+                'writeArtifactContent',
+                [
+                  {
+                    ...first,
+                    sourcePath: undefined,
+                    bytes: undefined,
+                    // A file is staged range by range, never read whole (FU1 S3).
+                    ...bytes
+                  }
+                ],
+                operationId
+              )
+          )
         }
         const result = await call(owner, key, args)
         return key === 'getArtifact' && result

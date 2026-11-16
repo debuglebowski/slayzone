@@ -353,6 +353,17 @@ test('unattributed blob staging cannot be silently counted as erased', async () 
   expect(existsSync(join(stage, 'abandoned-write'))).toBe(true)
 })
 
+test('unattributed upload staging prevents account erasure completion', async () => {
+  const { h, root } = await fixture()
+  const stage = join(root, 'uploads')
+  mkdirSync(stage, { recursive: true })
+  writeFileSync(join(stage, 'legacy.part'), 'unattributed private upload')
+  const report = await eraseContent(h.slayDb, root, { kind: 'user', userId: 'alice' })
+  expect(report.state).toBe('incomplete')
+  expect(report.failures).toContain('LEGACY_FILES_NEED_OWNERSHIP_REVIEW')
+  expect(existsSync(join(stage, 'legacy.part'))).toBe(true)
+})
+
 // --- Subtasks: deleting a task erases only what was selected --------------------
 
 /**

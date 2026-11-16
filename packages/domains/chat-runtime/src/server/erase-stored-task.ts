@@ -18,6 +18,7 @@ import {
   artifactPreparationBlobHashes
 } from '@slayzone/content-erasure/server'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
+import { eraseTaskUploads, assertUploadsErased } from './upload-staging'
 
 interface Candidates {
   attachments: string[]
@@ -137,12 +138,14 @@ export function prepareStoredTaskErasure(
  * old WAL frames): the caller rewrites the whole file off the main thread (the store's
  * compaction rebuild, `rebuildStoreFile` for an archive), then calls
  * {@link markStoredTaskErasureCompacted}. The erasure is not done before that.
+ * Await owned-upload erasure/verification under the store or archive lifetime before
+ * using the returned compaction decision or acknowledging completion.
  */
-export function finishStoredTaskErasure(
+export async function finishStoredTaskErasure(
   db: Database.Database,
   root: string,
   taskId: string
-): { compact: boolean } {
+): Promise<{ compact: boolean }> {
   assertNoUnattributedArtifactPreparations(root)
   assertPathSafeId(taskId, 'taskId')
   const saved = db
@@ -237,6 +240,8 @@ export function finishStoredTaskErasure(
   }).immediate()
   for (const directory of ['artifacts', 'assets'])
     erase(containedPath(join(root, directory), taskId))
+  await eraseTaskUploads(root, taskId)
+  await assertUploadsErased(root, taskId)
   const staging = join(root, 'blobs', '.tmp')
   if (
     (existsSync(staging) && readdirSync(staging).length) ||

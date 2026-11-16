@@ -213,8 +213,13 @@ export function createChatBackups(
   const archiveLabel = (id: string) => `chat archive ${id}`
   function archiveConnection(file: string, id: string, readonly = false) {
     const db = new Database(file, { readonly, fileMustExist: true })
-    const registration = store.maintenance.registerSecondary(archiveLabel(id), close)
+    let inUse = true
+    const registration = store.maintenance.registerSecondary(archiveLabel(id), () => {
+      if (inUse) throw new Error('Archive connection is still in use')
+      close()
+    })
     function close() {
+      inUse = false
       try {
         if (db.open) db.close()
       } finally {
@@ -227,27 +232,48 @@ export function createChatBackups(
     file: string,
     id: string,
     readonly: boolean,
+    action: (db: Database.Database) => Promise<T>
+  ): Promise<T>
+  function withArchiveConnection<T>(
+    file: string,
+    id: string,
+    readonly: boolean,
     action: (db: Database.Database) => T
-  ): T {
+  ): T
+  function withArchiveConnection<T>(
+    file: string,
+    id: string,
+    readonly: boolean,
+    action: (db: Database.Database) => T | Promise<T>
+  ): T | Promise<T> {
     const native = archiveConnection(file, id, readonly)
-    let failure: unknown
-    let value: T | undefined
+    function settle(result: { ok: true; value: T } | { ok: false; error: unknown }): T {
+      try {
+        native.close()
+      } catch (cleanup) {
+        if (!result.ok)
+          throw new AggregateError([result.error, cleanup], 'Archive connection cleanup failed', {
+            cause: result.error
+          })
+        throw cleanup
+      }
+      if (!result.ok) throw result.error
+      return result.value
+    }
+    let value: T | Promise<T>
     try {
       value = action(native.db)
     } catch (error) {
-      failure = error
+      return settle({ ok: false, error })
     }
-    try {
-      native.close()
-    } catch (cleanup) {
-      if (failure !== undefined)
-        throw new AggregateError([failure, cleanup], 'Archive connection cleanup failed', {
-          cause: failure
-        })
-      throw cleanup
-    }
-    if (failure !== undefined) throw failure
-    return value as T
+    // Async actions keep the native FD and secondary through their entire action,
+    // including any database verification after awaited file cleanup.
+    if (value instanceof Promise)
+      return value.then(
+        (value) => settle({ ok: true, value }),
+        (error) => settle({ ok: false, error })
+      )
+    return settle({ ok: true, value })
   }
 
   // Queues own the entire operation, including native exit and publication. Reserve
@@ -1298,7 +1324,7 @@ export function createChatBackups(
       m = manifest(archiveDir, id)
     const file = fileWithin(path, 'chat.sqlite')
     let present = false
-    const compact = withArchiveConnection(file, id, false, (db) => {
+    const compact = await withArchiveConnection(file, id, false, async (db) => {
       if (!db.prepare('SELECT 1 FROM conversations WHERE task_id=? LIMIT 1').get(taskId))
         return false
       present = true
@@ -1311,7 +1337,8 @@ export function createChatBackups(
       )
         db.exec('DELETE FROM artifact_blob_leases')
       prepareStoredTaskErasure(db, taskId, path)
-      return finishStoredTaskErasure(db, path, taskId).compact
+      const { compact } = await finishStoredTaskErasure(db, path, taskId)
+      return compact
     })
     if (!present) return
     // The whole archive file is rewritten off the main thread (stale copies of the
@@ -1349,10 +1376,10 @@ export function createChatBackups(
       raw.prepare('DELETE FROM archive_tasks WHERE archive_id=? AND task_id=?').run(id, taskId)
     )
   }
-  function withArchive<T>(id: string, read: (db: Database.Database) => T): Promise<T> {
+  function withArchive<T>(id: string, read: (db: Database.Database) => T | Promise<T>): Promise<T> {
     if (closed) return Promise.reject(new Error('Backup service is closed'))
     folder(archiveDir, id)
-    return inArchive(id, () => {
+    return inArchive<T>(id, () => {
       recoverArchive(id)
       const path = folder(archiveDir, id)
       archiveDescriptor(id)

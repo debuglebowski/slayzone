@@ -89,9 +89,26 @@ export function assembleComputerChatRuntime(
     backups,
     workspaceStore
   } = services
-  // Historical standalone staging dependency; online composition holds it on main.
-  const uploads = createUploadStaging(storage.dir)
-  uploads.sweep()
+  const uploads = createUploadStaging(storage.dir, {
+    automatic: !opts.maintenance,
+    onSweepError: () => opts.log?.('chat upload expiry deferred; cleanup will retry'),
+    validateOwner: (route) => {
+      const owner = storage.conversation(route.id)
+      if (
+        !owner ||
+        owner.identity.epoch !== route.epoch ||
+        (owner.state !== 'active' && owner.state !== 'prepared')
+      )
+        throw new Error('Upload conversation ownership is unavailable or deleted')
+      const lifecycle = storage.taskLifecycle(owner.identity.taskId)
+      if (
+        lifecycle.state === 'deleted' ||
+        (lifecycle.state !== 'active' && owner.state !== 'prepared')
+      )
+        throw new Error('Upload task is paused or deleted')
+      return { taskId: owner.identity.taskId, revision: lifecycle.revision }
+    }
+  })
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend
   const userInputSessions = new Set<string>()
@@ -376,6 +393,7 @@ export function assembleComputerChatRuntime(
       const closing = transport.removeSession(identity.tabId)
       storage.applyTombstone(identity)
       await closing
+      await uploads.eraseConversation(identity.taskId, identity.id)
       transfers.removeConversation(identity.id)
       attachments.collectGarbage()
       for (const parent of parents) if (parent) transport.chatEvents.emit('threads-changed', parent)
@@ -389,6 +407,7 @@ export function assembleComputerChatRuntime(
       const previous = storage.taskLifecycle(taskId)
       if (previous.state === 'deleted') {
         const applied = storage.applyTaskLifecycle(taskId, state, revision)
+        await uploads.eraseTask(taskId)
         artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
@@ -406,6 +425,7 @@ export function assembleComputerChatRuntime(
       const applied = storage.applyTaskLifecycle(taskId, state, revision)
       await Promise.all(closing)
       if (applied.state === 'deleted') {
+        await uploads.eraseTask(taskId)
         artifacts.cleanupDeletedTasks(taskId)
         transfers.removeTask(taskId)
         attachments.collectGarbage()
@@ -428,23 +448,25 @@ export function assembleComputerChatRuntime(
         throw new Error('Stale computer erasure request')
       await stopExternal?.()
       await Promise.all(closing)
-      transfers.removeTask(taskId)
-      artifacts.cleanupDeletedTasks(taskId)
-      await artifacts.retryErasures(taskId)
-      artifacts.collectGarbage()
-      const { compact } = storage.compose((raw) =>
-        finishStoredTaskErasure(raw, storage.dir, taskId)
-      )
-      // Stale copies of the erased rows go only with a whole-file rewrite: off the main
-      // thread, and the erasure is not done before it completed.
-      if (compact) {
-        await compaction.rebuildForErasure()
-        storage.compose((raw) => markStoredTaskErasureCompacted(raw, taskId))
-      }
-      await backups.eraseTask(taskId)
-      // Needs-attention records name the task (and quote its errors): erased too.
-      storage.deleteTaskFaults(taskId)
-      return { taskId, revision: applied.revision, erased: true as const }
+      return uploads.withTaskErasure(taskId, async () => {
+        transfers.removeTask(taskId)
+        artifacts.cleanupDeletedTasks(taskId)
+        await artifacts.retryErasures(taskId)
+        artifacts.collectGarbage()
+        const { compact } = await storage.compose((raw) =>
+          finishStoredTaskErasure(raw, storage.dir, taskId)
+        )
+        // Stale copies of the erased rows go only with a whole-file rewrite: off the main
+        // thread, and the erasure is not done before it completed.
+        if (compact) {
+          await compaction.rebuildForErasure()
+          storage.compose((raw) => markStoredTaskErasureCompacted(raw, taskId))
+        }
+        await backups.eraseTask(taskId)
+        // Needs-attention records name the task (and quote its errors): erased too.
+        storage.deleteTaskFaults(taskId)
+        return { taskId, revision: applied.revision, erased: true as const }
+      })
     },
     close(): Promise<void> {
       if (closing) return closing
@@ -466,6 +488,7 @@ export function assembleComputerChatRuntime(
         await attempt(() => transport.shutdownAll())
         await attempt(() => transfers.close())
         await attempt(() => artifacts.close())
+        await attempt(() => uploads.close())
         await attempt(() => storage.shutdown())
         if (errors.length === 1) throw errors[0]
         if (errors.length)

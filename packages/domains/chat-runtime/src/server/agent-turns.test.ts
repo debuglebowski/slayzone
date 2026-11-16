@@ -241,7 +241,7 @@ describe('agent turns on the computer', () => {
     ])
   })
 
-  test("a task's erasure removes its turns", () => {
+  test("a task's erasure removes its turns", async () => {
     const storage = open()
     const turns = createAgentTurns(storage, {} as TurnGit)
     for (const [id, task] of [
@@ -259,9 +259,9 @@ describe('agent turns on the computer', () => {
         created_at: 1
       })
     const root = tmp('slz-turns-erase-')
-    storage.compose((raw) => {
+    await storage.compose(async (raw) => {
       prepareStoredTaskErasure(raw, 't')
-      finishStoredTaskErasure(raw, root, 't')
+      await finishStoredTaskErasure(raw, root, 't')
     })
     expect(turns.store.get('a')).toBeNull()
     expect(turns.store.get('b')).not.toBeNull()

@@ -69,6 +69,9 @@ run_harness packages/domains/content-erasure/src/server/admin.test.ts
 run_harness packages/domains/content-erasure/src/server/restore.test.ts
 run_harness packages/domains/content-erasure/src/server/router.test.ts
 run_harness packages/domains/chat-runtime/src/server/computer-erasure.test.ts
+run_harness packages/domains/chat-runtime/src/server/owned-uploads.test.ts
+run_harness packages/domains/chat-runtime/src/server/upload-staging-async.test.ts
+run_harness packages/apps/computer/src/handlers/upload-responsiveness.test.ts
 run_harness packages/domains/diagnostics/src/server/content-erasure.test.ts
 # Erasure compaction: deferred/coalesced VACUUM, no repeated local steps or acked re-sends,
 # retry backoff; diagnostics and computer stores VACUUM only when something was erased.
@@ -974,6 +977,7 @@ run_harness packages/apps/hub/src/computer-artifacts.test.ts
 run_harness packages/apps/hub/src/computer-artifacts-ranges.test.ts
 run_harness packages/apps/hub/src/computer-chat-ranges.test.ts
 run_harness packages/apps/hub/src/computer-uploads.test.ts
+run_harness packages/apps/hub/src/computer-uploads-pipeline.test.ts
 # Decision 4: files a restored computer no longer holds stay listed as unavailable.
 run_harness packages/apps/hub/src/computer-artifacts-unavailable.test.ts
 run_harness packages/apps/hub/src/computer-folder-deletion.test.ts

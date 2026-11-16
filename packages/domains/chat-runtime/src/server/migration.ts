@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { ChatAttachment } from '@slayzone/terminal-contracts'
 import type { ChatTransferManifest } from '../shared'
 import type { ChatOwnershipStore, HubChatOwnership } from './hub-ownership'
@@ -40,6 +40,14 @@ export function createChatMigration(opts: {
     computerId: string,
     bytes: Uint8Array
   ) => Promise<{ data: string } | { staged: { sha256: string; size: number } }>
+  /** Owns staging through consumption, including legacy receivers' shared hash slot. */
+  putAttachment?: (
+    computerId: string,
+    route: { id: string; epoch: number },
+    ref: ChatAttachment,
+    bytes: Uint8Array,
+    operationId: string
+  ) => Promise<unknown>
 }) {
   const pending = new Map<string, Promise<HubChatOwnership>>()
   async function current(id: string) {
@@ -141,6 +149,18 @@ export function createChatMigration(opts: {
       await opts.source.pinAttachments?.(owner, verified.missing, manifest)
       for (const ref of verified.missing) {
         const bytes = await opts.source.readAttachment(owner, ref)
+        if (opts.putAttachment) {
+          await opts.putAttachment(
+            destination,
+            { id, epoch: owner.epoch + 1 },
+            ref,
+            bytes,
+            createHash('sha256')
+              .update(JSON.stringify([migrationId, ref.artifactId, ref.contentHash]))
+              .digest('hex')
+          )
+          continue
+        }
         await opts.request(destination, {
           kind: 'attachment.put',
           route: { id, epoch: owner.epoch + 1 },

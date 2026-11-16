@@ -14,7 +14,7 @@
  *
  * @module hub/computer-uploads
  */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { open, stat } from 'node:fs/promises'
 import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
@@ -24,7 +24,15 @@ import { COMPUTER_FRAME_TOO_LARGE_RPC_CODE } from '@slayzone/platform/computer-f
 export const INLINE_UPLOAD_MAX_CHARS = 14_000_000
 
 export type UploadSource = Uint8Array | { path: string }
-export type UploadBytes = { staged: { sha256: string; size: number } } | { data: string }
+interface UploadOptions {
+  bounded: boolean
+  send: (body: unknown) => Promise<unknown>
+  source: UploadSource
+  owner?: { route: { id: string; epoch: number }; operationId?: string }
+}
+export type UploadBytes =
+  | { staged: { sha256: string; size: number; uploadId?: string } }
+  | { data: string }
 
 /** Base64 length of `bytes` bytes. */
 const base64Chars = (bytes: number) => Math.ceil(bytes / 3) * 4
@@ -75,11 +83,7 @@ async function sha256Of(source: UploadSource): Promise<string> {
  * `source`'s bytes for one upload request to a computer: staged (`bounded`) or
  * inline. `send` is the request transport of the caller (the upload goes the same way).
  */
-export async function uploadBytesFor(opts: {
-  bounded: boolean
-  send: (body: unknown) => Promise<unknown>
-  source: UploadSource
-}): Promise<UploadBytes> {
+export async function uploadBytesFor(opts: UploadOptions): Promise<UploadBytes> {
   const size = await sizeOf(opts.source)
   if (!opts.bounded) {
     if (base64Chars(size) > INLINE_UPLOAD_MAX_CHARS) throw tooLargeForComputer(size)
@@ -87,9 +91,34 @@ export async function uploadBytesFor(opts: {
     return { data: Buffer.from(bytes).toString('base64') }
   }
   const sha256 = await sha256Of(opts.source)
-  const { received } = (await opts.send({ kind: 'upload.begin', sha256, size })) as {
+  return stageBytes(opts, { sha256, size })
+}
+
+async function stageBytes(
+  opts: UploadOptions,
+  { sha256, size }: { sha256: string; size: number },
+  owned?: () => void
+): Promise<UploadBytes> {
+  const owner = opts.owner
+    ? { ...opts.owner, operationId: opts.owner.operationId ?? randomUUID() }
+    : undefined
+  const { received, uploadId } = (await opts.send({
+    kind: 'upload.begin',
+    sha256,
+    size,
+    ...(owner ? { route: owner.route, operationId: owner.operationId } : {})
+  })) as {
     received: number
+    uploadId?: string
   }
+  if (
+    !Number.isSafeInteger(received) ||
+    received < 0 ||
+    received > size ||
+    (uploadId !== undefined && (!owner || !/^[a-f0-9]{64}$/.test(uploadId)))
+  )
+    throw new Error('Invalid upload checkpoint')
+  if (uploadId) owned?.()
   let offset = received
   for await (const part of rangesOf(opts.source, received)) {
     await opts.send({
@@ -97,9 +126,41 @@ export async function uploadBytesFor(opts: {
       sha256,
       size,
       offset,
+      ...(uploadId ? { uploadId, route: owner!.route } : {}),
       data: Buffer.from(part).toString('base64')
     })
     offset += part.length
   }
-  return { staged: { sha256, size } }
+  return { staged: { sha256, size, ...(uploadId ? { uploadId } : {}) } }
+}
+
+const pending = new Map<string, Promise<void>>()
+/** Keep a legacy receiver's shared hash slot locked THROUGH consumption. Owned acknowledgements release it early. */
+export async function withUploadedBytes<T>(
+  opts: UploadOptions & { computerId: string },
+  consume: (bytes: UploadBytes) => Promise<T>
+): Promise<T> {
+  if (!opts.bounded) return consume(await uploadBytesFor(opts))
+  const prepared = { size: await sizeOf(opts.source), sha256: await sha256Of(opts.source) }
+  const key = JSON.stringify([opts.computerId, prepared.sha256, prepared.size])
+  const previous = pending.get(key) ?? Promise.resolve()
+  let resolve!: () => void
+  const held = new Promise<void>((done) => {
+    resolve = done
+  })
+  const queued = previous.then(() => held)
+  pending.set(key, queued)
+  await previous
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    resolve()
+    if (pending.get(key) === queued) pending.delete(key)
+  }
+  try {
+    return await consume(await stageBytes(opts, prepared, release))
+  } finally {
+    release()
+  }
 }

@@ -544,8 +544,11 @@ fresh whole-FU2 review remain required.
   and final completed-tree checks remain later integration work.
 
 - **Uploads are staged in chunks (FU1 S3, 2026-11-15).**
-  - **What changed:** a hub used to send an artifact upload, a content write or an attachment as one base64 frame, capped at 14,000,000 chars by the schemas. Now it stages the bytes with `upload.begin` / `upload.chunk` (≤ 256 KiB each; `upload-staging.ts`, `<storage>/uploads/<sha256>-<size>.part`). The staging is resumable and in order, verified on `take`, released after use, and swept after 24 h.
-  - **How the upload names them:** `uploadArtifactBlob`, `writeArtifactContent` and `attachment.put` take `staged: {sha256, size}` in place of `data`; exactly one of the two. Every check that inline bytes get still applies, because the staged bytes go through the same `attachments.put` / store calls; for example the per-kind attachment size limit, which is tested.
+  - **What changed:** a hub used to send an artifact upload, a content write or an attachment as one base64 frame, capped at 14,000,000 chars by the schemas. It now stages the bytes with `upload.begin` / `upload.chunk` (≤ 256 KiB each), then consumes them through the same artifact/attachment validation as inline bytes.
+  - **Ownership (r1 H3/M2, 2026-11-16):** the hub supplies conversation route + operation ID to `begin`; an implementing runtime acknowledges an `uploadId`. Durable metadata and bytes live under `uploads/owned/<task-hash>/<conversation-hash>/<operation-token>/`. Tokens bind route epoch and task lifecycle revision. Same operation resumes; independent identical uploads have separate files. Duplicate chunk retries must match stored bytes. Task/route deletion, freeze and revision changes fence old chunks/consumption; a fresh begin after reactivation gets a new token. Prepared migration attachments retain their inline paused-task behavior.
+  - **I/O and durability (S10 amendment):** staging filesystem work is async; conflicting operation/hash keys serialize while unrelated uploads and computer controls remain independent. Native file/directory syncs complete before begin/chunk acknowledgement, including retries after a failed sync. Verification hashes bounded chunks with event-loop yields. Queued I/O and verification transfer into readonly lease lifetimes without an await gap; erasure fences first and drains I/O/readers before removal. Verified receipts hold legacy admission through the final check. Close cancels expiry, fences new work and drains owned I/O/cleanup.
+  - **Consumption:** `uploadArtifactBlob`, `writeArtifactContent` and `attachment.put` take `staged: {sha256, size, uploadId?}` or inline `data`, exactly one. Hash-verified readonly leases pin bytes until every reader releases; artifact writes revalidate the lease before publishing. Successful owned consumption removes staging after the last reader; failed/interrupted work stays resumable. Verified task erasure waits for consumers, removes owned staging and verifies leftovers; account erasure uses the same computer task acknowledgements.
+  - **Expiry:** live runtimes sweep idle staging after 24 h (a one-minute unreferenced timer), skip active I/O/readers, and drain I/O/leases on close. Filesystem failures are reported/retried without escaping the timer. Offline maintenance does not run another task's scheduled cleanup.
   - **Size:** this gives parity with hub-local uploads, which never had the 14M cap.
   - **Older computers:** the hub still sends them inline. Over the cap the hub refuses before encoding, as a frame-too-large error (`hub/computer-uploads.ts`).
   - **Migration:** the legacy migration's `attachment.put` uses the same path through `createChatMigration({ attachmentBytes })`.
@@ -570,3 +573,29 @@ fresh whole-FU2 review remain required.
   abort/erasure/close failures. See [ARTIFACT_PUBLICATION.md](./ARTIFACT_PUBLICATION.md).
   Canonical request-schema consolidation, the later owned/durable staging replay
   and final actual-invoke checks remain required; this partial merge is not H2 DONE.
+
+  - **Mixed versions:** pre-FU1 computers still get inline bytes, with the over-cap refusal before encoding. Earlier bounded computers ignore ownership fields and omit the new acknowledgement; `withUploadedBytes` holds their shared hash slot through consumption. Owned acknowledgements release that compatibility gate early. Old hubs retain their legacy hash/size protocol on new computers, with idempotent chunks and pinned reads. Their unattributed staging cannot be assigned to a task: verified erasure refuses completion until leftovers are removed/expired. No false receipt is issued over unknown bytes.
+  - **Migration:** the attachment consume hook uses the same owned upload pipeline, including prepared routes and compatibility gating. Existing inline/default hooks remain supported. No chat schema migration.
+
+- **Owned staging and canonical publication during replay.** The durable async
+  owned-upload manager, manifest/incarnation checks, scope/operation binding,
+  revocation, live expiry and drainable release/erase/close behavior are retained.
+  Host upload calls forward the route/operation/uploadId pairs to the injected
+  main-held manager; a manager, lease callback or native handle is never cloned to
+  the worker. New staged final consumers still require the actual B5 adapter above;
+  their explicit partial-replay refusal must be removed by complete S19 integration
+  before merge. A refusal or size cap is not the final feature solution.
+  B5 preparing/adopted/claimed journal ownership, orphan blob hashes, shared pins,
+  unknown/quarantined preparation refusal and owned upload inventory all remain
+  authoritative for erasure. `prepareStoredTaskErasure` retains its optional root,
+  including the actual readable archive root. `finishStoredTaskErasure` now awaits
+  owned-upload removal/verification and returns `Promise<{ compact: boolean }>`;
+  callers must await it under the physical owner lifetime, then perform the existing
+  off-thread rebuild and mark completion before ACK. No transaction spans its file
+  awaits. Standalone and archive paths retain this ordering; the nonconflict
+  canonical control adapter still requires its await update after replay.
+  Online lifecycle/erasure must cancel/drain B5 publication before main-held upload
+  verification through the existing stopExternal seam. Logical RPC/cancel/close
+  failure cannot release a source: matched quiescence or physical owner exit remains
+  required. Production manager admission/injection, exact publication reservations,
+  canonical request/registry adapters and final lifetime/erasure tests remain S19.

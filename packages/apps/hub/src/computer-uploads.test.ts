@@ -25,7 +25,15 @@ let pc: ReturnType<typeof createFixtureChatRuntime>
 let chat: ReturnType<typeof createComputerChatServices>
 let store: ReturnType<typeof createComputerArtifactStorage>
 let bounded = true
-const sent: Array<{ kind: string; method?: string; bytes: number }> = []
+let legacyReceiver = false
+const legacyOffsets = new Map<string, number>()
+const sent: Array<{
+  kind: string
+  method?: string
+  bytes: number
+  route?: { id: string; epoch: number }
+  uploadId?: string
+}> = []
 /** Over 14,000,000 base64 chars. */
 const BIG = randomBytes(11 * 1024 * 1024)
 
@@ -57,13 +65,52 @@ beforeAll(async () => {
     )
     .run()
   const request = async (_pc: string, p: unknown) => {
-    const body = p as { kind: string; value?: { method?: string } }
+    const body = p as {
+      kind: string
+      value?: { method?: string }
+      route?: { id: string; epoch: number }
+      uploadId?: string
+    }
     sent.push({
       kind: body.kind,
       method: body.value?.method,
-      bytes: Buffer.byteLength(JSON.stringify(p))
+      bytes: Buffer.byteLength(JSON.stringify(p)),
+      route: body.route,
+      uploadId: body.uploadId
     })
-    return pc.request(p)
+    if (!legacyReceiver) return pc.request(p)
+    const old = p as {
+      kind: string
+      sha256: string
+      size: number
+      offset: number
+      data: string
+      value?: { method: string; args: Array<{ staged?: { sha256: string } }> }
+    }
+    if (old.kind === 'upload.begin') {
+      // Historical receiver ignores additive ownership fields and acknowledges only offsets.
+      await pc.request({ kind: old.kind, sha256: old.sha256, size: old.size })
+      const received = legacyOffsets.get(old.sha256) ?? 0
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return { received }
+    }
+    if (old.kind === 'upload.chunk') {
+      const here = legacyOffsets.get(old.sha256) ?? 0
+      if (old.offset !== here)
+        throw new Error(`old receiver offset ${old.offset}, expected ${here}`)
+      legacyOffsets.set(old.sha256, here + Buffer.from(old.data, 'base64').length)
+      return pc.request({
+        kind: old.kind,
+        sha256: old.sha256,
+        size: old.size,
+        offset: old.offset,
+        data: old.data
+      })
+    }
+    const result = await pc.request(p)
+    if (old.kind === 'artifact.invoke' && old.value?.args[0]?.staged)
+      legacyOffsets.delete(old.value.args[0].staged.sha256)
+    return result
   }
   chat = createComputerChatServices({
     db: h.slayDb,
@@ -94,6 +141,33 @@ afterAll(async () => {
 const frame = Math.ceil((256 * 1024) / 3) * 4 + 8192
 
 describe('a bounded computer: staged chunks, any size', () => {
+  it('concurrent identical uploads also finish against a legacy receiver with strict shared offsets', async () => {
+    bounded = true
+    legacyReceiver = true
+    const bytes = Buffer.alloc(600_000, 66)
+    try {
+      const results = await Promise.allSettled(
+        ['one', 'two'].map((id) =>
+          store.uploadArtifactBlob(h.slayDb, {
+            taskId: 't',
+            title: `legacy-${id}.bin`,
+            bytes,
+            chatTabId: 'tab',
+            operationId: `legacy-${id}`
+          })
+        )
+      )
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+      for (const result of results)
+        if (result.status === 'fulfilled')
+          expect(
+            Buffer.from(await store.readArtifactBytes(h.slayDb, result.value!.id)).equals(bytes)
+          ).toBe(true)
+    } finally {
+      legacyReceiver = false
+      legacyOffsets.clear()
+    }
+  })
   it('uploads an artifact bigger than the inline limit; every request fits one range', async () => {
     sent.length = 0
     bounded = true
@@ -105,6 +179,8 @@ describe('a bounded computer: staged chunks, any size', () => {
       operationId: 'big-up'
     })
     expect(sent.map((s) => s.kind)).toContain('upload.chunk')
+    expect(sent.find((s) => s.kind === 'upload.begin')?.route).toBeDefined()
+    expect(sent.filter((s) => s.kind === 'upload.chunk').every((s) => !!s.uploadId)).toBe(true)
     expect(sent.every((s) => s.bytes <= frame)).toBe(true)
     expect(Buffer.from(await store.readArtifactBytes(h.slayDb, a!.id)).equals(BIG)).toBe(true)
   })
@@ -122,6 +198,8 @@ describe('a bounded computer: staged chunks, any size', () => {
     writeFileSync(path, BIG)
     sent.length = 0
     await store.writeArtifactContent(h.slayDb, { artifactId: a!.id, sourcePath: path })
+    expect(sent.find((s) => s.kind === 'upload.begin')?.route).toBeDefined()
+    expect(sent.filter((s) => s.kind === 'upload.chunk').every((s) => !!s.uploadId)).toBe(true)
     expect(sent.every((s) => s.bytes <= frame)).toBe(true)
     expect(Buffer.from(await store.readArtifactBytes(h.slayDb, a!.id)).equals(BIG)).toBe(true)
   })

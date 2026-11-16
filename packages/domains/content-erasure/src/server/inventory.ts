@@ -1,3 +1,4 @@
+import { opendir } from 'node:fs/promises'
 import type { SlayzoneDb } from '@slayzone/platform'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,6 +14,15 @@ export async function hasUnattributedFiles(db: SlayzoneDb, root: string): Promis
     assertNoUnattributedArtifactPreparations(root)
   } catch {
     return true
+  }
+  // Upload staging normally lives in computer stores. Unknown hub-local copies
+  // cannot be silently ignored by account erasure either.
+  const uploads = join(root, 'uploads')
+  try {
+    const directory = await opendir(uploads)
+    for await (const _entry of directory) return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   const tasks = new Set(
     (

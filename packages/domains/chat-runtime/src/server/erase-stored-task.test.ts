@@ -10,7 +10,7 @@ import {
 } from './erase-stored-task'
 import { rebuildStoreFile } from './storage-compaction'
 
-test('preparing blob inventory is captured durably before journals disappear; another task retains a shared hash', () => {
+test('preparing blob inventory is captured durably before journals disappear; another task retains a shared hash', async () => {
   const { root, db } = store()
   const mine = 'a'.repeat(64),
     shared = 'b'.repeat(64)
@@ -43,7 +43,7 @@ test('preparing blob inventory is captured durably before journals disappear; an
     }
     prepareStoredTaskErasure(db, 'alice', root)
     rmSync(join(root, 'artifacts', '.transactions'), { recursive: true })
-    finishStoredTaskErasure(db, root, 'alice')
+    await finishStoredTaskErasure(db, root, 'alice')
     expect(existsSync(join(root, 'blobs', mine.slice(0, 2), mine.slice(2)))).toBe(false)
     expect(existsSync(join(root, 'blobs', shared.slice(0, 2), shared.slice(2)))).toBe(true)
   } finally {
@@ -52,7 +52,7 @@ test('preparing blob inventory is captured durably before journals disappear; an
   }
 })
 
-test('erasure inventories preparing owner headers and claimed cleanup UUIDs without erasing another task', () => {
+test('erasure inventories preparing owner headers and claimed cleanup UUIDs without erasing another task', async () => {
   const { root, db } = store()
   const jobs = join(root, 'artifacts', '.transactions')
   const original = '00000000-0000-4000-8000-000000000001'
@@ -80,7 +80,7 @@ test('erasure inventories preparing owner headers and claimed cleanup UUIDs with
       writeFileSync(join(path, 'after'), 'private body')
     }
     prepareStoredTaskErasure(db, 'alice')
-    finishStoredTaskErasure(db, root, 'alice')
+    await finishStoredTaskErasure(db, root, 'alice')
     expect(existsSync(mine)).toBe(false)
     expect(existsSync(other)).toBe(true)
   } finally {
@@ -89,14 +89,16 @@ test('erasure inventories preparing owner headers and claimed cleanup UUIDs with
   }
 })
 
-test('unattributable preparation bytes prevent a verified computer erasure', () => {
+test('unattributable preparation bytes prevent a verified computer erasure', async () => {
   const { root, db } = store()
   const job = join(root, 'artifacts', '.transactions', '00000000-0000-4000-8000-000000000004')
   try {
     mkdirSync(job, { recursive: true })
     writeFileSync(join(job, 'after'), 'unknown private body')
     prepareStoredTaskErasure(db, 'alice')
-    expect(() => finishStoredTaskErasure(db, root, 'alice')).toThrow(/[Uu]nattributed|[Oo]wnership/)
+    await expect(finishStoredTaskErasure(db, root, 'alice')).rejects.toThrow(
+      /[Uu]nattributed|[Oo]wnership/
+    )
     expect(existsSync(job)).toBe(true)
   } finally {
     db.close()
@@ -138,7 +140,7 @@ test('erasure never VACUUMs on the calling thread; the off-thread rebuild leaves
     event('c-alice', 1, secret.repeat(100))
     event('c-bob', 1, 'bob keeps this')
     prepareStoredTaskErasure(db, 'alice')
-    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
+    expect(await finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
     expect(vacuums()).toBe(0)
     db.close()
     await rebuildStoreFile(path)
@@ -148,7 +150,7 @@ test('erasure never VACUUMs on the calling thread; the off-thread rebuild leaves
       if (existsSync(file)) expect(readFileSync(file).includes(Buffer.from(secret))).toBe(false)
     // The hub re-sends after a lost reply, or an account erasure lists old tasks again.
     prepareStoredTaskErasure(db, 'alice')
-    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: false })
+    expect(await finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: false })
     expect(db.prepare("SELECT event FROM events WHERE conversation_id='c-bob'").get()).toEqual({
       event: 'bob keeps this'
     })
@@ -158,19 +160,19 @@ test('erasure never VACUUMs on the calling thread; the off-thread rebuild leaves
   }
 })
 
-test('content removed by another path between preparation and finish still needs the rewrite', () => {
+test('content removed by another path between preparation and finish still needs the rewrite', async () => {
   const { root, db, event } = store()
   try {
     event('c-alice', 1, 'first')
     prepareStoredTaskErasure(db, 'alice')
-    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
+    expect(await finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
     markStoredTaskErasureCompacted(db, 'alice')
     // A restored copy brings content back; the lifecycle purge deletes it after the
     // preparation, so the finishing step itself deletes nothing.
     event('c-alice', 2, 'restored content')
     prepareStoredTaskErasure(db, 'alice')
     db.prepare("DELETE FROM events WHERE conversation_id='c-alice'").run()
-    expect(finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
+    expect(await finishStoredTaskErasure(db, root, 'alice')).toEqual({ compact: true })
   } finally {
     db.close()
     rmSync(root, { recursive: true, force: true })
@@ -194,7 +196,7 @@ test('erasing a task removes its session ledger; a proof another task still name
       INSERT INTO session_deletions VALUES('d','alice','claude-code','x',3);
       INSERT INTO legacy_conversation_history VALUES('alice','claude-code','["old"]');`)
     prepareStoredTaskErasure(db, 'alice')
-    finishStoredTaskErasure(db, root, 'alice')
+    await finishStoredTaskErasure(db, root, 'alice')
     for (const table of [
       'agent_sessions',
       'session_resets',

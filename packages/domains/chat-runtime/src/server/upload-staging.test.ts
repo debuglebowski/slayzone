@@ -15,13 +15,17 @@ import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { createUploadStaging } from './upload-staging'
 
 const dirs: string[] = []
-afterEach(() => {
+const stores: ReturnType<typeof createUploadStaging>[] = []
+afterEach(async () => {
+  for (const s of stores.splice(0)) await s.close()
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 const fresh = (opts?: Parameters<typeof createUploadStaging>[1]) => {
   const dir = mkdtempSync(join(tmpdir(), 'upload-staging-'))
   dirs.push(dir)
-  return createUploadStaging(dir, opts)
+  const s = createUploadStaging(dir, opts)
+  stores.push(s)
+  return s
 }
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const BYTES = randomBytes(BYTE_RANGE_MAX_CHUNK * 2 + 10)
@@ -34,69 +38,69 @@ const chunks = (b: Buffer) => {
 }
 
 describe('upload staging', () => {
-  it('begin, chunks in order, take: the exact bytes; release removes them', () => {
+  it('begin, chunks in order, take: the exact bytes; release removes them', async () => {
     const s = fresh()
-    expect(s.begin(HASH, BYTES.length)).toEqual({ received: 0 })
-    for (const c of chunks(BYTES)) s.chunk(HASH, BYTES.length, c.offset, c.bytes)
-    const taken = s.take(HASH, BYTES.length)
+    expect(await s.begin(HASH, BYTES.length)).toEqual({ received: 0 })
+    for (const c of chunks(BYTES)) await s.chunk(HASH, BYTES.length, c.offset, c.bytes)
+    const taken = await s.take(HASH, BYTES.length)
     expect(readFileSync(taken.path).equals(BYTES)).toBe(true)
-    s.release(HASH, BYTES.length)
+    await s.release(HASH, BYTES.length)
     expect(existsSync(taken.path)).toBe(false)
   })
 
-  it('resumable: begin answers what is here', () => {
+  it('resumable: begin answers what is here', async () => {
     const s = fresh()
-    s.begin(HASH, BYTES.length)
+    await s.begin(HASH, BYTES.length)
     const [first] = chunks(BYTES)
-    s.chunk(HASH, BYTES.length, 0, first.bytes)
-    expect(s.begin(HASH, BYTES.length)).toEqual({ received: first.bytes.length })
+    await s.chunk(HASH, BYTES.length, 0, first.bytes)
+    expect(await s.begin(HASH, BYTES.length)).toEqual({ received: first.bytes.length })
   })
 
-  it('refuses a chunk out of order, past the size, or over one range; and a chunk before begin', () => {
+  it('refuses a chunk out of order, past the size, or over one range; and a chunk before begin', async () => {
     const s = fresh()
-    expect(() => s.chunk(HASH, BYTES.length, 0, BYTES.subarray(0, 10))).toThrow(/begin/)
-    s.begin(HASH, BYTES.length)
-    expect(() => s.chunk(HASH, BYTES.length, 5, BYTES.subarray(5, 10))).toThrow(/offset/)
-    expect(() => s.chunk(HASH, BYTES.length, 0, randomBytes(BYTE_RANGE_MAX_CHUNK + 1))).toThrow(
-      /chunk/
-    )
+    await expect(s.chunk(HASH, BYTES.length, 0, BYTES.subarray(0, 10))).rejects.toThrow(/begin/)
+    await s.begin(HASH, BYTES.length)
+    await expect(s.chunk(HASH, BYTES.length, 5, BYTES.subarray(5, 10))).rejects.toThrow(/offset/)
+    await expect(
+      s.chunk(HASH, BYTES.length, 0, randomBytes(BYTE_RANGE_MAX_CHUNK + 1))
+    ).rejects.toThrow(/chunk/)
     const small = Buffer.from('abc')
-    s.begin(sha(small), 3)
-    expect(() => s.chunk(sha(small), 3, 0, Buffer.from('abcd'))).toThrow(/size/)
+    await s.begin(sha(small), 3)
+    await expect(s.chunk(sha(small), 3, 0, Buffer.from('abcd'))).rejects.toThrow(/size/)
   })
 
-  it('take refuses an incomplete upload and bytes that do not hash to their name', () => {
+  it('take refuses an incomplete upload and bytes that do not hash to their name', async () => {
     const s = fresh()
-    s.begin(HASH, BYTES.length)
-    expect(() => s.take(HASH, BYTES.length)).toThrow(/incomplete/)
+    await s.begin(HASH, BYTES.length)
+    await expect(s.take(HASH, BYTES.length)).rejects.toThrow(/incomplete/)
     const wrong = Buffer.from('not what the name says')
     const lie = sha(Buffer.from('something else'))
-    s.begin(lie, wrong.length)
-    s.chunk(lie, wrong.length, 0, wrong)
-    expect(() => s.take(lie, wrong.length)).toThrow(/hash/)
-    expect(() => s.take(sha(Buffer.from('never begun')), 3)).toThrow(/not staged/)
+    await s.begin(lie, wrong.length)
+    await s.chunk(lie, wrong.length, 0, wrong)
+    await expect(s.take(lie, wrong.length)).rejects.toThrow(/hash/)
+    await expect(s.take(sha(Buffer.from('never begun')), 3)).rejects.toThrow(/not staged/)
   })
 
-  it('a completed upload begun again is already complete (idempotent retries)', () => {
+  it('a completed upload begun again is already complete (idempotent retries)', async () => {
     const s = fresh()
-    s.begin(HASH, BYTES.length)
-    for (const c of chunks(BYTES)) s.chunk(HASH, BYTES.length, c.offset, c.bytes)
-    expect(s.begin(HASH, BYTES.length)).toEqual({ received: BYTES.length })
+    await s.begin(HASH, BYTES.length)
+    for (const c of chunks(BYTES)) await s.chunk(HASH, BYTES.length, c.offset, c.bytes)
+    expect(await s.begin(HASH, BYTES.length)).toEqual({ received: BYTES.length })
   })
 
-  it('sweeps uploads left stale', () => {
+  it('sweeps uploads left stale', async () => {
     let now = 0
     const s = fresh({ now: () => now, staleMs: 1000 })
-    s.begin(HASH, BYTES.length)
+    await s.begin(HASH, BYTES.length)
     now = 2000
-    s.sweep()
-    expect(s.begin(HASH, BYTES.length)).toEqual({ received: 0 })
+    await s.sweep()
+    expect(await s.begin(HASH, BYTES.length)).toEqual({ received: 0 })
   })
 
-  it('refuses a malformed hash or size', () => {
+  it('refuses a malformed hash or size', async () => {
     const s = fresh()
-    expect(() => s.begin('../x', 3)).toThrow(/hash/)
-    expect(() => s.begin(HASH, -1)).toThrow(/size/)
+    await expect(s.begin('../x', 3)).rejects.toThrow(/hash/)
+    await expect(s.begin(HASH, -1)).rejects.toThrow(/size/)
   })
 })
 
@@ -119,12 +123,13 @@ describe('staged bytes in use (computer runtime)', () => {
       const route = { id: 'c', epoch: 1 }
       // Over the 14,000,000-char inline cap once base64'd.
       const big = randomBytes(11 * 1024 * 1024)
-      const staged = { sha256: sha(big), size: big.length }
-      const stage = (b: Buffer) => {
-        r.uploads.begin(sha(b), b.length)
-        for (const c of chunks(b)) r.uploads.chunk(sha(b), b.length, c.offset, c.bytes)
+      const stage = async (b: Buffer, operationId: string) => {
+        const { uploadId } = await r.uploads.begin(sha(b), b.length, { route, operationId })
+        for (const c of chunks(b))
+          await r.uploads.chunk(sha(b), b.length, c.offset, c.bytes, { route, uploadId: uploadId! })
+        return { sha256: sha(b), size: b.length, uploadId }
       }
-      stage(big)
+      const staged = await stage(big, 'staged-up')
       const a = (await r.artifacts.invoke({
         route,
         method: 'uploadArtifactBlob',
@@ -136,15 +141,15 @@ describe('staged bytes in use (computer runtime)', () => {
       }
       expect(Buffer.from(read.data, 'base64').equals(big)).toBe(true)
       // Used up: a second use must send it again.
-      expect(() => r.uploads.take(staged.sha256, staged.size)).toThrow(/not staged/)
+      await expect(r.uploads.acquire(staged, route)).rejects.toThrow(/not staged/)
 
       const next = Buffer.from('written through staging')
-      stage(next)
+      const written = await stage(next, 'staged-write')
       await r.artifacts.invoke({
         route,
         method: 'writeArtifactContent',
         operationId: 'staged-write',
-        args: [{ artifactId: a.id, staged: { sha256: sha(next), size: next.length } }]
+        args: [{ artifactId: a.id, staged: written }]
       })
       expect(await r.artifacts.invoke({ route, method: 'readArtifactContent', args: [a.id] })).toBe(
         'written through staging'

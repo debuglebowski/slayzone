@@ -30,7 +30,7 @@ import { BYTE_RANGE_MAX_CHUNK } from '@slayzone/platform/bounded-reads'
 import { EMPTY_RANGE_PAGE, fileHashMatches, readFileRangePage } from './blob-store'
 import type { createLocalChatData } from './local-data'
 import type { createLocalAttachments } from './attachments'
-import type { UploadStaging } from './upload-staging'
+import type { UploadLease, UploadStaging } from './upload-staging'
 
 const id = z.string().min(1).max(200),
   title = z.string().min(1).max(512),
@@ -43,6 +43,10 @@ const base64 = z
   .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 /** Bytes staged on this computer (`upload-staging.ts`), by hash and size. */
 const stagedBytes = z.object({
+  uploadId: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 })
@@ -229,7 +233,9 @@ export function createLocalArtifacts(
   // Keep B5 hooks in position four and the historical standalone upload dependency.
   const hooks: LocalArtifactHooks = 'begin' in hooksOrUploads ? {} : hooksOrUploads
   const uploads = uploadStaging ?? ('begin' in hooksOrUploads ? hooksOrUploads : undefined)
-  const context = new AsyncLocalStorage<import('../shared').ConversationIdentity>()
+  const context = new AsyncLocalStorage<
+    import('../shared').ConversationIdentity & { upload?: UploadLease }
+  >()
   let mutationTail: Promise<unknown> = Promise.resolve()
   let mutationPending = 0
   function serialize<T>(work: () => Promise<T>): Promise<T> {
@@ -249,6 +255,7 @@ export function createLocalArtifacts(
   })
   const { db, store } = storage.compose((raw) =>
     createStandaloneArtifacts(raw, storage.dir, () => {
+      context.getStore()?.upload?.assertCurrent()
       const taskId = context.getStore()?.taskId
       if (taskId && storage.taskLifecycle(taskId).state !== 'active')
         throw new Error('Task chat is paused or deleted')
@@ -623,7 +630,10 @@ export function createLocalArtifacts(
         const source = await store.resolveArtifactReadSource(db, first, spec)
         if (source.kind === 'missing' || source.kind === 'empty') {
           if (offset !== 0) throw new Error('Range offset past the end')
-          result = { ...EMPTY_RANGE_PAGE, ...(source.kind === 'missing' ? { missing: true } : {}) }
+          result = {
+            ...EMPTY_RANGE_PAGE,
+            ...(source.kind === 'missing' ? { missing: true } : {})
+          }
         } else if (
           spec.kind === 'content' &&
           source.kind === 'blob' &&

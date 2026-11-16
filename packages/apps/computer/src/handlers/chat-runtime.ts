@@ -140,6 +140,10 @@ const requestSchema = z.discriminatedUnion('kind', [
     data: z.string().max(14000000).optional(),
     staged: z
       .object({
+        uploadId: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
       })
@@ -148,11 +152,18 @@ const requestSchema = z.discriminatedUnion('kind', [
   // Staged uploads (FU1 S3): a file's bytes in chunks of ≤ 256 KiB, by hash + size.
   z.object({
     kind: z.literal('upload.begin'),
+    route: chatRouteSchema.optional(),
+    operationId: z.string().min(1).max(200).optional(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
   }),
   z.object({
     kind: z.literal('upload.chunk'),
+    route: chatRouteSchema.optional(),
+    uploadId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -832,15 +843,24 @@ export function createChatRuntimeHandlers(opts: {
       case 'attachment.has':
         return await r.requests.handle(req)
       case 'upload.begin':
+        if ((req.route === undefined) !== (req.operationId === undefined))
+          throw new Error('Upload begin requires both route and operation id')
         if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
-        return await opts.uploads.begin(req.sha256, req.size)
+        return await opts.uploads.begin(
+          req.sha256,
+          req.size,
+          req.route ? { route: req.route, operationId: req.operationId! } : undefined
+        )
       case 'upload.chunk':
+        if ((req.route === undefined) !== (req.uploadId === undefined))
+          throw new Error('Upload chunk requires both route and upload id')
         if (!opts.uploads) throw new Error('Online upload staging adapter is unavailable')
         return await opts.uploads.chunk(
           req.sha256,
           req.size,
           req.offset,
-          Buffer.from(req.data, 'base64')
+          Buffer.from(req.data, 'base64'),
+          req.uploadId ? { route: req.route!, uploadId: req.uploadId } : undefined
         )
       case 'attachment.put': {
         if ((req.data === undefined) === (req.staged === undefined))
