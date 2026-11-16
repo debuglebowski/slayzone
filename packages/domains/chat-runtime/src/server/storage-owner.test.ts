@@ -93,6 +93,39 @@ test('one owner per file; close waits for writer/checkpointer release before reo
   expect(await next.storeId()).toBe(id)
 })
 
+test('online authority snapshots stay on the canonical worker, refresh stored exclusions, and preserve live leases', async () => {
+  const owner = await open()
+  await owner.db.run(
+    'INSERT INTO task_paths(task_id,project_id,worktree_path,base_dir,updated_at) VALUES(?,?,?,?,?)',
+    ['a', 'p', '/p/a', '/base/a', 1]
+  )
+  await owner.db.run(
+    'INSERT INTO task_paths(task_id,project_id,worktree_path,base_dir,updated_at) VALUES(?,?,?,?,?)',
+    ['b', 'q', '/p/b', '/base/b', 1]
+  )
+  const lease = await owner.acquireBlobLease('online writer', 60_000)
+  try {
+    const task = { kind: 'task', taskId: 'a', projectId: 'p' } as const
+    expect(await owner.readScope(task)).toMatchObject({
+      scope: task,
+      row: { taskId: 'a', worktreePath: '/p/a' },
+      others: { worktrees: ['/p/b'], baseDirs: ['/base/b'] }
+    })
+    expect(await owner.readScope({ kind: 'project', projectId: 'p' })).toMatchObject({
+      own: ['/p/a', '/base/a'],
+      others: ['/p/b', '/base/b']
+    })
+    await owner.db.run('UPDATE task_paths SET worktree_path=? WHERE task_id=?', ['/new/b', 'b'])
+    expect(await owner.readScope(task)).toMatchObject({ others: { worktrees: ['/new/b'] } })
+    expect(await owner.hasBlobLeases()).toBe(true)
+    await owner.db.exec('DROP TABLE task_paths')
+    await expect(owner.readScope(task)).rejects.toThrow(/task_paths/)
+    expect(await owner.hasBlobLeases()).toBe(true)
+  } finally {
+    await lease.release()
+  }
+})
+
 test('production maintenance composition drains an admitted erasure and its FULL fence before concurrent close', async () => {
   const dir = root()
   const initial = await open(dir)

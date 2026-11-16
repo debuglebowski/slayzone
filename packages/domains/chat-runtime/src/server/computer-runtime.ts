@@ -1,3 +1,4 @@
+import { createChatScopeAuthority } from './scope-authority'
 import { createChatRetention } from './retention'
 import { parseChatInvocation, type ChatTabTransition } from '../shared'
 import { createLocalArtifacts } from './artifacts'
@@ -326,6 +327,7 @@ export function assembleComputerChatRuntime(
   // Content erasure stops a rebuild: its copy came from a snapshot holding that content.
   storage.onTaskPurge(() => compaction.abort('Content was erased during compaction; start again'))
   return {
+    authority: createChatScopeAuthority(storage),
     diagnosticsConfig,
     async relocateProject(
       projectId: string,

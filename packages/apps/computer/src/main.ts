@@ -396,9 +396,9 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   })
   const { recoverRelocation, assertRelocationAvailable, ...projectHandlers } =
     createProjectHandlers(ctx, deps.getProjectPaths ?? (() => null), {
-      assertIdle: (projectId) => {
+      assertIdle: async (projectId) => {
         chat.assertProjectIdle(projectId)
-        const roots = chat.scopeBounds({ kind: 'project', projectId }).roots
+        const roots = (await chat.scopeBounds({ kind: 'project', projectId })).roots
         const contains = (cwd: string) => roots.some((root) => isWithinDirectory(cwd, root))
         if (
           [...relocationHosts].some((host) => host.hasFolderWork(contains)) ||
@@ -435,6 +435,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
   /** Handlers' cleanup for a lost hub connection (their state belongs to that hub). */
   const onHubDisconnected: Array<() => void> = []
   const table: HubMethodTable = {
+    [HubToComputerMethods.ping]: () => ({ ts: Date.now() }),
     [HubToComputerMethods.chatRequest]: chat.request,
     [HubToComputerMethods.computerShutdown]: shutdownHandler,
     ...pty.handlers,
@@ -522,7 +523,15 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     (p as { global?: unknown }).global === true
 
   /** The jail one request's path scope opens: its folders from this hub's store. */
-  const scopeJailOf = (scope: WirePathScope): ScopeJail => chat.scopeJail(scope)
+  const scopeJailOf = (scope: WirePathScope): Promise<ScopeJail> => chat.scopeJail(scope)
+  // These controls name existing local identities, never a filesystem path. Their
+  // handlers still enforce this hub's process ownership and the parsed actor.
+  const storeIndependentControls = new Set<string>([
+    HubToComputerMethods.ping,
+    HubToComputerMethods.procKill,
+    HubToComputerMethods.ptyKill,
+    HubToComputerMethods.computerShutdown
+  ])
 
   /** Exactly one log line per request, whatever its outcome. */
   const handle = async (method: string, params: unknown, rawActor: unknown): Promise<unknown> => {
@@ -552,9 +561,12 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     const entry0 = Object.hasOwn(table, method) ? table[method] : undefined
     // The path scope the hub authorized (§9 Phase 7b): every path judged while this
     // request is served must lie inside that task's / project's own folders here.
-    const scope = actor.pathScope
+    const independent = storeIndependentControls.has(method)
+    const scope = independent ? undefined : actor.pathScope
     const scoped =
-      entry0 && scope ? (p: unknown) => runInScopeJail(scopeJailOf(scope), () => entry0(p)) : entry0
+      entry0 && scope
+        ? async (p: unknown) => runInScopeJail(await scopeJailOf(scope), () => entry0(p))
+        : entry0
     // A process the hub starts for a task or project (§9 Phase 7c) starts inside
     // that scope's own folders: its cwd is judged against them, or chosen from them.
     // The hub no longer knows them, so a spawn naming neither is refused — except a
@@ -564,7 +576,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
     // is a root of the spawn, judged by the machine bound.
     const entry =
       scoped && SCOPED_SPAWNS.has(method)
-        ? (p: unknown) => {
+        ? async (p: unknown) => {
             const spawnScope = scope ?? implicitSpawnScope(p)
             if (!spawnScope && isGlobalProcSpawn(method, p)) return scoped(p)
             if (!spawnScope) {
@@ -581,8 +593,8 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
               cwd !== undefined &&
               (p as { declaredCwd?: unknown }).declaredCwd === true
             const jail = declared
-              ? withDeclaredRoot(scopeJailOf(spawnScope), cwd)
-              : scopeJailOf(spawnScope)
+              ? withDeclaredRoot(await scopeJailOf(spawnScope), cwd)
+              : await scopeJailOf(spawnScope)
             const judged = scopedSpawnCwd(
               jail,
               cwd,
@@ -611,7 +623,7 @@ export function createHubRequestHandler(deps: HubRequestHandlerDeps): HubRequest
         method === HubToComputerMethods.slaySetup
       )
         await cliReady
-      if (deps.pathReady && !ptyMethods.has(method)) await deps.pathReady
+      if (deps.pathReady && !ptyMethods.has(method) && !independent) await deps.pathReady
       // Chat requests judge their paths (agent start folder, `cwd` of a command,
       // folder lists) inside the task's folders too, from the same map.
       if (

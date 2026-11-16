@@ -22,7 +22,7 @@ import {
   type ChatBootstrap,
   type DataImportKinds,
   isStorageOnlyChatOwner,
-  scopeBounds,
+  resolveChatScope,
   usageCursorStore
 } from '@slayzone/chat-runtime/server'
 import type { WirePathScope } from '@slayzone/platform/path-scope'
@@ -700,43 +700,21 @@ export function createChatRuntimeHandlers(opts: {
     runtimeDir: join(opts.stateDir, 'computer-runtime'),
     hubUrl: opts.ctx.config.hubUrl
   })
-  /**
-   * The folders of a project's tasks held here, for its scope (B1). A project scope
-   * needs no chat store: with none (no computer identity yet, shutting down) no
-   * task's folder is held here, and one that cannot be read narrows the scope to the
-   * project's own folders — it never fails a project's request.
-   */
-  function projectTaskRoots(projectId: string): { own: string[]; others: string[] } {
-    const none = { own: [], others: [] }
-    if (closed || resetting || (!instance && !opts.computerId())) return none
-    try {
-      return runtime().taskPaths.ofProject(projectId)
-    } catch (err) {
-      opts.ctx.log('project scope: task folders unreadable', {
-        projectId,
-        error: err instanceof Error ? err.message : String(err)
-      })
-      return none
-    }
-  }
-  /** What a request's path scope may touch here (§9 Phase 7b): see `scopeBounds`. */
-  function boundsOf(scope: WirePathScope) {
-    return scopeBounds(
-      // Lazy: each part reads this hub's chat store only when the scope needs it.
-      {
-        get: (taskId) => runtime().taskPaths.get(taskId),
-        others: (taskId) => runtime().taskPaths.others(taskId),
-        ofProject: (projectId) => projectTaskRoots(projectId)
-      },
+  /** A fresh atomic store snapshot, then current host placements; failures refuse access. */
+  async function boundsOf(scope: WirePathScope) {
+    if (closed || resetting) throw new Error('Chat path authority is unavailable')
+    const snapshot = await runtime().authority.scope(scope)
+    if (closed || resetting) throw new Error('Chat path authority is unavailable')
+    return resolveChatScope(
+      snapshot,
       scope,
       (projectId) => opts.getProjectPaths()?.get(projectId)?.path ?? null,
       () => opts.getProjectPaths()?.list() ?? [],
       (_projectId, folder) => projectWorktreeBases(folder, scope)
     )
   }
-  /** The jail of a task's / project's own folders here. */
-  function scopeJail(scope: WirePathScope): ScopeJail {
-    const bounds = boundsOf(scope)
+  async function scopeJail(scope: WirePathScope): Promise<ScopeJail> {
+    const bounds = await boundsOf(scope)
     return {
       label: scope.kind === 'task' ? `task ${scope.taskId}` : `project ${scope.projectId}`,
       roots: bounds.roots,
@@ -759,14 +737,14 @@ export function createChatRuntimeHandlers(opts: {
     return { kind: 'task', taskId: owner.identity.taskId, projectId: bootstrap?.projectId ?? null }
   }
   /** `cwd` judged inside the conversation's task folders; refused without one. */
-  function judgeChatPath(
+  async function judgeChatPath(
     r: ReturnType<typeof runtime>,
     conversationId: string,
     candidate: string
-  ): string {
+  ): Promise<string> {
     const scope = conversationScope(r, conversationId)
     if (!scope) throw new Error('Chat conversation is not on this computer')
-    return runInScopeJail(scopeJail(scope), () =>
+    return runInScopeJail(await scopeJail(scope), () =>
       judgePath(candidate, opts.ctx.config.allowedRoots)
     )
   }
@@ -872,7 +850,7 @@ export function createChatRuntimeHandlers(opts: {
         // The task's checkout is this computer's to know (§9 Phase 7c/7d): its worktree,
         // else its project's folder here; a given path is judged against its folders.
         const { taskId, projectId } = value
-        const jail = scopeJail({ kind: 'task', taskId, projectId })
+        const jail = await scopeJail({ kind: 'task', taskId, projectId })
         const repoPath = runInScopeJail(jail, () => {
           const own =
             value.repoPath ??
@@ -1035,10 +1013,14 @@ export function createChatRuntimeHandlers(opts: {
               ? r.local.get<ChatBootstrap>(owner.identity.tabId, 'settings', 'bootstrap')
               : null
           const candidate = String(call.args[0] || bootstrap?.cwd || '')
-          if (owner) call.args[0] = judgeChatPath(r, route.id, candidate)
+          if (owner) call.args[0] = await judgeChatPath(r, route.id, candidate)
           else if (req.scope)
             call.args[0] = runInScopeJail(
-              scopeJail({ kind: 'task', taskId: req.scope.taskId, projectId: req.scope.projectId }),
+              await scopeJail({
+                kind: 'task',
+                taskId: req.scope.taskId,
+                projectId: req.scope.projectId
+              }),
               () => judgePath(candidate, opts.ctx.config.allowedRoots)
             )
           else throw new Error(`${req.method} names no task; refusing to list a folder`)
@@ -1178,7 +1160,7 @@ export function createChatRuntimeHandlers(opts: {
           !value.cwd && isStorageOnlyChatOwner(value.identity)
             ? ''
             : scopedSpawnCwd(
-                scopeJail({ kind: 'task', taskId: value.identity.taskId, projectId }),
+                await scopeJail({ kind: 'task', taskId: value.identity.taskId, projectId }),
                 value.cwd || undefined,
                 opts.ctx.config.allowedRoots,
                 projectId ? () => projectNotPlacedError(projectId) : undefined
@@ -1191,7 +1173,7 @@ export function createChatRuntimeHandlers(opts: {
         const first = call.args[0]
         if (first && typeof first === 'object' && 'cwd' in first) {
           const o = first as { cwd: string }
-          if (o.cwd) o.cwd = judgeChatPath(r, call.route.id, o.cwd)
+          if (o.cwd) o.cwd = await judgeChatPath(r, call.route.id, o.cwd)
           else {
             const i = r.storage.conversation(call.route.id)?.identity
             const b = i ? r.local.get<ChatBootstrap>(i.tabId, 'settings', 'bootstrap') : null
@@ -1201,12 +1183,16 @@ export function createChatRuntimeHandlers(opts: {
               // here, else refused — an agent never starts unconfined.
               const scope = conversationScope(r, call.route.id)
               if (!scope) throw new Error('Chat conversation is not on this computer')
-              o.cwd = scopedSpawnCwd(scopeJail(scope), undefined, opts.ctx.config.allowedRoots)
+              o.cwd = scopedSpawnCwd(
+                await scopeJail(scope),
+                undefined,
+                opts.ctx.config.allowedRoots
+              )
             }
           }
         }
         if (['listSkills', 'listCommands', 'listAgents', 'listFiles'].includes(call.method))
-          call.args[0] = judgeChatPath(r, call.route.id, String(first))
+          call.args[0] = await judgeChatPath(r, call.route.id, String(first))
         return r.invoke(call)
       }
       case 'inspect':

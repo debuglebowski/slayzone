@@ -51,6 +51,40 @@ async function handlersFor(roots: string[], baseDir = dir) {
 }
 
 describe('project path mapping', () => {
+  it('holds relocation admission while awaiting the async controller idle check', async () => {
+    const source = join(dir, 'before')
+    const target = join(dir, 'after')
+    mkdirSync(source)
+    mkdirSync(target)
+    const store = await createProjectPathStore(HUB, { baseDir: dir })
+    await store.set('p1', source)
+    let release: () => void = () => undefined
+    const idle = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const handlers = createProjectHandlers(ctxWith([dir]), () => store, {
+      assertIdle: () => idle,
+      remap: () => {}
+    })
+    const moving = handlers['project.relocate']({
+      projectId: 'p1',
+      sourcePath: source,
+      path: target,
+      mode: 'update'
+    })
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(store.get('p1')?.path).toBe(source)
+      expect(() => handlers.assertRelocationAvailable()).toThrow(/relocation/i)
+      release()
+      await moving
+      expect(store.get('p1')?.path).toBe(target)
+    } finally {
+      release()
+      await moving
+    }
+  })
+
   it('repairs nested Git worktrees after the folder was moved manually', async () => {
     const source = join(dir, 'repo')
     const target = join(dir, 'renamed')

@@ -301,3 +301,23 @@ dropped, or restored when it is the only copy).
   Retained same-contract busy-host proof preserves historical chat schemas and
   verifies new connectors do not invent this capability. Its bundle fixture
   matches schema indentation and the current summaries refinement explicitly.
+
+
+- 2026-11-16 (fu-2 R1, S6b2b3): online path controllers now await a fresh store
+  scope snapshot before judging filesystem/spawn/chat paths. Stored task roots and
+  exclusions are captured in one synchronous native transaction; current host
+  placements/settings are merged after the await. Unavailable project task
+  authority refuses the request rather than losing exclusions. The same compiled
+  read is available on the canonical owner as `chatAuthority.scope` / `readScope`;
+  it neither assembles the offline profile nor clears live leases. Online runtime
+  assembly still uses the transitional native store adapter: this slice migrates
+  production async callers, not the complete online owner.
+  Existing-identity ping, proc/pty stop and shutdown controls bypass path-store
+  and login-PATH readiness while retaining actor and per-hub process checks.
+  Generic dispatch now answers ping with the existing timestamp wire shape;
+  network dialer ping/heartbeat handling remains unchanged. Scoped filesystem
+  requests await fresh authority and reject read errors. Relocation holds admission
+  while awaiting its controller idle check. Delayed-scope multi-hub dispatch tests
+  are controller evidence, not blocked-native production latency proof. Full
+  runtime/local-data/event/caller cutover, chat cancel, provider/control ACK flow,
+  staged publication, S7/S8 and final native/scale acceptance remain pending.

@@ -9,6 +9,7 @@ import {
   type ChatExportReader,
   type ChatStorage
 } from './storage'
+import { readChatScope } from './scope-authority'
 import { assembleComputerChatRuntime } from './computer-runtime'
 import type { CompactionWorkerFactory, WorkerHandle } from './compaction-worker-host'
 import type { StoreCheckpointer, CheckpointResult } from './checkpointer'
@@ -34,6 +35,7 @@ export function serveChatStorageOwner(): void {
   const readers = new Map<string, ChatExportReader>()
   const allowed = new Set<string>(STORAGE_METHODS)
   const txns: StorageOwnerTxns = {
+    'chatAuthority.scope': (_db, scope) => readChatScope(storage, scope),
     'chatMaintenance.eraseTask': async (_db, { taskId, revision }) => {
       if (!runtime) throw new Error('Chat maintenance profile is not open')
       return runtime.eraseTask(taskId, revision)

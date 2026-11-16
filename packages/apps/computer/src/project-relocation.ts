@@ -70,7 +70,7 @@ async function repositories(root: string, previousRoot = root): Promise<Plan['re
 export function createProjectRelocation(opts: {
   store: () => ProjectPathStore
   roots: () => string[]
-  assertIdle: (projectId: string) => void
+  assertIdle: (projectId: string) => void | Promise<void>
   remap: (projectId: string, source: string, target: string) => void | Promise<void>
 }) {
   let busy = false
@@ -131,7 +131,7 @@ export function createProjectRelocation(opts: {
       try {
         if (existsSync(journal())) {
           const plan = planSchema.parse(JSON.parse(readFileSync(journal(), 'utf8')))
-          opts.assertIdle(plan.projectId)
+          await opts.assertIdle(plan.projectId)
           await finish(plan)
         }
         recovered = true
@@ -148,7 +148,7 @@ export function createProjectRelocation(opts: {
       if (busy) throw new Error('Project relocation is in progress. Retry when it finishes.')
       busy = true
       try {
-        opts.assertIdle(projectId)
+        await opts.assertIdle(projectId)
         const current = opts.store().get(projectId)?.path ?? ''
         const target = allowed(path)
         // A lost RPC reply can be retried after the computer already committed.

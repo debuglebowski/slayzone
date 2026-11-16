@@ -2,6 +2,8 @@
 import { mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
+import type { WirePathScope } from '@slayzone/platform/path-scope'
+import type { ChatScopeSnapshot } from './scope-authority'
 import type { SlayzoneDb } from '@slayzone/platform'
 import {
   openSqliteWorker,
@@ -42,6 +44,7 @@ export type AsyncChatStorage = Omit<
   AsyncMethods<SimpleStorage>,
   'getRecord' | 'maintenanceCursor' | 'queueMessageIdentity'
 > & {
+  readScope(scope: WirePathScope): Promise<ChatScopeSnapshot>
   readonly dir: string
   readonly path: string
   readonly db: SlayzoneDb<StorageOwnerTxnRegistry>
@@ -400,6 +403,7 @@ async function openStorageOwner(
       ])
     ),
     {
+      readScope: (scope: WirePathScope) => db.namedTxn('chatAuthority.scope', scope),
       dir,
       path,
       db,

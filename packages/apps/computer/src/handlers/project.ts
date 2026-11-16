@@ -45,7 +45,7 @@ export function createProjectHandlers(
   ctx: HandlerContext,
   getStore: () => ProjectPathStore | null,
   relocation?: {
-    assertIdle(projectId: string): void
+    assertIdle(projectId: string): void | Promise<void>
     remap(projectId: string, source: string, target: string): void | Promise<void>
   }
 ): HubMethodTable & { recoverRelocation(): Promise<void>; assertRelocationAvailable(): void } {

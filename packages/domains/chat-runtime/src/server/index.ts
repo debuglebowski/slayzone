@@ -85,3 +85,9 @@ export {
   type AsyncChatExportReader,
   type OpenStorageOwnerOptions
 } from './storage-owner'
+
+export {
+  resolveChatScope,
+  type ChatScopeAuthority,
+  type ChatScopeSnapshot
+} from './scope-authority'

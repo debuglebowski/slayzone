@@ -1,3 +1,5 @@
+import type { WirePathScope } from '@slayzone/platform/path-scope'
+import type { ChatScopeSnapshot } from './scope-authority'
 import type { MessagePort } from 'node:worker_threads'
 import type Database from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
@@ -144,6 +146,7 @@ export type MaintenanceResult = { taskId: string; revision: number; erased: true
 
 // One compiled, typed command surface; no function or transaction closure crosses threads.
 export type StorageOwnerTxns = {
+  'chatAuthority.scope': (db: Database.Database, scope: WirePathScope) => ChatScopeSnapshot
   'chatMaintenance.eraseTask': (
     db: Database.Database,
     params: { taskId: string; revision: number }
