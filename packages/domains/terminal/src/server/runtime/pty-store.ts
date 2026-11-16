@@ -33,7 +33,7 @@ import { createDbPtySpawnLookups, mapAgentRow, type PtySpawnLookups } from './pt
 import type { TaskSessionStore } from './task-session-store'
 import { claimWarmShell, getWarmStatus, setProjectTabCounts } from './warm-process-manager'
 import { resolveSpawnTarget } from './spawn-target'
-import { getPtyBackend, onPtyBackendChange } from './pty-backend'
+import { awaitPtyOperation, getPtyBackend, onPtyBackendChange } from './pty-backend'
 import { createKeyedSerializer } from './keyed-serializer'
 import { createUnattachedSessions, type UnattachedLaunchResolver } from './unattached-sessions'
 import { runDoctor } from './runtime-doctor'
@@ -91,7 +91,7 @@ export interface PtyCreateOpts {
    * the computer already runs under this id instead of starting one. See
    * `CreatePtyOptions.attach` and ./unattached-sessions.
    */
-  attach?: { computerId: string; spawnId: string }
+  attach?: { computerId: string; spawnId: string; signal?: AbortSignal }
 }
 
 /**
@@ -326,6 +326,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     win?: PtySessionWindow | null
   ): Promise<PtyCreateResult> =>
     oneAtATime(opts.sessionId, async () => {
+      const signal = opts.attach?.signal
+      signal?.throwIfAborted()
       const replacement = replaceNext.get(opts.sessionId)
       if (replacement && opts.attach) {
         return {
@@ -335,7 +337,10 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
           error: 'This session was stopped; its next start must launch a new process.'
         }
       }
-      const result = await ptyCreateNow(opts, win, replacement !== undefined)
+      const result = await awaitPtyOperation(
+        () => ptyCreateNow(opts, win, replacement !== undefined),
+        signal
+      )
       if (result.success && replacement && replaceNext.get(opts.sessionId) === replacement) {
         replaceNext.delete(opts.sessionId)
       }
@@ -347,6 +352,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     win?: PtySessionWindow | null,
     replace = false
   ): Promise<PtyCreateResult> => {
+    const signal = opts.attach?.signal
+    signal?.throwIfAborted()
     const host = getPtyHostBridge()
     const targetWin = win ?? host.getFocusedWindow() ?? host.getAllWindows()[0]
     if (!targetWin) return { success: false, error: 'No window found' }
@@ -361,7 +368,7 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     // Look up mode info to get type, templates, and default flags
     const modeId = opts.mode || 'claude-code'
 
-    const modeInfo = (await lookups.getAgent(modeId)) ?? undefined
+    const modeInfo = (await awaitPtyOperation(() => lookups.getAgent(modeId), signal)) ?? undefined
 
     // Warm-process pool: if a warm agent was reserved for THIS task at create (it
     // booted with the task's id) and the spawn matches it (default mode,
@@ -377,17 +384,17 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     // The computer, project and folder, decided here on the hub (spawn-target.ts).
     // `projectId` also travels in the spawn spec so the computer can use its own
     // record when the hub knows no folder (see PtySpawnSpec.projectId).
-    const { taskId, projectId, computerId, cwd } = await resolveSpawnTarget(
-      opts.sessionId,
-      opts.cwd,
-      {
-        ...lookups,
-        resolveComputerId: (taskId) =>
-          lookups.resolveComputerId(taskId, {
-            mode: modeId,
-            conversationId: opts.existingConversationId
-          })
-      }
+    const { taskId, projectId, computerId, cwd } = await awaitPtyOperation(
+      () =>
+        resolveSpawnTarget(opts.sessionId, opts.cwd, {
+          ...lookups,
+          resolveComputerId: (taskId) =>
+            lookups.resolveComputerId(taskId, {
+              mode: modeId,
+              conversationId: opts.existingConversationId
+            })
+        }),
+      signal
     )
     if (opts.attach && computerId !== opts.attach.computerId) {
       // The task runs on another computer now: its tab is not this process's to own.
@@ -456,13 +463,41 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
       })
   })
   unattached.start()
-  onPtyBackendChange(() => unattached.start())
+  const unsubscribeBackend = onPtyBackendChange(() => unattached.start())
   const unattachedList = () => unattached.list()
   const unattachedAttach = (computerId: string, sessionId: string) =>
     unattached.attach(computerId, sessionId)
   const unattachedKill = (computerId: string, sessionId: string) =>
     unattached.kill(computerId, sessionId)
   const onUnattachedChange = (cb: () => void) => unattached.onChange(cb)
+  // Called only on confirmed deletion. A later kill (tab close deletes first)
+  // rechecks the database below, so disposal needs no permanent tombstone set.
+  const ptyDisposeSession = (sessionId: string) => {
+    replaceNext.delete(sessionId)
+    unattached.cancelAdoptions(sessionId)
+  }
+  const ptyDisposeTask = (taskId: string) => {
+    for (const sessionId of replaceNext.keys()) {
+      if (sessionId.startsWith(`${taskId}:`)) ptyDisposeSession(sessionId)
+    }
+    for (const entry of unattached.list()) {
+      if (entry.taskId === taskId) unattached.cancelAdoptions(entry.sessionId)
+    }
+  }
+  const discardDeletedIntent = async (sessionId: string, token: object) => {
+    const parts = sessionId.split(':')
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return
+    try {
+      const live = await db.get(
+        `SELECT 1 AS live FROM tasks t WHERE t.id = ? AND t.deleted_at IS NULL
+         AND (? = t.id OR EXISTS (SELECT 1 FROM terminal_tabs tab WHERE tab.id = ? AND tab.task_id = t.id))`,
+        [parts[0], parts[1], parts[1]]
+      )
+      if (!live && replaceNext.get(sessionId) === token) replaceNext.delete(sessionId)
+    } catch {
+      // Unknown is not deletion; keep a valid offline tab's intent on DB failure.
+    }
+  }
 
   const ptyTestExecutionContext = (context: ExecutionContext) => testExecutionContext(context)
   const ptyWrite = (sessionId: string, data: string, writeId?: string) =>
@@ -476,14 +511,27 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
   // tracked here, the agent the computer still runs from a previous hub run is what
   // must end — else the new start would take that old agent over (review M2).
   const ptyKill = async (sessionId: string): Promise<boolean> => {
-    replaceNext.set(sessionId, {})
-    if (killPty(sessionId)) return true
+    const token = {}
+    replaceNext.set(sessionId, token)
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(new Error('Terminal cleanup timed out after 5000ms.')),
+      5_000
+    )
+    unattached.cancelAdoptions(sessionId)
     try {
-      const outcome = await unattached.killBySession(sessionId)
-      // Either adoption path may have won while this waited (including a tab's
-      // in-flight spawn). Retry the tracked kill whenever the old attempt lost.
-      if (outcome === 'attached' || outcome === 'not-stopped') return killPty(sessionId)
-      return outcome === 'stopped'
+      return await awaitPtyOperation(async () => {
+        const cleanup = async () => {
+          if (killPty(sessionId)) return true
+          const outcome = await unattached.killBySession(sessionId, controller.signal)
+          controller.signal.throwIfAborted()
+          // Either adoption path may have won while this waited.
+          if (outcome === 'attached' || outcome === 'not-stopped') return killPty(sessionId)
+          return outcome === 'stopped'
+        }
+        const [stopped] = await Promise.all([cleanup(), discardDeletedIntent(sessionId, token)])
+        return stopped
+      }, controller.signal)
     } catch (err) {
       recordDiagnosticEvent({
         level: 'warn',
@@ -494,6 +542,9 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
         payload: { error: err instanceof Error ? err.message : String(err) }
       })
       return false
+    } finally {
+      clearTimeout(timer)
+      controller.abort(new Error('Terminal cleanup finished.'))
     }
   }
   const ptyTouch = (sessionId: string) => touchPty(sessionId)
@@ -554,6 +605,11 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
 
   return {
     agentsList,
+    dispose: () => {
+      unsubscribeBackend()
+      unattached.stop()
+      replaceNext.clear()
+    },
     agentsTest,
     agentsGet,
     agentsCreate,
@@ -576,6 +632,8 @@ export function createPtyOps(db: SlayzoneDb, taskStore: TaskSessionStore) {
     ptyResize,
     ptyGetSize,
     ptyKill,
+    ptyDisposeSession,
+    ptyDisposeTask,
     ptyTouch,
     ptyInterrupt,
     ptyPrioritize,

@@ -57,9 +57,13 @@ on no evidence:
 - **Restart/reset.** A tab stop records replacement intent for its next successful
   start, even before the first session list or while its computer is offline.
   That spawn omits `adoptLive`, including reconnect resends; proactive adoption
-  cannot consume the intent. Untracked stop cleanup has a shared 5 s RPC budget
-  for kill and verification. A failed cleanup records `pty.orphan_kill_failed`
-  and returns false so reset, restart and tab close can finish.
+  cannot consume the intent. The not-attached overlay Restart uses this same stop.
+  Whole best-effort cleanup has one 5 s deadline across adoption, launch resolution,
+  serialized preparation, all computers, kill and verification. Cancellation fences
+  late adoption replies without killing a newer attempt. A failed cleanup records
+  `pty.orphan_kill_failed` and returns false so reset, restart and tab close can finish.
+  Confirmed task/tab deletion or ops disposal removes replacement intents; a kill
+  after deletion checks the hub rows. Valid offline-tab intents have no expiry.
 
 ### Codex silence and cancellation provenance
 
@@ -220,6 +224,9 @@ interface BufferSinceResult { chunks: BufferChunk[]; currentSeq: number }
 ```
 
 ## Main Process (main/)
+
+`./pty-backend` exposes the PTY backend seam and cancellation wait helper without
+loading the full server runtime, for computer-transport and hub consumers.
 
 - `registerPtyHandlers(ipcMain, db)` - PTY lifecycle (create, write, resize, kill, getBufferSince)
 - `PtyManager` - Session management, buffer caching, state detection

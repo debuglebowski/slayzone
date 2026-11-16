@@ -29,6 +29,7 @@ import {
 } from './pty-manager'
 import {
   setPtyBackend,
+  getPtyBackend,
   type PtyBackend,
   type PtySpawnConfirmation,
   type PtySpawnSpec
@@ -390,6 +391,41 @@ test('a start after the hub attached binds to the adopted session too', async ()
   expect(b.specs).toEqual([])
   expect(b.handles[0]!.killed).toBe(false)
   expect(events('pty.create_bound_to_adopted')).toHaveLength(1)
+})
+
+test('a cancelled attach cannot register its late handle over a fresh session', async () => {
+  const b = fakeBackend()
+  const backend = getPtyBackend()
+  const original = backend.reattach!.bind(backend)
+  let release!: (v: Awaited<ReturnType<NonNullable<typeof backend.reattach>>>) => void
+  let oldHandle!: Awaited<ReturnType<NonNullable<typeof backend.reattach>>>
+  backend.reattach = async (...args) => {
+    oldHandle = await original(...args)
+    return new Promise((r) => {
+      release = r
+    })
+  }
+  const sid = nextSessionId()
+  const controller = new AbortController()
+  const adopting = createPty(
+    agentOpts(sid, { attach: { computerId: 'pc', spawnId: 'run-1', signal: controller.signal } })
+  )
+  await until(() => !!release)
+  controller.abort(new Error('stop requested'))
+  let cancelled = false
+  void adopting.then(() => {
+    cancelled = true
+  })
+  await settle()
+  expect(cancelled).toBe(true)
+  expect((await createPty(agentOpts(sid, { takeOver: false }))).success).toBe(true)
+  opened.push(sid)
+  release(oldHandle)
+  await settle()
+  expect(writePty(sid, 'fresh')).toBe(true)
+  expect(b.handles[0]!.written).toEqual([])
+  expect(b.handles[1]!.written).toContain('fresh')
+  expect(events('pty.orphan_adopted')).toEqual([])
 })
 
 test('explicit replacement bypasses an adopted session and reaches the backend', async () => {

@@ -8,11 +8,16 @@
  */
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { createPtyOps, setPtySpawnLookups } from './pty-store'
+import {
+  createPtyOps as makePtyOps,
+  setPtySpawnLookups,
+  setUnattachedLaunchResolver
+} from './pty-store'
 import { createPty, killPty } from './pty-manager'
 import type { PtySpawnLookups } from './pty-data-ops'
 import { setPtyBackend, type PtyBackend, type UntrackedPtySession } from './pty-backend'
 import { createFakeTaskSessionStore } from './fake-task-session-store'
+import { createTestHarness } from '../../../../../shared/test-utils/ipc-harness'
 
 const diag = vi.hoisted(() => vi.fn())
 vi.mock('@slayzone/diagnostics/server', async (orig) => ({
@@ -24,14 +29,27 @@ vi.mock('./pty-manager', async (orig) => ({
   createPty: vi.fn(async () => ({ success: true })),
   killPty: vi.fn(() => false)
 }))
+vi.mock('../pty-host', async (orig) => ({
+  ...(await orig<typeof import('../pty-host')>()),
+  getPtyHostBridge: () => ({
+    getFocusedWindow: () => ({ isDestroyed: () => false, webContents: { send: () => undefined } })
+  })
+}))
 
 const db = {
-  get: async () => undefined,
+  get: vi.fn(async () => ({ live: 1 })),
   all: async () => [],
   run: async () => ({ changes: 0, lastInsertRowid: 0 }),
   prepare: () => ({ get: async () => undefined, all: async () => [], run: async () => ({}) }),
   batchTxn: async (ops: unknown[]) => ops.map(() => undefined)
 } as unknown as SlayzoneDb
+
+const openOps: Array<ReturnType<typeof makePtyOps>> = []
+const createPtyOps = (...args: Parameters<typeof makePtyOps>) => {
+  const ops = makePtyOps(...args)
+  openOps.push(ops)
+  return ops
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -44,8 +62,172 @@ beforeEach(() => {
   } as unknown as PtySpawnLookups)
 })
 afterEach(() => {
+  for (const ops of openOps.splice(0)) ops.dispose()
+  vi.useRealTimers()
   setPtyBackend(null)
   setPtySpawnLookups(null)
+  setUnattachedLaunchResolver(null)
+})
+
+test('whole cleanup deadline covers held launch resolution and every computer; late resolution cannot adopt', async () => {
+  vi.useFakeTimers()
+  let release!: (v: { ok: true; launch: { sessionId: string; cwd: string; mode: string } }) => void
+  const held = new Promise<{ ok: true; launch: { sessionId: string; cwd: string; mode: string } }>(
+    (r) => {
+      release = r
+    }
+  )
+  setUnattachedLaunchResolver(() => held)
+  const lateStops: Array<(v: { stopped: boolean }) => void> = []
+  const stop = vi.fn(
+    () =>
+      new Promise<{ stopped: boolean }>((r) => {
+        lateStops.push(r)
+      })
+  )
+  setPtyBackend({
+    spawn: vi.fn(),
+    killUntracked: stop,
+    untrackedSessions: () =>
+      ['a', 'b'].map((computerId) => ({
+        computerId,
+        sessionId: 'task-1:tab-1',
+        spawnId: 'old',
+        detection: true
+      }))
+  })
+  const ops = createPtyOps(db, createFakeTaskSessionStore())
+  await vi.advanceTimersByTimeAsync(0)
+  let answer: boolean | undefined
+  const killing = ops.ptyKill('task-1:tab-1').then((v) => {
+    answer = v
+  })
+  await vi.advanceTimersByTimeAsync(5_001)
+  expect(answer).toBe(false)
+  expect(stop).toHaveBeenCalledTimes(2)
+  await killing
+  await ops.ptyCreate({ sessionId: 'task-1:tab-1', cwd: '/repo' }, win)
+  expect(createPty).toHaveBeenLastCalledWith(expect.objectContaining({ takeOver: false }))
+  const creates = vi.mocked(createPty).mock.calls.length
+  const trackedKills = vi.mocked(killPty).mock.calls.length
+  for (const finish of lateStops) finish({ stopped: true })
+  release({ ok: true, launch: { sessionId: 'task-1:tab-1', cwd: '/repo', mode: 'claude-code' } })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(createPty).toHaveBeenCalledTimes(creates)
+  expect(killPty).toHaveBeenCalledTimes(trackedKills)
+})
+
+test('an older create cannot consume a newer stop token', async () => {
+  const ops = createPtyOps(db, createFakeTaskSessionStore())
+  const opts = { sessionId: 'task-1:tab-1', cwd: '/repo' }
+  await ops.ptyKill(opts.sessionId)
+  let finish!: (v: { success: boolean }) => void
+  vi.mocked(createPty).mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        finish = r
+      })
+  )
+  const first = ops.ptyCreate(opts, win)
+  await vi.waitFor(() => expect(createPty).toHaveBeenCalledOnce())
+  await ops.ptyKill(opts.sessionId)
+  finish({ success: true })
+  await first
+  await ops.ptyCreate(opts, win)
+  expect(createPty).toHaveBeenLastCalledWith(expect.objectContaining({ takeOver: false }))
+  await ops.ptyCreate(opts, win)
+  expect(vi.mocked(createPty).mock.calls.at(-1)?.[0].takeOver).not.toBe(false)
+})
+
+test('stop cancels adoption during serialized preparation; fresh create does not wait and late prep cannot bind', async () => {
+  vi.useFakeTimers()
+  let release!: (v: null) => void
+  const held = new Promise<null>((r) => {
+    release = r
+  })
+  const getAgent = vi.fn().mockReturnValueOnce(held).mockResolvedValue(null)
+  setPtySpawnLookups({
+    getAgent,
+    getTaskProjectId: async () => null,
+    resolveComputerId: async () => 'pc'
+  } as unknown as PtySpawnLookups)
+  setUnattachedLaunchResolver(async ({ sessionId }) => ({
+    ok: true,
+    launch: { sessionId, cwd: '/repo', mode: 'claude-code' }
+  }))
+  setPtyBackend({
+    spawn: vi.fn(),
+    untrackedSessions: () => [
+      { computerId: 'pc', sessionId: 'task-1:tab-1', spawnId: 'old', detection: true }
+    ],
+    killUntracked: async () => ({ stopped: false })
+  })
+  const ops = createPtyOps(db, createFakeTaskSessionStore())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(getAgent).toHaveBeenCalledOnce()
+  let stopped: boolean | undefined
+  const killing = ops.ptyKill('task-1:tab-1').then((v) => {
+    stopped = v
+  })
+  await vi.advanceTimersByTimeAsync(5_001)
+  expect(stopped).toBe(false)
+  await killing
+  let started = false
+  const starting = ops.ptyCreate({ sessionId: 'task-1:tab-1', cwd: '/repo' }, win).then(() => {
+    started = true
+  })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(started).toBe(true)
+  await starting
+  release(null)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(createPty).toHaveBeenCalledOnce()
+  expect(createPty).toHaveBeenLastCalledWith(expect.objectContaining({ takeOver: false }))
+})
+
+test('confirmed tab/task deletion clears many tokens, including kill after tab deletion; valid offline token persists', async () => {
+  const ops = createPtyOps(db, createFakeTaskSessionStore())
+  vi.mocked(db.get).mockResolvedValueOnce(undefined)
+  await ops.ptyKill('task-1:closed-tab')
+  await ops.ptyCreate({ sessionId: 'task-1:closed-tab', cwd: '/repo' }, win)
+  expect(vi.mocked(createPty).mock.calls.at(-1)?.[0].takeOver).not.toBe(false)
+  for (let n = 0; n < 100; n++) {
+    const sessionId = `deleted-${n}:tab`
+    await ops.ptyKill(sessionId)
+    if (n % 2) ops.ptyDisposeSession(sessionId)
+    else ops.ptyDisposeTask(`deleted-${n}`)
+    await ops.ptyCreate({ sessionId, cwd: '/repo' }, win)
+    expect(vi.mocked(createPty).mock.calls.at(-1)?.[0].takeOver).not.toBe(false)
+  }
+  await ops.ptyKill('valid:offline')
+  await ops.ptyCreate({ sessionId: 'valid:offline', cwd: '/repo' }, win)
+  expect(createPty).toHaveBeenLastCalledWith(expect.objectContaining({ takeOver: false }))
+})
+
+test('real deletion lookup preserves lazy main and offline tabs, discards closed/deleted owners', async () => {
+  const h = await createTestHarness()
+  const ops = createPtyOps(h.slayDb, createFakeTaskSessionStore())
+  try {
+    await h.slayDb.run("INSERT INTO projects (id, name, color) VALUES ('p', 'P', '#123456')")
+    await h.slayDb.run("INSERT INTO tasks (id, project_id, title) VALUES ('t', 'p', 'T')")
+    await h.slayDb.run(
+      "INSERT INTO terminal_tabs (id, task_id, mode, is_main) VALUES ('tab', 't', 'terminal', 0)"
+    )
+    const startAfterKill = async (sessionId: string) => {
+      await ops.ptyKill(sessionId)
+      await ops.ptyCreate({ sessionId, cwd: '/repo' }, win)
+      return vi.mocked(createPty).mock.calls.at(-1)?.[0].takeOver
+    }
+    expect(await startAfterKill('t:t')).toBe(false)
+    expect(await startAfterKill('t:tab')).toBe(false)
+    await h.slayDb.run("DELETE FROM terminal_tabs WHERE id = 'tab'")
+    expect(await startAfterKill('t:tab')).not.toBe(false)
+    await h.slayDb.run("DELETE FROM tasks WHERE id = 't'")
+    expect(await startAfterKill('t:t')).not.toBe(false)
+  } finally {
+    ops.dispose()
+    h.cleanup()
+  }
 })
 
 const win = { isDestroyed: () => false, webContents: { send: () => undefined } } as never

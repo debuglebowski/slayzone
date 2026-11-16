@@ -1568,6 +1568,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/tasks/src/client/KanbanListView.test.tsx \
   packages/domains/terminal/src/client/PtyContext.test.tsx \
   packages/domains/terminal/src/client/TerminalDeadOverlay.test.tsx \
+  packages/domains/terminal/src/client/useUnattachedSession.test.tsx \
   packages/domains/terminal/src/client/TerminalStartError.test.tsx \
   packages/domains/terminal/src/client/TerminalSearchBar.test.tsx \
   packages/domains/terminal/src/client/TerminalStatusPopover.test.tsx \

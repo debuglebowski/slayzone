@@ -2452,6 +2452,56 @@ describe('createRoutingPtyBackend', () => {
       expect(backend.untrackedSessions?.()).toEqual([])
     })
 
+    it('cancelled adoption releases its registration; a late reply cannot bind or mutate its replacement', async () => {
+      const { gateway, backend } = restartedHub()
+      let release!: (v: unknown) => void
+      gateway.onMethod(
+        'pty.adopt',
+        () =>
+          new Promise((r) => {
+            release = r
+          })
+      )
+      gateway.onMethod('pty.spawn', () => ({ pid: 999, detection: true }))
+      connect(gateway, 'epoch-a')
+      await vi.waitFor(() => expect(backend.untrackedSessions?.()).toHaveLength(1))
+      const controller = new AbortController()
+      const adopting = backend.reattach!('computer-1', 'task-1:tab-1', 'run-1', {
+        processName: 'claude',
+        signal: controller.signal
+      }).catch((e: unknown) => e)
+      await vi.waitFor(() => expect(gateway.requestsOf('pty.adopt')).toHaveLength(1))
+      diagnostics.length = 0
+      controller.abort(new Error('stop requested'))
+      let cancelled = false
+      void adopting.then(() => {
+        cancelled = true
+      })
+      await settle()
+      expect(cancelled).toBe(true)
+      const fresh = await backend.spawn(agentSpec({ takeOver: false }))
+      await fresh.whenSpawned
+      const before = diagnostics.length
+      release({ pid: 4242, seq: 5, detected })
+      await settle()
+      expect(diagnostics).toHaveLength(before)
+      expect(fresh.pid).toBe(999)
+      let output = ''
+      fresh.onData((d) => {
+        output += d
+      })
+      const spawnId = (requireCall(gateway, 'pty.spawn').params as { spawnId: string }).spawnId
+      gateway.emit('pty.data', {
+        computerId: 'computer-1',
+        sessionId: 'task-1:tab-1',
+        spawnId,
+        seq: 0,
+        data: 'fresh'
+      })
+      expect(output).toBe('fresh')
+      expect(gateway.requestsOf('pty.kill')).toEqual([])
+    })
+
     // Review M1: the computer may have handed the process to another attempt meanwhile
     // (a lost adopt reply). A kill of the old attempt stops nothing — never "stopped".
     it('killUntracked of an attempt no longer running there: not stopped, and the new one is known', async () => {

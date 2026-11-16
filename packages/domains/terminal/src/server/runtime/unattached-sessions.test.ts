@@ -113,13 +113,13 @@ test('adopts every listed task-tab session with its tab launch and the attach in
       sessionId: 'task-1:tab-1',
       cwd: '/work',
       mode: 'claude-code',
-      attach: { computerId: 'pc', spawnId: 'run-1' }
+      attach: { computerId: 'pc', spawnId: 'run-1', signal: expect.any(AbortSignal) }
     },
     {
       sessionId: 'task-2:task-2',
       cwd: '/work',
       mode: 'claude-code',
-      attach: { computerId: 'pc', spawnId: 'run-2' }
+      attach: { computerId: 'pc', spawnId: 'run-2', signal: expect.any(AbortSignal) }
     }
   ])
   await idle()

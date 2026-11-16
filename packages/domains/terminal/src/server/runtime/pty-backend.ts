@@ -4,6 +4,26 @@ import type { PtyInputFacts } from '../pty-input'
 import type { TerminalTheme } from '../sync-query-response'
 import type { BufferSinceResult } from '@slayzone/terminal-contracts'
 
+/** Cancel a hub-side wait; late completion is observed but cannot resume its caller. */
+export function awaitPtyOperation<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  if (!signal) return operation()
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted()
+        return operation()
+      })
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort))
+  })
+}
+
 /**
  * Hub/computer split (wave 2, Model A): the OS-level `node-pty` spawn — the ONLY
  * piece a remote computer replaces — pulled behind a backend seam. pty-manager
@@ -352,6 +372,8 @@ export interface PtyBackend {
       mode?: string
       /** See `PtySpawnSpec.relay`. */
       relay?: boolean
+      /** Hub-side adoption lifetime; cancellation never kills a newer attempt. */
+      signal?: AbortSignal
     }
   ): Promise<PtyHandle>
   /**
@@ -362,7 +384,8 @@ export interface PtyBackend {
   killUntracked?(
     computerId: string,
     sessionId: string,
-    spawnId: string
+    spawnId: string,
+    signal?: AbortSignal
   ): Promise<{ stopped: boolean }>
   /**
    * Pre-boot a warm session on `computerId`. It buffers output but streams nothing

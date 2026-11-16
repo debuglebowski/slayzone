@@ -51,6 +51,7 @@ import { diag } from './terminal-webgl-diag'
 import { trimSelectionTrailingSpaces } from './Terminal.utils'
 import { syncMacOptionIsMeta } from './option-as-meta'
 import { noteTerminalOutput } from './focus-loss-diag'
+import { useUnattachedSession } from './useUnattachedSession'
 import { TerminalDeadOverlay } from './TerminalDeadOverlay'
 import { TerminalComputerOffline } from './TerminalComputerOffline'
 import { isComputerOfflineError, useComputerOffline } from './useComputerOffline'
@@ -1380,45 +1381,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     deadExitCode === null &&
     !initError &&
     !computerOffline
-  const [unattachedHere, setUnattachedHere] = useState<{ computerId: string } | null>(null)
-  const [attaching, setAttaching] = useState(false)
-  useSubscription(
-    trpc.pty.onUnattachedChange.subscriptionOptions(undefined, {
-      enabled: showNotAttached,
-      onData: (list) => {
-        const here = list.find((s) => s.sessionId === sessionId && s.status === 'unattached')
-        setUnattachedHere(here ? { computerId: here.computerId } : null)
-      }
-    })
-  )
   const remountPane = onRemount ?? onRetry
-  const handleNotAttachedRestart = useStableCallback(() => {
-    // An explicit restart: the session still running from before ends first —
-    // otherwise the new start would take it over instead of restarting.
-    const stopFirst = unattachedHere
-      ? trpcClient.pty.unattachedKill
-          .mutate({ computerId: unattachedHere.computerId, sessionId })
-          .then(
-            () => undefined,
-            () => undefined
-          )
-      : Promise.resolve()
-    void stopFirst.then(() => remountPane?.())
-  })
-  const handleNotAttachedAttach = useStableCallback(() => {
-    if (!unattachedHere) return
-    setAttaching(true)
-    void trpcClient.pty.unattachedAttach
-      .mutate({ computerId: unattachedHere.computerId, sessionId })
-      .then(
-        (result) => {
-          setAttaching(false)
-          // Attached: remount to show it (scrollback replayed from its computer).
-          if (result.ok) remountPane?.()
-        },
-        () => setAttaching(false)
-      )
-  })
+  const { unattachedHere, attaching, handleNotAttachedRestart, handleNotAttachedAttach } =
+    useUnattachedSession(sessionId, showNotAttached, remountPane)
 
   // Stale-session case (issue #90): the CLI's stored conversation id was
   // auto-cleaned by the provider, so `--resume` failed. Show a friendly,

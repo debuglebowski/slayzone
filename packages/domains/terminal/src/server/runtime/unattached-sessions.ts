@@ -20,7 +20,7 @@
  * the computer restarted) leaves the registry.
  */
 import { recordDiagnosticEvent } from '@slayzone/diagnostics/server'
-import type { PtyBackend, UntrackedPtySession } from './pty-backend'
+import { awaitPtyOperation, type PtyBackend, type UntrackedPtySession } from './pty-backend'
 import type { PtyCreateResult } from './pty-manager'
 
 /** Why a session is not adopted (see the module doc). */
@@ -95,14 +95,23 @@ export interface UnattachedSessions {
     sessionId: string
   ): Promise<{ ok: true } | { ok: false; reason: string; detail?: string }>
   /** End it — exactly the attempt listed (the user's "Stop"). */
-  kill(computerId: string, sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>
+  kill(
+    computerId: string,
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<{ ok: true } | { ok: false; reason: string }>
+  /** Supersede queued and in-flight adoptions before restarting or disposing a tab. */
+  cancelAdoptions(sessionId: string): void
   /**
    * The hub was asked to end the tab's session (a restart, reset, respawn, Start
    * fresh) while it tracks none there: end what the computer still runs under that
    * id, on every computer (review M2). `attached`: an adoption in flight attached it
    * meanwhile — the caller ends it as the tab's session.
    */
-  killBySession(sessionId: string): Promise<'stopped' | 'attached' | 'none' | 'not-stopped'>
+  killBySession(
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<'stopped' | 'attached' | 'none' | 'not-stopped'>
   onChange(cb: () => void): () => void
 }
 
@@ -126,7 +135,9 @@ export function createUnattachedSessions(deps: {
     target: Parameters<UnattachedLaunchResolver>[0]
   ) => Promise<Awaited<ReturnType<UnattachedLaunchResolver>> | null>
   create: (
-    opts: UnattachedLaunch & { attach: { computerId: string; spawnId: string } }
+    opts: UnattachedLaunch & {
+      attach: { computerId: string; spawnId: string; signal?: AbortSignal }
+    }
   ) => Promise<PtyCreateResult>
 }): UnattachedSessions {
   const entries = new Map<string, UnattachedSession>()
@@ -136,6 +147,7 @@ export function createUnattachedSessions(deps: {
   const queue: string[] = []
   /** Adoptions running now, per entry key: a Stop waits for one (review M1). */
   const inflight = new Map<string, Promise<void>>()
+  const adoptions = new Map<string, AbortController>()
   let running = 0
   let subscription: { dispose(): void } | null = null
   let subscribedTo: PtyBackend | null = null
@@ -190,22 +202,28 @@ export function createUnattachedSessions(deps: {
     return null
   }
 
-  async function adopt(entry: UnattachedSession): Promise<void> {
+  async function adopt(entry: UnattachedSession, signal: AbortSignal): Promise<void> {
     const blocked = precheck(entry)
     if (blocked) return surface(entry, blocked)
     const spawnId = entry.spawnId!
     let resolved: Awaited<ReturnType<UnattachedLaunchResolver>> | null
     try {
-      resolved = await deps.resolve({
-        computerId: entry.computerId,
-        sessionId: entry.sessionId,
-        taskId: entry.taskId!,
-        tabId: entry.tabId!,
-        ...(entry.mode ? { mode: entry.mode } : {})
-      })
+      resolved = await awaitPtyOperation(
+        () =>
+          deps.resolve({
+            computerId: entry.computerId,
+            sessionId: entry.sessionId,
+            taskId: entry.taskId!,
+            tabId: entry.tabId!,
+            ...(entry.mode ? { mode: entry.mode } : {})
+          }),
+        signal
+      )
     } catch (err) {
+      if (signal.aborted) return
       return surface(entry, 'launch-unresolved', err instanceof Error ? err.message : String(err))
     }
+    if (signal.aborted || entries.get(keyOf(entry)) !== entry) return
     if (!resolved) return surface(entry, 'launch-unresolved', 'no launch resolver')
     if (!resolved.ok) return surface(entry, resolved.reason, resolved.detail)
     // The tab now runs another agent than the process does: not this tab's agent.
@@ -218,11 +236,16 @@ export function createUnattachedSessions(deps: {
     }
     let result: PtyCreateResult
     try {
-      result = await deps.create({
-        ...resolved.launch,
-        attach: { computerId: entry.computerId, spawnId }
-      })
+      result = await awaitPtyOperation(
+        () =>
+          deps.create({
+            ...resolved.launch,
+            attach: { computerId: entry.computerId, spawnId, signal }
+          }),
+        signal
+      )
     } catch (err) {
+      if (signal.aborted) return
       return surface(entry, 'launch-unresolved', err instanceof Error ? err.message : String(err))
     }
     if (result.success) {
@@ -236,13 +259,33 @@ export function createUnattachedSessions(deps: {
     surface(entry, result.attachRefusal ?? 'launch-unresolved', result.error)
   }
 
+  function runAdoption(entry: UnattachedSession): Promise<void> {
+    const key = keyOf(entry)
+    const controller = new AbortController()
+    adoptions.set(key, controller)
+    return track(entry, adopt(entry, controller.signal)).finally(() => {
+      if (adoptions.get(key) === controller) adoptions.delete(key)
+    })
+  }
+
+  function cancelAdoptions(sessionId: string): void {
+    for (const [key, controller] of adoptions) {
+      if (key.endsWith(`\u0000${sessionId}`))
+        controller.abort(new Error('Terminal adoption superseded by stop.'))
+    }
+    for (const entry of entries.values()) {
+      if (entry.sessionId !== sessionId) continue
+      if (entry.status === 'adopting') surface(entry, 'not-adoptable', 'Stop requested.')
+    }
+  }
+
   function pump(): void {
     while (running < ADOPT_CONCURRENCY && queue.length > 0) {
       const key = queue.shift()!
       const entry = entries.get(key)
       if (!entry || entry.status !== 'adopting') continue
       running++
-      void track(entry, adopt(entry)).then(() => {
+      void runAdoption(entry).then(() => {
         running--
         pump()
       })
@@ -318,6 +361,7 @@ export function createUnattachedSessions(deps: {
       subscription = null
       subscribedTo = null
       entries.clear()
+      for (const controller of adoptions.values()) controller.abort(new Error('Registry disposed.'))
       queue.length = 0
       recorded.clear()
     },
@@ -333,7 +377,7 @@ export function createUnattachedSessions(deps: {
       delete entry.reason
       delete entry.detail
       changed()
-      await track(entry, adopt(entry))
+      await runAdoption(entry)
       if (!entries.has(keyOf(entry))) return { ok: true }
       return {
         ok: false,
@@ -341,20 +385,22 @@ export function createUnattachedSessions(deps: {
         ...(entry.detail ? { detail: entry.detail } : {})
       }
     },
-    async kill(computerId, sessionId) {
+    cancelAdoptions,
+    async kill(computerId, sessionId, signal) {
       // Being attached right now: wait for that first. Attached = it is its tab's
       // session now, stopped (if at all) there — never behind the tab's back.
       const adopting = inflight.get(keyOf({ computerId, sessionId }))
-      if (adopting) await adopting
+      if (adopting) await awaitPtyOperation(() => adopting, signal)
+      signal?.throwIfAborted()
       const entry = find(computerId, sessionId)
       if (!entry) return { ok: false, reason: adopting ? 'attached' : 'not-found' }
       const backend = deps.backend()
       if (!entry.spawnId || !backend.killUntracked) return { ok: false, reason: 'no-attempt-key' }
-      const { stopped } = await backend.killUntracked(
-        entry.computerId,
-        entry.sessionId,
-        entry.spawnId
+      const { stopped } = await awaitPtyOperation(
+        () => backend.killUntracked!(entry.computerId, entry.sessionId, entry.spawnId!, signal),
+        signal
       )
+      signal?.throwIfAborted()
       // Another attempt runs it now (the set lists that one), or the computer could
       // not say: never reported as stopped (review M1).
       if (!stopped) return { ok: false, reason: 'not-stopped' }
@@ -378,7 +424,8 @@ export function createUnattachedSessions(deps: {
       }
       return { ok: true }
     },
-    async killBySession(sessionId) {
+    async killBySession(sessionId, signal) {
+      cancelAdoptions(sessionId)
       const computers = [
         ...new Set(
           [...entries.values()].filter((e) => e.sessionId === sessionId).map((e) => e.computerId)
@@ -386,8 +433,10 @@ export function createUnattachedSessions(deps: {
       ]
       if (computers.length === 0) return 'none'
       let outcome: 'stopped' | 'attached' | 'none' | 'not-stopped' = 'none'
-      for (const computerId of computers) {
-        const r = await this.kill(computerId, sessionId)
+      const results = await Promise.all(
+        computers.map((computerId) => this.kill(computerId, sessionId, signal))
+      )
+      for (const r of results) {
         if (r.ok) {
           if (outcome === 'none') outcome = 'stopped'
         } else if (r.reason === 'attached') outcome = 'attached'

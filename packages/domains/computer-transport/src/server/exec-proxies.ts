@@ -42,6 +42,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { awaitPtyOperation } from '@slayzone/terminal/pty-backend'
 import type { ProcessBackend, ProcHandle, ProcSpawnSpec } from '@slayzone/processes/server'
 import type { LocalWorkspaceFs, WorkspaceFsAdapters } from '@slayzone/file-editor/server'
 import type { WorktreeExecAdapters } from '@slayzone/task/server'
@@ -599,17 +600,22 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
   async function refreshUntracked(
     computerId: string,
     sessionId: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal
   ): Promise<ListedSession | null | undefined> {
     let parsed: ReturnType<typeof ptyListResultSchema.safeParse>
     try {
       parsed = ptyListResultSchema.safeParse(
-        await gateway.request(computerId, HubToComputerMethods.ptyList, {}, timeoutMs)
+        await awaitPtyOperation(
+          () => gateway.request(computerId, HubToComputerMethods.ptyList, {}, timeoutMs),
+          signal
+        )
       )
     } catch {
       return undefined
     }
     if (!parsed.success) return undefined
+    signal?.throwIfAborted()
     const live = toSessionList(parsed.data).live.get(sessionId) ?? null
     const tracked = sessions.get(sessionKey(computerId, sessionId))
     const bySession = untracked.get(computerId) ?? new Map<string, ListedSession>()
@@ -1311,12 +1317,23 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       computerId: string,
       sessionId: string,
       fromSpawnId: string,
-      opts: { processName: string; taskId?: string; mode?: string; relay?: boolean }
+      opts: {
+        processName: string
+        taskId?: string
+        mode?: string
+        relay?: boolean
+        signal?: AbortSignal
+      }
     ) {
       const refusal = (reason: PtyReattachRefusal, message: string): Error =>
         Object.assign(new Error(message), { reattachRefusal: reason })
       // Before anything is tracked: a refused reattach leaves no session behind.
-      if (gate) await gate(computerId, { kind: 'session', id: sessionId })
+      if (gate)
+        await awaitPtyOperation(
+          () => gate(computerId, { kind: 'session', id: sessionId }),
+          opts.signal
+        )
+      opts.signal?.throwIfAborted()
       const key = sessionKey(computerId, sessionId)
       const live = sessions.get(key)
       if (live && !live.disposed) {
@@ -1330,16 +1347,29 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
       entry.spawnInFlight = true
       entry.relay = opts.relay
       lastSpawnIds.set(key, spawnId)
+      const cancel = () => {
+        const ownsRegistration = sessions.get(key) === entry
+        finalize(entry, null, null, 'adopt-cancelled')
+        if (firstHere && ownsRegistration) registeredKeys.delete(key)
+      }
+      opts.signal?.addEventListener('abort', cancel, { once: true })
       try {
-        const res = await gateway.request(computerId, HubToComputerMethods.ptyAdopt, {
-          sessionId,
-          spawnId,
-          fromSpawnId,
-          ...(opts.taskId ? { taskId: opts.taskId } : {}),
-          ...(opts.mode ? { mode: opts.mode } : {}),
-          ...(opts.relay !== undefined ? { relay: opts.relay } : {})
-        })
+        const res = await awaitPtyOperation(
+          () =>
+            gateway.request(computerId, HubToComputerMethods.ptyAdopt, {
+              sessionId,
+              spawnId,
+              fromSpawnId,
+              ...(opts.taskId ? { taskId: opts.taskId } : {}),
+              ...(opts.mode ? { mode: opts.mode } : {}),
+              ...(opts.relay !== undefined ? { relay: opts.relay } : {})
+            }),
+          opts.signal
+        )
+        if (entry.disposed || sessions.get(key) !== entry)
+          throw refusal('not-adoptable', 'This adoption was superseded.')
         const parsed = ptyAdoptResultSchema.parse(res)
+        opts.signal?.throwIfAborted()
         setPid(parsed.pid)
         bindTakenOver(
           entry,
@@ -1356,8 +1386,9 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // Nothing to undo on the computer: a refused adopt changed nothing, and one
         // whose reply was lost left the process running as `spawnId` — listed again
         // (untracked) on the next reconnect, and taken over then.
+        const ownsRegistration = sessions.get(key) === entry
         finalize(entry, null, null, 'adopt-failed', errorMessage(err))
-        if (firstHere) registeredKeys.delete(key)
+        if (firstHere && ownsRegistration) registeredKeys.delete(key)
         const refused =
           err instanceof RpcError &&
           (err.code === ComputerTransportErrorCodes.unimplemented ||
@@ -1365,7 +1396,7 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
         // No verdict (a lost or timed-out reply): the computer may have handed the
         // process over to `spawnId` already. Ask it, so the untracked entry names the
         // attempt it runs NOW — never a stale one that Attach and Stop would miss.
-        if (!refused) void refreshUntracked(computerId, sessionId)
+        if (!refused && !opts.signal?.aborted) void refreshUntracked(computerId, sessionId)
         if (err instanceof RpcError && err.code === ComputerTransportErrorCodes.unimplemented) {
           throw refusal(
             'computer-too-old',
@@ -1379,28 +1410,45 @@ export function createRoutingPtyBackend(options: RoutingPtyBackendOptions): PtyB
           throw refusal('not-adoptable', err.message)
         }
         throw err
+      } finally {
+        opts.signal?.removeEventListener('abort', cancel)
       }
     },
 
-    async killUntracked(computerId: string, sessionId: string, spawnId: string) {
+    async killUntracked(
+      computerId: string,
+      sessionId: string,
+      spawnId: string,
+      signal?: AbortSignal
+    ) {
       // User stop/reset must finish even if this computer's link is stalled.
       // Share one finite budget between the stop and its verification.
       const deadline = Date.now() + 5_000
       const reply = ptyKillResultSchema.safeParse(
-        await gateway.request(
-          computerId,
-          HubToComputerMethods.ptyKill,
-          { sessionId, spawnId },
-          5_000
+        await awaitPtyOperation(
+          () =>
+            gateway.request(
+              computerId,
+              HubToComputerMethods.ptyKill,
+              { sessionId, spawnId },
+              5_000
+            ),
+          signal
         )
       )
       if (reply.success && reply.data.killed === true) {
+        signal?.throwIfAborted()
         dropUntracked(computerId, sessionId, spawnId)
         return { stopped: true }
       }
       // Nothing matched (or an older computer that does not say): find out what runs
       // there now. Gone = stopped; another attempt = NOT stopped (it is listed instead).
-      const live = await refreshUntracked(computerId, sessionId, Math.max(1, deadline - Date.now()))
+      const live = await refreshUntracked(
+        computerId,
+        sessionId,
+        Math.max(1, deadline - Date.now()),
+        signal
+      )
       if (live === undefined) return { stopped: false }
       return { stopped: live === null }
     },

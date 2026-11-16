@@ -27,6 +27,7 @@ import type { TaskSessionStore } from './task-session-store'
 // computer. `spawnLocalPty` still exists in pty-backend for the COMPUTER's own use.
 import {
   getPtyBackend,
+  awaitPtyOperation,
   NodePtyUnavailableError,
   ptyReattachRefusal,
   type PtyReattachRefusal,
@@ -1472,7 +1473,7 @@ export interface CreatePtyOptions {
    * output, input, state, exit — like any session. Refused (`attach-refused`) when
    * it cannot be taken over or a session is already tracked under the id.
    */
-  attach?: { computerId: string; spawnId: string }
+  attach?: { computerId: string; spawnId: string; signal?: AbortSignal }
 }
 
 // Test-only (PLAYWRIGHT) pty-create capture at the TRUE spawn chokepoint (every
@@ -1519,6 +1520,7 @@ async function createPtyImpl(
   opts: CreatePtyOptions,
   continuation?: PtyContinuation
 ): Promise<PtyCreateResult> {
+  if (opts.attach?.signal?.aborted) return { success: false, error: 'Attachment cancelled.' }
   if (process.env.PLAYWRIGHT === '1' && ptyCreateCaptureOn && !continuation && !opts.attach) {
     // What the spawn would resume: the caller's id, else the session ledger's on the
     // agent's computer (robustness plan §9) — the same resolver a real spawn asks.
@@ -2302,12 +2304,18 @@ async function createPtyImpl(
           { reattachRefusal: 'computer-too-old' }
         )
       }
-      ptyProcess = (await backend.reattach(opts.attach.computerId, sessionId, opts.attach.spawnId, {
-        processName: spawnConfig.shell,
-        ...(taskId ? { taskId } : {}),
-        mode: agentId,
-        relay: (spawnRelay = isWatched(sessionId))
-      })) as unknown as pty.IPty
+      const attach = opts.attach
+      ptyProcess = (await awaitPtyOperation(
+        () =>
+          backend.reattach!(attach.computerId, sessionId, attach.spawnId, {
+            processName: spawnConfig.shell,
+            ...(taskId ? { taskId } : {}),
+            mode: agentId,
+            relay: (spawnRelay = isWatched(sessionId)),
+            signal: attach.signal
+          }),
+        attach.signal
+      )) as unknown as pty.IPty
     } else if (opts.adoptPty) {
       // Warm-process adoption: the agent is already running ON THE COMPUTER. Adopting
       // REKEYS it there (warmId → this sessionId) rather than spawning anything, so
@@ -2417,6 +2425,7 @@ async function createPtyImpl(
       stateMachine.unregister(sessionId)
     }
 
+    opts.attach?.signal?.throwIfAborted()
     sessions.set(sessionId, {
       win: carried?.win ?? originalWin,
       pty: ptyProcess,
@@ -3805,6 +3814,7 @@ async function createPtyImpl(
       })
       return { success: false, error: err.message, code: err.code }
     }
+    if (opts.attach?.signal?.aborted) return { success: false, error: 'Attachment cancelled.' }
     const refusal = ptyReattachRefusal(err)
     if (refusal) {
       recordDiagnosticEvent({
