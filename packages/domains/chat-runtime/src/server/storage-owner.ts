@@ -8,6 +8,7 @@ import {
   serializeError,
   type SqliteWorkerHandle
 } from '@slayzone/platform/sqlite-worker'
+import { createStorageCopyBroker } from './storage-copy-broker'
 import { attachCheckpointer } from './checkpointer'
 import { chatStorageDigest } from './storage-digest'
 import type { ChatExportReader, ChatStorage } from './storage'
@@ -23,6 +24,7 @@ import {
   type StorageMaintenanceCall,
   type OwnerControl,
   type HostControl,
+  type MaintenanceResult,
   type StorageOwnerTxnRegistry
 } from './storage-owner-protocol'
 
@@ -86,6 +88,35 @@ const owned = new Map<string, symbol>()
 export async function openChatStorageOwner(
   opts: OpenStorageOwnerOptions
 ): Promise<AsyncChatStorage> {
+  return openStorageOwner(opts)
+}
+
+/** Offline caller group: the same canonical writer and worker-local runtime composition. */
+export async function openChatMaintenanceOwner(
+  opts: OpenStorageOwnerOptions & { computerId: string }
+) {
+  const storage = await openStorageOwner(opts, { computerId: opts.computerId })
+  return {
+    exited: storage.exited,
+    eraseTask: async (taskId: string, revision: number) => {
+      const result = storage.db.namedTxn('chatMaintenance.eraseTask', {
+        taskId,
+        revision
+      }) as Promise<MaintenanceResult>
+      // Admit the fence with the command. A concurrent close must drain both;
+      // it must not close admission between the command reply and its fence.
+      const durable = storage.flush()
+      const [value] = await Promise.all([result, durable])
+      return value
+    },
+    close: () => storage.close()
+  }
+}
+
+async function openStorageOwner(
+  opts: OpenStorageOwnerOptions,
+  profile?: StorageOwnerData['maintenance']
+): Promise<AsyncChatStorage> {
   if (!opts.hubScope.trim()) throw new Error('Hub storage scope is required')
   await mkdir(opts.stateDir, { recursive: true, mode: 0o700 })
   const stateDir = await realpath(opts.stateDir)
@@ -106,6 +137,7 @@ export async function openChatStorageOwner(
   const post = (message: HostControl) => {
     if (!stopped) port1.postMessage(message)
   }
+  const copies = createStorageCopyBroker(post)
   const scheduleRetry = () => {
     if (retry || stopped || !checkpointerWanted) return
     retry = setTimeout(async () => {
@@ -130,7 +162,14 @@ export async function openChatStorageOwner(
     void (async () => {
       try {
         let result: unknown
-        if (request.operation === 'open') {
+        if (
+          request.operation === 'copy-start' ||
+          request.operation === 'copy-delta' ||
+          request.operation === 'copy-finish' ||
+          request.operation === 'copy-terminate'
+        ) {
+          result = await copies.request(request)
+        } else if (request.operation === 'open') {
           checkpointerWanted = true
           await checkpointer.open()
           if (!checkpointer.active) throw new Error('Shared checkpointer unavailable')
@@ -156,6 +195,7 @@ export async function openChatStorageOwner(
     cleanup = (async () => {
       try {
         await Promise.all([...activeLeases])
+        await copies.close()
         await checkpointer.close(false)
       } finally {
         port1.close()
@@ -172,7 +212,8 @@ export async function openChatStorageOwner(
       stateDir,
       hubScope: opts.hubScope,
       checkpointIntervalMs: opts.checkpointIntervalMs,
-      control: port2
+      control: port2,
+      maintenance: profile
     }
     raw = await openSqliteWorker<StorageOwnerTxnRegistry>({
       label: 'chat storage owner',

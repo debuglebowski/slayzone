@@ -94,19 +94,19 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
   // busy. Restore its historical identity and chat request schemas.
   const entry = retainedEntry(root, HOST_CONTRACT_VERSION)
   let source = readFileSync(entry, 'utf8').replace(
-    /^ {4}(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll): true,\n/gm,
+    /^[ \t]+(?:chatHistoryPages|chatTimelineRowSlices|promptSummariesAll|chatStorageCompaction): true,\n/gm,
     ''
   )
-  const tuple = /^ {2}timelinePages: external_exports\.tuple\(\[[\s\S]*?\n {2}\]\),/m.exec(source)
+  const tuple = /^([ \t]+)timelinePages: external_exports\.tuple\(\[[\s\S]*?\n\1\]\),/m.exec(source)
   expect(tuple).not.toBeNull()
   const oldTuple = tuple![0].replace(
-    ',\n    external_exports.number().int().nonnegative().optional()',
+    /,\n[ \t]+external_exports\.number\(\)\.int\(\)\.nonnegative\(\)\.optional\(\)/,
     ''
   )
   expect(oldTuple).not.toBe(tuple![0])
   source = source.replace(tuple![0], oldTuple)
   const summaries =
-    /^ {2}external_exports.object\(\{\n {4}kind: external_exports.literal\("prompt.summaries"\),[\s\S]*?\n {2}\}\),/m.exec(
+    /^([ \t]+)external_exports.object\(\{\n[ \t]+kind: external_exports.literal\("prompt.summaries"\),[\s\S]*?\n\1\}\)(?:\.refine\([\s\S]*?\n\1\}\))?,/m.exec(
       source
     )
   expect(summaries).not.toBeNull()
@@ -118,7 +118,7 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
     conversationIds: external_exports.array(external_exports.string()).max(500)
   }),`
   )
-  const pagedReads = /^ {2}(?:getReplayPage|getEventPage):.*\n/gm
+  const pagedReads = /^[ \t]+(?:getReplayPage|getEventPage): external_exports\.tuple.*\n/gm
   expect(source.match(pagedReads)).toHaveLength(2)
   source = source.replace(pagedReads, '')
   writeFileSync(entry, source)
@@ -214,7 +214,8 @@ test('new connectors keep a busy same-contract pre-capability host on chat fallb
         chatRuntimeReady: true,
         chatHistoryPages: false,
         chatTimelineRowSlices: false,
-        promptSummariesAll: false
+        promptSummariesAll: false,
+        chatStorageCompaction: false
       })
       expect(await control!.rpc.request('health')).toMatchObject({
         pid: health.pid,

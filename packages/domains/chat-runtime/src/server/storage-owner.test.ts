@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { killCheckpointerThreadForTests } from './checkpointer'
-import { openChatStorageOwner, type AsyncChatStorage } from './storage-owner'
+import {
+  openChatStorageOwner,
+  openChatMaintenanceOwner,
+  type AsyncChatStorage
+} from './storage-owner'
 import { chatStorageDigest } from './storage-digest'
 
 const roots: string[] = []
@@ -87,6 +91,55 @@ test('one owner per file; close waits for writer/checkpointer release before reo
   await closing
   const next = await open(dir)
   expect(await next.storeId()).toBe(id)
+})
+
+test('production maintenance composition drains an admitted erasure and its FULL fence before concurrent close', async () => {
+  const dir = root()
+  const initial = await open(dir)
+  await initial.createConversation(identity)
+  await initial.append('c', 1, event('erase through the composed owner'))
+  await initial.close()
+  const maintenance = await openChatMaintenanceOwner({
+    stateDir: dir,
+    hubScope: 'hub',
+    workerPath,
+    computerId: 'pc'
+  })
+  try {
+    await expect(open(dir)).rejects.toThrow(/already.*owner/i)
+    const erased = maintenance.eraseTask('t', 2)
+    const closing = maintenance.close()
+    expect(await erased).toEqual({ taskId: 't', revision: 2, erased: true })
+    await Promise.all([closing, maintenance.exited])
+    const next = await open(dir)
+    expect(await next.read('c', -1)).toEqual([])
+    expect(await next.taskLifecycle('t')).toMatchObject({ state: 'deleted', revision: 2 })
+    expect(await next.maintenanceCursor<string>('storage-durable-prefix-v1')).toEqual(
+      expect.any(String)
+    )
+  } finally {
+    await maintenance.close()
+  }
+})
+
+test('failed worker-local composition releases writer/checkpointer ownership before retry', async () => {
+  const dir = root()
+  const initial = await open(dir)
+  await initial.db.exec(
+    'CREATE TABLE artifact_storage_schema(version INTEGER NOT NULL); INSERT INTO artifact_storage_schema VALUES(99)'
+  )
+  await initial.close()
+  const options = { stateDir: dir, hubScope: 'hub', workerPath, computerId: 'pc' }
+  await expect(openChatMaintenanceOwner(options)).rejects.toThrow(
+    /Unsupported computer artifact schema/
+  )
+  const repair = await open(dir)
+  await repair.db.run('UPDATE artifact_storage_schema SET version=1')
+  await repair.close()
+  const maintenance = await openChatMaintenanceOwner(options)
+  await Promise.all([maintenance.close(), maintenance.exited])
+  const next = await open(dir)
+  expect(await next.db.get('SELECT version FROM artifact_storage_schema')).toEqual({ version: 1 })
 })
 
 test('owned export snapshots retain worker-local readers and close without a lease cycle', async () => {

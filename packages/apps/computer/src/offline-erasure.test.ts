@@ -8,15 +8,24 @@ import {
   readFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { once } from 'node:events'
-import { expect, test } from 'vitest'
+import { promisify } from 'node:util'
+import { expect, test, vi } from 'vitest'
+import Database from 'better-sqlite3'
 import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
 import { createFileCredentialStore } from '@slayzone/computer-transport/client'
-import { eraseComputerOffline } from './offline-erasure'
+import { eraseComputerOffline as erase } from './offline-erasure'
 import { createPtyHistory, ptyHistoryDir } from './pty-history'
+const eraseComputerOffline = (
+  root: string,
+  request: unknown,
+  options: { worktreesVerified?: boolean } = {}
+) =>
+  erase(root, request, { ...options, workerPath: resolve('packages/apps/computer/dist/bin.cjs') })
+
 import { adoptHookJournal, hookJournalPath } from './hook-journal'
 
 test.skipIf(process.platform === 'win32')(
@@ -66,6 +75,7 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
   const root = mkdtempSync(join(tmpdir(), 'offline-erasure-'))
   const r = createComputerChatRuntime({ stateDir: root, hubScope: 'hub.example', computerId: 'pc' })
   try {
+    const files: Record<string, string> = {}
     for (const taskId of ['alice', 'bob'])
       r.bootstrap({
         identity: { id: taskId, taskId, tabId: taskId, mode: 'claude-chat', epoch: 1 },
@@ -76,6 +86,28 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
         defaultFlags: null,
         env: {}
       })
+    for (const taskId of ['alice', 'bob']) {
+      const artifact = (await r.artifacts.invoke({
+        route: { id: taskId, epoch: 1 },
+        method: 'uploadArtifactBlob',
+        args: [
+          {
+            taskId,
+            title: `${taskId}.txt`,
+            data: Buffer.from(`${taskId} original`).toString('base64')
+          }
+        ],
+        operationId: `upload-${taskId}`
+      })) as { id: string; title: string }
+      const ref = await r.artifacts.seal(taskId, {
+        artifactId: artifact.id,
+        name: artifact.title,
+        kind: 'text',
+        mediaType: 'text/plain',
+        size: `${taskId} original`.length
+      })
+      files[taskId] = ref.contentHash!
+    }
     r.storage.append(
       'alice',
       1,
@@ -88,6 +120,8 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
       { kind: 'assistant-text', messageId: 'b', text: 'private Bob message' },
       1
     )
+    const backup = await r.backups.create('manual')
+    const archive = await r.backups.restore(backup.id)
     await r.close()
     await createFileCredentialStore('hub.example', { baseDir: root }).save({
       computerId: 'pc',
@@ -106,7 +140,17 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
     await expect(eraseComputerOffline(root, { ...request, computerId: 'wrong' })).rejects.toThrow(
       /identity/
     )
-    const receipt = await eraseComputerOffline(root, request)
+    // The production cleanup path must never execute native chat SQL on its host.
+    // Its worker loads a separate native module, so this observes main only.
+    const nativeMethods = ['prepare', 'exec', 'pragma', 'backup', 'close'] as const
+    const mainSql = nativeMethods.map((method) => vi.spyOn(Database.prototype, method))
+    let receipt: Awaited<ReturnType<typeof eraseComputerOffline>>
+    try {
+      receipt = await eraseComputerOffline(root, request)
+      for (const method of mainSql) expect(method).not.toHaveBeenCalled()
+    } finally {
+      for (const method of mainSql) method.mockRestore()
+    }
     expect(receipt.managedContentErased).toBe(true)
     expect(JSON.stringify(receipt)).not.toContain('private')
     const check = createComputerChatRuntime({
@@ -117,6 +161,15 @@ test('a revoked/offline computer erases only the issued hub/task scope and retur
     try {
       expect(check.storage.read('alice', -1)).toEqual([])
       expect(check.storage.read('bob', -1)).toHaveLength(1)
+      expect(check.backups.conversations(archive.id).map((c) => c.taskId)).toContain('bob')
+      expect(check.backups.conversations(archive.id).map((c) => c.taskId)).not.toContain('alice')
+      expect(check.backups.list().some((b) => b.id === backup.id)).toBe(true)
+      expect(existsSync(join(check.storage.dir, 'artifacts', 'alice'))).toBe(false)
+      expect(existsSync(join(check.storage.dir, 'blobs', files.alice))).toBe(false)
+      expect(existsSync(join(check.storage.dir, 'blobs', files.bob))).toBe(true)
+      expect(readFileSync(check.storage.path).includes(Buffer.from('private Alice message'))).toBe(
+        false
+      )
     } finally {
       await check.close()
     }
@@ -158,6 +211,70 @@ const baseRequest = {
   tasks: [{ taskId: 'alice', revision: 2 }],
   worktreeTaskIds: []
 }
+
+test('packaged offline CLI erases through worker dispatch with every main-thread SQLite constructor refused', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'offline-erasure-packaged-'))
+  try {
+    await liveComputer(root)
+    const requestFile = join(root, 'request.json')
+    const receiptFile = join(root, 'receipt.json')
+    const guard = join(root, 'forbid-main-sqlite.cjs')
+    const attempted = join(root, 'main-sqlite-attempted')
+    writeFileSync(requestFile, JSON.stringify(baseRequest))
+    writeFileSync(
+      guard,
+      `
+      const { isMainThread } = require('node:worker_threads')
+      if (isMainThread) {
+        const Module = require('node:module')
+        const load = Module._load
+        Module._load = function (name, ...args) {
+          const value = load.call(this, name, ...args)
+          if (name !== 'better-sqlite3') return value
+          return new Proxy(value, {
+            construct() {
+              require('node:fs').writeFileSync(${JSON.stringify(attempted)}, 'refused')
+              throw new Error('Native SQLite constructor ran on computer main')
+            }
+          })
+        }
+      }
+    `
+    )
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        '--require',
+        guard,
+        resolve('packages/apps/computer/dist/bin.cjs'),
+        '--erase-data',
+        requestFile,
+        '--receipt',
+        receiptFile
+      ],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SLAYZONE_ROOT: root } }
+    )
+    expect(stdout.match(/Cleanup receipt saved/g)).toHaveLength(1)
+    expect(existsSync(attempted)).toBe(false)
+    expect(JSON.parse(readFileSync(receiptFile, 'utf8'))).toMatchObject({
+      managedContentErased: true
+    })
+    const check = createComputerChatRuntime({
+      stateDir: root,
+      hubScope: 'hub.example',
+      computerId: 'pc',
+      maintenance: true
+    })
+    try {
+      expect(check.storage.taskLifecycle('alice')).toMatchObject({ state: 'deleted', revision: 2 })
+      expect(check.storage.taskLifecycle('bob').state).toBe('active')
+    } finally {
+      await check.close()
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('terminal history is erased where the live computer writes it, temp files included', async () => {
   const root = mkdtempSync(join(tmpdir(), 'offline-erasure-history-'))

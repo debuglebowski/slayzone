@@ -33,10 +33,8 @@
  * the copy was taken from a snapshot that still held the erased content.
  */
 import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { Worker } from 'node:worker_threads'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -44,7 +42,13 @@ import type {
   ComputerChatStorageResult,
   ComputerChatStorageState
 } from '@slayzone/terminal-contracts'
-import { COMPACTION_WORKER_SOURCE } from './compaction-worker'
+import {
+  startCompactionWorker,
+  type CompactionWorkerFactory,
+  type WorkerHandle,
+  type TableInfo,
+  type Key
+} from './compaction-worker-host'
 import { freeDiskBytes } from './disk-space'
 import { ChatStorageSwapRefused, type ChatStorage, type ChatSwapPhase } from './storage'
 
@@ -69,6 +73,8 @@ export type StorageCompactionHook =
 
 export interface StorageCompactionOptions {
   storage: ChatStorage
+  /** Composition-owned copy worker factory; callbacks remain local. */
+  workerFactory?: CompactionWorkerFactory
   /** The event-blob backfill finished (a rebuild waits for it). */
   backfillDone(): boolean
   /** Free bytes on the store's disk. Default: statfs of the store dir. */
@@ -117,34 +123,9 @@ export class ChatCompactionRefused extends Error {
 }
 class Stopped extends Error {}
 
-interface TableInfo {
-  name: string
-  cols: string[]
-  pk: string[]
-  /** Copied in primary-key order (no rowid to page by). */
-  withoutRowid: boolean
-}
-type Key = [string, ...unknown[]]
-
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`
 const formatBytes = (bytes: number) =>
   bytes >= GiB ? `${(bytes / GiB).toFixed(2)} GiB` : `${(bytes / MiB).toFixed(1)} MiB`
-
-/** better-sqlite3's entry, for the worker (loaded by path in an eval worker). */
-function sqliteModulePath(): string {
-  // The computer's CJS bundle: better-sqlite3 is external, resolved like the store's.
-  if (typeof require === 'function') return require.resolve('better-sqlite3')
-  // Unbundled ESM (tests, tsx): from the entry script, else the working directory.
-  let lastError: unknown
-  for (const from of [process.argv[1], join(process.cwd(), 'index.js')])
-    if (from)
-      try {
-        return createRequire(from).resolve('better-sqlite3')
-      } catch (error) {
-        lastError = error
-      }
-  throw lastError
-}
 
 export function createStorageCompaction(opts: StorageCompactionOptions) {
   const store = opts.storage
@@ -492,7 +473,7 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
     tables: TableInfo[],
     on: { exit(): void; progress(bytes: number): void }
   ): WorkerHandle {
-    return startCompactionWorker({
+    return (opts.workerFactory ?? startCompactionWorker)({
       mode,
       live: store.path,
       out,
@@ -735,123 +716,6 @@ export function createStorageCompaction(opts: StorageCompactionOptions) {
 }
 export type StorageCompaction = ReturnType<typeof createStorageCompaction>
 
-interface WorkerHandle {
-  ready: Promise<Array<{ name: string; sql: string }>>
-  copy(tables: TableInfo[], keys: Key[]): Promise<void>
-  finish(check: boolean): Promise<string>
-  /** Inside a long native call (quick_check): it cannot stop before returning. */
-  busyNative(): boolean
-  /** Ends the thread; settles when it has exited. */
-  terminate(): Promise<void>
-}
-/**
- * A compaction worker (`compaction-worker.ts`). `exit` runs when its thread really
- * ended (its copy is free then); `registration` (a live store's secondary-connection
- * entry) is released as soon as its connections are closed.
- */
-function startCompactionWorker(spec: {
-  mode: 'build' | 'resume' | 'file'
-  live: string
-  out: string
-  tables: TableInfo[]
-  throttle: { batchBytes: number; syncBytes: number; pauseMs: number }
-  registration?: { release(): void }
-  exit(): void
-  progress(bytes: number): void
-}): WorkerHandle {
-  const { mode, registration } = spec
-  const on = spec
-  const worker = new Worker(COMPACTION_WORKER_SOURCE, {
-    eval: true,
-    workerData: {
-      modulePath: sqliteModulePath(),
-      live: spec.live,
-      out: spec.out,
-      mode,
-      tables: spec.tables,
-      throttle: spec.throttle
-    }
-  })
-  let waiting: { resolve(m: WorkerMessage): void; reject(e: Error): void } | null = null
-  let failure: Error | null = null
-  let ended = false
-  let state: 'building' | 'idle' | 'copying' | 'finishing' = mode === 'resume' ? 'idle' : 'building'
-  let markExited: () => void = () => undefined
-  const exited = new Promise<void>((resolve) => {
-    markExited = resolve
-  })
-  const end = () => {
-    if (ended) return
-    ended = true
-    registration?.release()
-  }
-  const settle = (m: WorkerMessage | Error) => {
-    const w = waiting
-    waiting = null
-    if (m instanceof Error) {
-      failure = m
-      w?.reject(m)
-    } else w?.resolve(m)
-  }
-  worker.on('message', (m: WorkerMessage) => {
-    if (m.t === 'progress') {
-      on.progress(m.bytes)
-      return
-    }
-    if (m.t === 'error') {
-      end()
-      settle(new Error(m.message))
-    } else {
-      if (m.t === 'finished') end()
-      settle(m)
-    }
-  })
-  worker.on('error', (error) => {
-    end()
-    settle(error)
-  })
-  worker.on('exit', () => {
-    end()
-    if (waiting) settle(new Error('The compaction worker stopped'))
-    on.exit()
-    markExited()
-  })
-  const next = () =>
-    failure
-      ? Promise.reject(failure)
-      : new Promise<WorkerMessage>((resolve, reject) => {
-          waiting = { resolve, reject }
-        })
-  const ready = next().then((m) => {
-    state = 'idle'
-    return m.t === 'ready' ? m.triggers : []
-  })
-  return {
-    ready,
-    async copy(tables, keys) {
-      const reply = next()
-      state = 'copying'
-      worker.postMessage({ t: 'copy', tables, keys })
-      await reply
-      state = 'idle'
-    },
-    async finish(check) {
-      const reply = next()
-      state = 'finishing'
-      worker.postMessage({ t: 'finish', check })
-      const m = await reply
-      return m.t === 'finished' ? m.check : 'no reply'
-    },
-    busyNative: () => state === 'finishing',
-    terminate() {
-      // Ends at the next JS boundary (between copy batches; quick_check runs to its
-      // end). Only its read-only connection and its own copy are involved.
-      void worker.terminate().catch(() => undefined)
-      return exited
-    }
-  }
-}
-
 /** The tables of `db`'s main schema, with the columns and keys a copy needs. */
 function describeTables(db: Database.Database): TableInfo[] {
   return (
@@ -888,7 +752,8 @@ export async function rebuildStoreFile(
     batchBytes: 4 * MiB,
     syncBytes: 16 * MiB,
     pauseMs: 25
-  }
+  },
+  workerFactory: CompactionWorkerFactory = startCompactionWorker
 ): Promise<void> {
   // Settle the WAL first (an archive opened in WAL mode): the last close removes it.
   const probe = new Database(path, { fileMustExist: true })
@@ -905,7 +770,7 @@ export async function rebuildStoreFile(
     for (const suffix of ['', '-journal', '-wal', '-shm'])
       rmSync(`${out}${suffix}`, { force: true })
   }
-  const worker = startCompactionWorker({
+  const worker = workerFactory({
     mode: 'file',
     live: path,
     out,
@@ -939,13 +804,6 @@ function syncDirSync(dir: string) {
     closeSync(fd)
   }
 }
-
-type WorkerMessage =
-  | { t: 'ready'; triggers: Array<{ name: string; sql: string }> }
-  | { t: 'copied' }
-  | { t: 'progress'; bytes: number }
-  | { t: 'finished'; check: string }
-  | { t: 'error'; message: string }
 
 /** A promise settled from outside (Node 20 has no `Promise.withResolvers`). */
 function deferred(): { promise: Promise<void>; resolve(): void } {

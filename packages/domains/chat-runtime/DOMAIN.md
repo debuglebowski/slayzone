@@ -278,3 +278,26 @@ dropped, or restored when it is the only copy).
   `exited` exposes physical owner exit independently from lease-dependent cleanup.
   Production runtime/composed-store callers still require cutover; these adapters and
   tests do not complete H1/H2 or prove actual computer control responsiveness.
+
+
+- 2026-11-16 (fu-2 R1, S6b2b2): offline erasure now awaits the canonical async
+  maintenance owner. Its already-open writer assembles the same local-data, ledger,
+  attachment/artifact, backup/archive, transfer, retention and compaction services;
+  no second store or serialized transaction/callback is involved. The private
+  compiled erasure command admits its FULL fence before yielding to concurrent
+  close. Offline credential/hub/process/worktree checks still precede owner open.
+  Only that verified stopped-host profile clears abandoned ephemeral blob leases.
+  The CLI passes its bundled entry explicitly; worker dispatch stays isolated.
+  Copy helpers are main-owned through a typed private broker, also for archive
+  rewrites. Completion/secondary release wait for physical helper exit; writer death
+  drains helpers independently of writer shutdown. The broker module loads no native
+  SQLite. Online host/runtime handlers and fixture/seeder callers still require
+  migration; full H1/H2, actual control responsiveness, S7/S8 and publication-file
+  adoption remain open. The approved pure publication helper is not wired here.
+
+- 2026-11-16 (fu-2 integration item 6): `chatStorageCompaction` now comes from the
+  implementing host's `ComputerIdentity`; connectors forward it and both enroll
+  and hello advertise only an explicit true value (absent/false stay false).
+  Retained same-contract busy-host proof preserves historical chat schemas and
+  verifies new connectors do not invent this capability. Its bundle fixture
+  matches schema indentation and the current summaries refinement explicitly.

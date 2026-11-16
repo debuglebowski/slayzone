@@ -168,7 +168,10 @@ async function main(): Promise<void> {
       process.env.SLAYZONE_ROOT ?? process.cwd(),
       // startup-json: strict — the admin's cleanup request file: a bad one must refuse, not default
       JSON.parse(readFileSync(requestFile, 'utf8')),
-      { worktreesVerified: process.argv.includes('--worktrees-verified') }
+      {
+        worktreesVerified: process.argv.includes('--worktrees-verified'),
+        workerPath: process.argv[1]
+      }
     )
     writeFileSync(receiptFile, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
     process.stdout.write('SlayZone-managed computer data erased. Cleanup receipt saved.\n')

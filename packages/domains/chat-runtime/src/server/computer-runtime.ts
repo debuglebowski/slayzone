@@ -20,7 +20,7 @@ import {
   type ClaudeSessionReader
 } from '@slayzone/terminal/runtime'
 import type { SlayzoneDb } from '@slayzone/platform'
-import { openChatStorage } from './storage'
+import { openChatStorage, type ChatStorage } from './storage'
 import { createLocalChatData, type ChatBootstrap, type ChatMetadataUpdate } from './local-data'
 import { randomUUID } from 'node:crypto'
 import { createComputerTaskData, type DataImportKinds } from './task-data'
@@ -48,7 +48,7 @@ import {
   markStoredTaskErasureCompacted
 } from './erase-stored-task'
 
-export function createComputerChatRuntime(opts: {
+export interface ComputerChatRuntimeOptions {
   stateDir: string
   hubScope: string
   computerId: string
@@ -76,8 +76,17 @@ export function createComputerChatRuntime(opts: {
   compaction?: Partial<Omit<StorageCompactionOptions, 'storage' | 'backfillDone' | 'log'>>
   /** The computer's log (`computer.log`): maintenance progress, never chat content. */
   log?: (line: string) => void
-}) {
-  const storage = openChatStorage(opts)
+}
+
+export function createComputerChatRuntime(opts: ComputerChatRuntimeOptions) {
+  return assembleComputerChatRuntime(openChatStorage(opts), opts)
+}
+
+/** Worker-local assembly: no second connection or callback crosses the owner boundary. */
+export function assembleComputerChatRuntime(
+  storage: ChatStorage,
+  opts: ComputerChatRuntimeOptions
+) {
   // Register before artifact purge listeners: every deletion delivery captures
   // retry identifiers before its source records disappear, including old clients.
   storage.onTaskPurge((taskId) => storage.compose((raw) => prepareStoredTaskErasure(raw, taskId)))
@@ -147,7 +156,10 @@ export function createComputerChatRuntime(opts: {
   const sessionMoves = createSessionMoves(storage)
   const attachments = createLocalAttachments(storage, local)
   const artifacts = createLocalArtifacts(storage, local, attachments)
-  const backups = createChatBackups(storage, { automatic: !opts.maintenance })
+  const backups = createChatBackups(storage, {
+    automatic: !opts.maintenance,
+    workerFactory: opts.compaction?.workerFactory
+  })
   const workspaceStore = createLocalWorkspaceStore(storage, local)
   const conversations = createConversationRegistry()
   const backend = opts.transport?.backend

@@ -382,6 +382,7 @@ export async function prepareArtifactPublicationFiles(
     // Never remove a reusable original path. Claim its inode at an unoccupied private UUID,
     // serialized with other helpers that might create that name. No recursive removal can erase
     // owner.json first and leave unattributable body bytes when native cleanup fails partway.
+    // isolation: fatal — UUID retries claim one directory; native failure must preserve ownership and refuse cleanup.
     for (;;) {
       const target = join(root, randomUUID())
       const result = await withPath(target, async () => {

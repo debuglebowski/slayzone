@@ -723,6 +723,7 @@ export function startComputer(
     chatHistoryPages: true,
     chatTimelineRowSlices: true,
     promptSummariesAll: true,
+    chatStorageCompaction: true,
     capabilities: [...new Set([...config.capabilities, AI_CONFIG_HASH_CAPABILITY])]
   } as ComputerIdentity
   // A secondary hub enrolls this computer under its OWN name, so it gets its own

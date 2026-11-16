@@ -55,6 +55,7 @@ import {
   finishStoredTaskErasure,
   markStoredTaskErasureCompacted
 } from './erase-stored-task'
+import type { CompactionWorkerFactory } from './compaction-worker-host'
 import { rebuildStoreFile } from './storage-compaction'
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const activeBackupStaging = new Set<string>()
@@ -172,7 +173,10 @@ function durableJson(path: string, value: unknown) {
 export const ARCHIVE_QUARANTINE_PASS = 'chat-archive'
 const isMissingFile = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 
-export function createChatBackups(store: ChatStorage, options: { automatic?: boolean } = {}) {
+export function createChatBackups(
+  store: ChatStorage,
+  options: { automatic?: boolean; workerFactory?: CompactionWorkerFactory } = {}
+) {
   const dir = join(store.dir, 'backups'),
     archiveDir = join(store.dir, 'archives'),
     scope = basename(store.dir)
@@ -1109,7 +1113,7 @@ export function createChatBackups(store: ChatStorage, options: { automatic?: boo
     // The whole archive file is rewritten off the main thread (stale copies of the
     // erased rows), then marked: a retry after a crash rewrites again.
     if (compact) {
-      await rebuildStoreFile(file)
+      await rebuildStoreFile(file, undefined, options.workerFactory)
       const rewritten = new Database(file, { fileMustExist: true })
       try {
         // No fsync on this thread: a lost flag only means another rewrite next time.

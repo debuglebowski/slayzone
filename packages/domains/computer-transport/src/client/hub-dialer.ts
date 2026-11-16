@@ -51,6 +51,8 @@ export interface ComputerIdentity {
   chatTimelineRowSlices?: boolean
   /** Implementing host answers `prompt.summaries` with `all: true`. Absent = 500-id batches. */
   promptSummariesAll?: boolean
+  /** Implementing runtime owns chat storage compaction. Absent = unavailable. */
+  chatStorageCompaction?: boolean
   name: string
   /** `${process.platform}-${process.arch}`. */
   platform: string
@@ -363,7 +365,7 @@ export class HubDialer {
       chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
       promptSummariesAll: this.opts.identity.promptSummariesAll === true,
       // ...and compacts its chat store on request.
-      chatStorageCompaction: true
+      chatStorageCompaction: this.opts.identity.chatStorageCompaction === true
     })
     return enrollResultSchema.parse(raw)
   }
@@ -412,7 +414,7 @@ export class HubDialer {
             chatHistoryPages: this.opts.identity.chatHistoryPages === true,
             promptSummariesAll: this.opts.identity.promptSummariesAll === true,
             chatTimelineRowSlices: this.opts.identity.chatTimelineRowSlices === true,
-            chatStorageCompaction: true
+            chatStorageCompaction: this.opts.identity.chatStorageCompaction === true
           })
           const result = helloResultSchema.parse(raw)
           if (!this.hubSpeaksOurProtocol(conn, result.protocolVersion)) return

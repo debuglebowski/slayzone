@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3'
 import type { TxnSigOf } from '@slayzone/platform'
 import type { SerializedError } from '@slayzone/platform/sqlite-worker'
 import type { ChatExportReader, ChatStorage } from './storage'
+import type { CompactionWorkerInput, Key, TableInfo } from './compaction-worker-host'
 
 export const CHAT_STORAGE_OWNER_KIND = 'slayzone-chat-storage-owner-v1'
 export interface StorageOwnerData {
@@ -11,6 +12,7 @@ export interface StorageOwnerData {
   hubScope: string
   checkpointIntervalMs?: number
   control: MessagePort
+  maintenance?: { computerId: string }
 }
 
 export const STORAGE_METHODS = [
@@ -117,21 +119,35 @@ export type StorageMaintenanceCall =
   | { method: 'fileStats' | 'secondaryConnections' | 'tempPath' | 'connectionEpoch'; args: [] }
   | { method: 'swapIn'; args: [string] }
   | { method: 'pauseCheckpointer' | 'resumeCheckpointer' | 'checkpointNow'; args: [] }
-export type ControlRequest = {
-  type: 'request'
-  id: number
-  operation: 'open' | 'close' | 'checkpoint'
-  final?: boolean
-}
+export type CopyControl =
+  | { operation: 'copy-start'; token: string; spec: CompactionWorkerInput }
+  | { operation: 'copy-delta'; token: string; tables: TableInfo[]; keys: Key[] }
+  | { operation: 'copy-finish'; token: string; check: boolean }
+  | { operation: 'copy-terminate'; token: string }
+export type ControlRequest = { type: 'request'; id: number } & (
+  | CopyControl
+  | {
+      operation: 'open' | 'close' | 'checkpoint'
+      final?: boolean
+    }
+)
 export type OwnerControl = ControlRequest | { type: 'purged'; taskId: string }
 export type HostControl =
+  | { type: 'copy-progress'; token: string; bytes: number }
+  | { type: 'copy-exit'; token: string }
   | { type: 'reply'; id: number; ok: true; result?: unknown }
   | { type: 'reply'; id: number; ok: false; error: SerializedError }
   | { type: 'failed'; message: string }
   | { type: 'recovered' }
 
+export type MaintenanceResult = { taskId: string; revision: number; erased: true }
+
 // One compiled, typed command surface; no function or transaction closure crosses threads.
 export type StorageOwnerTxns = {
+  'chatMaintenance.eraseTask': (
+    db: Database.Database,
+    params: { taskId: string; revision: number }
+  ) => Promise<MaintenanceResult>
   'chatStorage.call': (db: Database.Database, params: StorageCall) => StorageCallResult
   'chatStorage.flush': (db: Database.Database) => Promise<void>
   'chatStorage.prepareClose': (db: Database.Database) => void

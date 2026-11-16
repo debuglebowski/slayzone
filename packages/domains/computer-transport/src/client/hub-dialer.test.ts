@@ -301,8 +301,13 @@ describe('computer protocol v3 (T-27)', () => {
   it.each(['enroll', 'hello'] as const)(
     '%s advertises only the chat capabilities implemented by its runtime identity',
     async (mode) => {
-      const features = ['chatHistoryPages', 'chatTimelineRowSlices', 'promptSummariesAll'] as const
-      // A retained host can omit all three, explicitly disable them, or implement
+      const features = [
+        'chatHistoryPages',
+        'chatTimelineRowSlices',
+        'promptSummariesAll',
+        'chatStorageCompaction'
+      ] as const
+      // A retained host can omit these capabilities, explicitly disable them, or implement
       // each independently of the connector release and the other capabilities.
       const runtimes: Array<Partial<Record<(typeof features)[number], boolean>>> = [
         {},

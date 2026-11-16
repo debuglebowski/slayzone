@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { basename, join } from 'node:path'
 import { z } from 'zod'
-import { createComputerChatRuntime } from '@slayzone/chat-runtime/server'
+import { openChatMaintenanceOwner } from '@slayzone/chat-runtime/server'
 import { createFileCredentialStore, hubHostFromUrl } from '@slayzone/computer-transport/client'
 import { assertPathSafeId, containedPath } from '@slayzone/platform/safe-path'
 import { forEachIsolated, isStorageFatal } from '@slayzone/platform/isolation'
@@ -112,7 +112,7 @@ function sync(path: string) {
 export async function eraseComputerOffline(
   root: string,
   raw: unknown,
-  options: { worktreesVerified?: boolean } = {}
+  options: { worktreesVerified?: boolean; workerPath: string }
 ) {
   const request = requestSchema.parse(raw),
     runtime = join(root, 'computer-runtime')
@@ -140,18 +140,13 @@ export async function eraseComputerOffline(
     )
   const ids = new Set(request.tasks.map((t) => t.taskId))
   const journals = ownHookJournals(runtime, request.hubUrl, ids)
-  const r = createComputerChatRuntime({
+  const r = await openChatMaintenanceOwner({
     stateDir: root,
     hubScope: request.hubScope,
     computerId: request.computerId,
-    maintenance: true
+    workerPath: options.workerPath
   })
   try {
-    // The original host and process groups are verified stopped above. Its old
-    // ephemeral backup leases have no surviving writer; do not wait out a TTL.
-    r.storage.compose((raw) =>
-      raw.exec('DELETE FROM blob_leases; DELETE FROM artifact_blob_leases;')
-    )
     // One task at a time: a task that cannot be erased yet does not stop the
     // others. No receipt is issued until every task is erased (the throw below).
     const erased = await forEachIsolated(
