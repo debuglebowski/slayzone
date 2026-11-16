@@ -116,8 +116,9 @@ export function webShellCsp(publicAddress: string | undefined, telemetry: boolea
  *     opened, framed or top-level, so nothing in it reaches the hub's cookies, storage
  *     or pages (and the shell's frame leaves out `allow-same-origin` too). Scripts run
  *     (the bootstrap, an html artifact's own, mermaid's); `allow-modals` lets it print
- *     (the bootstrap makes the page's alert/confirm/prompt no-ops, export-frame.ts).
- *     No forms, popups, top navigation or downloads.
+ *     (the bootstrap makes the page's alert/confirm/prompt no-ops, export-frame.ts; a
+ *     document the frame is navigated to gets no `allow-modals` from the shell's
+ *     frame). No forms, popups, top navigation or downloads.
  *   - Content: a document renders as written, as desktop renders it — inline and
  *     remote scripts and styles, remote images, fonts and media, network calls. All of
  *     it from an origin that holds nothing.

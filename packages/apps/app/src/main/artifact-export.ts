@@ -3,7 +3,7 @@
 // Reached from the renderer over the `app:export-artifact` IPC — the hub is not
 // involved, so export behaves the same against a local or a remote hub.
 import { randomUUID } from 'crypto'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 import { BrowserWindow, app, dialog, screen, session, shell } from 'electron'
 import type { Session, WebPreferences } from 'electron'
@@ -22,6 +22,7 @@ import type {
   ArtifactExportRequest,
   ArtifactExportResult
 } from '@slayzone/platform/electron-bootstrap-contract'
+import { writeFileWhole } from './client-save'
 
 // --- The export window ---
 //
@@ -393,7 +394,11 @@ export async function exportArtifactOnDesktop(
     throw err
   }
 
-  writeFileSync(picked.filePath, bytes)
+  // Whole or not at all: a failed write never leaves a cut file where theirs was.
+  await writeFileWhole(
+    picked.filePath,
+    typeof bytes === 'string' ? Buffer.from(bytes, 'utf-8') : bytes
+  )
   shell.showItemInFolder(picked.filePath)
   return { ok: true }
 }

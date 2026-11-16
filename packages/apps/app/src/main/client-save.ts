@@ -4,8 +4,15 @@
 // person's own disk whether the hub is local or remote, and no size has to fit in
 // memory. A zip is compressed by archiver on zlib's thread pool: off the UI and off
 // main's event loop. Reached over `app:save-target-*`.
-import { createWriteStream, lstatSync, mkdirSync, rmdirSync, unlinkSync } from 'fs'
-import { link, open, rename, unlink, type FileHandle } from 'fs/promises'
+import {
+  constants as fsConstants,
+  createWriteStream,
+  lstatSync,
+  mkdirSync,
+  rmdirSync,
+  unlinkSync
+} from 'fs'
+import { access, link, lstat, open, rename, unlink, type FileHandle } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { basename, dirname, extname, join } from 'path'
 import { PassThrough, type Writable } from 'stream'
@@ -14,6 +21,7 @@ import { BrowserWindow, app, dialog, shell } from 'electron'
 import { ZipArchive } from 'archiver'
 import { containedPath } from '@slayzone/platform/safe-path'
 import { numberedName } from '@slayzone/task-artifacts/download-plan'
+import { type EntryWidth, entryWidth, writeZip64Entries } from './zip64-entries'
 import type {
   HostSaveResult,
   SaveTargetOpenResult,
@@ -37,7 +45,8 @@ export function parseSaveTargetRequest(raw: unknown): SaveTargetRequest | null {
 }
 
 interface Target {
-  write(path: string, data: Uint8Array): Promise<void>
+  /** `size`: the entry's total bytes when known (only a zip needs it, see zip64). */
+  write(path: string, data: Uint8Array, size?: number): Promise<void>
   mkdir(path: string): Promise<void>
   close(): Promise<void>
   abort(): Promise<void>
@@ -242,6 +251,55 @@ async function writeAll(handle: FileHandle, data: Uint8Array): Promise<void> {
   }
 }
 
+/**
+ * Write `data` to `dest` whole or not at all: into a hidden partial beside it, then
+ * renamed over it. A failure (a full disk) leaves whatever was at `dest` untouched and
+ * removes the partial. For a file the person picked in a save dialog (an export),
+ * where replacing is what they asked for.
+ *
+ * Only a plain file of ours (or nothing) is replaced that way. Anything else is written
+ * in place, as main did, so the OS keeps deciding: a file we may not write refuses
+ * (EACCES), a symlink's target and a hard link's shared file get the bytes, and a file
+ * someone else owns keeps its owner.
+ */
+export async function writeFileWhole(
+  dest: string,
+  data: Uint8Array,
+  ops: { write: (handle: FileHandle, data: Uint8Array) => Promise<void> } = { write: writeAll }
+): Promise<void> {
+  const existing = await lstat(dest).catch(() => null)
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null
+  const replaceable =
+    !existing ||
+    (existing.isFile() &&
+      existing.nlink === 1 &&
+      (uid === null || existing.uid === uid) &&
+      (await access(dest, fsConstants.W_OK).then(
+        () => true,
+        () => false
+      )))
+  if (!replaceable) {
+    const handle = await open(dest, 'w')
+    try {
+      await ops.write(handle, data)
+    } finally {
+      await handle.close()
+    }
+    return
+  }
+  const partial = partialPath(dest)
+  const handle = await open(partial, 'wx')
+  try {
+    await ops.write(handle, data)
+    await handle.close()
+    await rename(partial, dest)
+  } catch (err) {
+    await handle.close().catch(ignore)
+    await unlink(partial).catch(ignore)
+    throw err
+  }
+}
+
 export async function copyInto(src: string, dest: FileHandle): Promise<void> {
   const from = await open(src, 'r')
   const buf = Buffer.alloc(4 * 1024 * 1024)
@@ -419,6 +477,9 @@ async function zipTarget(
   const partial = partialPath(filePath)
   const output = openOutput(partial)
   const archive = new ZipArchive({ zlib: { level: 9 } })
+  /** Each entry's width, from the size the client declared with its first piece. */
+  const widths = new Map<string, EntryWidth>()
+  writeZip64Entries(archive, (name) => widths.get(name) ?? 'unknown')
   let failure: Error | null = null
   let rejectFailed: (err: Error) => void = ignore
   /** Rejects once the zip has failed: every wait races it, so none hangs. */
@@ -449,13 +510,15 @@ async function zipTarget(
     current = null
   }
   return {
-    async write(path, data) {
+    async write(path, data, size) {
       check()
       if (current?.path !== path) {
         startPath(path)
         finishCurrent()
         const stream = new PassThrough()
-        archive.append(stream, { name: path, store: STORED.has(extname(path).toLowerCase()) })
+        const store = STORED.has(extname(path).toLowerCase())
+        widths.set(path, entryWidth(size, store))
+        archive.append(stream, { name: path, store })
         current = { path, stream }
       }
       if (!current.stream.write(data)) await settle(once(current.stream, 'drain'))
@@ -642,10 +705,18 @@ export class SaveTargets {
     return { ok: true, targetId }
   }
 
-  async write(owner: number, id: unknown, path: unknown, data: unknown): Promise<void> {
+  async write(
+    owner: number,
+    id: unknown,
+    path: unknown,
+    data: unknown,
+    size?: unknown
+  ): Promise<void> {
     if (typeof path !== 'string' || !(data instanceof Uint8Array))
       throw new Error('Invalid save write')
-    await this.run(this.entry(owner, id), (t) => t.write(path, data))
+    if (size !== undefined && (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0))
+      throw new Error('Invalid save write size')
+    await this.run(this.entry(owner, id), (t) => t.write(path, data, size as number | undefined))
   }
 
   async mkdir(owner: number, id: unknown, path: unknown): Promise<void> {

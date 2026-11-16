@@ -152,8 +152,17 @@ export interface ElectronBootstrapApp {
   /**
    * Append `data` to the file at `path` (`/`-separated, relative; `''` for a `file`
    * target). Writing a new path finishes the previous file and starts this one.
+   * `size`: the file's TOTAL byte length, the same on every write of the file; read
+   * when the file starts. A zip lays the entry out by it before its first byte (4 GiB
+   * or more: zip64 from the local header on). Undefined = unknown: the host lays the
+   * entry out for any size.
    */
-  saveTargetWrite?: (targetId: string, path: string, data: Uint8Array) => Promise<void>
+  saveTargetWrite?: (
+    targetId: string,
+    path: string,
+    data: Uint8Array,
+    size?: number
+  ) => Promise<void>
   /** Create a (possibly empty) folder at `path`. */
   saveTargetMkdir?: (targetId: string, path: string) => Promise<void>
   /** Finish: everything written is saved (and revealed, when asked). */

@@ -17,7 +17,7 @@ import { createZipEncoder, fflateDeflater } from './zip-stream'
 
 /** A message to the zip worker; one at a time, each answered by a {@link ZipWorkerReply}. */
 export type ZipWorkerRequest =
-  | { seq: number; op: 'write'; path: string; data: Uint8Array }
+  | { seq: number; op: 'write'; path: string; data: Uint8Array; size?: number }
   | { seq: number; op: 'mkdir'; path: string }
   | { seq: number; op: 'finish' }
 
@@ -30,7 +30,8 @@ export interface ZipWorkerReply {
 
 /** A zip being built: every archive byte it produces goes to `onOut`. */
 export interface ZipSink {
-  write(path: string, data: Uint8Array): Promise<void>
+  /** `size`: the file's total length (the encoder lays its entry out by it). */
+  write(path: string, data: Uint8Array, size?: number): Promise<void>
   mkdir(path: string): Promise<void>
   finish(): Promise<void>
   dispose(): void
@@ -88,11 +89,11 @@ export function workerZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
       }
     })
   return {
-    write: (path, data) => {
+    write: (path, data, size) => {
       // Transfer when the view owns its whole buffer; otherwise it is copied.
       const whole = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
       return send(
-        { seq: ++seq, op: 'write', path, data },
+        { seq: ++seq, op: 'write', path, data, size },
         whole ? [data.buffer as ArrayBuffer] : []
       )
     },
@@ -106,7 +107,7 @@ export function workerZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
 export function inlineZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
   const encoder = createZipEncoder(onOut, { deflater: fflateDeflater })
   return {
-    write: async (path, data) => encoder.write(path, data),
+    write: async (path, data, size) => encoder.write(path, data, size),
     mkdir: async (path) => encoder.mkdir(path),
     finish: async () => encoder.finish(),
     dispose: () => undefined
@@ -114,7 +115,7 @@ export function inlineZipSink(onOut: (chunk: Uint8Array) => void): ZipSink {
 }
 
 interface Target {
-  write(path: string, data: Uint8Array): Promise<void>
+  write(path: string, data: Uint8Array, size?: number): Promise<void>
   mkdir(path: string): Promise<void>
   close(): Promise<void>
   abort(): void
@@ -158,7 +159,7 @@ export function createBrowserSaveTargets(
     let parts: Blob[] = []
     const sink = createZipSink((chunk) => parts.push(stash(chunk)))
     return {
-      write: (path, data) => sink.write(path, data),
+      write: (path, data, size) => sink.write(path, data, size),
       mkdir: (path) => sink.mkdir(path),
       close: async () => {
         await sink.finish().finally(() => sink.dispose())
@@ -187,7 +188,8 @@ export function createBrowserSaveTargets(
       targets.set(targetId, target)
       return { ok: true, targetId }
     },
-    write: async (id: string, path: string, data: Uint8Array) => get(id).write(path, data),
+    write: async (id: string, path: string, data: Uint8Array, size?: number) =>
+      get(id).write(path, data, size),
     mkdir: async (id: string, path: string) => get(id).mkdir(path),
     async close(id: string): Promise<HostSaveResult> {
       const target = get(id)

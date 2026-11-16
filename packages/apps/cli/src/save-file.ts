@@ -368,6 +368,45 @@ async function writeThroughProtected(
 }
 
 /**
+ * A rename onto `existing` (at `real`) would take it over: it is write-protected
+ * against us (0444, a read-only attribute), or another user's (in a directory we may
+ * write, renaming would make it ours). Opening it, as `--output` always did, leaves
+ * that to the OS: refused (EACCES) when we may not write it, else written with its
+ * owner and mode kept.
+ */
+function renameWouldTakeOver(real: string, existing: fs.Stats): boolean {
+  const uid = typeof process.geteuid === 'function' ? process.geteuid() : null
+  if (uid !== null && existing.uid !== uid) return true
+  try {
+    fs.accessSync(real, fs.constants.W_OK)
+    return false
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Put the complete temp file at `real`. A refusal (EPERM / EACCES) means the name was
+ * not ours to replace: in a sticky directory such as /tmp, another user's file (one
+ * that took the name after {@link renameWouldTakeOver} checked it), or a locked /
+ * immutable file. Said plainly; the old file is left as it was.
+ */
+function renameOnto(tmp: string, real: string): void {
+  try {
+    fs.renameSync(tmp, real)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'EPERM' && code !== 'EACCES') throw err
+    throw new Error(
+      `Cannot replace ${real}: the system refused (${code}). In a shared sticky directory ` +
+        'such as /tmp that means the file there now belongs to another user; a locked or ' +
+        'immutable file is refused the same way. It was left as it was.',
+      { cause: err }
+    )
+  }
+}
+
+/**
  * Save at `target`, replacing what is there (the person named the path). The new
  * bytes go to a temp file first and are renamed over the target once complete, so a
  * failed download leaves the old file as it was. As before, a symlink at `target` is
@@ -377,7 +416,9 @@ async function writeThroughProtected(
  * device, pipe or anything else under `/dev` or `/proc`, a file with other hard links
  * (they must see the new bytes), a dangling symlink, a symlink Linux
  * `fs.protected_symlinks` guards ({@link resolveForWrite}: the kernel decides, as it
- * did), or a directory that does not let us create the temp file.
+ * did), a file a rename would take over — read-only to us, or another user's
+ * ({@link renameWouldTakeOver}: the OS decides, as it did) — or a directory that does
+ * not let us create the temp file.
  */
 export async function saveReplacing(target: string, write: WriteBody): Promise<string> {
   // The path itself or a symlink it leads through (`out` → `/dev/stdout` → on Linux
@@ -420,7 +461,10 @@ export async function saveReplacing(target: string, write: WriteBody): Promise<s
     real = target
   }
   // Reached through a directory symlink (the resolution follows those too).
-  if (isSystemPath(real) || (existing && (!existing.isFile() || existing.nlink > 1))) {
+  if (
+    isSystemPath(real) ||
+    (existing && (!existing.isFile() || existing.nlink > 1 || renameWouldTakeOver(real, existing)))
+  ) {
     await writeInPlace(target, write)
     return target
   }
@@ -439,7 +483,7 @@ export async function saveReplacing(target: string, write: WriteBody): Promise<s
   const tmp = await writeTemp(opened, write)
   try {
     if (existing) fs.chmodSync(tmp.path, existing.mode & 0o7777)
-    fs.renameSync(tmp.path, real)
+    renameOnto(tmp.path, real)
   } finally {
     tmp.discard()
   }

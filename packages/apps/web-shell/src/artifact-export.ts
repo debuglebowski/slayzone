@@ -40,7 +40,15 @@ const FRAME_LOAD_TIMEOUT_MS = 15_000
 
 /** The hub's export frame (hub export-frame.ts) and the protocol version it speaks. */
 const EXPORT_FRAME_PATH = '/export-frame'
-const EXPORT_FRAME_VERSION = 1
+const EXPORT_FRAME_VERSION = 2
+/**
+ * How long the export frame has to vouch for a document load (see printDocument): its
+ * longest task, at worst. A load it does not vouch for is a navigation.
+ */
+const FRAME_VOUCH_MS = 15_000
+/** The frame left the bootstrap's document: whatever it shows now is not the artifact. */
+export const EXPORT_NAVIGATED_ERROR =
+  'The artifact tried to load another page while it was being exported, so nothing was printed.'
 /** How long the frame waits for a document to load (remote images, fonts, a drawing). */
 const EXPORT_FRAME_SETTLE_MS = 30_000
 /** The shell's backstop on top of the frame's own wait. */
@@ -155,26 +163,61 @@ function exportId(): string {
  * Print `html` through the browser's dialog from the hub's export frame (see the
  * module comment; the protocol is hub export-frame.ts's). Resolves once the dialog
  * closes. `waitForReady`: the document flags itself ready when it has drawn (mermaid).
+ *
+ * The document may navigate the frame away (meta refresh, `location.href`, a link):
+ * the next document is a fresh window WITHOUT the bootstrap's dialog lock. So:
+ *  - Once the bootstrap is running, the frame's sandbox drops `allow-modals`. A sandbox
+ *    change applies at the frame's NEXT navigation, so the bootstrap's document keeps
+ *    print(), and any document after it can raise no dialog and print nothing.
+ *  - Every frame load after the bootstrap said hello is hostile unless the bootstrap
+ *    vouches for it over a private channel (its own document reloads the frame:
+ *    writing the artifact, the artifact rewriting itself, a fragment change in
+ *    WebKit). A navigated frame's bootstrap is gone and cannot: frame removed, export
+ *    failed, nothing printed. The bootstrap also reports a navigation it sees start
+ *    (`state: 'navigated'`), which ends the export at once.
  */
 function printDocument(html: string, waitForReady: boolean): Promise<void> {
   const frame = hiddenFrame('allow-scripts allow-modals')
   const id = exportId()
+  const channel = new MessageChannel()
   return new Promise<void>((resolve, reject) => {
     let stage: 'hello' | 'rendering' | 'printing' = 'hello'
     let timer = setTimeout(
       () => finish(new Error('The print frame did not load')),
       FRAME_LOAD_TIMEOUT_MS
     )
+    let pinged = 0
+    let vouchTimer: ReturnType<typeof setTimeout> | undefined
     const wait = (ms: number, onTimeout: () => void): void => {
       clearTimeout(timer)
       timer = setTimeout(onTimeout, ms)
     }
     function finish(err?: Error): void {
       clearTimeout(timer)
+      clearTimeout(vouchTimer)
       window.removeEventListener('message', onMessage)
+      frame.removeEventListener('load', onLoad)
+      channel.port1.onmessage = null
+      channel.port1.close()
       frame.remove()
       if (err) reject(err)
       else resolve()
+    }
+    function onLoad(): void {
+      // Before hello: the export frame's own page, nothing of the artifact's yet.
+      // While printing: the bootstrap is blocked in print() and answers once the dialog
+      // closes, together with its `done`; a fragment change just before it (WebKit
+      // reloads the frame for one) is no navigation.
+      if (stage !== 'rendering') return
+      pinged += 1
+      channel.port1.postMessage({ ping: pinged })
+      clearTimeout(vouchTimer)
+      vouchTimer = setTimeout(() => finish(new Error(EXPORT_NAVIGATED_ERROR)), FRAME_VOUCH_MS)
+    }
+    channel.port1.onmessage = (event: MessageEvent) => {
+      const data = event.data as { pong?: unknown } | null
+      // Only the answer to the latest ping: every load since has been vouched for.
+      if (data && data.pong === pinged) clearTimeout(vouchTimer)
     }
     function onMessage(event: MessageEvent): void {
       // Only the frame speaks this protocol; anything else (another frame, a script
@@ -188,29 +231,39 @@ function printDocument(html: string, waitForReady: boolean): Promise<void> {
           finish(new Error('This page is out of date. Reload it, then export again.'))
           return
         }
+        // The bootstrap is running: its document keeps allow-modals for print(); the
+        // frame's next document, if the artifact navigates it, gets none.
+        frame.setAttribute('sandbox', 'allow-scripts')
         stage = 'rendering'
         wait(EXPORT_FRAME_READY_MS, () => finish(new Error('The export did not finish loading')))
         // An opaque origin has no name to address: '*'. The frame is ours (its URL and
-        // sandbox set here) and holds nothing but what this page sends it.
+        // sandbox set here) and holds nothing but what this page sends it. The channel
+        // is the bootstrap's alone: what answers on it is the bootstrap's document.
         frame.contentWindow?.postMessage(
           { slayzoneExport: id, html, waitForReady, deadlineMs: EXPORT_FRAME_SETTLE_MS },
-          '*'
+          '*',
+          [channel.port2]
         )
         return
       }
       if (data.slayzoneExport !== id) return
       if (data.state === 'error') {
         finish(new Error(typeof data.message === 'string' ? data.message : 'Printing failed'))
+      } else if (data.state === 'navigated') {
+        finish(new Error(EXPORT_NAVIGATED_ERROR))
       } else if (data.state === 'ready' && stage === 'rendering') {
-        // The dialog is open now. Its Cancel is indistinguishable from Save; both end
-        // the export. A browser that never reports afterprint still gets the frame back.
+        // The bootstrap posts this in the task that opens the dialog: the document it
+        // prints is its own. Cancel is indistinguishable from Save; both end the
+        // export. A browser that never reports afterprint still gets the frame back.
         stage = 'printing'
+        clearTimeout(vouchTimer)
         wait(PRINT_FRAME_MAX_MS, () => finish())
       } else if (data.state === 'done') {
         finish()
       }
     }
     window.addEventListener('message', onMessage)
+    frame.addEventListener('load', onLoad)
     frame.src = EXPORT_FRAME_PATH
     document.body.appendChild(frame)
   })

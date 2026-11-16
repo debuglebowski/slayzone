@@ -64,15 +64,23 @@ class ArtifactGoneError extends Error {
 
 const CHANGED = 'The artifact changed while it was being downloaded. Download it again.'
 
+/** One piece of a file, with the file's total size (pinned by the first piece). */
+interface Piece {
+  data: Uint8Array
+  size: number
+}
+
 /**
  * The artifact's pieces in order, the next one fetched while this one is written
  * (two reads in flight at most). Throws {@link ArtifactGoneError} before the first
  * piece when the hub has no such file. The first piece pins the version and size:
  * a later piece from any other version (rewritten, truncated, replaced, deleted)
  * throws, as does a piece that is empty before the end or overruns it, so a download
- * is never saved truncated or spliced: it ends exactly at the pinned size.
+ * is never saved truncated or spliced: it ends exactly at the pinned size. Each piece
+ * carries that size: the host lays a zip entry out by it before its first byte (an
+ * entry of 4 GiB or more is zip64 from its local header on).
  */
-async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint8Array> {
+async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Piece> {
   let offset = 0
   let pinned: { version: string; size: number } | null = null
   let next = read(id, 0, DOWNLOAD_CHUNK_BYTES)
@@ -96,7 +104,7 @@ async function* pieces(read: ReadArtifactChunk, id: string): AsyncGenerator<Uint
       // Consumed on the next turn; a consumer that stops early must not leave it unhandled.
       next.catch(ignore)
     }
-    yield piece.data
+    yield { data: piece.data, size: pinned.size }
     offset = end
     // Done only when every byte of the pinned size has arrived.
     if (!more) return
@@ -124,17 +132,29 @@ async function streamInto(
   read: ReadArtifactChunk
 ): Promise<boolean> {
   const it = pieces(read, id)
-  let first: IteratorResult<Uint8Array>
+  let first: IteratorResult<Piece>
   try {
     first = await it.next()
   } catch (err) {
     if (err instanceof ArtifactGoneError) return false
     throw err
   }
-  if (!first.done) await electronBootstrap.saveTargetWrite(targetId, path, first.value)
-  for await (const piece of it)
-    if (piece.byteLength > 0) await electronBootstrap.saveTargetWrite(targetId, path, piece)
+  await writeAll(targetId, path, first, it)
   return true
+}
+
+/** Write a file's pieces into `path` of the target, each declaring the file's size. */
+async function writeAll(
+  targetId: string,
+  path: string,
+  first: IteratorResult<Piece>,
+  rest: AsyncGenerator<Piece>
+): Promise<void> {
+  if (!first.done)
+    await electronBootstrap.saveTargetWrite(targetId, path, first.value.data, first.value.size)
+  for await (const piece of rest)
+    if (piece.data.byteLength > 0)
+      await electronBootstrap.saveTargetWrite(targetId, path, piece.data, piece.size)
 }
 
 /** Write every entry (and folder) into an open target; abort it on any failure. */
@@ -177,9 +197,7 @@ export async function downloadArtifactOnThisDevice(
     return { saved: false, skipped: [] }
   }
   const written = (async () => {
-    if (!first.done) await electronBootstrap.saveTargetWrite(targetId, '', first.value)
-    for await (const piece of it)
-      if (piece.byteLength > 0) await electronBootstrap.saveTargetWrite(targetId, '', piece)
+    await writeAll(targetId, '', first, it)
     await close(targetId)
   })()
   return written.then(

@@ -116,6 +116,37 @@ async function spawnHub(): Promise<Hub> {
   }
 }
 
+/**
+ * A remote "phishing" page an artifact navigates the export frame to: it raises a
+ * password prompt and tries to print itself, reporting what it got.
+ */
+async function servePhish(): Promise<{
+  url: string
+  hits: () => number
+  close: () => Promise<void>
+}> {
+  let hits = 0
+  const srv = http.createServer((_req, res) => {
+    hits++
+    res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
+    res.end(
+      `<!doctype html><title>Sign in</title><p>Session expired</p><script>
+        addEventListener('beforeprint', function () { parent.postMessage({ probe: 'phish-printed' }, '*') })
+        var answer = prompt('Session expired. Password?')
+        parent.postMessage({ probe: 'phish-ran', answer: String(answer) }, '*')
+        try { print() } catch (e) {}
+      </script>`
+    )
+  })
+  const port = await freePort()
+  await new Promise<void>((resolve) => srv.listen(port, '127.0.0.1', () => resolve()))
+  return {
+    url: `http://127.0.0.1:${port}/login`,
+    hits: () => hits,
+    close: () => new Promise((resolve) => srv.close(() => resolve()))
+  }
+}
+
 /** A plain http server on its own port: another origin than the hub's. */
 async function serveImage(): Promise<{
   url: string
@@ -273,7 +304,7 @@ test.describe('web shell — artifact export renders in the browser', () => {
     // Drives the streaming save target the way the shared client does, piece by piece.
     const stream = (
       request: unknown,
-      writes: Array<{ path: string; bytes: number[] }>,
+      writes: Array<{ path: string; bytes: number[]; size?: number }>,
       dirs: string[] = []
     ) =>
       page.evaluate(
@@ -283,7 +314,12 @@ test.describe('web shell — artifact export renders in the browser', () => {
               api: {
                 app: {
                   saveTargetOpen: (r: unknown) => Promise<{ ok: boolean; targetId?: string }>
-                  saveTargetWrite: (id: string, p: string, d: Uint8Array) => Promise<void>
+                  saveTargetWrite: (
+                    id: string,
+                    p: string,
+                    d: Uint8Array,
+                    size?: number
+                  ) => Promise<void>
                   saveTargetMkdir: (id: string, p: string) => Promise<void>
                   saveTargetClose: (id: string) => Promise<unknown>
                 }
@@ -293,8 +329,16 @@ test.describe('web shell — artifact export renders in the browser', () => {
           const opened = await app.saveTargetOpen(request)
           if (!opened.ok || !opened.targetId) return opened
           for (const d of dirs) await app.saveTargetMkdir(opened.targetId, d)
+          // Each write declares its file's total size, as the shared client does.
+          const totals = new Map<string, number>()
+          for (const w of writes) totals.set(w.path, (totals.get(w.path) ?? 0) + w.bytes.length)
           for (const w of writes)
-            await app.saveTargetWrite(opened.targetId, w.path, new Uint8Array(w.bytes))
+            await app.saveTargetWrite(
+              opened.targetId,
+              w.path,
+              new Uint8Array(w.bytes),
+              w.size ?? totals.get(w.path)
+            )
           return app.saveTargetClose(opened.targetId)
         },
         { request, writes, dirs }
@@ -334,6 +378,26 @@ test.describe('web shell — artifact export renders in the browser', () => {
     expect(new TextDecoder().decode(entries['docs/a.md'])).toBe('A')
     expect(Array.from(entries['docs/big.bin'])).toEqual(big)
     expect(Object.keys(entries)).toContain('docs/empty/')
+
+    // Review 9, F3: the declared size reaches the worker's encoder. A file declared at
+    // 4 GiB or more is zip64 from its local header on (a zip64 extra there, a 24-byte
+    // descriptor), and the entry after it still reads back.
+    const wide = page.waitForEvent('download')
+    expect(
+      await stream({ kind: 'directory', folderName: 'big', title: 'Download Folder To' }, [
+        { path: 'big/huge.bin', bytes: [1, 2, 3], size: 2 ** 32 + 5 },
+        { path: 'big/after.md', bytes: Array.from(new TextEncoder().encode('after')) }
+      ])
+    ).toEqual({ ok: true })
+    const wideZip = fs.readFileSync(await (await wide).path())
+    const nameLen = wideZip.readUInt16LE(26)
+    expect(wideZip.subarray(30, 30 + nameLen).toString()).toBe('big/huge.bin')
+    expect(wideZip.readUInt16LE(4), 'version needed').toBe(45)
+    expect(wideZip.readUInt16LE(28), 'zip64 extra in the local header').toBe(20)
+    expect(wideZip.readUInt16LE(30 + nameLen), 'zip64 extra id').toBe(1)
+    const back = unzipSync(new Uint8Array(wideZip))
+    expect(Array.from(back['big/huge.bin'])).toEqual([1, 2, 3])
+    expect(new TextDecoder().decode(back['big/after.md'])).toBe('after')
   })
 
   test('PDF goes to the browser print dialog', async () => {
@@ -460,6 +524,164 @@ test.describe('web shell — artifact export renders in the browser', () => {
     } finally {
       page.off('dialog', onDialog)
     }
+  })
+
+  // Review 9, F2: the export frame can be navigated to a new document (meta refresh,
+  // location.href to http: or data:). That document is a fresh window WITHOUT the
+  // bootstrap's dialog lock; with the shell's `allow-modals` it could raise a password
+  // prompt over the shell, and its own print() would print the attacker's page. The
+  // shell drops `allow-modals` from the frame for any next document, and treats a
+  // document load its export frame does not vouch for as hostile: frame removed at
+  // once, export failed, nothing printed.
+  const NAVIGATED =
+    'The artifact tried to load another page while it was being exported, so nothing was printed.'
+  const navigations: Array<[string, (phish: string) => string]> = [
+    [
+      'meta refresh to an http page',
+      (phish) =>
+        `<!doctype html><html><head><meta http-equiv="refresh" content="0;url=${phish}"></head>` +
+        '<body><p>report</p></body></html>'
+    ],
+    [
+      'location.href to a data: page',
+      () =>
+        '<!doctype html><html><body><p>report</p><script>' +
+        'location.href = "data:text/html,<script>prompt(1)<\\/script>"' +
+        '</script></body></html>'
+    ],
+    [
+      'location.href to an http page',
+      (phish) =>
+        `<!doctype html><html><body><p>report</p><script>location.href = ${JSON.stringify(phish)}</script></body></html>`
+    ],
+    [
+      'location.href after load (an export already rendering)',
+      (phish) =>
+        '<!doctype html><html><body><p>report</p><script>' +
+        `addEventListener('load', function () { location.href = ${JSON.stringify(phish)} })` +
+        '</script></body></html>'
+    ],
+    [
+      // Not governed by the shell's frame-src: the frame becomes a blank window.
+      'location.href to about:blank',
+      () =>
+        '<!doctype html><html><body><p>report</p><script>location.href = "about:blank"</script></body></html>'
+    ],
+    [
+      // The hub's own pages are the only ones the shell's frame-src lets in.
+      'location.href to a fresh export frame',
+      () =>
+        '<!doctype html><html><body><p>report</p><script>location.href = "/export-frame"</script></body></html>'
+    ],
+    [
+      // The document erases the bootstrap's navigation watch (document.open) and blocks
+      // it (its own capture listeners first) before navigating: the shell still sees a
+      // frame load its bootstrap never vouches for.
+      'a navigation the bootstrap cannot see',
+      () =>
+        '<!doctype html><html><body><p>report</p><script>' +
+        "addEventListener('load', function () {" +
+        "document.open(); document.write('<p>rewritten</p>'); document.close();" +
+        'function stop(e) { e.stopImmediatePropagation() }' +
+        "addEventListener('beforeunload', stop, true); addEventListener('pagehide', stop, true);" +
+        "location.href = 'about:blank'" +
+        '})' +
+        '</script></body></html>'
+    ]
+  ]
+  for (const [name, artifact] of navigations) {
+    test(`html → PDF: ${name} fails the export, raises no dialog, prints nothing`, async () => {
+      const phish = await servePhish()
+      const dialogs: string[] = []
+      const onDialog = (d: import('@playwright/test').Dialog): void => {
+        dialogs.push(`${d.type()}: ${d.message()}`)
+        void d.dismiss().catch(() => {})
+      }
+      page.on('dialog', onDialog)
+      try {
+        const before = (await received(page)).length
+        const res = await exportInPage(page, {
+          format: 'pdf',
+          mode: 'html-preview',
+          title: 'phish.html',
+          content: artifact(phish.url)
+        })
+        expect(res, 'failed with the clear error').toEqual({ ok: false, error: NAVIGATED })
+        // Whatever the next document still does after the frame is gone.
+        await page.waitForTimeout(1_000)
+        // The shell's own frame-src refuses http: and data: documents in its frames
+        // (a layer of its own); the guard holds without it, so the refusal may or may
+        // not be reached before the frame is gone.
+        for (let i = cspErrors.length - 1; i >= 0; i--) {
+          if (
+            /^Framing '[^']*' violates the following Content Security Policy directive: "default-src 'self'"/.test(
+              cspErrors[i]
+            )
+          )
+            cspErrors.splice(i, 1)
+        }
+        expect(dialogs, 'no dialog reached the page').toEqual([])
+        const after = (await received(page)).slice(before)
+        expect(
+          after.filter((m) => m.data?.state === 'ready'),
+          'the bootstrap never printed'
+        ).toEqual([])
+        expect(
+          after.filter((m) => m.data?.probe === 'phish-printed'),
+          'the next page never printed'
+        ).toEqual([])
+        expect(await page.locator('iframe').count(), 'the frame is gone').toBe(0)
+      } finally {
+        page.off('dialog', onDialog)
+        await phish.close()
+      }
+    })
+  }
+
+  // A javascript: URL that returns markup would replace the document with one in a fresh
+  // window. Chromium does not navigate a sandboxed frame there (the document prints);
+  // either way no dialog reaches the shell.
+  test('html → PDF: a javascript: URL navigation raises no dialog', async () => {
+    const dialogs: string[] = []
+    const onDialog = (d: import('@playwright/test').Dialog): void => {
+      dialogs.push(`${d.type()}: ${d.message()}`)
+      void d.dismiss().catch(() => {})
+    }
+    page.on('dialog', onDialog)
+    try {
+      const res = await exportInPage(page, {
+        format: 'pdf',
+        mode: 'html-preview',
+        title: 'js.html',
+        content:
+          '<!doctype html><html><body><p>report</p><script>' +
+          `location.href = 'javascript:"<script>prompt(\\'Session expired. Password?\\')<\\/script>"'` +
+          '</script></body></html>'
+      })
+      expect([{ ok: true }, { ok: false, error: NAVIGATED }]).toContainEqual(res)
+      await page.waitForTimeout(1_000)
+      expect(dialogs, 'no dialog reached the page').toEqual([])
+    } finally {
+      page.off('dialog', onDialog)
+    }
+  })
+
+  // Not a navigation: the document rewriting itself (document.open/write/close after
+  // load, a fragment change) loads the frame again but stays the bootstrap's realm.
+  test('html → PDF: a document that rewrites itself and changes its fragment still prints', async () => {
+    const res = await exportInPage(page, {
+      format: 'pdf',
+      mode: 'html-preview',
+      title: 'rewrite.html',
+      content:
+        '<!doctype html><html><body><p>first</p><script>' +
+        "addEventListener('load', function () { setTimeout(function () {" +
+        'document.open(); document.write(\'<p>rewritten</p><script>location.hash = "#end"<\\/script>\'); document.close()' +
+        '}, 0) })' +
+        '</script></body></html>'
+    })
+    expect(res).toEqual({ ok: true })
+    expect(await lastReady(page)).toMatchObject({ settled: true })
   })
 
   // Review 5, #8: markdown's remote images print (another origin than the hub's).

@@ -17,6 +17,8 @@ interface Recorded {
   writes: { path: string; bytes: number }[]
   dirs: string[]
   sums: Map<string, number>
+  /** The total size each write declared for its file. */
+  sizes: Map<string, Set<number | undefined>>
   closed: boolean
   aborted: boolean
 }
@@ -24,15 +26,25 @@ let rec: Recorded
 let openResult: unknown
 
 function installHost() {
-  rec = { request: null, writes: [], dirs: [], sums: new Map(), closed: false, aborted: false }
+  rec = {
+    request: null,
+    writes: [],
+    dirs: [],
+    sums: new Map(),
+    sizes: new Map(),
+    closed: false,
+    aborted: false
+  }
   openResult = { ok: true, targetId: 't1' }
   const app = {
     saveTargetOpen: vi.fn(async (req: SaveTargetRequest) => {
       rec.request = req
       return openResult
     }),
-    saveTargetWrite: vi.fn(async (_id: string, path: string, data: Uint8Array) => {
+    saveTargetWrite: vi.fn(async (_id: string, path: string, data: Uint8Array, size?: number) => {
       rec.writes.push({ path, bytes: data.byteLength })
+      if (!rec.sizes.has(path)) rec.sizes.set(path, new Set())
+      rec.sizes.get(path)?.add(size)
       let sum = rec.sums.get(path) ?? 0
       for (let i = 0; i < data.length; i += 4096) sum = (sum + data[i]) % 1_000_003
       rec.sums.set(path, sum)
@@ -198,6 +210,38 @@ describe('downloadTaskZipOnThisDevice', () => {
       reveal: true
     })
     expect(rec.writes.map((w) => w.path)).toEqual(['root.md', 'docs/top.md'])
+  })
+
+  // Review 9, F3: a zip entry of 4 GiB or more must be zip64 from its local header on,
+  // so the host needs each file's size before its first byte: every write declares it.
+  it("every write declares its file's total size, the first one included", async () => {
+    const big = DOWNLOAD_CHUNK_BYTES * 2 + 5
+    const hub = fakeHub({
+      a: { size: 2, seed: 1 },
+      b: { size: big, seed: 2 },
+      e: { size: 0, seed: 3 }
+    })
+    await downloadTaskZipOnThisDevice(
+      folders,
+      [
+        { id: 'a', title: 'root.md', folder_id: null },
+        { id: 'b', title: 'top.bin', folder_id: 'f1' },
+        { id: 'e', title: 'empty.md', folder_id: null }
+      ],
+      hub.read
+    )
+    expect(rec.writes.filter((w) => w.path === 'docs/top.bin')).toHaveLength(3)
+    expect(Object.fromEntries([...rec.sizes].map(([p, s]) => [p, [...s]]))).toEqual({
+      'root.md': [2],
+      'docs/top.bin': [big],
+      'empty.md': [0]
+    })
+  })
+
+  it('a single-file download declares its size too', async () => {
+    const hub = fakeHub({ a: { size: 7, seed: 1 } })
+    await downloadArtifactOnThisDevice({ id: 'a', title: 'a.md', folder_id: null }, hub.read)
+    expect([...(rec.sizes.get('') ?? [])]).toEqual([7])
   })
 
   it('nothing to save with no artifacts', async () => {

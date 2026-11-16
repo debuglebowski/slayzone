@@ -96,7 +96,18 @@ export interface Browser {
    * for the browser itself). Returns the function that stops listening.
    */
   onEvent(listener: CdpEventListener): () => void
-  close(): Promise<void>
+  /**
+   * Give up on page `sessionId`: every command waiting on it, and every later one,
+   * fails with `err` (as when the page crashes). For a page found misbehaving. Answers
+   * to what the page is held on (a paused request, a dialog) are still delivered.
+   */
+  failPage(sessionId: string, err: Error): void
+  /**
+   * Shut the browser down and remove its profile. `kill`: end it at once instead of
+   * asking it to shut down — an orderly shutdown first lets go of the pages, and a
+   * navigation one of them has under way then goes out without its interception.
+   */
+  close(opts?: { kill?: boolean }): Promise<void>
 }
 
 export type CdpEventListener = (
@@ -120,6 +131,11 @@ export interface LaunchOptions {
   stallMs?: number
   /** How often a long page command probes the page (default 1 s). */
   stallProbeIntervalMs?: number
+  /**
+   * Where the profile saves a download, should one ever be let through (default: a
+   * directory inside the throwaway profile, removed with it). Tests watch their own.
+   */
+  downloadDir?: string
 }
 
 const LAUNCH_TIMEOUT_MS = 30_000
@@ -129,6 +145,35 @@ const EXIT_GRACE_MS = 2_000
 const STALL_MS = 5 * 60_000
 const STALL_PROBE_INTERVAL_MS = 1_000
 const STDERR_KEEP = 16 * 1024
+
+/**
+ * Answers to something a page is held on — a paused request, an open dialog. Sent
+ * even once the page is given up ({@link Browser.failPage}, a crash): a request left
+ * paused is let through when the session ends, a dialog left open stays open. To a
+ * page that is truly gone they cost an error reply, nothing more.
+ */
+const ALWAYS_DELIVERED = new Set([
+  'Fetch.failRequest',
+  'Fetch.continueRequest',
+  'Fetch.fulfillRequest',
+  'Page.handleJavaScriptDialog'
+])
+
+/**
+ * The throwaway profile's preferences, written before the browser starts: downloads go
+ * to `downloadDir`, never asked about. The renderer denies downloads over CDP
+ * (`Browser.setDownloadBehavior`), but that holds only while a DevTools client is
+ * attached — a browser shutting down lets go of it first, and then the profile's own
+ * setting decides. Chrome's default is the person's Downloads folder.
+ */
+export function seedProfile(userDataDir: string, downloadDir: string): void {
+  const prefs = {
+    download: { default_directory: downloadDir, prompt_for_download: false },
+    savefile: { default_directory: downloadDir }
+  }
+  fs.mkdirSync(path.join(userDataDir, 'Default'), { recursive: true })
+  fs.writeFileSync(path.join(userDataDir, 'Default', 'Preferences'), JSON.stringify(prefs))
+}
 
 /** Flags for a throwaway, quiet, headless profile. */
 export function browserArgs(userDataDir: string, platform = process.platform): string[] {
@@ -200,6 +245,7 @@ export async function launchBrowser(
   const ownGroup = process.platform !== 'win32'
   let child: ChildProcess
   try {
+    seedProfile(userDataDir, opts.downloadDir ?? path.join(userDataDir, 'downloads'))
     child = spawn(executable, browserArgs(userDataDir), {
       stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
       detached: ownGroup
@@ -350,7 +396,8 @@ export async function launchBrowser(
     timeoutMs: number | null = commandTimeoutMs
   ): Promise<T> {
     if (exited) return Promise.reject(exited)
-    const dead = sessionId ? deadSessions.get(sessionId) : undefined
+    const dead =
+      sessionId && !ALWAYS_DELIVERED.has(method) ? deadSessions.get(sessionId) : undefined
     if (dead) return Promise.reject(dead)
     const id = nextId++
     const reply = new Promise<T>((resolve, reject) => {
@@ -479,15 +526,20 @@ export async function launchBrowser(
   }
 
   let closed = false
-  async function close(): Promise<void> {
+  async function close(opts: { kill?: boolean } = {}): Promise<void> {
     if (closed) return
     closed = true
     if (!exited) {
-      // A browser that ignores Browser.close is killed below.
-      send('Browser.close', {}, undefined, 2_000).catch(ignore)
-      const timer = setTimeout(kill, 5_000)
-      await exitPromise
-      clearTimeout(timer)
+      if (opts.kill) {
+        kill()
+        await exitPromise
+      } else {
+        // A browser that ignores Browser.close is killed below.
+        send('Browser.close', {}, undefined, 2_000).catch(ignore)
+        const timer = setTimeout(kill, 5_000)
+        await exitPromise
+        clearTimeout(timer)
+      }
     }
     // Whatever the browser started (a wrapper's children) goes with it.
     if (ownGroup) kill()
@@ -517,5 +569,11 @@ export async function launchBrowser(
       listeners.delete(listener)
     }
   }
-  return { send: (m, p, sid) => send(m, p, sid), sendLong, onEvent: onEventListener, close }
+  return {
+    send: (m, p, sid) => send(m, p, sid),
+    sendLong,
+    onEvent: onEventListener,
+    failPage: failSession,
+    close
+  }
 }

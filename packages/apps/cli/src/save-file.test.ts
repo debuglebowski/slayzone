@@ -316,6 +316,119 @@ describe('saveReplacing (--output)', () => {
 })
 
 /**
+ * Review 9, L3: renaming over the destination would take it over — its write
+ * protection (0444) and its owner (another user's file in a directory we may write)
+ * would be lost. `--output` used to open the file, so the OS decided (EACCES for a
+ * read-only file); such a file is again written in place, where the OS still decides.
+ * And a rename the system refuses (EPERM: in a sticky /tmp, a destination that is not
+ * ours) fails with a message that says so, the destination untouched.
+ */
+describe('saveReplacing: what renaming would take over (review 9, L3)', () => {
+  /** Opened `.part` temp files: none means the file was written in place. */
+  function watchTemps(): string[] {
+    const temps: string[] = []
+    const open = fs.openSync
+    vi.spyOn(fs, 'openSync').mockImplementation((p, ...rest) => {
+      if (String(p).endsWith('.part')) temps.push(String(p))
+      return open(p, ...rest)
+    })
+    return temps
+  }
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a read-only (0444) file is not replaced: the OS refuses, as before, and it stays as it was',
+    async () => {
+      const dir = freshDir()
+      const target = path.join(dir, 'locked.pdf')
+      fs.writeFileSync(target, 'old')
+      fs.chmodSync(target, 0o444)
+      const inode = fs.statSync(target).ino
+      const temps = watchTemps()
+      await expect(saveReplacing(target, bytes('new'))).rejects.toMatchObject({ code: 'EACCES' })
+      expect(temps).toEqual([])
+      expect(fs.readFileSync(target, 'utf8')).toBe('old')
+      expect(fs.statSync(target).mode & 0o777).toBe(0o444)
+      expect(fs.statSync(target).ino).toBe(inode)
+      expect(fs.readdirSync(dir)).toEqual(['locked.pdf'])
+    }
+  )
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a read-only file reached through a symlink: the same',
+    async () => {
+      const dir = freshDir()
+      const real = path.join(freshDir(), 'locked.pdf')
+      fs.writeFileSync(real, 'old')
+      fs.chmodSync(real, 0o444)
+      const link = path.join(dir, 'out.pdf')
+      fs.symlinkSync(real, link)
+      await expect(saveReplacing(link, bytes('new'))).rejects.toMatchObject({ code: 'EACCES' })
+      expect(fs.readFileSync(real, 'utf8')).toBe('old')
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
+    }
+  )
+
+  // Another user's file can't be made without root: this process's own file is
+  // reported as another's (its bytes and inode are what the OS really keeps).
+  test.skipIf(process.platform === 'win32')(
+    "another user's file we may write is written in place: it keeps its inode (owner, mode)",
+    async () => {
+      const dir = freshDir()
+      const target = path.join(dir, 'shared.pdf')
+      fs.writeFileSync(target, 'old')
+      const inode = fs.statSync(target).ino
+      const me = process.geteuid?.() ?? 0
+      const stat = fs.statSync
+      vi.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, ...rest: never[]) => {
+        const st = stat(p, ...rest) as fs.Stats
+        if (st && fs.realpathSync(String(p)) === fs.realpathSync(target)) {
+          return Object.assign(Object.create(st), { uid: me + 1 })
+        }
+        return st
+      }) as typeof fs.statSync)
+      const temps = watchTemps()
+      expect(await saveReplacing(target, bytes('new'))).toBe(target)
+      expect(temps).toEqual([])
+      expect(fs.statSync(target).ino).toBe(inode)
+      expect(fs.readFileSync(target, 'utf8')).toBe('new')
+    }
+  )
+
+  test('our own writable file is still replaced whole (temp + rename)', async () => {
+    const dir = freshDir()
+    const target = path.join(dir, 'out.pdf')
+    fs.writeFileSync(target, 'old')
+    const temps = watchTemps()
+    await saveReplacing(target, bytes('new'))
+    expect(temps).toHaveLength(1)
+    expect(fs.readFileSync(target, 'utf8')).toBe('new')
+  })
+
+  for (const code of ['EPERM', 'EACCES']) {
+    test(`a rename the system refuses (${code}) fails clearly; the file stays, no temp left`, async () => {
+      const dir = freshDir()
+      const target = path.join(dir, 'out.pdf')
+      fs.writeFileSync(target, 'old')
+      vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        throw Object.assign(
+          new Error(`${code}: operation not permitted, rename '${from}' -> '${to}'`),
+          {
+            code
+          }
+        )
+      })
+      const err = await saveReplacing(target, bytes('new')).catch((e: Error) => e)
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).message).toMatch(/^Cannot replace .*out\.pdf/)
+      expect((err as Error).message).toMatch(/another user/)
+      expect(((err as Error).cause as NodeJS.ErrnoException).code).toBe(code)
+      expect(fs.readFileSync(target, 'utf8')).toBe('old')
+      expect(fs.readdirSync(dir)).toEqual(['out.pdf'])
+    })
+  }
+})
+
+/**
  * Review 8, L5: Linux `fs.protected_symlinks` refuses to follow a symlink in a sticky,
  * world-writable directory (`/tmp`) that another user owns, unless that user also
  * owns the directory. `--output` used to open the path, so the kernel applied it; the

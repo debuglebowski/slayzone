@@ -343,7 +343,9 @@ describe('ArtifactViewer, Export', () => {
         {
           render: expect.any(Function),
           mermaidScript: loadMermaidScript,
-          html2canvasScript: loadHtml2canvasScript
+          html2canvasScript: loadHtml2canvasScript,
+          signal: expect.objectContaining({ aborted: false }),
+          onNotice: expect.any(Function)
         }
       )
     )
@@ -433,6 +435,45 @@ describe('ArtifactViewer, Export', () => {
       await screen.findByText(/could not read the file/)
       expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled()
     })
+  })
+
+  // Review 9, L4: closing the viewer stops its export: the share sheet never opens over
+  // another screen.
+  it('closing the viewer cancels its export (the abort signal)', async () => {
+    let signal: AbortSignal | undefined
+    runExport.mockImplementation((_request, deps) => {
+      signal = deps.signal
+      return new Promise(() => undefined)
+    })
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'plan.md')],
+      content: { a1: '# Plan' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-markdown')
+    await pickExport('PDF')
+    await waitFor(() => expect(signal).toBeDefined())
+    expect(signal?.aborted).toBe(false)
+    await act(async () => screen.unmount())
+    expect(signal?.aborted).toBe(true)
+  })
+
+  // Review 9, F4: drawn again with text labels — said under the toolbar, as it happens
+  // (before the share sheet opens), not as an error.
+  it("a notice of the export's is shown under the toolbar", async () => {
+    runExport.mockImplementation(async (_request, deps) => {
+      deps.onNotice?.('Some labels were drawn as plain text.')
+      return 'file:///cache/slayzone-exports/r.pdf'
+    })
+    const hub = fakeArtifactsHub({
+      artifacts: [artifactRow('a1', 'report.html')],
+      content: { a1: '<h1>R</h1>' }
+    })
+    await view(hub, { artifactId: 'a1' })
+    await screen.findByTestId('artifact-page-html')
+    await pickExport('PDF')
+    await screen.findByText('Some labels were drawn as plain text.')
+    expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled()
   })
 
   it('a failed export says why, under the toolbar', async () => {

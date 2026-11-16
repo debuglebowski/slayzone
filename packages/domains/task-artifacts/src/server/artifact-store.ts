@@ -565,7 +565,13 @@ export function createArtifactStore(dataDir: string) {
         const st = await handle.stat({ bigint: true })
         return {
           size: Number(st.size),
-          version: blobVersion ?? `file:${st.ino}:${st.size}:${st.mtimeNs}`
+          // A blob is named by its hash, but its FILE can still be replaced (hub-disk
+          // tampering, restore): the stamp makes that a different version, so a
+          // download spanning the change is refused instead of spliced.
+          version:
+            blobVersion !== null
+              ? `${blobVersion}:${st.ino}:${st.size}:${st.mtimeNs}`
+              : `file:${st.ino}:${st.size}:${st.mtimeNs}`
         }
       }
       return stamp()

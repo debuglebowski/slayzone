@@ -4,10 +4,10 @@ import {
   EXPORT_RENDER_SOURCE,
   type ExportRenderPage,
   type ExportRenderReply,
-  HTML_RENDER_TIMEOUT_MS,
+  HTML_RENDER_IDLE_MS,
   htmlRasterPage
 } from './render-pages'
-import { EXPORT_RENDER_TIMEOUT_MS, useExportRenderer } from './use-export-renderer'
+import { EXPORT_RENDER_IDLE_MS, useExportRenderer } from './use-export-renderer'
 
 /** The view is hidden from accessibility on purpose: look for it anyway. */
 const HIDDEN = { includeHiddenElements: true }
@@ -15,10 +15,10 @@ const HIDDEN = { includeHiddenElements: true }
 type Render = (page: ExportRenderPage) => Promise<ExportRenderReply>
 
 const TOKEN = 'page-token'
-const page = (html: string, viewport?: ExportRenderPage['viewport']): ExportRenderPage => ({
+const page = (html: string, extra: Partial<ExportRenderPage> = {}): ExportRenderPage => ({
   html,
   token: TOKEN,
-  viewport
+  ...extra
 })
 
 async function mount(): Promise<{ run: () => Render }> {
@@ -77,6 +77,16 @@ describe('useExportRenderer: a hidden web view per render', () => {
     expect(props.onShouldStartLoadWithRequest({ url: 'about:blank#x' })).toBe(false)
     expect(props.onShouldStartLoadWithRequest({ url: 'data:text/html,x' })).toBe(false)
     expect(props.onShouldStartLoadWithRequest({ url: 'javascript:alert(1)' })).toBe(false)
+    // Review 9, F2: in any frame (react-native-webview asks for every frame's loads).
+    for (const url of [
+      'blob:null/0b6c',
+      'file:///etc/hosts',
+      'http://evil.example/',
+      'about:srcdoc#x',
+      'about:blankx'
+    ]) {
+      expect(props.onShouldStartLoadWithRequest({ url })).toBe(false)
+    }
     // Noise the page didn't send is ignored, and so is a reply without its token.
     await act(async () =>
       props.onMessage({ nativeEvent: { data: '{"hello":1}', url: 'about:blank' } })
@@ -107,9 +117,11 @@ describe('useExportRenderer: a hidden web view per render', () => {
     await act(async () => {
       result = host.run()(page('<html/>'))
     })
-    const settled = expect(result).rejects.toThrow('Rendering the export took too long.')
+    const settled = expect(result).rejects.toThrow(
+      'Rendering the export stalled: nothing came back from it for 30 s.'
+    )
     await act(async () => {
-      jest.advanceTimersByTime(EXPORT_RENDER_TIMEOUT_MS)
+      jest.advanceTimersByTime(EXPORT_RENDER_IDLE_MS)
     })
     await settled
     expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
@@ -145,14 +157,16 @@ describe('useExportRenderer: an html artifact', () => {
     expect(props.onShouldStartLoadWithRequest({ url: 'about:srcdoc', isTopFrame: false })).toBe(
       true
     )
-    const settled = expect(result).rejects.toThrow('Rendering the export took too long.')
-    // Drawing a long report takes longer than a diagram: still running at the default.
+    const settled = expect(result).rejects.toThrow(
+      `Rendering the export stalled: nothing came back from it for ${HTML_RENDER_IDLE_MS / 1000} s.`
+    )
+    // An html artifact settles before it says anything: more time than a diagram gets.
     await act(async () => {
-      jest.advanceTimersByTime(EXPORT_RENDER_TIMEOUT_MS)
+      jest.advanceTimersByTime(EXPORT_RENDER_IDLE_MS)
     })
     expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
     await act(async () => {
-      jest.advanceTimersByTime(HTML_RENDER_TIMEOUT_MS - EXPORT_RENDER_TIMEOUT_MS)
+      jest.advanceTimersByTime(HTML_RENDER_IDLE_MS - EXPORT_RENDER_IDLE_MS)
     })
     await settled
     expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
@@ -234,4 +248,104 @@ it('two renders asked for at once: the first is ended, the second runs', async (
   expect(props.source).toEqual({ html: '<html>second</html>' })
   await act(async () => props.onMessage(reply({ type: 'svg', svg: '<svg/>' })))
   await expect(second).resolves.toEqual({ type: 'svg', svg: '<svg/>' })
+})
+
+// Review 9, L5: one fixed budget covered an html artifact's whole render, and its pages
+// came back in one message. Now each message of the page (progress, a page) restarts the
+// renderer's idle timer, and the pages are put together here as they come.
+describe('useExportRenderer: progress, not a fixed budget', () => {
+  const IDLE = 10_000
+  const slow = () => page('<html/>', { idleTimeoutMs: IDLE })
+
+  it('a render that keeps reporting progress well past 90 s completes, its pages put together', async () => {
+    jest.useFakeTimers()
+    const host = await mount()
+    let result: Promise<ExportRenderReply> | null = null
+    await act(async () => {
+      result = host.run()(slow())
+    })
+    const props = viewProps()
+    for (let i = 0; i < 12; i++) {
+      await act(async () => {
+        jest.advanceTimersByTime(IDLE - 1)
+      })
+      await act(async () =>
+        props.onMessage(
+          i % 2
+            ? reply({ type: 'progress' })
+            : reply({ type: 'page', index: i / 2, base64: `UA${i}=` })
+        )
+      )
+    }
+    // 12 × 10 s: far past any one budget, and still running.
+    expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
+    await act(async () =>
+      props.onMessage(reply({ type: 'pages-end', count: 6, textLabels: false }))
+    )
+    await expect(result).resolves.toEqual({
+      type: 'pages',
+      pages: ['UA0=', 'UA2=', 'UA4=', 'UA6=', 'UA8=', 'UA10='],
+      textLabels: false
+    })
+    expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it('a render that goes silent fails with a clear message, its view released', async () => {
+    jest.useFakeTimers()
+    const host = await mount()
+    let result: Promise<ExportRenderReply> | null = null
+    await act(async () => {
+      result = host.run()(slow())
+    })
+    const settled = expect(result).rejects.toThrow(
+      'Rendering the export stalled: nothing came back from it for 10 s.'
+    )
+    await act(async () => {
+      jest.advanceTimersByTime(IDLE - 1)
+    })
+    await act(async () => viewProps().onMessage(reply({ type: 'page', index: 0, base64: 'UA==' })))
+    // Noise and a message without the token are no progress.
+    await act(async () => {
+      jest.advanceTimersByTime(IDLE - 1)
+    })
+    await act(async () =>
+      viewProps().onMessage({ nativeEvent: { data: '{"type":"progress"}', url: 'about:blank' } })
+    )
+    await act(async () => viewProps().onMessage(reply({ type: 'progress' }, 'guess')))
+    expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
+    await act(async () => {
+      jest.advanceTimersByTime(1)
+    })
+    await settled
+    expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it('a page out of order fails the render', async () => {
+    const host = await mount()
+    let result: Promise<ExportRenderReply> | null = null
+    await act(async () => {
+      result = host.run()(slow())
+    })
+    await act(async () => viewProps().onMessage(reply({ type: 'page', index: 1, base64: 'UA==' })))
+    await expect(result).resolves.toMatchObject({ type: 'error', code: 'render' })
+    expect(screen.queryByTestId('artifact-export-renderer', HIDDEN)).toBeNull()
+  })
+})
+
+// Review 9, L2: a frame inside an html artifact (<iframe src="about:blank">) posts as
+// about:blank too: the token is the only guard. A message longer than the page's cap is
+// dropped before anything else is read of it.
+it("drops a message longer than the page's cap, even one with the token", async () => {
+  const host = await mount()
+  let result: Promise<ExportRenderReply> | null = null
+  const ok = reply({ type: 'svg', svg: '<svg/>' })
+  await act(async () => {
+    result = host.run()(page('<html/>', { maxMessageChars: ok.nativeEvent.data.length }))
+  })
+  await act(async () => viewProps().onMessage(reply({ type: 'svg', svg: '<svg id="long"/>' })))
+  expect(screen.getByTestId('artifact-export-renderer', HIDDEN)).toBeOnTheScreen()
+  await act(async () => viewProps().onMessage(ok))
+  await expect(result).resolves.toEqual({ type: 'svg', svg: '<svg/>' })
 })

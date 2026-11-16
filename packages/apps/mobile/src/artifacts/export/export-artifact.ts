@@ -9,17 +9,21 @@
  * - PDF: the document printed by `expo-print`, on A4 with 1cm margins as desktop. Its
  *   WKWebView prints the moment the page has loaded, before any script has drawn, and
  *   has no navigation policy and no cancel, so nothing that needs a script is printed by
- *   it: a mermaid diagram is drawn first in the hidden web view (`render-pages.ts`) and
- *   printed as the static SVG it became; an html artifact runs there in the viewer's
- *   sandbox (the view is unmounted at its timeout, a page that loops included) and is
- *   drawn there page by page: the PDF is those page pictures, nothing else — no text to
- *   select or search, no links (what html2canvas can't draw is missing: a picture from
- *   a site that doesn't allow it to be read, a frame's content, a WebGL scene).
+ *   it, and its HTML parser never sees the document (`printDocument`: it arrives as data,
+ *   is parsed inert and moved in without what navigates). A mermaid diagram is drawn
+ *   first in the hidden web view (`render-pages.ts`) and printed as the static SVG it
+ *   became; an html artifact runs there in the viewer's sandbox (the view is unmounted
+ *   when it goes silent, a page that loops included) and is drawn there page by page:
+ *   the PDF is those page pictures, nothing else — no text to select or search, no links
+ *   (what html2canvas can't draw is missing: a picture from a site that doesn't allow it
+ *   to be read, a frame's content, a WebGL scene). An SVG with HTML in it that WebKit
+ *   won't let be read back is drawn again with its HTML as text, and the person told.
  * - PNG: the SVG (a mermaid diagram drawn first, as for PDF) rasterised in the hidden web
  *   view; if WebKit won't read back mermaid's HTML labels, drawn again with text labels.
  *
  * Files go to `<caches>/slayzone-exports/`, emptied at each export (the share sheet is
- * done with the previous one by then). expo-print's own scratch PDFs (`<caches>/Print/`)
+ * done with the previous one by then). An export whose viewer closes stops at its next
+ * step (`signal`): nothing is printed, written or shared after that. expo-print's own scratch PDFs (`<caches>/Print/`)
  * never pile up either: one that lands after its export gave up is removed when it
  * lands, and any left over (the app was killed mid-print) are swept when no print runs.
  */
@@ -34,6 +38,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import { printToFileAsync } from 'expo-print'
 import { shareAsync } from 'expo-sharing'
 import { canExport, EXPORT_FILE_TYPES, exportFileName, formatLabel } from './export-formats'
+import { printDocument } from './print-document'
 import {
   type ExportRenderPage,
   type ExportRenderReply,
@@ -66,7 +71,21 @@ export interface ExportArtifactDeps {
   html2canvasScript: () => Promise<string>
   /** How long printing may take (default {@link EXPORT_PRINT_TIMEOUT_MS}). */
   printTimeoutMs?: number
+  /**
+   * Aborted when the viewer closes: the export stops at its next step — nothing printed,
+   * written or shared after it (a share sheet would open over another screen).
+   */
+  signal?: AbortSignal
+  /** Something the person should know about the file, said before the share sheet opens. */
+  onNotice?: (notice: string) => void
 }
+
+/** What an export whose viewer closed fails with (nobody shows it). */
+export const EXPORT_CANCELLED_MESSAGE = 'The export was cancelled: the viewer was closed.'
+
+/** An html artifact's SVG labels drawn as plain text (`ExportRenderReply` `textLabels`). */
+export const TEXT_LABELS_NOTICE =
+  "Some labels in this page's drawings can't be exported as they are on this device, so they were drawn as plain text: they may look different from the page."
 
 /** A print waiting on an unreachable image gives up long before this. */
 export const EXPORT_PRINT_TIMEOUT_MS = 60_000
@@ -91,9 +110,15 @@ export async function exportArtifact(
     throw new Error(`${formatLabel(format)} export isn't available for ${kind} artifacts.`)
   }
   if (!content.trim()) throw new Error('This artifact is empty: there is nothing to export.')
+  stopIfClosed(deps)
 
   const { dir, file: target } = freshExportFile(exportFileName(title, format))
   return exportInto(target, request, deps).finally(() => liveExportDirs.delete(dir))
+}
+
+/** The viewer closed: the export stops here. */
+function stopIfClosed(deps: ExportArtifactDeps): void {
+  if (deps.signal?.aborted) throw new Error(EXPORT_CANCELLED_MESSAGE)
 }
 
 async function exportInto(
@@ -102,20 +127,29 @@ async function exportInto(
   deps: ExportArtifactDeps
 ): Promise<string> {
   const { content, mode, title, format } = request
+  let notice: string | null = null
   switch (format) {
     case 'html': {
       const mermaid = needsMermaidScript(mode) ? await deps.mermaidScript() : null
+      stopIfClosed(deps)
       target.create({ overwrite: true })
       await target.write(buildDocumentHtml(content, mode, title, mermaid, { standalone: true }))
       break
     }
     case 'pdf': {
-      const html =
-        mode === 'mermaid-preview'
-          ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
-          : mode === 'html-preview'
-            ? htmlPrintDocument(await drawHtmlPages(content, title, deps))
+      let html: string
+      if (mode === 'html-preview') {
+        const drawn = await drawHtmlPages(content, title, deps)
+        if (drawn.textLabels) notice = TEXT_LABELS_NOTICE
+        html = htmlPrintDocument(drawn.pages)
+      } else {
+        html = printDocument(
+          mode === 'mermaid-preview'
+            ? buildDrawnMermaidDocumentHtml(await drawMermaid(content, deps, true), title)
             : buildDocumentHtml(content, mode, title)
+        )
+      }
+      stopIfClosed(deps)
       if (printsInFlight === 0) sweepLeftoverPrints()
       printsInFlight++
       const job = printToFileAsync({
@@ -136,17 +170,24 @@ async function exportInto(
           job.then((late) => removeQuietly(new File(late.uri))).catch(() => undefined)
           throw err
         })
+      if (deps.signal?.aborted) {
+        removeQuietly(new File(printed.uri))
+        stopIfClosed(deps)
+      }
       await new File(printed.uri).move(target)
       break
     }
     case 'png': {
       const png = await drawPng(content, mode, title, deps)
+      stopIfClosed(deps)
       target.create({ overwrite: true })
       await target.write(png, { encoding: 'base64' })
       break
     }
   }
 
+  stopIfClosed(deps)
+  if (notice) deps.onNotice?.(notice)
   const type = EXPORT_FILE_TYPES[format]
   await shareAsync(target.uri, {
     mimeType: type.mimeType,
@@ -219,14 +260,17 @@ async function drawMermaid(
   )
 }
 
-/** An html artifact's pages as its scripts drew them (PNGs, base64), from the hidden web view. */
+/**
+ * An html artifact's pages as its scripts drew them (PNGs, base64), from the hidden web
+ * view; `textLabels`: an SVG's HTML labels drawn as plain text.
+ */
 async function drawHtmlPages(
   content: string,
   title: string,
   deps: ExportArtifactDeps
-): Promise<string[]> {
+): Promise<{ pages: string[]; textLabels: boolean }> {
   const reply = await deps.render(htmlRasterPage(content, title, await deps.html2canvasScript()))
-  if (reply.type === 'pages') return reply.pages
+  if (reply.type === 'pages') return { pages: reply.pages, textLabels: reply.textLabels }
   if (reply.type === 'error' && reply.code === 'tainted') {
     throw new Error(
       "This page draws something this device won't let the export read back, so it can't be made into a PDF here."

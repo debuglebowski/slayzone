@@ -95,9 +95,20 @@ describe('PDF through the export frame', () => {
     await vi.waitFor(() => expect(frames).toHaveLength(1))
     const frame = frames[0]
     const win = frame.contentWindow as Window
-    const posted: { message: Record<string, unknown>; target: string }[] = []
-    win.postMessage = ((message: Record<string, unknown>, target: string) => {
-      posted.push({ message, target })
+    const posted: {
+      message: Record<string, unknown>
+      target: string
+      transfer: unknown[]
+      sandbox: string | null
+    }[] = []
+    win.postMessage = ((message: Record<string, unknown>, target: string, transfer?: unknown[]) => {
+      // The frame's sandbox at the moment the document is handed over.
+      posted.push({
+        message,
+        target,
+        transfer: transfer ?? [],
+        sandbox: frame.getAttribute('sandbox')
+      })
     }) as typeof win.postMessage
     const say = (data: unknown, source: Window | null = win) =>
       window.dispatchEvent(new MessageEvent('message', { data, source }))
@@ -112,7 +123,7 @@ describe('PDF through the export frame', () => {
     expect(frame.hasAttribute('srcdoc')).toBe(false)
     expect(posted).toEqual([])
 
-    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExportFrame: 2 })
     expect(posted).toHaveLength(1)
     const { message, target } = posted[0]
     // An opaque origin has no name to address it by.
@@ -136,7 +147,7 @@ describe('PDF through the export frame', () => {
       '<body><canvas id="c"></canvas><script src="https://cdn.example/chart.js"></script>' +
       '<script>draw()</script></body></html>'
     const { posted, say, result } = await startPdf({ mode: 'html-preview', content: page })
-    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExportFrame: 2 })
     const html = posted[0].message.html as string
     expect(html).toContain('<script src="https://cdn.example/chart.js"></script>')
     expect(html).toContain('<script>draw()</script>')
@@ -151,7 +162,7 @@ describe('PDF through the export frame', () => {
       mode: 'mermaid-preview',
       content: '---\ntitle: T\n---\ngraph TD; A-->B'
     })
-    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExportFrame: 2 })
     const { message } = posted[0]
     expect(message.waitForReady).toBe(true)
     expect(message.html).toContain('/*mermaid build*/')
@@ -165,7 +176,8 @@ describe('PDF through the export frame', () => {
 
   it('a frame speaking another protocol version (a stale tab) asks for a reload', async () => {
     const { posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
-    say({ slayzoneExportFrame: 2 })
+    // v1 frames have no navigation guard: a shell that expects v2 refuses them.
+    say({ slayzoneExportFrame: 1 })
     expect(posted).toEqual([])
     await expect(result).resolves.toEqual({
       ok: false,
@@ -175,7 +187,7 @@ describe('PDF through the export frame', () => {
 
   it('a failure the frame reports fails the export and removes the frame', async () => {
     const { frame, posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
-    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExportFrame: 2 })
     say({ slayzoneExport: posted[0].message.slayzoneExport, state: 'error', message: 'boom' })
     await expect(result).resolves.toEqual({ ok: false, error: 'boom' })
     expect(frame.isConnected).toBe(false)
@@ -183,10 +195,10 @@ describe('PDF through the export frame', () => {
 
   it('messages from anywhere but the frame, or for another export, are ignored', async () => {
     const { posted, say, result } = await startPdf({ mode: 'markdown', content: '# x' })
-    say({ slayzoneExportFrame: 1 }, null)
-    say({ slayzoneExportFrame: 1 }, window)
+    say({ slayzoneExportFrame: 2 }, null)
+    say({ slayzoneExportFrame: 2 }, window)
     expect(posted).toEqual([])
-    say({ slayzoneExportFrame: 1 })
+    say({ slayzoneExportFrame: 2 })
     const id = posted[0].message.slayzoneExport
     say({ slayzoneExport: 'other', state: 'error', message: 'not mine' })
     say({ slayzoneExport: id, state: 'done' }, null)
@@ -207,6 +219,130 @@ describe('PDF through the export frame', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+// Review 9, F2: the export frame can be navigated away from the bootstrap (meta refresh,
+// location.href, about:blank) to a document WITHOUT its dialog lock. A next document gets
+// no allow-modals (so no prompt, no print), and a frame load the bootstrap does not vouch
+// for fails the export: frame removed, nothing printed.
+describe('PDF: the export frame navigated away', () => {
+  const NAVIGATED =
+    'The artifact tried to load another page while it was being exported, so nothing was printed.'
+
+  async function startPdf() {
+    const frames = captureFrames()
+    const result = exportArtifactInBrowser({
+      format: 'pdf',
+      title: 'n.html',
+      mode: 'html-preview',
+      content: '<p>x</p>'
+    })
+    await vi.waitFor(() => expect(frames).toHaveLength(1))
+    const frame = frames[0]
+    const win = frame.contentWindow as Window
+    const posted: {
+      message: Record<string, unknown>
+      transfer: unknown[]
+      sandbox: string | null
+    }[] = []
+    win.postMessage = ((message: Record<string, unknown>, _t: string, transfer?: unknown[]) => {
+      posted.push({ message, transfer: transfer ?? [], sandbox: frame.getAttribute('sandbox') })
+    }) as typeof win.postMessage
+    const say = (data: unknown) =>
+      window.dispatchEvent(new MessageEvent('message', { data, source: win }))
+    const load = () => frame.dispatchEvent(new Event('load'))
+    say({ slayzoneExportFrame: 2 })
+    const id = posted[0].message.slayzoneExport
+    const port = posted[0].transfer[0] as MessagePort
+    return { frame, result, posted, say, load, id, port }
+  }
+
+  /** The bootstrap's side of the channel: answers every ping. */
+  function vouch(port: MessagePort): number[] {
+    const pings: number[] = []
+    port.onmessage = (e: MessageEvent) => {
+      pings.push(e.data.ping)
+      port.postMessage({ pong: e.data.ping })
+    }
+    return pings
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('the next document the frame loads gets no allow-modals, set before the document is sent', async () => {
+    const { frame, posted, say, id, port, result } = await startPdf()
+    // The current document keeps print(); a navigation gets the attribute's flags.
+    expect(posted[0].sandbox).toBe('allow-scripts')
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(port).toBeInstanceOf(MessagePort)
+    say({ slayzoneExport: id, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+    port.close()
+  })
+
+  it('the frame reporting it is being navigated away fails the export at once', async () => {
+    const { frame, say, id, port, result } = await startPdf()
+    say({ slayzoneExport: id, state: 'navigated' })
+    await expect(result).resolves.toEqual({ ok: false, error: NAVIGATED })
+    expect(frame.isConnected).toBe(false)
+    port.close()
+  })
+
+  it('a frame load the bootstrap does not vouch for fails the export and removes the frame', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { frame, load, port, result } = await startPdf()
+    load()
+    await vi.advanceTimersByTimeAsync(20_000)
+    await expect(result).resolves.toEqual({ ok: false, error: NAVIGATED })
+    expect(frame.isConnected).toBe(false)
+    port.close()
+  })
+
+  it('a frame load the bootstrap vouches for (its own rewrite) is not a navigation', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { frame, load, say, id, port, result } = await startPdf()
+    const pings = vouch(port)
+    load()
+    load()
+    // Ports deliver on the real event loop, not on the faked timers.
+    await vi.waitFor(() => expect(pings).toEqual([1, 2]))
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r))
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(frame.isConnected).toBe(true)
+    say({ slayzoneExport: id, state: 'ready', settled: true })
+    say({ slayzoneExport: id, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+    port.close()
+  })
+
+  it('only the answer to the latest ping vouches: an older one does not', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { load, port, result } = await startPdf()
+    port.onmessage = (e: MessageEvent) => {
+      if (e.data.ping === 1) port.postMessage({ pong: 1 })
+    }
+    load()
+    await vi.advanceTimersByTimeAsync(100)
+    load()
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r))
+    await vi.advanceTimersByTimeAsync(20_000)
+    await expect(result).resolves.toEqual({ ok: false, error: NAVIGATED })
+    port.close()
+  })
+
+  it('a load while the dialog is open (the bootstrap is blocked in print) waits for it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { frame, load, say, id, port, result } = await startPdf()
+    say({ slayzoneExport: id, state: 'ready', settled: true })
+    load()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(frame.isConnected).toBe(true)
+    say({ slayzoneExport: id, state: 'done' })
+    await expect(result).resolves.toEqual({ ok: true })
+    port.close()
   })
 })
 

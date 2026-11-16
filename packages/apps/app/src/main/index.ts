@@ -3858,8 +3858,10 @@ app
       watchSaveTargetOwner(event.sender, saveTargets)
       return saveTargets.open(event.sender.id, BrowserWindow.fromWebContents(event.sender), request)
     })
-    ipcMain.handle('app:save-target-write', (event, id: unknown, path: unknown, data: unknown) =>
-      saveTargets.write(event.sender.id, id, path, data)
+    ipcMain.handle(
+      'app:save-target-write',
+      (event, id: unknown, path: unknown, data: unknown, size: unknown) =>
+        saveTargets.write(event.sender.id, id, path, data, size)
     )
     ipcMain.handle('app:save-target-mkdir', (event, id: unknown, path: unknown) =>
       saveTargets.mkdir(event.sender.id, id, path)

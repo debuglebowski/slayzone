@@ -9,8 +9,10 @@
  *   its own, whose `parent.postMessage` reaches the page as a message event from that
  *   frame (`event.source` is the frame's window), as WebKit delivers it.
  * - jsdom has no canvas: `getContext` answers with a 2D context that draws nothing, and
- *   `toDataURL` with a blank picture (`taint`: throws as WebKit does for a tainted one) —
- *   in every frame, so the real html2canvas (`HTML2CANVAS_BUILD`) runs too.
+ *   `toDataURL` with a blank picture — in every frame, so the real html2canvas
+ *   (`HTML2CANVAS_BUILD`) runs too. A canvas marked {@link TAINTED} (or every canvas, with
+ *   `taint`) refuses `getImageData` and `toDataURL` with a SecurityError, and drawing it
+ *   onto another canvas taints that one: WebKit's origin-clean flag.
  * - jsdom has no layout: `onFrame` sees each frame the page adds itself (to stub sizes),
  *   at any depth (html2canvas's copy of the stage too).
  * - jsdom loads no image: an `<img>` with a URL never completes, as on a server that
@@ -20,9 +22,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type * as Jsdom from 'jsdom'
 import {
+  collectExportReply,
+  type ExportRenderMessage,
   type ExportRenderPage,
   type ExportRenderReply,
-  parseExportRenderReply
+  parseExportRenderMessage
 } from './render-pages'
 
 type JsdomApi = Pick<typeof Jsdom, 'JSDOM' | 'VirtualConsole'>
@@ -37,6 +41,9 @@ export const { JSDOM, VirtualConsole } = jsdomApi()
 type JSDOM = Jsdom.JSDOM
 type JsdomWindow = JSDOM['window']
 
+/** A canvas with this property set is tainted (see the stub canvas). */
+export const TAINTED = '__slzTainted'
+
 /** A 1x1 PNG. */
 export const BLANK_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -48,8 +55,10 @@ export interface WebViewOptions {
   inkRow?: (y: number) => boolean
   /** Each picture `toDataURL` makes: its canvas's height. */
   onPicture?: (height: number) => void
-  /** `toDataURL` throws a SecurityError (a tainted canvas). */
+  /** Every canvas is tainted: `getImageData` and `toDataURL` throw a SecurityError. */
   taint?: boolean
+  /** Each message the page posts to the app (with its token), as it posts it. */
+  onMessage?: (message: ExportRenderMessage) => void
   /** The bridge is iOS's message handler (`window.webkit.messageHandlers`). */
   nativeHandler?: boolean
   /** Fails the render if no reply came by then. */
@@ -86,10 +95,20 @@ function stubImages(window: JsdomWindow): void {
 function stubCanvas(window: JsdomWindow, options: WebViewOptions): void {
   stubImages(window)
   const proto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>
+  const tainted = (canvas: unknown) =>
+    options.taint || (canvas as Record<string, unknown> | null)?.[TAINTED] === true
+  const refuse = () => {
+    throw new window.DOMException('The canvas is tainted.', 'SecurityError')
+  }
   proto.getContext = function getContext(this: HTMLCanvasElement) {
+    const canvas = this
     const context: Record<string | symbol, unknown> = {
-      canvas: this,
+      canvas,
+      drawImage: (source: unknown) => {
+        if (tainted(source)) (canvas as unknown as Record<string, unknown>)[TAINTED] = true
+      },
       getImageData: (_x: number, y: number, w: number, h: number) => {
+        if (tainted(canvas)) refuse()
         const data = new Uint8ClampedArray(Math.max(0, w * h * 4))
         for (let row = 0; row < h; row++) {
           if (options.inkRow?.(y + row)) data[row * w * 4 + 4] = 255
@@ -116,7 +135,7 @@ function stubCanvas(window: JsdomWindow, options: WebViewOptions): void {
     })
   }
   proto.toDataURL = function toDataURL(this: HTMLCanvasElement) {
-    if (options.taint) throw new window.DOMException('The canvas is tainted.', 'SecurityError')
+    if (tainted(this)) refuse()
     options.onPicture?.(this.height)
     return `data:image/png;base64,${BLANK_PNG}`
   }
@@ -124,8 +143,12 @@ function stubCanvas(window: JsdomWindow, options: WebViewOptions): void {
 
 export interface HostPage {
   window: JsdomWindow
-  /** Every reply the page posted (messages with its token), and every message at all. */
+  /**
+   * Every reply the page posted (its messages with its token, put together as the app
+   * does: `collectExportReply`), each such message, and every message at all.
+   */
   replies: ExportRenderReply[]
+  received: ExportRenderMessage[]
   messages: string[]
   /** A message to the page as if from `source` (default: its artifact frame). */
   post: (data: unknown, source?: unknown) => void
@@ -136,13 +159,19 @@ export interface HostPage {
 /** The page loaded on its own: its frames don't run (`post` speaks for them). */
 export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {}): HostPage {
   const replies: ExportRenderReply[] = []
+  const received: ExportRenderMessage[] = []
   const messages: string[] = []
   const errors: string[] = []
   const virtualConsole = new VirtualConsole()
   virtualConsole.on('jsdomError', (error) => errors.push(String(error.stack ?? error)))
+  const take = collectExportReply()
   const receive = (data: unknown) => {
     messages.push(String(data))
-    const reply = parseExportRenderReply(String(data), page.token)
+    const message = parseExportRenderMessage(String(data), page.token, page.maxMessageChars)
+    if (!message) return
+    received.push(message)
+    options.onMessage?.(message)
+    const reply = take(message)
     if (reply) replies.push(reply)
   }
   const host = new JSDOM(page.html, {
@@ -182,6 +211,7 @@ export function loadHostPage(page: ExportRenderPage, options: WebViewOptions = {
   return {
     window: host.window,
     replies,
+    received,
     messages,
     errors,
     post: (data, source = artifactFrame?.contentWindow) => {

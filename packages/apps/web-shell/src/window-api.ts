@@ -90,7 +90,7 @@ const webApiTarget: ElectronAPI = {
     exportArtifact: (request) => exportArtifactInBrowser(request),
     // Downloads stream into browser downloads (a folder as one zip) — see client-save.ts.
     saveTargetOpen: (request) => saveTargets.open(request),
-    saveTargetWrite: (id, path, data) => saveTargets.write(id, path, data),
+    saveTargetWrite: (id, path, data, size) => saveTargets.write(id, path, data, size),
     saveTargetMkdir: (id, path) => saveTargets.mkdir(id, path),
     saveTargetClose: (id) => saveTargets.close(id),
     saveTargetAbort: (id) => saveTargets.abort(id),

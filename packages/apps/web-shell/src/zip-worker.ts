@@ -11,7 +11,7 @@ self.onmessage = (event: MessageEvent<ZipWorkerRequest>) => {
   const req = event.data
   try {
     encoder ??= createZipEncoder((chunk) => produced.push(chunk), { deflater: fflateDeflater })
-    if (req.op === 'write') encoder.write(req.path, req.data)
+    if (req.op === 'write') encoder.write(req.path, req.data, req.size)
     else if (req.op === 'mkdir') encoder.mkdir(req.path)
     else encoder.finish()
     // Each chunk on its own buffer, so each can be transferred exactly once.

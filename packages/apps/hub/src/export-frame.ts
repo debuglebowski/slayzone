@@ -16,16 +16,24 @@
  *
  * The page is a bootstrap and nothing else (web-shell `artifact-export.ts` drives it):
  *   1. It tells its parent it is here: `{ slayzoneExportFrame: EXPORT_FRAME_VERSION }`.
- *   2. It takes ONE message from its parent, `{ slayzoneExport: id, html, waitForReady }`,
- *      and writes `html` as its document (`document.open/write/close`). The page's
- *      alert/confirm/prompt are no-ops by then (`allow-modals` is only for print();
- *      see `silenceDialogs`, and its known gap).
+ *   2. It takes ONE message from its parent, `{ slayzoneExport: id, html, waitForReady }`
+ *      with a MessagePort, and writes `html` as its document (`document.open/write/
+ *      close`). The page's alert/confirm/prompt are no-ops by then (`allow-modals` is
+ *      only for print(); see `silenceDialogs`, and its known gap). On the port it
+ *      answers the shell's `{ ping: n }` with `{ pong: n }`: the shell counts every
+ *      load of the frame as a navigation unless the bootstrap vouches for it.
  *   3. Once the document has loaded (images, styles, scripts), its fonts are ready and,
  *      with `waitForReady`, it has flagged itself ready (`data-export-ready="1"`, the
  *      mermaid document's flag) — or after `deadlineMs` — it reports
- *      `{ slayzoneExport: id, state: 'ready', images: { total, loaded }, drawn }`, then
- *      prints, and reports `{ slayzoneExport: id, state: 'done' }` on `afterprint`.
- *      A failure reports `{ slayzoneExport: id, state: 'error', message }`.
+ *      `{ slayzoneExport: id, state: 'ready', images: { total, loaded }, drawn }` and
+ *      prints, in one task, and reports `{ slayzoneExport: id, state: 'done' }` on
+ *      `afterprint`. A failure reports `{ slayzoneExport: id, state: 'error', message }`.
+ *   A navigation away from the document (meta refresh, `location.href`, a link) ends
+ *   the export: reported as `{ slayzoneExport: id, state: 'navigated' }` when the
+ *   bootstrap sees it start, and nothing is printed. The next document is not this
+ *   bootstrap's and has no dialog lock; the shell has taken `allow-modals` from the
+ *   frame's sandbox by then (a change that applies at its next navigation), so it can
+ *   raise no dialog and print nothing, and it cannot vouch for its load.
  * A document carrying its own policy (the markdown/code/mermaid documents' nonce'd CSP
  * meta) keeps it: it constrains the document's scripts, not this bootstrap, which is
  * already running when the document is written.
@@ -41,7 +49,7 @@ export const EXPORT_FRAME_PATH = '/export-frame'
  * The protocol's version, announced in the page's first message. A shell that speaks
  * another (a tab left open across a hub upgrade) refuses to print and asks for a reload.
  */
-export const EXPORT_FRAME_VERSION = 1
+export const EXPORT_FRAME_VERSION = 2
 
 const BOOTSTRAP = `(function () {
   'use strict';
@@ -55,24 +63,59 @@ const BOOTSTRAP = `(function () {
     if (taken || event.source !== host || !data) return;
     if (typeof data.slayzoneExport !== 'string' || typeof data.html !== 'string') return;
     taken = true;
+    vouch(event.ports && event.ports[0]);
     render(data.slayzoneExport, data.html, data.waitForReady === true,
       typeof data.deadlineMs === 'number' ? data.deadlineMs : 30000);
   });
 
+  // The shell treats every load of this frame as a navigation (a document without
+  // this bootstrap) unless the bootstrap vouches for it: it answers the shell's pings
+  // on the channel the shell sent with the document. Only this realm holds that port,
+  // and a port outlives document.open() (it is no listener of the window or document).
+  function vouch(port) {
+    if (!port) return;
+    port.onmessage = function (event) {
+      var data = event.data;
+      if (data && typeof data.ping === 'number') port.postMessage({ pong: data.ping });
+    };
+  }
+
   function render(id, html, waitForReady, deadlineMs) {
+    var left = false;
     function fail(err) {
       post({ slayzoneExport: id, state: 'error', message: String((err && err.message) || err) });
     }
+    // A navigation away from this document (meta refresh, location.href, a link) is
+    // the end of the export: the next document is not the artifact as written, and
+    // has no dialog lock (the shell gives it no allow-modals). Reported as it starts,
+    // and this document never prints.
+    function leaving() {
+      if (left) return;
+      left = true;
+      post({ slayzoneExport: id, state: 'navigated' });
+    }
+    function watchLeaving() {
+      // Capture listeners run first at the window. Re-adding is a no-op while they
+      // are still there.
+      window.addEventListener('beforeunload', leaving, true);
+      window.addEventListener('pagehide', leaving, true);
+    }
     try {
       document.open();
+      // document.open() removed every listener this page had. Watch before the
+      // document is written: its inline scripts may navigate while it is parsed.
+      // A later document.open() of the artifact's removes these again; the observer
+      // that sees it replace the document puts them back (silenceChildren). A
+      // navigation started in between is caught by the shell: this document no
+      // longer vouches for the frame's loads.
+      watchLeaving();
       document.write(html);
       document.close();
     } catch (err) {
       fail(err);
       return;
     }
-    // document.open() removed every listener this page had: nothing else is listening.
-    silenceChildren();
+    silenceChildren(watchLeaving);
     var deadline = Date.now() + deadlineMs;
     var fontsReady = !document.fonts;
     if (document.fonts) {
@@ -83,28 +126,33 @@ const BOOTSTRAP = `(function () {
       return !waitForReady || (!!root && root.getAttribute('data-export-ready') === '1');
     }
     function check() {
+      if (left) return;
       var settled = document.readyState === 'complete' && fontsReady && drawn();
       if (settled || Date.now() >= deadline) print_(settled);
       else setTimeout(check, 50);
     }
     function print_(settled) {
-      var images = document.images;
-      var loaded = 0;
-      for (var i = 0; i < images.length; i++) {
-        if (images[i].complete && images[i].naturalWidth > 0) loaded++;
-      }
-      post({
-        slayzoneExport: id,
-        state: 'ready',
-        settled: settled,
-        drawn: drawn(),
-        images: { total: images.length, loaded: loaded }
-      });
-      window.addEventListener('afterprint', function () {
-        post({ slayzoneExport: id, state: 'done' });
-      }, { once: true });
-      // The next task: the ready report goes out before the dialog takes the thread.
+      // The next task: whatever the document does in between (navigate away) is seen
+      // first. Then ready and print() in ONE task: nothing of the document's runs
+      // between the report and the dialog, so the shell knows from ready on that the
+      // document printing is this one.
       setTimeout(function () {
+        if (left) return;
+        var images = document.images;
+        var loaded = 0;
+        for (var i = 0; i < images.length; i++) {
+          if (images[i].complete && images[i].naturalWidth > 0) loaded++;
+        }
+        post({
+          slayzoneExport: id,
+          state: 'ready',
+          settled: settled,
+          drawn: drawn(),
+          images: { total: images.length, loaded: loaded }
+        });
+        window.addEventListener('afterprint', function () {
+          post({ slayzoneExport: id, state: 'done' });
+        }, { once: true });
         try {
           window.focus();
           window.print();
@@ -135,13 +183,17 @@ const BOOTSTRAP = `(function () {
   // there, and so are its dialogs to the document; this covers an engine that shares it.
   // KNOWN GAP: a cross-origin child the document creates (srcdoc, javascript:, data:,
   // a remote page) inherits allow-modals (sandbox flags inherit) and can still raise a
-  // dialog. Every way to stop it, measured in Chromium, costs print fidelity: print()
-  // is ignored without allow-modals; printing the document from a modal-less inner
-  // frame slices it by height and drops its page breaks; frame-src 'none' drops remote
-  // iframes and still lets srcdoc through; printing a script-free copy loses canvas,
-  // shadow DOM and live state.
-  function silenceChildren() {
+  // dialog in Chromium. Every way to stop it, measured in Chromium, costs print
+  // fidelity: print() is ignored without allow-modals; printing the document from a
+  // modal-less inner frame slices it by height and drops its page breaks; frame-src
+  // 'none' drops remote iframes and still lets srcdoc through; printing a script-free
+  // copy loses canvas, shadow DOM and live state. (WebKit computes a child's flags
+  // from the frame's current sandbox attribute, which the shell has stripped of
+  // allow-modals by then: no dialog there.) Not this gap: the document navigating THIS
+  // frame to a new document (render's leaving() and the shell's load guard).
+  function silenceChildren(onMutation) {
     function each() {
+      onMutation();
       for (var i = 0; i < window.length; i++) {
         try { silenceDialogs(window[i]); } catch (err) { /* cross-origin */ }
       }

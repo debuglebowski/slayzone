@@ -100,8 +100,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('app:export-artifact', request) as Promise<ArtifactExportResult>,
     saveTargetOpen: (request: SaveTargetRequest) =>
       ipcRenderer.invoke('app:save-target-open', request) as Promise<SaveTargetOpenResult>,
-    saveTargetWrite: (targetId: string, path: string, data: Uint8Array) =>
-      ipcRenderer.invoke('app:save-target-write', targetId, path, data) as Promise<void>,
+    saveTargetWrite: (targetId: string, path: string, data: Uint8Array, size?: number) =>
+      ipcRenderer.invoke('app:save-target-write', targetId, path, data, size) as Promise<void>,
     saveTargetMkdir: (targetId: string, path: string) =>
       ipcRenderer.invoke('app:save-target-mkdir', targetId, path) as Promise<void>,
     saveTargetClose: (targetId: string) =>

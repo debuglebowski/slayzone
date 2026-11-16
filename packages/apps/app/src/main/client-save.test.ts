@@ -42,9 +42,8 @@ vi.mock('electron', () => ({
   shell: { showItemInFolder: (p: string) => revealed.push(p) }
 }))
 
-const { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner, copyInto } = await import(
-  './client-save'
-)
+const { SaveTargets, abortAllSaveTargetsNow, watchSaveTargetOwner, copyInto, writeFileWhole } =
+  await import('./client-save')
 const { EventEmitter } = await import('node:events')
 
 let root: string
@@ -785,4 +784,172 @@ describe('short writes', () => {
     await copyInto(src, dest).finally(() => dest.close())
     expect(fs.readFileSync(path.join(root, 'copy.bin'))).toEqual(big)
   })
+})
+
+// Review 9, L6: an export replaces the chosen file only once its bytes are complete.
+// A failed write (a full disk) leaves the person's old file as it was, and no partial.
+describe('writeFileWhole', () => {
+  test('replaces the file with the complete bytes', async () => {
+    const dest = path.join(root, 'report.pdf')
+    fs.writeFileSync(dest, 'OLD')
+    await writeFileWhole(dest, Buffer.from('NEW CONTENT'))
+    expect(fs.readFileSync(dest, 'utf8')).toBe('NEW CONTENT')
+    expect(partials(root)).toEqual([])
+  })
+
+  test('a failed write leaves the old file intact and no partial', async () => {
+    const dest = path.join(root, 'report.pdf')
+    fs.writeFileSync(dest, 'OLD')
+    shortWrites.max = 0
+    const failing = Buffer.from('x'.repeat(100_000))
+    await expect(
+      writeFileWhole(dest, failing, {
+        write: async (handle, data) => {
+          await handle.write(data, 0, 10)
+          throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' })
+        }
+      })
+    ).rejects.toThrow('ENOSPC')
+    expect(fs.readFileSync(dest, 'utf8')).toBe('OLD')
+    expect(partials(root)).toEqual([])
+  })
+
+  // As main (which wrote in place): what isn't a plain file of ours is written through,
+  // never replaced — a read-only file still refuses, a symlink's target and a hard
+  // link's shared file get the bytes.
+  // root writes read-only files anyway.
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a read-only file is refused, as on main',
+    async () => {
+      const dest = path.join(root, 'locked.pdf')
+      fs.writeFileSync(dest, 'OLD')
+      fs.chmodSync(dest, 0o444)
+      await expect(writeFileWhole(dest, Buffer.from('NEW'))).rejects.toThrow(/EACCES|EPERM/)
+      expect(fs.readFileSync(dest, 'utf8')).toBe('OLD')
+      expect((fs.statSync(dest).mode & 0o777).toString(8)).toBe('444')
+      expect(partials(root)).toEqual([])
+    }
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'a symlink and a hard link are written through',
+    async () => {
+      const target = path.join(root, 'real.pdf')
+      fs.writeFileSync(target, 'OLD')
+      const link = path.join(root, 'link.pdf')
+      fs.symlinkSync(target, link)
+      await writeFileWhole(link, Buffer.from('VIA LINK'))
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
+      expect(fs.readFileSync(target, 'utf8')).toBe('VIA LINK')
+      const twin = path.join(root, 'twin.pdf')
+      fs.linkSync(target, twin)
+      await writeFileWhole(twin, Buffer.from('BOTH'))
+      expect(fs.readFileSync(target, 'utf8')).toBe('BOTH')
+      expect(partials(root)).toEqual([])
+    }
+  )
+})
+
+// Review 9, F3: an entry that may reach 4 GiB carries a zip64 extra in its LOCAL header
+// and a 24-byte descriptor, so readers that walk local headers (macOS ditto / Archive
+// Utility, streaming readers) keep every later entry. Declared sizes drive it (the
+// client knows each entry's size before its first byte); the layout is checked byte for
+// byte and by the real readers available here.
+describe('zip64 for an entry declared ≥ 4 GiB', () => {
+  const { execFileSync } = require('node:child_process') as typeof import('node:child_process')
+  const hasTool = (cmd: string, args: string[]): boolean => {
+    try {
+      execFileSync(cmd, args, { stdio: 'ignore' })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function build(): Promise<Buffer> {
+    picked.file = path.join(root, 'wide.zip')
+    const id = await openOk({ kind: 'zip', fileName: 'wide.zip', title: 't' })
+    // Declared wide (the layout under test); the bytes are small so the test is fast.
+    await targets.write(SENDER, id, 'big.bin', bytes('BIG BYTES'), 5_000_000_000)
+    await targets.write(SENDER, id, 'pic.png', new Uint8Array([1, 2, 3]), 5_000_000_000)
+    await targets.mkdir(SENDER, id, 'd')
+    await targets.write(SENDER, id, 'd/after.txt', bytes('after'), 5)
+    expect(await targets.close(SENDER, id)).toEqual({ ok: true })
+    return fs.readFileSync(picked.file)
+  }
+
+  test('local header and descriptor of a wide entry, classic for the rest', async () => {
+    const zip = await build()
+    for (const name of ['big.bin', 'pic.png']) {
+      const at = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 3, 4]), zip.indexOf(name))
+      expect(zip.readUInt32LE(at)).toBe(0x04034b50)
+      expect(zip.readUInt16LE(at + 4)).toBe(45)
+      expect(zip.readUInt16LE(at + 6) & 0x0008).toBe(0x0008)
+      expect(zip.readUInt32LE(at + 14)).toBe(0)
+      expect(zip.readUInt32LE(at + 18)).toBe(0xffffffff)
+      expect(zip.readUInt32LE(at + 22)).toBe(0xffffffff)
+      const nameLen = zip.readUInt16LE(at + 26)
+      expect(zip.readUInt16LE(at + 28)).toBe(20)
+      const extra = at + 30 + nameLen
+      expect(zip.readUInt16LE(extra)).toBe(0x0001)
+      expect(zip.readUInt16LE(extra + 2)).toBe(16)
+      expect(zip.readBigUInt64LE(extra + 4)).toBe(0n)
+      expect(zip.readBigUInt64LE(extra + 12)).toBe(0n)
+    }
+    const after = zip.indexOf('d/after.txt')
+    const at = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 3, 4]), after)
+    expect(zip.readUInt16LE(at + 4)).toBe(20)
+    expect(zip.readUInt16LE(at + 28)).toBe(0)
+    const out = unzipSync(new Uint8Array(zip))
+    expect(new TextDecoder().decode(out['big.bin'])).toBe('BIG BYTES')
+    expect(Array.from(out['pic.png'])).toEqual([1, 2, 3])
+    expect(new TextDecoder().decode(out['d/after.txt'])).toBe('after')
+  })
+
+  test.skipIf(!hasTool('bsdtar', ['--version']))(
+    'a streaming reader (bsdtar on a pipe) reads every entry',
+    async () => {
+      const file = path.join(root, 'wide.zip')
+      fs.writeFileSync(file, await build())
+      const list = execFileSync('/bin/sh', ['-c', 'bsdtar -tf - < "$1"', 'sh', file]).toString()
+      expect(list.split('\n').filter(Boolean).sort()).toEqual([
+        'big.bin',
+        'd/',
+        'd/after.txt',
+        'pic.png'
+      ])
+      const after = execFileSync('/bin/sh', ['-c', 'bsdtar -xOf - d/after.txt < "$1"', 'sh', file])
+      expect(after.toString()).toBe('after')
+    },
+    60_000
+  )
+
+  test.skipIf(process.platform !== 'darwin' || !fs.existsSync('/usr/bin/ditto'))(
+    'macOS ditto keeps every entry after the wide one',
+    async () => {
+      const file = path.join(root, 'wide.zip')
+      fs.writeFileSync(file, await build())
+      const out = path.join(root, 'ditto-out')
+      execFileSync('/usr/bin/ditto', ['-x', '-k', file, out])
+      expect(fs.readFileSync(path.join(out, 'big.bin'), 'utf8')).toBe('BIG BYTES')
+      expect(fs.readFileSync(path.join(out, 'd', 'after.txt'), 'utf8')).toBe('after')
+    },
+    60_000
+  )
+
+  test.skipIf(!hasTool('python3', ['--version']) || !hasTool('unzip', ['-v']))(
+    'central-directory readers (Python zipfile, unzip -t) read it',
+    async () => {
+      const file = path.join(root, 'wide.zip')
+      fs.writeFileSync(file, await build())
+      execFileSync('unzip', ['-tq', file])
+      const bad = execFileSync('python3', [
+        '-c',
+        'import sys,zipfile; print(zipfile.ZipFile(sys.argv[1]).testzip())',
+        file
+      ])
+      expect(bad.toString().trim()).toBe('None')
+    },
+    60_000
+  )
 })

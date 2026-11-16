@@ -3,12 +3,16 @@ import {
   EXPORT_RENDER_SOURCE,
   type ExportRenderPage,
   type ExportRenderReply,
+  collectExportReply,
+  EXPORT_MESSAGE_MAX_CHARS,
+  HTML_MESSAGE_MAX_CHARS,
   HTML_PRINT_POLICY,
   HTML_SETTLE,
   htmlArtifactDocument,
   htmlPrintDocument,
+  htmlRasterPage,
   mermaidSvgPage,
-  parseExportRenderReply,
+  parseExportRenderMessage,
   pngCapturePage
 } from './render-pages'
 
@@ -30,14 +34,16 @@ function runPage(
   globals: Record<string, unknown>
 ): Promise<ExportRenderReply> {
   return new Promise((resolve, reject) => {
+    const take = collectExportReply()
     const context = {
       ...globals,
       window: {
         ReactNativeWebView: {
           postMessage: (data: string) => {
-            const reply = parseExportRenderReply(data, page.token)
+            const message = parseExportRenderMessage(data, page.token)
+            if (!message) reject(new Error(`unparseable reply: ${data}`))
+            const reply = message && take(message)
             if (reply) resolve(reply)
-            else reject(new Error(`unparseable reply: ${data}`))
           }
         }
       }
@@ -46,74 +52,179 @@ function runPage(
   })
 }
 
-describe('parseExportRenderReply', () => {
+describe('parseExportRenderMessage', () => {
   const TOKEN = 'page-token'
   const msg = (body: object) =>
     JSON.stringify({ source: EXPORT_RENDER_SOURCE, token: TOKEN, ...body })
 
-  it('reads the four replies', () => {
-    expect(parseExportRenderReply(msg({ type: 'svg', svg: '<svg/>' }), TOKEN)).toEqual({
+  it('reads the replies, and the steps of an html render', () => {
+    expect(parseExportRenderMessage(msg({ type: 'svg', svg: '<svg/>' }), TOKEN)).toEqual({
       type: 'svg',
       svg: '<svg/>'
     })
     expect(
-      parseExportRenderReply(msg({ type: 'png', base64: 'AAA', width: 20, height: 10 }), TOKEN)
+      parseExportRenderMessage(msg({ type: 'png', base64: 'AAA', width: 20, height: 10 }), TOKEN)
     ).toEqual({ type: 'png', base64: 'AAA', width: 20, height: 10 })
-    expect(parseExportRenderReply(msg({ type: 'pages', pages: ['QUJD', 'RA=='] }), TOKEN)).toEqual({
-      type: 'pages',
-      pages: ['QUJD', 'RA==']
+    expect(
+      parseExportRenderMessage(msg({ type: 'error', code: 'tainted', message: 'no' }), TOKEN)
+    ).toEqual({ type: 'error', code: 'tainted', message: 'no' })
+    // Review 9, L5: an html artifact's pages come one message each.
+    expect(parseExportRenderMessage(msg({ type: 'progress' }), TOKEN)).toEqual({
+      type: 'progress'
     })
     expect(
-      parseExportRenderReply(msg({ type: 'error', code: 'tainted', message: 'no' }), TOKEN)
-    ).toEqual({ type: 'error', code: 'tainted', message: 'no' })
+      parseExportRenderMessage(msg({ type: 'page', index: 0, base64: 'QUJD' }), TOKEN)
+    ).toEqual({ type: 'page', index: 0, base64: 'QUJD' })
+    expect(parseExportRenderMessage(msg({ type: 'restart' }), TOKEN)).toEqual({
+      type: 'restart'
+    })
+    expect(
+      parseExportRenderMessage(msg({ type: 'pages-end', count: 2, textLabels: true }), TOKEN)
+    ).toEqual({ type: 'pages-end', count: 2, textLabels: true })
   })
 
-  it('ignores anything else: not JSON, another source, a malformed reply', () => {
-    expect(parseExportRenderReply('not json', TOKEN)).toBeNull()
+  it('ignores anything else: not JSON, another source, a malformed message', () => {
+    expect(parseExportRenderMessage('not json', TOKEN)).toBeNull()
     expect(
-      parseExportRenderReply(JSON.stringify({ type: 'svg', svg: '<svg/>', token: TOKEN }), TOKEN)
+      parseExportRenderMessage(JSON.stringify({ type: 'svg', svg: '<svg/>', token: TOKEN }), TOKEN)
     ).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'svg' }), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'pages' }), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'pages', pages: [] }), TOKEN)).toBeNull()
-    // A page is base64 and nothing else.
+    expect(parseExportRenderMessage(msg({ type: 'svg' }), TOKEN)).toBeNull()
+    // All the pages at once is no message: they come one by one.
+    expect(parseExportRenderMessage(msg({ type: 'pages', pages: ['QUJD'] }), TOKEN)).toBeNull()
+    // A page is base64 and nothing else, at a whole-number place.
     expect(
-      parseExportRenderReply(msg({ type: 'pages', pages: ['QUJD', '<img>'] }), TOKEN)
+      parseExportRenderMessage(msg({ type: 'page', index: 0, base64: '<img>' }), TOKEN)
     ).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'pages', pages: [1] }), TOKEN)).toBeNull()
+    expect(parseExportRenderMessage(msg({ type: 'page', index: 0, base64: 1 }), TOKEN)).toBeNull()
+    expect(
+      parseExportRenderMessage(msg({ type: 'page', index: 0.5, base64: 'QUJD' }), TOKEN)
+    ).toBeNull()
+    expect(
+      parseExportRenderMessage(msg({ type: 'page', index: -1, base64: 'QUJD' }), TOKEN)
+    ).toBeNull()
+    expect(
+      parseExportRenderMessage(msg({ type: 'pages-end', count: '2', textLabels: false }), TOKEN)
+    ).toBeNull()
+    expect(parseExportRenderMessage(msg({ type: 'pages-end', count: 2 }), TOKEN)).toBeNull()
     // The old snapshot reply is no reply.
-    expect(parseExportRenderReply(msg({ type: 'html', html: '<p/>' }), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'png', base64: 'A', width: '1' }), TOKEN)).toBeNull()
+    expect(parseExportRenderMessage(msg({ type: 'html', html: '<p/>' }), TOKEN)).toBeNull()
     expect(
-      parseExportRenderReply(msg({ type: 'error', code: 'boom', message: '' }), TOKEN)
+      parseExportRenderMessage(msg({ type: 'png', base64: 'A', width: '1' }), TOKEN)
     ).toBeNull()
-    expect(parseExportRenderReply(msg({ type: 'other' }), TOKEN)).toBeNull()
+    expect(
+      parseExportRenderMessage(msg({ type: 'error', code: 'boom', message: '' }), TOKEN)
+    ).toBeNull()
+    expect(parseExportRenderMessage(msg({ type: 'other' }), TOKEN)).toBeNull()
   })
 
-  // Review 6, #4: an html artifact's own scripts run in the render; a reply counts only
+  // Review 6, #4: an html artifact's own scripts run in the render; a message counts only
   // if it carries the page's token, which they never see.
-  it("ignores a reply without the page's token", () => {
-    const forged = { source: EXPORT_RENDER_SOURCE, type: 'pages', pages: ['QUJD'] }
-    expect(parseExportRenderReply(JSON.stringify(forged), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(JSON.stringify({ ...forged, token: 'guess' }), TOKEN)).toBeNull()
-    expect(parseExportRenderReply(JSON.stringify({ ...forged, token: TOKEN }), 'other')).toBeNull()
+  it("ignores a message without the page's token", () => {
+    const forged = { source: EXPORT_RENDER_SOURCE, type: 'page', index: 0, base64: 'QUJD' }
+    expect(parseExportRenderMessage(JSON.stringify(forged), TOKEN)).toBeNull()
+    expect(
+      parseExportRenderMessage(JSON.stringify({ ...forged, token: 'guess' }), TOKEN)
+    ).toBeNull()
+    expect(
+      parseExportRenderMessage(JSON.stringify({ ...forged, token: TOKEN }), 'other')
+    ).toBeNull()
   })
   // Review 8, L11: an artifact's frame can post to the app straight, megabytes a message;
   // nothing without the page's own opening (its token) is parsed at all.
-  it('parses nothing that does not open as a reply of the page does', () => {
+  it('parses nothing that does not open as a message of the page does', () => {
     const parse = jest.spyOn(JSON, 'parse')
     try {
       const flood = `{"source":"${EXPORT_RENDER_SOURCE}","token":"guess","pages":["${'A'.repeat(1_000_000)}"]}`
-      expect(parseExportRenderReply(flood, TOKEN)).toBeNull()
-      expect(parseExportRenderReply(`  ${msg({ type: 'svg', svg: '<svg/>' })}`, TOKEN)).toBeNull()
+      expect(parseExportRenderMessage(flood, TOKEN)).toBeNull()
+      expect(parseExportRenderMessage(`  ${msg({ type: 'svg', svg: '<svg/>' })}`, TOKEN)).toBeNull()
       expect(parse).not.toHaveBeenCalled()
-      expect(parseExportRenderReply(msg({ type: 'svg', svg: '<svg/>' }), TOKEN)).toEqual({
+      expect(parseExportRenderMessage(msg({ type: 'svg', svg: '<svg/>' }), TOKEN)).toEqual({
         type: 'svg',
         svg: '<svg/>'
       })
     } finally {
       parse.mockRestore()
     }
+  })
+
+  // Review 9, L2: the token is the only guard (a frame inside the artifact posts as
+  // about:blank too); a message longer than any the page sends is dropped unread, before
+  // even its opening is compared.
+  it('drops a message longer than the cap unread, whatever it opens with', () => {
+    const ok = msg({ type: 'svg', svg: '<svg/>' })
+    expect(parseExportRenderMessage(ok, TOKEN, ok.length)).toEqual({ type: 'svg', svg: '<svg/>' })
+    const startsWith = jest.spyOn(String.prototype, 'startsWith')
+    try {
+      expect(parseExportRenderMessage(ok, TOKEN, ok.length - 1)).toBeNull()
+      expect(startsWith).not.toHaveBeenCalled()
+    } finally {
+      startsWith.mockRestore()
+    }
+  })
+
+  it('the caps sit well above the largest message each page sends', () => {
+    // A page picture of an html artifact: 1078 × 1560 pixels at most, RGBA, base64.
+    const page = Math.ceil((1078 * 1560 * 4) / 3) * 4
+    expect(HTML_MESSAGE_MAX_CHARS).toBeGreaterThanOrEqual(2 * page)
+    expect(HTML_MESSAGE_MAX_CHARS).toBeLessThan(64 * 1024 * 1024)
+    expect(htmlRasterPage('x', 't', 'void 0').maxMessageChars).toBe(HTML_MESSAGE_MAX_CHARS)
+    // A PNG of an SVG: up to 16M pixels.
+    const png = Math.ceil((16_000_000 * 4) / 3) * 4
+    expect(EXPORT_MESSAGE_MAX_CHARS).toBeGreaterThanOrEqual(2 * png)
+  })
+})
+
+describe("collectExportReply: an html render's pages, put together", () => {
+  const page = (index: number, base64 = 'QUJD') => ({ type: 'page' as const, index, base64 })
+
+  it('collects the pages in order and answers at their end', () => {
+    const take = collectExportReply()
+    expect(take({ type: 'progress' })).toBeNull()
+    expect(take(page(0, 'QUJD'))).toBeNull()
+    expect(take(page(1, 'REVG'))).toBeNull()
+    expect(take({ type: 'pages-end', count: 2, textLabels: false })).toEqual({
+      type: 'pages',
+      pages: ['QUJD', 'REVG'],
+      textLabels: false
+    })
+  })
+
+  it('a restart drops the pages so far (drawn again with text labels)', () => {
+    const take = collectExportReply()
+    take(page(0, 'T0xE'))
+    expect(take({ type: 'restart' })).toBeNull()
+    take(page(0, 'TkVX'))
+    expect(take({ type: 'pages-end', count: 1, textLabels: true })).toEqual({
+      type: 'pages',
+      pages: ['TkVX'],
+      textLabels: true
+    })
+  })
+
+  it('a page out of order, a missing page or no page at all is an error', () => {
+    let take = collectExportReply()
+    expect(take(page(1))).toMatchObject({ type: 'error', code: 'render' })
+    take = collectExportReply()
+    take(page(0))
+    expect(take({ type: 'pages-end', count: 2, textLabels: false })).toMatchObject({
+      type: 'error',
+      code: 'render'
+    })
+    take = collectExportReply()
+    expect(take({ type: 'pages-end', count: 0, textLabels: false })).toMatchObject({
+      type: 'error',
+      code: 'render'
+    })
+  })
+
+  it('a reply of another page passes straight through', () => {
+    const take = collectExportReply()
+    expect(take({ type: 'svg', svg: '<svg/>' })).toEqual({ type: 'svg', svg: '<svg/>' })
+    expect(take({ type: 'error', code: 'tainted', message: 'x' })).toEqual({
+      type: 'error',
+      code: 'tainted',
+      message: 'x'
+    })
   })
 })
 
@@ -536,8 +647,11 @@ describe('htmlArtifactDocument: the snapshot script posts the settled DOM to the
     jest.advanceTimersByTime(HTML_SETTLE.maxLoadMs - 200)
     expect(p.posted).toEqual([])
 
-    // Loaded; quiet, but a chart may still be animating in: not yet.
+    // Loaded (the host is told: its navigation guard); quiet, but a chart may still be
+    // animating in: no snapshot yet.
     p.fire('load')
+    expect(p.posted).toEqual([{ message: { type: 'slz-export-loaded' }, target: '*' }])
+    p.posted.length = 0
     jest.advanceTimersByTime(HTML_SETTLE.minAfterLoadMs - 200)
     expect(p.posted).toEqual([])
     // The artifact draws (mutations) for a while after: taken once quiet.
@@ -588,6 +702,7 @@ describe('htmlArtifactDocument: the snapshot script posts the settled DOM to the
   it('a page that never stops changing is taken anyway, after the cap', () => {
     const p = load(htmlArtifactDocument('x', 't'), () => undefined)
     p.fire('load')
+    p.posted.length = 0
     for (let t = 0; t < HTML_SETTLE.maxAfterLoadMs - 200; t += 100) {
       p.mutate()
       jest.advanceTimersByTime(100)

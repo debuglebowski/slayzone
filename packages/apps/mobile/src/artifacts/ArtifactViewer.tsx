@@ -17,7 +17,7 @@ import type { ArtifactVersion } from '@slayzone/task-artifacts/shared'
 import { dbTimestampToIso, formatRelativeDate } from '@slayzone/task-artifacts/shared'
 import { getEffectiveRenderMode, type TaskArtifact } from '@slayzone/task-contracts/types'
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -130,11 +130,17 @@ function LoadedArtifact({
     busy: false,
     error: null
   })
-  const [exportState, setExportState] = useState<{ busy: boolean; error: string | null }>({
-    busy: false,
-    error: null
-  })
+  const [exportState, setExportState] = useState<{
+    busy: boolean
+    error: string | null
+    /** Something to know about the file just exported (not an error). */
+    notice: string | null
+  }>({ busy: false, error: null, notice: null })
   const exportRenderer = useExportRenderer()
+  // The running export's abort: closing the viewer stops it, so its share sheet never
+  // opens over another screen.
+  const exportAbort = useRef<AbortController | null>(null)
+  useEffect(() => () => exportAbort.current?.abort(), [])
   const renderMode = getEffectiveRenderMode(artifact.title, artifact.render_mode)
   const exportFormats = fileKind ? [] : exportFormatsOf(renderMode)
 
@@ -234,7 +240,9 @@ function LoadedArtifact({
       (index) => {
         const choice = exportFormats[index]
         if (!choice) return
-        setExportState({ busy: true, error: null })
+        const abort = new AbortController()
+        exportAbort.current = abort
+        setExportState({ busy: true, error: null, notice: null })
         exportArtifact(
           {
             content: exportContent,
@@ -245,13 +253,23 @@ function LoadedArtifact({
           {
             render: exportRenderer.render,
             mermaidScript: loadMermaidScript,
-            html2canvasScript: loadHtml2canvasScript
+            html2canvasScript: loadHtml2canvasScript,
+            signal: abort.signal,
+            // Shown under the toolbar as soon as it is known: before the share sheet opens.
+            onNotice: (notice) => setExportState((state) => ({ ...state, notice }))
           }
         )
-          .then(() => setExportState({ busy: false, error: null }))
+          .then(() => setExportState((state) => ({ ...state, busy: false, error: null })))
           .catch((err: unknown) =>
-            setExportState({ busy: false, error: err instanceof Error ? err.message : String(err) })
+            setExportState({
+              busy: false,
+              error: err instanceof Error ? err.message : String(err),
+              notice: null
+            })
           )
+          .then(() => {
+            if (exportAbort.current === abort) exportAbort.current = null
+          })
       }
     )
   }
@@ -340,6 +358,7 @@ function LoadedArtifact({
       ) : null}
       {shareState.error ? <Text style={styles.error}>{shareState.error}</Text> : null}
       {exportState.error ? <Text style={styles.error}>{exportState.error}</Text> : null}
+      {exportState.notice ? <Text style={styles.notice}>{exportState.notice}</Text> : null}
       <View style={styles.body}>
         <ArtifactBody body={body} onOpenArtifact={onOpenArtifact} onShare={share} kind={kind} />
         {showHistory ? (
@@ -531,6 +550,7 @@ const makeStyles = (t: ChromeColors) =>
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
     note: { color: t.mutedForeground, textAlign: 'center', padding: 24 },
     error: { color: t.destructive, paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },
+    notice: { color: t.mutedForeground, paddingHorizontal: 16, paddingVertical: 6, fontSize: 13 },
     banner: {
       flexDirection: 'row',
       alignItems: 'center',

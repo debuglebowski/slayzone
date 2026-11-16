@@ -4,7 +4,12 @@ import {
 } from '@slayzone/task-artifacts/export-html'
 import { printToFileAsync } from 'expo-print'
 import { shareAsync } from 'expo-sharing'
-import { EXPORT_DIR, type ExportArtifactDeps, exportArtifact } from './export-artifact'
+import {
+  EXPORT_DIR,
+  type ExportArtifactDeps,
+  exportArtifact,
+  TEXT_LABELS_NOTICE
+} from './export-artifact'
 import {
   type ExportRenderPage,
   type ExportRenderReply,
@@ -87,6 +92,10 @@ const inExportDir = (name: string) =>
   new RegExp(`^${OUT.replace(/[/.]/g, '\\$&')}/[^/]+/${name.replace('.', '\\.')}$`)
 
 const print = jest.mocked(printToFileAsync)
+
+/** A document as `printDocument` carries it: a string in its script, never markup. */
+const asData = (html: string) =>
+  JSON.stringify(html).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
 const share = jest.mocked(shareAsync)
 
 /** A renderer that answers each page with the next reply, and the pages it got. */
@@ -106,7 +115,8 @@ function renderer(
       return reply
     }),
     mermaidScript: jest.fn(async () => 'globalThis.mermaid={/*bundle*/}'),
-    html2canvasScript: jest.fn(async () => 'window.html2canvas=function(){/*bundle*/}')
+    html2canvasScript: jest.fn(async () => 'window.html2canvas=function(){/*bundle*/}'),
+    onNotice: jest.fn()
   }
 }
 
@@ -251,11 +261,16 @@ describe('exportArtifact: PDF', () => {
       deps
     )
     expect(print).toHaveBeenCalledWith({
-      html: buildDocumentHtml('# Plan', 'markdown', 'plan.md'),
+      html: expect.any(String),
       width: 595,
       height: 842,
       margins: { left: 28, right: 28, top: 28, bottom: 28 }
     })
+    // Review 9, F2 (d): the shared document, handed over as data its HTML parser never
+    // sees (print-document.test.ts runs it): nothing in it can navigate expo-print's view.
+    const printed = print.mock.calls[0][0]?.html ?? ''
+    expect(printed).toContain(asData(buildDocumentHtml('# Plan', 'markdown', 'plan.md')))
+    expect(printed).not.toContain('<h1')
     expect(uri).toMatch(inExportDir('plan.pdf'))
     expect(mockFs.log).toContainEqual(['move', 'file:///cache/Print/0F.pdf', uri])
     expect(share).toHaveBeenCalledWith(uri, {
@@ -275,11 +290,14 @@ describe('exportArtifact: PDF', () => {
     expect(deps.pages).toHaveLength(1)
     expect(deps.pages[0]).toContain('globalThis.mermaid={/*bundle*/}')
     expect(deps.pages[0]).toContain('"graph TD; A--\\u003eB"')
-    const html = print.mock.calls[0][0]?.html
-    // Laid out like desktop's mermaid PDF, with the diagram already drawn.
-    expect(html).toBe(buildDrawnMermaidDocumentHtml('<svg id="drawn"></svg>', 'flow.mmd'))
-    // Nothing left to run in the printer's web view.
-    expect(html).not.toContain('<script')
+    const html = print.mock.calls[0][0]?.html ?? ''
+    // Laid out like desktop's mermaid PDF, with the diagram already drawn — handed over as
+    // data (Review 9, F2 (d)): the drawn SVG is never parsed by the printer's parser.
+    expect(html).toContain(
+      asData(buildDrawnMermaidDocumentHtml('<svg id="drawn"></svg>', 'flow.mmd'))
+    )
+    expect(html).not.toContain('<svg')
+    expect(html).not.toContain('<pre')
   })
 
   // Review 6, #4 / review 7, #1–#2: an html artifact runs in the hidden web view, in the
@@ -295,7 +313,7 @@ describe('exportArtifact: PDF', () => {
     const PAGES = ['QUJD', 'REVGRw==']
 
     it('prints the pages its scripts drew, as pictures, and nothing else', async () => {
-      const deps = renderer({ type: 'pages', pages: PAGES })
+      const deps = renderer({ type: 'pages', pages: PAGES, textLabels: false })
       const uri = await exportArtifact(report, deps)
       // Rendered in the host page with html2canvas, at the printed page's width.
       expect(deps.rendered).toHaveLength(1)
@@ -310,9 +328,28 @@ describe('exportArtifact: PDF', () => {
       expect(printed).not.toContain('draw()')
       expect(uri).toMatch(inExportDir('report.pdf'))
       expect(deps.mermaidScript).not.toHaveBeenCalled()
+      expect(deps.onNotice).not.toHaveBeenCalled()
     })
 
-    it('a page WebKit refuses to read back says so, printing nothing', async () => {
+    // Review 9, F4: drawn again with an SVG's HTML labels as text (WebKit tainted the
+    // drawing): exported, and the person told the labels may look different — under the
+    // toolbar, before the share sheet opens.
+    it('drawn with text labels: exported, with a notice before the share sheet', async () => {
+      const deps = renderer({ type: 'pages', pages: PAGES, textLabels: true })
+      const order: string[] = []
+      deps.onNotice = (notice: string) => {
+        order.push(notice)
+      }
+      share.mockImplementationOnce(async () => {
+        order.push('share')
+      })
+      await exportArtifact(report, deps)
+      expect(print.mock.calls[0][0]?.html).toBe(htmlPrintDocument(PAGES))
+      expect(order).toEqual([TEXT_LABELS_NOTICE, 'share'])
+      expect(TEXT_LABELS_NOTICE).toMatch(/labels/i)
+    })
+
+    it('a page WebKit refuses to read back (even with text labels) says so, printing nothing', async () => {
       const deps = renderer({ type: 'error', code: 'tainted', message: 'tainted' })
       await expect(exportArtifact(report, deps)).rejects.toThrow(
         "This page draws something this device won't let the export read back"
@@ -456,6 +493,81 @@ describe('exportArtifact: what it refuses', () => {
     await expect(
       exportArtifact({ content: '# A', mode: 'markdown', title: 'a.md', format: 'pdf' }, renderer())
     ).rejects.toThrow('PDF not rendered')
+    expect(share).not.toHaveBeenCalled()
+  })
+})
+
+// Review 9, L4: the viewer closed after the render step: the export stops, and the share
+// sheet never opens over whatever screen is shown by then.
+describe('exportArtifact: the viewer closed (its abort signal)', () => {
+  const report = {
+    content: '<p>r</p>',
+    mode: 'html-preview' as const,
+    title: 'r.html',
+    format: 'pdf' as const
+  }
+  const CANCELLED = 'The export was cancelled: the viewer was closed.'
+
+  it('closed while the page rendered: nothing is printed or shared', async () => {
+    const controller = new AbortController()
+    const deps = renderer()
+    deps.render = jest.fn(async () => {
+      controller.abort()
+      return { type: 'pages' as const, pages: ['QUJD'], textLabels: false }
+    })
+    await expect(exportArtifact(report, { ...deps, signal: controller.signal })).rejects.toThrow(
+      CANCELLED
+    )
+    expect(print).not.toHaveBeenCalled()
+    expect(share).not.toHaveBeenCalled()
+  })
+
+  it('closed while printing: the PDF is removed, the share sheet never opens', async () => {
+    const controller = new AbortController()
+    let land: (r: { uri: string; numberOfPages: number }) => void = () => undefined
+    print.mockImplementationOnce(() => new Promise((r) => (land = r)))
+    const done = exportArtifact(
+      { content: '# x', mode: 'markdown', title: 'p.md', format: 'pdf' },
+      { ...renderer(), signal: controller.signal }
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    controller.abort()
+    land({ uri: 'file:///cache/Print/late.pdf', numberOfPages: 1 })
+    await expect(done).rejects.toThrow(CANCELLED)
+    expect(mockFs.log).toContainEqual(['rm', 'file:///cache/Print/late.pdf'])
+    expect(mockFs.log).not.toContainEqual([
+      'move',
+      'file:///cache/Print/late.pdf',
+      expect.anything()
+    ])
+    expect(share).not.toHaveBeenCalled()
+  })
+
+  it('closed before it began: nothing at all', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const deps = { ...renderer(), signal: controller.signal }
+    await expect(
+      exportArtifact({ content: '# x', mode: 'markdown', title: 'p.md', format: 'html' }, deps)
+    ).rejects.toThrow(CANCELLED)
+    expect(mockFs.files.size).toBe(0)
+    expect(share).not.toHaveBeenCalled()
+  })
+
+  it('closed while a PNG was drawn: nothing written or shared', async () => {
+    const controller = new AbortController()
+    const deps = renderer()
+    deps.render = jest.fn(async () => {
+      controller.abort()
+      return { type: 'png' as const, base64: 'UE5H', width: 1, height: 1 }
+    })
+    await expect(
+      exportArtifact(
+        { content: '<svg/>', mode: 'svg-preview', title: 'l.svg', format: 'png' },
+        { ...deps, signal: controller.signal }
+      )
+    ).rejects.toThrow(CANCELLED)
+    expect(mockFs.files.size).toBe(0)
     expect(share).not.toHaveBeenCalled()
   })
 })

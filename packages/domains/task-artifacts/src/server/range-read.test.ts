@@ -81,9 +81,25 @@ test('a blob-backed artifact is versioned by its content hash', async () => {
   const a = (await store.createArtifact(db, { taskId: 't', title: 'h.txt', content: 'hash me' }))!
   unlinkSync((await store.getArtifactPath(db, a.id))!)
   const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
-  expect((await store.readArtifactBytesRange(db, a.id, 0, 2))!.version).toBe(
-    `blob:${version.content_hash}`
+  expect((await store.readArtifactBytesRange(db, a.id, 0, 2))!.version).toMatch(
+    new RegExp(`^blob:${version.content_hash}:`)
   )
+})
+
+// Review 9, L7: a blob's version also carries its file's stamp, so a blob file replaced
+// between two pieces of one download (same name = same hash) is refused, not spliced.
+test("a blob's version changes when its file is replaced between pieces", async () => {
+  const { store, db } = setup()
+  const a = (await store.createArtifact(db, { taskId: 't', title: 's.txt', content: 'stamp me!' }))!
+  unlinkSync((await store.getArtifactPath(db, a.id))!)
+  const first = (await store.readArtifactBytesRange(db, a.id, 0, 4))!
+  const version = (await store.getCurrentArtifactVersion(db, { artifactId: a.id }))!
+  const file = new BlobStore(roots[roots.length - 1]).blobPath(version.content_hash)
+  // Replaced (a new inode, the same length), as a hub-disk change would.
+  unlinkSync(file)
+  writeFileSync(file, 'stomp me!')
+  const later = (await store.readArtifactBytesRange(db, a.id, 4, 4))!
+  expect(later.version).not.toBe(first.version)
 })
 
 // Review 8, L8: a download's first piece checks the whole blob's hash. Asking for

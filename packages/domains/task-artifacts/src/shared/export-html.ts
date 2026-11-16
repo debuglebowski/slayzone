@@ -101,6 +101,21 @@ function mermaidRunScript(mermaidJs: string, nonce: string): string {
 </script>`
 }
 
+/**
+ * `html` with every `<meta …>` and `<base …>` tag turned into text: the `<` that opens
+ * one is escaped, so the parser never sees an element. A content policy governs what a
+ * document fetches, not where it navigates — a `<meta http-equiv=refresh>` (or a
+ * `<base>` re-pointing relative links) in a markdown or svg body would send the render,
+ * and the PDF, to a page the artifact chose, on every client. Inside foreign content
+ * (`<svg>`) a `<meta>` breaks out to an HTML element, so svg bodies need it too.
+ * Elsewhere the escape is harmless: in an attribute value or RCDATA (`<textarea>`,
+ * `<title>`) `&lt;` reads back as `<`. An html artifact is a page of its own and is
+ * not touched; each host blocks its navigation instead.
+ */
+export function inertNavigationTags(html: string): string {
+  return html.replace(/<(?=\/?(?:meta|base)(?:[\s/>]|$))/gi, '&lt;')
+}
+
 function codeTableHtml(content: string): string {
   const rows = content
     .split('\n')
@@ -194,13 +209,13 @@ ${mermaidRunScript(mermaidJs, nonce)}
   let body: string
   switch (mode) {
     case 'markdown':
-      body = marked.parse(content, { async: false }) as string
+      body = inertNavigationTags(marked.parse(content, { async: false }) as string)
       break
     case 'html-preview':
       body = content
       break
     case 'svg-preview':
-      body = `<div style="display:flex;justify-content:center;padding:2rem">${content}</div>`
+      body = `<div style="display:flex;justify-content:center;padding:2rem">${inertNavigationTags(content)}</div>`
       break
     case 'code':
       body = codeTableHtml(content)
@@ -220,7 +235,7 @@ export function buildDrawnMermaidDocumentHtml(svg: string, title: string): strin
   return `${documentHead(title, null)}
 <style>${PDF_CSS} .mermaid svg { max-width: 100%; }</style>
 </head><body>
-<pre class="mermaid">${svg}</pre>
+<pre class="mermaid">${inertNavigationTags(svg)}</pre>
 </body></html>`
 }
 
@@ -243,7 +258,7 @@ export function buildPngHtml(
   const nonce = opts.nonce ?? (isMermaid ? newNonce() : null)
   const body = isMermaid
     ? `<pre class="mermaid">${escapeHtml(content)}</pre>${mermaidRunScript(mermaidJs as string, nonce as string)}`
-    : `<div style="display:inline-block">${content}</div>`
+    : `<div style="display:inline-block">${inertNavigationTags(content)}</div>`
 
   return `${documentHead(title, nonce)}
 <style>* { margin: 0; padding: 0; } body { background: white; display: inline-block; } svg { display: block; }</style>

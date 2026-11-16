@@ -105,8 +105,13 @@ export const electronBootstrap = {
   saveTargetOpen: (request: SaveTargetRequest): Promise<SaveTargetOpenResult> =>
     api().app.saveTargetOpen?.(request) ??
     Promise.resolve({ ok: false as const, error: SAVE_NOT_SUPPORTED }),
-  saveTargetWrite: (targetId: string, path: string, data: Uint8Array): Promise<void> =>
-    api().app.saveTargetWrite?.(targetId, path, data) ??
+  saveTargetWrite: (
+    targetId: string,
+    path: string,
+    data: Uint8Array,
+    size?: number
+  ): Promise<void> =>
+    api().app.saveTargetWrite?.(targetId, path, data, size) ??
     Promise.reject(new Error(SAVE_NOT_SUPPORTED)),
   saveTargetMkdir: (targetId: string, path: string): Promise<void> =>
     api().app.saveTargetMkdir?.(targetId, path) ?? Promise.reject(new Error(SAVE_NOT_SUPPORTED)),

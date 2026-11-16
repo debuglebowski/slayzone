@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterAll, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, describe, expect, test, vi } from 'vitest'
 import { CdpFrameReader, launchBrowser } from './cdp'
 import { renderPdf } from './render'
 
@@ -258,4 +258,88 @@ describe.skipIf(process.platform === 'win32')('#3: a page that stops answering m
     )
     expect(pdf.subarray(0, 8).toString()).toBe('%PDF-1.7')
   }, 30_000)
+})
+
+// Review 9, F2: a page the renderer gives up on (it tried to navigate away) still gets
+// the answers it is held on — a paused request left unanswered would go out when the
+// session ends — and its browser can be ended at once instead of shut down.
+describe.skipIf(process.platform === 'win32')('review 9: a page given up on', () => {
+  test('failPage: its commands fail with the given error; answers to its pauses still go', async () => {
+    const log = path.join(tmp, 'failpage.log')
+    const b = await withEnv({ LOG_FILE: log }, () => launchBrowser(fake('failpage')))
+    try {
+      const { sessionId } = await b.send<{ sessionId: string }>('Target.attachToTarget', {
+        targetId: 't1',
+        flatten: true
+      })
+      const err = new Error('refused')
+      b.failPage(sessionId, err)
+      await expect(b.send('Runtime.evaluate', { expression: '1' }, sessionId)).rejects.toBe(err)
+      for (const method of [
+        'Fetch.failRequest',
+        'Fetch.continueRequest',
+        'Fetch.fulfillRequest',
+        'Page.handleJavaScriptDialog'
+      ]) {
+        await expect(b.send(method, { requestId: 'r1' }, sessionId)).resolves.toEqual({})
+      }
+      const sent = fs.readFileSync(log, 'utf8').split('\n')
+      expect(sent).not.toContain('Runtime.evaluate')
+      expect(sent).toContain('Fetch.failRequest')
+      expect(sent).toContain('Page.handleJavaScriptDialog')
+    } finally {
+      await b.close()
+    }
+  }, 30_000)
+
+  test('close({ kill: true }) ends the browser without asking it to shut down', async () => {
+    const log = path.join(tmp, 'kill.log')
+    const b = await withEnv({ LOG_FILE: log }, () => launchBrowser(fake('kill')))
+    await b.close({ kill: true })
+    expect(fs.readFileSync(log, 'utf8').split('\n')).not.toContain('Browser.close')
+    // Ended: nothing more can be sent.
+    await expect(b.send('Browser.getVersion')).rejects.toThrow()
+  }, 30_000)
+
+  // Review 9, F1: the CDP download denial lasts only while a client is attached; once
+  // a shutting-down browser lets go of it, the profile's own setting decides — never
+  // Chrome's default (the person's Downloads folder).
+  describe('the profile saves downloads inside itself', () => {
+    afterEach(() => vi.restoreAllMocks())
+    async function prefsOf(opts: { downloadDir?: string }): Promise<{
+      profile: string
+      prefs: { download: Record<string, unknown>; savefile: Record<string, unknown> }
+    }> {
+      const made: string[] = []
+      const mkdtemp = fs.mkdtempSync
+      vi.spyOn(fs, 'mkdtempSync').mockImplementation(((prefix: string, ...rest: never[]) => {
+        const dir = mkdtemp(prefix, ...rest) as string
+        made.push(dir)
+        return dir
+      }) as typeof fs.mkdtempSync)
+      const b = await launchBrowser(fake('prefs'), opts)
+      try {
+        const profile = made.find((d) => path.basename(d).startsWith('slay-export-profile-'))
+        if (!profile) throw new Error('no profile made')
+        const file = path.join(profile, 'Default', 'Preferences')
+        return { profile, prefs: JSON.parse(fs.readFileSync(file, 'utf8')) }
+      } finally {
+        await b.close({ kill: true })
+      }
+    }
+
+    test('by default: a directory inside the throwaway profile', async () => {
+      const { profile, prefs } = await prefsOf({})
+      const dir = path.join(profile, 'downloads')
+      expect(prefs.download).toEqual({ default_directory: dir, prompt_for_download: false })
+      expect(prefs.savefile).toEqual({ default_directory: dir })
+      // Removed with the profile.
+      expect(fs.existsSync(profile)).toBe(false)
+    }, 30_000)
+
+    test('or the one given', async () => {
+      const { prefs } = await prefsOf({ downloadDir: '/somewhere/else' })
+      expect(prefs.download.default_directory).toBe('/somewhere/else')
+    }, 30_000)
+  })
 })

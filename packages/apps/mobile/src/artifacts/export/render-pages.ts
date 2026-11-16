@@ -15,16 +15,19 @@
  *
  * - `htmlRasterPage`: an html artifact, run as the viewer runs it — in an
  *   `<iframe sandbox="allow-scripts">` inside a host page of ours, so its dialogs never
- *   reach the app as native alerts — then drawn page by page as PNGs (html2canvas, in the host). The
- *   export prints only those pictures (`htmlPrintDocument`): nothing the artifact wrote
- *   is ever parsed by expo-print's web view (no navigation policy, no cancel). The
- *   artifact runs only here, where a page that loops is unmounted at the timeout.
+ *   reach the app as native alerts — then drawn page by page as PNGs (html2canvas, in
+ *   the host), each page sent to the app as soon as it is drawn. The export prints only
+ *   those pictures (`htmlPrintDocument`): nothing the artifact wrote is ever parsed by
+ *   expo-print's web view (no navigation policy, no cancel). The artifact runs only
+ *   here, where a page that loops (and so says nothing) is unmounted at the renderer's
+ *   idle timeout.
  *
  * The mermaid and PNG pages run only their own scripts (a nonce'd policy, as the
  * viewer's pages): a script inside an artifact's SVG never runs. Every page has a token
- * of its own that its replies carry; a message without it is not a reply
- * (`parseExportRenderReply`). An html artifact never sees its page's token: it runs in a
- * frame of another origin, and the token is only in the host's script.
+ * of its own that its messages carry; a message without it is not one
+ * (`parseExportRenderMessage`) — the token is the only thing that tells the page's
+ * messages from anything else posted to the app. An html artifact never sees its page's
+ * token: it runs in a frame of another origin, and the token is only in the host's script.
  */
 import { mermaidInitOptions } from '@slayzone/markdown/mermaid-config'
 import { buildDocumentHtml, buildPngHtml } from '@slayzone/task-artifacts/export-html'
@@ -33,31 +36,62 @@ import { contentPolicy, inlineScript, newNonce, pageShell } from '../pages/page-
 /** Marks the replies of these pages among anything else a page could post. */
 export const EXPORT_RENDER_SOURCE = 'slayzone-export'
 
-/** A page for the hidden web view: its HTML and the token its replies carry. */
+/** A page for the hidden web view: its HTML and the token its messages carry. */
 export interface ExportRenderPage {
   html: string
   token: string
   /** The web view's size in points while it renders (default: the renderer's own). */
   viewport?: { width: number; height: number }
-  /** How long it may take (default: the renderer's own). */
-  timeoutMs?: number
+  /**
+   * How long it may go without a message (default: the renderer's own): every message of
+   * the page restarts the clock, so a long render that keeps going is never cut short.
+   */
+  idleTimeoutMs?: number
+  /** The longest message it sends, with room to spare (default {@link EXPORT_MESSAGE_MAX_CHARS}). */
+  maxMessageChars?: number
 }
 
 export type ExportRenderErrorCode = 'render' | 'tainted'
 
+/** What a render answers with (an html artifact's pages put together: `collectExportReply`). */
 export type ExportRenderReply =
   /** The drawn diagram (`mermaidSvgPage`). */
   | { type: 'svg'; svg: string }
   /** The PNG's bytes, base64, and its size in pixels (`pngCapturePage`). */
   | { type: 'png'; base64: string; width: number; height: number }
-  /** The html artifact's pages, each a PNG's bytes, base64 (`htmlRasterPage`). */
-  | { type: 'pages'; pages: string[] }
+  /**
+   * The html artifact's pages, each a PNG's bytes, base64 (`htmlRasterPage`).
+   * `textLabels`: drawn again with an SVG's HTML labels as plain SVG text (WebKit would
+   * not let a drawing of them be read back), so they may look different.
+   */
+  | { type: 'pages'; pages: string[]; textLabels: boolean }
   /** `render`: nothing could be drawn (`message` says why); `tainted`: see above. */
   | { type: 'error'; code: ExportRenderErrorCode; message: string }
 
+/** What a page posts: a reply, or (an html artifact's page) a step towards one. */
+export type ExportRenderMessage =
+  | Exclude<ExportRenderReply, { type: 'pages' }>
+  /** Still going: it settled, its stage loaded. */
+  | { type: 'progress' }
+  /** One page picture, PNG base64, the `index`th (from 0). */
+  | { type: 'page'; index: number; base64: string }
+  /** The pages so far are dropped: the page is drawn again from its top. */
+  | { type: 'restart' }
+  /** All `count` pages were sent. */
+  | { type: 'pages-end'; count: number; textLabels: boolean }
+
+/** base64's length for `bytes` bytes. */
+const base64Chars = (bytes: number): number => Math.ceil(bytes / 3) * 4
+
+/**
+ * The longest PNG of `pixels` RGBA pixels, as base64: stored uncompressed (zlib's worst
+ * case: about 0.1 % on top) with a filter byte a row, plus the PNG's own chunks.
+ */
+const pngMaxChars = (pixels: number): number => base64Chars(Math.ceil(pixels * 4 * 1.01) + 4096)
+
 /**
  * How every reply of the page with `token` opens: its source and token, written by hand
- * in this order (the pages' `post`). `parseExportRenderReply` parses nothing else.
+ * in this order (the pages' `post`). `parseExportRenderMessage` parses nothing else.
  */
 const replyHead = (token: string): string =>
   `{"source":${JSON.stringify(EXPORT_RENDER_SOURCE)},"token":${JSON.stringify(token)}`
@@ -66,7 +100,7 @@ const replyHead = (token: string): string =>
 const newToken = (): string => `${newNonce()}${newNonce()}${newNonce()}`
 
 /** A value as script source, safe inside an inline `<script>`. */
-function scriptJson(value: unknown): string {
+export function scriptJson(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
@@ -151,6 +185,13 @@ export function mermaidSvgPage(
  * scale drops below 2x to stay under it.
  */
 const MAX_CANVAS_PIXELS = 16_000_000
+
+/**
+ * The longest message a mermaid or PNG page sends, twice over: the largest is a PNG of
+ * {@link MAX_CANVAS_PIXELS} (an SVG drawn by mermaid is far smaller). A longer message is
+ * dropped unread (`parseExportRenderMessage`).
+ */
+export const EXPORT_MESSAGE_MAX_CHARS = 2 * pngMaxChars(MAX_CANVAS_PIXELS)
 
 const captureScript = (token: string): string => `(function () {${replyHelpers(token)}
   function length(value) {
@@ -237,8 +278,8 @@ export function pngCapturePage(svg: string, title: string): ExportRenderPage {
  * `minAfterLoadMs` on (a chart's draw-in animation) with its DOM unchanged for
  * `quietMs`; and anyway `maxAfterLoadMs` after load (a page that keeps changing, a
  * clock) or `maxLoadMs` after it started (a request that never ends). All of it well
- * inside the render's own timeout ({@link HTML_RENDER_TIMEOUT_MS}), which ends a page
- * whose script never yields.
+ * inside the render's idle timeout ({@link HTML_RENDER_IDLE_MS}: nothing is posted while
+ * it settles), which ends a page whose script never yields.
  */
 export const HTML_SETTLE = {
   tickMs: 100,
@@ -249,15 +290,19 @@ export const HTML_SETTLE = {
 } as const
 
 /**
- * An html artifact's render: its settle (20 s at most), then drawing every page
- * (about a second for a few pages; a long report takes longer).
+ * How long an html artifact's render may go without a message: the host posts one when
+ * the artifact has settled (20 s at most, `HTML_SETTLE`), when its stage has loaded, and
+ * with each page drawn — so the longest silence is the settle, or one drawing (ended by
+ * the page itself at {@link HTML_DRAW_TIMEOUT_MS}, naming what it waited on). There is no
+ * cap on the whole: a long report on a slow phone takes as long as it takes, as long as
+ * pages keep coming. A page that never yields (a loop) says nothing and is ended here.
  */
-export const HTML_RENDER_TIMEOUT_MS = 90_000
+export const HTML_RENDER_IDLE_MS = 45_000
 
 /**
  * One html2canvas call (a few pages): a drawing that takes longer still waits on
- * something that never finished loading, and the export fails naming it — well before
- * {@link HTML_RENDER_TIMEOUT_MS}. html2canvas's own image loads end at 10 s.
+ * something that never finished loading, and the export fails naming it — before
+ * {@link HTML_RENDER_IDLE_MS}. html2canvas's own image loads end at 10 s.
  */
 export const HTML_DRAW_TIMEOUT_MS = 30_000
 
@@ -278,6 +323,15 @@ export const HTML_PAGE = { width: 539, height: 780 } as const
 
 /** Drawn at 2x (≈ 144 dpi on paper). */
 const RASTER_SCALE = 2
+
+/**
+ * The longest message an html artifact's page sends, twice over: one page picture (a
+ * page's pixels at {@link RASTER_SCALE}, a page a message). Its artifact's frames can post
+ * to the app too (WKWebView gives every frame the handler): anything longer is dropped
+ * unread.
+ */
+export const HTML_MESSAGE_MAX_CHARS =
+  2 * pngMaxChars(HTML_PAGE.width * RASTER_SCALE * HTML_PAGE.height * RASTER_SCALE)
 /**
  * Pages drawn per html2canvas call: each call clones the whole document, so fewer calls
  * are faster; four pages at 2x are a 1078 × 6240 canvas (≈ 6.7M pixels, under iOS's
@@ -291,6 +345,8 @@ const SOFT_BREAK = 0.2
 const ARTIFACT_FRAME_ID = 'slz-export-artifact'
 const SNAPSHOT_MESSAGE = 'slz-export-snapshot'
 const SNAPSHOT_FAILED_MESSAGE = 'slz-export-failed'
+/** The artifact's document has loaded (its own `load`): see the host's navigation guard. */
+const LOADED_MESSAGE = 'slz-export-loaded'
 
 /**
  * The snapshot script, first in the artifact's document (`htmlArtifactDocument`): once
@@ -377,7 +433,10 @@ const snapshotScript = (): string => `(function () {
   var started = now(), loadedAt = 0, changedAt = started;
   var observer = new MutationObserver(function () { changedAt = now(); });
   observer.observe(doc, { childList: true, subtree: true, attributes: true, characterData: true });
-  window.addEventListener('load', function () { loadedAt = now(); });
+  window.addEventListener('load', function () {
+    loadedAt = now();
+    post({ type: ${scriptJson(LOADED_MESSAGE)} });
+  });
 
   function settled(t) {
     if (!loadedAt) return t - started >= S.maxLoadMs;
@@ -429,6 +488,39 @@ const hostScript = (token: string): string => `(function () {
   }
   function delay(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
+  // An SVG's HTML (a <foreignObject>: mermaid's labels, many charts) as plain SVG text:
+  // its text, centred in its box (as mermaid centres a label), else at its corner; one
+  // with no text is dropped. WebKit won't let a drawing of an SVG with HTML in it be read
+  // back; one with text only, it will.
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  function textLabels(parsed) {
+    var found = parsed.getElementsByTagName('foreignObject'), list = [];
+    for (var i = 0; i < found.length; i++) list.push(found[i]);
+    for (var j = 0; j < list.length; j++) {
+      var fo = list[j];
+      var label = ('' + (fo.textContent || '')).replace(/\\s+/g, ' ').trim();
+      if (!label) { fo.remove(); continue; }
+      var text = parsed.createElementNS(SVG_NS, 'text');
+      var x = parseFloat(fo.getAttribute('x')) || 0, y = parseFloat(fo.getAttribute('y')) || 0;
+      var w = parseFloat(fo.getAttribute('width')), h = parseFloat(fo.getAttribute('height'));
+      if (w > 0 && h > 0) {
+        x += w / 2;
+        y += h / 2;
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'central');
+      } else {
+        text.setAttribute('dominant-baseline', 'hanging');
+      }
+      text.setAttribute('x', String(x));
+      text.setAttribute('y', String(y));
+      var transform = fo.getAttribute('transform');
+      if (transform) text.setAttribute('transform', transform);
+      text.textContent = label;
+      fo.replaceWith(text);
+    }
+    return list.length;
+  }
+
   // The snapshot, parsed (no browsing context: nothing loads or runs) and made inert.
   // Whatever the artifact's serialization did, this is the tree that gets staged: the
   // parse is never repeated, so nothing can re-parse into something else.
@@ -453,9 +545,13 @@ const hostScript = (token: string): string => `(function () {
 
   // The stage: a frame of this page's origin (so html2canvas can read it) whose policy,
   // first in its head before any of the artifact's content, lets nothing run. Returns its
-  // document and the pictures that failed to load in it (\`broken\`, see \`release\`).
-  function stage(html) {
+  // document, the pictures that failed to load in it (\`broken\`, see \`release\`), its
+  // frame, and how many <foreignObject>s it held (\`withTextLabels\`: each made SVG text).
+  function stage(html, withTextLabels) {
     var parsed = inert(html);
+    var labels = withTextLabels
+      ? textLabels(parsed)
+      : parsed.getElementsByTagName('foreignObject').length;
     var frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-same-origin allow-scripts');
     frame.setAttribute('title', 'Export');
@@ -487,7 +583,7 @@ const hostScript = (token: string): string => `(function () {
     for (var k = 0; k < found.length; k++) {
       if (found[k] !== policy) throw new Error('The page holds content the export cannot draw safely.');
     }
-    return { doc: doc, broken: broken };
+    return { doc: doc, broken: broken, frame: frame, foreignObjects: labels };
   }
 
   // Images and stylesheets loaded (or failed), fonts ready: then the layout is final.
@@ -614,6 +710,9 @@ const hostScript = (token: string): string => `(function () {
   // Exported pages are paper, not app chrome: white whatever the theme.
   var PAPER = 'white';
 
+  // Each page goes to the app as soon as it is cut: one message a page, each one a sign
+  // of progress for the app's idle timer.
+  var sent = 0;
   function picture(canvas, y, height) {
     var page = document.createElement('canvas');
     page.width = canvas.width;
@@ -625,12 +724,14 @@ const hostScript = (token: string): string => `(function () {
     var url = page.toDataURL('image/png');
     var prefix = 'data:image/png;base64,';
     if (url.indexOf(prefix) !== 0 || url.length === prefix.length) throw new Error('A page is too large to draw.');
-    return url.slice(prefix.length);
+    post({ type: 'page', index: sent, base64: url.slice(prefix.length) });
+    sent++;
   }
 
-  // Cuts a drawing of the page from \`top\` into pages; returns the CSS pixels used (the
-  // rest, less than a page, starts the next drawing unless this is the last).
-  function cut(canvas, last, pages) {
+  // Cuts a drawing of the page from \`top\` into pages, sending each; returns the CSS
+  // pixels used (the rest, less than a page, starts the next drawing unless this is the
+  // last).
+  function cut(canvas, last) {
     var context = canvas.getContext('2d');
     var full = PAGE * SCALE, y = 0;
     while (canvas.height - y > 0) {
@@ -641,19 +742,20 @@ const hostScript = (token: string): string => `(function () {
       } else {
         end = pageEnd(context, canvas.width, y, full);
       }
-      pages.push(picture(canvas, y, end));
+      picture(canvas, y, end);
       y += end;
     }
     return y / SCALE;
   }
 
+  // Draws the stage from its top, sending each page; resolves once all are sent.
   function draw(doc) {
     var root = doc.documentElement;
     var total = Math.max(1, Math.ceil(Math.max(root.scrollHeight, doc.body ? doc.body.scrollHeight : 0)));
-    var pages = [], top = 0;
+    var top = 0;
     var fonts = boundCopyFonts(doc);
     function next() {
-      if (top >= total) return Promise.resolve(pages);
+      if (top >= total) return Promise.resolve();
       var height = Math.min(PAGE * PER_DRAW, total - top);
       var last = top + height >= total;
       return drawPart(doc, {
@@ -661,23 +763,76 @@ const hostScript = (token: string): string => `(function () {
         scrollX: 0, scrollY: 0, scale: SCALE, backgroundColor: PAPER,
         useCORS: true, logging: false, imageTimeout: 10000
       }).then(function (canvas) {
-        top += cut(canvas, last, pages);
+        top += cut(canvas, last);
         return next();
       });
     }
     return next().then(
-      function (drawn) { fonts.disconnect(); return drawn; },
+      function () { fonts.disconnect(); },
       function (error) { fonts.disconnect(); throw error; }
     );
   }
 
+  // Stages the snapshot and draws it from its top. Fails with \`{ error, foreignObjects }\`
+  // (how many the stage held), its stage removed.
+  function attempt(html, withTextLabels) {
+    var staged;
+    try { staged = stage(html, withTextLabels); } catch (error) {
+      return Promise.reject({ error: error, foreignObjects: 0 });
+    }
+    return loaded(staged.doc)
+      .then(function () {
+        release(staged);
+        post({ type: 'progress' });
+        return draw(staged.doc);
+      })
+      .then(null, function (error) {
+        staged.frame.remove();
+        throw { error: error, foreignObjects: staged.foreignObjects };
+      });
+  }
+
+  // Draws the snapshot; resolves with whether its SVGs' HTML was drawn as text. A drawing
+  // WebKit won't let be read back (an SVG with HTML in it taints it) is dropped and the
+  // page drawn again, once, with each <foreignObject> as SVG text.
+  function render(html) {
+    return attempt(html, false).then(
+      function () { return false; },
+      function (failed) {
+        var tainted = failed.error && failed.error.name === 'SecurityError';
+        if (!tainted || !failed.foreignObjects) throw failed;
+        sent = 0;
+        post({ type: 'restart' });
+        return attempt(html, true).then(function () { return true; });
+      }
+    );
+  }
+
   var taken = false;
+  // The artifact's frame loads in its place another document once its own has loaded
+  // (it said so: LOADED; the frame's own load event comes before that message does): it
+  // navigated — reloaded, or went to about:blank, the only URLs the web view lets a frame
+  // load. Not the artifact: the export stops, nothing of it is drawn. (A frame that says
+  // LOADED early only fails its own export.)
+  var artifactLoaded = false;
+  document.addEventListener('load', function (event) {
+    var frame = document.getElementById(${scriptJson(ARTIFACT_FRAME_ID)});
+    if (taken || !frame || event.target !== frame || !artifactLoaded) return;
+    taken = true;
+    frame.remove();
+    fail(new Error('The page opened another page in its place, so it was not exported.'));
+  }, true);
+
   window.addEventListener('message', function (event) {
     var frame = document.getElementById(${scriptJson(ARTIFACT_FRAME_ID)});
     // Only the artifact's own frame (not a frame inside it), and only its first answer.
     if (taken || !frame || event.source !== frame.contentWindow) return;
     var data = event.data;
     if (!data || typeof data !== 'object') return;
+    if (data.type === ${scriptJson(LOADED_MESSAGE)}) {
+      artifactLoaded = true;
+      return;
+    }
     var failed = data.type === ${scriptJson(SNAPSHOT_FAILED_MESSAGE)};
     if (!failed && (data.type !== ${scriptJson(SNAPSHOT_MESSAGE)} || typeof data.html !== 'string')) return;
     taken = true;
@@ -687,14 +842,10 @@ const hostScript = (token: string): string => `(function () {
       fail(new Error('' + data.message));
       return;
     }
-    var staged;
-    try { staged = stage(data.html); } catch (error) { fail(error); return; }
-    loaded(staged.doc)
-      .then(function () {
-        release(staged);
-        return draw(staged.doc);
-      })
-      .then(function (pages) { post({ type: 'pages', pages: pages }); }, fail);
+    post({ type: 'progress' });
+    render(data.html).then(function (withTextLabels) {
+      post({ type: 'pages-end', count: sent, textLabels: withTextLabels });
+    }, function (failed) { fail(failed.error); });
   });
 })();`
 
@@ -743,7 +894,8 @@ export function htmlArtifactDocument(content: string, title: string): string {
  * the artifact makes inherits that), popups, top navigation or forms, and it can't reach
  * the host or its token. The host takes the frame's snapshot (from that frame only),
  * removes the frame, stages the snapshot inert in a frame of its own, draws it page by
- * page with html2canvas, and posts the pages to the app as PNGs, carrying its token.
+ * page with html2canvas, and posts each page to the app as a PNG as soon as it is drawn
+ * (then how many there were), every message carrying its token.
  * Laid out at the printed page's width.
  */
 export function htmlRasterPage(
@@ -763,7 +915,13 @@ export function htmlRasterPage(
     `<iframe id="${ARTIFACT_FRAME_ID}" sandbox="allow-scripts" title="Export" srcdoc="${frame}"></iframe>`,
     '</body></html>'
   ].join('')
-  return { html, token, viewport: HTML_PAGE, timeoutMs: HTML_RENDER_TIMEOUT_MS }
+  return {
+    html,
+    token,
+    viewport: HTML_PAGE,
+    idleTimeoutMs: HTML_RENDER_IDLE_MS,
+    maxMessageChars: HTML_MESSAGE_MAX_CHARS
+  }
 }
 
 /** A page picture: PNG bytes as base64, nothing else. */
@@ -794,15 +952,23 @@ export function htmlPrintDocument(pages: readonly string[]): string {
 }
 
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0
 
 /**
- * A reply of the page with `token`, or null for anything else. A message that doesn't
- * open as the page's replies do (`replyHead`: its token) is never parsed: a frame of an
- * html artifact can post to the app straight (WKWebView gives every frame the handler),
- * megabytes at a time, and never knows the token.
+ * A message of the page with `token`, or null for anything else. The token is the only
+ * guard: WKWebView gives its message handler to every frame, so an html artifact's frame
+ * — and any frame inside it, an `about:blank` one too — can post to the app straight,
+ * megabytes at a time; it never knows the token. A message longer than `maxChars` (the
+ * page's longest, twice over) is dropped before anything of it is read; one that doesn't
+ * open as the page's messages do (`replyHead`: its token) is never parsed.
  */
-export function parseExportRenderReply(data: string, token: string): ExportRenderReply | null {
-  if (typeof data !== 'string' || !data.startsWith(replyHead(token))) return null
+export function parseExportRenderMessage(
+  data: string,
+  token: string,
+  maxChars: number = EXPORT_MESSAGE_MAX_CHARS
+): ExportRenderMessage | null {
+  if (typeof data !== 'string' || data.length > maxChars) return null
+  if (!data.startsWith(replyHead(token))) return null
   let raw: unknown
   try {
     raw = JSON.parse(data)
@@ -821,11 +987,17 @@ export function parseExportRenderReply(data: string, token: string): ExportRende
       return typeof r.base64 === 'string' && isNumber(r.width) && isNumber(r.height)
         ? { type: 'png', base64: r.base64, width: r.width, height: r.height }
         : null
-    case 'pages':
-      return Array.isArray(r.pages) &&
-        r.pages.length > 0 &&
-        r.pages.every((page) => typeof page === 'string' && BASE64.test(page))
-        ? { type: 'pages', pages: r.pages as string[] }
+    case 'progress':
+      return { type: 'progress' }
+    case 'page':
+      return isIndex(r.index) && typeof r.base64 === 'string' && BASE64.test(r.base64)
+        ? { type: 'page', index: r.index, base64: r.base64 }
+        : null
+    case 'restart':
+      return { type: 'restart' }
+    case 'pages-end':
+      return isIndex(r.count) && typeof r.textLabels === 'boolean'
+        ? { type: 'pages-end', count: r.count, textLabels: r.textLabels }
         : null
     case 'error':
       return (r.code === 'render' || r.code === 'tainted') && typeof r.message === 'string'
@@ -833,5 +1005,40 @@ export function parseExportRenderReply(data: string, token: string): ExportRende
         : null
     default:
       return null
+  }
+}
+
+/**
+ * A render's messages put together: `take(message)` answers with the reply once there is
+ * one, else null. An html artifact's pages come one a message, in order (a `restart`
+ * drops those so far), and answer as `pages` at their end; a page out of order, or an end
+ * that doesn't count the pages sent, is an error.
+ */
+export function collectExportReply(): (message: ExportRenderMessage) => ExportRenderReply | null {
+  let pages: string[] = []
+  const broken = (message: string): ExportRenderReply => ({
+    type: 'error',
+    code: 'render',
+    message
+  })
+  return (message) => {
+    switch (message.type) {
+      case 'progress':
+        return null
+      case 'restart':
+        pages = []
+        return null
+      case 'page':
+        if (message.index !== pages.length) return broken('A page of the export came out of order.')
+        pages.push(message.base64)
+        return null
+      case 'pages-end':
+        if (message.count === 0 || message.count !== pages.length) {
+          return broken(`The export sent ${pages.length} of its ${message.count} pages.`)
+        }
+        return { type: 'pages', pages, textLabels: message.textLabels }
+      default:
+        return message
+    }
   }
 }

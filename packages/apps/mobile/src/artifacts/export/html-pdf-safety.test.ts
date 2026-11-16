@@ -139,9 +139,28 @@ function expectOnlyPictures(html: string, doc: Document) {
   const elements = elementsOf(doc)
   const tags = elements.map((el) => el.localName)
   // Nothing that can run, navigate or load a page.
-  for (const tag of ['iframe', 'frame', 'script', 'object', 'embed', 'template', 'noscript']) {
+  for (const tag of [
+    'iframe',
+    'frame',
+    'script',
+    'object',
+    'embed',
+    'template',
+    'noscript',
+    'link',
+    'base'
+  ]) {
     expect(tags).not.toContain(tag)
   }
+  // Review 9, F2: no URL at all but the pictures' own data: ones.
+  for (const el of elements) {
+    for (const attr of Array.from(el.attributes)) {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(attr.value.trim()) && attr.name !== 'content') {
+        expect(`${attr.name}=${attr.value}`).toMatch(/^src=data:image\/png;base64,/)
+      }
+    }
+  }
+  expect(html).not.toMatch(/(https?|file|blob|javascript):/i)
   const metas = elements.filter((el) => el.localName === 'meta')
   expect(metas.map((m) => m.getAttribute('http-equiv'))).toEqual(['Content-Security-Policy'])
   // Nothing of the artifact's: our page pictures only.
@@ -201,4 +220,64 @@ describe('the artifact runs only inside a sandboxed frame (#2: no native dialogs
     frames[0].remove()
     expect(top.documentElement.outerHTML).not.toContain(MARKER)
   }, 20_000)
+})
+
+/**
+ * Review 9, F2 (d): a markdown, code, svg or mermaid PDF is printed by expo-print from the
+ * shared document (text stays text), and expo-print's web view has no navigation policy.
+ * What its HTML parser sees is our policy and one script; the document arrives as data,
+ * parsed inert and moved in without what navigates (print-document.test.ts: how).
+ */
+describe('a markdown, code, svg or mermaid PDF: nothing in it navigates the printer', () => {
+  const REFRESH = '<meta http-equiv="refresh" content="0;url=https://evil.example/r">'
+  const BASE = '<base href="https://evil.example/">'
+
+  async function printed(
+    content: string,
+    mode: 'markdown' | 'code' | 'svg-preview' | 'mermaid-preview',
+    drawn?: string
+  ): Promise<string> {
+    print.mockReset()
+    print.mockResolvedValue({ uri: 'file:///cache/Print/x.pdf', numberOfPages: 1 })
+    const d = deps()
+    if (drawn) d.render = async () => ({ type: 'svg', svg: drawn })
+    await exportArtifact({ content, mode, title: 'doc', format: 'pdf' }, d)
+    const html = print.mock.calls[0]?.[0]?.html
+    if (typeof html !== 'string') throw new Error('nothing was printed')
+    return html
+  }
+
+  const SVG_VECTORS = `<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">${REFRESH}${BASE}</div></foreignObject><text>${MARKER}</text></svg>`
+
+  it.each([
+    ['markdown', `# ${MARKER}\n\n${REFRESH}\n\n${BASE}\n`, 'markdown' as const, undefined],
+    ['code', `const a = '${REFRESH}' // ${MARKER}`, 'code' as const, undefined],
+    ['svg', SVG_VECTORS, 'svg-preview' as const, undefined],
+    ['mermaid', 'graph TD; A-->B', 'mermaid-preview' as const, SVG_VECTORS]
+  ])(
+    '%s: the printer parses none of it, and once run no refresh or base is live',
+    async (_, content, mode, drawn) => {
+      const html = await printed(content, mode, drawn)
+      // As the printer's HTML parser sees it: our policy and our script.
+      const parsedFirst: Document = new JSDOM(html).window.document
+      expect(elementsOf(parsedFirst).map((el) => el.localName)).toEqual([
+        'html',
+        'head',
+        'meta',
+        'meta',
+        'body',
+        'script'
+      ])
+      // Run as the printer runs it: the document shows, nothing in it navigates.
+      const run: Document = new JSDOM(html, { runScripts: 'dangerously' }).window.document
+      const live = elementsOf(run)
+      expect(live.filter((el) => el.localName === 'base')).toEqual([])
+      expect(
+        live.filter(
+          (el) => el.localName === 'meta' && /refresh/i.test(el.getAttribute('http-equiv') ?? '')
+        )
+      ).toEqual([])
+      expect(run.body.textContent).toContain(MARKER)
+    }
+  )
 })

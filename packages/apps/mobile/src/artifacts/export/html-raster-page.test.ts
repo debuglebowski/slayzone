@@ -8,7 +8,7 @@ import {
   EXPORT_RENDER_SOURCE,
   HTML_DRAW_TIMEOUT_MS,
   HTML_PAGE,
-  HTML_RENDER_TIMEOUT_MS,
+  HTML_RENDER_IDLE_MS,
   HTML_STAGE_POLICY,
   htmlArtifactDocument,
   htmlRasterPage
@@ -19,6 +19,7 @@ import {
   type HostPage,
   JSDOM,
   loadHostPage,
+  TAINTED,
   type WebViewOptions
 } from './testing-web-view'
 
@@ -27,8 +28,10 @@ const PAPER_WHITE = 'white'
 /** A fake html2canvas that records each call; a blank canvas of the asked size. */
 const FAKE_HTML2CANVAS = `window.__calls = [];
 window.html2canvas = function (element, options) {
+  var doc = element.ownerDocument;
   window.__calls.push({
-    doc: element.ownerDocument,
+    doc: doc,
+    html: doc.documentElement.outerHTML,
     options: options,
     artifactFrame: !!document.getElementById('slz-export-artifact')
   });
@@ -36,11 +39,15 @@ window.html2canvas = function (element, options) {
   var canvas = document.createElement('canvas');
   canvas.width = Math.round(options.width * options.scale);
   canvas.height = Math.round(options.height * options.scale);
+  // WebKit: an SVG with HTML in it (<foreignObject>), drawn as html2canvas draws an SVG
+  // (as an image), taints the canvas.
+  if (doc.getElementsByTagName('foreignObject').length) canvas[${JSON.stringify(TAINTED)}] = true;
   return Promise.resolve(canvas);
 };`
 
 interface Call {
   doc: Document
+  html: string
   options: Record<string, unknown>
   artifactFrame: boolean
 }
@@ -93,10 +100,10 @@ describe('htmlRasterPage: the host page', () => {
     // Nothing of the artifact's outside the frame.
     frames[0].remove()
     expect(doc.documentElement.outerHTML).not.toContain('ARTIFACT')
-    // Laid out at the printed page's width; more time than a diagram gets.
+    // Laid out at the printed page's width; more time without a word than a diagram gets.
     expect(page.viewport).toEqual(HTML_PAGE)
     expect(HTML_PAGE).toEqual({ width: 539, height: 780 })
-    expect(page.timeoutMs).toBe(HTML_RENDER_TIMEOUT_MS)
+    expect(page.idleTimeoutMs).toBe(HTML_RENDER_IDLE_MS)
     expect(htmlRasterPage(content, 'r.html', FAKE_HTML2CANVAS).token).not.toBe(page.token)
   })
 
@@ -123,7 +130,7 @@ describe('htmlRasterPage: the host page', () => {
     h.post(SNAPSHOT('<p>drawn</p>'))
     h.post(SNAPSHOT('<p>second</p>'))
     await until(() => h.replies.length > 0)
-    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG], textLabels: false }])
     expect(callsOf(h)).toHaveLength(1)
     expect(callsOf(h)[0].doc.body.innerHTML).toBe('<p>drawn</p>')
     // The artifact's frame was gone before anything was drawn.
@@ -131,17 +138,42 @@ describe('htmlRasterPage: the host page', () => {
     expect(h.window.document.getElementById('slz-export-artifact')).toBeNull()
   })
 
-  it("posts the pages with the page's token, through iOS's message handler", async () => {
+  it("posts with the page's token, through iOS's message handler", async () => {
     const { page, host: h } = host('x', { nativeHandler: true })
     h.post(SNAPSHOT('<p>drawn</p>'))
-    await until(() => h.messages.length > 0)
-    expect(h.messages).toHaveLength(1)
-    expect(JSON.parse(h.messages[0])).toEqual({
-      source: EXPORT_RENDER_SOURCE,
-      token: page.token,
-      type: 'pages',
-      pages: [BLANK_PNG]
+    await until(() => h.replies.length > 0)
+    const head = { source: EXPORT_RENDER_SOURCE, token: page.token }
+    expect(h.messages.map((m) => JSON.parse(m))).toEqual([
+      { ...head, type: 'progress' },
+      { ...head, type: 'progress' },
+      { ...head, type: 'page', index: 0, base64: BLANK_PNG },
+      { ...head, type: 'pages-end', count: 1, textLabels: false }
+    ])
+  })
+
+  // Review 9, L5: a long report on a slow phone took longer than one fixed budget, and
+  // every page drawn was lost with it. Each page goes to the app as soon as it is cut,
+  // each message a sign of progress (the app's idle timer).
+  it('sends each page as soon as it is drawn, not all at the end', async () => {
+    const callsAtPage: number[] = []
+    const { host: h } = host('x', {
+      heightCss: 10 * 780,
+      onMessage: (message) => {
+        if (message.type === 'page') callsAtPage.push(callsOf(h).length)
+      }
     })
+    h.post(SNAPSHOT('<p>long</p>'))
+    await until(() => h.replies.length > 0)
+    // Four pages a drawing: pages 0–2 went before the second drawing started.
+    expect(callsAtPage).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3, 3])
+    expect(h.received.map((m) => m.type)).toEqual([
+      'progress',
+      'progress',
+      ...Array(10).fill('page'),
+      'pages-end'
+    ])
+    const reply = h.replies[0]
+    expect(reply.type === 'pages' && reply.pages.length).toBe(10)
   })
 
   it('draws the snapshot in a stage that runs nothing: sandboxed, a no-script policy first', async () => {
@@ -272,6 +304,131 @@ describe('htmlRasterPage: the host page', () => {
     expect(h.replies).toEqual([
       { type: 'error', code: 'tainted', message: 'The canvas is tainted.' }
     ])
+    // No <foreignObject> to draw as text: nothing is tried again.
+    expect(callsOf(h)).toHaveLength(1)
+  })
+
+  // Review 9, F4: an inline SVG with HTML in it (mermaid's HTML labels, many charts) taints
+  // the canvas in WebKit. The page is staged again with each <foreignObject> as SVG
+  // text at its place, drawn again, and the app is told the labels may differ.
+  it('a drawing tainted by an SVG with HTML in it is drawn again with text labels', async () => {
+    const { host: h } = host('x', { heightCss: 780 })
+    h.post(
+      SNAPSHOT(
+        [
+          '<p>chart</p><svg width="200" height="100">',
+          '<g transform="translate(10,20)"><foreignObject x="4" y="6" width="40" height="20">',
+          '<div xmlns="http://www.w3.org/1999/xhtml"><span>Start</span>  <b>here</b></div>',
+          '</foreignObject></g>',
+          '<foreignObject x="7" y="8"><div xmlns="http://www.w3.org/1999/xhtml">Corner</div></foreignObject>',
+          '<foreignObject x="1" y="1" width="5" height="5"><div xmlns="http://www.w3.org/1999/xhtml"> </div></foreignObject>',
+          '</svg>'
+        ].join('')
+      )
+    )
+    await until(() => h.replies.length > 0)
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG], textLabels: true }])
+    // The tainted drawing's pages (none here) are dropped, then all drawn again.
+    expect(h.received.map((m) => m.type)).toEqual([
+      'progress',
+      'progress',
+      'restart',
+      'progress',
+      'page',
+      'pages-end'
+    ])
+    const [first, second] = callsOf(h)
+    expect(callsOf(h)).toHaveLength(2)
+    expect(first.html).toContain('<foreignObject')
+    expect(second.html).not.toContain('foreignObject')
+    const texts = Array.from(second.doc.getElementsByTagName('text'))
+    expect(
+      texts.map((t) => ({
+        text: t.textContent,
+        x: t.getAttribute('x'),
+        y: t.getAttribute('y'),
+        anchor: t.getAttribute('text-anchor'),
+        baseline: t.getAttribute('dominant-baseline'),
+        ns: t.namespaceURI
+      }))
+    ).toEqual([
+      // Centred in its box, as mermaid centres a label in it.
+      {
+        text: 'Start here',
+        x: '24',
+        y: '16',
+        anchor: 'middle',
+        baseline: 'central',
+        ns: 'http://www.w3.org/2000/svg'
+      },
+      // No box: at its corner.
+      {
+        text: 'Corner',
+        x: '7',
+        y: '8',
+        anchor: null,
+        baseline: 'hanging',
+        ns: 'http://www.w3.org/2000/svg'
+      }
+    ])
+    // In the group the label was in (its transform still applies); an empty one is dropped.
+    expect(texts[0].parentElement?.getAttribute('transform')).toBe('translate(10,20)')
+    expect(second.doc.querySelector('p')?.textContent).toBe('chart')
+    // The first stage is gone: one stage frame left.
+    const stages = Array.from(h.window.document.querySelectorAll('iframe')).filter(
+      (f) => f.getAttribute('sandbox') === 'allow-same-origin allow-scripts'
+    )
+    expect(stages).toHaveLength(1)
+  })
+
+  it('still tainted with text labels (another picture): the "tainted" error', async () => {
+    const { host: h } = host('x', { taint: true })
+    h.post(
+      SNAPSHOT(
+        '<svg><foreignObject x="0" y="0"><div xmlns="http://www.w3.org/1999/xhtml">L</div></foreignObject></svg>'
+      )
+    )
+    await until(() => h.replies.length > 0)
+    expect(h.replies).toEqual([
+      { type: 'error', code: 'tainted', message: 'The canvas is tainted.' }
+    ])
+    expect(callsOf(h)).toHaveLength(2)
+  })
+
+  // Review 9, F2: the web view lets every frame load its srcdoc (about:srcdoc) and
+  // about:blank, nothing else. The artifact's frame loading another document once its own
+  // has loaded (a reload, about:blank) is not the artifact: the export stops, nothing of it
+  // is drawn.
+  it("fails the export if the artifact's frame loads another document", async () => {
+    const { host: h } = host()
+    const frame = h.window.document.getElementById('slz-export-artifact') as HTMLIFrameElement
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
+    // Another frame saying the artifact loaded is nobody: no guard yet.
+    const other = h.window.document.createElement('iframe')
+    h.window.document.body.appendChild(other)
+    h.post({ type: 'slz-export-loaded' }, other.contentWindow)
+    // The frame's own load event (any before its document says it loaded) is no navigation.
+    frame.dispatchEvent(new h.window.Event('load'))
+    await settle()
+    h.post({ type: 'slz-export-loaded' })
+    await settle()
+    expect(h.messages).toEqual([])
+    // A load after that: another document in its place.
+    frame.dispatchEvent(new h.window.Event('load'))
+    await until(() => h.replies.length > 0)
+    expect(h.replies).toEqual([
+      {
+        type: 'error',
+        code: 'render',
+        message: 'The page opened another page in its place, so it was not exported.'
+      }
+    ])
+    expect(h.window.document.getElementById('slz-export-artifact')).toBeNull()
+    // Its snapshot, if one still came, is not taken.
+    h.post(SNAPSHOT('<p>after</p>'), frame.contentWindow)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(callsOf(h)).toEqual([])
+    expect(h.replies).toHaveLength(1)
   })
 
   it('a failed drawing, or a snapshot the frame could not take, is a render error', async () => {
@@ -297,7 +454,7 @@ it('stages a root attribute the DOM cannot set by skipping it, the others kept',
     html: '<html lang="en" =x="1" data-theme="light"><head></head><body><p>drawn</p></body></html>'
   })
   await until(() => h.replies.length > 0)
-  expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+  expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG], textLabels: false }])
   const root = callsOf(h)[0].doc.documentElement
   expect(root.getAttribute('lang')).toBe('en')
   expect(root.getAttribute('data-theme')).toBe('light')
@@ -371,8 +528,8 @@ describe('htmlRasterPage: what never loads (the real html2canvas)', () => {
         ].join('')
       )
     )
-    await until(() => h.messages.length > 0, 20_000)
-    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+    await until(() => h.replies.length > 0, 20_000)
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG], textLabels: false }])
     const stage = stageOf(h)
     if (!stage) throw new Error('no stage')
     const img = (id: string) => stage.getElementById(id) as HTMLImageElement
@@ -405,8 +562,8 @@ describe('htmlRasterPage: what never loads (the real html2canvas)', () => {
     }
     const { host: h } = realHost({ onFrame: fontsNeverReady })
     h.post(SNAPSHOT('<p style="font-family: Never, serif">text</p>'))
-    await until(() => h.messages.length > 0, 20_000)
-    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG] }])
+    await until(() => h.replies.length > 0, 20_000)
+    expect(h.replies).toEqual([{ type: 'pages', pages: [BLANK_PNG], textLabels: false }])
   }, 30_000)
 
   it('a drawing that still waits on something fails at its own timeout, naming it', async () => {
@@ -423,7 +580,7 @@ describe('htmlRasterPage: what never loads (the real html2canvas)', () => {
       }
     })
     h.post(SNAPSHOT('<p>text</p><img src="https://never.example/slow.png">'))
-    await until(() => h.messages.length > 0, 20_000)
+    await until(() => h.replies.length > 0, 20_000)
     expect(h.replies).toHaveLength(1)
     const reply = h.replies[0]
     expect(reply).toMatchObject({ type: 'error', code: 'render' })
