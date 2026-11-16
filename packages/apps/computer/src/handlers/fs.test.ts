@@ -327,6 +327,7 @@ describe('createFsHandlers — watch lifecycle', () => {
   type Notify = ReturnType<typeof vi.fn<ComputerDialer['notify']>>
   const changesFor = (notify: Notify, relPath: string) =>
     notify.mock.calls.filter((c) => (c[1] as { relPath: string }).relPath === relPath)
+  let readinessId = 0
 
   /**
    * FSEvents starts asynchronously. Only this watch's dedicated probe event proves
@@ -335,6 +336,7 @@ describe('createFsHandlers — watch lifecycle', () => {
    * let each probe's debounce settle while startup is still being probed.
    */
   async function untilWatching(notify: Notify, watchId: string, root = dir): Promise<void> {
+    const invocation = readinessId++
     let n = 0
     const probes = new Set<string>()
     const probeDelivered = () =>
@@ -351,7 +353,7 @@ describe('createFsHandlers — watch lifecycle', () => {
     await vi.waitFor(
       () => {
         if (!probeDelivered()) {
-          const probe = `watch-probe-${n++}.txt`
+          const probe = `watch-probe-${invocation}-${n++}.txt`
           probes.add(probe)
           writeFileSync(join(root, probe), 'native readiness')
         }
@@ -456,6 +458,44 @@ describe('createFsHandlers — watch lifecycle', () => {
     } finally {
       disposeAll()
       watching.mockRestore()
+    }
+  }, 20_000)
+
+  it('recovers an identical watch retry after an actual native runtime error', async () => {
+    type NativeWatcher = nativeFs.FSWatcher & {
+      _handle: { onchange(status: number, event: string, path: string): void } | null
+    }
+    const notify = vi.fn<ComputerDialer['notify']>(() => true)
+    const { handlers, disposeAll } = createFsHandlers(ctxWithRoots([realpathSync(dir)], notify))
+    const actualWatch = (await vi.importActual<typeof import('node:fs')>('node:fs')).watch
+    const opened: NativeWatcher[] = []
+    const watching = vi.spyOn(nativeFs, 'watch').mockImplementation((...args) => {
+      const watcher = Reflect.apply(actualWatch, nativeFs, args) as NativeWatcher
+      opened.push(watcher)
+      return watcher
+    })
+    try {
+      handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })
+      await untilWatching(notify, 'w1')
+      expect(opened).toHaveLength(1)
+      // Node's actual negative native-status branch closes the real handle and
+      // emits EIO without a close event. No successful callback is fabricated.
+      expect(opened[0]._handle).not.toBeNull()
+      opened[0]._handle!.onchange(-5, 'rename', dir)
+      expect(opened[0]._handle).toBeNull()
+      expect(handlers[M.fsWatchStart]({ watchId: 'w1', rootPath: dir })).toEqual({ ok: true })
+      expect(opened).toHaveLength(2)
+      await untilWatching(notify, 'w1')
+      writeFileSync(join(dir, 'runtime-recovered.txt'), 'one real write after native recovery')
+      await vi.waitFor(() => expect(changesFor(notify, 'runtime-recovered.txt')).toHaveLength(1), {
+        timeout: 5000
+      })
+    } finally {
+      try {
+        disposeAll()
+      } finally {
+        watching.mockRestore()
+      }
     }
   }, 20_000)
 

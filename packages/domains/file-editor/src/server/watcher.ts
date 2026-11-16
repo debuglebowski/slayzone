@@ -11,8 +11,8 @@ export type FileWatchEvent = {
 type Listener = (e: FileWatchEvent) => void
 
 type WatcherEntry = {
-  watcher: fs.FSWatcher
-  listeners: Set<Listener>
+  watcher: fs.FSWatcher | undefined
+  listeners: Map<Listener, Set<symbol>>
   debounceMap: Map<string, NodeJS.Timeout>
 }
 
@@ -20,17 +20,28 @@ const watchers = new Map<string, WatcherEntry>()
 
 export function subscribeFileWatcher(rootPath: string, listener: Listener): () => void {
   const root = path.resolve(rootPath)
-  const existing = watchers.get(root)
-  if (existing) {
-    existing.listeners.add(listener)
-    return () => unsubscribe(root, listener)
+  let entry = watchers.get(root)
+  if (!entry) {
+    entry = { watcher: undefined, listeners: new Map(), debounceMap: new Map() }
+    watchers.set(root, entry)
   }
+  const owner = Symbol()
+  let owners = entry.listeners.get(listener)
+  if (!owners) {
+    owners = new Set()
+    entry.listeners.set(listener, owners)
+  }
+  owners.add(owner)
+  if (!entry.watcher) openWatcher(root, entry)
+  // Bind to the owned entry, not whichever generation later occupies this root.
+  return () => unsubscribe(root, entry, listener, owner)
+}
 
-  const debounceMap = new Map<string, NodeJS.Timeout>()
-  const listeners = new Set<Listener>([listener])
-
+function openWatcher(root: string, entry: WatcherEntry): void {
+  const { debounceMap, listeners } = entry
   try {
     const watcher = fs.watch(root, { recursive: true }, (_eventType, filename) => {
+      if (entry.watcher !== watcher) return
       if (!filename) return
       const relPath = filename.replace(/\\/g, '/')
       if (ignoredSafely(root, relPath)) return
@@ -44,6 +55,7 @@ export function subscribeFileWatcher(rootPath: string, listener: Listener): () =
       debounceMap.set(
         relPath,
         setTimeout(() => {
+          if (entry.watcher !== watcher) return
           debounceMap.delete(relPath)
           const abs = path.join(root, relPath)
           const exists = fs.existsSync(abs)
@@ -52,23 +64,26 @@ export function subscribeFileWatcher(rootPath: string, listener: Listener): () =
             root,
             relPath
           }
-          for (const l of listeners) l(event)
+          for (const l of listeners.keys()) l(event)
         }, 100)
       )
     })
 
-    // An 'error' with no listener throws out of this process (a watched root that went
-    // away, out of watches). Log it; the stream simply stops reporting.
+    entry.watcher = watcher
+    // Node can close the native handle on error without emitting 'close'. Keep
+    // logical owners, but retire this generation so a new subscription retries.
     watcher.on('error', (err) => {
+      if (entry.watcher !== watcher) return
+      stopWatcher(entry)
       console.warn(`[file-editor] watcher on ${root}: ${err.message}`)
     })
-
-    watchers.set(root, { watcher, listeners, debounceMap })
-    return () => unsubscribe(root, listener)
+    watcher.on('close', () => {
+      if (entry.watcher !== watcher) return
+      entry.watcher = undefined
+      clearDebounce(entry)
+    })
   } catch {
-    return () => {
-      /* watch failed; nothing to unsubscribe */
-    }
+    // A failed constructor has no stream; retain its owners until retry/disposal.
   }
 }
 
@@ -85,21 +100,32 @@ function ignoredSafely(root: string, relPath: string): boolean {
   }
 }
 
-function unsubscribe(root: string, listener: Listener): void {
-  const entry = watchers.get(root)
-  if (!entry) return
-  entry.listeners.delete(listener)
+function clearDebounce(entry: WatcherEntry): void {
+  for (const timer of entry.debounceMap.values()) clearTimeout(timer)
+  entry.debounceMap.clear()
+}
+
+function stopWatcher(entry: WatcherEntry): void {
+  const watcher = entry.watcher
+  entry.watcher = undefined
+  clearDebounce(entry)
+  watcher?.close()
+}
+
+function unsubscribe(root: string, entry: WatcherEntry, listener: Listener, owner: symbol): void {
+  const owners = entry.listeners.get(listener)
+  if (!owners?.delete(owner)) return
+  if (owners.size === 0) entry.listeners.delete(listener)
   if (entry.listeners.size === 0) {
-    entry.watcher.close()
-    for (const t of entry.debounceMap.values()) clearTimeout(t)
-    watchers.delete(root)
+    if (watchers.get(root) === entry) watchers.delete(root)
+    stopWatcher(entry)
   }
 }
 
 export function closeAllFileWatchers(): void {
   for (const [, entry] of watchers) {
-    entry.watcher.close()
-    for (const t of entry.debounceMap.values()) clearTimeout(t)
+    entry.listeners.clear()
+    stopWatcher(entry)
   }
   watchers.clear()
   clearIgnoreCache()
