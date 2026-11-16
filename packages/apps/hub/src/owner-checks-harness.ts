@@ -29,7 +29,10 @@ import {
   agentStarts,
   getAgentLifecycleEvents,
   getChatDeps,
-  getPtyDeps
+  getPtyDeps,
+  getPtyBackend,
+  setPtyBackend,
+  type UntrackedPtySession
 } from '@slayzone/terminal/server'
 import { getProcessesDeps } from '@slayzone/processes/server'
 import { getGitWatcher } from '@slayzone/worktrees/server'
@@ -54,6 +57,7 @@ export interface InProcessHub {
 
 const SECRET = 'owner-checks-test-signing-secret-0123456789-abcdef'
 const PUBLIC_ADDRESS = 'hub.example.com'
+let emitUnattached: (owner: Owned) => void
 
 /**
  * Boot the hub in this process. `login: false` is the desktop app's own hub exactly
@@ -99,6 +103,30 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
     adminToken = owner.token
     adminUserId = owner.userId
   }
+  // Drive snapshots through the real unattached registry/router/filter, like a
+  // computer's reconnect list. No detection means these fixtures stay surfaced;
+  // this owner-policy harness never adopts or starts a process.
+  const backend = getPtyBackend()
+  const unattached = new Map<string, UntrackedPtySession>()
+  const listeners = new Set<() => void>()
+  setPtyBackend({
+    ...backend,
+    untrackedSessions: () => [...unattached.values()],
+    onUntrackedChange: (cb) => {
+      listeners.add(cb)
+      return { dispose: () => listeners.delete(cb) }
+    }
+  })
+  emitUnattached = (o) => {
+    unattached.set(o.session, {
+      computerId: o.computer,
+      sessionId: o.session,
+      spawnId: `${o.mark}_attempt`,
+      detection: false,
+      mode: 'terminal'
+    })
+    for (const cb of [...listeners]) cb()
+  }
   return {
     root,
     port: handle.port,
@@ -107,6 +135,7 @@ export async function bootInProcessHub(opts: { login: boolean }): Promise<InProc
     adminUserId,
     async stop() {
       await handle.stop()
+      setPtyBackend(backend)
       rmSync(root, { recursive: true, force: true })
     }
   }
@@ -524,6 +553,7 @@ export const EMIT: Record<string, (o: Owned) => void> = {
   'processes.onStats': (o) =>
     getProcessesDeps().events.emit('stats', { [o.process]: { cpu: 1, rss: 1 } } as never),
   'pty.onData': (o) => getPtyDeps().events.emit('data', o.session, `${o.mark}_TERMINAL_BYTES`, 1),
+  'pty.onUnattachedChange': (o) => emitUnattached(o),
   'pty.onStateChange': (o) =>
     getPtyDeps().events.emit('state-change', o.session, 'running', 'idle'),
   'pty.onBackgroundJobs': (o) => getPtyDeps().events.emit('background-jobs', o.session, 1),
