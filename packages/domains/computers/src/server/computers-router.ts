@@ -407,12 +407,19 @@ export const computersRouter = router({
       })
     }),
 
-  /** Effective computer for a task (task binding → project default → null). */
+  /**
+   * Effective computer for a task (task binding → project default → null), and
+   * whether that is this hub's own co-located computer (`onHubMachine`; null resolves
+   * to it when the hub has one) — how a client tells "the terminal is on my machine".
+   */
   resolveTaskComputer: publicProcedure
     .input(z.object({ taskId: z.string() }))
     .query(async ({ ctx, input }) => {
       const computerId = await storeResolveTaskComputerId(ctx.db, input.taskId)
-      return { computerId }
+      const localComputerId = getComputersDepsOrNull()?.localComputerId ?? null
+      const onHubMachine =
+        localComputerId !== null && (computerId ?? localComputerId) === localComputerId
+      return { computerId, onHubMachine }
     }),
 
   /**

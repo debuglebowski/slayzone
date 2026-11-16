@@ -27,6 +27,14 @@ export interface BrowserHostClient {
   ): () => void
 }
 
+/**
+ * This client among the hub's clients: random per renderer, stable across that
+ * renderer's reconnects. The hub keys "who used the task's browser last" by it, so a
+ * reconnect (a new relay host) keeps this client's standing instead of resetting it.
+ */
+export const BROWSER_CLIENT_KEY: string =
+  globalThis.crypto?.randomUUID?.() ?? `c-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
 let cached: { raw: object; client: BrowserHostClient } | null = null
 
 export function getBrowserHost(): BrowserHostClient | null {

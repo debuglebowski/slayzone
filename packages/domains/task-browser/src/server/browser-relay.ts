@@ -12,9 +12,12 @@
  * ends (panel closed, socket dropped). Its tabs are reported with `sync` — full
  * state each time, so a reconnect just re-sends it.
  *
- * OWNERSHIP when several clients show one task: the host that synced most recently
- * (the one last used). An explicit tab id goes to the most recent host that HAS
- * that tab.
+ * OWNERSHIP when several clients show one task: the client the user USED last for
+ * that task (`noteUse`: input in its views or panel), never the one that merely
+ * mounted, synced or reconnected. Use is kept per (principal, client, task), so a
+ * reconnect — a new host for the same client — keeps its client's standing. With no
+ * use yet, the host that came online first owns it. An explicit tab id goes to the
+ * best-ranked host that HAS that tab.
  *
  * Each host is bound to the principal that opened it (`principalKey`, the user id on
  * a hub with login, null without): a sync or reply naming a host of another
@@ -24,25 +27,31 @@
  * puts it on the wire; the hub composes one instance.
  */
 import { randomUUID } from 'node:crypto'
-import type {
-  BrowserRelayFrame,
-  BrowserRelayOp,
-  BrowserRelayReply,
-  BrowserRelayTabsState
+import {
+  BROWSER_RELAY_MAX_RESULT_BYTES,
+  type BrowserRelayFrame,
+  type BrowserRelayOp,
+  type BrowserRelayReply,
+  type BrowserRelayTabsState,
+  type BrowserRequestOrigin
 } from '../shared'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_REGISTRATION_TIMEOUT_MS = 10_000
+/** Use records kept (oldest dropped first): one per (principal, client, task). */
+const MAX_USE_RECORDS = 10_000
 
 interface Host {
   hostId: string
   taskId: string
   principalKey: string | null
+  /** The client device it runs on (stable across that client's reconnects). */
+  clientKey: string
   send: (frame: BrowserRelayFrame) => void
   tabIds: Set<string>
   activeTabId: string | null
-  /** Monotonic use counter — bigger = used more recently. */
-  usedAt: number
+  /** When it came online — the tie-break among hosts nobody used. */
+  attachedSeq: number
   pending: Set<string>
 }
 
@@ -63,6 +72,8 @@ interface Waiter {
 export interface BrowserRelayOptions {
   /** How long a client may take to answer one request. */
   requestTimeoutMs?: number
+  /** Largest reply result accepted (JSON bytes). */
+  maxResultBytes?: number
 }
 
 export interface BrowserRelayTabInfo {
@@ -74,17 +85,23 @@ export class BrowserRelay {
   private readonly hosts = new Map<string, Host>()
   private readonly requests = new Map<string, PendingRequest>()
   private readonly waiters = new Map<string, Waiter[]>()
+  /** `lastUseKey(principal, client, task)` → use clock. Survives host detach. */
+  private readonly lastUse = new Map<string, number>()
   private readonly requestTimeoutMs: number
+  private readonly maxResultBytes: number
   private useClock = 0
+  private attachClock = 0
 
   constructor(opts: BrowserRelayOptions = {}) {
     this.requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.maxResultBytes = opts.maxResultBytes ?? BROWSER_RELAY_MAX_RESULT_BYTES
   }
 
   /** A client's panel for `taskId` came online. Greets it with its host id. */
   attachHost(input: {
     taskId: string
     principalKey: string | null
+    clientKey: string
     send: (frame: BrowserRelayFrame) => void
   }): { hostId: string; detach: () => void } {
     const hostId = randomUUID()
@@ -92,10 +109,11 @@ export class BrowserRelay {
       hostId,
       taskId: input.taskId,
       principalKey: input.principalKey,
+      clientKey: input.clientKey,
       send: input.send,
       tabIds: new Set(),
       activeTabId: null,
-      usedAt: ++this.useClock,
+      attachedSeq: ++this.attachClock,
       pending: new Set()
     }
     this.hosts.set(hostId, host)
@@ -103,13 +121,23 @@ export class BrowserRelay {
     return { hostId, detach: () => this.detach(hostId) }
   }
 
-  /** Replace a host's live tabs. Counts as "used now" for ownership. */
+  /** Replace a host's live tabs. NOT use: mounting or reconnecting takes nothing over. */
   sync(principalKey: string | null, state: BrowserRelayTabsState): void {
     const host = this.requireHost(principalKey, state.hostId)
     host.tabIds = new Set(state.tabIds)
     host.activeTabId = state.activeTabId
-    host.usedAt = ++this.useClock
     this.settleWaiters(host.taskId)
+  }
+
+  /** The user used task `taskId`'s browser on client `clientKey` (input, focus). */
+  noteUse(principalKey: string | null, clientKey: string, taskId: string): void {
+    const key = lastUseKey(principalKey, clientKey, taskId)
+    this.lastUse.delete(key)
+    this.lastUse.set(key, ++this.useClock)
+    if (this.lastUse.size > MAX_USE_RECORDS) {
+      const oldest = this.lastUse.keys().next().value
+      if (oldest !== undefined) this.lastUse.delete(oldest)
+    }
   }
 
   /** The client's answer to one request. Unknown request ids (late, timed out) are ignored. */
@@ -120,13 +148,19 @@ export class BrowserRelay {
     this.requests.delete(reply.requestId)
     host.pending.delete(reply.requestId)
     clearTimeout(pending.timer)
-    if (reply.ok) pending.resolve(reply.result)
-    else pending.reject(new Error(reply.error))
-  }
-
-  /** The task a host serves — for host-scoped calls (engagement). */
-  taskOf(principalKey: string | null, hostId: string): string {
-    return this.requireHost(principalKey, hostId).taskId
+    if (!reply.ok) {
+      pending.reject(new Error(reply.error))
+      return
+    }
+    const size = jsonBytes(reply.result)
+    if (size > this.maxResultBytes) {
+      const err = new Error(
+        `Browser result too large (${mib(size)} MiB; the limit is ${mib(this.maxResultBytes)} MiB).`
+      )
+      pending.reject(err)
+      throw err
+    }
+    pending.resolve(reply.result)
   }
 
   /** Explicit tab when given, else the owner's active tab. */
@@ -169,7 +203,12 @@ export class BrowserRelay {
   }
 
   /** Run one operation on the client that owns the tab; resolves with its reply. */
-  run(taskId: string, tabId: string | null, op: BrowserRelayOp): Promise<unknown> {
+  run(
+    taskId: string,
+    tabId: string | null,
+    op: BrowserRelayOp,
+    origin: BrowserRequestOrigin
+  ): Promise<unknown> {
     const host = this.resolveHost(taskId, tabId ?? undefined)
     if (!host) {
       return Promise.reject(
@@ -189,7 +228,7 @@ export class BrowserRelay {
       this.requests.set(requestId, { hostId: host.hostId, resolve, reject, timer })
       host.pending.add(requestId)
       try {
-        host.send({ type: 'request', requestId, taskId, tabId: targetTabId, ...op })
+        host.send({ type: 'request', requestId, taskId, tabId: targetTabId, origin, ...op })
       } catch (err) {
         clearTimeout(timer)
         this.requests.delete(requestId)
@@ -219,11 +258,13 @@ export class BrowserRelay {
     return host
   }
 
-  /** Hosts serving `taskId`, most recently used first. */
+  /** Hosts serving `taskId`: most recently used client first, then first online. */
   private hostsFor(taskId: string): Host[] {
+    const used = (h: Host): number =>
+      this.lastUse.get(lastUseKey(h.principalKey, h.clientKey, h.taskId)) ?? 0
     return [...this.hosts.values()]
       .filter((h) => h.taskId === taskId)
-      .sort((a, b) => b.usedAt - a.usedAt)
+      .sort((a, b) => used(b) - used(a) || a.attachedSeq - b.attachedSeq)
   }
 
   private ownerForActive(taskId: string): Host | null {
@@ -262,3 +303,13 @@ export class BrowserRelay {
     else this.waiters.delete(taskId)
   }
 }
+
+const lastUseKey = (principalKey: string | null, clientKey: string, taskId: string): string =>
+  `${principalKey ?? ''}\u0000${clientKey}\u0000${taskId}`
+
+function jsonBytes(value: unknown): number {
+  if (value === undefined) return 0
+  return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8')
+}
+
+const mib = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1)

@@ -30,7 +30,14 @@ import {
   Expand
 } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { hubAllows, useSubscription } from '@slayzone/transport/client'
+import {
+  electronBootstrap,
+  hubAllows,
+  useHubId,
+  useHubRegistryStore,
+  useSubscription
+} from '@slayzone/transport/client'
+import { terminalOnThisDevice } from './terminal-on-this-device'
 import { useTRPC, useTRPCClient } from './trpc'
 import { useArtifactUpload } from '@slayzone/editor/hooks'
 import { DndContext, PointerSensor, useSensors, useSensor, closestCenter } from '@dnd-kit/core'
@@ -168,7 +175,7 @@ import {
   type EditorThemeColors
 } from '@slayzone/ui'
 import type { BrowserPanelHandle } from '@slayzone/task-browser'
-import { getBrowserHost } from '@slayzone/task-browser'
+import { getBrowserHost, hubMayNavigateTo } from '@slayzone/task-browser'
 import type { LinkOpenTarget } from '@slayzone/editor'
 import { WorkspaceDirPicker } from '@slayzone/file-editor/client/WorkspaceDirPicker'
 import type { FileEditorViewHandle } from '@slayzone/file-editor/client'
@@ -1070,18 +1077,36 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
   }, [task])
 
   // Screenshot: capture browser view and inject path into terminal
+  const hubId = useHubId()
+  const hubs = useHubRegistryStore((s) => s.hubs)
+  const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
   const handleScreenshot = useCallback(
     async (viewId: string) => {
-      // Captured on THIS device's browser host (the web view lives here, not on the hub).
+      // Captured on THIS device's browser host (the web view lives here, not on the hub)
+      // into this device's temp dir, so its path only means something to a terminal
+      // running here. Elsewhere, say so instead of typing a path that does not exist.
       const host = getBrowserHost()
-      if (!host) return
+      if (!host || !task) return
+      const hubIsLocal = hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local')
+      const resolved = await trpcClient.computers.resolveTaskComputer.query({ taskId: task.id })
+      const myComputerIdOnHub = hubIsLocal
+        ? null
+        : ((await electronBootstrap.getLocalComputerHubs())[hubId ?? defaultHubId]?.computerId ??
+          null)
+      if (!terminalOnThisDevice({ hubIsLocal, resolved, myComputerIdOnHub })) {
+        toast.error('Screenshot not sent', {
+          description:
+            "This task's terminal runs on another computer, which can't open a file saved on this one. Ask the agent to run `slay browser screenshot` there instead."
+        })
+        return
+      }
       const result = await host.call('view.captureToTempFile', viewId)
       if (!result.success || !result.path) return
       track('screenshot_captured')
       const escaped = result.path.includes(' ') ? `"${result.path}"` : result.path
       await terminalApiRef.current?.write(escaped)
     },
-    [track]
+    [task, trpcClient, hubs, hubId, defaultHubId, track]
   )
 
   const handleInsertElementSnippet = useCallback(
@@ -1703,10 +1728,28 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     else void trpcClient.app.shell.openExternal.mutate({ url: href })
   })
 
+  // A URL the HUB sends (slay browser new / --panel visible) is loaded on THIS device:
+  // only web pages, plus file: from this device's own local hub (main's behaviour for
+  // local agents). Anything else opens the panel without loading it.
+  const hubUrlAllowed = (url: string | null | undefined): url is string =>
+    !!url &&
+    hubMayNavigateTo(url, {
+      fileAllowed: hubs.some((h) => h.id === (hubId ?? defaultHubId) && h.kind === 'local')
+    })
+
   // CLI: open browser panel when requested by main process (slay tasks browser --panel=visible)
   const handleBrowserEnsurePanelOpen = useStableCallback(
-    ({ taskId, url, tabId }: { taskId: string; url?: string | null; tabId?: string | null }) => {
+    ({
+      taskId,
+      url: rawUrl,
+      tabId
+    }: {
+      taskId: string
+      url?: string | null
+      tabId?: string | null
+    }) => {
       if (!task || taskId !== task.id) return
+      const url = hubUrlAllowed(rawUrl) ? rawUrl : null
       if (tabId) {
         // CLI targeted an existing tab — open panel and switch to that tab.
         // The navigate route will load `url` into the targeted tab's webContents.
@@ -1744,7 +1787,7 @@ export const TaskDetailPage = React.memo(function TaskDetailPage({
     }) => {
       if (!task || taskId !== task.id) return
       handlePanelToggle('browser', true)
-      const tabUrl = url ?? 'about:blank'
+      const tabUrl = hubUrlAllowed(url) ? url : 'about:blank'
       const newTab = {
         id: tabId,
         url: tabUrl,

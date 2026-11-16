@@ -13,6 +13,12 @@ export function registerBrowserUrlRoute(app: Express, deps: RestApiDeps): void {
       req.query.tabId as string | undefined
     )
     if (!result) return
-    res.json({ url: await deps.browser!.getUrl(req.query.taskId as string, result.tabId) })
+    res.json({
+      url: await deps.browser!.getUrl(
+        req.query.taskId as string,
+        result.tabId,
+        deps.browser!.originOf(req)
+      )
+    })
   })
 }

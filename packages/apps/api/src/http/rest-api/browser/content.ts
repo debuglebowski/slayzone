@@ -37,7 +37,8 @@ export function registerBrowserContentRoute(app: Express, deps: RestApiDeps): vo
             return o;
           });
         return { url, title, text, interactive };
-      })()`
+      })()`,
+        deps.browser!.originOf(req)
       )
       res.json(content)
     } catch (err) {

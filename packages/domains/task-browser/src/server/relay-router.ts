@@ -48,16 +48,19 @@ const id = z.string().min(1).max(200)
 
 export const appBrowserRelayRouter = router({
   /** A panel for `taskId` comes online: `hello` with its host id, then requests. */
-  serve: publicProcedure.input(z.object({ taskId: id })).subscription(({ input, ctx }) =>
-    observable<BrowserRelayFrame>((emit) => {
-      const { detach } = relayDeps().relay.attachHost({
-        taskId: input.taskId,
-        principalKey: principalKey(ctx),
-        send: (frame) => emit.next(frame)
+  serve: publicProcedure
+    .input(z.object({ taskId: id, clientKey: id }))
+    .subscription(({ input, ctx }) =>
+      observable<BrowserRelayFrame>((emit) => {
+        const { detach } = relayDeps().relay.attachHost({
+          taskId: input.taskId,
+          principalKey: principalKey(ctx),
+          clientKey: input.clientKey,
+          send: (frame) => emit.next(frame)
+        })
+        return detach
       })
-      return detach
-    })
-  ),
+    ),
   /** The host's live tabs, in full (idempotent). */
   sync: publicProcedure
     .input(
@@ -86,11 +89,20 @@ export const appBrowserRelayRouter = router({
         )
       )
     ),
-  /** The user is actively using this host's browser tabs. */
-  engaged: publicProcedure.input(z.object({ hostId: id })).mutation(({ input, ctx }) => {
-    const { relay, onEngaged } = relayDeps()
-    onEngaged(onHost(() => relay.taskOf(principalKey(ctx), input.hostId)))
-  })
+  /**
+   * The user used task `taskId`'s browser on client `clientKey` — input in any of the
+   * task's web views (browser tabs AND web panels, panel open or not) or its panel.
+   * Keeps the task's agent awake (idle-close) and makes that client the one
+   * `slay browser` reaches. Sent by one app-level listener per window, so it needs no
+   * mounted panel.
+   */
+  engaged: publicProcedure
+    .input(z.object({ taskId: id, clientKey: id }))
+    .mutation(({ input, ctx }) => {
+      const { relay, onEngaged } = relayDeps()
+      relay.noteUse(principalKey(ctx), input.clientKey, input.taskId)
+      onEngaged(input.taskId)
+    })
 })
 
 export type AppBrowserRelayRouter = typeof appBrowserRelayRouter

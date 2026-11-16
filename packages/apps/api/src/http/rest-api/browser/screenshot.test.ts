@@ -19,6 +19,7 @@ let nextCapture: Uint8Array | null = PNG
 const captured: Array<[string, string | null]> = []
 
 const browser: BrowserAccess = {
+  originOf: () => 'elsewhere',
   getResolvedBrowserTabId: async (_taskId, tabId) => tabId ?? 'tab-a',
   listBrowserTabs: async () => [{ tabId: 'tab-a', active: true }],
   hasBrowserTab: async () => true,
@@ -26,7 +27,7 @@ const browser: BrowserAccess = {
   execJs: async () => null,
   loadUrl: async () => {},
   getUrl: async () => null,
-  capturePng: async (taskId, tabId) => {
+  capturePng: async (taskId, tabId, _origin) => {
     captured.push([taskId, tabId])
     return nextCapture
   }
@@ -47,7 +48,7 @@ describe('POST /api/browser/screenshot', () => {
     const res = await h.request<{ ok: boolean; pngBase64?: string; path?: string }>(
       'POST',
       '/api/browser/screenshot',
-      { taskId: 't1', tabId: 'tab-b' }
+      { taskId: 't1', tabId: 'tab-b', accept: 'png-bytes' }
     )
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
@@ -60,10 +61,27 @@ describe('POST /api/browser/screenshot', () => {
   test('an empty capture is a 500', async () => {
     nextCapture = null
     const res = await h.request<{ error?: string }>('POST', '/api/browser/screenshot', {
-      taskId: 't1'
+      taskId: 't1',
+      accept: 'png-bytes'
     })
     expect(res.status).toBe(500)
     expect(res.body.error).toMatch(/empty/)
     nextCapture = PNG
+  })
+
+  // Version skew: a CLI from before bytes-not-paths sends no `accept` and reads `path`.
+  // It must fail loudly (its error printer shows `error`, exit 1), never print
+  // "undefined" as if it were a screenshot path.
+  test('a CLI that does not ask for bytes gets a clear 409, and nothing is captured', async () => {
+    const before = captured.length
+    const res = await h.request<{ error?: string; path?: string }>(
+      'POST',
+      '/api/browser/screenshot',
+      { taskId: 't1' }
+    )
+    expect(res.status).toBe(409)
+    expect(res.body.error).toMatch(/slay CLI is too old for this hub/)
+    expect(res.body.path).toBeUndefined()
+    expect(captured.length).toBe(before)
   })
 })

@@ -24,7 +24,8 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
     if (!result) return
     try {
       // Skip loadUrl when panel was just auto-opened — the renderer already created a tab with this URL
-      if (!result.autoOpened) await deps.browser!.loadUrl(taskId, result.tabId, url)
+      if (!result.autoOpened)
+        await deps.browser!.loadUrl(taskId, result.tabId, url, deps.browser!.originOf(req))
       // Auto-open counts as "opening" the tab, not interacting with it. Skip
       // the trip flag so first-navigate-that-opens-panel doesn't auto-lock.
       if (!result.autoOpened)
@@ -36,7 +37,10 @@ export function registerBrowserNavigateRoute(app: Express, deps: RestApiDeps): v
           deps.legacyBroadcast,
           deps.menu
         )
-      res.json({ ok: true, url: await deps.browser!.getUrl(taskId, result.tabId) })
+      res.json({
+        ok: true,
+        url: await deps.browser!.getUrl(taskId, result.tabId, deps.browser!.originOf(req))
+      })
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
     }

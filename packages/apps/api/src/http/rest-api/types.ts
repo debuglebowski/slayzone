@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http'
 import type { IncomingHttpHeaders } from 'node:http'
 import type { SlayzoneDb } from '@slayzone/platform'
 import type { TypedEmitter } from '@slayzone/platform/events'
@@ -194,7 +195,15 @@ export type ProcessStartResult =
  * machine's disk: the requester (a CLI) may run on another machine than the hub and
  * the client.
  */
+type BrowserOrigin = 'hub-machine' | 'elsewhere'
+
 export interface BrowserAccess {
+  /**
+   * Where this request's caller runs, as THIS hub sees it (see the relay's
+   * `BrowserRequestOrigin`). The client honours `hub-machine` only from its own
+   * local hub; it is how a local agent keeps file:// navigation and nothing more.
+   */
+  originOf: (req: IncomingMessage) => 'hub-machine' | 'elsewhere'
   getResolvedBrowserTabId: (taskId: string, tabId?: string) => Promise<string | null>
   listBrowserTabs: (taskId: string) => Promise<Array<{ tabId: string; active?: boolean }>>
   /** True when a live tab is registered — the "is the panel open?" probe. */
@@ -204,11 +213,25 @@ export interface BrowserAccess {
     taskId: string,
     opts: { tabId?: string; timeoutMs?: number }
   ) => Promise<void>
-  execJs: (taskId: string, tabId: string | null, code: string) => Promise<unknown>
-  loadUrl: (taskId: string, tabId: string | null, url: string) => Promise<void>
-  getUrl: (taskId: string, tabId: string | null) => Promise<string | null>
+  execJs: (
+    taskId: string,
+    tabId: string | null,
+    code: string,
+    origin: BrowserOrigin
+  ) => Promise<unknown>
+  loadUrl: (
+    taskId: string,
+    tabId: string | null,
+    url: string,
+    origin: BrowserOrigin
+  ) => Promise<void>
+  getUrl: (taskId: string, tabId: string | null, origin: BrowserOrigin) => Promise<string | null>
   /** PNG bytes of the visible page; null when the captured image was empty. */
-  capturePng: (taskId: string, tabId: string | null) => Promise<Uint8Array | null>
+  capturePng: (
+    taskId: string,
+    tabId: string | null,
+    origin: BrowserOrigin
+  ) => Promise<Uint8Array | null>
 }
 
 /**

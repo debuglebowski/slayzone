@@ -13,3 +13,5 @@ export {
   useBrowserHostEvent,
   type BrowserHostClient
 } from './browser-host'
+export { useBrowserEngagementForwarder } from './useBrowserEngagementForwarder'
+export { hubMayNavigateTo } from './useBrowserRelayHost'

@@ -4,7 +4,11 @@ import { useSubscription } from '@slayzone/transport/client'
 import { useTRPC, useTRPCClient } from '../trpc'
 import { scopeTracker, useStableCallback } from '@slayzone/ui'
 import { useTabStore } from '@slayzone/tabs-state'
-import { callBrowserHost, useBrowserHostEvent } from '@slayzone/task-browser/client'
+import {
+  callBrowserHost,
+  useBrowserEngagementForwarder,
+  useBrowserHostEvent
+} from '@slayzone/task-browser/client'
 import { useDialogStore } from '@slayzone/dialogs'
 import { buildCreateTaskDraftFromBrowserLink } from '@slayzone/task-contracts'
 import type { Task } from '@slayzone/task-contracts'
@@ -202,6 +206,10 @@ export function useAppIpcListeners(deps: AppIpcListenersDeps): void {
   // Forward keyboard shortcuts from WebContentsView back into the DOM.
   // Forward WebContentsView keyboard shortcuts back into the renderer DOM (the
   // view is a separate web contents, so renderer key handlers never see them).
+  // Input in any web view (browser tab or web panel, panel open or not) → the task's
+  // hub: idle-close and `slay browser` ownership.
+  useBrowserEngagementForwarder()
+
   useBrowserHostEvent('shortcut', (payload) => {
     // WebContentsView is a separate web contents — focusin never fires in
     // renderer when it has focus. Set browser scope before dispatching so

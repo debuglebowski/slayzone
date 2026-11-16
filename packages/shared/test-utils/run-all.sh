@@ -332,6 +332,8 @@ run_harness packages/apps/hub/src/web-sessions.test.ts
 run_harness packages/apps/hub/src/password-switch.test.ts
 run_harness packages/domains/task-contracts/src/conversation-heal.test.ts
 run_harness packages/domains/task/src/client/card-water-fill.test.ts
+# Camera → terminal: is the task's terminal on this device (a local path means something there)?
+run_harness packages/domains/task/src/client/terminal-on-this-device.test.ts
 # Workflow columns — statuses shared by several projects (bulk status menu).
 run_harness packages/shared/workflow/src/columns.test.ts
 # Tab store — Home-icon nav forces home/kanban tab across project switch.
@@ -446,6 +448,7 @@ run_harness packages/apps/cli/src/commands/computer-lifecycle.test.ts
 # `slay update` — global npm install detection + version bump. npm itself is a
 # PATH-faked script (no native deps involved) => plain node.
 run_harness packages/apps/cli/src/commands/update.test.ts
+run_harness packages/apps/cli/src/commands/browser-screenshot.test.ts
 # `slay computer mint --for` / `--ttl` cap against a fake hub (T-20). Pure Node.
 run_harness packages/apps/cli/src/commands/computer-mint.test.ts
 # `slay computer roots` edit rules (T-27: folder limits are set on the device). Pure.
@@ -756,6 +759,7 @@ run_harness packages/domains/task-artifacts/src/server/artifacts-router.test.ts
 run_harness packages/apps/api/src/routers/history.test.ts
 # Browser relay: which client owns a task's tabs + slay browser request/reply — no DB
 run_harness packages/domains/task-browser/src/server/browser-relay.test.ts
+run_harness packages/domains/task-browser/src/server/relay-router.test.ts
 # slay browser screenshot: PNG bytes to the requester, nothing written on the hub
 run_harness packages/apps/api/src/http/rest-api/browser/screenshot.test.ts
 run_harness packages/domains/automations/src/shared/templates.test.ts
@@ -1448,6 +1452,7 @@ run_vitest_files "vitest (jsdom client suites)" \
   packages/domains/task/src/client/taskDetailCache.test.ts \
   packages/domains/task-browser/src/client/useBrowserViewEvents.test.tsx \
   packages/domains/task-browser/src/client/browser-host.test.ts \
+  packages/domains/task-browser/src/client/useBrowserEngagementForwarder.test.tsx \
   packages/domains/task-browser/src/client/useBrowserFind.test.tsx \
   packages/domains/task-browser/src/client/useBrowserLock.test.tsx \
   packages/domains/task-browser/src/client/useBrowserImportUrls.test.tsx \

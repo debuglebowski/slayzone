@@ -508,6 +508,10 @@ export const BrowserPanel = forwardRef<BrowserPanelHandle, BrowserPanelProps>(fu
         tabIndex={-1}
         onFocus={handleFocus}
         onBlur={handleBlur}
+        // Working in the panel's own chrome makes this client the one `slay browser`
+        // reaches (input inside a web view arrives as the host's `engaged`).
+        onPointerDownCapture={relayHost.noteUse}
+        onKeyDownCapture={relayHost.noteUse}
       >
         <BrowserTabBar
           tabs={tabs}

@@ -83,10 +83,11 @@ export function execJs<T>(
   browser: BrowserAccess,
   taskId: string,
   tabId: string | null,
-  code: string
+  code: string,
+  origin: 'hub-machine' | 'elsewhere'
 ): Promise<T> {
   return Promise.race([
-    browser.execJs(taskId, tabId, code) as Promise<T>,
+    browser.execJs(taskId, tabId, code, origin) as Promise<T>,
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Browser script timed out (10s)')), BROWSER_JS_TIMEOUT)
     )

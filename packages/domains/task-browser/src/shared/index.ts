@@ -32,8 +32,10 @@ export type {
 export { BROWSER_HOST_METHODS } from './browser-host'
 export type {
   BrowserRelayOp,
+  BrowserRequestOrigin,
   BrowserRelayRequest,
   BrowserRelayFrame,
   BrowserRelayReply,
   BrowserRelayTabsState
 } from './browser-relay'
+export { BROWSER_RELAY_MAX_RESULT_BYTES } from './browser-relay'

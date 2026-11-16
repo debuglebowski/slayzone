@@ -132,6 +132,7 @@ import {
   setBackupOps,
   BrowserRelay,
   setBrowserRelayRouterDeps,
+  restComputerOf,
   setAuthEvents,
   setComputersDeps,
   setHubAdminDeps,
@@ -357,7 +358,7 @@ import {
   idpRolesOf,
   type SsoConfig
 } from '@slayzone/hub-auth/server'
-import { hubUrlFromAddr } from '@slayzone/platform/hub-addr'
+import { hubUrlFromAddr, isLoopbackPeer } from '@slayzone/platform/hub-addr'
 import type { HubSsoBootConfig } from './boot-rules.js'
 import { ssoConfigFromBoot } from './sso-config.js'
 import { resolveAllowedWebOrigins } from './ws-origin.js'
@@ -2008,23 +2009,39 @@ export function composeServer(opts: {
     // Browser routes run HERE, where the `tasks.browser_tabs` row they read and write
     // lives; each operation on a live tab is relayed to the client that owns it.
     browser: {
+      // The caller is on THIS machine when it reached the hub over loopback directly
+      // (no proxy in between), or through the hub's own co-located computer. A client
+      // trusts the claim only from its own local hub (task-browser `runRelayRequest`).
+      originOf: (req) => {
+        const computerId = restComputerOf(req)
+        if (computerId !== null) {
+          return supervised &&
+            computerId === deterministicLocalComputerId(DEFAULT_LOCAL_COMPUTER_NAME)
+            ? 'hub-machine'
+            : 'elsewhere'
+        }
+        return isLoopbackPeer(req.socket?.remoteAddress) && !req.headers['x-forwarded-for']
+          ? 'hub-machine'
+          : 'elsewhere'
+      },
       getResolvedBrowserTabId: async (taskId, tabId) =>
         browserRelay.getResolvedTabId(taskId, tabId),
       listBrowserTabs: async (taskId) => browserRelay.listTabs(taskId),
       hasBrowserTab: async (taskId, tabId) => browserRelay.hasTab(taskId, tabId),
       waitForBrowserRegistration: (taskId, opts) => browserRelay.waitForRegistration(taskId, opts),
-      execJs: (taskId, tabId, code) => browserRelay.run(taskId, tabId, { op: 'execJs', code }),
-      loadUrl: async (taskId, tabId, url) => {
-        await browserRelay.run(taskId, tabId, { op: 'loadUrl', url })
+      execJs: (taskId, tabId, code, origin) =>
+        browserRelay.run(taskId, tabId, { op: 'execJs', code }, origin),
+      loadUrl: async (taskId, tabId, url, origin) => {
+        await browserRelay.run(taskId, tabId, { op: 'loadUrl', url }, origin)
       },
-      getUrl: async (taskId, tabId) => {
-        const url = await browserRelay.run(taskId, tabId, { op: 'getUrl' })
+      getUrl: async (taskId, tabId, origin) => {
+        const url = await browserRelay.run(taskId, tabId, { op: 'getUrl' }, origin)
         return typeof url === 'string' ? url : null
       },
       // The client sends the PNG bytes; they go straight back to the requester — the
       // hub never writes a screenshot to its own disk.
-      capturePng: async (taskId, tabId) => {
-        const reply = (await browserRelay.run(taskId, tabId, { op: 'capturePng' })) as {
+      capturePng: async (taskId, tabId, origin) => {
+        const reply = (await browserRelay.run(taskId, tabId, { op: 'capturePng' }, origin)) as {
           pngBase64?: unknown
         } | null
         const b64 = typeof reply?.pngBase64 === 'string' ? reply.pngBase64 : ''

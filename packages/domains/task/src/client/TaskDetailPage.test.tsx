@@ -309,6 +309,9 @@ vi.mock('@slayzone/transport/client', () => {
     useClientForTask: () => proxy,
     getClientForHub: () => proxy,
     getHubIdForTask: () => undefined,
+    useHubId: () => null,
+    useHubRegistryStore: (sel: (s: { hubs: unknown[]; defaultHubId: string }) => unknown) =>
+      sel({ hubs: [], defaultHubId: 'local' }),
     useSubscription: () => undefined,
     hubAllows: async () => false
   }
