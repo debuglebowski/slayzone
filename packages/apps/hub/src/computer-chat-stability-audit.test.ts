@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import Database from 'better-sqlite3'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -440,10 +441,29 @@ type RecordsMeasurement = {
   threadId: number
   reads: Array<{ sql: string; params: unknown[]; path: string; rows: number; plan: string[] }>
   parsed: number[]
+  nativeCalls: NativeCall[]
+  payloadVisits: { rows: number; bytes: number }
+}
+
+type NativeCall = {
+  kind: string
+  sql?: string
+  params?: unknown[]
+  path?: string
+  completed?: boolean
+}
+type MainNativeAudit = {
+  begin(): void
+  end(): NativeCall[]
+  restore(): void
 }
 
 /** Observe execution on the existing canonical writer; main must do no native work. */
-async function recordsReads(storage: AsyncChatStorage, run: () => Promise<unknown>) {
+async function recordsReads(
+  storage: AsyncChatStorage,
+  main: MainNativeAudit,
+  run: () => Promise<unknown>
+) {
   await storage.db.get('SELECT audit_metadata_begin()')
   const native = (['prepare', 'exec', 'pragma', 'backup', 'close'] as const).map((method) =>
     vi.spyOn(Database.prototype, method)
@@ -456,9 +476,12 @@ async function recordsReads(storage: AsyncChatStorage, run: () => Promise<unknow
   }) as typeof JSON.parse
   let result: unknown
   let mainNativeCalls: number[] = []
+  let mainNativeExecutions: NativeCall[] = []
+  main.begin()
   try {
     result = await run()
   } finally {
+    mainNativeExecutions = main.end()
     mainNativeCalls = native.map((spy) => spy.mock.calls.length)
     for (const spy of native) spy.mockRestore()
     JSON.parse = realParse
@@ -468,6 +491,7 @@ async function recordsReads(storage: AsyncChatStorage, run: () => Promise<unknow
     ...(JSON.parse(report!.report) as RecordsMeasurement),
     result,
     mainNativeCalls,
+    mainNativeExecutions,
     mainParsed
   }
 }
@@ -492,10 +516,17 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       readFileSync(path, 'utf8')
     )
   }
+  const { installMainNativeAudit } = createRequire(import.meta.url)(
+    './computer-chat-metadata.worker.fixture.cjs'
+  ) as { installMainNativeAudit(): MainNativeAudit }
+  const main = installMainNativeAudit()
   const f = await fixture({
     workerPath: fileURLToPath(
       new URL('./computer-chat-metadata.worker.fixture.cjs', import.meta.url)
     )
+  }).catch((error) => {
+    main.restore()
+    throw error
   })
   let raw: AsyncChatStorage | undefined
   const openOwner = storageOwners.openChatStorageOwner
@@ -515,6 +546,32 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
     await hub.relay.ops.saveTabDraft('tab', { text: 'draft', attachments: [] })
     const owner = (await hub.ownership.forTab('tab'))!
     expect(raw, 'the actual online canonical owner').toBeDefined()
+    // Calibrate native observation separately from the computer request. This
+    // statement belongs to the hub fixture and predates the observed window.
+    const cachedMainRead = f.db.prepare('SELECT ? AS body')
+    const probeBody = JSON.stringify({ payload: 'x'.repeat(128 * 1024) })
+    let probeHandle: Database.Database | undefined
+    let mainCalibration: NativeCall[] = []
+    main.begin()
+    try {
+      probeHandle = new Database(':memory:')
+      expect(cachedMainRead.get(probeBody)).toEqual({ body: probeBody })
+      expect(cachedMainRead.all(probeBody)).toEqual([{ body: probeBody }])
+      expect([...cachedMainRead.iterate(probeBody)]).toEqual([{ body: probeBody }])
+    } finally {
+      mainCalibration = main.end()
+      probeHandle?.close()
+    }
+    for (const kind of [
+      'Database.constructor',
+      'Statement.get',
+      'Statement.all',
+      'Statement.iterate',
+      'StatementIterator.next'
+    ])
+      expect(mainCalibration, `native calibration observes ${kind}`).toContainEqual(
+        expect.objectContaining({ kind, completed: true })
+      )
     const pending = [0, 1, 2].map((n) => ({ sequence: n, audit: `pending-${n}` }))
     for (const value of pending)
       await raw!.putRecord(owner.id, owner.epoch, {
@@ -524,7 +581,7 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
         at: value.sequence
       })
     const pendingMetadata = () => f.request({ kind: 'pendingMetadata' })
-    const baseline = await recordsReads(raw!, pendingMetadata)
+    const baseline = await recordsReads(raw!, main, pendingMetadata)
     // Stamped with the chat database they count in when sent.
     const storeId = await raw!.storeId()
     const stamped = pending.map((value) => ({ ...value, storeId }))
@@ -545,7 +602,16 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       ),
       'retained diagnostic corpus exists on the measured owner'
     ).toEqual({ rows: 256, bytes: 256 * JSON.stringify({ payload }).length })
-    const retained = await recordsReads(raw!, pendingMetadata)
+    // SQLite, not JSON.parse, decodes these actual bodies. Calibrate exec on the
+    // same canonical connection outside the pending-metadata measurement.
+    const execSql =
+      "SELECT audit_metadata_payload_seen(json_extract(value,'$.payload')) FROM records WHERE kind='settings' AND id GLOB 'diagnostic:audit-*'"
+    const execCalibration = await recordsReads(raw!, main, () => raw!.db.exec(execSql))
+    expect(execCalibration.payloadVisits).toEqual({ rows: 256, bytes: 256 * payload.length })
+    expect(execCalibration.nativeCalls).toEqual([
+      { kind: 'Database.exec', sql: execSql, path: raw!.path, completed: true }
+    ])
+    const retained = await recordsReads(raw!, main, pendingMetadata)
     expect(retained.result, 'the same pending metadata').toEqual(stamped)
 
     const thread = await raw!.db.get<{ n: number }>('SELECT chat_storage_owner_thread() AS n')
@@ -555,6 +621,10 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       expect(measurement.mainNativeCalls, 'zero native SQLite work on main').toEqual([
         0, 0, 0, 0, 0
       ])
+      expect(
+        measurement.mainNativeExecutions,
+        'zero main native constructors or cached statement executions'
+      ).toEqual([])
       expect(measurement.reads.every((read) => read.path === raw!.path)).toBe(true)
       expect(measurement.mainParsed.filter((length) => length >= payload.length)).toEqual([])
     }
@@ -584,6 +654,43 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       'no diagnostic payload is deserialized'
     ).toEqual([])
     expect(retained.parsed, 'worker deserialization is observed').toHaveLength(pending.length)
+    for (const measurement of [baseline, retained]) {
+      expect(
+        measurement.nativeCalls.filter((call) => call.kind === 'Database.exec'),
+        'no unaccounted worker exec, including SQLite JSON body decoding'
+      ).toEqual([])
+      // Enumerate the complete native work of this public handler, including
+      // owner change/fence checks. No SQL-prefix/table-name allowlist can hide a
+      // body read through a view, CTE, scalar subquery or SQLite JSON function.
+      const changeCheck = 'SELECT total_changes() n'
+      const pendingSql =
+        "SELECT r.*,c.id AS conversation_id FROM records r JOIN conversations c ON c.id=r.conversation_id WHERE r.kind=? AND c.state<>'deleted' AND r.id>=? AND r.id<? ORDER BY r.conversation_id,json_extract(r.value,'$.sequence') LIMIT ?"
+      const prepared = (sql: string): NativeCall => ({
+        kind: 'Database.prepare',
+        sql,
+        path: raw!.path,
+        completed: true
+      })
+      const executed = (kind: string, sql: string, params: unknown[]): NativeCall => ({
+        kind,
+        sql,
+        params,
+        path: raw!.path,
+        completed: true
+      })
+      expect(measurement.nativeCalls, 'all worker native SQL is accounted for').toEqual([
+        prepared(changeCheck),
+        executed('Statement.get', changeCheck, []),
+        prepared(pendingSql),
+        executed('Statement.all', pendingSql, ['settings', 'metadata:', 'metadata:\uffff', 500]),
+        prepared(changeCheck),
+        executed('Statement.get', changeCheck, [])
+      ])
+      expect(measurement.payloadVisits, 'no diagnostic body decoded in pending request').toEqual({
+        rows: 0,
+        bytes: 0
+      })
+    }
     expect(await raw!.storeId(), 'fixture never rotates the live store identity').toBe(storeId)
     expect(await raw!.conversation(owner.id)).toMatchObject({
       identity: { id: owner.id, epoch: owner.epoch },
@@ -603,6 +710,14 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
           plan: retained.reads.map((read) => read.plan),
           workerParsed: retained.parsed,
           mainNativeCalls: retained.mainNativeCalls,
+          mainNativeExecutions: retained.mainNativeExecutions,
+          workerNativeCalls: retained.nativeCalls,
+          calibration: {
+            mainKinds: mainCalibration.map((call) => call.kind),
+            cachedMainBodyBytes: probeBody.length,
+            workerExec: execCalibration.nativeCalls,
+            workerPayloadVisits: execCalibration.payloadVisits
+          },
           stableStoreId: true,
           preservedDraft: true
         }) +
@@ -613,6 +728,7 @@ test('audit measurement: pending metadata reads scale with retained diagnostic p
       await f.close()
     } finally {
       capture.mockRestore()
+      main.restore()
     }
   }
 })
