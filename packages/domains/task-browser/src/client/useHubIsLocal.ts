@@ -1,5 +1,5 @@
 import { useHubId, useHubRegistryStore } from '@slayzone/transport/client'
-import { browserPartitionForHub } from '../shared'
+import { browserPartitionForHub, webPanelPartitionForHub } from '../shared'
 
 /**
  * Whether the hub this subtree talks to is THIS device's own local hub (`kind:
@@ -20,4 +20,11 @@ export function useBrowserPartition(): string {
   const hubId = useHubId()
   const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
   return browserPartitionForHub(hubId ?? defaultHubId, useHubIsLocal())
+}
+
+/** The cookie jar this subtree's WEB PANELS use (see `webPanelPartitionForHub`). */
+export function useWebPanelPartition(): string {
+  const hubId = useHubId()
+  const defaultHubId = useHubRegistryStore((s) => s.defaultHubId)
+  return webPanelPartitionForHub(hubId ?? defaultHubId, useHubIsLocal())
 }

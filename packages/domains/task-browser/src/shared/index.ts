@@ -49,5 +49,7 @@ export {
   browserPartitionForTab,
   isBrowserPanelPartition,
   isIsolatedPartition,
-  isUsersOwnPartition
+  isRemoteUserBrowserPartition,
+  isUsersOwnPartition,
+  webPanelPartitionForHub
 } from './browser-partition'

@@ -2,11 +2,14 @@ import { expect, test } from 'vitest'
 import {
   ISOLATED_BROWSER_PARTITION,
   LOCAL_BROWSER_PARTITION,
+  WEB_PANEL_PARTITION,
   browserPartitionForHub,
   browserPartitionForTab,
   isBrowserPanelPartition,
   isIsolatedPartition,
-  isUsersOwnPartition
+  isRemoteUserBrowserPartition,
+  isUsersOwnPartition,
+  webPanelPartitionForHub
 } from './browser-partition'
 
 test('the local hub keeps the existing partition (users keep their logins)', () => {
@@ -70,4 +73,29 @@ test("a remote hub's agent tabs get their own empty jar, not the hub's shared on
   expect(isBrowserPanelPartition(iso)).toBe(true)
   expect(browserPartitionForTab(other, { isolated: true })).not.toBe(iso)
   expect(isIsolatedPartition('browser-tabs-isolated-hub-zz')).toBe(false)
+})
+
+test("a remote hub's web panels get that hub's own partition, never the trusted shared one (review 6)", () => {
+  expect(webPanelPartitionForHub('local', true)).toBe(WEB_PANEL_PARTITION)
+  const a = webPanelPartitionForHub('hub:https://a.example.com', false)
+  expect(a).toBe('persist:web-panels-hub-3f2d202f-a-example-com')
+  expect(webPanelPartitionForHub('hub:https://b.example.com', false)).not.toBe(a)
+  expect(isBrowserPanelPartition(a)).toBe(true)
+  expect(isUsersOwnPartition(a)).toBe(false)
+  expect(isIsolatedPartition(a)).toBe(false)
+  expect(isBrowserPanelPartition('persist:web-panels-hub-zz')).toBe(false)
+})
+
+test("only the user's own remote-hub tabs may reach local addresses on the user's act (review 6 F2)", () => {
+  const remote = browserPartitionForHub('hub:https://a.example.com', false)
+  expect(isRemoteUserBrowserPartition(remote)).toBe(true)
+  // Never an agent's tab, a web panel, or the local partitions.
+  expect(isRemoteUserBrowserPartition(browserPartitionForTab(remote, { isolated: true }))).toBe(
+    false
+  )
+  expect(
+    isRemoteUserBrowserPartition(webPanelPartitionForHub('hub:https://a.example.com', false))
+  ).toBe(false)
+  expect(isRemoteUserBrowserPartition(LOCAL_BROWSER_PARTITION)).toBe(false)
+  expect(isRemoteUserBrowserPartition(ISOLATED_BROWSER_PARTITION)).toBe(false)
 })

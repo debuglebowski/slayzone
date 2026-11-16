@@ -76,7 +76,9 @@ import { linkBridgeAllowed, UserGestureTracker, type LinkBridgeKind } from './pa
 import {
   PanelNetworkPolicy,
   panelMarkerNeeded,
-  untrustedPermissionAllowed
+  untrustedPermissionAllowed,
+  UserLocalAccess,
+  type PanelRequest
 } from './browser-panel-policy'
 import { BROWSER_PANEL_REQUEST_HEADER } from '@slayzone/platform/browser-network'
 import {
@@ -84,6 +86,7 @@ import {
   WEB_PANEL_PARTITION,
   isBrowserPanelPartition,
   isIsolatedPartition,
+  isRemoteUserBrowserPartition,
   type BrowserViewEvent
 } from '@slayzone/task-browser/shared'
 import {
@@ -808,6 +811,8 @@ let ensurePanelPartition: ((partition: string) => Electron.Session) | null = nul
 /** User acts (input events main received) per web contents: the panel page's link
  *  bridge acts only on one (panel-link-bridge.ts). */
 const panelGestures = new UserGestureTracker()
+/** Local addresses the user opened in their own remote-hub tabs (browser-panel-policy.ts). */
+const userLocalAccess = new UserLocalAccess()
 /** Whether a session is an untrusted panel session (set at boot). */
 let isUntrustedPanelSession: (s: Electron.Session) => boolean = () => false
 /** Hostnames of every registered remote hub (for the panel marker), re-read at most every 10 s. */
@@ -3071,7 +3076,11 @@ app
     // EVERY request of a panel session goes through the session-level policy first; only
     // what it allows reaches the trusted handling below.
     const panelBeforeRequest =
-      (untrustedSession: boolean, sess: Electron.Session) =>
+      (
+        untrustedSession: boolean,
+        sess: Electron.Session,
+        userAccess?: (req: PanelRequest, nonPublic: boolean) => boolean
+      ) =>
       (
         details: Electron.OnBeforeRequestListenerDetails,
         callback: (response: Electron.CallbackResponse) => void
@@ -3086,7 +3095,7 @@ app
               webContentsId: wcId,
               topUrl: wc && !wc.isDestroyed() ? wc.getURL() : ''
             },
-            { untrustedSession, resolveIn: sess }
+            { untrustedSession, resolveIn: sess, userAccess }
           )
           .then(
             (decision) => {
@@ -3213,7 +3222,17 @@ app
       sess.on('will-download', (event) => event.preventDefault())
       sess.setUserAgent(_chromeUa)
       sess.webRequest.onBeforeSendHeaders(panelRequestHeaders)
-      sess.webRequest.onBeforeRequest(panelBeforeRequest(true, sess))
+      // The user's own tabs on a remote hub reach local addresses on the user's own act
+      // (typed, back/forward/reload, a click); never an isolated (agent) partition or a
+      // remote hub's web panels, whose pages the hub picks.
+      const userAccess = isRemoteUserBrowserPartition(partition)
+        ? (req: PanelRequest, nonPublic: boolean) =>
+            userLocalAccess.allows(req, {
+              nonPublic,
+              gesture: req.webContentsId !== null && panelGestures.hasRecent(req.webContentsId)
+            })
+        : undefined
+      sess.webRequest.onBeforeRequest(panelBeforeRequest(true, sess, userAccess))
       // Deny by default: nothing sensitive (camera/mic, clipboard, MIDI, devices, …)
       // for a page a remote hub or an agent elsewhere loads (browser-panel-policy.ts).
       sess.setPermissionRequestHandler((_wc, permission, callback) =>
@@ -3224,6 +3243,7 @@ app
       return sess
     }
     browserViewManager.setSessionResolver((partition) => ensurePanelPartition!(partition))
+    browserViewManager.setUserActedCheck((id) => panelGestures.consume(id))
 
     // Initialize Chrome Web Store support for service worker lifecycle management.
     const extensionsPath = join(app.getPath('userData'), 'Extensions')
@@ -3452,6 +3472,10 @@ app
     // The browser panel's client-local host: this app's renderers drive the web views
     // here directly (never through the hub), in local AND remote-hub mode. Registered
     // before any window loads so a renderer's subscribe is never dropped.
+    const userNavigated = (viewId: string, url: string | null): void => {
+      const wcId = browserViewManager.getWebContentsId(viewId)
+      if (wcId != null) userLocalAccess.userNavigates(wcId, url)
+    }
     const browserHostImpl: BrowserHostImpl = {
       'view.create': (_s, opts) => browserViewManager.createView(opts),
       'view.destroy': (_s, viewId) => browserViewManager.destroyView(viewId),
@@ -3468,10 +3492,23 @@ app
       'view.showAll': () => browserViewManager.showAll(),
       'view.setHandoffPolicy': (_s, viewId, policy) =>
         browserViewManager.setHandoffPolicy(viewId, policy),
-      'view.navigate': (_s, viewId, url) => browserViewManager.navigate(viewId, url),
-      'view.goBack': (_s, viewId) => browserViewManager.goBack(viewId),
-      'view.goForward': (_s, viewId) => browserViewManager.goForward(viewId),
-      'view.reload': (_s, viewId, ignoreCache) => browserViewManager.reload(viewId, ignoreCache),
+      // The panel's own chrome: the user navigating (UserLocalAccess).
+      'view.navigate': (_s, viewId, url) => {
+        userNavigated(viewId, url)
+        return browserViewManager.navigate(viewId, url)
+      },
+      'view.goBack': (_s, viewId) => {
+        userNavigated(viewId, null)
+        return browserViewManager.goBack(viewId)
+      },
+      'view.goForward': (_s, viewId) => {
+        userNavigated(viewId, null)
+        return browserViewManager.goForward(viewId)
+      },
+      'view.reload': (_s, viewId, ignoreCache) => {
+        userNavigated(viewId, null)
+        return browserViewManager.reload(viewId, ignoreCache)
+      },
       'view.stop': (_s, viewId) => browserViewManager.stop(viewId),
       'view.executeJs': (_s, viewId, code) => browserViewManager.executeJs(viewId, code),
       'view.insertCss': (_s, viewId, css) => browserViewManager.insertCss(viewId, css),
@@ -4848,7 +4885,10 @@ const WEBVIEW_INIT_SCRIPT = WEBVIEW_DESKTOP_HANDOFF_SCRIPT
 app.on('web-contents-created', (_, wc) => {
   // Input main itself receives — no page can forge it (panel-link-bridge.ts).
   wc.on('input-event', (_event, input) => panelGestures.noteInput(wc.id, input.type))
-  wc.once('destroyed', () => panelGestures.forget(wc.id))
+  wc.once('destroyed', () => {
+    panelGestures.forget(wc.id)
+    userLocalAccess.forget(wc.id)
+  })
   // A DOM <webview> (multi-device emulation) only on a browser-panel partition, set up
   // like the panel's own views (marker header, network guard).
   wc.on('will-attach-webview', (event, _prefs, params) => {

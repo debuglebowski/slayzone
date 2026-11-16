@@ -18,6 +18,7 @@ export const WEB_PANEL_PARTITION = 'persist:web-panels'
  */
 export const ISOLATED_BROWSER_PARTITION = 'browser-tabs-isolated'
 const REMOTE_PREFIX = 'persist:browser-tabs-hub-'
+const REMOTE_WEB_PANEL_PREFIX = 'persist:web-panels-hub-'
 const ISOLATED_REMOTE_PREFIX = 'browser-tabs-isolated-hub-'
 const ISOLATED_REMOTE_RE = /^browser-tabs-isolated-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/
 
@@ -31,8 +32,8 @@ function fnv1a(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0')
 }
 
-export function browserPartitionForHub(hubId: string, hubIsLocal: boolean): string {
-  if (hubIsLocal) return LOCAL_BROWSER_PARTITION
+/** `<fnv>[-<readable>]`: one remote hub, stable, distinct per hub id. */
+function hubSuffix(hubId: string): string {
   const readable = hubId
     .toLowerCase()
     .replace(/^hub:/, '')
@@ -40,7 +41,24 @@ export function browserPartitionForHub(hubId: string, hubIsLocal: boolean): stri
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 32)
-  return `${REMOTE_PREFIX}${fnv1a(hubId)}${readable ? `-${readable}` : ''}`
+  return `${fnv1a(hubId)}${readable ? `-${readable}` : ''}`
+}
+
+export function browserPartitionForHub(hubId: string, hubIsLocal: boolean): string {
+  if (hubIsLocal) return LOCAL_BROWSER_PARTITION
+  return `${REMOTE_PREFIX}${hubSuffix(hubId)}`
+}
+
+/**
+ * A task's WEB PANELS' partition. The local hub keeps the shared `persist:web-panels`
+ * (the user's logins there). A remote hub — whose operator or agents pick its panels'
+ * URLs — gets its OWN persistent partition, which Electron main runs under the
+ * untrusted session policy (no permission without a prompt, public addresses only, no
+ * app protocols), like a remote hub's browser tabs.
+ */
+export function webPanelPartitionForHub(hubId: string, hubIsLocal: boolean): string {
+  if (hubIsLocal) return WEB_PANEL_PARTITION
+  return `${REMOTE_WEB_PANEL_PREFIX}${hubSuffix(hubId)}`
 }
 
 /**
@@ -64,6 +82,11 @@ export function isIsolatedPartition(p: string): boolean {
   return p === ISOLATED_BROWSER_PARTITION || ISOLATED_REMOTE_RE.test(p)
 }
 
+/** The partition of the user's OWN tabs on a remote hub (not an agent's isolated one). */
+export function isRemoteUserBrowserPartition(p: string): boolean {
+  return /^persist:browser-tabs-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/.test(p)
+}
+
 /** The user's own browser (their logins, local files): only trusted callers reach it. */
 export function isUsersOwnPartition(p: string): boolean {
   return p === LOCAL_BROWSER_PARTITION
@@ -73,5 +96,5 @@ export function isUsersOwnPartition(p: string): boolean {
 export function isBrowserPanelPartition(p: string): boolean {
   if (p === LOCAL_BROWSER_PARTITION || p === WEB_PANEL_PARTITION) return true
   if (isIsolatedPartition(p)) return true
-  return /^persist:browser-tabs-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/.test(p)
+  return /^persist:(browser-tabs|web-panels)-hub-[0-9a-f]{8}(-[a-z0-9-]{1,32})?$/.test(p)
 }

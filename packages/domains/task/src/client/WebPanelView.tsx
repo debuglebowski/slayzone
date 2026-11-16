@@ -10,7 +10,7 @@ import {
   safeClipboardWriteText,
   useStableCallback
 } from '@slayzone/ui'
-import { useBrowserView } from '@slayzone/task-browser'
+import { useBrowserView, useWebPanelPartition } from '@slayzone/task-browser'
 import { fileUrlToSlzFileUrl } from '@slayzone/platform/slz-file-url'
 import {
   inferHostScopeFromUrl,
@@ -103,11 +103,13 @@ export function WebPanelView({
     [desktopHandoffPolicy, trpcClient]
   )
 
+  const webPanelPartition = useWebPanelPartition()
   const { viewId, state, actions, placeholderRef } = useBrowserView({
     tabId: panelId,
     taskId,
     url: fileUrlToSlzFileUrl(url || 'about:blank'),
-    partition: 'persist:web-panels',
+    // The local hub's shared web-panel jar; a remote hub's own, untrusted one.
+    partition: webPanelPartition,
     kind: 'web-panel',
     desktopHandoffPolicy,
     onPopupRoute,

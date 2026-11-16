@@ -176,6 +176,11 @@ export class BrowserViewManager {
   setSessionResolver(resolve: (partition: string) => Electron.Session): void {
     this.sessionResolver = resolve
   }
+  /** Whether the user just acted in a web contents (one call per act). */
+  private userActed: (webContentsId: number) => boolean = () => false
+  setUserActedCheck(check: (webContentsId: number) => boolean): void {
+    this.userActed = check
+  }
   /** viewId → ts of the last deliberate focus request (focus API / CLI click).
    * The nav focus-steal guard treats focus gains near these as intentional. */
   private explicitFocusAt = new Map<string, number>()
@@ -1379,13 +1384,24 @@ export class BrowserViewManager {
       // the same session so auth cookies propagate back). Route other popups
       // through renderer for handoff-aware routing.
       wc.setWindowOpenHandler((details) => {
-        // Real popup windows (window.open with features) — always allow for OAuth.
-        // The popup inherits the WCV's session, so cookies flow back.
-        if (details.disposition === 'new-window' && /^https?:\/\//i.test(details.url)) {
+        // Real popup windows (window.open with features) — allowed for OAuth on the
+        // local hub's web panels. The popup inherits the WCV's session, so cookies flow
+        // back. A remote hub's web panel (untrusted session) never gets a top-level
+        // window of its own: the popup is routed like a link instead.
+        if (
+          details.disposition === 'new-window' &&
+          /^https?:\/\//i.test(details.url) &&
+          isTrustedPanelPartition(entry.partition)
+        ) {
           return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } }
         }
-        // Link clicks and other dispositions — emit event for renderer routing
-        if (/^https?:\/\//i.test(details.url)) {
+        // Link clicks and other dispositions — emit event for renderer routing. From
+        // an untrusted session only on the user's own act: routing may open the system
+        // browser, which a page must not do by itself.
+        if (
+          /^https?:\/\//i.test(details.url) &&
+          (isTrustedPanelPartition(entry.partition) || this.userActed(wc.id))
+        ) {
           send({
             viewId,
             type: 'web-panel:popup-request',

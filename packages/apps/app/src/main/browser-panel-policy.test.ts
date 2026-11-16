@@ -19,6 +19,7 @@ import {
   panelMarkerNeeded,
   untrustedOpRefusal,
   untrustedPermissionAllowed,
+  UserLocalAccess,
   type PanelRequest
 } from './browser-panel-policy'
 
@@ -241,5 +242,73 @@ describe('untrusted sessions: permissions are deny-by-default (review 5 HIGH)', 
   })
   test('only the harmless allow-list passes', () => {
     expect(untrustedPermissionAllowed('mediaKeySystem')).toBe(true)
+  })
+})
+
+describe('the user’s own remote-hub tabs: local addresses only on the user’s own act (review 6 F2)', () => {
+  const WC = 7
+  const setup = (gesture = false) => {
+    let t = 1_000
+    const access = new UserLocalAccess(() => t)
+    const p = policy()
+    const decide = (url: string, over: Partial<PanelRequest> = {}) =>
+      p.decide(req(url, over), {
+        untrustedSession: true,
+        userAccess: (r, nonPublic) => access.allows(r, { nonPublic, gesture })
+      })
+    return { access, decide, advance: (ms: number) => (t += ms) }
+  }
+  const main = { resourceType: 'mainFrame', topUrl: 'https://public.test/page' }
+
+  test('the user types a local address: it opens, and its own page loads its resources', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, 'http://localhost:3000/')
+    expect(await decide('http://localhost:3000/', main)).toBe('allow')
+    // The user's local page: its subresources and API calls on this machine load.
+    const onPage = { resourceType: 'xhr', topUrl: 'http://localhost:3000/' }
+    expect(await decide('http://localhost:3000/app.js', onPage)).toBe('allow')
+    expect(await decide('http://127.0.0.1:8080/api', onPage)).toBe('allow')
+  })
+  test('a typed grant is for that address, once', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, 'http://localhost:3000/')
+    expect(await decide('http://192.168.1.1/', main)).toBe('block')
+    expect(await decide('http://localhost:3000/', main)).toBe('block')
+  })
+  test('a user click (real input) may open a local link', async () => {
+    const { decide } = setup(true)
+    expect(await decide('http://localhost:5173/', main)).toBe('allow')
+  })
+  test('back / forward / reload from the panel are the user’s act', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, null)
+    expect(await decide('http://localhost:3000/', main)).toBe('allow')
+  })
+  test('nothing the hub or a page starts by itself reaches this machine', async () => {
+    const { access, decide, advance } = setup()
+    // A stored (hub-planted) tab URL loading at start, or a page navigating itself.
+    expect(await decide('http://localhost:3000/', main)).toBe('block')
+    // A public page's own requests to this machine (local-network CSRF).
+    expect(
+      await decide('http://127.0.0.1:51100/api/tasks', {
+        resourceType: 'xhr',
+        topUrl: 'https://public.test/page'
+      })
+    ).toBe('block')
+    // A stale user act does not carry over.
+    access.userNavigates(WC, null)
+    advance(11_000)
+    expect(await decide('http://localhost:3000/', main)).toBe('block')
+  })
+  test('a public navigation spends the pending act', async () => {
+    const { access, decide } = setup()
+    access.userNavigates(WC, null)
+    expect(await decide('https://public.test/x', main)).toBe('allow')
+    expect(await decide('http://localhost:3000/', main)).toBe('block')
+  })
+  test('without a user-access rule (an isolated session) nothing local ever opens', async () => {
+    expect(
+      await policy().decide(req('http://localhost:3000/', main), { untrustedSession: true })
+    ).toBe('block')
   })
 })

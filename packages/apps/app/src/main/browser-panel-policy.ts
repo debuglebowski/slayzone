@@ -86,9 +86,19 @@ export class PanelNetworkPolicy {
     }
   }
 
+  /**
+   * `userAccess`: for the user's OWN tabs in an untrusted session (a remote hub's
+   * partition, never an isolated one) — may this non-public request go ahead because
+   * the user asked for it ({@link UserLocalAccess})? Asked for every web request, so a
+   * main-frame request spends a pending user act whatever its target.
+   */
   async decide(
     req: PanelRequest,
-    ctx: { untrustedSession: boolean; resolveIn?: unknown }
+    ctx: {
+      untrustedSession: boolean
+      resolveIn?: unknown
+      userAccess?: (req: PanelRequest, nonPublic: boolean) => boolean
+    }
   ): Promise<'allow' | 'block'> {
     const url = parse(req.url)
     if (!url) return 'block'
@@ -101,9 +111,9 @@ export class PanelNetworkPolicy {
         return 'allow'
       }
       if (!WEB.has(url.protocol)) return 'block'
-      return (await this.isNonPublicHost(url.hostname, req.webContentsId, ctx.resolveIn))
-        ? 'block'
-        : 'allow'
+      const nonPublic = await this.isNonPublicHost(url.hostname, req.webContentsId, ctx.resolveIn)
+      const userAsked = ctx.userAccess?.(req, nonPublic) ?? false
+      return nonPublic && !userAsked ? 'block' : 'allow'
     }
     // Trusted: a local file is a document of its own, never part of a web page.
     if (url.protocol === 'slz-file:' || url.protocol === 'file:') {
@@ -147,6 +157,70 @@ function parse(raw: string): URL | null {
   } catch {
     return null
   }
+}
+
+/**
+ * The user's own tabs in a REMOTE hub's partition run under the untrusted policy (the
+ * hub plants their stored URLs), yet the user should reach localhost / their LAN from
+ * them — a local dev server, say. So a non-public address is allowed there only on the
+ * user's own act, never on anything the hub or a page starts by itself:
+ *
+ *  - a main-frame navigation the user started: typed in the address bar (that address,
+ *    once), back / forward / reload from the panel, or right after real input in the tab
+ *    (a click on a link) — and its origin becomes one the user opened in that tab;
+ *  - any request of a page whose top document is such a user-opened local origin (the
+ *    user's own local page, loading its resources and calling its APIs).
+ *
+ * A stored URL loading at start, a page navigating itself, or a public page's request
+ * to this machine (local-network CSRF) stays blocked. Isolated partitions (the agents'
+ * tabs) never get this. Pure; `now` injected.
+ */
+export class UserLocalAccess {
+  /** A pending user navigation per web contents: the typed URL, or null (back /
+   *  forward / reload: whichever URL it lands on). Spent by the next main frame. */
+  private readonly pending = new Map<number, { url: string | null; at: number }>()
+  /** Non-public origins the user opened, per web contents. */
+  private readonly opened = new Map<number, Set<string>>()
+
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly windowMs = 10_000
+  ) {}
+
+  /** The user navigates this tab from the panel (`url` typed, or null). */
+  userNavigates(webContentsId: number, url: string | null): void {
+    this.pending.set(webContentsId, { url, at: this.now() })
+  }
+
+  allows(req: PanelRequest, ctx: { nonPublic: boolean; gesture: boolean }): boolean {
+    const id = req.webContentsId
+    if (id === null) return false
+    const origin = originOf(req.url)
+    if (req.resourceType === 'mainFrame') {
+      const p = this.pending.get(id)
+      this.pending.delete(id)
+      if (!ctx.nonPublic || !origin) return false
+      const typed =
+        !!p && this.now() - p.at <= this.windowMs && (p.url === null || originOf(p.url) === origin)
+      if (!typed && !ctx.gesture) return false
+      let set = this.opened.get(id)
+      if (!set) this.opened.set(id, (set = new Set()))
+      set.add(origin)
+      return true
+    }
+    const top = originOf(req.topUrl)
+    return ctx.nonPublic && !!top && (this.opened.get(id)?.has(top) ?? false)
+  }
+
+  forget(webContentsId: number): void {
+    this.pending.delete(webContentsId)
+    this.opened.delete(webContentsId)
+  }
+}
+
+function originOf(raw: string): string | null {
+  const u = parse(raw)
+  return u && u.origin !== 'null' ? u.origin : null
 }
 
 /**

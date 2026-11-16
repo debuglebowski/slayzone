@@ -16,4 +16,4 @@ export {
 export { useBrowserEngagementForwarder } from './useBrowserEngagementForwarder'
 export { hubMayNavigateTo, hubSuppliedUrlAllowed, planHubSuppliedUrl } from './useBrowserRelayHost'
 export { queueUntrustedLoad } from './hub-supplied-loads'
-export { useHubIsLocal, useBrowserPartition } from './useHubIsLocal'
+export { useHubIsLocal, useBrowserPartition, useWebPanelPartition } from './useHubIsLocal'

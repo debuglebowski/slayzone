@@ -47,6 +47,12 @@ export class UserGestureTracker {
     return this.now() - at <= this.windowMs
   }
 
+  /** A recent user act in this web contents, WITHOUT using it up (navigation). */
+  hasRecent(webContentsId: number): boolean {
+    const at = this.last.get(webContentsId)
+    return at !== undefined && this.now() - at <= this.windowMs
+  }
+
   forget(webContentsId: number): void {
     this.last.delete(webContentsId)
   }

@@ -18,6 +18,7 @@ const view: {
   actions: Actions
   viewId: string | null
   onPopupRoute: ((url: string) => void) | null
+  partition?: string
 } = {
   state: { url: '', isLoading: false, error: null },
   actions: {},
@@ -33,7 +34,10 @@ const makeActions = (): Actions => ({
 })
 
 vi.mock('@slayzone/task-browser', () => ({
-  useBrowserView: (opts: { onPopupRoute: (url: string) => void }) => {
+  // The hub's web-panel jar (a remote hub's own, under the untrusted policy).
+  useWebPanelPartition: () => 'persist:web-panels-hub-3f2d202f-a-example-com',
+  useBrowserView: (opts: { onPopupRoute: (url: string) => void; partition?: string }) => {
+    view.partition = opts.partition
     view.onPopupRoute = opts.onPopupRoute
     return {
       viewId: view.viewId,
@@ -89,6 +93,11 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('WebPanelView', () => {
+  it("browses in the hub's web-panel partition, not a hard-coded shared one (review 6)", () => {
+    render(<WebPanelView {...baseProps()} />)
+    expect(view.partition).toBe('persist:web-panels-hub-3f2d202f-a-example-com')
+  })
+
   it('reports real URL changes to the latest onUrlChange, skipping auth hops', () => {
     const first = vi.fn()
     const { rerender } = render(<WebPanelView {...baseProps({ onUrlChange: first })} />)
