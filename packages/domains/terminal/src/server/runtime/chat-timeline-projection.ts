@@ -402,6 +402,22 @@ export class TimelineProjection {
         return { expired: true }
       }
       const wanted = pages.filter((p) => p >= 0 && p < this.sealed)
+      // Resolve historical values before choosing the byte boundary. A late
+      // result may have shrunk a row; sizing today's value would overfill an
+      // answer after undo. Newest first, so the oldest applicable value wins.
+      const previous = new Map<number, Map<number, TimelineItem>>()
+      for (let k = this.undo.length - 1; k >= 0 && this.undo[k].seq > asOfSeq; k--) {
+        const u = this.undo[k]
+        const page = Math.floor(u.row / TIMELINE_PAGE_ROWS)
+        let rows = previous.get(page)
+        if (!rows) previous.set(page, (rows = new Map()))
+        rows.set(u.row % TIMELINE_PAGE_ROWS, u.prev)
+      }
+      const restore = (page: number, rows: TimelineItem[]): TimelineItem[] => {
+        // Both resident slices and parsed stored pages are private arrays.
+        for (const [index, row] of previous.get(page) ?? []) rows[index] = row
+        return rows
+      }
       const out: Array<{ page: number; from: number; rows: TimelineItem[] }> = []
       const omitted: number[] = []
       let bytes = 0
@@ -414,9 +430,12 @@ export class TimelineProjection {
               continue
             }
             const from = page * TIMELINE_PAGE_ROWS
-            const rows = this.resident.includes(page)
-              ? this.pageRows(page)
-              : (JSON.parse(await this.readStoredPage(page)) as TimelineItem[])
+            const rows = restore(
+              page,
+              this.resident.includes(page)
+                ? this.pageRows(page)
+                : (JSON.parse(await this.readStoredPage(page)) as TimelineItem[])
+            )
             const skip = startRow > from && startRow < from + rows.length ? startRow - from : 0
             const taken: TimelineItem[] = []
             for (let k = skip; k < rows.length; k++) {
@@ -440,8 +459,10 @@ export class TimelineProjection {
             }
             // In memory, or as stored (a page leaves memory only once stored: current).
             const resident = this.resident.includes(page)
-            const rows = resident ? this.pageRows(page) : null
+            let rows = resident ? this.pageRows(page) : null
             const stored = resident ? null : await this.readStoredPage(page)
+            if (previous.has(page))
+              rows = restore(page, rows ?? (JSON.parse(stored!) as TimelineItem[]))
             const size = rows ? jsonByteLength(rows) : utf8Length(stored!)
             if (out.length > 0 && bytes + size > this.pageBudgetBytes) {
               omitted.push(page)
@@ -458,12 +479,6 @@ export class TimelineProjection {
         // The client opens again (from the events: this one is no longer served).
         this.fail(err)
         return { expired: true }
-      }
-      // Undo what happened after `asOfSeq`, newest first.
-      for (let k = this.undo.length - 1; k >= 0 && this.undo[k].seq > asOfSeq; k--) {
-        const u = this.undo[k]
-        const hit = out.find((p) => u.row >= p.from && u.row < p.from + p.rows.length)
-        if (hit) hit.rows[u.row - hit.from] = u.prev
       }
       return {
         expired: false,

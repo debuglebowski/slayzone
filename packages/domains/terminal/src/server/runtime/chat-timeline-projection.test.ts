@@ -637,3 +637,138 @@ describe('a page larger than the answer budget, asked from a row on (`startRow`)
     expect(got).not.toHaveProperty('next')
   })
 })
+
+describe('historical rows that became smaller after the snapshot', () => {
+  test.each([
+    ['resident', 'rows'],
+    ['stored', 'rows'],
+    ['resident', 'pages'],
+    ['stored', 'pages']
+  ] as const)('%s %s are sized after undo and remain fully reachable', async (cache, mode) => {
+    const mem = memoryStore()
+    const history = buffered(buildLongSession({ events: 12_000, seed: 21, askEveryTool: true }))
+    const original = fullReplay(history, true)
+    const tools = (page: number) =>
+      original.timeline
+        .slice(page * TIMELINE_PAGE_ROWS, (page + 1) * TIMELINE_PAGE_ROWS)
+        .filter((row): row is Extract<TimelineItem, { kind: 'tool' }> => row?.kind === 'tool')
+    const targets = [0, 1].flatMap((page) => tools(page).slice(0, 2))
+    expect(targets).toHaveLength(4)
+    const expanded = buffered(
+      targets.map((row, i) => ({
+        kind: 'tool-result',
+        toolUseId: row.invocation.id,
+        isError: false,
+        rawContent: `historical-${i}:` + 'µ'.repeat(96 * 1024),
+        structured: null
+      })),
+      history.length
+    )
+    const budget = 768 * 1024
+    const p = await TimelineProjection.open({
+      store: mem.store,
+      history: [...history, ...expanded],
+      agentStartedTurns: true,
+      pageBudgetBytes: budget
+    })
+    try {
+      const snapshot = await p.openSnapshot()
+      const expected = fullReplay([...history, ...expanded], true).timeline.slice(
+        0,
+        2 * TIMELINE_PAGE_ROWS
+      )
+      // Each historical page fits alone, both together do not. Each historical
+      // row fits too; the one-oversized-row/page allowance cannot mask the bug.
+      for (let page = 0; page < 2; page++)
+        expect(
+          Buffer.byteLength(
+            JSON.stringify(
+              expected.slice(page * TIMELINE_PAGE_ROWS, (page + 1) * TIMELINE_PAGE_ROWS)
+            )
+          )
+        ).toBeLessThan(budget)
+      expect(Buffer.byteLength(JSON.stringify(expected))).toBeGreaterThan(budget)
+      let seq = snapshot.seq + 1
+      // Two changes per row exercise newest-to-oldest undo, not just one value.
+      for (const text of ['intermediate', 'tiny'])
+        for (const row of targets)
+          await p.apply({
+            seq: seq++,
+            at: 99_000,
+            event: {
+              kind: 'tool-result',
+              toolUseId: row.invocation.id,
+              isError: false,
+              rawContent: text,
+              structured: null
+            }
+          })
+      if (cache === 'stored') {
+        // Touch other pages through real late results, then flush: pages 0/1
+        // leave the resident cache while their historical undo remains valid.
+        expect(snapshot.summaries.length).toBeGreaterThan(12)
+        for (let page = 2; page < snapshot.summaries.length; page++) {
+          const [row] = tools(page)
+          if (row)
+            await p.apply({
+              seq: seq++,
+              at: 99_000,
+              event: {
+                kind: 'tool-result',
+                toolUseId: row.invocation.id,
+                isError: false,
+                rawContent: 'evict earlier pages',
+                structured: null
+              }
+            })
+        }
+      }
+      await p.flush()
+      const reads = vi.spyOn(mem.store, 'loadPages')
+      const collected: TimelineItem[] = []
+      let wanted = [0, 1],
+        start = 0,
+        replies = 0
+      while (wanted.length) {
+        expect(replies++).toBeLessThan(20)
+        const got = await p.pagesAsOf(
+          wanted,
+          snapshot.seq,
+          snapshot.epoch,
+          mode === 'rows' ? start : undefined
+        )
+        if (got.expired) throw new Error('historical snapshot expired')
+        expect(got.pages.length).toBeGreaterThan(0)
+        const bytes =
+          mode === 'rows'
+            ? got.pages
+                .flatMap((page) => page.rows)
+                .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
+            : got.pages.reduce((sum, page) => sum + Buffer.byteLength(JSON.stringify(page.rows)), 0)
+        expect(bytes).toBeLessThanOrEqual(budget)
+        for (const page of got.pages) {
+          expect(page.from).toBe(collected.length)
+          collected.push(...page.rows)
+        }
+        wanted = got.omitted ?? []
+        if (got.next !== undefined) {
+          expect(mode).toBe('rows')
+          expect(got.next).toBe(collected.length)
+          expect(wanted[0]).toBe(Math.floor(got.next / TIMELINE_PAGE_ROWS))
+        }
+        start = got.next ?? (wanted[0] ?? 0) * TIMELINE_PAGE_ROWS
+      }
+      expect(replies).toBeGreaterThan(1)
+      expect(collected).toEqual(expected)
+      expect(reads.mock.calls.some(([pages]) => pages.includes(0))).toBe(cache === 'stored')
+      // Undo must not mutate the live rows while serving historical text.
+      const live = await p.openSnapshot()
+      const current = await p.pagesAsOf([0, 1], live.seq, live.epoch)
+      if (current.expired) throw new Error('live snapshot expired')
+      expect(JSON.stringify(current.pages)).not.toContain('historical-')
+      expect(JSON.stringify(current.pages)).toContain('tiny')
+    } finally {
+      await p.close()
+    }
+  })
+})

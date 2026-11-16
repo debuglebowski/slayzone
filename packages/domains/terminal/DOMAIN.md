@@ -158,6 +158,11 @@ before; a computer takes `startRow` only once it advertised `chatTimelineRowSlic
 after its snapshot are one history page at most: more, and it takes a fresh snapshot
 (up to 3), else answers `full`.
 
+Historical page reads restore undo values before sizing rows or whole pages, so
+late results that shrink content cannot overfill an older snapshot's answer.
+The worker forwards `startRow` with the captured sequence/epoch; continuations
+retain the same historical view and leave live rows unchanged.
+
 Heavy history work takes turns process-wide (`historyReadTurns`): a page read is
 one `take`; a projection's rebuild folds (256 events a step), its page writes
 (`TIMELINE_FLUSH_SLICE_BYTES`, 1 MiB of encoded rows a store write, one page always)

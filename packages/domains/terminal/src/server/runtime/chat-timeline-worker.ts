@@ -47,7 +47,8 @@ export function createTimelineWorkerPool(createWorker: () => Worker): {
           // A failed derived projection never stops saving or delivering chat events.
           apply: (entry) => current.call<void>(id, 'apply', [entry]).catch(() => undefined),
           openSnapshot: () => current.call(id, 'openSnapshot', []),
-          pagesAsOf: (pages, seq, epoch) => current.call(id, 'pagesAsOf', [pages, seq, epoch]),
+          pagesAsOf: (pages, seq, epoch, startRow) =>
+            current.call(id, 'pagesAsOf', [pages, seq, epoch, startRow]),
           searchPages: (query) => current.call(id, 'searchPages', [query]),
           flush: () => current.call(id, 'flush', []),
           close() {

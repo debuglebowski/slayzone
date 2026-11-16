@@ -97,6 +97,60 @@ test('worker preserves snapshots, pages, live ordering and checkpoint restoratio
   await reopened.close()
 })
 
+test('worker forwards startRow and resumes bounded slices without losing or repeating rows', async () => {
+  const f = fixture(),
+    expected = fixture()
+  const plain = await TimelineProjection.open({
+    store: expected.store,
+    history,
+    agentStartedTurns: true
+  })
+  const budget = 8 * 1024
+  const { projection } = await f.pool.begin({
+    store: f.store,
+    lastSeq: history.length - 1,
+    agentStartedTurns: true,
+    pageBudgetBytes: budget
+  })
+  try {
+    await projection.feed(history)
+    await projection.finish()
+    const snapshot = await projection.openSnapshot()
+    const whole = await plain.pagesAsOf([0, 1], snapshot.seq, snapshot.epoch)
+    if (whole.expired) throw new Error('expected snapshot expired')
+    const expectedRows = whole.pages.flatMap((page) => page.rows).slice(17)
+    const rows = []
+    let wanted = [0, 1],
+      start = 17,
+      replies = 0
+    while (wanted.length) {
+      expect(replies++).toBeLessThan(200)
+      const got = await projection.pagesAsOf(wanted, snapshot.seq, snapshot.epoch, start)
+      if (got.expired) throw new Error('worker snapshot expired')
+      expect(got.pages[0].from).toBe(17 + rows.length)
+      const batch = got.pages.flatMap((page) => page.rows)
+      expect(batch.length).toBeGreaterThan(0)
+      if (batch.length > 1)
+        expect(
+          batch.reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
+        ).toBeLessThanOrEqual(budget)
+      rows.push(...batch)
+      wanted = got.omitted ?? []
+      if (got.next !== undefined) expect(got.next).toBe(17 + rows.length)
+      start = got.next ?? (wanted[0] ?? 0) * snapshot.pageRows
+    }
+    expect(replies).toBeGreaterThan(2)
+    expect(rows).toEqual(expectedRows)
+    const legacy = await projection.pagesAsOf([0, 1], snapshot.seq, snapshot.epoch)
+    if (legacy.expired) throw new Error('legacy snapshot expired')
+    expect(legacy.pages[0].rows).toHaveLength(snapshot.pageRows)
+    expect(legacy).not.toHaveProperty('next')
+  } finally {
+    await projection.close()
+    await plain.close()
+  }
+})
+
 test('main event loop stays responsive while worker folds and serializes a long history', async () => {
   const f = fixture()
   let beats = 0
